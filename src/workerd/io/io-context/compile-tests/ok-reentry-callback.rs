@@ -4,8 +4,8 @@
 
 // The example of `IoContext::make_reentry_callback_weak()`: an API keeps a JavaScript callback that
 // returns a Worker's code, for a C++ `kj::Function` to call later, as `WorkerLoader.get()` does.
-// The `await_js` map converts the resolved object in the IoContext, and the future builds an
-// output that is not `Send` from it. A Rust future can await a call too.
+// The `await_js_local` conversion builds an output that is not `Send` from the resolved
+// object, in the IoContext, and its future is the function's. A Rust future can await a call too.
 use std::rc::Rc;
 
 use io_context::IoContext;
@@ -28,8 +28,9 @@ pub fn keep<'s>(
     IoContext::current(lock)?.make_reentry_callback_weak(move |lock, context| {
         let code = get_code.as_local(lock).call(lock, None, &[])?;
         let code = v8::Promise::resolved(lock, code)?;
-        let code = context.await_js(lock, code, |lock, value| WorkerCode::from_js(lock, value))?;
-        Ok(async move { Ok(Rc::new(code.await?)) })
+        context.await_js_local(lock, code, |lock, _context, value| {
+            Ok(Rc::new(WorkerCode::from_js(lock, value)?))
+        })
     })
 }
 

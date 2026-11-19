@@ -5,6 +5,7 @@
 // Tests the io-context crate inside and outside a request of a real worker. The Rust half is
 // test_bridge.rs.
 
+#include <workerd/api/http.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-context/ffi.h>
 #include <workerd/io/io-context/test-bridge-state.h>
@@ -2927,6 +2928,102 @@ KJ_TEST("a panic in a reentry callback's function fails the call, terminates exe
   KJ_EXPECT(evaluate(fixture, "6 * 7") == "42");
   KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+// A channel that can be passed to another worker. It is never sent requests.
+class TransferableChannel final: public IoChannelFactory::SubrequestChannel {
+ public:
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    KJ_UNIMPLEMENTED("not used by these tests");
+  }
+  void requireAllowsTransfer() override {}
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_UNIMPLEMENTED("not used by these tests");
+  }
+};
+
+// A reentry callback made in `request` by make_channel_reentry_callback(), with the function that
+// the script `function` evaluates to, wrapped as wrapReentryCallback() wraps a callback. The script
+// can use `service`, a Fetcher on a TransferableChannel, which is stored in `channelOut` if given.
+kj::Function<kj::Promise<void>()> makeChannelReentryCallback(TestFixture& fixture,
+    IoContext::IncomingRequest& request,
+    kj::StringPtr function,
+    kj::Maybe<IoChannelFactory::SubrequestChannel&>* channelOut = nullptr) {
+  kj::Maybe<::rust::Box<HeldChannelReentryCallback>> callback;
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel = kj::rc<TransferableChannel>();
+    if (channelOut != nullptr) *channelOut = *channel;
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<api::Fetcher>>());
+    auto service = handler.wrap(js, js.alloc<api::Fetcher>(env.context.addObject(kj::mv(channel))));
+    jsg::JsObject(js.v8Context()->Global()).set(js, "service"_kj, jsg::JsValue(service));
+    auto handle = runScript(env, function).As<v8::Function>();
+    callback =
+        make_channel_reentry_callback(isolateOf(env), ::workerd::rust::jsg::to_ffi(kj::mv(handle)));
+  });
+  return [callback = KJ_ASSERT_NONNULL(kj::mv(callback))]() {
+    return call_channel_reentry_callback(*callback);
+  };
+}
+
+KJ_TEST("a reentry callback converts with await_js_local(), in its IoContext") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  kj::Maybe<IoChannelFactory::SubrequestChannel&> channel;
+  auto callback = makeChannelReentryCallback(
+      fixture, *request, "(function () { return Promise.resolve(service); })", &channel);
+  KJ_EXPECT(channel_conversion_runs() == 0);
+
+  for (auto expectedRuns: {1, 2}) {
+    awaitContextId = kj::none;
+    keptChannel = kj::none;
+    callback().wait(fixture.getWaitScope());
+    KJ_EXPECT(channel_conversion_runs() == expectedRuns);
+    // The conversion ran in the IoContext that created the callback, and got it.
+    KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+    KJ_EXPECT(channel_conversion_context() == idOf(*context));
+
+    // C++ got the Fetcher's own channel, which Rust can't hold across threads.
+    auto& kept = KJ_ASSERT_NONNULL(keptChannel);
+    KJ_EXPECT(kept.get() == &KJ_ASSERT_NONNULL(channel));
+  }
+  keptChannel = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js_local() fails without converting what another request resolves") {
+  TestFixture fixture;
+  auto owner = fixture.newIncomingRequest();
+  auto other = fixture.newIncomingRequest();
+  auto callback = makeChannelReentryCallback(fixture, *owner,
+      "(function () { return new Promise(resolve => { globalThis.resolveService = resolve; }); })");
+  keptChannel = kj::none;
+  auto call = callback()
+                  .then([]() -> kj::String { return kj::str("fulfilled"); }, [](kj::Exception&& e) {
+    return kj::str("rejected: ", e.getDescription());
+  }).eagerlyEvaluate(nullptr);
+  fixture.pollEventLoop();
+  KJ_EXPECT(!call.poll(fixture.getWaitScope()));
+
+  // A promise resolved in another request runs its reactions there, which fail before the
+  // conversion runs.
+  fixture.enterContext(*other,
+      [&](const TestFixture::Environment& env) { runScript(env, "resolveService(service)"_kj); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(channel_conversion_runs() == 0);
+  KJ_EXPECT(!call.poll(fixture.getWaitScope()));
+
+  // The wait fails as never settled once GC collects the reactions, which drops their sender, as
+  // when C++ awaitJs() waits for such a promise.
+  collectGarbage(fixture, *owner);
+  auto outcome = call.wait(fixture.getWaitScope());
+  KJ_EXPECT(outcome == NEVER_SETTLED_OUTCOME, outcome);
+  KJ_EXPECT(channel_conversion_runs() == 0);
+  KJ_EXPECT(keptChannel == kj::none);
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
 }
 
 }  // namespace

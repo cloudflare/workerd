@@ -267,7 +267,8 @@ impl<'s> IoContext<'s> {
     /// under the isolate lock, and the future resolves with what `map` returns. `map` is `Copy`,
     /// so that what it captures holds no GC references, and `Send`, as the reaction's data must
     /// be. What it returns holds no GC references either ([`jsg::HoldsNoGcReferences`]), since
-    /// nothing traces it while the future holds it.
+    /// nothing traces it while the future holds it. For a conversion that needs the `IoContext`, or
+    /// whose output is not `Send`, use [`await_js_local`](Self::await_js_local).
     ///
     /// The future fails with a [`cxx::KjException`], so that an exception C++ created reaches C++
     /// as it is:
@@ -352,6 +353,56 @@ impl<'s> IoContext<'s> {
         T: for<'a> jsg::FromJS<'a, ResultType = T> + jsg::HoldsNoGcReferences + 'static,
     {
         self.await_js(lock, promise, |lock, value| T::from_js(lock, value))
+    }
+
+    /// [`await_js`](Self::await_js) for a conversion that runs with this `IoContext` and may
+    /// produce a value local to its thread, as the continuation that C++ `awaitJs()` waits for
+    /// does when it is wrapped in `IoContext::addFunctor()`: for example a `KjOwn<Frankenvalue>`,
+    /// a `KjRc<SubrequestChannel>`, or a C++ struct that holds them, which are neither `Send` nor
+    /// `Sync`. Nothing moves to another thread: the conversion, the future and its output all stay
+    /// on this `IoContext`'s.
+    ///
+    /// The wait is that of `await_js`, with the same failures and cancellation, and the
+    /// conversion runs as `await_js`'s `map` does, with this `IoContext` as well. A reaction that
+    /// runs while this `IoContext` is not the current one, as for a promise that another request
+    /// resolves, fails before the conversion runs, and the wait never settles; it fails once GC
+    /// collects the reactions or this `IoContext` is destroyed, as when C++ `awaitJs()` waits for
+    /// such a promise.
+    ///
+    /// The returned future is neither `Send` nor `Sync`, so it is polled and dropped on this
+    /// `IoContext`'s thread, as the future a reentry callback's function returns is (see
+    /// [`make_reentry_callback_weak`](Self::make_reentry_callback_weak)). The output need only be
+    /// `'static`, as a reentry callback's is. Nothing traces it, so a `jsg::Rc` or `v8::Global` in
+    /// it is a strong reference, held untraced until the future's caller drops it.
+    ///
+    /// # Errors
+    /// As for `await_js`.
+    pub fn await_js_local<T, M>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        map: M,
+    ) -> jsg::Result<AwaitJsLocal<T>>
+    where
+        T: 'static,
+        M: Copy
+            + Send
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<T>,
+    {
+        let wait = self.await_js(lock, promise, move |lock, value| {
+            // The reaction has taken its sender, which succeeds only in this IoContext.
+            let context = IoContext::current(lock)?;
+            Ok(ThreadBound::new(map(lock, &context, value)?))
+        })?;
+        Ok(AwaitJsLocal {
+            wait,
+            _thread: PhantomData,
+        })
     }
 
     /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
@@ -455,7 +506,9 @@ impl<'s> IoContext<'s> {
     /// current when this was called, if any, with a new lock and the `IoContext`. What `function`
     /// returns is waited for as part of the request, and the call's future completes with its
     /// output. To wait for a JavaScript promise, return the future of an
-    /// [`await_js`](Self::await_js), whose conversion runs in this `IoContext` or not at all.
+    /// [`await_js_local`](Self::await_js_local), whose conversion runs in this
+    /// `IoContext` or not at all, and can build an output that belongs to its thread, as the
+    /// continuation C++ wraps in `addFunctor()` does; the future can be returned as it is.
     ///
     /// If `function` fails, the call fails with a KJ exception, as a C++ function that `run()`
     /// runs does:
@@ -481,9 +534,11 @@ impl<'s> IoContext<'s> {
     /// # Example
     ///
     /// An API that keeps a JavaScript callback returning a Worker's code, for C++ to call later,
-    /// as `WorkerLoader.get()` does. The `await_js` map converts the resolved object in this
-    /// `IoContext`, and the future builds the output from it. The `ok-reentry-callback` compile
-    /// test builds this example.
+    /// as `WorkerLoader.get()` does. The conversion runs in this `IoContext` when the code's
+    /// promise is fulfilled, and builds an output that is not `Send`, here an `Rc`; for
+    /// `WorkerLoader.get()`, the `DynamicWorkerSource` with the Worker's `env` as a
+    /// `KjOwn<Frankenvalue>` and its outbound channels. The `ok-reentry-callback` compile test
+    /// builds this example.
     ///
     /// ```ignore
     /// #[jsg_struct]
@@ -500,8 +555,9 @@ impl<'s> IoContext<'s> {
     ///     IoContext::current(lock)?.make_reentry_callback_weak(move |lock, context| {
     ///         let code = get_code.as_local(lock).call(lock, None, &[])?;
     ///         let code = v8::Promise::resolved(lock, code)?;
-    ///         let code = context.await_js(lock, code, |lock, value| WorkerCode::from_js(lock, value))?;
-    ///         Ok(async move { Ok(Rc::new(code.await?)) })
+    ///         context.await_js_local(lock, code, |lock, _context, value| {
+    ///             Ok(Rc::new(WorkerCode::from_js(lock, value)?))
+    ///         })
     ///     })
     /// }
     /// ```
@@ -982,6 +1038,104 @@ impl<T> Drop for AwaitJs<T> {
         }
     }
 }
+
+/// A future for the outcome of a JavaScript promise, converted in its `IoContext`, from
+/// [`IoContext::await_js_local`].
+///
+/// It is an [`AwaitJs`] whose output belongs to the `IoContext`'s thread, so it is neither `Send`
+/// nor `Sync`. It is polled without the isolate lock, and dropping it cancels the wait, as for an
+/// `AwaitJs`.
+pub struct AwaitJsLocal<T> {
+    wait: AwaitJs<ThreadBound<T>>,
+    // Keeps the future, and so the output it takes, on the thread that created it.
+    _thread: PhantomData<*const ()>,
+}
+
+impl<T> Future for AwaitJsLocal<T> {
+    type Output = Result<T, cxx::KjException>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.get_mut().wait)
+            .poll(cx)
+            .map(|result| result.map(ThreadBound::into_inner))
+    }
+}
+
+/// The output of an [`AwaitJsLocal`], while the wait's shared state holds it.
+///
+/// It records the thread that created it, and debug builds assert that it is taken out or
+/// dropped there. The SAFETY comment below does not rely on that check; it catches a change to
+/// `AwaitJs` that breaks what the comment relies on.
+struct ThreadBound<T> {
+    // `None` only once `into_inner()` has taken the value.
+    value: Option<T>,
+    thread: std::thread::ThreadId,
+}
+
+impl<T> ThreadBound<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value: Some(value),
+            thread: std::thread::current().id(),
+        }
+    }
+
+    fn into_inner(mut self) -> T {
+        self.debug_assert_thread();
+        let Some(value) = self.value.take() else {
+            unreachable!("only into_inner() takes the value, and it consumes the ThreadBound")
+        };
+        value
+    }
+
+    fn debug_assert_thread(&self) {
+        debug_assert_eq!(
+            self.thread,
+            std::thread::current().id(),
+            "the output of an AwaitJsLocal is touched only on its IoContext's thread"
+        );
+    }
+}
+
+impl<T> Drop for ThreadBound<T> {
+    fn drop(&mut self) {
+        if self.value.is_some() {
+            self.debug_assert_thread();
+        }
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "the output of an AwaitJsLocal is touched only on its IoContext's thread; see the \
+              SAFETY comment"
+)]
+// SAFETY: the value belongs to its IoContext's thread, and is touched only there. The conversion
+// of `await_js_local()` creates it, in a reaction that has taken its sender through
+// `IoOwned::take()`, which requires the IoContext to be current, so on its thread. It goes into
+// the wait's state, which only the sender, the abort watcher's callback and the `AwaitJsLocal`
+// reach. The `AwaitJsLocal` takes it out or drops it, on the thread that created it, which is
+// the IoContext's, since `await_js_local()` requires the IoContext to be current and the
+// future is neither `Send` nor `Sync`. The other references to the state, through which the last
+// one may drop the value, are those of the sender, which is dropped on the IoContext's thread (see
+// `ThreadBoundAbortWatcher`), and of the abort watcher's callback, which upgrades its weak one
+// only while it runs, on that thread. A value that the wait discards, because it was aborted
+// first, is dropped where it was created, in the reaction. No reaction data holds one, so GC never
+// drops one.
+unsafe impl<T> Send for ThreadBound<T> {}
+
+// These impls exist only so that the wait's state can sit in the data of a reaction, whose sender
+// `IoOwned` holds the state outside any traced value. `ThreadBound` is private, and only the state
+// of an `AwaitJsLocal` wait holds one: never a resource, a reaction's data or anything else
+// that GC traces. So a `T` that holds a `jsg::Rc` or a `TracedGlobal` is never visited, and its
+// references stay strong, as in any untraced Rust value, until the caller of the future drops
+// them. Written out rather than with `jsg_traced_unchecked!`, which would bound `T` by
+// `HoldsNoGcReferences`.
+impl<T> jsg::Traced for ThreadBound<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T> jsg::HoldsNoGcReferences for ThreadBound<T> {}
 
 /// The data of the reactions [`IoContext::await_js`] registers.
 struct AwaitJsReaction<T, M> {

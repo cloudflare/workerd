@@ -17,9 +17,12 @@ use std::sync::PoisonError;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
+use channel_interop::Fetcher;
+use channel_interop::SubrequestChannel;
 use execution_context::new_gate;
 use execution_context::new_rust_execution_context;
 use execution_context::open_gate;
@@ -34,6 +37,7 @@ use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
+use kj_rs::KjRc;
 
 /// C++ receives an error as an exception whose description is the `jsg::Error`'s name and
 /// message.
@@ -161,11 +165,18 @@ mod ffi {
         Panic,
     }
 
+    #[namespace = "workerd::api::channel_interop"]
+    unsafe extern "C++" {
+        include!("workerd/api/channel-interop/ffi.h");
+        type SubrequestChannel = channel_interop::SubrequestChannel;
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
         fn record_async_context(isolate: usize);
         fn record_await_context();
+        fn keep_channel(channel: KjRc<SubrequestChannel>);
     }
 
     extern "Rust" {
@@ -240,6 +251,19 @@ mod ffi {
         fn reentry_function_runs() -> u32;
         fn reentry_function_dropped() -> bool;
         fn reentry_function_dropped_with_callback() -> bool;
+
+        /// A `ReentryCallback` whose output, a channel, is not `Send`.
+        type HeldChannelReentryCallback;
+        unsafe fn make_channel_reentry_callback(
+            isolate: usize,
+            function: Local,
+        ) -> Result<Box<HeldChannelReentryCallback>>;
+        async unsafe fn call_channel_reentry_callback<'a>(
+            callback: &'a HeldChannelReentryCallback,
+        ) -> Result<()>;
+        fn channel_conversion_runs() -> u32;
+        /// The id of the `IoContext` the conversion last got, or 0.
+        fn channel_conversion_context() -> u64;
 
     }
 }
@@ -1262,6 +1286,65 @@ fn reentry_function_runs() -> u32 {
 
 fn reentry_function_dropped() -> bool {
     REENTRY_FUNCTION_DROPPED.load(Ordering::SeqCst)
+}
+
+/// A `ReentryCallback` whose output is the channel of the `Fetcher` its function resolves, as
+/// `WorkerLoader.get()`'s takes a dynamic Worker's outbound channels from the code it resolves,
+/// held as `HeldReentryCallback` holds its callback.
+struct HeldChannelReentryCallback(ReentryCallback<KjRc<SubrequestChannel>>);
+
+/// How many times the conversion of a `make_channel_reentry_callback()` callback has run.
+static CHANNEL_CONVERSION_RUNS: AtomicU32 = AtomicU32::new(0);
+/// The id of the `IoContext` the conversion of a `make_channel_reentry_callback()` callback last got,
+/// or 0.
+static CHANNEL_CONVERSION_CONTEXT: AtomicU64 = AtomicU64::new(0);
+
+/// In a request, makes a reentry callback whose function calls `function`, a JavaScript function
+/// in the caller's scope, and converts the value of the promise it returns with
+/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, recording the `IoContext` the
+/// conversion runs in.
+unsafe fn make_channel_reentry_callback(
+    isolate: usize,
+    function: v8::ffi::Local,
+) -> Result<Box<HeldChannelReentryCallback>> {
+    CHANNEL_CONVERSION_RUNS.store(0, Ordering::SeqCst);
+    CHANNEL_CONVERSION_CONTEXT.store(0, Ordering::SeqCst);
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a function handle of the scope `lock` stands for.
+    let function = unsafe { v8::Local::<v8::Function>::from_ffi(function) }.to_global(lock);
+    let callback = IoContext::current(lock)
+        .and_then(|context| {
+            context.make_reentry_callback_weak(move |lock, context| {
+                let result = function.as_local(lock).call(lock, None, &[])?;
+                let promise = v8::Promise::resolved(lock, result)?;
+                context.await_js_local(lock, promise, |lock, context, value| {
+                    ffi::record_await_context();
+                    CHANNEL_CONVERSION_CONTEXT.store(context.as_ffi(), Ordering::SeqCst);
+                    CHANNEL_CONVERSION_RUNS.fetch_add(1, Ordering::SeqCst);
+                    let fetcher = jsg_cpp::Ref::<Fetcher>::from_js(lock, value)?;
+                    fetcher.get(lock).subrequest_channel(lock, context)
+                })
+            })
+        })
+        .map_err(|err| to_io(&err))?;
+    Ok(Box::new(HeldChannelReentryCallback(callback)))
+}
+
+/// Calls `callback`, and hands the channel it produces to C++, through `keep_channel()`.
+async unsafe fn call_channel_reentry_callback(
+    callback: &HeldChannelReentryCallback,
+) -> std::result::Result<(), cxx::KjException> {
+    ffi::keep_channel(callback.0.call().await?);
+    Ok(())
+}
+
+fn channel_conversion_runs() -> u32 {
+    CHANNEL_CONVERSION_RUNS.load(Ordering::SeqCst)
+}
+
+fn channel_conversion_context() -> u64 {
+    CHANNEL_CONVERSION_CONTEXT.load(Ordering::SeqCst)
 }
 
 /// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the
