@@ -51,10 +51,10 @@ struct GlobalInRefCell {
 #[jsg_resource]
 impl GlobalInRefCell {}
 
-// A `Lenient` holds a `TracedGlobal` for a value it could not convert.
+// A `LenientOption` holds a GC reference when its `T` does.
 #[jsg_resource] //~ ERROR E0277
 struct LenientInCell {
-    value: Cell<jsg::Lenient<String>>,
+    value: Cell<jsg::LenientOption<jsg::Rc<Leaf>>>,
 }
 
 #[jsg_resource]

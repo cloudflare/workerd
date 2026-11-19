@@ -36,7 +36,7 @@ use std::ops::DerefMut;
 use std::pin::Pin;
 
 use crate::Dict;
-use crate::Lenient;
+use crate::LenientOption;
 use crate::NonCoercible;
 use crate::NullOrUndefined;
 use crate::Nullable;
@@ -514,22 +514,15 @@ impl<T: MemoryInfo> MemoryInfo for NullOrUndefined<T> {
     }
 }
 
-// Not plain data even when `T` is: `Unconvertable` holds a `TracedGlobal`, an edge into V8.
-impl<T: MemoryInfo> MemoryInfo for Lenient<T> {
+impl<T: MemoryInfo> MemoryInfo for LenientOption<T> {
+    const PLAIN_DATA: bool = T::PLAIN_DATA;
+
     fn self_bytes_reported(&self) -> usize {
-        match self {
-            Self::Some(inner) => inner.self_bytes_reported(),
-            Self::Unconvertable(inner) => inner.self_bytes_reported(),
-            Self::Null | Self::Undefined => 0,
-        }
+        self.0.self_bytes_reported()
     }
 
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        match self {
-            Self::Some(inner) => inner.track_as_field(tracker, edge_name),
-            Self::Unconvertable(inner) => inner.track_as_field(tracker, edge_name),
-            Self::Null | Self::Undefined => {}
-        }
+        self.0.track_as_field(tracker, edge_name);
     }
 }
 

@@ -505,11 +505,11 @@ fn integer_handle_parameters_do_not_coerce() {
             assert!(err.message.contains(expected), "{expr}: {}", err.message);
         }
 
-        // `Lenient` applies the same check through `try_from_js`.
-        let lenient: jsg::Lenient<v8::Local<v8::Uint32>> = ctx.eval(lock, "7").unwrap();
-        assert!(matches!(lenient, jsg::Lenient::Some(n) if n.value() == 7));
-        let lenient: jsg::Lenient<v8::Local<v8::Uint32>> = ctx.eval(lock, "-1").unwrap();
-        assert!(matches!(lenient, jsg::Lenient::Unconvertable(_)));
+        // `LenientOption` applies the same check through `try_from_js`.
+        let lenient: jsg::LenientOption<v8::Local<v8::Uint32>> = ctx.eval(lock, "7").unwrap();
+        assert!(matches!(lenient.0, Some(n) if n.value() == 7));
+        let lenient: jsg::LenientOption<v8::Local<v8::Uint32>> = ctx.eval(lock, "-1").unwrap();
+        assert!(lenient.is_none());
         Ok(())
     });
 }

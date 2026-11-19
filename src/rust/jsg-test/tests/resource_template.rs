@@ -81,7 +81,7 @@ impl Sample {
         &self,
         _value: jsg::v8::Local<'s, jsg::v8::Value>,
         _optional: OptionalValue,
-        _after: jsg::Lenient<u32>,
+        _after: jsg::LenientOption<u32>,
     ) -> bool {
         true
     }

@@ -104,7 +104,7 @@ fn each_web_idl_rule_rejects_a_union() {
         ),
         (
             vec![UnionTypes::STRING.optional()],
-            "may not contain Option<T> or Lenient<T>",
+            "may not contain Option<T> or LenientOption<T>",
         ),
     ];
     for (members, rule) in cases {

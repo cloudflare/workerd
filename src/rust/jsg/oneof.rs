@@ -10,7 +10,7 @@
 //! see [`UnionTypes`]. Everything here is used only by the code the macro generates.
 
 use crate::Error;
-use crate::Lenient;
+use crate::LenientOption;
 use crate::Lock;
 use crate::Type;
 use crate::v8;
@@ -126,7 +126,7 @@ pub struct UnionTypes {
     pub sequence_like: u32,
     /// Nullable types: `Nullable<T>`.
     pub nullable: u32,
-    /// Optional types, `Option<T>` and `Lenient<T>`, which may not be variants.
+    /// Optional types, `Option<T>` and `LenientOption<T>`, which may not be variants.
     pub optional: u32,
 }
 
@@ -264,7 +264,7 @@ impl UnionTypes {
         );
         assert!(
             self.optional == 0,
-            "A #[jsg_oneof] union may not contain Option<T> or Lenient<T>, which mark optional \
+            "A #[jsg_oneof] union may not contain Option<T> or LenientOption<T>, which mark optional \
              parameters and fields. Use Nullable<T> for a nullable type."
         );
     }
@@ -372,12 +372,12 @@ impl<T: UnionVariant> UnionVariant for Option<T> {
     }
 }
 
-impl<T: UnionVariant> UnionVariant for Lenient<T> {
+impl<T: UnionVariant> UnionVariant for LenientOption<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.optional();
     const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_null_or_undefined() || T::is_exact(value)
+        value.is_undefined() || T::is_exact(value)
     }
 }
 
