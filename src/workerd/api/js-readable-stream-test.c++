@@ -1942,6 +1942,40 @@ KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed queued stream") {
   KJ_EXPECT(ended);
 }
 
+KJ_TEST("JsReadableStream pumpTo starts its first read before it returns") {
+  for (bool typescript: {false, true}) {
+    uint pulls = 0;
+    kj::Vector<kj::byte> collected;
+    bool ended = false;
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    // Under the legacy implementation, fromPull() builds its stream with the public constructor.
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setTypeScriptImplementedStreams(typescript);
+    TestFixture fixture({.featureFlags = flags.asReader()});
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto stream = JsReadableStream::fromPull(
+          js, [&pulls](jsg::Lock& js) -> jsg::Promise<kj::Maybe<jsg::Value>> {
+        if (pulls++ > 0) {
+          return js.resolvedPromise(kj::Maybe<jsg::Value>(kj::none));
+        }
+        auto chunk = jsg::JsUint8Array::create(js, kData.asBytes());
+        return js.resolvedPromise(kj::Maybe<jsg::Value>(js.v8Ref<v8::Value>(jsg::JsValue(chunk))));
+      });
+      auto pump = stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES);
+      // The pump reads the stream under this lock rather than waiting to take it again. A
+      // TypeScript stream pulls only once its start step has settled, a microtask after it was
+      // made, so the pull comes in this lock's microtasks rather than within pumpTo().
+      js.runMicrotasks();
+      KJ_EXPECT(pulls == 1, typescript, pulls);
+      return pump.then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    });
+    KJ_EXPECT(collected.asPtr() == kData.asBytes(), typescript);
+    KJ_EXPECT(ended, typescript);
+  }
+}
+
 KJ_TEST("JsReadableStream pumpTo of an in-memory body ends the sink with its last write") {
   // The stream closes in the pull that enqueues its last chunk, so the pump's draining read
   // returns that chunk together with the end, and the pump ends the sink without reading again,

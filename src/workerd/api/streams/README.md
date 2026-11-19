@@ -273,7 +273,8 @@ adapter API (same API Internal streams use).
 
 When `pumpTo()` is called on the adapter:
 
-1. Acquires isolate lock
+1. Starts the first read under the isolate lock `pumpTo()` is called with; each later
+   read takes the lock again
 2. Runs read->write promise loop
 3. Ends when data exhausted or stream errors
 4. If the pump promise is dropped first (e.g. client disconnect), cancels the stream
