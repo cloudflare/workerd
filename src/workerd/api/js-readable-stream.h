@@ -79,12 +79,6 @@ class JsReadableStream final {
       IoContext& ioContext,
       kj::Own<ReadableStreamSource> source) KJ_WARN_UNUSED_RESULT;
 
-  // Create a stream that reads the given in-memory data, which it takes over. Each call creates
-  // an independent stream reading from the start. These need the current IoContext.
-  static JsReadableStream create(
-      jsg::Lock& js, kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
-  static JsReadableStream create(jsg::Lock& js, kj::String data) KJ_WARN_UNUSED_RESULT;
-
   // Create a byte stream that reads the given JS value: its bytes, or for a string its UTF-8,
   // copied into new chunks as they are pulled (see ByteChunker). Each chunk of a string ends on a
   // code point boundary, with a lone surrogate written as `loneSurrogates` says, and a value of

@@ -24,6 +24,7 @@
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/per-isolate-bootstrap.h>
+#include <workerd/api/streams/common.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
 #include <workerd/tests/test-fixture.h>
@@ -315,7 +316,8 @@ KJ_TEST("legacy pumpTo: a buffer-backed stream's proxy is a no-op") {
     // Memory-backed bodies must finish their I/O before the IoContext goes away, so
     // their pump defers nothing.
     auto sink = newSystemStream(kj::mv(out), StreamEncoding::IDENTITY, env.context);
-    auto stream = JsReadableStream::create(env.js, kj::str("hello world"));
+    auto stream =
+        JsReadableStream::create(env.js, env.context, newMemorySource("hello world"_kj.asBytes()));
     auto pump = stream.pumpTo(env.js, kj::mv(sink), EndStream::YES);
 
     bool outerResolved = false;

@@ -8,8 +8,10 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/per-isolate-bootstrap.h>
+#include <workerd/api/streams/common.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/external-pusher.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
@@ -24,6 +26,11 @@ namespace {
 
 constexpr uint64_t kLimit = 1024 * 1024;
 constexpr kj::StringPtr kData = "hello world"_kj;
+
+// A stream over a native memory source holding a copy of `data`.
+JsReadableStream memoryStream(jsg::Lock& js, kj::StringPtr data) {
+  return JsReadableStream::create(js, IoContext::current(), newMemorySource(data.asBytes()));
+}
 
 // The user-visible message produced when consuming an already-consumed stream. This must match
 // the message historically produced by the Body mixin exactly.
@@ -292,7 +299,7 @@ KJ_TEST("JsReadableStream over in-memory data") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     KJ_EXPECT(!stream.isNull());
     KJ_EXPECT(!stream.isDisturbed(js));
     KJ_EXPECT(!stream.isLocked(js));
@@ -311,7 +318,7 @@ KJ_TEST("JsReadableStream consuming twice rejects with the historical Body error
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.text(js, kLimit)
                        .then(js,
                            JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
@@ -332,8 +339,8 @@ KJ_TEST("JsReadableStream consumption helpers return stream content") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto forArrayBuffer = JsReadableStream::create(js, kj::str(kData));
-    auto forBytes = JsReadableStream::create(js, kj::str(kData));
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
     auto promise = forArrayBuffer.arrayBuffer(js, kLimit)
                        .then(js,
                            JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
@@ -354,7 +361,7 @@ KJ_TEST("JsReadableStream blob carries the given content type") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.blob(js, kLimit, kj::str("text/plain;charset=UTF-8"))
                        .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
       KJ_EXPECT(blob->getSize() == int(kData.size()));
@@ -369,7 +376,7 @@ KJ_TEST("JsReadableStream json parses stream content") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str("{\"hello\":\"world\"}"));
+    auto stream = memoryStream(js, "{\"hello\":\"world\"}"_kj);
     auto promise =
         stream.json(js, kLimit).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
       KJ_EXPECT(value.getHandle(js).isObject());
@@ -383,7 +390,7 @@ KJ_TEST("JsReadableStream addRef shares the underlying stream") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto ref = stream.addRef(js);
     KJ_EXPECT(!ref.isDisturbed(js));
 
@@ -401,7 +408,7 @@ KJ_TEST("JsReadableStream tee nullifies the original and both branches read the 
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto tee = stream.tee(js);
     KJ_EXPECT(stream.isNull());
 
@@ -422,7 +429,7 @@ KJ_TEST("JsReadableStream detach takes over the stream, leaving a disturbed husk
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     // The original still holds the (now locked and disturbed) husk...
     KJ_EXPECT(!stream.isNull());
@@ -443,7 +450,7 @@ KJ_TEST("JsReadableStream detach of a consumed stream throws without IgnoreDistu
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String) {
       JSG_TRY(js) {
       stream.detach(js);  // defaults to IgnoreDisturbed::NO
@@ -463,7 +470,7 @@ KJ_TEST("JsReadableStream detach accepts IgnoreDisturbed::YES") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js, IgnoreDisturbed::YES);
     KJ_EXPECT(!detached.isNull());
     KJ_EXPECT(stream.isDisturbed(js));
@@ -478,7 +485,7 @@ KJ_TEST("JsReadableStream cancel disturbs the stream; null cancel is a no-op") {
     // Canceling a null stream is a no-op that yields a resolved promise.
     auto nullPromise = JsReadableStream().cancel(js, kj::none);
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise =
         stream.cancel(js, js.error("lost interest")).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
           // Cancellation counts as disturbing the stream.
@@ -497,7 +504,7 @@ KJ_TEST("JsReadableStream forceCancel cancels even when the stream is locked") {
 
     // detach() leaves the original as a locked (and disturbed) husk, which is a convenient way
     // to produce a locked stream without a reader.
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     KJ_EXPECT(stream.isLocked(js));
 
@@ -523,7 +530,7 @@ KJ_TEST("JsReadableStream setPendingClosure is safe on live and null streams") {
 
     JsReadableStream().setPendingClosure(js);  // null: no-op
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     stream.setPendingClosure(js);
     KJ_EXPECT(!stream.isDisturbed(js));
   });
@@ -572,7 +579,7 @@ KJ_TEST("JsReadableStream pumpTo drains into a sink and ends it") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -587,7 +594,7 @@ KJ_TEST("JsReadableStream pumpTo with EndStream::NO leaves the sink open") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::NO)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -3182,7 +3189,7 @@ KJ_TEST("JsReadableStream in-memory streams are TypeScript-backed under the flag
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
 
     // The constructed stream is the TypeScript implementation's object: wrapping yields
@@ -3207,7 +3214,7 @@ KJ_TEST("JsReadableStream tee of a TypeScript-backed in-memory stream") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto tee = stream.tee(js);
     KJ_EXPECT(stream.isNull());
 
@@ -3235,7 +3242,7 @@ KJ_TEST("JsReadableStream text() returns the stream's bytes undecoded") {
     fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
       auto& js = env.js;
 
-      auto stream = JsReadableStream::create(js, kj::str(kNotUtf8));
+      auto stream = memoryStream(js, kNotUtf8);
       auto promise = stream.text(js, kLimit).then(js, [typescript](jsg::Lock&, kj::String text) {
         KJ_EXPECT(text == kNotUtf8, typescript, kj::encodeHex(text.asBytes()));
       });
@@ -3253,7 +3260,7 @@ KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed in-memory stream") {
 
     // In-memory streams under the flag are native-backed TypeScript streams: pumpTo extracts
     // the source and pumps at the C++ layer.
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -3293,7 +3300,7 @@ KJ_TEST("JsReadableStream detach takes over a TypeScript-backed in-memory stream
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto stream = JsReadableStream::create(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     KJ_EXPECT(stream.isDisturbed(js));
     KJ_EXPECT(stream.isLocked(js));
@@ -3535,7 +3542,7 @@ KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-n
     KJ_EXPECT(queuedDefault.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
 
     // Buffer-backed streams sit on the in-memory source, which is identity-only.
-    auto buffered = JsReadableStream::create(js, kj::str(kData));
+    auto buffered = memoryStream(js, kData);
     KJ_EXPECT(KJ_ASSERT_NONNULL(buffered.tryGetLength(js)) == kData.size());
     KJ_EXPECT(buffered.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
   });
@@ -3556,7 +3563,7 @@ KJ_TEST("JsReadableStream getPreferredEncoding forwards from the native source (
       KJ_EXPECT(queued.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
 
       // Buffer-backed streams sit on the identity-only in-memory source.
-      auto buffered = JsReadableStream::create(js, kj::str(kData));
+      auto buffered = memoryStream(js, kData);
       KJ_EXPECT(buffered.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
     });
   }
@@ -3996,10 +4003,10 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
 
     // One TypeScript-backed in-memory stream per helper; text() is covered by the in-memory
     // stream tests above.
-    auto forArrayBuffer = JsReadableStream::create(js, kj::str(kData));
-    auto forBytes = JsReadableStream::create(js, kj::str(kData));
-    auto forJson = JsReadableStream::create(js, kj::str("{\"hello\":\"world\"}"));
-    auto forBlob = JsReadableStream::create(js, kj::str(kData));
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
+    auto forJson = memoryStream(js, "{\"hello\":\"world\"}"_kj);
+    auto forBlob = memoryStream(js, kData);
 
     auto promise =
         forArrayBuffer.arrayBuffer(js, kLimit)
@@ -4047,11 +4054,11 @@ KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prot
       onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
     })));
 
-    auto forArrayBuffer = JsReadableStream::create(js, kj::str(kData));
-    auto forBytes = JsReadableStream::create(js, kj::str(kData));
-    auto forText = JsReadableStream::create(js, kj::str(kData));
-    auto forJson = JsReadableStream::create(js, kj::str("{\"hello\":\"world\"}"));
-    auto forBlob = JsReadableStream::create(js, kj::str(kData));
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
+    auto forText = memoryStream(js, kData);
+    auto forJson = memoryStream(js, "{\"hello\":\"world\"}"_kj);
+    auto forBlob = memoryStream(js, kData);
 
     auto promise =
         forArrayBuffer.arrayBuffer(js, kLimit)

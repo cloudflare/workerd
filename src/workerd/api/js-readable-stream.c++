@@ -821,18 +821,6 @@ JsReadableStream JsReadableStream::create(
   return JsReadableStream(Impl{.stream = newBackingStream(js, ioContext, kj::mv(source))});
 }
 
-JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Array<const kj::byte> data) {
-  // TODO (soon): Add memory accounting for this path
-  // newMemorySource() reads the bytes in place, keeping `data` alive as its backing. Unlike
-  // newSystemStream() over a memory input stream, it does not support deferred proxying.
-  auto bytes = data.asPtr();
-  return create(js, IoContext::current(), newMemorySource(bytes, kj::heap(kj::mv(data))));
-}
-
-JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::String data) {
-  return create(js, webstreams::stringToBytes(kj::mv(data)));
-}
-
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, jsg::JsString str, LoneSurrogates loneSurrogates) {
   return create(js, kj::rc<ByteChunker>(js, str, loneSurrogates));
