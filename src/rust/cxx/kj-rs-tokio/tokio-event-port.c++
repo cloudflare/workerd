@@ -9,6 +9,11 @@
 namespace kj_rs_tokio {
 
 namespace {
+// How often a busy loop gives tokio a batch: often enough that a tokio socket or timer is served
+// within tens of milliseconds however long KJ stays busy, and seldom enough that the batches cost
+// a busy loop nothing measurable.
+constexpr kj::Duration BUSY_POLL_INTERVAL = 20 * kj::MILLISECONDS;
+
 // The port active on this loop thread, to enforce one port per thread (KJ's one-loop-per-thread
 // model); set by the constructor, cleared by the destructor.
 thread_local TokioEventPort* activePort = nullptr;
@@ -28,9 +33,12 @@ const kj::MonotonicClock& requireNoActivePort() {
 TokioEventPort::TokioEventPort()
     : ownerThread(kj::ThreadId::current()),
       clock(requireNoActivePort()),
+      coarseClock(kj::systemCoarseMonotonicClock()),
       timerImpl(clock.now()),
       rustPort(new_tokio_port()),
-      loop(kj::heap<kj::EventLoop>(*this)) {
+      rustWaker(new_tokio_waker(*rustPort)),
+      loop(kj::heap<kj::EventLoop>(*this)),
+      lastTick(coarseClock.now()) {
   activePort = this;
 }
 
@@ -60,61 +68,49 @@ void TokioEventPort::cancelSpawnedTasks() {
   unwindDetector.catchExceptionsIfUnwinding([this]() { rustPort->cancel_spawned_tasks(); });
 }
 
-void TokioEventPort::setRunnable(bool runnable) {
-  assertOwnerThread();
-  // Called by the EventLoop on the loop thread on empty <-> runnable transitions. The loop
-  // reports `false` right before it calls wait(), so a `true` that arrives while we are parked
-  // means a tokio task armed a KJ event: hand the thread back to KJ.
-  if (runnable) {
-    rustPort->notify_kj_service();
-  }
-}
-
-void TokioEventPort::updateNextTimerEvent(kj::Maybe<kj::TimePoint> time) {
-  assertOwnerThread();
-  // A timer was armed or cancelled while we sleep. Only a deadline sooner than the one this
-  // wait() was planned against needs the thread back: KJ must re-plan the sleep.
-  KJ_IF_SOME(next, time) {
-    bool sooner =
-        plannedNextEvent.map([&](kj::TimePoint planned) { return next < planned; }).orDefault(true);
-    if (sooner) {
-      rustPort->notify_kj_service();
-    }
-  }
-}
-
 bool TokioEventPort::wait() {
   assertOwnerThread();
-  // Bound the sleep by the next KJ timer deadline, if any, and remember which deadline that was
-  // so updateNextTimerEvent() can spot a sooner one armed during the park. `timeoutToNextEvent()`
-  // rounds up, so we always sleep until just *after* the timer is due.
-  plannedNextEvent = timerImpl.nextEvent();
-  KJ_DEFER(plannedNextEvent = kj::none);
-  // While parked, be the timer's sleep hooks: tokio tasks arming KJ timers mid-park get live
-  // time from now() and re-plan the sleep if their deadline is sooner. The advanceTo() deferred
-  // below clears the hooks (KJ's contract for setSleeping()).
-  timerImpl.setSleeping(*this);
-  // Load-bearing: TimerImpl only fires timer events from advanceTo(). Forgetting this after a
-  // wait means every kj::Timer promise silently never resolves. Deferred so a wait that throws
-  // also clears the sleep hooks.
-  KJ_DEFER(timerImpl.advanceTo(clock.now()));
+  // Sleep until just *after* the next KJ timer is due (`timeoutToNextEvent()` rounds up), or
+  // until tokio has work. No task runs under the sleep, so no KJ timer can be armed under it.
   KJ_IF_SOME(timeoutNs, timerImpl.timeoutToNextEvent(clock.now(), kj::NANOSECONDS, kj::maxValue)) {
-    return rustPort->wait_timeout_ns(timeoutNs);
+    rustPort->park_timeout_ns(timeoutNs);
   } else {
-    return rustPort->wait_forever();
+    rustPort->park_forever();
   }
+  return tick();
 }
 
 bool TokioEventPort::poll() {
   assertOwnerThread();
-  bool woken = rustPort->poll();
+  if (loop->isRunnable()) {
+    // A busy poll, between two turns of a promise.wait(). It reports the wake latch every time,
+    // so cross-thread events reach KJ within a turn, and runs a batch of tokio tasks only every
+    // BUSY_POLL_INTERVAL. The KJ timer stays put while KJ has work queued: a due timer fires once
+    // the queue drains, after the work queued ahead of it, as on a loop that does not busy poll.
+    auto now = coarseClock.now();
+    if (now - lastTick < BUSY_POLL_INTERVAL) {
+      return rustPort->take_wake_latch();
+    }
+    lastTick = now;
+    return rustPort->tick();
+  }
+  return tick();
+}
+
+bool TokioEventPort::tick() {
+  // The loop has woken: advance the timer first, so the batch of tokio tasks sees the time it
+  // runs at (as KJ events do) and the KJ timers now due are armed ahead of whatever the batch
+  // arms. Load-bearing: TimerImpl only fires timer events from advanceTo(). Forgetting this after
+  // a wait means every kj::Timer promise silently never resolves.
   timerImpl.advanceTo(clock.now());
-  return woken;
+  lastTick = coarseClock.now();
+  return rustPort->tick();
 }
 
 void TokioEventPort::wake() const {
-  // Callable from any thread; the Rust side latches the flag and unblocks a concurrent wait().
-  rustPort->wake();
+  // Callable from any thread; the waker latches the flag and ends a concurrent (or the next)
+  // wait(). It must not touch `rustPort`, which is the loop thread's alone.
+  rustWaker->wake();
 }
 
 TokioAsyncIoContext::~TokioAsyncIoContext() noexcept(false) {

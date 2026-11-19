@@ -2852,8 +2852,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 [[package]]
 name = "tokio"
 version = "1.54.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
+source = "git+https://github.com/guybedford/tokio?branch=emscripten-event-loop#b4b01d96f1d1a5b713ba26a674b2d6771a336a28"
 dependencies = [
  "bytes",
  "libc",

@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "eb9ab79751c275672f5b39535545a7891464446ef52bbffe2e1e34e60eb284e5",
+  "checksum": "dbb1ed9c47de0add5e542954ca5e2c2ab49aee71eeb866bd9ba0534d22299f3b",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -13366,7 +13366,11 @@
             ]
           }
         },
-        "edition": "2021"
+        "edition": "2021",
+        "rustc_flags": [
+          "--cfg",
+          "tokio_unstable"
+        ]
       },
       "library_target_name": "tokio",
       "license": "MIT",
@@ -13377,9 +13381,12 @@
       "name": "tokio",
       "package_url": "https://github.com/tokio-rs/tokio",
       "repository": {
-        "Http": {
-          "sha256": "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
-          "url": "https://static.crates.io/crates/tokio/1.54.1/download"
+        "Git": {
+          "commitish": {
+            "Rev": "b4b01d96f1d1a5b713ba26a674b2d6771a336a28"
+          },
+          "remote": "https://github.com/guybedford/tokio",
+          "strip_prefix": "tokio"
         }
       },
       "targets": [

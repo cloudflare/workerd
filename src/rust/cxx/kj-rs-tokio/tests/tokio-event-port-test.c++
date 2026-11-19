@@ -1,5 +1,5 @@
 // Tests for TokioEventPort / setupTokioAsyncIo: a kj::EventLoop driven by a per-thread tokio
-// current_thread runtime. Following kj-rs conventions, C++ KJ_TESTs drive; Rust helpers (see
+// LocalEventLoop. Following kj-rs conventions, C++ KJ_TESTs drive; Rust helpers (see
 // tests/lib.rs, bridged by workerd-cxx) provide async behaviors.
 
 #include "kj-rs-tokio-test/lib.rs.h"
@@ -440,8 +440,8 @@ namespace {
 
 KJ_TEST("context destruction with a spawned task HOLDING a KJ timer promise is clean") {
   // Unlike the test below, the spawned task itself owns live KJ objects (TimerPromiseAdapter in
-  // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The LocalSet
-  // cancellation that drops them must run while the timer and loop still exist.
+  // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The runtime
+  // shutdown that drops them must run while the timer and loop still exist.
   {
     auto io = setupTokioAsyncIo();
     auto &ws = io.getWaitScope();
@@ -524,10 +524,10 @@ KJ_TEST("bridged future woken from a plain std::thread while the loop is parked"
 }
 
 // =======================================================================================
-// A tokio task hands KJ work by means other than a bridged waker while the loop is parked in
-// wait(): KJ reports it to the port (setRunnable(true) for events, the TimerImpl SleepHooks for
-// timers) and the park must end. Each test is bounded by a long timer that turns "hangs forever"
-// into a failed assertion.
+// A tokio task hands KJ work by means other than a bridged waker from inside wait(): the park
+// ends at the tokio timer that readies the task, the batch after it runs the task, and KJ runs
+// what the task armed. Each test is bounded by a long timer that turns "hangs forever" into a
+// failed assertion.
 
 KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is parked wakes it") {
   auto io = setupTokioAsyncIo();
@@ -539,8 +539,8 @@ KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is park
   testFulfiller = kj::mv(paf.fulfiller);
   KJ_DEFER(testFulfiller = kj::none);
 
-  // The task fulfills ~20 ms into the park; the 10 s timer is the "we hung" bound. Without KJ
-  // reporting the arm (setRunnable(true)) it sits unserviced until that timer.
+  // The task fulfills ~20 ms into the wait; the 10 s timer is the "we hung" bound. A port that
+  // slept through tokio's timer would leave it unserviced until that timer.
   task_fulfills_kj_fulfiller(20, 42);
   auto before = sysClock.now();
   int value = paf.promise
@@ -583,13 +583,12 @@ KJ_TEST("a KJ timer armed by a spawned task during the park is honored at its ow
   setTestTimer(&timer);
   KJ_DEFER(setTestTimer(nullptr));
 
-  // wait() plans against the 10 s bound; 10 ms (wall clock) into the park the task arms a 20 ms
-  // KJ timer and awaits it to completion. The park must end at that timer, not at 10 s.
+  // wait() sleeps against the 10 s bound; 10 ms (wall clock) in, the task arms a 20 ms KJ timer
+  // and awaits it to completion. The wait must end at that timer, not at 10 s.
   //
-  // The port is the TimerImpl's SleepHooks while parked, so kj::Timer::now() reads the live
-  // clock: the task's afterDelay(20ms) is measured from the moment it is armed (~10 ms in), and
-  // the timer is due at ~30 ms of wall time -- KJ's intended semantics for code using the timer
-  // while the loop sleeps (see kj::TimerImpl::setSleeping).
+  // The port advances the KJ timer when the park ends, before the batch runs the task, so the
+  // task's afterDelay(20ms) is measured from the moment it is armed (~10 ms in), and the timer
+  // is due at ~30 ms of wall time.
   auto before = sysClock.now();
   task_awaits_kj_timer(10, 20)
       .exclusiveJoin(timer.afterDelay(10 * kj::SECONDS).then([]() {
@@ -672,7 +671,7 @@ KJ_TEST("a task that yields forever keeps poll() bounded and does not starve the
   // The KJ side still makes progress alongside the spinning task.
   KJ_EXPECT(kj::evalLater([]() { return 21; }).wait(ws) == 21);
   KJ_EXPECT(spawn_task_on_runtime(1, 9).wait(ws) == 9);
-  // The spinning task is cancelled at teardown (LocalSet cancellation, above).
+  // The spinning task is cancelled at teardown (runtime shutdown, above).
 }
 
 KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an abort") {
@@ -772,6 +771,108 @@ KJ_TEST("a detached spawned task (JoinHandle dropped) still runs to completion")
     io.getTimer().afterDelay(2 * kj::MILLISECONDS).wait(ws);
   }
   KJ_EXPECT(completed_task_count() == before + 1);
+}
+
+// =======================================================================================
+// A busy loop: promise.wait() polls the port after every turn, and tokio runs from those polls
+// about every 20 ms.
+
+// A chain of events, one per turn, that keeps the KJ queue from emptying, so that the loop never
+// waits, until `done()` or 2 s passed since `start`. (A coroutine awaiting evalLater() would
+// resume at once, in a single turn.)
+template <typename Done>
+kj::Promise<void> spinUntil(Done done, kj::TimePoint start) {
+  if (done() || kj::systemPreciseMonotonicClock().now() - start >= 2 * kj::SECONDS) {
+    return kj::READY_NOW;
+  }
+  return kj::evalLater(
+      [done = kj::mv(done), start]() mutable { return spinUntil(kj::mv(done), start); });
+}
+
+KJ_TEST("spawned tasks and tokio timers run while the KJ loop stays busy") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+
+  uint64_t before = completed_task_count();
+  // Sleeps 5 ms in tokio, then counts itself completed.
+  spawn_detached_completing_task();
+  auto start = sysClock.now();
+  spinUntil([before]() { return completed_task_count() != before; }, start).wait(ws);
+  auto took = sysClock.now() - start;
+  KJ_EXPECT(completed_task_count() == before + 1);
+  KJ_EXPECT(took < 500 * kj::MILLISECONDS, took);
+}
+
+KJ_TEST("a due KJ timer fires after the work a busy loop has queued ahead of it") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+
+  // The timer is due at once, but the chain that is queued ahead of it keeps KJ busy for 60 ms,
+  // through busy polls that run tokio.
+  bool chainDone = false;
+  kj::Maybe<bool> chainDoneWhenFired;
+  auto timer =
+      io.getTimer().afterDelay(0 * kj::MILLISECONDS).then([&]() {
+    chainDoneWhenFired = chainDone;
+  }).eagerlyEvaluate(nullptr);
+  auto start = sysClock.now();
+  spinUntil([&]() { return sysClock.now() - start >= 60 * kj::MILLISECONDS; }, start)
+      .then([&]() {
+    chainDone = true;
+  }).wait(ws);
+  timer.wait(ws);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(chainDoneWhenFired));
+}
+
+// A busy chain's state: the turns taken, the turn a cross-thread fulfill was sent in, and the turn
+// it was delivered in. The other thread touches only `phase`.
+struct BusyTurns {
+  uint32_t turns = 0;
+  kj::Maybe<uint32_t> sentAt;
+  kj::Maybe<uint32_t> deliveredAt;
+  // 0: spinning; 1: the other thread is to fulfill; 2: it fulfilled.
+  std::atomic<int> phase{0};
+};
+
+// One event per turn, until the fulfill was delivered, or a million turns passed. In turn 100 it
+// has the other thread fulfill, and waits within the turn until it has.
+kj::Promise<void> spinUntilDelivered(BusyTurns &state) {
+  if (state.deliveredAt != kj::none || state.turns >= 1'000'000) {
+    return kj::READY_NOW;
+  }
+  if (++state.turns == 100) {
+    state.phase.store(1);
+    while (state.phase.load() != 2) std::this_thread::yield();
+    state.sentAt = state.turns;
+  }
+  return kj::evalLater([&state]() { return spinUntilDelivered(state); });
+}
+
+KJ_TEST("a cross-thread fulfill reaches a busy loop within a few turns") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  // Outlives the promises and the thread, which are declared after it: the thread is joined
+  // before it goes.
+  BusyTurns state;
+  auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+  auto delivered =
+      paf.promise.then([&state]() { state.deliveredAt = state.turns; }).eagerlyEvaluate(nullptr);
+  kj::Thread thread([fulfiller = kj::mv(paf.fulfiller), &state]() mutable {
+    while (state.phase.load() != 1) std::this_thread::yield();
+    // Sets the port's wake latch, which only a poll() or wait() that returns true reports.
+    fulfiller->fulfill();
+    state.phase.store(2);
+  });
+  // Turns, not time: tokio runs from a busy poll only every 20 ms, which a turn this short leaves
+  // thousands of turns apart, but the latch is to be reported by the very next poll.
+  spinUntilDelivered(state).wait(ws);
+  delivered.wait(ws);
+  auto sentAt = KJ_ASSERT_NONNULL(state.sentAt);
+  auto deliveredAt = KJ_ASSERT_NONNULL(state.deliveredAt);
+  KJ_EXPECT(deliveredAt - sentAt <= 5, sentAt, deliveredAt);
 }
 
 // =======================================================================================

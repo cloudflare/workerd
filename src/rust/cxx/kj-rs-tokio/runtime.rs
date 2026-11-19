@@ -25,7 +25,8 @@ pub async fn block_on_task_join(task: Box<BlockOnTask>) {
 /// A thread's KJ event loop on the tokio-backed port (tokio-event-port.h), with its tokio
 /// `current_thread` runtime, for a Rust `main` to own and block on.
 ///
-/// One per thread. The KJ loop schedules the thread, and tokio runs whenever that loop sleeps;
+/// One per thread. The KJ loop schedules the thread, and tokio runs whenever that loop sleeps,
+/// and about every 20 ms while it stays busy;
 /// the thread stays inside the tokio runtime's context for the Runtime's whole life, so tokio
 /// resources created anywhere on it -- including by C++ inside KJ turns -- register with its
 /// drivers.
@@ -52,7 +53,7 @@ impl Runtime {
     }
 
     /// Runs `future` to completion, blocking this thread in `promise.wait()` on the loop's
-    /// `WaitScope` meanwhile. `future` is polled by a task on the loop's `LocalSet` (see
+    /// `WaitScope` meanwhile. `future` is polled by a task on the loop's runtime (see
     /// [`crate::spawn`]): KJ events run, and whenever none is left, tokio does. Tasks still
     /// pending when `future` completes run whenever the loop next waits (a later `block_on`, or a
     /// wait on [`context()`](Self::context)), until the Runtime is dropped.
@@ -95,7 +96,7 @@ impl Runtime {
             .context
             .as_mut()
             .block_on(Box::new(BlockOnTask(Box::pin(join))));
-        // After a failed wait the task is still on the `LocalSet`; once this frame drops `future`
+        // After a failed wait the task is still on the runtime; once this frame drops `future`
         // it has nothing left to poll.
         abort.abort();
         waited?;
