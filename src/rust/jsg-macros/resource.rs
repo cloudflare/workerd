@@ -97,10 +97,6 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
                 &[concat!(module_path!(), "::", #name_str)];
 
             fn class_name() -> &'static str { #class_name }
-
-            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                value.is_object()
-            }
         }
 
         #[automatically_derived]

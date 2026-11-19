@@ -323,13 +323,6 @@ impl<R: Resource> Type for Rc<R> {
     fn class_name() -> &'static str {
         R::class_name()
     }
-
-    // Any object: telling whether it wraps an `R` takes a lock, which `is_exact` doesn't have.
-    // `FromJS::try_from_js` makes that check. A resource is not `Coercible`, so no
-    // `NonCoercible<Rc<R>>` relies on this.
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_object()
-    }
 }
 
 impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {

@@ -10,10 +10,6 @@ impl Type for Bad {
     fn class_name() -> &'static str {
         "Bad"
     }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        false
-    }
 }
 
 impl crate::Traced for Bad {
@@ -52,10 +48,6 @@ impl Type for BadLazy {
     fn class_name() -> &'static str {
         "BadLazy"
     }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        false
-    }
 }
 
 impl crate::Traced for BadLazy {
@@ -91,10 +83,6 @@ struct BadLazyReadonly;
 impl Type for BadLazyReadonly {
     fn class_name() -> &'static str {
         "BadLazyReadonly"
-    }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        false
     }
 }
 

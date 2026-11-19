@@ -3,9 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // NonCoercible<T> takes only the types a value is otherwise coerced to (String, bool and f64),
-// as C++ JSG's takes only a CoercibleType, so not an integer. A union or a resource would
-// convert a value as it always does, coercion included, once its JavaScript type passed a coarse
-// check.
+// as C++ JSG's takes only a CoercibleType, so not an integer. A union or a resource has no
+// coercion of its own to disable.
 
 use jsg::FromJS;
 use jsg::NonCoercible;
