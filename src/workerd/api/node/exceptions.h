@@ -5,24 +5,12 @@
 
 namespace workerd::api::node {
 
-// Utilities for creating Node.js-style exceptions.
+// Utilities for creating Node.js-style exceptions. The Rust node-exceptions crate
+// (`src/rust/node-exceptions/lib.rs`) builds the error objects.
 //
-// JsErrorType is defined in exception-type.h (a dependency-free header) so it
-// can be shared with the Rust node-exceptions crate as a cxx extern enum.
-
-// Node.js Exception Codes
-#define NODE_EXCEPTION_CODE_LIST(V)                                                                \
-  V(ERR_FS_CP_EEXIST)                                                                              \
-  V(ERR_FS_CP_DIR_TO_NON_DIR)                                                                      \
-  V(ERR_FS_CP_EINVAL)                                                                              \
-  V(ERR_FS_CP_NON_DIR_TO_DIR)                                                                      \
-  V(ERR_FS_EISDIR)
-
-enum class NodeExceptionCode {
-#define V(name) name,
-  NODE_EXCEPTION_CODE_LIST(V)
-#undef V
-};
+// JsErrorType, NodeExceptionCode and NODE_EXCEPTION_CODE_LIST are defined in
+// exception-type.h (a dependency-free header) so they can be shared with that
+// crate as cxx extern enums.
 
 // A Node.js style exception is just a JS error with a string "code" property.
 jsg::JsValue createNodeException(

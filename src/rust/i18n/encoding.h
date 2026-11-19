@@ -11,7 +11,7 @@
 // correspondence checks reference the enum by the bridge namespace
 // (`workerd::rust::i18n`), so the real type must be visible there; this alias
 // provides it without duplicating the definition. Mirrors
-// `src/rust/node-exceptions/js-error-type.h`.
+// `src/rust/node-exceptions/exception-type.h`.
 namespace workerd::rust::i18n {
 using Encoding = ::workerd::api::node::Encoding;
 }  // namespace workerd::rust::i18n

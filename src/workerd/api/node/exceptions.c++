@@ -18,37 +18,13 @@ static jsg::JsValue fromRust(::workerd::rust::jsg::MaybeLocal value) {
   return jsg::JsValue(local);
 }
 
-// Maps the C++ NodeExceptionCode to the Rust bridge enum. Following the kj-rs
-// convert.h idiom, this is exposed as a `fromImpl` overload so callers use
-// `kj::from<rust_exc::NodeExceptionCode>(code)`; ADL finds this overload via the
-// `NodeExceptionCode` argument's namespace. It is a `static` (rather than
-// anonymous-namespace) function because Clang's ADL does not consider
-// unnamed-namespace functions. The switch has no `default` so the compiler flags
-// any variant that drifts out of sync between the two enums.
-static rust_exc::NodeExceptionCode fromImpl(rust_exc::NodeExceptionCode*, NodeExceptionCode code) {
-  switch (code) {
-    case NodeExceptionCode::ERR_FS_CP_EEXIST:
-      return rust_exc::NodeExceptionCode::ErrFsCpEexist;
-    case NodeExceptionCode::ERR_FS_CP_DIR_TO_NON_DIR:
-      return rust_exc::NodeExceptionCode::ErrFsCpDirToNonDir;
-    case NodeExceptionCode::ERR_FS_CP_EINVAL:
-      return rust_exc::NodeExceptionCode::ErrFsCpEinval;
-    case NodeExceptionCode::ERR_FS_CP_NON_DIR_TO_DIR:
-      return rust_exc::NodeExceptionCode::ErrFsCpNonDirToDir;
-    case NodeExceptionCode::ERR_FS_EISDIR:
-      return rust_exc::NodeExceptionCode::ErrFsEisdir;
-  }
-  KJ_UNREACHABLE;
-}
-
 jsg::JsValue createNodeException(
     jsg::Lock& js, NodeExceptionCode code, JsErrorType type, kj::StringPtr message) {
   // Exception messages may be arbitrary, potentially non-UTF-8 byte strings, so they're passed
   // as raw bytes (kj::none for null) rather than ::rust::Str (which validates UTF-8 and throws);
   // V8 then renders invalid sequences lossily.
-  return fromRust(
-      rust_exc::create_node_exception(js.v8Isolate, kj::from<rust_exc::NodeExceptionCode>(code),
-          type, message == nullptr ? kj::none : kj::Maybe(message.asBytes().as<kj_rs::Rust>())));
+  return fromRust(rust_exc::create_node_exception(js.v8Isolate, code, type,
+      message == nullptr ? kj::none : kj::Maybe(message.asBytes().as<kj_rs::Rust>())));
 }
 
 jsg::JsValue createUVException(jsg::Lock& js,

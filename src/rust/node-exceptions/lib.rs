@@ -15,14 +15,16 @@ use kj_rs::KjMaybe;
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Most Node.js exceptions are represented as either Error, TypeError, or
-    /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
-    /// is the single source of truth, and cxx generates static-asserts that the
-    /// variants below match it. `#[repr(u8)]` matches the C++ enum's `uint8_t`
-    /// underlying type.
+    /// RangeError.
     ///
-    /// The paired `type JsErrorType;` declaration below marks this as an extern
-    /// enum. cxx references the C++ type by this bridge's namespace, so the
-    /// `js-error-type.h` shim aliases `api::node::JsErrorType` into
+    /// This and [`NodeExceptionCode`] are cxx *extern* enums: the C++ enums in
+    /// `src/workerd/api/node/exception-type.h` are the single source of truth,
+    /// and cxx generates static-asserts that the variants below match them.
+    /// `#[repr(u8)]` matches the C++ enums' `uint8_t` underlying types.
+    ///
+    /// The paired `type` declarations below mark these as extern enums. cxx
+    /// references the C++ types by this bridge's namespace, so the
+    /// `exception-type.h` shim aliases them into
     /// `workerd::rust::node_exceptions`.
     #[repr(u8)]
     enum JsErrorType {
@@ -31,21 +33,26 @@ mod ffi {
         RangeError,
     }
 
-    unsafe extern "C++" {
-        include!("workerd/rust/node-exceptions/js-error-type.h");
-
-        type JsErrorType;
+    /// Node.js Exception Codes, from the C++ `NODE_EXCEPTION_CODE_LIST`.
+    #[repr(u8)]
+    enum NodeExceptionCode {
+        #[cxx_name = "ERR_FS_CP_EEXIST"]
+        ErrFsCpEexist,
+        #[cxx_name = "ERR_FS_CP_DIR_TO_NON_DIR"]
+        ErrFsCpDirToNonDir,
+        #[cxx_name = "ERR_FS_CP_EINVAL"]
+        ErrFsCpEinval,
+        #[cxx_name = "ERR_FS_CP_NON_DIR_TO_DIR"]
+        ErrFsCpNonDirToDir,
+        #[cxx_name = "ERR_FS_EISDIR"]
+        ErrFsEisdir,
     }
 
-    /// Node.js Exception Codes. Mirrors the C++ `NodeExceptionCode` enum
-    /// (generated from `NODE_EXCEPTION_CODE_LIST`); the variant order must stay
-    /// in sync with `api::node::NodeExceptionCode`.
-    enum NodeExceptionCode {
-        ErrFsCpEexist,
-        ErrFsCpDirToNonDir,
-        ErrFsCpEinval,
-        ErrFsCpNonDirToDir,
-        ErrFsEisdir,
+    unsafe extern "C++" {
+        include!("workerd/rust/node-exceptions/exception-type.h");
+
+        type JsErrorType;
+        type NodeExceptionCode;
     }
 
     extern "Rust" {
