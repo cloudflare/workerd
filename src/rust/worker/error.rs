@@ -10,7 +10,7 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use cxx::KjError;
+use cxx::KjException;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -47,8 +47,10 @@ impl Worker {
         Self { message }
     }
 
-    fn error(&self, file: &str, line: u32) -> KjError {
-        kj::failed!("jsg.Error: {}", self.message).with_location(file.to_owned(), line)
+    fn error(&self, file: &str, line: u32) -> KjException {
+        kj::failed!("jsg.Error: {}", self.message)
+            .with_location(file.to_owned(), line)
+            .into()
     }
 }
 

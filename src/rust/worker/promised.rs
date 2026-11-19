@@ -10,6 +10,8 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
+use cxx::KjException;
+use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
@@ -34,7 +36,7 @@ enum State {
     Starting(LocalBoxFuture<'static, Result<KjOwn<bridge::WorkerInterface>>>),
     Started(CxxWorkerInterface),
     /// The target failed to start. Every event fails with this error.
-    Failed(cxx::KjError),
+    Failed(KjException),
 }
 
 pub struct PromisedInterface {
@@ -44,11 +46,11 @@ pub struct PromisedInterface {
 impl PromisedInterface {
     /// `target` is not polled until the first event arrives. That event and every later one
     /// wait for it to finish.
-    pub fn new(
-        target: impl Future<Output = Result<KjOwn<bridge::WorkerInterface>>> + 'static,
+    pub fn new<E: Into<KjException> + 'static>(
+        target: impl Future<Output = std::result::Result<KjOwn<bridge::WorkerInterface>, E>> + 'static,
     ) -> Self {
         Self {
-            state: State::Starting(Box::pin(target)),
+            state: State::Starting(Box::pin(target.map_err(Into::into))),
         }
     }
 
@@ -62,7 +64,7 @@ impl PromisedInterface {
         match &mut self.state {
             State::Started(target) => Ok(target),
             State::Failed(error) => Err(error.clone()),
-            State::Starting(_) => Err(kj::failed!("the worker did not start")),
+            State::Starting(_) => Err(kj::failed!("the worker did not start").into()),
         }
     }
 }
@@ -141,7 +143,7 @@ impl Interface for PromisedInterface {
                 // client with this error instead of reporting that the event was destroyed
                 // before it completed. If `failed()` itself throws, that exception is returned
                 // instead.
-                bridge::custom_event_failed(event, cxx::KjException::from(error.clone()))?;
+                bridge::custom_event_failed(event, error.clone())?;
                 return Err(error);
             }
         };

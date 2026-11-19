@@ -557,6 +557,97 @@ KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {
   KJ_ASSERT(response.statusCode == 200);
 }
 
+namespace {
+
+// Builds an exception with the parts a KjError has no field for: a context and a remote trace.
+kj::Exception tracedFailure() {
+  kj::Exception e(kj::Exception::Type::DISCONNECTED, "peer.c++", 7, kj::str("the peer went away"));
+  e.wrapContext("caller.c++", 8, kj::str("while calling the peer"));
+  e.setRemoteTrace(kj::str("remote frames"));
+  return e;
+}
+
+void expectTracedFailure(const kj::Exception& e) {
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(e.getDescription() == "the peer went away");
+  KJ_EXPECT(kj::StringPtr(e.getFile()) == "peer.c++");
+  KJ_EXPECT(e.getLine() == 7);
+  KJ_EXPECT(e.getRemoteTrace() == "remote frames");
+  auto& context = KJ_ASSERT_NONNULL(e.getContext());
+  KJ_EXPECT(kj::StringPtr(context.file) == "caller.c++");
+  KJ_EXPECT(context.line == 8);
+  KJ_EXPECT(context.description == "while calling the peer");
+}
+
+// Fails every event with tracedFailure().
+class FailingWorker final: public WorkerInterface {
+ public:
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return tracedFailure();
+  }
+};
+
+}  // namespace
+
+KJ_TEST("cxx_worker hands back the wrapped C++ worker's exception whole") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::heap<FailingWorker>()));
+
+  expectTracedFailure(KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { worker->prewarm("/warm"_kj).wait(waitScope); })));
+  expectTracedFailure(KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { worker->runAlarm(kj::UNIX_EPOCH, 0).wait(waitScope); })));
+
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream body;
+  struct NoResponse final: public kj::HttpService::Response {
+    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      KJ_UNIMPLEMENTED();
+    }
+  } response;
+  expectTracedFailure(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    worker->request(kj::HttpMethod::GET, "http://test/"_kj, headers, body, response)
+        .wait(waitScope);
+  })));
+}
+
 // ======================================================================================
 // PromisedInterface: a Rust Interface whose C++ target is still being started.
 

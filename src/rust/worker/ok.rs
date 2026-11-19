@@ -10,7 +10,7 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use cxx::KjError;
+use cxx::KjException;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -41,8 +41,8 @@ pub mod bridge {
 pub struct Worker;
 
 impl Worker {
-    fn not_implemented(name: &str) -> KjError {
-        kj::not_implemented!("{name} not implemented")
+    fn not_implemented(name: &str) -> KjException {
+        kj::not_implemented!("{name} not implemented").into()
     }
 }
 

@@ -465,12 +465,10 @@ impl DiskRequest {
         let json = serde_json::to_string(&listing).map_err(|e| kj::failed!("{e}"))?;
         out.write(json.as_bytes()).await
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl Service for DiskRequest {
-    async fn request<'a>(
-        &'a mut self,
+    /// Serves a request on the directory.
+    async fn serve<'a>(
+        &'a self,
         method: Method,
         url: &'a [u8],
         headers: HeadersRef<'a>,
@@ -520,6 +518,22 @@ impl Service for DiskRequest {
             _ => send_error(response, 501, "Not Implemented", &none).await,
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for DiskRequest {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        request_body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> worker::Result<()> {
+        Ok(self
+            .serve(method, url, headers, request_body, response)
+            .await?)
+    }
 
     async fn connect<'a>(
         &'a mut self,
@@ -528,19 +542,27 @@ impl Service for DiskRequest {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
-        Err(unsupported("Disk directory services"))
+    ) -> worker::Result<()> {
+        Err(unsupported("Disk directory services").into())
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Interface for DiskRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("Disk directory services"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("Disk directory services").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("Disk directory services"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("Disk directory services").into())
     }
 }
 

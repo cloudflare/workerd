@@ -811,12 +811,9 @@ impl CacheRequest {
             None => self.answer(response, 500, "Internal Server Error"),
         }
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl Service for CacheRequest {
-    async fn request<'a>(
-        &'a mut self,
+    async fn serve<'a>(
+        &'a self,
         method: Method,
         url: &'a [u8],
         headers: HeadersRef<'a>,
@@ -840,6 +837,20 @@ impl Service for CacheRequest {
             _ => self.refuse(body, response, 405, "Method Not Allowed").await,
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for CacheRequest {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> worker::Result<()> {
+        Ok(self.serve(method, url, headers, body, response).await?)
+    }
 
     async fn connect<'a>(
         &'a mut self,
@@ -848,19 +859,27 @@ impl Service for CacheRequest {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
-        Err(unsupported("Cache services"))
+    ) -> worker::Result<()> {
+        Err(unsupported("Cache services").into())
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Interface for CacheRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("Cache services"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("Cache services").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("Cache services"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("Cache services").into())
     }
 }
 
