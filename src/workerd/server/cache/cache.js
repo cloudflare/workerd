@@ -184,8 +184,9 @@ function rest(first, reader, check = () => {}) {
 // `{head, body, size}` of the unexpired entry at `at`, or null, after
 // which `miss.ticket` is the store's for a fill. One that expired, or is
 // not a record, is deleted.
-async function load(env, at, miss = {}) {
-  const r = await env.STORE.fetch(at);
+async function load(env, at, miss = {}, lease = false) {
+  const init = lease ? { headers: { 'X-Lease': '1' } } : undefined;
+  const r = await env.STORE.fetch(at, init);
   if (r.status === 404) {
     miss.ticket = r.headers.get('X-Ticket');
     return null;
@@ -198,7 +199,13 @@ async function load(env, at, miss = {}) {
     const head = JSON.parse(decodeURIComponent(meta));
     if (head.expires > clock()) {
       const size = Number(r.headers.get('Content-Length'));
-      return { head, body: r.body, size };
+      const until = Number(r.headers.get('X-Lease-Until') ?? 0);
+      if (!lease || until <= Date.now() || size > COPY) {
+        return { head, body: r.body, size };
+      }
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      keep(at, head, bytes, until);
+      return { head, body: new Response(bytes).body, size };
     }
     await r.body?.cancel();
     await remove(env, at).catch(() => {});
@@ -597,6 +604,62 @@ const UNSERVED = ['cache-tag', 'cloudflare-cdn-cache-control'];
 // The misses running the Worker, by key.
 const fills = new Map();
 
+// Leased copies: a hit whose store answered with `X-Lease-Until` is kept
+// here until then, so the hits before it ask the store nothing. The store
+// holds its writes to the key until every lease on it ran out, its home's
+// own too, so no copy outlives a write that is done. Bodies of at most COPY
+// bytes are kept, COPIES bytes in all, the least recently served dropped
+// first. A fill drops its key's; a purge from this module drops them all.
+// On one machine STORE is a disk, which gives no leases: nothing is kept.
+const COPY = 1024 * 1024;
+const COPIES = 64 * 1024 * 1024;
+const copies = new Map();
+let copied = 0;
+
+function keep(at, head, bytes, until) {
+  drop(at);
+  const { status, statusText } = head;
+  const headers = new Headers(head.headers);
+  headers.set('CF-Cache-Status', 'HIT');
+  if (!NULL_BODY.includes(status)) {
+    headers.set('Content-Length', `${bytes.byteLength}`);
+  }
+  const init = { status, statusText, headers, encodeBody: 'manual' };
+  copies.set(at, { head, bytes, until, init });
+  copied += bytes.byteLength;
+  for (const [key] of copies) {
+    if (copied <= COPIES) break;
+    drop(key);
+  }
+}
+
+function drop(at) {
+  const copy = copies.get(at);
+  if (copy === undefined) return;
+  copies.delete(at);
+  copied -= copy.bytes.byteLength;
+}
+
+// A hit of `at` from its copy, if it has a live one.
+function copyOf(request, at) {
+  const copy = copies.get(at);
+  if (copy === undefined) return null;
+  if (Date.now() >= copy.until || copy.head.expires <= clock()) {
+    drop(at);
+    return null;
+  }
+  copies.delete(at);
+  copies.set(at, copy);
+  const h = request.headers;
+  if (['Range', 'If-None-Match', 'If-Modified-Since'].some((n) => h.has(n))) {
+    const { head, bytes } = copy;
+    const body = new Response(bytes).body;
+    return answer(request, { head, body, size: bytes.byteLength }, 'HIT');
+  }
+  const body = NULL_BODY.includes(copy.head.status) ? null : copy.bytes;
+  return new Response(body, copy.init);
+}
+
 async function readThrough(request, env, ctx) {
   const h = request.headers;
   if (
@@ -610,9 +673,11 @@ async function readThrough(request, env, ctx) {
   const path = url.pathname + url.search;
   const ns = env.NAMESPACE ?? '';
   const at = await storeUrl(`\0rt\0${ns}\0${path}`);
+  const copy = copyOf(request, at);
+  if (copy !== null) return copy;
   for (;;) {
     const miss = {};
-    const entry = await load(env, at, miss);
+    const entry = await load(env, at, miss, true);
     if (entry !== null) return answer(request, entry, 'HIT');
     if (request.method === 'HEAD') return env.ORIGIN.fetch(request);
     const ticket = miss.ticket ?? null;
@@ -656,6 +721,7 @@ async function run(request, env, ctx, { at, ns, path, ticket }) {
   const fill = { ticket, head: null, bytes: null, waiting: [], over: false };
   const wake = () => fill.waiting.splice(0).forEach((resolve) => resolve());
   fills.set(at, fill);
+  drop(at);
   const filled = fillFrom(request, env, fill, wake, { at, ns, path, ticket });
   const over = filled.then(
     ({ stored }) => stored,
@@ -781,6 +847,8 @@ function cdnLifetime(status, headers) {
 // src/workerd/server/workerd-api.c++, passed to the store with this
 // module's NAMESPACE.
 async function purge(request, env) {
+  copies.clear();
+  copied = 0;
   const url = new URL(request.url);
   url.searchParams.set('ns', env.NAMESPACE ?? '');
   const r = await env.STORE.fetch(`http://store/?${url.searchParams}`, {

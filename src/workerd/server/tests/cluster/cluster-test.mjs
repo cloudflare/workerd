@@ -1484,6 +1484,43 @@ test('cluster: a read-through purge is done on every node', async () => {
   );
 });
 
+test('cluster: a read-through copy on its home outlives no purge', async () => {
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      const [a, b] = nodes;
+      await until(
+        async () => {
+          await readThrough(a, '/ready/x');
+          return (await readThrough(b, '/ready/x'))[0] === 'HIT';
+        },
+        20_000,
+        'b never hit a fill'
+      );
+      // Only a reads, and each purge names one path: on a key a is home to,
+      // a's cache.js copy is then the only one out, so a's own lease is all
+      // the purge's delete waits for. About half the keys are a's.
+      const paths = Array.from({ length: 16 }, (_, i) => `/home/k${i}/`);
+      const each = () => Promise.all(paths.map((p) => readThrough(a, p)));
+      await until(
+        async () => (await each()).every(([status]) => status === 'HIT'),
+        20_000,
+        'a never hit its fills'
+      );
+      const ok = { success: true, errors: [] };
+      for (const path of paths) {
+        const [status, filled] = await readThrough(a, path);
+        assert.strictEqual(status, 'HIT', path);
+        const purged = await purge(b, { pathPrefixes: [path] });
+        assert.deepStrictEqual(purged, ok);
+        const [, body] = await readThrough(a, path);
+        assert.notStrictEqual(body, filled, path);
+      }
+    },
+    { configName: 'readThrough', disk: 'cache' }
+  );
+});
+
 test('cluster: a read-through fill begun before a purge serves no later read', async () => {
   await withCluster(
     2,
@@ -3407,7 +3444,7 @@ test('cluster: a cron occurrence does not run again on an owner whose clock lags
     // Its arm fails until it has taken the schedule over, then plans on its
     // own clock.
     let armed;
-    for (const deadline = Date.now() + 40_000; armed === undefined; ) {
+    for (const deadline = Date.now() + 40_000; armed === undefined;) {
       try {
         armed = await clock(survivor, 0);
       } catch (e) {

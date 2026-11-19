@@ -8,7 +8,9 @@
 //! machine that Worker stores to a writable `disk` instead. A record is opaque, with an expiry:
 //!
 //! - `GET <url>`: 200 with the record, its `Content-Length` and the put's `X-Meta`, or 404, as
-//!   once it expired, with an `X-Ticket` for a fill.
+//!   once it expired, with an `X-Ticket` for a fill. With `X-Lease`, a 200 may say until when
+//!   the caller may serve what it got, `X-Lease-Until: <ms since the epoch>`; the store holds
+//!   its writes to the key until then.
 //! - `PUT <url>` with `X-Expires: <ms since the epoch>` and optionally `X-Meta`, kept opaque
 //!   beside the record: 204 stored, 413 refused, 500 if the outcome is unknown. Workers Caching's also name the entry for purges, by
 //!   `X-Purge-Namespace`, `X-Purge-Path` and `X-Purge-Tags`, and return the miss's `X-Ticket`:
@@ -77,8 +79,8 @@ fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64, u64)>> {
     };
     let text = std::str::from_utf8(&line[..end]).ok();
     let parsed = text.and_then(|t| {
-        let mut words = t.split(' ').map(str::parse::<u64>);
-        let [e, n, m] = [words.next()?, words.next()?, words.next()?].map(|w| w.ok());
+        let mut words = t.split(' ').map(|w| w.parse::<u64>().ok());
+        let [e, n, m] = [words.next()?, words.next()?, words.next()?];
         Some((e?, n?, m?, end as u64 + 1))
     });
     Ok(parsed)
@@ -86,7 +88,8 @@ fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64, u64)>> {
 
 /// `n` bytes of `file` at `at`.
 fn read_at(file: &mut File, at: u64, n: u64) -> Result<Vec<u8>> {
-    let mut bytes = vec![0; usize::try_from(n).unwrap()];
+    let n = usize::try_from(n).map_err(|_| kj::failed!("cache: {n} bytes is too long"))?;
+    let mut bytes = vec![0; n];
     file.seek(SeekFrom::Start(at))
         .and_then(|_| file.read_exact(&mut bytes))
         .map_err(|e| io_kj_error(&e))?;
@@ -228,12 +231,17 @@ impl CacheRequest {
         }
     }
 
-    async fn get(&self, key: &str, response: ServiceResponse<'_>) -> Result<()> {
+    async fn get(&self, key: &str, leased: bool, response: ServiceResponse<'_>) -> Result<()> {
         let store = &self.cache.store;
         let ticket = self.cache.purges.ticket(store.active());
         let mut miss = HeaderMap::new();
         miss.insert("X-Ticket", header_value(ticket.text())?);
-        let Some(mut file) = store.get(key).await? else {
+        let got = if leased {
+            store.get_leased(key).await?
+        } else {
+            store.get(key).await?.map(|file| (file, None))
+        };
+        let Some((mut file, until)) = got else {
             return self.send(response, 404, "Not Found", &miss, 0).map(drop);
         };
         // A near copy, leased, may expire before its home drops it.
@@ -245,9 +253,15 @@ impl CacheRequest {
         let size = file.metadata().map_err(|e| io_kj_error(&e))?.len() - start;
         let mut headers = HeaderMap::new();
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
+        if let Some(until) = until {
+            headers.insert("X-Lease-Until", HeaderValue::from(until));
+        }
         if m > 0 {
             let meta = HeaderValue::from_bytes(&read_at(&mut file, at + n, m)?);
-            headers.insert("X-Meta", meta.map_err(|_| kj::failed!("X-Meta is no header"))?);
+            headers.insert(
+                "X-Meta",
+                meta.map_err(|_| kj::failed!("X-Meta is no header"))?,
+            );
         }
         let mut out = self.send(response, 200, "OK", &headers, size)?;
         copy_file(&mut file, start, size, &mut out).await
@@ -339,7 +353,10 @@ impl Service for CacheRequest {
         let url = String::from_utf8_lossy(url);
         let key = url.rsplit('/').next().unwrap_or_default();
         match method {
-            Method::GET => self.get(key, response).await,
+            Method::GET => {
+                let leased = headers.get_by_name("X-Lease").is_some();
+                self.get(key, leased, response).await
+            }
             Method::PUT => self.put(key, headers, body, response).await,
             Method::DELETE => self.wrote(response, store.delete(key).await, (404, "Not Found")),
             _ => {

@@ -110,7 +110,10 @@ impl Purge {
         meta.ns == self.ns
             && (self.everything
                 || meta.tags.split(',').any(tag)
-                || self.prefixes.iter().any(|p| meta.path.starts_with(p.as_str())))
+                || self
+                    .prefixes
+                    .iter()
+                    .any(|p| meta.path.starts_with(p.as_str())))
     }
 }
 

@@ -34,6 +34,11 @@
 //! from a fresh view as fenced, and keeps nothing across a restart, after
 //! which the node registers again.
 //!
+//! A caller that keeps what a match returns asks with [`Cache::get_leased`],
+//! and may serve it until [`Cache::until`]: its near copy's lease, or on the
+//! key's home a lease the home grants itself, which writes wait out as they
+//! do the leases it gave other nodes.
+//!
 //! Safety, which `cache-test.rs` checks by simulation: once a delete, or a put
 //! that stored, is done, no match issued later returns a value whose put
 //! stored before that write began. A miss is always allowed.
@@ -41,6 +46,7 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::handoff::successor;
 use crate::handoff::weight;
@@ -219,6 +225,10 @@ pub struct Cache<V> {
     /// leases more to revalidate by version.
     near: HashMap<String, Near<V>>,
     ops: BTreeMap<u64, (u64, Op)>,
+    /// Matches by `get_leased` not yet answered, and until when those
+    /// answered with a value may serve it.
+    leasing: HashSet<u64>,
+    untils: HashMap<u64, u64>,
     /// Acks of writes, held until the key's leases run out.
     held: Vec<(u64, Send<V>)>,
     sends: Vec<Send<V>>,
@@ -240,6 +250,8 @@ impl<V: Clone> Cache<V> {
             leases: HashMap::new(),
             near: HashMap::new(),
             ops: BTreeMap::new(),
+            leasing: HashSet::new(),
+            untils: HashMap::new(),
             held: Vec::new(),
             sends: Vec::new(),
             done: Vec::new(),
@@ -306,7 +318,7 @@ impl<V: Clone> Cache<V> {
         for id in late {
             let done = match self.ops.remove(&id) {
                 Some((_, Op::Fetch { joined, .. })) => {
-                    self.fetched(id, joined, None);
+                    self.fetched(id, joined, None, now);
                     continue;
                 }
                 Some((_, Op::Put { .. })) => Done::Put(None),
@@ -325,7 +337,7 @@ impl<V: Clone> Cache<V> {
     /// node that answers `NotHome` while the target still serves the key.
     pub fn lost(&mut self, op: u64) {
         match self.ops.remove(&op) {
-            Some((_, Op::Fetch { joined, .. })) => self.fetched(op, joined, None),
+            Some((_, Op::Fetch { joined, .. })) => self.fetched(op, joined, None, 0),
             Some((_, Op::Put { .. })) => self.done.push((op, Done::Put(None))),
             Some(delete) => {
                 self.ops.insert(op, delete);
@@ -342,7 +354,9 @@ impl<V: Clone> Cache<V> {
 
     /// The entries this node holds as their home.
     pub fn homed(&self) -> impl Iterator<Item = (&str, &V)> {
-        self.home.iter().map(|(key, (value, _))| (key.as_str(), value))
+        self.home
+            .iter()
+            .map(|(key, (value, _))| (key.as_str(), value))
     }
 
     /// Drops an entry or near copy, to make room.
@@ -361,15 +375,38 @@ impl<V: Clone> Cache<V> {
 
     /// A match; its result comes as `Done::Match` under the returned id.
     pub fn get(&mut self, key: &str) -> u64 {
+        self.get_with(key, false)
+    }
+
+    /// A match whose caller keeps the value it returns, until [`Cache::until`].
+    pub fn get_leased(&mut self, key: &str) -> u64 {
+        self.get_with(key, true)
+    }
+
+    /// Until when the caller of `get_leased` match `id`, answered with a value,
+    /// may serve it.
+    pub fn until(&mut self, id: u64) -> Option<u64> {
+        self.untils.remove(&id)
+    }
+
+    fn get_with(&mut self, key: &str, leased: bool) -> u64 {
         let id = self.id();
+        if leased {
+            self.leasing.insert(id);
+        }
         let now = self.now;
         if let Some(near) = self.near.get(key).filter(|n| now < n.until) {
-            self.done.push((id, Done::Match(Some(near.value.clone()))));
+            let (value, until) = (near.value.clone(), near.until);
+            self.matched(id, Some(value), until);
             return id;
         }
         if self.serves(key) {
             let value = self.home.get(key).map(|(value, _)| value.clone());
-            self.done.push((id, Done::Match(value)));
+            if leased && value.is_some() {
+                let lease = self.leases.entry(key.to_owned()).or_default();
+                *lease = (*lease).max(now + self.timing.lease_wait_ms());
+            }
+            self.matched(id, value, now + self.timing.lease_ms);
             return id;
         }
         let lease = self.timing.lease_ms;
@@ -404,9 +441,17 @@ impl<V: Clone> Cache<V> {
                 };
                 self.ops.insert(id, (now, op));
             }
-            _ => self.done.push((id, Done::Match(None))),
+            _ => self.matched(id, None, now),
         }
         id
+    }
+
+    /// Answers match `id` with `value`, servable until `until` if leased.
+    fn matched(&mut self, id: u64, value: Option<V>, until: u64) {
+        if self.leasing.remove(&id) && value.is_some() {
+            self.untils.insert(id, until);
+        }
+        self.done.push((id, Done::Match(value)));
     }
 
     pub fn put(&mut self, key: &str, value: V) -> u64 {
@@ -492,7 +537,7 @@ impl<V: Clone> Cache<V> {
                 else {
                     return;
                 };
-                let until = sent + self.timing.lease_ms;
+                let mut until = sent + self.timing.lease_ms;
                 let value = match hit {
                     Some(Hit::Value(value, version)) => {
                         let near = Near {
@@ -506,6 +551,7 @@ impl<V: Clone> Cache<V> {
                     Some(Hit::Same) => match self.near.get_mut(&key) {
                         Some(near) if have.as_ref() == Some(&near.version) => {
                             near.until = near.until.max(until);
+                            until = near.until;
                             Some(near.value.clone())
                         }
                         _ => None,
@@ -515,7 +561,7 @@ impl<V: Clone> Cache<V> {
                         None
                     }
                 };
-                self.fetched(op, joined, value.as_ref());
+                self.fetched(op, joined, value.as_ref(), until);
             }
             Msg::Put { op, key, value } => {
                 let reply = self.apply(&key, Some(value));
@@ -545,10 +591,11 @@ impl<V: Clone> Cache<V> {
         }
     }
 
-    /// Ends fetch `id`, and the matches that joined it, with `value`.
-    fn fetched(&mut self, id: u64, joined: Vec<u64>, value: Option<&V>) {
+    /// Ends fetch `id`, and the matches that joined it, with `value`, leased
+    /// until `until`.
+    fn fetched(&mut self, id: u64, joined: Vec<u64>, value: Option<&V>, until: u64) {
         for id in std::iter::once(id).chain(joined) {
-            self.done.push((id, Done::Match(value.cloned())));
+            self.matched(id, value.cloned(), until);
         }
     }
 

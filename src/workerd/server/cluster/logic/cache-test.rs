@@ -794,6 +794,60 @@ fn a_lost_request_ends_a_match_or_put_at_once() {
 }
 
 #[test]
+fn a_leased_match_says_until_when_and_its_home_holds_writes_that_long() {
+    let mut a = Cache::new("a", T);
+    let view = vec!["a".to_owned(), "b".to_owned()];
+    a.set(0, view, true, true);
+    let homed = |a: &Cache<i32>, home| {
+        (0..64)
+            .map(|i| format!("k{i}"))
+            .find(|k| a.home_of(k) == Some(home))
+            .unwrap()
+    };
+    let wrote = |sends: Vec<Send<i32>>| -> Vec<u64> {
+        let op = |s: Send<i32>| match s.msg {
+            Msg::Wrote { op, .. } => op,
+            msg => panic!("{msg:?}"),
+        };
+        sends.into_iter().map(op).collect()
+    };
+    // A near copy is servable until its lease.
+    let far = homed(&a, "b");
+    let get = a.get_leased(&far);
+    a.take_sends();
+    let hit = Some(Hit::Value(1, ("b".to_owned(), 1)));
+    a.receive("b", Msg::Got { op: get, hit });
+    assert_eq!(a.take_done(), [(get, Done::Match(Some(1)))]);
+    assert_eq!(a.until(get), Some(T.lease_ms));
+    // On the home a plain match leases nothing, and a write is acked at once.
+    let key = homed(&a, "a");
+    let value = 1;
+    a.receive(
+        "b",
+        Msg::Put {
+            op: 1,
+            key: key.clone(),
+            value,
+        },
+    );
+    assert_eq!(wrote(a.take_sends()), [1]);
+    let get = a.get(&key);
+    assert_eq!(a.take_done(), [(get, Done::Match(Some(1)))]);
+    assert_eq!(a.until(get), None);
+    // A leased one leases the home to itself: writes wait it out.
+    let get = a.get_leased(&key);
+    assert_eq!(a.take_done(), [(get, Done::Match(Some(1)))]);
+    assert_eq!(a.until(get), Some(T.lease_ms));
+    let value = 2;
+    a.receive("b", Msg::Put { op: 2, key, value });
+    assert!(a.take_sends().is_empty());
+    a.tick(T.lease_wait_ms() - 1);
+    assert!(a.take_sends().is_empty());
+    a.tick(T.lease_wait_ms());
+    assert_eq!(wrote(a.take_sends()), [2]);
+}
+
+#[test]
 fn simulation_holds_the_safety_rule() {
     let var = |name, or| {
         std::env::var(name)

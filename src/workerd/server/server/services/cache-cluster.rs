@@ -94,7 +94,7 @@ struct Shared {
     start: Instant,
     cache: RefCell<Cache<Value>>,
     /// This node's operations, awaiting what they came to.
-    ops: Waiters<u64, Done<Value>>,
+    ops: Waiters<u64, (Done<Value>, Option<u64>)>,
     /// Peers' messages, awaiting their replies, by sender and op.
     asked: Waiters<(String, u64), Msg<Value>>,
     purges: Rc<Purges>,
@@ -243,7 +243,11 @@ impl Shared {
                     }
                 }
             }
-            cache.take_done()
+            let done = cache.take_done();
+            let mut until = |op| cache.until(op);
+            done.into_iter()
+                .map(|(op, done)| (op, (done, until(op))))
+                .collect::<Vec<_>>()
         };
         for (op, done) in done {
             if let Some(waiter) = self.ops.borrow_mut().remove(&op) {
@@ -262,6 +266,14 @@ impl Shared {
 
     /// Starts the operation `f` returns the id of, and awaits what it comes to.
     async fn run(self: &Rc<Self>, f: impl FnOnce(&mut Cache<Value>) -> u64) -> Option<Done<Value>> {
+        self.run_until(f).await.map(|(done, _)| done)
+    }
+
+    /// As `run`, with until when a leased match's value may be served (`Cache::until`).
+    async fn run_until(
+        self: &Rc<Self>,
+        f: impl FnOnce(&mut Cache<Value>) -> u64,
+    ) -> Option<(Done<Value>, Option<u64>)> {
         let (waiter, done) = oneshot::channel();
         self.step(|cache| {
             self.ops.borrow_mut().insert(f(cache), waiter);
@@ -432,6 +444,20 @@ impl Clustered {
     pub(super) async fn get(&self, key: &str) -> Result<Option<File>> {
         match self.0.run(|cache| cache.get(key)).await {
             Some(Done::Match(Some(value))) => value.open().map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    /// As `get`, for a caller that keeps the value: with until when it may serve it, in ms
+    /// since the epoch. On the key's home, writes to it wait that out.
+    pub(super) async fn get_leased(&self, key: &str) -> Result<Option<(File, Option<u64>)>> {
+        let shared = &self.0;
+        match shared.run_until(|cache| cache.get_leased(key)).await {
+            Some((Done::Match(Some(value)), until)) => {
+                let left = |u: u64| u.saturating_sub(shared.now());
+                let until = until.map(|u| super::now_ms() + left(u));
+                Ok(Some((value.open()?, until)))
+            }
             _ => Ok(None),
         }
     }
