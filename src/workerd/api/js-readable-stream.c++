@@ -815,9 +815,10 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::Ref<Blob> blob) {
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chunker) {
-  // Each pull enqueues one chunk, or closes the stream once there are none left. The stream pulls
-  // only for a waiting read (highWaterMark 0), so each chunk goes to a read whole, and a pull that
-  // closes the stream is the one after the last chunk, or the first for an empty value.
+  // Each pull enqueues the next chunk, and the pull that enqueues the last one also closes the
+  // stream, so a draining read that takes the last chunk sees the end too, and a pump needs no
+  // further read. The first pull of an empty value only closes. The stream pulls only for a
+  // waiting read (highWaterMark 0), so each chunk goes to a read whole.
   uint64_t length = chunker->getLength();
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     UnderlyingSource source;
@@ -831,17 +832,13 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chu
       KJ_IF_SOME(chunk, chunker->next(js)) {
         controller->enqueue(js, jsg::JsBufferSource(chunk));
       }
-      if (!chunker->isDone()) {
-        return js.resolvedPromise();
+      // Closing clears the stream's algorithms, this pull among them; jsg::Function holds its own
+      // reference for the duration of a call, so the lambda and its captures outlive the close.
+      // Settling a read can run JavaScript (a `then` getter) that cancels the stream first.
+      if (chunker->isDone() && controller->canCloseOrEnqueue()) {
+        controller->close(js);
       }
-      // Closing clears the stream's algorithms, which would destroy this lambda while it runs, so
-      // close in a continuation. The pull is pending until then, so no other pull runs first.
-      return js.resolvedPromise().then(
-          js, [controller = controller.addRef()](jsg::Lock& js) mutable {
-        if (controller->canCloseOrEnqueue()) {
-          controller->close(js);
-        }
-      });
+      return js.resolvedPromise();
     };
     source.cancel = [chunker = chunker.addRef()](
                         jsg::Lock& js, jsg::JsValue) mutable -> jsg::Promise<void> {
@@ -855,7 +852,7 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chu
     return JsReadableStream(kj::mv(stream));
   }
 
-  // TypeScript arm: the same source, built as a JS object. A JS pull may close the stream itself.
+  // TypeScript arm: the same source, built as a JS object.
   auto pull = js.wrapSimpleFunction(js.v8Context(),
       [chunker = chunker.addRef()](
           jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {

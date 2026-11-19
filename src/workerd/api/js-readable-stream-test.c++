@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/blob.h>
+#include <workerd/api/byte-chunker.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
@@ -182,6 +183,50 @@ class StallingSink final: public WritableStreamSink {
     calls.pendingWrite = kj::mv(paf.fulfiller);
     return kj::mv(paf.promise);
   }
+};
+
+// A sink that takes every write synchronously, through tryWriteSync(), and records whether end()
+// came in the same event-loop turn as the last write: whether the pump ended it without first
+// going back to the stream for another read.
+class EndTimingSink final: public WritableStreamSink {
+ public:
+  EndTimingSink(kj::Vector<kj::byte>& data, bool& endedWithLastWrite)
+      : data(data),
+        endedWithLastWrite(endedWithLastWrite) {}
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return tryWriteSync(kj::arr(buffer));
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto& piece: pieces) {
+      data.addAll(piece);
+    }
+    writeInThisTurn = true;
+    clearAtNextTurn = kj::evalLater([this]() { writeInThisTurn = false; }).eagerlyEvaluate(nullptr);
+    return true;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_FAIL_REQUIRE("the pump should write through tryWriteSync()");
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_FAIL_REQUIRE("the pump should write through tryWriteSync()");
+  }
+
+  kj::Promise<void> end() override {
+    endedWithLastWrite = writeInThisTurn;
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {}
+
+ private:
+  kj::Vector<kj::byte>& data;
+  bool& endedWithLastWrite;
+  bool writeInThisTurn = false;
+  kj::Promise<void> clearAtNextTurn = kj::READY_NOW;
 };
 
 KJ_TEST("JsReadableStream null state") {
@@ -1895,6 +1940,30 @@ KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed queued stream") {
   });
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory body ends the sink with its last write") {
+  // The stream closes in the pull that enqueues its last chunk, so the pump's draining read
+  // returns that chunk together with the end, and the pump ends the sink without reading again,
+  // for a body of one chunk or of several. Only the legacy pump writes through tryWriteSync();
+  // the TypeScript one awaits each write, so this sink cannot tell its last read from one more.
+  for (size_t size: {kData.size(), ByteChunker::kMaxChunkSize + 1}) {
+    kj::Vector<kj::byte> collected;
+    bool endedWithLastWrite = false;
+    TestFixture fixture;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto data = kj::heapArray<kj::byte>(size);
+      data.asPtr().fill('a');
+      auto stream =
+          JsReadableStream::create(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+      return stream
+          .pumpTo(js, kj::heap<EndTimingSink>(collected, endedWithLastWrite), EndStream::YES)
+          .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    });
+    KJ_EXPECT(collected.size() == size, size);
+    KJ_EXPECT(endedWithLastWrite, size);
+  }
 }
 
 KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte chunks") {
