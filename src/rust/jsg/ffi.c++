@@ -369,6 +369,10 @@ bool local_is_function(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
 }
 
+bool local_is_async_function(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsAsyncFunction();
+}
+
 bool local_is_promise(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsPromise();
 }
@@ -667,6 +671,40 @@ MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
       local_as_ref_from_ffi<v8::Value>(data)));
 }
 
+MaybeLocal function_compile(Isolate* isolate,
+    const Local& source,
+    const Local& resourceName,
+    ::rust::Slice<const Local> params) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Function>());
+  v8::ScriptOrigin origin(local_as_ref_from_ffi<v8::String>(resourceName));
+  v8::ScriptCompiler::Source compileSource(local_as_ref_from_ffi<v8::String>(source), origin);
+  v8::LocalVector<v8::String> paramNames(isolate, params.size());
+  for (size_t i = 0; i < params.size(); i++) {
+    paramNames[i] = local_as_ref_from_ffi<v8::String>(params[i]);
+  }
+  return maybe_local_to_ffi(v8::ScriptCompiler::CompileFunction(isolate->GetCurrentContext(),
+      &compileSource, paramNames.size(), paramNames.data(), 0, nullptr));
+}
+
+void local_function_set_name(const Local& function, const Local& name) {
+  local_as_ref_from_ffi<v8::Function>(function)->SetName(local_as_ref_from_ffi<v8::String>(name));
+}
+
+// Local<Script>
+MaybeLocal script_compile(Isolate* isolate, const Local& source, const Local& resourceName) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Script>());
+  v8::ScriptOrigin origin(local_as_ref_from_ffi<v8::String>(resourceName));
+  v8::ScriptCompiler::Source compileSource(local_as_ref_from_ffi<v8::String>(source), origin);
+  return maybe_local_to_ffi(
+      v8::ScriptCompiler::Compile(isolate->GetCurrentContext(), &compileSource));
+}
+
+MaybeLocal local_script_run(Isolate* isolate, const Local& script) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::Script>(script)->Run(isolate->GetCurrentContext()));
+}
+
 // Local<Object>
 Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> keys) {
   kj::Vector<std::string_view> names(keys.size());
@@ -919,6 +957,14 @@ size_t local_array_buffer_get_backing_store(const Local& buffer) {
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
   return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
+}
+
+MaybeLocal wasm_module_object_compile(Isolate* isolate, ::rust::Slice<const uint8_t> bytes) {
+  // Compile() takes no context, but throws a WebAssembly.CompileError, so it is not entered while
+  // something else is pending.
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::WasmModuleObject>());
+  return maybe_local_to_ffi(
+      v8::WasmModuleObject::Compile(isolate, std::span<const uint8_t>(bytes.data(), bytes.size())));
 }
 
 // CompiledWasmModule
@@ -2345,6 +2391,18 @@ bool isolate_has_pending_exception(Isolate* isolate) {
 
 bool isolate_captures_throws_as_rejections(Isolate* isolate) {
   return workerd::jsg::getCaptureThrowsAsRejections(isolate);
+}
+
+bool isolate_is_eval_allowed(Isolate* isolate) {
+  return ::workerd::jsg::isEvalAllowed(isolate);
+}
+
+void isolate_set_allow_eval(Isolate* isolate, bool allow) {
+  ::workerd::jsg::setAllowEval(isolate, allow);
+}
+
+bool isolate_is_starting_from_snapshot(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).isStartingFromSnapshot();
 }
 
 Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {

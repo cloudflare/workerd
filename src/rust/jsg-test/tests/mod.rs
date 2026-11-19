@@ -59,6 +59,7 @@ mod resource_properties;
 mod resource_template;
 mod resource_this;
 mod rest_arguments;
+mod script;
 mod serialization;
 mod signature_callback;
 mod startup_snapshot;

@@ -309,6 +309,7 @@ bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
 bool local_is_shared_array_buffer(const Local& val);
 bool local_is_function(const Local& val);
+bool local_is_async_function(const Local& val);
 bool local_is_promise(const Local& val);
 bool local_is_symbol(const Local& val);
 bool local_is_name(const Local& val);
@@ -405,6 +406,23 @@ MaybeLocal local_function_call(
 // wrappable_attach_opaque_wrapper() returned, as its data. Returns empty if an exception or a
 // termination is pending, or if V8 could not create the function.
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
+// Compiles `source` as the body of a function whose parameters are named by `params`, with
+// `resourceName` as its script origin, as v8::ScriptCompiler::CompileFunction() does. Returns
+// none if it does not compile, with the SyntaxError pending.
+MaybeLocal function_compile(Isolate* isolate,
+    const Local& source,
+    const Local& resourceName,
+    ::rust::Slice<const Local> params);
+void local_function_set_name(const Local& function, const Local& name);
+
+// Local<Script>
+// Compiles `source` as a classic script bound to the current context, with `resourceName` as its
+// script origin, as v8::ScriptCompiler::Compile() does, without the code cache. Returns none if
+// it does not compile, with the SyntaxError pending.
+MaybeLocal script_compile(Isolate* isolate, const Local& source, const Local& resourceName);
+// Runs the script and returns its completion value, or none if it threw, leaving the exception
+// pending.
+MaybeLocal local_script_run(Isolate* isolate, const Local& script);
 
 // Struct shapes
 // Returns a `v8::Global<v8::DictionaryTemplate>` declaring `keys` as data properties, in order.
@@ -542,6 +560,9 @@ size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module);
+// Compiles `bytes` as v8::WasmModuleObject::Compile() does. Returns none if they do not compile,
+// with the WebAssembly.CompileError pending.
+MaybeLocal wasm_module_object_compile(Isolate* isolate, ::rust::Slice<const uint8_t> bytes);
 
 // CompiledWasmModule
 // Returns the address of the bytes the module was compiled from, which the module owns, and sets
@@ -815,6 +836,12 @@ bool isolate_has_pending_exception(Isolate* isolate);
 // Whether a method that returns a promise rejects it with what it throws
 // (jsg::getCaptureThrowsAsRejections()).
 bool isolate_captures_throws_as_rejections(Isolate* isolate);
+// Whether code may be generated from strings (eval(), new Function(), WebAssembly compilation),
+// and setting it, as jsg::Lock::isEvalAllowed() and setAllowEval() do.
+bool isolate_is_eval_allowed(Isolate* isolate);
+void isolate_set_allow_eval(Isolate* isolate, bool allow);
+// Whether the isolate is starting from a startup snapshot (IsolateBase::isStartingFromSnapshot()).
+bool isolate_is_starting_from_snapshot(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context
 // frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
 // workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.
