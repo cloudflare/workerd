@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// The future given to `await_io_and_run` is polled without the isolate lock, so it cannot hold a
-// value that is not `Send`, such as an `std::rc::Rc`.
+// `await_io_and_run` takes only a future that is `Send`, so it cannot hold a value that is not,
+// such as an `std::rc::Rc`. `await_io_local` takes one that is only `'static`.
 use std::rc::Rc;
 
 use io_context::IoContext;

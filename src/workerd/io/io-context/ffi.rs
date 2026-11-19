@@ -72,9 +72,21 @@ pub mod bridge {
         fn settle(self: &AsyncResource, outcome: AsyncOutcome);
     }
 
+    /// C++ `IoChannelFactory::EvictWebSocketMode`, by its alias in `ffi.h`: what evicting a
+    /// Durable Object for a test does with its hibernatable WebSockets.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(i32)]
+    enum EvictWebSocketMode {
+        /// Hibernates them, so that they outlive the eviction.
+        HIBERNATE,
+        /// Closes them.
+        CLOSE,
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/ffi.h");
 
+        type EvictWebSocketMode;
         type IoOwnedObject;
         type IsolateWeakRef;
         type AbortWatcher;
@@ -123,6 +135,12 @@ pub mod bridge {
         fn io_context_check_current(id: u64) -> Result<()>;
         fn io_context_abort(id: u64, reason: KjException) -> Result<()>;
         fn io_context_abort_without_reason(id: u64) -> Result<()>;
+        fn io_context_abort_all_actors(id: u64, reason: KjException) -> Result<()>;
+        fn io_context_delete_all_actors(id: u64, reason: KjException) -> Result<()>;
+        async fn io_context_evict_all_actors_for_test(
+            id: u64,
+            web_socket_mode: EvictWebSocketMode,
+        ) -> Result<()>;
 
         // The `&[u8]` names, keys and literal values below are NUL-terminated strings with the
         // NUL, which C++ requires and does not copy, so they must outlive the spans: the
@@ -345,18 +363,22 @@ fn pending_unless(succeeded: bool) -> jsg::Result<()> {
 }
 
 /// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.
-pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>);
+///
+/// Neither it nor its output is `Send`: C++ polls and drops the future, and runs the callback
+/// that takes the output, only on its `IoContext`'s thread. The functions that make one bound
+/// what they accept.
+pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any>>>>);
 
 /// The future that `io_context_add_wait_until()` waits for as a waitUntil task: an
 /// [`AwaitJs`](crate::AwaitJs) whose value is discarded.
 pub struct WaitUntilFuture(pub Pin<Box<dyn Future<Output = Result<(), cxx::KjException>> + Send>>);
 
 /// The output of an [`IoFuture`].
-pub struct IoOutput(Box<dyn Any + Send>);
+pub struct IoOutput(Box<dyn Any>);
 
 /// What [`IoCallback`] calls.
 pub type IoCallbackFn =
-    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()>>;
+    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any>) -> jsg::Result<()>>;
 
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);
