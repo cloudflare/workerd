@@ -1012,6 +1012,26 @@ or a JavaScript exception is pending, `Function::new` creates nothing and return
 propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
 0, and it can be called with `new`.
 
+A function that needs no state can skip the `Wrappable`: `v8::Function::from_callback(lock,
+callback)` creates one that V8 calls `callback` for directly, like C++ `v8::Function::New()` with
+a plain callback, so a call costs no more than V8's own. Its data is `undefined` and it has no
+signature, so `this` can be any value; like a `Function::new` function, its `name` is empty, its
+`length` is 0 and it can be called with `new`. It fails as `Function::new` does. Build `callback`
+with `jsg::function_callback` from a closure that captures nothing: the closure gets a lock per
+call and sets its result with `set_return_value`, and a panic in it throws an internal error and
+terminates execution. An `extern "C"` callback also works, but it gets no lock and no panic
+handling, so a panic in it aborts the process.
+
+```rust
+let second = v8::Function::from_callback(
+    lock,
+    jsg::function_callback(|_lock, args| {
+        let value = args.get(1);
+        args.set_return_value(value);
+    }),
+)?;
+```
+
 ### Conventions of the `v8` module
 
 The `v8` module takes handles and returns handles. Converting between a Rust value and a
