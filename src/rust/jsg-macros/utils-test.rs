@@ -159,6 +159,10 @@ fn is_null_or_undefined_type_cases() {
 fn is_option_type_cases() {
     assert!(is_option_type(&parse_quote!(Option<String>)));
     assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
+    assert!(!is_option_type(&parse_quote!(jsg::LenientOption<u32>)));
+    assert!(is_lenient_option_type(&parse_quote!(
+        jsg::LenientOption<u32>
+    )));
     assert!(!is_option_type(&parse_quote!(String)));
     assert!(!is_option_type(&parse_quote!(&Option<String>)));
 }

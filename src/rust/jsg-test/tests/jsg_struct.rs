@@ -34,6 +34,14 @@ struct NestedStruct {
     pub inner: String,
 }
 
+/// Every field is optional, as C++ `jsg::LenientOptional<T>` fields of a `JSG_STRUCT` are.
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct LenientStruct {
+    pub label: jsg::LenientOption<jsg::NonCoercible<String>>,
+    pub count: jsg::LenientOption<u32>,
+}
+
 #[jsg_struct]
 #[derive(Debug, PartialEq)]
 struct OptionalStruct {
@@ -677,6 +685,54 @@ fn struct_fields_can_have_the_names_of_generated_locals() {
         .to_js(lock)?;
         let back = ShapeFieldStruct::from_js(lock, value)?;
         assert_eq!((back.shape.as_str(), back.other), ("round", 7));
+        Ok(())
+    });
+}
+
+/// Like C++ JSG, a `LenientOption` field is optional: an all-lenient struct converts from null or
+/// undefined, an absent property is `None`, and so is a value of the wrong type.
+#[test]
+fn lenient_struct_fields_are_optional() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let empty = LenientStruct {
+            label: jsg::LenientOption(None),
+            count: jsg::LenientOption(None),
+        };
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "null")?, empty);
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "undefined")?, empty);
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "({})")?, empty);
+        assert_eq!(
+            convert::<LenientStruct>(lock, ctx, "({ label: 1, count: 3 })")?,
+            LenientStruct {
+                label: jsg::LenientOption(None),
+                count: jsg::LenientOption(Some(3)),
+            }
+        );
+        assert_eq!(
+            convert::<LenientStruct>(lock, ctx, "({ label: 'x' })")?,
+            LenientStruct {
+                label: jsg::LenientOption(Some(jsg::NonCoercible::new("x".to_owned()))),
+                count: jsg::LenientOption(None),
+            }
+        );
+        Ok(())
+    });
+}
+
+/// An absent `LenientOption` field is left out of the JS object, as an absent `Option` field is.
+#[test]
+fn lenient_struct_omits_absent_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = LenientStruct {
+            label: jsg::LenientOption(None),
+            count: jsg::LenientOption(Some(1)),
+        }
+        .to_js(lock)?;
+        let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+        assert!(!obj.has(lock, "label")?);
+        assert!(obj.has(lock, "count")?);
         Ok(())
     });
 }

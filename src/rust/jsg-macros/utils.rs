@@ -347,6 +347,12 @@ pub fn is_option_type(ty: &syn::Type) -> bool {
         if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
 }
 
+/// Returns true if `ty` is `jsg::LenientOption<T>`.
+pub fn is_lenient_option_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "LenientOption"))
+}
+
 /// Returns the tokens of `ty` with every named lifetime other than `'static`
 /// replaced by `'_`.
 ///
