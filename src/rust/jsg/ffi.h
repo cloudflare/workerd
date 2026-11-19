@@ -34,8 +34,9 @@ using FastApiCallbackOptions = v8::FastApiCallbackOptions;
 // Const, as IsolateBase hands it out: every member that the shims call is const and thread-safe.
 using ExternalMemoryTarget = const ::workerd::jsg::ExternalMemoryTarget;
 // The compiled code of a WebAssembly.Module, which V8 shares between every module object made
-// from it, in any isolate. It is not on the V8 heap, and may be read and destroyed on any thread;
-// making a module object from it needs the lock of the isolate it is made in.
+// from it, in any isolate. It is not on the V8 heap, and may be read and destroyed on any thread
+// that may use V8 (one created, after V8 starts, by a thread that may use V8); making a module
+// object from it needs the lock of the isolate it is made in.
 using CompiledWasmModule = v8::CompiledWasmModule;
 struct ModuleRegistry;
 struct Local;
