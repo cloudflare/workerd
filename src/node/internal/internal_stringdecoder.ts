@@ -43,7 +43,7 @@ const kBufferedBytes = 5;
 const kEncoding = 6;
 const kSize = 7;
 
-// The order of this array should be in sync with i18n.h
+// The order of this array should be in sync with encoding.h
 // Encoding enum. Index of this array defines the uint8_t
 // value of an encoding.
 const encodings = [

@@ -41,6 +41,19 @@ const fn require_within_isolate_limit(
     }
 }
 
+impl Encoding {
+    /// Whether [`Transcoder`] supports this encoding, as either source or
+    /// destination. `BufferUtil::transcode`
+    /// (`src/workerd/api/node/buffer.c++`) calls this through the bridge.
+    #[must_use]
+    pub const fn can_be_transcoded(self) -> bool {
+        matches!(
+            self,
+            Self::Ascii | Self::Latin1 | Self::Utf8 | Self::Utf16Le
+        )
+    }
+}
+
 /// A validated, sized transcode, ready to run.
 ///
 /// Borrows its source for the whole of its life, so [`Transcoder::dest_len`]
@@ -75,10 +88,13 @@ impl<'a> Transcoder<'a> {
     /// Prepares a transcode of `source` from `from` to `to`, choosing the
     /// conversion for that encoding pair.
     ///
-    /// Returns an error if `from` is not a transcodable encoding, if `source`
-    /// is malformed for `from`, or if the destination the conversion would
-    /// need exceeds [`ISOLATE_LIMIT`].
+    /// Returns an error if `from` or `to` is not a transcodable encoding, if
+    /// `source` is malformed for `from`, or if the destination the conversion
+    /// would need exceeds [`ISOLATE_LIMIT`].
     pub fn new(source: &'a [u8], from: Encoding, to: Encoding) -> Result<Self, TranscodeError> {
+        if !(from.can_be_transcoded() && to.can_be_transcoded()) {
+            return Err(TranscodeError::InvalidEncoding);
+        }
         match from {
             Encoding::Ascii | Encoding::Latin1 => {
                 if to == Encoding::Utf16Le {

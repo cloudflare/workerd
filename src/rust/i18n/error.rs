@@ -11,9 +11,7 @@ use thiserror::Error;
 ///
 /// The messages and JavaScript error types are what `node:buffer`'s
 /// `transcode()` exposes to JavaScript, so do not reword them.
-/// [`TranscodeError::InvalidEncoding`] shares its message with the
-/// `JSG_FAIL_REQUIRE` in `fromImpl` (`src/workerd/api/node/i18n.c++`), and
-/// [`TranscodeError::AllocationFailed`] with the one in
+/// [`TranscodeError::AllocationFailed`] shares its message with the one in
 /// `jsg::JsUint8Array::create`.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TranscodeError {

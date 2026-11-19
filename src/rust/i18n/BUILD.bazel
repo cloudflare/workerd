@@ -4,6 +4,7 @@ wd_rust_crate(
     name = "i18n",
     cxx_bridge_deps = [
         "//src/rust/jsg",
+        "//src/workerd/api/node:encoding",
         "@simdutf",
         "@workerd-v8//:v8",
     ],

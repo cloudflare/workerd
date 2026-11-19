@@ -1,14 +1,27 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
-# Dependency-free header defining api::node::JsErrorType. Kept separate so it can
-# be shared with the Rust node-exceptions crate as a cxx extern enum without
-# creating a dependency cycle (the crate must not depend on anything that depends
-# on it). Do not add deps to this target.
+# Dependency-free header defining api::node::JsErrorType and
+# api::node::NodeExceptionCode. Kept separate so they can be shared with the Rust
+# node-exceptions crate as cxx extern enums without creating a dependency cycle
+# (the crate must not depend on anything that depends on it). Do not add deps to
+# this target.
 wd_cc_library(
     name = "exception-type",
     hdrs = [
         "exception-type.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dependency-free header defining api::node::Encoding. Kept separate so it can be
+# shared with the Rust i18n crate as a cxx extern enum without creating a
+# dependency cycle (the crate must not depend on anything that depends on it). Do
+# not add deps to this target.
+wd_cc_library(
+    name = "encoding",
+    hdrs = [
+        "encoding.h",
     ],
     visibility = ["//visibility:public"],
 )
@@ -77,12 +90,10 @@ wd_cc_library(
     name = "node-core",
     srcs = [
         "buffer.c++",
-        "i18n.c++",
     ],
     hdrs = [
         "buffer.h",
         "buffer-string-search.h",
-        "i18n.h",
         "node-version.h",
     ],
     implementation_deps = [
@@ -97,6 +108,7 @@ wd_cc_library(
         # need to be rebuilt if there are changes to io.
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        ":encoding",
         ":exceptions",
     ],
 )
