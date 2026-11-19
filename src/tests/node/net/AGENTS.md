@@ -104,7 +104,8 @@ network service allowing `private`.
   chunk through the writer; `_writev` concatenates a corked batch into one
   write. The write callback fires when the writer's promise settles;
   `bytesWritten` counts the encoded bytes once flushed (queued bytes are
-  added from `writableLength`), and `bufferSize` mirrors `writableLength`.
+  added from `writableLength`), and `bufferSize` mirrors `writableLength`
+  until `_destroy` drops the handle, then reads undefined.
 - `end()` → `_final` → `writer.close()` → 'finish'. Backpressure follows the
   Duplex's `highWaterMark`: `write()` returns false and 'drain' follows the
   flush.

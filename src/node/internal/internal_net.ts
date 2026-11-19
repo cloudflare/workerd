@@ -671,7 +671,14 @@ export class Server extends EventEmitter {
       socket.pause();
     }
     this.emit('connection', socket);
-    if (!socket.isPaused() && !socket._handle.reading) {
+    // A 'connection' listener may have destroyed the socket, dropping its
+    // handle.
+    if (
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      socket._handle != null &&
+      !socket.isPaused() &&
+      !socket._handle.reading
+    ) {
       tryReadStart(socket);
     }
 
@@ -1354,8 +1361,15 @@ Socket.prototype._destroy = function (
 
   releaseBoundSource(this);
 
-  if (this._handle != null) {
-    this._handle.socket.close().then(
+  const handle = this._handle;
+  if (handle != null) {
+    // The socket has no handle from here on, as in Node: bufferSize reads
+    // undefined and the byte counters read the totals kept below.
+    this[kBytesRead] = handle.bytesRead;
+    this[kBytesWritten] = handle.bytesWritten;
+    this.resetAndClosing = false;
+    this._handle = null;
+    handle.socket.close().then(
       () => {
         cleanupAfterDestroy(this, cb, exception);
       },
@@ -1685,11 +1699,6 @@ function cleanupAfterDestroy(
   error?: Error
 ): void {
   const isException = error != null;
-  if (socket._handle != null) {
-    socket[kBytesRead] = socket._handle.bytesRead;
-    socket[kBytesWritten] = socket._handle.bytesWritten;
-    socket.resetAndClosing = false;
-  }
   socket[kLastWriteQueueSize] = 0;
   socket[kSocketInfo] = null;
 
