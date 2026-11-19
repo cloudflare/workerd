@@ -189,8 +189,10 @@ fn create_node_exception_impl<'s>(
 /// This is an intentionally truncated list of the error codes that Node.js/libuv
 /// uses. We won't need all of the error codes that libuv uses.
 ///
-/// Mirrors the C++ `UV_ERRNO_MAP` X-macro list. Each entry is
-/// `(errorno, name, default message)`, where `errorno` mirrors the C++
+/// Lists the same codes as the C++ `UV_ERRNO_MAP` X-macro list
+/// (`src/workerd/api/node/exceptions.h`), which C++ callers name errors by;
+/// the names and default messages live only here. Each entry is
+/// `(errorno, name, default message)`, where `errorno` matches the C++
 /// `UV_##code = -code` constant. Using `libc` errno constants keeps the numeric
 /// values in sync with the C++ side across platforms.
 macro_rules! uv_errno_map {

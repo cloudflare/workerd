@@ -57,34 +57,39 @@ jsg::JsValue createUVException(jsg::Lock& js,
 
 // This is an intentionally truncated list of the error codes that Node.js/libuv
 // uses. We won't need all of the error codes that libuv uses.
+//
+// The Rust node-exceptions crate keeps its own copy of this list, with each
+// code's name and default message (`UV_ERRNO_MAP` in
+// `src/rust/node-exceptions/lib.rs`); the two must list the same codes. A code
+// missing from the Rust copy gets the code "UNKNOWN".
 #define UV_ERRNO_MAP(V)                                                                            \
-  V(EACCES, "permission denied")                                                                   \
-  V(EBADF, "bad file descriptor")                                                                  \
-  V(EEXIST, "file already exists")                                                                 \
-  V(EFBIG, "file too large")                                                                       \
-  V(EINVAL, "invalid argument")                                                                    \
-  V(EISDIR, "illegal operation on a directory")                                                    \
-  V(ELOOP, "too many symbolic links encountered")                                                  \
-  V(EMFILE, "too many open files")                                                                 \
-  V(ENAMETOOLONG, "name too long")                                                                 \
-  V(ENFILE, "file table overflow")                                                                 \
-  V(ENOBUFS, "no buffer space available")                                                          \
-  V(ENODEV, "no such device")                                                                      \
-  V(ENOENT, "no such file or directory")                                                           \
-  V(ENOMEM, "not enough memory")                                                                   \
-  V(ENOSPC, "no space left on device")                                                             \
-  V(ENOSYS, "function not implemented")                                                            \
-  V(ENOTDIR, "not a directory")                                                                    \
-  V(ENOTEMPTY, "directory not empty")                                                              \
-  V(EPERM, "operation not permitted")                                                              \
-  V(EMLINK, "too many links")                                                                      \
-  V(EIO, "input/output error")
+  V(EACCES)                                                                                        \
+  V(EBADF)                                                                                         \
+  V(EEXIST)                                                                                        \
+  V(EFBIG)                                                                                         \
+  V(EINVAL)                                                                                        \
+  V(EISDIR)                                                                                        \
+  V(ELOOP)                                                                                         \
+  V(EMFILE)                                                                                        \
+  V(ENAMETOOLONG)                                                                                  \
+  V(ENFILE)                                                                                        \
+  V(ENOBUFS)                                                                                       \
+  V(ENODEV)                                                                                        \
+  V(ENOENT)                                                                                        \
+  V(ENOMEM)                                                                                        \
+  V(ENOSPC)                                                                                        \
+  V(ENOSYS)                                                                                        \
+  V(ENOTDIR)                                                                                       \
+  V(ENOTEMPTY)                                                                                     \
+  V(EPERM)                                                                                         \
+  V(EMLINK)                                                                                        \
+  V(EIO)
 
-#define V(code, _) constexpr int UV_##code = -code;
+#define V(code) constexpr int UV_##code = -code;
 UV_ERRNO_MAP(V)
 #undef V
 
-#define V(code, _)                                                                                 \
+#define V(code)                                                                                    \
   [[noreturn]] inline void THROW_ERR_UV_##code(jsg::Lock& js, kj::StringPtr syscall,               \
       kj::StringPtr message = nullptr, kj::StringPtr path = nullptr,                               \
       kj::StringPtr dest = nullptr) {                                                              \
