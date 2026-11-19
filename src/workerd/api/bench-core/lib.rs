@@ -75,13 +75,15 @@ pub struct GroupResult {
 pub enum Error {
     #[error(transparent)]
     Histogram(#[from] histogram::Error),
+    #[error(transparent)]
+    Capnp(#[from] capnp::Error),
     /// A sample that the histogram didn't record, though `fill_group` checked that it is in
     /// range.
     #[error("A sample of {0} ps is out of the histogram's range.")]
     NotRecorded(i64),
 }
 
-/// The median of `samples`, which must not be empty.
+/// The median of `samples`, or NaN if `samples` is empty.
 #[must_use]
 pub fn median(samples: &[f64]) -> f64 {
     let mut sorted = samples.to_vec();
@@ -121,16 +123,42 @@ pub fn fill_group(
 pub fn encode_group(result: &GroupResult) -> Result<Vec<u64>, Error> {
     let mut message = capnp::message::TypedBuilder::<bench_report::group::Owned>::new_default();
     fill_group(result, message.init_root())?;
-    Ok(
-        capnp::serialize::write_message_to_words(message.borrow_inner())
-            .chunks_exact(8)
-            .map(|chunk| {
-                let mut word = [0; 8];
-                word.copy_from_slice(chunk);
-                u64::from_ne_bytes(word)
-            })
-            .collect(),
-    )
+    to_words(&message)
+}
+
+/// `message`, encoded (segment table, then segments) in words.
+///
+/// The message is written straight into a buffer of its final size, with no intermediate copy as
+/// bytes, which matters for large groups.
+fn to_words(
+    message: &capnp::message::TypedBuilder<bench_report::group::Owned>,
+) -> Result<Vec<u64>, Error> {
+    let message = message.borrow_inner();
+    let mut words = Vec::with_capacity(capnp::serialize::compute_serialized_size_in_words(message));
+    capnp::serialize::write_message(Words(&mut words), message)?;
+    Ok(words)
+}
+
+/// A `capnp::io::Write` that appends to a vector of words. The serializer writes the segment table
+/// and each segment in whole words.
+struct Words<'a>(&'a mut Vec<u64>);
+
+impl capnp::io::Write for Words<'_> {
+    fn write_all(&mut self, buf: &[u8]) -> capnp::Result<()> {
+        let chunks = buf.chunks_exact(8);
+        if !chunks.remainder().is_empty() {
+            return Err(capnp::Error::failed(format!(
+                "A write of {} bytes isn't a whole number of words.",
+                buf.len()
+            )));
+        }
+        self.0.extend(chunks.map(|chunk| {
+            let mut word = [0; 8];
+            word.copy_from_slice(chunk);
+            u64::from_ne_bytes(word)
+        }));
+        Ok(())
+    }
 }
 
 fn fill_case(
