@@ -32,6 +32,11 @@ namespace jsg_cpp = ::workerd::rust::jsg_cpp;
 using SubrequestChannel = IoChannelFactory::SubrequestChannel;
 using ActorClassChannel = IoChannelFactory::ActorClassChannel;
 
+// The options of a Fetcher on a numbered channel, by names in this namespace, which the bridge
+// declares them by as shared enums. C++ `Fetcher` takes whether it is in-house as a bool.
+using RequiresHostAndProtocol = Fetcher::RequiresHostAndProtocol;
+enum class InHouse { YES, NO };
+
 // Per-type shims of jsg_cpp::CppResource.
 kj::Maybe<kj::Own<jsg_cpp::CppRef>> fetcher_try_unwrap(v8::Isolate* isolate, jsg_cpp::Local value);
 jsg_cpp::MaybeLocal fetcher_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref);
@@ -55,8 +60,8 @@ bool fetcher_new(v8::Isolate* isolate,
 // no IoContext, as the environment's bindings are.
 bool fetcher_new_for_channel_number(v8::Isolate* isolate,
     uint32_t channel,
-    bool requiresHostAndProtocol,
-    bool isInHouse,
+    RequiresHostAndProtocol requiresHostAndProtocol,
+    InHouse inHouse,
     kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);
 
 // fetcher.mapVirtualHost(js, port).
