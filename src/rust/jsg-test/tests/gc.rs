@@ -17,6 +17,7 @@ use std::sync::atomic::Ordering;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Counter to track how many `SimpleResource` instances have been dropped.
 static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -997,6 +998,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
 
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
+#[jsg_traced]
 struct NativeState {
     value: u32,
 }
@@ -1007,9 +1009,8 @@ impl Drop for NativeState {
     }
 }
 
+#[jsg_traced]
 struct SharedNativeState(std::sync::Arc<NativeState>);
-
-jsg::jsg_traced!(SharedNativeState);
 
 #[jsg_resource]
 struct NativeOwnerResource {

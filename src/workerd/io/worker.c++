@@ -773,6 +773,7 @@ struct Worker::Isolate::Impl {
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
+      ::workerd::rust::jsg::restoreResourceTemplatesFromSnapshot(lock->v8Isolate);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -1226,9 +1227,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
-    // Never in multi-tenant processes: the hook slows down every promise in the isolate.
+    // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
+    // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
+    // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
+    // the snapshot installs a hook of its own.
     KJ_IF_SOME(config, asyncTraceConfig) {
-      if (config.promises && asyncTraceIsolate != kj::none) {
+      if (config.promises && asyncTraceIsolate != kj::none && !lock->isPreparingSnapshot()) {
         if (isMultiTenantProcess()) {
           KJ_LOG(ERROR, "ignoring AsyncTraceConfig::promises in a multi-tenant process");
         } else {
@@ -1280,13 +1284,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, reinterpret_cast<intptr_t>(&messageCallback));
 
-    // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
-    // machine is competing for memory so it might as well use all it wants and be lazy about GC.
-    //
-    // In our production environment, however, we can safely assume that there is always memory
-    // pressure, because every machine is handling thousands of tenants all the time. So we might
-    // as well just throw the switch to "moderate" right away.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    // This notification has no lasting effect: V8 handles it synchronously because we hold the
+    // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
+    // starting incremental marking, which we disable. What it does do is free caches shared by the
+    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
+    // the Wasm it runs, and it empties the isolate group's memory pools.
+    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
@@ -2468,6 +2473,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
             auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+            if (isolateBase.isStartingFromSnapshot()) {
+              // Objects restored from the snapshot were built before the context existed. Its
+              // embedder-data slots are all populated now, the VFS above being the last, and
+              // none of the Worker's JavaScript has run in it yet, so they bind to what the
+              // context carries (api::FileSystemHandle to the VFS).
+              isolateBase.notifySnapshotContextReady(js);
+            }
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.
@@ -2726,20 +2738,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             "the zygote's top level failed; no startup snapshot was created", e.getDescription());
       }
 
-      // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-      // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-      // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-      // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. Templates are recreated
-      // lazily on demand and a START_FROM_SNAPSHOT isolate starts with an empty cache.
-      kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-      {
-        auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          rustTemplateHandles.add(
-              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
-        }
-      }
+      // The templates of Rust JSG resource types (e.g. node-internal:dns) are v8::Globals in the
+      // Rust Realm, invisible to the C++ template slots. They are pinned into the snapshot, and
+      // their handles reset with the other isolate handles before CreateBlob().
+      auto rustTemplateHandles =
+          ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
       auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
@@ -4301,7 +4304,7 @@ struct Worker::Actor::Impl {
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
   // (since it's long lived), but can still refer to the HibernationManager by passing a reference
   // in each CustomEvent.
-  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
+  kj::Maybe<kj::Rc<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
 
   struct ScheduledAlarm {
@@ -4348,7 +4351,7 @@ struct Worker::Actor::Impl {
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metricsParam,
-      kj::Maybe<kj::Own<HibernationManager>> manager,
+      kj::Maybe<kj::Rc<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
       jsg::Dict<kj::String> containerImages,
@@ -4405,7 +4408,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
-    kj::Maybe<kj::Own<HibernationManager>> manager,
+    kj::Maybe<kj::Rc<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
     jsg::Dict<kj::String> containerImages,
@@ -4844,6 +4847,10 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
   return kj::none;
 }
 
+kj::Maybe<kj::Date> Worker::Actor::getRunningAlarmTime() {
+  return impl->maybeRunningAlarm.map([](Impl::RunningAlarm& alarm) { return alarm.scheduledTime; });
+}
+
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
     kj::Date scheduledTime) {
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
@@ -4988,9 +4995,8 @@ jsg::JsValue Worker::Actor::getEnv(jsg::Lock& js) {
   return jsg::JsValue(KJ_REQUIRE_NONNULL(worker->impl->env).getHandle(js));
 }
 
-kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
-  return impl->hibernationManager.map(
-      [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
+kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> Worker::Actor::getHibernationManager() {
+  return impl->hibernationManager.map([](kj::Rc<HibernationManager>& hib) { return hib.addRef(); });
 }
 
 kj::Maybe<uint64_t> Worker::Actor::getHolderToken() {
@@ -5035,7 +5041,7 @@ void Worker::Actor::attachHibernationManager(HibernationManager& manager) {
   manager.setLoopback(impl->loopback->addRef());
 }
 
-void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+void Worker::Actor::setHibernationManager(kj::Rc<HibernationManager> hib) {
   KJ_REQUIRE(impl->hibernationManager == kj::none);
 
   // A manager built by acceptWebSocket() already points here, but an adopted one still carries the

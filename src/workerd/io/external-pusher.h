@@ -78,4 +78,13 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
   class DelayedChannelTokenImpl;
 };
 
+// Returns a capability to write into a `delayed*ChannelToken` External. Once `token` resolves, it
+// is pushed to `pusher`, and the capability resolves to the result.
+//
+// The capability owns this work, so it continues for as long as the recipient holds the
+// capability, even if the sending request ends first. If `token` fails, the capability breaks
+// with that failure, which the recipient sees when it unwraps the token.
+rpc::JsValue::ExternalPusher::DelayedChannelToken::Client sendDelayedChannelToken(
+    rpc::JsValue::ExternalPusher::Client pusher, kj::Promise<kj::Array<byte>> token);
+
 }  // namespace workerd

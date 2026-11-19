@@ -126,6 +126,11 @@ fn i64_converts_big_ints_and_numbers() {
             convert::<i64>(lock, ctx, "2 ** 53").unwrap(),
             9_007_199_254_740_992
         );
+        assert_eq!(
+            convert::<i64>(lock, ctx, "2 ** 63 - 1024").unwrap(),
+            9_223_372_036_854_774_784
+        );
+        assert_eq!(convert::<i64>(lock, ctx, "-(2 ** 63)").unwrap(), i64::MIN);
         Ok(())
     });
 }
@@ -141,13 +146,12 @@ fn i64_rejects_what_cpp_jsg_rejects() {
         assert_type_error::<i64>(lock, ctx, "NaN", not_an_integer);
         assert_type_error::<i64>(lock, ctx, "-Infinity", not_an_integer);
         assert_type_error::<i64>(lock, ctx, "undefined", not_an_integer);
-        assert_type_error::<i64>(
-            lock,
-            ctx,
-            "1e19",
-            "Value out of range. Must be between -9223372036854775808 and 9223372036854775807 \
-             (inclusive).",
-        );
+        let out_of_range = "Value out of range. Must be between -9223372036854775808 and \
+                            9223372036854775807 (inclusive).";
+        assert_type_error::<i64>(lock, ctx, "1e19", out_of_range);
+        // i64::MAX rounds up to 2^63 as an f64.
+        assert_type_error::<i64>(lock, ctx, "2 ** 63", out_of_range);
+        assert_type_error::<i64>(lock, ctx, "-(2 ** 63) - 2048", out_of_range);
         assert_type_error::<i64>(
             lock,
             ctx,
@@ -174,6 +178,10 @@ fn u64_converts_big_ints_and_numbers() {
             convert::<u64>(lock, ctx, "2 ** 63").unwrap(),
             9_223_372_036_854_775_808
         );
+        assert_eq!(
+            convert::<u64>(lock, ctx, "2 ** 64 - 2048").unwrap(),
+            18_446_744_073_709_549_568
+        );
         Ok(())
     });
 }
@@ -194,12 +202,11 @@ fn u64_rejects_what_cpp_jsg_rejects() {
                         expects a positive bigint.";
         assert_type_error::<u64>(lock, ctx, "-1", negative);
         assert_type_error::<u64>(lock, ctx, "-0.5", negative);
-        assert_type_error::<u64>(
-            lock,
-            ctx,
-            "2e19",
-            "Value out of range. Must be less than or equal to 18446744073709551615.",
-        );
+        let out_of_range =
+            "Value out of range. Must be less than or equal to 18446744073709551615.";
+        assert_type_error::<u64>(lock, ctx, "2e19", out_of_range);
+        // u64::MAX rounds up to 2^64 as an f64.
+        assert_type_error::<u64>(lock, ctx, "2 ** 64", out_of_range);
         assert_type_error::<u64>(
             lock,
             ctx,

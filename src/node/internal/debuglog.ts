@@ -26,6 +26,7 @@
 /* eslint-disable */
 
 import { format, formatWithOptions } from 'node-internal:internal_inspect';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 let debugImpls: object = {};
 
@@ -75,6 +76,8 @@ export function debuglog(
     }
   };
   Object.defineProperty(logger, 'enabled', {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     get() {
       return true;
     },

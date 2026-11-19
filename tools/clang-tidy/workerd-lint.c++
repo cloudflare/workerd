@@ -26,6 +26,7 @@
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
 #include "shared-visit.h"
+#include "traced-own.h"
 #include "unsafe-continuation-capture.h"
 #include "use-after-move.h"
 #include "visit-for-gc.h"
@@ -44,6 +45,7 @@ class WorkerdLintModule: public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<LegacyStreamAllocCheck>("workerd-legacy-stream-alloc");
     CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
     CheckFactories.registerCheck<SharedVisitCheck>("jsg-shared-visit");
+    CheckFactories.registerCheck<TracedOwnCheck>("jsg-traced-own");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
         "workerd-unsafe-continuation-capture");
     CheckFactories.registerCheck<UseAfterMoveCheck>("workerd-use-after-move");

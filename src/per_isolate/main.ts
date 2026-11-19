@@ -447,6 +447,24 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
+// The TypeScript structuredClone() replaces the C++ method, which
+// global-scope.h then leaves out. Installed where JSG_METHOD installs it, on
+// ServiceWorkerGlobalScope.prototype, with the same attributes (all three
+// true).
+if (autogates['ts-structured-clone']) {
+  const { structuredClone } = require('structured-clone');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    __proto__: null,
+    structuredClone: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: structuredClone,
+    },
+  });
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

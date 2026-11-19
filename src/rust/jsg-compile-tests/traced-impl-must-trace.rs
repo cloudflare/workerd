@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // `Traced::trace` has no default, so an impl can't skip a GC reference by leaving the method
-// out. A type with nothing to trace uses `jsg_traced!`.
+// out. A type with nothing to trace uses `#[jsg_traced]`.
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]

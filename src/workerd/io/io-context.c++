@@ -777,6 +777,16 @@ kj::Exception IoContext::abortWithoutReasonException() {
       FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
 }
 
+kj::Exception IoContext::neverSettledException() {
+  return JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete.");
+}
+
+kj::Exception IoContext::memoryLimitException() {
+  auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, MEMORY_LIMIT_MESSAGE);
+  e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return e;
+}
+
 void IoContext::abortIsolate(kj::StringPtr reason) {
   getIoChannelFactory().abortIsolate(reason);
 }
@@ -1699,6 +1709,11 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
+}
+
+TraceContext IoContext::makeTraceSpanWithoutUserSpan(kj::ConstString operationName) {
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChildWithoutUserSpan(kj::mv(operationName), tryGetAsyncTracker());
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

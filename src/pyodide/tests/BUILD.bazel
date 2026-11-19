@@ -1,0 +1,180 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "py_wd_test", "python_test_setup")
+load("//src/pyodide/tests/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
+
+python_test_setup()
+
+# NOTE: Each test takes a while to start up, so if possible add additional tests to pytest or to
+# top-level-tests or sdk or some other existing test.
+
+# TODO: This only works for pytest-asyncio <= 1.1.0, starting from pytest-asyncio 1.2.0 there is a
+# problem.
+vendored_py_wd_test(
+    "pytest-asyncio",
+    data = glob(["pytest/tests/**"]),
+    main_py_file = "pytest/main.py",
+    test_template = "pytest/pytest.wd-test",
+)
+
+py_wd_test("hello")
+
+py_wd_test("top-level-tests")
+
+py_wd_test("env-param")
+
+py_wd_test("asgi")
+
+py_wd_test("asgi-sse")
+
+py_wd_test("top-level-entropy")
+
+# Restores the baseline snapshot without creating one, so the top level runs after the restore and
+# reads the bad entropy flag at the address the restored snapshot records, if it records one.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-baseline",
+    make_snapshot = False,
+)
+
+py_wd_test("subdirectory")
+
+py_wd_test(
+    "subdirectory",
+    name = "subdirectory-keep-import-caches",
+    src = "subdirectory/subdirectory-keep-import-caches.wd-test",
+)
+
+py_wd_test(
+    "sdk",
+    compat_date = "2026-01-01",
+)
+
+py_wd_test("undefined-handler")
+
+py_wd_test("vendor_dir")
+
+py_wd_test("durable-object")
+
+py_wd_test(
+    "durable-object-websocket",
+    make_snapshot = False,
+    # TODO: enabling this will reproduce a strange issue, see comment in EW-9767.
+    use_snapshot = None,
+)
+
+py_wd_test("worker-entrypoint")
+
+py_wd_test(
+    "jspi",
+    skip_python_flags = ["0.26.0a2"],
+)
+
+py_wd_test("python-rpc")
+
+py_wd_test(
+    "stack-switching-state",
+    # This is fixed in Pyodide 314.0.6
+    skip_python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        "314.0.4",
+    ],
+)
+
+py_wd_test(
+    "stack-switching-gc",
+    # Exercises the saveState/restoreState patch that patch_pyodide_asm.ts
+    # applies to 314.0.6. It also crashes Pyodide 0.28.2, reproduced upstream.
+    skip_python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        "314.0.4",
+    ],
+)
+
+# TODO(later): having multiple Python workers in a single wd-test makes the dedicated snapshot
+# created by one Python worker used by the other Python worker, which is wrong and causes issues.
+# Since this is test-only, fix it later.
+py_wd_test(
+    "workflow-entrypoint",
+    src = "workflow-entrypoint/workflow-entrypoint.wd-test",
+)
+
+py_wd_test(
+    "workflow-entrypoint",
+    name = "workflow-entrypoint-old",
+    src = "workflow-entrypoint/workflow-entrypoint-old.wd-test",
+)
+
+py_wd_test("vendor_dir_compat_flag")
+
+py_wd_test("default-class-with-legacy-global-handlers")
+
+py_wd_test("python-compat-flag")
+
+py_wd_test("nodejs-compat")
+
+py_wd_test("pth-file")
+
+py_wd_test(
+    "metadata-read-overflow",
+    # Needs a buffer of 2 GiB or more, which some downstream builds can't allocate.
+    tags = ["no-downstream"],
+)
+
+py_wd_test("stdlib-zip")
+
+js_binary(
+    name = "socket-server",
+    entry_point = "sockets/socket-server.js",
+)
+
+py_wd_test(
+    "sockets",
+    data = [
+        "//src/workerd/api/tests:starttls-server.pem",
+    ],
+    # sidecar and python_snapshot_test currently cannot be used together
+    make_snapshot = False,
+    sidecar = ":socket-server",
+    sidecar_port_bindings = [
+        "PYTHON_SOCKET_SERVER_PORT",
+        "PYTHON_HOSTNAME_SOCKET_SERVER_PORT",
+        "PYTHON_STARTTLS_SOCKET_SERVER_PORT",
+        "PYTHON_TLS_SOCKET_SERVER_PORT",
+    ],
+    skip_python_flags = [
+        # Older versions does not support sockets
+        "0.26.0a2",
+        "0.28.2",
+    ],
+)
+
+# Shell-driven test for aborting the isolate on a Python fatal error. The Python worker
+# triggers a fatal error which calls abortIsolate(), terminating the workerd process. The shell
+# script verifies the expected fatal output and non-zero exit.
+sh_test(
+    name = "python-abort-isolate-on-fatal-test",
+    size = "enormous",
+    srcs = ["python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
+        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)",
+    ],
+    data = [
+        "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
+        "python-abort-isolate-on-fatal/worker.py",
+        "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
+        "//src/workerd/server:workerd",
+    ],
+    tags = [
+        "no-coverage",
+        "python",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)

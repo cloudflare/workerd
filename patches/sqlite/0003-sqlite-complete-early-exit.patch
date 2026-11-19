@@ -1,3 +1,4 @@
+diff -u5 -r sqlite-src-pristine/src/complete.c sqlite-src-modified/src/complete.c
 --- sqlite-src-pristine/src/complete.c
 +++ sqlite-src-modified/src/complete.c
 @@ -54,10 +54,13 @@
@@ -73,6 +74,7 @@
  /*
  ** This routine is the same as the sqlite3_complete() routine described
  ** above, except that the parameter is required to be UTF-16 encoded, not
+diff -u5 -r sqlite-src-pristine/src/sqlite.h.in sqlite-src-modified/src/sqlite.h.in
 --- sqlite-src-pristine/src/sqlite.h.in
 +++ sqlite-src-modified/src/sqlite.h.in
 @@ -3004,10 +3004,14 @@

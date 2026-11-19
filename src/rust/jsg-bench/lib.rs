@@ -231,6 +231,33 @@ impl Target {
     }
 
     #[jsg_method]
+    fn bytes_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::Uint8Array>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
+    fn buffer_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::ArrayBuffer>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
+    fn view_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::ArrayBufferView>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
     fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
         let a = a.as_slice(lock).to_vec();
         black_box(&a);

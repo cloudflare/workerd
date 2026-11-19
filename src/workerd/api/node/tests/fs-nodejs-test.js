@@ -1355,6 +1355,23 @@ export const copyAndRenameAsyncCallbackTest = {
   },
 };
 
+export const fsRelativeSymlinkIgnoresCwdTest = {
+  test() {
+    // A relative target resolves from the link's directory, not the current
+    // working directory, even when the link path itself is relative.
+    mkdirSync('/tmp/cwd-link/sub', { recursive: true });
+    writeFileSync('/tmp/cwd-link/sub/x.txt', 'x');
+    process.chdir('/tmp/cwd-link');
+    try {
+      symlinkSync('x.txt', 'sub/rel');
+    } finally {
+      process.chdir('/bundle');
+    }
+    strictEqual(readlinkSync('/tmp/cwd-link/sub/rel'), 'x.txt');
+    strictEqual(readFileSync('/tmp/cwd-link/sub/rel', 'utf8'), 'x');
+  },
+};
+
 export const fsCwdTest = {
   test() {
     process.chdir('/bundle');

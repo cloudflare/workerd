@@ -571,13 +571,11 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     JSG_REQUIRE(crv == curveName, DOMNotSupportedError, "Only ", curveName, " is supported but \"",
         crv, "\" was requested.");
     KJ_IF_SOME(alg, keyDataJwk.alg) {
-      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-      // importKey().
+      // Web Crypto accepts both the algorithm name and the older JOSE name "EdDSA".
       if (curveId == NID_ED25519) {
-        JSG_REQUIRE(alg == "EdDSA", DOMDataError, "JSON Web Key Algorithm parameter \"alg\" (\"",
-            alg,
-            "\") does not match requested "
-            "Ed25519 curve.");
+        JSG_REQUIRE(alg == "Ed25519" || alg == "EdDSA", DOMDataError,
+            "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
+            "\") does not match requested Ed25519 curve.");
       }
     }
 

@@ -17,6 +17,8 @@
 //!   cycle through it can be collected
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
+//! - [`CompiledWasmModule`] - Owned handle to the compiled code of a `WebAssembly.Module`,
+//!   which C++ can make another module object from without recompiling
 //!
 //! # Garbage Collection
 //!
@@ -48,6 +50,8 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use kj_rs::KjOwn;
 
 pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::JsErrorType;
@@ -182,6 +186,17 @@ pub mod ffi {
         EvalError,
     }
 
+    /// How throwing an internal error logs its message.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum InternalErrorLog {
+        /// At `ERROR`, with the reference ID that JavaScript gets when an error is created.
+        /// While execution is terminating, logs only the message without creating an error.
+        Error,
+        /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
+        /// `worker_do_not_log` that it throws to JavaScript.
+        Info,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -215,8 +230,34 @@ pub mod ffi {
             wrappable: &Wrappable,
             tracker: Pin<&mut MemoryTracker>,
         );
+
+        /// Called from C++ `Wrappable::snapshotClone()`. If the resource's type implements
+        /// `jsg::SnapshotTransfer`, stores in `copy` what the snapshot stores of the resource,
+        /// or, called on that, a restored resource; the caller's new `Wrappable` then owns it.
+        /// Returns false otherwise. May run on any thread, with no isolate locked.
+        unsafe fn wrappable_invoke_snapshot_clone(
+            wrappable: &Wrappable,
+            copy: &mut TraitObjectPtr,
+        ) -> bool;
+
+        /// Called from C++ `Wrappable::snapshotReferences()`: the Wrappables of the resources
+        /// that `jsg::SnapshotTransfer::snapshot_references` adds, 0 for `None`.
+        unsafe fn wrappable_invoke_snapshot_references(wrappable: &Wrappable) -> Vec<usize>;
+
+        /// Called from C++ `Wrappable::snapshotRelink()`, under the isolate lock with a context
+        /// entered and a `HandleScope` open: calls `jsg::SnapshotTransfer::snapshot_relink` with
+        /// the restored Wrappables, 0 for none.
+        unsafe fn wrappable_invoke_snapshot_relink(
+            wrappable: &Wrappable,
+            isolate: *mut Isolate,
+            restored: &[usize],
+        );
     }
 
+    // `#[nothrow]` marks a shim that can't throw a C++ exception, which the bridge then calls
+    // directly instead of catching what it throws (see src/rust/cxx/README.md). V8 never throws
+    // one, not even from a call that runs JavaScript. Shims that can throw (KJ_REQUIRE, building a
+    // rust::String or Vec, allocating a KJ object) don't have it.
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
@@ -230,6 +271,15 @@ pub mod ffi {
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
+        /// C++ `const jsg::ExternalMemoryTarget`, the isolate's singleton that adjustments add
+        /// to. Thread-safe.
+        type ExternalMemoryTarget;
+        /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
+        /// (see `ffi.h`).
+        type ExternalMemoryAdjustment;
+        /// C++ `v8::CompiledWasmModule`, the compiled code of a `WebAssembly.Module`, which C++
+        /// holds in a `kj::Own` (see `ffi.h`).
+        type CompiledWasmModule;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -245,13 +295,18 @@ pub mod ffi {
 
         // Local<T>
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
+        #[nothrow]
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_object_with_null_prototype(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
-        pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;
         pub unsafe fn local_new_uint8_array(
             isolate: *mut Isolate,
             data: *const u8,
@@ -318,9 +373,26 @@ pub mod ffi {
         ) -> MaybeLocal;
         pub unsafe fn array_buffer_from_backing_store(isolate: *mut Isolate, store: usize)
         -> Local;
+        #[nothrow]
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_array_buffer_data(buffer: &Local) -> *mut u8;
+        #[nothrow]
+        pub unsafe fn local_array_buffer_contents(buffer: &Local, byte_length: &mut usize)
+        -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
+
+        // Local<WasmModuleObject>
+        pub unsafe fn local_wasm_module_object_get_compiled_module(
+            module: &Local,
+        ) -> KjOwn<CompiledWasmModule>;
+
+        // CompiledWasmModule
+        #[nothrow]
+        pub unsafe fn compiled_wasm_module_get_wire_bytes(
+            module: &CompiledWasmModule,
+            length: &mut usize,
+        ) -> *const u8;
 
         // Local<ArrayBufferView>
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
@@ -334,6 +406,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_element_size(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_is_integer_type(view: &Local) -> bool;
 
+        #[nothrow]
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         /// Whether `value` can be used in `isolate`: Smis in any isolate, values in read-only or
         /// writable shared space in any isolate of their isolate group, and other values only in
@@ -342,48 +415,85 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: &Local,
         ) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_string(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_number(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int32(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint32(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_null(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_undefined(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_object(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_native_error(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint8_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int8_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_bigint64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint8clamped_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_typed_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_promise(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_name(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_date(value: &Local) -> bool;
+        #[nothrow]
+        pub unsafe fn local_is_wasm_module_object(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
         // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
         // store the result in `result` and return true, or return false if the coercion threw,
         // leaving the exception pending; see `call_into_js()`.
+        #[nothrow]
         pub unsafe fn local_value_int32_value(
             isolate: *mut Isolate,
             value: Local,
             result: &mut i32,
         ) -> bool;
+        #[nothrow]
         pub unsafe fn local_value_uint32_value(
             isolate: *mut Isolate,
             value: Local,
@@ -467,16 +577,23 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<Boolean>
+        #[nothrow]
         pub unsafe fn local_boolean_value(value: &Local) -> bool;
 
         // Local<Number>
+        #[nothrow]
         pub unsafe fn local_number_value(value: &Local) -> f64;
 
         // Local<Integer>
+        #[nothrow]
         pub unsafe fn integer_new(isolate: *mut Isolate, value: i32) -> Local;
+        #[nothrow]
         pub unsafe fn integer_new_from_unsigned(isolate: *mut Isolate, value: u32) -> Local;
+        #[nothrow]
         pub unsafe fn local_integer_value(value: &Local) -> i64;
+        #[nothrow]
         pub unsafe fn local_int32_value(value: &Local) -> i32;
+        #[nothrow]
         pub unsafe fn local_uint32_value(value: &Local) -> u32;
 
         // Local<BigInt>
@@ -502,6 +619,15 @@ pub mod ffi {
             data: &Local,
         ) -> MaybeLocal;
 
+        // Struct shapes; see `structs.rs`.
+        pub unsafe fn dictionary_template_new(isolate: *mut Isolate, keys: &[&str]) -> Global;
+        // Leaves what is pending pending.
+        pub unsafe fn dictionary_template_new_instance(
+            isolate: *mut Isolate,
+            tmpl: &Global,
+            values: &mut [MaybeLocal],
+        ) -> MaybeLocal;
+
         // Local<Object>
         // Fallible: interning a key fails if it is longer than V8's string length limit or V8
         // fails to create the string, and there must be as many keys as values.
@@ -519,6 +645,13 @@ pub mod ffi {
             key: &str,
             value: Local,
         ) -> Result<bool>;
+        // Leaves what a setter or Proxy trap throws pending.
+        pub unsafe fn local_object_set_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
+            value: Local,
+        ) -> bool;
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
@@ -535,6 +668,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             object: &Local,
             name: &Local,
+        ) -> MaybeLocal;
+        // Leaves what a getter or Proxy trap throws pending.
+        pub unsafe fn local_object_get_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
         ) -> MaybeLocal;
         pub unsafe fn local_object_get_own_property_names(
             isolate: *mut Isolate,
@@ -602,9 +741,13 @@ pub mod ffi {
             byte_offset: usize,
             length: usize,
         ) -> Result<Local>;
+        #[nothrow]
         pub unsafe fn local_typed_array_length(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_buffer_data(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_byte_offset(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_byte_length(array: &Local) -> usize;
         pub unsafe fn local_uint8_array_get(array: &Local, index: usize) -> u8;
         pub unsafe fn local_uint16_array_get(array: &Local, index: usize) -> u16;
@@ -621,9 +764,11 @@ pub mod ffi {
         // Global<T>
         pub unsafe fn global_reset(value: Pin<&mut Global>);
         pub unsafe fn global_clone(isolate: *mut Isolate, value: &Global) -> Global;
+        #[nothrow]
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
         // Wrappable - data access
+        #[nothrow]
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
@@ -635,6 +780,8 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
+        pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
+        pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
         pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
@@ -716,7 +863,7 @@ pub mod ffi {
         // Shims that can throw a C++ exception (building rust::String/Vec from V8
         // data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then catches the
         // throw in C++ instead of aborting across the nounwind FFI frame. Shims that
-        // provably can't throw stay bare (see unwrap_boolean, unwrap_number).
+        // provably can't throw are #[nothrow] (see unwrap_boolean, unwrap_number).
         //
         // unwrap_string and unwrap_number leave what a coercion throws pending; see
         // `call_into_js()`.
@@ -726,8 +873,10 @@ pub mod ffi {
             result: &mut String,
         ) -> Result<bool>;
         // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
+        #[nothrow]
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
         // Infallible: NumberValue reports what JavaScript threw in its result.
+        #[nothrow]
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
 
         // ArrayBuffer detach/detachable/was-detached
@@ -739,25 +888,46 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_is_shared(value: &Local) -> bool;
 
         // FunctionCallbackInfo
+        #[nothrow]
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn fci_get_this(args: *mut FunctionCallbackInfo) -> Local;
+        #[nothrow]
         pub unsafe fn fci_get_length(args: *mut FunctionCallbackInfo) -> usize;
+        #[nothrow]
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
+        #[nothrow]
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
+        #[nothrow]
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+        #[nothrow]
+        pub unsafe fn fci_set_return_number(args: *mut FunctionCallbackInfo, value: f64);
+        #[nothrow]
+        pub unsafe fn fci_set_return_boolean(args: *mut FunctionCallbackInfo, value: bool);
         pub unsafe fn fci_get_data_wrappable(
             args: *mut FunctionCallbackInfo,
         ) -> KjMaybe<KjRc<Wrappable>>;
 
         // PropertyCallbackInfo, for native data properties
+        #[nothrow]
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn pci_get_this(info: *mut PropertyCallbackInfo) -> Local;
+        #[nothrow]
         pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
+        #[nothrow]
+        pub unsafe fn pci_set_return_number(info: *mut PropertyCallbackInfo, value: f64);
+        #[nothrow]
+        pub unsafe fn pci_set_return_boolean(info: *mut PropertyCallbackInfo, value: bool);
+        #[nothrow]
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
         // PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+        #[nothrow]
         pub unsafe fn pqci_get_isolate(info: *mut PropertyQueryCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn pqci_get_this(info: *mut PropertyQueryCallbackInfo) -> Local;
 
         // FastApiCallbackOptions
@@ -837,6 +1007,7 @@ pub mod ffi {
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
+            log: InternalErrorLog,
         ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
@@ -855,10 +1026,16 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        pub unsafe fn isolate_throw_internal_error(
+            isolate: *mut Isolate,
+            internal_message: &str,
+            log: InternalErrorLog,
+        );
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
+        #[nothrow]
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
+        #[nothrow]
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
@@ -877,7 +1054,34 @@ pub mod ffi {
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
         pub unsafe fn ignore_leak(ptr: usize);
+
+        // ExternalMemory
+        pub unsafe fn isolate_external_memory_target(
+            isolate: *mut Isolate,
+        ) -> KjArc<ExternalMemoryTarget>;
+        pub unsafe fn isolate_external_memory_adjustment(
+            isolate: *mut Isolate,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_adjustment(
+            target: &ExternalMemoryTarget,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_is_isolate_alive(target: &ExternalMemoryTarget) -> bool;
+        pub fn external_memory_target_pending_update_for_test(target: &ExternalMemoryTarget)
+        -> i64;
+        pub fn external_memory_adjustment_amount(adjustment: &ExternalMemoryAdjustment) -> usize;
+        pub fn external_memory_adjustment_adjust(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            delta: isize,
+        ) -> Result<()>;
+        pub fn external_memory_adjustment_set(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            amount: usize,
+        );
     }
+
+    impl KjOwn<ExternalMemoryAdjustment> {}
 
     /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
     ///
@@ -1028,18 +1232,21 @@ pub mod ffi {
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
+        #[nothrow]
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> KjMaybe<KjRc<Wrappable>>;
         // Like `unwrap_resource`, but borrows: the pointer is into the Wrappable of `value`'s
         // wrapper, or null when `value` is not a Rust resource.
+        #[nothrow]
         pub unsafe fn unwrap_resource_trait_object(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
         // Like `unwrap_resource_trait_object`, without the marker check, for the receiver of a
         // method registered with a `v8::Signature`.
+        #[nothrow]
         pub unsafe fn unwrap_method_receiver(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
@@ -1098,10 +1305,6 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
-
-    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
-    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
-    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -1165,7 +1368,7 @@ impl ffi::ExceptionType {
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
 // - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
-// - WasmModuleObject, WasmMemoryObject
+// - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
 // `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
@@ -1428,6 +1631,7 @@ impl String {
 pub struct Object;
 pub struct Function;
 pub struct FunctionTemplate;
+pub struct DictionaryTemplate;
 pub struct Array;
 pub struct TypedArray;
 pub struct Uint8Array;
@@ -1443,6 +1647,8 @@ pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
 pub struct ArrayBufferView;
+/// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
+pub struct WasmModuleObject;
 
 // =============================================================================
 // `BackingStore` — owned handle to a heap-allocated `std::shared_ptr<v8::BackingStore>`
@@ -1589,6 +1795,62 @@ impl BackingStore {
         }
         // SAFETY: data() is non-null for non-empty stores; byte_length() bytes are valid.
         unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+    }
+}
+
+/// The compiled code of a `WebAssembly.Module`: C++ `v8::CompiledWasmModule`.
+///
+/// Obtained with [`Local<WasmModuleObject>::compiled_module()`]. V8 shares the compiled code
+/// between every module object made from it, in any isolate, so C++ can make another
+/// `WebAssembly.Module` from it without recompiling (`v8::WasmModuleObject::FromCompiledModule`).
+/// It is not on the V8 heap: it keeps the code and the wire bytes alive for as long as it is held,
+/// needs no lock, and can be dropped on any thread that may use V8: one created, after V8 starts,
+/// by a thread that may use V8.
+///
+/// Drop it before V8 is disposed: dropping the last reference to the compiled code frees it
+/// through the process-wide WebAssembly engine, which `V8::Dispose()` destroys. A value that lives
+/// until process exit, such as in a `static` or `thread_local!`, may be dropped too late.
+pub struct CompiledWasmModule {
+    inner: KjOwn<ffi::CompiledWasmModule>,
+}
+
+// SAFETY: a `v8::CompiledWasmModule` holds only a `std::shared_ptr` to the module's compiled code,
+// which V8 shares between isolates on different threads, and the module's source URL. Both are
+// const, so they may be read, copied and destroyed on any thread that may use V8. Destroying the
+// last reference to the compiled code frees it through the process-wide `wasm::WasmEngine`, so it
+// must happen before `V8::Dispose()` destroys the engine; the type's docs say so.
+unsafe impl Send for CompiledWasmModule {}
+// SAFETY: `&self` only reads the wire bytes, which never change.
+unsafe impl Sync for CompiledWasmModule {}
+
+impl CompiledWasmModule {
+    /// Returns the bytes the module was compiled from, which it owns.
+    ///
+    /// Corresponds to `v8::CompiledWasmModule::GetWireBytesRef()`.
+    #[inline]
+    pub fn wire_bytes(&self) -> &[u8] {
+        let mut length = 0;
+        // SAFETY: `inner` is a live `v8::CompiledWasmModule`.
+        let data = unsafe { ffi::compiled_wasm_module_get_wire_bytes(&self.inner, &mut length) };
+        if length == 0 {
+            return &[];
+        }
+        // SAFETY: the module owns `length` bytes at `data`, which never change, for as long as
+        // `self` holds it.
+        unsafe { std::slice::from_raw_parts(data, length) }
+    }
+
+    /// Returns the C++ `kj::Own<v8::CompiledWasmModule>`, to hand the module to C++.
+    pub fn into_ffi(self) -> KjOwn<ffi::CompiledWasmModule> {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for CompiledWasmModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledWasmModule")
+            .field("wire_bytes_len", &self.wire_bytes().len())
+            .finish()
     }
 }
 
@@ -1903,6 +2165,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_typed_array(self.raw()) }
     }
 
+    /// Returns true if the value is a `WebAssembly.Module`.
+    pub fn is_wasm_module_object(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_wasm_module_object(self.raw()) }
+    }
+
     /// Returns true if the value is a `SharedArrayBuffer`.
     pub fn is_shared_array_buffer(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -2100,6 +2368,10 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn detach_before_drop(&self) -> bool {
+        T::needs_drop_detach()
+    }
+
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -2390,6 +2662,7 @@ impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
 impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
 impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
@@ -2404,13 +2677,6 @@ impl_local_cast!(BigInt64Array: TypedArray, ArrayBufferView, Object, Value; is_b
 impl_local_cast!(BigUint64Array: TypedArray, ArrayBufferView, Object, Value; is_biguint64_array);
 
 impl Array {
-    /// Creates a new JavaScript array with the given length.
-    pub fn new<'s>(lock: &mut crate::Lock<'s>, len: usize) -> Local<'s, Self> {
-        let isolate = lock.isolate();
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe { Local::from_ffi(ffi::local_new_array(isolate.as_ffi(), len)) }
-    }
-
     /// Creates a new JavaScript array of `elements`.
     ///
     /// Runs no JavaScript: unlike [`Local::<Array>::set`], it calls no setter that a script
@@ -2700,12 +2966,9 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        if self.is_empty() {
-            return &[];
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid
-        // until JS runs, which the shared borrow of the lock prevents for 'b.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }
+        // SAFETY: the FFI returns this region's bytes, and the lock borrow prevents
+        // JavaScript from detaching, resizing or writing to the buffer for 'b.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice view into the `ArrayBuffer`'s backing store.
@@ -2730,22 +2993,38 @@ impl<'s> Local<'s, ArrayBuffer> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        if self.is_empty() {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; data() is non-null for
-        // non-empty buffers; byte_length() bytes are valid while the lock is borrowed.
-        unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+        // SAFETY: caller guarantees exclusive access; the lock borrow keeps the
+        // buffer in place while the slice is live.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the `ArrayBuffer` contents into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        if self.is_empty() {
-            return Vec::new();
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid,
-        // and no JS can run before the copy completes.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }.to_vec()
+        // SAFETY: the FFI returns this region's bytes, and no JavaScript runs
+        // before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the buffer's bytes, read from V8 in one call. It is dangling, with no
+    /// bytes, for an empty or detached buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees a buffer's backing store.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
+        let mut byte_length = 0;
+        // SAFETY: handle is valid within the current HandleScope.
+        let data = unsafe { ffi::local_array_buffer_contents(self.raw(), &mut byte_length) };
+        let ptr = if byte_length == 0 {
+            NonNull::<u8>::dangling().as_ptr()
+        } else {
+            data as *mut u8
+        };
+        std::ptr::slice_from_raw_parts_mut(ptr, byte_length)
     }
 
     /// Detaches this `ArrayBuffer`, setting its byte length to zero.
@@ -2800,6 +3079,19 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl Local<'_, WasmModuleObject> {
+    /// Returns the module's compiled code, which outlives this handle.
+    ///
+    /// Corresponds to `v8::WasmModuleObject::GetCompiledModule()`. It takes no context and runs
+    /// no JavaScript.
+    pub fn compiled_module(&self) -> CompiledWasmModule {
+        CompiledWasmModule {
+            // SAFETY: handle is valid within the current HandleScope and is a `WasmModuleObject`.
+            inner: unsafe { ffi::local_wasm_module_object_get_compiled_module(self.raw()) },
+        }
     }
 }
 
@@ -2882,14 +3174,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &[];
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers, which are valid until JS
-        // runs, which the lock borrow prevents.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+        // SAFETY: the bytes are this view's, and the borrow of `lock` keeps JavaScript from
+        // running, so they stay in place and unchanged.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice of the view's visible region.
@@ -2914,42 +3201,55 @@ impl<'s> Local<'s, ArrayBufferView> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; `data` points to the `len` bytes the
-        // view covers; the lock borrow keeps JS from running.
-        unsafe { std::slice::from_raw_parts_mut(data, len) }
+        // SAFETY: the caller guarantees exclusive access to this buffer region, and the borrow
+        // of `lock` keeps JavaScript from running.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
+        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with
+    /// no bytes, for an empty or detached view and for one that does not lie within its buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees an off-heap backing store, and reading the
+    /// view's buffer here moves an on-heap typed array's elements off the heap.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
         // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return Vec::new();
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers; no JS can run before the
-        // copy completes.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }.to_vec()
+        unsafe { array_buffer_view_raw_slice::<u8>(self.raw()) }
     }
 }
 
-/// Returns the first of the elements of type `E` that the `ArrayBufferView` `view` covers, and
-/// how many it covers.
+/// The elements of type `E` that the `ArrayBufferView` `view` covers, read from V8 in one call, as
+/// a raw slice on an aligned dangling pointer when it covers none.
 ///
 /// V8 reads a view's offset and length from the V8 heap and does not always check them against
 /// the buffer, so a view that does not lie within its buffer covers nothing here.
 ///
 /// # Safety
 /// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
-unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
+#[inline]
+unsafe fn array_buffer_view_raw_slice<E>(view: &ffi::Local) -> *mut [E] {
     let mut byte_length = 0;
     // SAFETY: the caller guarantees the handle.
-    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) };
-    (data as *mut E, byte_length / size_of::<E>())
+    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) } as *mut E;
+    let len = byte_length / size_of::<E>();
+    if len == 0 {
+        return std::ptr::slice_from_raw_parts_mut(NonNull::<E>::dangling().as_ptr(), 0);
+    }
+    // V8 aligns the backing stores it allocates for every element type, but not one created over
+    // external memory, and a misaligned slice is undefined behavior.
+    debug_assert!(data.is_aligned(), "misaligned ArrayBufferView elements");
+    std::ptr::slice_from_raw_parts_mut(data, len)
 }
 
 // `TypedArray`-specific implementations
@@ -3081,14 +3381,9 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &[];
-                }
-                // SAFETY: `data` points to the `len` elements the view covers, which are
-                // valid until JS runs, which the lock borrow prevents.
-                unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+                // SAFETY: the elements are this view's, and the borrow of `lock` keeps JavaScript
+                // from running, so they stay in place and unchanged.
+                unsafe { &*self.as_raw_slice() }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -3117,14 +3412,27 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
+                // SAFETY: the caller guarantees exclusive access to this buffer region, and the
+                // borrow of `lock` keeps JavaScript from running.
+                unsafe { &mut *self.as_raw_slice() }
+            }
+
+            /// A raw pointer to the elements of this view, read from V8 in one call. It is
+            /// dangling, with no elements, for an empty or detached view and for one that does
+            /// not lie within its buffer.
+            ///
+            /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can
+            /// detach, resize or write to the buffer, and while the buffer is neither detached
+            /// nor resized. A `&mut` made from it must not overlap any other reference to the
+            /// same memory. Garbage collection may run: it neither moves nor frees an
+            /// off-heap backing store, and reading the view's buffer here moves an on-heap
+            /// typed array's elements off the heap. [`as_slice`](Self::as_slice) and
+            /// [`as_mut_slice`](Self::as_mut_slice) borrow the lock to keep JavaScript from
+            /// running.
+            #[inline]
+            pub fn as_raw_slice(&self) -> *mut [$elem] {
                 // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &mut [];
-                }
-                // SAFETY: caller guarantees exclusive access to this buffer region; `data`
-                // points to the `len` elements the view covers.
-                unsafe { std::slice::from_raw_parts_mut(data, len) }
+                unsafe { array_buffer_view_raw_slice::<$elem>(self.raw()) }
             }
 
             /// Returns an iterator over the elements.
@@ -3612,6 +3920,41 @@ impl<'s> Local<'s, String> {
                 flags.bits(),
             )
         }
+    }
+
+    /// Writes the string as UTF-8 into uninitialized storage and returns the bytes written,
+    /// which include the null terminator when `flags` includes [`WriteFlags::NullTerminate`].
+    /// Flags have the same meaning as in [`Self::write_utf8`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` is empty and `flags` includes [`WriteFlags::NullTerminate`], as
+    /// [`Self::write_utf8`] does.
+    pub fn write_utf8_uninit<'b>(
+        &self,
+        lock: &mut crate::Lock,
+        buffer: &'b mut [std::mem::MaybeUninit<u8>],
+        flags: WriteFlags,
+    ) -> &'b mut [u8] {
+        assert!(
+            buffer.len() >= usize::from(flags.null_terminates()),
+            "buffer too small for the null terminator"
+        );
+        // SAFETY: the isolate is locked, the handle is a String, and `buffer` is writable for
+        // its full capacity, with room for a terminator if one is written.
+        let written = unsafe {
+            ffi::local_string_write_utf8_v2(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                flags.bits(),
+            )
+        };
+        debug_assert!(written <= buffer.len());
+        // SAFETY: V8 initializes exactly the prefix it reports, whose length does not exceed the
+        // buffer's; only that prefix becomes an initialized slice.
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), written) }
     }
 
     // -------------------------------------------------------------------------
@@ -4280,6 +4623,28 @@ impl<T> TracedGlobal<T> {
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
+
+    /// Clears the traced reference, if any, without resetting it, and makes the strong handle
+    /// strong; see [`GcVisitor::visit_traced_global`]. The caller must hold the lock of the
+    /// handle's isolate, which must not be closed.
+    ///
+    /// V8 resets the weak handles of dead values before cppgc starts sweeping, so a weak handle
+    /// that isn't empty reaches a live value even in a `Drop` that the sweep runs.
+    fn let_go_of_traced(&self) {
+        // SAFETY: GC writes into the slot only while it runs on the thread holding the lock,
+        // which is this thread; see `GlobalSlot`.
+        let (strong, traced) = unsafe {
+            (
+                &raw mut (*self.slot.strong.get()).ptr,
+                &mut *self.slot.traced.get(),
+            )
+        };
+        if traced.ptr != 0 {
+            traced.ptr = 0;
+            // SAFETY: the strong handle is valid, and this thread holds its isolate's lock.
+            unsafe { ffi::global_clear_weak(strong) };
+        }
+    }
 }
 
 /// Dropping a `TracedGlobal` hands its slot to its isolate's state, which resets the strong handle
@@ -4601,6 +4966,18 @@ impl<'cb> FunctionCallbackInfo<'cb> {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
     }
+
+    /// Sets a number result without allocating an intermediate local handle.
+    pub fn set_return_number(&mut self, value: f64) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::fci_set_return_number(self.0, value) }
+    }
+
+    /// Sets a boolean result without allocating an intermediate local handle.
+    pub fn set_return_boolean(&mut self, value: bool) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::fci_set_return_boolean(self.0, value) }
+    }
 }
 
 /// The arguments to a native data property getter, or to the getter of a wildcard property.
@@ -4636,6 +5013,18 @@ impl<'cb> PropertyCallbackInfo<'cb> {
         // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
         // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+
+    /// Sets a number result without allocating an intermediate local handle.
+    pub fn set_return_number(&mut self, value: f64) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::pci_set_return_number(self.0, value) }
+    }
+
+    /// Sets a boolean result without allocating an intermediate local handle.
+    pub fn set_return_boolean(&mut self, value: bool) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::pci_set_return_boolean(self.0, value) }
     }
 }
 
@@ -4721,6 +5110,12 @@ impl<'cb> PropertySetterCallbackInfo<'cb> {
 
     /// Setters return nothing.
     pub fn set_return_value(&mut self, _value: Local<'cb, Value>) {}
+
+    /// Setters return nothing.
+    pub fn set_return_number(&mut self, _value: f64) {}
+
+    /// Setters return nothing.
+    pub fn set_return_boolean(&mut self, _value: bool) {}
 }
 
 /// A fat pointer to a `dyn GarbageCollected` trait object, decomposed into its
@@ -4778,8 +5173,7 @@ impl ffi::TraitObjectPtr {
 
         assert!(!data.is_null(), "Rc::into_raw returned null");
 
-        // SAFETY: TypeId is 128 bits (two usize on 64-bit), transmute to split halves for FFI storage.
-        let [type_id_lo, type_id_hi]: [usize; 2] = unsafe { std::mem::transmute(type_id) };
+        let [type_id_lo, type_id_hi] = split_type_id(type_id);
 
         Self {
             data_ptr: data as usize,
@@ -4805,8 +5199,7 @@ impl ffi::TraitObjectPtr {
 
     /// Returns the stored `TypeId`.
     pub(crate) fn type_id(&self) -> std::any::TypeId {
-        // SAFETY: Reconstructing TypeId from the same [lo, hi] halves stored in from_raw.
-        unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
+        join_type_id([self.type_id_lo, self.type_id_hi])
     }
 
     /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
@@ -4850,7 +5243,7 @@ impl ffi::TraitObjectPtr {
     /// # Safety
     /// The data pointer must have originated from `Rc::into_raw`.
     /// Must only be called once per allocation.
-    unsafe fn drop_rc(&self) {
+    pub(crate) unsafe fn drop_rc(&self) {
         // SAFETY: transmuting [data, vtable] back into a fat pointer; Rc::from_raw
         // reclaims the allocation originally created by Rc::into_raw in from_raw.
         unsafe {
@@ -4902,7 +5295,7 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
         // The resource is alive until `drop_rc`.
         let resource = saved.as_gc_ref();
-        if resource.has_drop_impl() {
+        if resource.detach_before_drop() {
             GcVisitor::detach_for_drop(resource);
         }
         saved.drop_rc();
@@ -4918,6 +5311,58 @@ unsafe fn wrappable_invoke_trace(wrappable: &ffi::Wrappable, visitor: *mut ffi::
         let mut gc_visitor = GcVisitor::from_ffi(visitor);
         trait_ptr.as_gc_ref().trace(&mut gc_visitor);
     }
+}
+
+/// A `TypeId` as the two halves C++ stores.
+pub(crate) fn split_type_id(type_id: TypeId) -> [usize; 2] {
+    // SAFETY: a `TypeId` is 128 bits, two `usize`s on the 64-bit targets workerd builds for.
+    unsafe { std::mem::transmute(type_id) }
+}
+
+/// The `TypeId` that [`split_type_id`] split into `halves`, which C++ stored.
+pub(crate) fn join_type_id(halves: [usize; 2]) -> TypeId {
+    // SAFETY: the halves of a `TypeId` of this binary, from `split_type_id`.
+    unsafe { std::mem::transmute(halves) }
+}
+
+/// The resource of `wrappable` as a `jsg::SnapshotTransfer`, if its type implements it.
+fn snapshot_transfer_of(wrappable: &ffi::Wrappable) -> Option<&dyn crate::ErasedSnapshotTransfer> {
+    let trait_ptr = ffi::TraitObjectPtr::from_wrappable(wrappable)?;
+    // SAFETY: the resource is alive while its Wrappable holds it.
+    unsafe { trait_ptr.as_gc_ref() }.snapshot_transfer()
+}
+
+unsafe fn wrappable_invoke_snapshot_clone(
+    wrappable: &ffi::Wrappable,
+    copy: &mut ffi::TraitObjectPtr,
+) -> bool {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return false;
+    };
+    *copy = transfer.snapshot_copy().into_trait_object();
+    true
+}
+
+unsafe fn wrappable_invoke_snapshot_references(wrappable: &ffi::Wrappable) -> Vec<usize> {
+    snapshot_transfer_of(wrappable)
+        .map_or_else(Vec::new, crate::ErasedSnapshotTransfer::snapshot_references)
+}
+
+unsafe fn wrappable_invoke_snapshot_relink(
+    wrappable: &ffi::Wrappable,
+    isolate: *mut ffi::Isolate,
+    restored: &[usize],
+) {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return;
+    };
+    // SAFETY: C++ calls this under the isolate lock, with a context entered and its own
+    // `HandleScope` innermost until it returns.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    let lock = scope.open();
+    // SAFETY: C++ passes the Wrappables of restored wrappers of this isolate, which stay alive
+    // while the context is created.
+    unsafe { transfer.snapshot_relink(lock, restored) };
 }
 
 unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str {
@@ -5019,11 +5464,12 @@ impl GcVisitor {
     /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
     /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
     /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
-    /// next owner's visit asserts against. Every `jsg::Rc` and C++ `jsg::Ref` of an isolate whose
-    /// lock this thread holds becomes strong again and forgets its parent, as a moved C++
-    /// `jsg::Ref` does; the others are left as they are, as is every `TracedGlobal`. This can run
-    /// during the garbage collector's sweep, when the value of a weak `TracedGlobal` may already
-    /// be dead, so making one strong could revive a freed value.
+    /// next owner's visit asserts against, while a moved `TracedGlobal` would stay weak and lose
+    /// its value once nothing else holds it. Every `jsg::Rc`, C++ `jsg::Ref` and `TracedGlobal` of
+    /// an isolate whose lock this thread holds becomes strong again, as a moved C++ `jsg::Ref` or
+    /// `jsg::V8Ref` does; the others are left as they are. This can run during the garbage
+    /// collector's sweep, when the value of a weak `TracedGlobal` may be dead; its handle is then
+    /// empty and stays so (see `TracedGlobal::let_go_of_traced`).
     ///
     /// A child without a wrapper is visited once here, to make what it holds strong, and again
     /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
@@ -5142,6 +5588,9 @@ impl GcVisitor {
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
     ///
+    /// A drop visit only lets go of the traced reference, under its isolate's lock; see
+    /// [`GcVisitor::detach_for_drop`].
+    ///
     /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
     /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
     /// under another isolate's lock panics. A `TracedGlobal` belongs in resources of its own
@@ -5170,60 +5619,31 @@ impl GcVisitor {
     /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         // Once the isolate is being torn down, its handles are left to `Dispose`, as those of a
-        // dropped `TracedGlobal` are. A drop visit leaves them as well; see `detach_for_drop`.
-        if global.state.is_closed() || self.mode == VisitMode::DetachForDrop {
+        // dropped `TracedGlobal` are.
+        if global.state.is_closed() {
             return;
         }
-        if let VisitMode::Detach(isolate) = self.mode {
-            assert!(
-                global.state.belongs_to(isolate),
-                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
-            );
-            // SAFETY: see below, and `GlobalSlot`.
-            let (strong, traced) = unsafe {
-                (
-                    &raw mut (*global.slot.strong.get()).ptr,
-                    &mut *global.slot.traced.get(),
-                )
-            };
-            if traced.ptr != 0 {
-                traced.ptr = 0;
-                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
-                // isolate, as checked above.
-                unsafe { ffi::global_clear_weak(strong) };
-            }
-            return;
-        }
-        // SAFETY: the visitor is valid for the duration of the visit.
-        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
-        if visiting.is_null() {
-            // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes under the lock of the resource's isolate.
-            if !global.state.this_thread_holds_lock() {
-                return;
-            }
+        // A detaching visit panics with the message `assert_in_isolate_of` uses for both kinds
+        // of handle; the debug assert of a GC visit names the only kind it visits.
+        let what = if matches!(self.mode, VisitMode::Detach(_)) {
+            "Global or TracedGlobal"
         } else {
-            let foreign = !global.state.belongs_to(visiting);
-            debug_assert!(
-                !foreign,
-                "a TracedGlobal was visited on behalf of an isolate other than its own"
-            );
-            if foreign {
-                return;
-            }
+            "TracedGlobal"
+        };
+        if !self.may_change_in(&global.state, what) {
+            return;
         }
-        // SAFETY: see above, and `GlobalSlot`.
+        global.let_go_of_traced();
+        if self.is_detaching() {
+            return;
+        }
+        // SAFETY: see `GlobalSlot`.
         let (strong, traced) = unsafe {
             (
                 &raw mut (*global.slot.strong.get()).ptr,
                 &mut *global.slot.traced.get(),
             )
         };
-        if traced.ptr != 0 {
-            traced.ptr = 0;
-            // SAFETY: the strong handle is valid, and the visit runs under the isolate lock.
-            unsafe { ffi::global_clear_weak(strong) };
-        }
         // SAFETY: the handles are valid handles of the visitor's isolate, which is locked, and
         // stay where they are for as long as they exist.
         unsafe { ffi::wrappable_visit_global(&raw mut self.handle, strong, traced) };
@@ -5524,6 +5944,13 @@ impl WrappableRc {
     ) {
         // SAFETY: the KjRc keeps the Wrappable alive.
         tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
+    }
+
+    /// Condemns the underlying Wrappable if a collection found it unreachable and is sweeping it,
+    /// and returns whether it did (see `wrappable_try_condemn`).
+    pub(crate) fn try_condemn(&self) -> bool {
+        // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
+        unsafe { ffi::wrappable_try_condemn(self.as_pin_mut()) }
     }
 
     /// Increments the strong reference count on the underlying Wrappable.

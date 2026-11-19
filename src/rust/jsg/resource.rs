@@ -80,9 +80,9 @@ use crate::v8::ffi::Wrappable;
 /// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
 /// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
 /// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
-/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A resource's own `Drop`
-/// impl may move an `Rc` out of a plain field (see
-/// [`crate::GarbageCollected::has_drop_impl`]). See `README.md` §Safety rules, rule 2, and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A `Drop` impl of a
+/// resource or of a field's type may move an `Rc` out of a plain field (see
+/// [`crate::GarbageCollected::detach_before_drop`]). See `README.md` §Safety rules, rule 2, and
 /// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource. Taken by `Drop`.
@@ -162,6 +162,43 @@ impl<R: Resource> Rc<R> {
             self.strong.as_ptr(),
             visitor,
         );
+    }
+
+    /// The C++ `Wrappable` of the resource.
+    pub(crate) fn wrappable_ptr(&self) -> *const v8::ffi::Wrappable {
+        self.wrappable.as_ptr().as_ptr()
+    }
+
+    /// A strong reference to the resource that `wrappable` owns, if it is an `R`.
+    ///
+    /// # Safety
+    /// `wrappable` is alive, and belongs to the lock's isolate.
+    pub(crate) unsafe fn from_restored_wrappable(
+        lock: &mut Lock<'_>,
+        wrappable: *const v8::ffi::Wrappable,
+    ) -> Option<Self> {
+        // SAFETY: forwarded from the caller.
+        let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable) };
+        Self::from_wrappable(lock, wrappable)
+    }
+
+    /// A strong reference to the resource that `wrappable` owns, if it is an `R`.
+    fn from_wrappable(lock: &mut Lock<'_>, wrappable: v8::WrappableRc) -> Option<Self> {
+        let resource_ptr = wrappable.resolve_resource::<R>()?;
+        // SAFETY: The pointer came from std::rc::Rc::into_raw when the Wrappable was made, and
+        // the Wrappable being alive guarantees the Rc allocation is still valid.
+        // increment_strong_count bumps the count so from_raw can safely create
+        // a second Rc handle without double-freeing.
+        let handle = unsafe {
+            std::rc::Rc::increment_strong_count(resource_ptr.as_ptr());
+            std::rc::Rc::from_raw(resource_ptr.as_ptr())
+        };
+        wrappable.add_strong_ref();
+        Some(Self::from_parts(
+            handle,
+            wrappable,
+            Arc::clone(lock.isolate_state()),
+        ))
     }
 
     /// The state of the resource's isolate.
@@ -348,25 +385,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
         let Some(wrappable) = v8::WrappableRc::from_js(lock, value) else {
             return Ok(None);
         };
-        let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
-            return Ok(None);
-        };
-
-        // SAFETY: The pointer came from std::rc::Rc::into_raw in Rc::new(), and the
-        // Wrappable being alive guarantees the Rc allocation is still valid.
-        // increment_strong_count bumps the count so from_raw can safely create
-        // a second Rc handle without double-freeing.
-        let handle = unsafe {
-            std::rc::Rc::increment_strong_count(resource_ptr.as_ptr());
-            std::rc::Rc::from_raw(resource_ptr.as_ptr())
-        };
-
-        wrappable.add_strong_ref();
-        Ok(Some(Self::from_parts(
-            handle,
-            wrappable,
-            Arc::clone(lock.isolate_state()),
-        )))
+        Ok(Self::from_wrappable(lock, wrappable))
     }
 }
 
@@ -439,17 +458,29 @@ pub struct Weak<R: Resource> {
 }
 
 impl<R: Resource> Weak<R> {
-    /// Returns `true` if the resource is still alive.
+    /// Returns `true` if the resource is still alive, i.e. if [`upgrade`](Self::upgrade) would
+    /// return `Some`.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
     #[inline]
     pub fn is_alive(&self, lock: &Lock<'_>) -> bool {
         self.assert_in_isolate_of(lock);
-        self.handle.strong_count() > 0
+        if self.handle.strong_count() == 0 {
+            return false;
+        }
+        self.wrappable.is_some_and(|wrappable| {
+            // SAFETY: the resource is alive, so its Wrappable is too (see `upgrade`).
+            !unsafe { v8::ffi::wrappable_is_condemned(wrappable.as_ref()) }
+        })
     }
 
     /// Upgrades to a strong `Rc<R>` if the resource is still alive.
+    ///
+    /// Returns `None` for a resource that a collection found unreachable and is sweeping, as
+    /// C++ `WeakRef::tryAddRef` does: its wrapper and the handles it traces are already dead,
+    /// though it is not dropped yet. Only code that runs during the sweep, such as the `Drop` of
+    /// another resource swept with it, can see one.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
@@ -464,6 +495,10 @@ impl<R: Resource> Weak<R> {
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
         let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        if wrappable.try_condemn() {
+            // The sweep still owns the Wrappable, so this drops only the references just taken.
+            return None;
+        }
         wrappable.add_strong_ref();
         Some(Rc::from_parts(handle, wrappable, state))
     }
@@ -931,7 +966,7 @@ impl NestedType {
 /// Hashes a [`TypeId`], whose `Hash` implementation writes a single `u64` that is already a
 /// high-quality hash, so this passes it through rather than hashing it again.
 #[derive(Default)]
-struct TypeIdHasher(u64);
+pub(crate) struct TypeIdHasher(u64);
 
 impl Hasher for TypeIdHasher {
     fn write_u64(&mut self, value: u64) {
@@ -1040,16 +1075,38 @@ impl Resources {
         template
     }
 
-    /// Drains every cached resource-template handle, transferring ownership of each
-    /// `v8::Global<v8::FunctionTemplate>` to the caller. Used by the `PREPARE_SNAPSHOT`
-    /// pipeline, which disposes each handle before `CreateBlob`; the cache is left empty and
-    /// templates are recreated lazily on demand.
-    pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
-        self.slots.clear();
-        self.templates
-            .drain(..)
-            .map(v8::Global::into_ffi_for_snapshot)
+    /// Drains every cached template, with its resource type, for the `PREPARE_SNAPSHOT`
+    /// pipeline, which pins each one into the snapshot and disposes its handle before
+    /// `CreateBlob`. The cache is left empty.
+    pub fn take_templates(&mut self) -> Vec<(TypeId, v8::ffi::Global)> {
+        let mut type_ids = vec![None; self.templates.len()];
+        for (type_id, slot) in self.slots.drain() {
+            type_ids[slot] = Some(type_id);
+        }
+        type_ids
+            .into_iter()
+            .zip(self.templates.drain(..))
+            .filter_map(|(type_id, template)| Some((type_id?, template.into_ffi_for_snapshot())))
             .collect()
+    }
+
+    /// Fills the empty cache with the templates a snapshot carried.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cache is not empty, which would leave a resource type with two templates.
+    pub fn restore_templates(
+        &mut self,
+        templates: impl IntoIterator<Item = (TypeId, v8::Global<v8::FunctionTemplate>)>,
+    ) {
+        assert!(
+            self.templates.is_empty(),
+            "resource templates restored into a non-empty cache"
+        );
+        for (type_id, template) in templates {
+            self.slots.insert(type_id, self.templates.len());
+            self.templates.push(template);
+        }
     }
 }
 

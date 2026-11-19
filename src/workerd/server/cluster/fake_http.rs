@@ -48,8 +48,12 @@ pub enum Answer {
     Stall,
     /// The answer, this long after the request arrived.
     After(Duration, Box<Self>),
-    /// The head of a 200 answer, then a byte of its body every 20 ms.
-    Dribble,
+    /// The head of a 200 answer with these headers, then a byte of its body
+    /// every 20 ms.
+    Dribble(Vec<(&'static str, String)>),
+    /// As `Dribble`, but the body ends after its first byte, short of its
+    /// length.
+    Cut(Vec<(&'static str, String)>),
     Reply {
         status: u16,
         headers: Vec<(&'static str, String)>,
@@ -210,12 +214,19 @@ async fn answer(
             // hyper closes the connection on a service's error.
             Answer::Close => Err("close"),
             Answer::Stall => std::future::pending().await,
-            Answer::Dribble => Ok(http::Response::builder()
-                .header("content-length", "100000")
-                .body(Body::Dribble(tokio::time::interval(Duration::from_millis(
-                    20,
-                ))))
-                .unwrap()),
+            Answer::Dribble(ref headers) | Answer::Cut(ref headers) => {
+                let mut response = http::Response::builder().header("content-length", "100000");
+                for (name, value) in headers {
+                    response = response.header(*name, value);
+                }
+                let interval = tokio::time::interval(Duration::from_millis(20));
+                let left = if matches!(answer, Answer::Cut(_)) {
+                    1
+                } else {
+                    usize::MAX
+                };
+                Ok(response.body(Body::Dribble(interval, left)).unwrap())
+            }
             Answer::Reply {
                 status,
                 headers,
@@ -237,7 +248,8 @@ async fn answer(
 
 enum Body {
     Full(Option<Bytes>),
-    Dribble(tokio::time::Interval),
+    /// A byte a tick, this many more.
+    Dribble(tokio::time::Interval, usize),
 }
 
 impl http_body::Body for Body {
@@ -250,9 +262,11 @@ impl http_body::Body for Body {
     ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
         match self.get_mut() {
             Self::Full(bytes) => Poll::Ready(bytes.take().map(|b| Ok(Frame::data(b)))),
-            Self::Dribble(interval) => interval
-                .poll_tick(cx)
-                .map(|_| Some(Ok(Frame::data(Bytes::from_static(b" "))))),
+            Self::Dribble(_, 0) => Poll::Ready(None),
+            Self::Dribble(interval, left) => interval.poll_tick(cx).map(|_| {
+                *left -= 1;
+                Some(Ok(Frame::data(Bytes::from_static(b" "))))
+            }),
         }
     }
 }

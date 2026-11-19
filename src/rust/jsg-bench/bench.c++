@@ -153,6 +153,15 @@ class Target final: public Object {
   uint32_t bytesLen(v8::Local<v8::Uint8Array> a) {
     return static_cast<uint32_t>(a->ByteLength());
   }
+  uint32_t bytesSliceLen(jsg::JsUint8Array a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
+  }
+  uint32_t bufferSliceLen(jsg::JsArrayBuffer a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
+  }
+  uint32_t viewSliceLen(jsg::JsArrayBufferView a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
+  }
   uint32_t bytesCopy(v8::Local<v8::Uint8Array> a) {
     auto bytes = kj::heapArray(a->ByteLength() == 0
             ? kj::ArrayPtr<const kj::byte>()
@@ -209,6 +218,9 @@ class Target final: public Object {
     JSG_METHOD(octetSum);
     JSG_METHOD(octetMake);
     JSG_METHOD(bytesLen);
+    JSG_METHOD(bytesSliceLen);
+    JSG_METHOD(bufferSliceLen);
+    JSG_METHOD(viewSliceLen);
     JSG_METHOD(bytesCopy);
     JSG_METHOD(bytesSum);
     JSG_METHOD(newNode);
@@ -241,12 +253,12 @@ class Context final: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(BenchIsolate, Context, Target, Node, Pair, Octet);
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(VerifyFastIsolate, Context, Target, Node, Pair, Octet);
 
-V8System& system() {
-  static V8System system({"--allow-natives-syntax"_kj, "--expose-gc"_kj});
-  return system;
-}
+// Constructed during static initialization so that V8 starts up, and is torn down, on the main
+// thread, like every JSG test and benchmark. V8 grants access to the memory protection key that
+// guards its JIT memory only to the thread that starts it and the threads that thread creates.
+V8System v8System({"--allow-natives-syntax"_kj, "--expose-gc"_kj});
 
-enum class Binding { CPP, RUST, CPP_FAST, RUST_FAST, CPP_STRUCT_FAST };
+enum class Binding { CPP, RUST, CPP_FAST, RUST_FAST, CPP_STRUCT_FAST, RUST_STRUCT_FAST };
 enum class CpuTime { THREAD, PROCESS };
 
 struct Case {
@@ -282,16 +294,17 @@ kj::StringPtr describe(const v8::String::Utf8Value& error) {
 
 template <typename Isolate = BenchIsolate>
 void runCase(benchmark::State& state, Binding binding, const Case& test) {
-  auto rust = binding == Binding::RUST || binding == Binding::RUST_FAST;
+  auto rust = binding == Binding::RUST || binding == Binding::RUST_FAST ||
+      binding == Binding::RUST_STRUCT_FAST;
   JsgConfig config = {
     .fastApiEnabled = binding == Binding::CPP_FAST || binding == Binding::RUST_FAST};
-  // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
-  auto& v8System = system();
   Isolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](auto& js) {
     if (binding == Binding::CPP_STRUCT_FAST) js.setUsingFastJsgStruct();
     capnp::MallocMessageBuilder message;
-    auto flags = capnp::canonicalize(message.initRoot<CompatibilityFlags>().asReader());
+    auto flagsRoot = message.initRoot<CompatibilityFlags>();
+    if (binding == Binding::RUST_STRUCT_FAST) flagsRoot.setFastJsgStruct(true);
+    auto flags = capnp::canonicalize(flagsRoot.asReader());
     // The realm stays attached to the isolate until it is dropped.
     auto realm =
         rustJsg::realm_create(js.v8Isolate, {flags.asBytes().begin(), flags.asBytes().size()});
@@ -393,8 +406,6 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
 // Runs `func` with an isolate locked, a Rust realm attached and a context entered, as creating
 // a Rust resource requires.
 void withRealm(auto func) {
-  // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
-  auto& v8System = system();
   JsgConfig config = {};
   BenchIsolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](auto& js) {
@@ -485,11 +496,12 @@ int registerCases() {
         kj::str(validation), kj::str(expected), batch});
       auto* testPtr = test.get();
       cases.add(kj::mv(test));
-      auto label = kj::str(binding == Binding::CPP ? "Cpp/"
-              : binding == Binding::RUST           ? "Rust/"
-              : binding == Binding::CPP_FAST       ? "CppFast/"
-              : binding == Binding::RUST_FAST      ? "RustFast/"
-                                                   : "CppStructFast/",
+      auto label = kj::str(binding == Binding::CPP   ? "Cpp/"
+              : binding == Binding::RUST             ? "Rust/"
+              : binding == Binding::CPP_FAST         ? "CppFast/"
+              : binding == Binding::RUST_FAST        ? "RustFast/"
+              : binding == Binding::RUST_STRUCT_FAST ? "RustStructFast/"
+                                                     : "CppStructFast/",
           name);
       auto* registered =
           benchmark::RegisterBenchmark(label.cStr(), [binding, testPtr](benchmark::State& state) {
@@ -537,11 +549,11 @@ int registerCases() {
       "124");
   add("struct/pair-in", "const x={a:1,b:2};", "t.pairSum(x)", "t.pairSum(x)===3", "3");
   add("struct/pair-roundtrip", "const x={a:1,b:2};", "t.pairEcho(x).b", "t.pairEcho(x).b===2", "2",
-      1024, {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST});
+      1024, {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST, Binding::RUST_STRUCT_FAST});
   add("struct/octet-in", "const x={a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8};", "t.octetSum(x)",
       "t.octetSum(x)===36", "36");
   add("struct/octet-out", "", "t.octetMake().h", "t.octetMake().h===8", "8", 1024,
-      {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST});
+      {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST, Binding::RUST_STRUCT_FAST});
   add("resource/unwrap", "const x=t.sameNode();", "t.takeNode(x)", "t.takeNode(x)===7", "7");
   add("resource/cached-wrap", "const x=t.sameNode();", "+(t.sameNode()===x)", "t.sameNode()===x",
       "1");
@@ -607,6 +619,16 @@ int registerCases() {
     if (size == 16 || size == (smokeTesting() ? 32 : 1024)) {
       add(kj::str("buffer/length/", size), setup, "t.bytesLen(x)",
           kj::str("t.bytesLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/typed-array/", size), setup, "t.bytesSliceLen(x)",
+          kj::str("t.bytesSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/array-buffer/", size),
+          kj::str("const x=new ArrayBuffer(", size, ");"), "t.bufferSliceLen(x)",
+          kj::str("t.bufferSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/typed-view/", size), setup, "t.viewSliceLen(x)",
+          kj::str("t.viewSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/data-view/", size),
+          kj::str("const x=new DataView(new ArrayBuffer(", size + 8, "),3,", size, ");"),
+          "t.viewSliceLen(x)", kj::str("t.viewSliceLen(x)===", size), kj::str(size));
     }
     add(kj::str("buffer/copy-in/", size), setup, "t.bytesCopy(x)",
         kj::str("t.bytesCopy(x)===", size), kj::str(size), size >= 65536 ? 16 : 256);
