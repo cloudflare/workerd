@@ -135,8 +135,7 @@ namespace workerd::util {
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
   V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
-     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
-     group's memory pools. */                                                                      \
+     empties the isolate group's memory pools. */                                                  \
   V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
 // clang-format on
 // --------------------------------------------------------------------------------------

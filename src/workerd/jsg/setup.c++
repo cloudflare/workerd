@@ -175,6 +175,12 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable the WebAssembly compact import section encoding.
   v8::V8::SetFlagsFromString("--wasm-compact-imports");
 
+  // Keep Liftoff code when V8 gets a memory pressure signal. By default V8 then drops the Liftoff
+  // code of every Wasm module in the process, so every Worker running Wasm compiles the functions
+  // it calls again, even when the pressure came from another isolate. V8 still frees the code of
+  // modules that are no longer referenced.
+  v8::V8::SetFlagsFromString("--noflush-liftoff-code");
+
 #ifndef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
   // Custom startup snapshots for the shared cage mode:
   // Keep the read-only heap sealed for serializer-enabled isolates.
