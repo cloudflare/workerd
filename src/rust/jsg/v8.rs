@@ -17,6 +17,8 @@
 //!   cycle through it can be collected
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
+//! - [`CompiledWasmModule`] - Owned handle to the compiled code of a `WebAssembly.Module`,
+//!   which C++ can make another module object from without recompiling
 //!
 //! # Garbage Collection
 //!
@@ -48,6 +50,8 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use kj_rs::KjOwn;
 
 pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::JsErrorType;
@@ -182,6 +186,17 @@ pub mod ffi {
         EvalError,
     }
 
+    /// How throwing an internal error logs its message.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum InternalErrorLog {
+        /// At `ERROR`, with the reference ID that JavaScript gets when an error is created.
+        /// While execution is terminating, logs only the message without creating an error.
+        Error,
+        /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
+        /// `worker_do_not_log` that it throws to JavaScript.
+        Info,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -205,11 +220,6 @@ pub mod ffi {
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
 
-        /// Called from C++ `Wrappable::snapshotClone`: the trait object of a fresh instance for
-        /// a wrapper restored from a startup snapshot (`GarbageCollected::snapshot_recreate`), or
-        /// a cleared pointer (`data_ptr == 0`) when the resource's type is not stateless.
-        unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &Wrappable) -> TraitObjectPtr;
-
         /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
         /// which C++ adds to the Wrappable's own.
         unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
@@ -219,6 +229,28 @@ pub mod ffi {
         unsafe fn wrappable_invoke_get_memory_info(
             wrappable: &Wrappable,
             tracker: Pin<&mut MemoryTracker>,
+        );
+
+        /// Called from C++ `Wrappable::snapshotClone()`. If the resource's type implements
+        /// `jsg::SnapshotTransfer`, stores in `copy` what the snapshot stores of the resource,
+        /// or, called on that, a restored resource; the caller's new `Wrappable` then owns it.
+        /// Returns false otherwise. May run on any thread, with no isolate locked.
+        unsafe fn wrappable_invoke_snapshot_clone(
+            wrappable: &Wrappable,
+            copy: &mut TraitObjectPtr,
+        ) -> bool;
+
+        /// Called from C++ `Wrappable::snapshotReferences()`: the Wrappables of the resources
+        /// that `jsg::SnapshotTransfer::snapshot_references` adds, 0 for `None`.
+        unsafe fn wrappable_invoke_snapshot_references(wrappable: &Wrappable) -> Vec<usize>;
+
+        /// Called from C++ `Wrappable::snapshotRelink()`, under the isolate lock with a context
+        /// entered and a `HandleScope` open: calls `jsg::SnapshotTransfer::snapshot_relink` with
+        /// the restored Wrappables, 0 for none.
+        unsafe fn wrappable_invoke_snapshot_relink(
+            wrappable: &Wrappable,
+            isolate: *mut Isolate,
+            restored: &[usize],
         );
     }
 
@@ -245,6 +277,9 @@ pub mod ffi {
         /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
         /// (see `ffi.h`).
         type ExternalMemoryAdjustment;
+        /// C++ `v8::CompiledWasmModule`, the compiled code of a `WebAssembly.Module`, which C++
+        /// holds in a `kj::Own` (see `ffi.h`).
+        type CompiledWasmModule;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -347,6 +382,18 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<WasmModuleObject>
+        pub unsafe fn local_wasm_module_object_get_compiled_module(
+            module: &Local,
+        ) -> KjOwn<CompiledWasmModule>;
+
+        // CompiledWasmModule
+        #[nothrow]
+        pub unsafe fn compiled_wasm_module_get_wire_bytes(
+            module: &CompiledWasmModule,
+            length: &mut usize,
+        ) -> *const u8;
+
         // Local<ArrayBufferView>
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
@@ -434,6 +481,8 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_date(value: &Local) -> bool;
+        #[nothrow]
+        pub unsafe fn local_is_wasm_module_object(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
         // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
         // store the result in `result` and return true, or return false if the coercion threw,
@@ -958,6 +1007,7 @@ pub mod ffi {
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
+            log: InternalErrorLog,
         ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
@@ -976,7 +1026,11 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        pub unsafe fn isolate_throw_internal_error(
+            isolate: *mut Isolate,
+            internal_message: &str,
+            log: InternalErrorLog,
+        );
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         #[nothrow]
@@ -1251,10 +1305,6 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
-
-    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
-    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
-    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -1318,7 +1368,7 @@ impl ffi::ExceptionType {
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
 // - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
-// - WasmModuleObject, WasmMemoryObject
+// - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
 // `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
@@ -1597,6 +1647,8 @@ pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
 pub struct ArrayBufferView;
+/// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
+pub struct WasmModuleObject;
 
 // =============================================================================
 // `BackingStore` — owned handle to a heap-allocated `std::shared_ptr<v8::BackingStore>`
@@ -1743,6 +1795,62 @@ impl BackingStore {
         }
         // SAFETY: data() is non-null for non-empty stores; byte_length() bytes are valid.
         unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+    }
+}
+
+/// The compiled code of a `WebAssembly.Module`: C++ `v8::CompiledWasmModule`.
+///
+/// Obtained with [`Local<WasmModuleObject>::compiled_module()`]. V8 shares the compiled code
+/// between every module object made from it, in any isolate, so C++ can make another
+/// `WebAssembly.Module` from it without recompiling (`v8::WasmModuleObject::FromCompiledModule`).
+/// It is not on the V8 heap: it keeps the code and the wire bytes alive for as long as it is held,
+/// needs no lock, and can be dropped on any thread that may use V8: one created, after V8 starts,
+/// by a thread that may use V8.
+///
+/// Drop it before V8 is disposed: dropping the last reference to the compiled code frees it
+/// through the process-wide WebAssembly engine, which `V8::Dispose()` destroys. A value that lives
+/// until process exit, such as in a `static` or `thread_local!`, may be dropped too late.
+pub struct CompiledWasmModule {
+    inner: KjOwn<ffi::CompiledWasmModule>,
+}
+
+// SAFETY: a `v8::CompiledWasmModule` holds only a `std::shared_ptr` to the module's compiled code,
+// which V8 shares between isolates on different threads, and the module's source URL. Both are
+// const, so they may be read, copied and destroyed on any thread that may use V8. Destroying the
+// last reference to the compiled code frees it through the process-wide `wasm::WasmEngine`, so it
+// must happen before `V8::Dispose()` destroys the engine; the type's docs say so.
+unsafe impl Send for CompiledWasmModule {}
+// SAFETY: `&self` only reads the wire bytes, which never change.
+unsafe impl Sync for CompiledWasmModule {}
+
+impl CompiledWasmModule {
+    /// Returns the bytes the module was compiled from, which it owns.
+    ///
+    /// Corresponds to `v8::CompiledWasmModule::GetWireBytesRef()`.
+    #[inline]
+    pub fn wire_bytes(&self) -> &[u8] {
+        let mut length = 0;
+        // SAFETY: `inner` is a live `v8::CompiledWasmModule`.
+        let data = unsafe { ffi::compiled_wasm_module_get_wire_bytes(&self.inner, &mut length) };
+        if length == 0 {
+            return &[];
+        }
+        // SAFETY: the module owns `length` bytes at `data`, which never change, for as long as
+        // `self` holds it.
+        unsafe { std::slice::from_raw_parts(data, length) }
+    }
+
+    /// Returns the C++ `kj::Own<v8::CompiledWasmModule>`, to hand the module to C++.
+    pub fn into_ffi(self) -> KjOwn<ffi::CompiledWasmModule> {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for CompiledWasmModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledWasmModule")
+            .field("wire_bytes_len", &self.wire_bytes().len())
+            .finish()
     }
 }
 
@@ -2055,6 +2163,12 @@ impl<'s, T> Local<'s, T> {
     pub fn is_typed_array(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_typed_array(self.raw()) }
+    }
+
+    /// Returns true if the value is a `WebAssembly.Module`.
+    pub fn is_wasm_module_object(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_wasm_module_object(self.raw()) }
     }
 
     /// Returns true if the value is a `SharedArrayBuffer`.
@@ -2548,6 +2662,7 @@ impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
 impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
 impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
@@ -2964,6 +3079,19 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl Local<'_, WasmModuleObject> {
+    /// Returns the module's compiled code, which outlives this handle.
+    ///
+    /// Corresponds to `v8::WasmModuleObject::GetCompiledModule()`. It takes no context and runs
+    /// no JavaScript.
+    pub fn compiled_module(&self) -> CompiledWasmModule {
+        CompiledWasmModule {
+            // SAFETY: handle is valid within the current HandleScope and is a `WasmModuleObject`.
+            inner: unsafe { ffi::local_wasm_module_object_get_compiled_module(self.raw()) },
+        }
     }
 }
 
@@ -5023,8 +5151,7 @@ impl ffi::TraitObjectPtr {
 
         assert!(!data.is_null(), "Rc::into_raw returned null");
 
-        // SAFETY: TypeId is 128 bits (two usize on 64-bit), transmute to split halves for FFI storage.
-        let [type_id_lo, type_id_hi]: [usize; 2] = unsafe { std::mem::transmute(type_id) };
+        let [type_id_lo, type_id_hi] = split_type_id(type_id);
 
         Self {
             data_ptr: data as usize,
@@ -5050,8 +5177,7 @@ impl ffi::TraitObjectPtr {
 
     /// Returns the stored `TypeId`.
     pub(crate) fn type_id(&self) -> std::any::TypeId {
-        // SAFETY: Reconstructing TypeId from the same [lo, hi] halves stored in from_raw.
-        unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
+        join_type_id([self.type_id_lo, self.type_id_hi])
     }
 
     /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
@@ -5095,7 +5221,7 @@ impl ffi::TraitObjectPtr {
     /// # Safety
     /// The data pointer must have originated from `Rc::into_raw`.
     /// Must only be called once per allocation.
-    unsafe fn drop_rc(&self) {
+    pub(crate) unsafe fn drop_rc(&self) {
         // SAFETY: transmuting [data, vtable] back into a fat pointer; Rc::from_raw
         // reclaims the allocation originally created by Rc::into_raw in from_raw.
         unsafe {
@@ -5165,6 +5291,58 @@ unsafe fn wrappable_invoke_trace(wrappable: &ffi::Wrappable, visitor: *mut ffi::
     }
 }
 
+/// A `TypeId` as the two halves C++ stores.
+pub(crate) fn split_type_id(type_id: TypeId) -> [usize; 2] {
+    // SAFETY: a `TypeId` is 128 bits, two `usize`s on the 64-bit targets workerd builds for.
+    unsafe { std::mem::transmute(type_id) }
+}
+
+/// The `TypeId` that [`split_type_id`] split into `halves`, which C++ stored.
+pub(crate) fn join_type_id(halves: [usize; 2]) -> TypeId {
+    // SAFETY: the halves of a `TypeId` of this binary, from `split_type_id`.
+    unsafe { std::mem::transmute(halves) }
+}
+
+/// The resource of `wrappable` as a `jsg::SnapshotTransfer`, if its type implements it.
+fn snapshot_transfer_of(wrappable: &ffi::Wrappable) -> Option<&dyn crate::ErasedSnapshotTransfer> {
+    let trait_ptr = ffi::TraitObjectPtr::from_wrappable(wrappable)?;
+    // SAFETY: the resource is alive while its Wrappable holds it.
+    unsafe { trait_ptr.as_gc_ref() }.snapshot_transfer()
+}
+
+unsafe fn wrappable_invoke_snapshot_clone(
+    wrappable: &ffi::Wrappable,
+    copy: &mut ffi::TraitObjectPtr,
+) -> bool {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return false;
+    };
+    *copy = transfer.snapshot_copy().into_trait_object();
+    true
+}
+
+unsafe fn wrappable_invoke_snapshot_references(wrappable: &ffi::Wrappable) -> Vec<usize> {
+    snapshot_transfer_of(wrappable)
+        .map_or_else(Vec::new, crate::ErasedSnapshotTransfer::snapshot_references)
+}
+
+unsafe fn wrappable_invoke_snapshot_relink(
+    wrappable: &ffi::Wrappable,
+    isolate: *mut ffi::Isolate,
+    restored: &[usize],
+) {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return;
+    };
+    // SAFETY: C++ calls this under the isolate lock, with a context entered and its own
+    // `HandleScope` innermost until it returns.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    let lock = scope.open();
+    // SAFETY: C++ passes the Wrappables of restored wrappers of this isolate, which stay alive
+    // while the context is created.
+    unsafe { transfer.snapshot_relink(lock, restored) };
+}
+
 unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str {
     // SAFETY: wrappable is valid.
     unsafe {
@@ -5175,25 +5353,6 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // literal). Convert to &str so CXX can pass it as rust::Str. The C++
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
-    }
-}
-
-unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &ffi::Wrappable) -> ffi::TraitObjectPtr {
-    const NONE: ffi::TraitObjectPtr = ffi::TraitObjectPtr {
-        data_ptr: 0,
-        vtable_ptr: 0,
-        type_id_lo: 0,
-        type_id_hi: 0,
-    };
-    // SAFETY: wrappable is valid.
-    unsafe {
-        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
-            return NONE;
-        };
-        trait_ptr
-            .as_gc_ref()
-            .snapshot_recreate()
-            .map_or(NONE, |recreated| recreated.0)
     }
 }
 

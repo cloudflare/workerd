@@ -93,10 +93,7 @@ export default {
       'terminates it. fetch() rejects a truncated header block before headers are combined.',
     expectedFailures: true,
   },
-  'basic/header-value-null-byte.any.js': {
-    comment: 'We should return a nicer TypeError instead of "internal error"',
-    expectedFailures: ['Ensure fetch() rejects null bytes in headers'],
-  },
+  'basic/header-value-null-byte.any.js': {},
   'basic/historical.any.js': {
     comment: 'This test expects us not to implement getAll',
     expectedFailures: ['Headers object no longer has a getAll() method'],
@@ -132,7 +129,10 @@ export default {
   },
   'basic/request-head.any.js': {},
   'basic/request-headers-case.any.js': {
-    comment: 'To be investigated',
+    comment:
+      'The casing of the first name is kept, but each value is sent on its own header line ' +
+      'rather than combined into one, which RFC 9110 section 5.3 allows. The test expects ' +
+      'one combined line.',
     expectedFailures: [
       'Multiple headers with the same name, different case (THIS-IS-A-TEST first)',
       'Multiple headers with the same name, different case (THIS-is-A-test first)',

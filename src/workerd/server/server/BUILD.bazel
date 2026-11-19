@@ -7,6 +7,7 @@ wd_rust_crate(
     name = "workerd-server",
     cxx_bridge_deps = [
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/workerd/io/frankenvalue:ffi.rs@cxx",
         "//src/workerd/server/factory:bootstrap-hdrs",
         "//src/workerd/server/factory:worker-factory-hdrs",
         "//src/workerd/util:thread-scopes",
@@ -37,6 +38,7 @@ wd_rust_crate(
         "//src/rust/worker",
         "//src/workerd/io:bench_capnp_rust",
         "//src/workerd/io:outcome_capnp_rust",
+        "//src/workerd/io/frankenvalue",
         "//src/workerd/server:compiled-bindings_capnp_rust",
         "//src/workerd/server:workerd_capnp_rust",
         "//src/workerd/server/cluster",

@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same tests under each setting of `dont_substitute_null_on_type_error`, which changes how a
+# `globalOutbound` of the wrong type converts.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "worker-loader-validation-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-validation-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "dont_substitute_null_on_type_error"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+          (name = "noSubstituteNull", json = "true"),
+        ],
+      )
+    ),
+    ( name = "worker-loader-validation-substitute-null-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-validation-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "substitute_null_on_type_error"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+          (name = "noSubstituteNull", json = "false"),
+        ],
+      )
+    ),
+  ],
+);

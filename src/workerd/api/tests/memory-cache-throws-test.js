@@ -46,14 +46,16 @@ export const readFailsBeforePromise = {
   async test(ctrl, env) {
     const notString = "parameter 1 is not of type 'string'.";
 
-    let err = readError(await failureOf(() => env.CACHE.read(123)));
-    strictEqual(err.name, 'TypeError');
-    strictEqual(
-      err.message,
-      `Failed to execute 'read' on 'MemoryCache': ${notString}`
-    );
+    for (const args of [[123], []]) {
+      const err = readError(await failureOf(() => env.CACHE.read(...args)));
+      strictEqual(err.name, 'TypeError');
+      strictEqual(
+        err.message,
+        `Failed to execute 'read' on 'MemoryCache': ${notString}`
+      );
+    }
 
-    err = readError(
+    let err = readError(
       await failureOf(() => env.CACHE.read('key', 'not a function'))
     );
     strictEqual(err.name, 'TypeError');
@@ -90,12 +92,14 @@ export const deleteThrows = {
   async test(ctrl, env) {
     if (!Cloudflare.compatibilityFlags.memory_cache_delete) return;
     // delete() returns nothing, so it throws, whatever the flag.
-    const failure = await failureOf(() => env.CACHE.delete(123));
-    strictEqual(failure.thrown.name, 'TypeError');
-    strictEqual(
-      failure.thrown.message,
-      "Failed to execute 'delete' on 'MemoryCache': parameter 1 is not of type 'string'."
-    );
+    for (const args of [[123], []]) {
+      const failure = await failureOf(() => env.CACHE.delete(...args));
+      strictEqual(failure.thrown.name, 'TypeError');
+      strictEqual(
+        failure.thrown.message,
+        "Failed to execute 'delete' on 'MemoryCache': parameter 1 is not of type 'string'."
+      );
+    }
   },
 };
 

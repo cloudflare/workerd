@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -130,14 +131,77 @@ void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
   wrappable_invoke_get_memory_info(*this, tracker);
 }
 
+kj::Vector<v8::Global<v8::FunctionTemplate>> pinResourceTemplatesIntoSnapshot(
+    v8::Isolate* isolate) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  KJ_REQUIRE(isolateBase.isPreparingSnapshot());
+  kj::Vector<v8::Global<v8::FunctionTemplate>> handles;
+  auto* realm = realm_from_isolate(isolate);
+  if (realm == nullptr) return handles;
+  v8::HandleScope scope(isolate);
+  auto& records = isolateBase.mutableSnapshotArtifact().rustResourceTemplates;
+  for (auto& entry: realm_take_resource_templates(*realm)) {
+    auto handle = global_from_ffi<v8::FunctionTemplate>(kj::mv(entry.handle));
+    records.add(::workerd::jsg::SnapshotArtifact::RustResourceTemplate{
+      .typeIdLo = entry.type_id_lo,
+      .typeIdHi = entry.type_id_hi,
+      .index = isolateBase.pinIntoIsolateSnapshot(handle.Get(isolate)),
+    });
+    handles.add(kj::mv(handle));
+  }
+  return handles;
+}
+
+void restoreResourceTemplatesFromSnapshot(v8::Isolate* isolate) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  if (!isolateBase.isStartingFromSnapshot()) return;
+  auto& records = isolateBase.finalizedSnapshotArtifact().rustResourceTemplates;
+  if (records.size() == 0) return;
+  v8::HandleScope scope(isolate);
+  ::rust::Vec<ResourceTemplate> templates;
+  templates.reserve(records.size());
+  for (auto& record: records) {
+    v8::Local<v8::FunctionTemplate> functionTemplate;
+    KJ_REQUIRE(isolate->GetDataFromSnapshotOnce<v8::FunctionTemplate>(record.index)
+                   .ToLocal(&functionTemplate),
+        "START_FROM_SNAPSHOT: Rust resource template missing from snapshot", record.index);
+    templates.push_back(ResourceTemplate{
+      .type_id_lo = record.typeIdLo,
+      .type_id_hi = record.typeIdHi,
+      .handle = to_ffi(v8::Global<v8::FunctionTemplate>(isolate, functionTemplate)),
+    });
+  }
+  auto* realm = realm_from_isolate(isolate);
+  KJ_REQUIRE(realm != nullptr, "START_FROM_SNAPSHOT: no Rust Realm to restore templates into");
+  realm_restore_resource_templates(*realm, kj::mv(templates));
+}
+
 kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> Wrappable::snapshotClone() const {
-  auto recreated = wrappable_invoke_snapshot_recreate(*this);
-  if (recreated.data_ptr == 0) return kj::none;
-  // wrappable_new() minus the strong reference: the restore path requires a strong refcount of
-  // zero, and nothing on the Rust side holds the instance (snapshot_recreate_leak).
-  auto rc = kj::rc<Wrappable>();
-  rc->trait_object = kj::mv(recreated);
-  return kj::Own<::workerd::jsg::Wrappable>(rc.toOwn());
+  TraitObjectPtr copy = {0, 0, 0, 0};
+  if (!wrappable_invoke_snapshot_clone(*this, copy)) return kj::none;
+  // Unlike wrappable_new(), it adds no strong reference: no Rust Rc refers to the copy.
+  auto clone = kj::refcounted<Wrappable>();
+  clone->trait_object = copy;
+  return kj::Own<::workerd::jsg::Wrappable>(kj::mv(clone));
+}
+
+kj::Array<const ::workerd::jsg::Wrappable*> Wrappable::snapshotReferences() const {
+  auto references = wrappable_invoke_snapshot_references(*this);
+  return KJ_MAP(reference, references) -> const ::workerd::jsg::Wrappable* {
+    return reinterpret_cast<const Wrappable*>(reference);
+  };
+}
+
+void Wrappable::snapshotRelink(kj::ArrayPtr<::workerd::jsg::Wrappable* const> restored) {
+  auto* isolate = v8::Isolate::GetCurrent();
+  v8::HandleScope scope(isolate);
+  // Every reference snapshotReferences() returned was to a Rust resource, so each restored one
+  // is too; Rust checks its type.
+  auto wrappables = KJ_MAP(target, restored) -> size_t {
+    return reinterpret_cast<size_t>(static_cast<Wrappable*>(target));
+  };
+  wrappable_invoke_snapshot_relink(
+      *this, isolate, ::rust::Slice<const size_t>(wrappables.begin(), wrappables.size()));
 }
 
 // Local<T>
@@ -310,6 +374,10 @@ bool local_is_big_int(const Local& val) {
 
 bool local_is_date(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
+bool local_is_wasm_module_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsWasmModuleObject();
 }
 
 bool local_is_shared_array_buffer(const Local& val) {
@@ -833,6 +901,21 @@ uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
+}
+
+// Local<WasmModuleObject>
+kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
+  return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
+}
+
+// CompiledWasmModule
+const uint8_t* compiled_wasm_module_get_wire_bytes(
+    const CompiledWasmModule& module, size_t& length) {
+  // GetWireBytesRef() is not const, but only reads the bytes, atomically, and V8 never replaces
+  // them once the module object exists.
+  auto bytes = const_cast<CompiledWasmModule&>(module).GetWireBytesRef();
+  length = bytes.size();
+  return bytes.data();
 }
 
 // Local<ArrayBufferView>
@@ -1480,7 +1563,7 @@ void fast_api_throw_exception(FastApiCallbackOptions* options,
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
   v8::HandleScope scope(options->isolate);
-  isolate_throw_internal_error(options->isolate, internalMessage);
+  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::Error);
 }
 
 void fast_api_terminate_execution(FastApiCallbackOptions* options) {
@@ -2062,20 +2145,50 @@ bool dom_exception_try_unwrap(Isolate* isolate,
 }
 
 namespace {
-// Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
-// the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
-// "internal error; reference = <id>" JS Error.
-v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalMessage) {
+// Logs the message of an internal error that is not created, as `log` says. With
+// InternalErrorLog::Error there is no ID to log it with, since no error carries one.
+void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
+  switch (log) {
+    case InternalErrorLog::Error:
+      KJ_LOG(ERROR, message);
+      return;
+    case InternalErrorLog::Info:
+      KJ_LOG(INFO, message);
+      return;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Generates a unique error ID and returns a generic "internal error; reference = <id>" JS Error.
+// With InternalErrorLog::Error, this is makeInternalError() from util.c++, which it calls: the
+// internal message is logged with the ID to KJ_LOG(ERROR) for Sentry. With
+// InternalErrorLog::Info, the message is logged to KJ_LOG(INFO) without the ID, as
+// reportInternalException() in util.c++ logs an exception marked worker_do_not_log.
+v8::Local<v8::Value> createInternalError(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  return ::workerd::jsg::makeInternalError(isolate, message);
+  switch (log) {
+    case InternalErrorLog::Error:
+      return ::workerd::jsg::makeInternalError(isolate, message);
+    case InternalErrorLog::Info: {
+      logInternalMessage(message, log);
+      // The text makeInternalError() gives the error.
+      auto text = kj::str("internal error; reference = ", ::workerd::makeInternalErrorId());
+      return v8::Exception::Error(
+          v8::String::NewFromUtf8(isolate, text.cStr(), v8::NewStringType::kNormal, text.size())
+              .ToLocalChecked());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
-Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
-  return to_ffi(createInternalError(isolate, internalMessage));
+Local exception_create_internal(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
+  return to_ffi(createInternalError(isolate, internalMessage, log));
 }
 
 uint64_t tunneled_exception_detail_id() {
@@ -2130,14 +2243,15 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
-void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
+void isolate_throw_internal_error(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   if (isolate->IsExecutionTerminating()) {
     // Logs the message, but creates no error, since it would not be thrown. See
     // createInternalError() for why the message is copied.
-    KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
+    logInternalMessage(kj::heapString(internalMessage.data(), internalMessage.size()), log);
     return;
   }
-  isolate->ThrowException(createInternalError(isolate, internalMessage));
+  isolate->ThrowException(createInternalError(isolate, internalMessage, log));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

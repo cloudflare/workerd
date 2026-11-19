@@ -1420,6 +1420,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-rust-case-test.js",
         "startup-snapshot-node-test.js",
     ],
 )
@@ -1484,6 +1485,19 @@ wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
 )
 
 js_binary(
@@ -1808,6 +1822,17 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-liftoff-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-liftoff-test.js",
+    ],
+    # The test uses V8 natives syntax, which eslint can't parse.
+    lint = False,
+)
+
+wd_test(
     size = "large",
     src = "worker-loader-limits-test.wd-test",
     args = ["--experimental"],
@@ -1827,9 +1852,21 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-validation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-validation-test.js"],
+)
+
+wd_test(
     src = "worker-loader-gc-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-gc-test.js"],
+)
+
+wd_test(
+    src = "worker-loader-hibernation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-hibernation-test.js"],
 )
 
 wd_test(
