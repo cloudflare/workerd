@@ -351,7 +351,7 @@ impl Sim {
                 node.view = view;
             }
         }
-        // `Cluster::cache_view`: `!holds(now + lease_wait_ms)`.
+        // `Timing::view`: `!holds(now + lease_wait_ms)`.
         let wait = T.lease_wait_ms() + self.safety;
         let fenced = node.until.is_none_or(|u| now + wait >= u);
         let fresh = !fenced && T.fresh(now, node.listed);

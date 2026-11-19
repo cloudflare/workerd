@@ -105,6 +105,19 @@ impl Timing {
     pub fn lease_wait_ms(&self) -> u64 {
         self.lease_ms + self.lease_ms / 25 + 1
     }
+
+    /// [`Cache::set`]'s view, `fresh` and `active` at wall time `now`, as `cache-test.rs`'s
+    /// `Sim::leases` makes them: the nodes of the latest listing, fresh from when it started;
+    /// the lease, from when its renewal was sent; the join, from when the registration
+    /// answered. A copy's lease stops before peers may judge this node's lease expired. A node
+    /// that drains is not active, and one that left not fresh.
+    #[must_use]
+    pub fn view(&self, now: u64, m: crate::Membership) -> (Vec<String>, bool, bool) {
+        let (listed, view) = m.listing.unzip();
+        let fresh = now + self.lease_wait_ms() < m.lease_until && self.fresh(now, listed);
+        let active = fresh && self.active(now, listed, m.registered) && !m.draining;
+        (view.unwrap_or_default(), fresh, active)
+    }
 }
 
 // `Cluster::maintain` renews (at most `renew_timeout_ms`), lists (at most

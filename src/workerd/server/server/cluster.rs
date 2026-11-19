@@ -24,7 +24,6 @@ use std::time::Duration;
 use cluster::Cluster;
 use cluster::Layout;
 use cluster::Route;
-use cluster_logic::cache;
 use cluster_logic::handoff::Budget;
 use cluster_logic::handoff::GRACE_MS;
 use cluster_logic::lease::Timing;
@@ -74,8 +73,8 @@ const TUNNEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// This instance's cluster: the crate's state and the factory sessions to owners start from.
 pub struct ClusterNode {
     pub cluster: Rc<Cluster>,
-    /// The Cache API's (`services/cache-cluster.rs`), divided as the lease's.
-    pub cache_timing: cache::Timing,
+    /// `unsafeTimeDivisor`: what the lease's times are divided by.
+    pub time_divisor: u64,
     factory: Rc<Factory>,
     /// One session per peer instance at its address, dropped when it disconnects. A peer that
     /// vanishes without its session noticing keeps its entry for the life of the process.
@@ -96,8 +95,9 @@ pub struct ClusterNode {
     peer_requests: Rc<PeerRequests>,
     /// Whether the application's listeners are being served (`Serving`).
     serving: Cell<bool>,
-    /// Whether a `cache` service stores here, so that leaving waits out its leases.
-    pub caching: Cell<bool>,
+    /// How long a stop waits from its drain's start to leave: the leases a service granted
+    /// here (the cache's), else 0.
+    pub leave_wait_ms: Cell<u64>,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -425,10 +425,7 @@ impl ClusterNode {
     ) -> Result<Rc<Self>> {
         let options = conf.get_bucket_options().map_err(|e| capnp(&e))?;
         let divisor = conf.get_unsafe_time_divisor();
-        let (Some(timing), Some(cache_timing)) = (
-            Timing::divided(divisor.into()),
-            cache::Timing::divided(divisor.into()),
-        ) else {
+        let Some(timing) = Timing::divided(divisor.into()) else {
             return Err(kj::failed!(
                 "cluster: unsafeTimeDivisor {divisor} rounds a lease time down to 0 ms"
             ));
@@ -444,7 +441,7 @@ impl ClusterNode {
         let cluster = Cluster::new(setup).map_err(|e| kj::failed!("cluster: {e}"))?;
         Ok(Rc::new(Self {
             cluster,
-            cache_timing,
+            time_divisor: divisor.into(),
             factory,
             sessions: Rc::default(),
             advertise: address,
@@ -458,7 +455,7 @@ impl ClusterNode {
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
             serving: Cell::new(false),
-            caching: Cell::new(false),
+            leave_wait_ms: Cell::new(0),
         }))
     }
 
@@ -476,11 +473,7 @@ impl ClusterNode {
             in_flight: at(self.budget.in_flight_ms()),
             handoff: at(self.budget.handoff_ms()),
             release: at(self.budget.release_ms()),
-            leave: at(if self.caching.get() {
-                self.cache_timing.lease_wait_ms()
-            } else {
-                0
-            }),
+            leave: at(self.leave_wait_ms.get()),
             grace: at(self.budget.grace_ms()),
             connections: at(self.budget.connections_ms()),
             stop: at(self.budget.stop_ms),

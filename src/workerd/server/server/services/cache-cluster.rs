@@ -8,9 +8,9 @@
 //! locks its directory, and as it starts removes every `cluster-*` directory no node has locked.
 //!
 //! The protocol runs on a monotonic clock in ms. Its view, `fresh` and `active` come from the
-//! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms. A
-//! draining node is not active but stays in views until it leaves: the keys it is home to, about
-//! 1/N, miss meanwhile, and their puts are not stored.
+//! membership by wall time (`Timing::view` of `Cluster::membership`), set before every call and
+//! every 20 ms. A draining node is not active but stays in views until it leaves: the keys it is
+//! home to, about 1/N, miss meanwhile, and their puts are not stored.
 //!
 //! A message is HTTP to this service on node `to` (`ClusterNode::peer_service`), whose metadata
 //! names its sender as `forwardedBy`, which only a peer sets:
@@ -42,6 +42,7 @@ use cluster_logic::cache::Done;
 use cluster_logic::cache::Hit;
 use cluster_logic::cache::Msg;
 use cluster_logic::cache::Reply;
+use cluster_logic::cache::Timing;
 use http::HeaderMap;
 use kj::http::HeadersRef;
 use kj::http::Method;
@@ -82,6 +83,8 @@ struct Shared {
     /// Held while `dir` is in use, so that other nodes leave it be.
     _lock: File,
     start: Instant,
+    /// The protocol's, divided as the lease's.
+    timing: Timing,
     cache: RefCell<Cache<Value>>,
     /// This node's operations, awaiting what they came to.
     ops: Waiters<u64, Done<Value>>,
@@ -99,8 +102,14 @@ pub fn store(
     factory: &Rc<Factory>,
 ) -> Result<Clustered> {
     let me = node.cluster.node();
+    let Some(timing) = Timing::divided(node.time_divisor) else {
+        return Err(kj::failed!(
+            "cluster: unsafeTimeDivisor {} rounds a cache time down to 0 ms",
+            node.time_divisor
+        ));
+    };
     let (dir, lock) = claim(root, me).map_err(|e| io_kj_error(&e))?;
-    node.caching.set(true);
+    node.leave_wait_ms.set(timing.lease_wait_ms());
     let shared = Rc::new(Shared {
         name: name.to_owned(),
         node: Rc::clone(node),
@@ -108,7 +117,8 @@ pub fn store(
         dir,
         _lock: lock,
         start: Instant::now(),
-        cache: RefCell::new(Cache::new(me, node.cache_timing)),
+        timing,
+        cache: RefCell::new(Cache::new(me, timing)),
         ops: RefCell::default(),
         asked: RefCell::default(),
     });
@@ -213,8 +223,8 @@ impl Shared {
         let (mut asks, mut replies) = (Vec::new(), Vec::new());
         let done = {
             let mut cache = self.cache.borrow_mut();
-            let timing = &self.node.cache_timing;
-            let (view, fresh, active) = self.node.cluster.cache_view(cluster::now_ms(), timing);
+            let membership = self.node.cluster.membership();
+            let (view, fresh, active) = self.timing.view(cluster::now_ms(), membership);
             cache.set(self.now(), view, fresh, active);
             f(&mut cache);
             loop {
@@ -260,7 +270,7 @@ impl Shared {
     /// was lost.
     async fn ask(self: Rc<Self>, to: String, msg: Msg<Value>) {
         let op = op_of(&msg);
-        let timeout = Duration::from_millis(self.node.cache_timing.timeout_ms);
+        let timeout = Duration::from_millis(self.timing.timeout_ms);
         let answer = tokio::time::timeout(timeout, self.call(&to, msg)).await;
         self.step(|cache| match answer {
             Ok(Ok(msg)) => cache.receive(&to, msg),

@@ -14,7 +14,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use cluster_logic::cache;
+use cluster_logic::Membership;
 use cluster_logic::lease;
 use cluster_logic::lease::Lease;
 use cluster_logic::lease::Step;
@@ -534,21 +534,14 @@ impl Cluster {
         self.lease.borrow().holds(now_ms())
     }
 
-    /// `cache::Cache::set`'s view, `fresh` and `active` at `now_ms`, as
-    /// `cache-test.rs`'s `Sim::leases` makes them: the nodes of the latest
-    /// listing, fresh from when it started; the lease, from when its renewal
-    /// was sent; the join, from when the registration answered. Peers judge
-    /// the lease by clocks up to `safety_ms` ahead, so the cache stops one
-    /// copy's lease before that. A node that drains is not active, and one
-    /// that left not fresh.
-    pub fn cache_view(&self, now_ms: u64, timing: &cache::Timing) -> (Vec<String>, bool, bool) {
-        let (listed, view) = self.registry.listing().unzip();
-        let lease = self.lease.borrow();
-        let fenced = lease.left || !lease.holds(now_ms + timing.lease_wait_ms());
-        let fresh = !fenced && timing.fresh(now_ms, listed);
-        let joined = timing.active(now_ms, listed, self.registered.get());
-        let active = fresh && joined && !self.is_draining();
-        (view.unwrap_or_default(), fresh, active)
+    /// What this node knows of the membership, for what routes by it.
+    pub fn membership(&self) -> Membership {
+        Membership {
+            listing: self.registry.listing(),
+            registered: self.registered.get(),
+            lease_until: self.lease.borrow().holds_until(),
+            draining: self.is_draining(),
+        }
     }
 }
 
