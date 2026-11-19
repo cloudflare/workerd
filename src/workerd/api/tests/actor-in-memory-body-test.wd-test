@@ -7,7 +7,7 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc", "streams_enable_constructors"],
 
   modules = [
     (name = "worker", esModule = embed "actor-in-memory-body-test.js"),

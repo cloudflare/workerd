@@ -3738,7 +3738,10 @@ kj::Promise<DrainingReadResult> startPumpRead(
 //
 // `firstRead` is the first draining read, which the caller starts under the isolate lock it
 // already holds, so that a source that has data ready, or a body that fits in one read, does not
-// wait for the lock to be taken again. Each later read takes the lock through run().
+// wait for the lock to be taken again. Each later read takes the lock through run(), in
+// `criticalSection`, the one that was current when the pump started, as awaitIo() continues in
+// it: a pump started within blockConcurrencyWhile() must be able to read while the callback awaits
+// it, or neither finishes. A failure cancels the source in it too, for the same reason.
 //
 // No read is awaited directly. A draining read runs the stream's pull() callback, and
 // pull() can abort the request, which drops the pump promise from inside the very event
@@ -3762,6 +3765,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
     bool end,
     kj::Promise<DrainingReadResult> firstRead,
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection,
     SourceIgnoresCancelReason sourceIgnoresCancelReason,
     kj::CoUnwindAware = {}) {
 
@@ -3772,6 +3776,11 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
   });
 
   bool writeFailed = false;
+  auto runInCriticalSection = [&ioContext, &criticalSection](auto func) {
+    return ioContext.run(kj::mv(func),
+        criticalSection.map(
+            [](kj::Rc<InputGate::CriticalSection>& section) { return section.addRef(); }));
+  };
 
   KJ_TRY {
     auto read = kj::mv(firstRead);
@@ -3810,8 +3819,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         co_return;
       }
 
-      read = ioContext.run([weakReader = reader->getWeak()](
-                               jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
+      read = runInCriticalSection([weakReader = reader->getWeak()](
+                                      jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
         KJ_IF_SOME(reader, weakReader.tryGet()) {
           return startPumpRead(js, IoContext::current(), reader);
         } else {
@@ -3826,9 +3835,9 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     }
 
     auto prp = kj::newPromiseAndFulfiller<void>();
-    auto promise =
-        ioContext.run([weakReader = reader->getWeak(), ex = exception.clone(),
-                          sourceIgnoresCancelReason](jsg::Lock& js) mutable -> kj::Promise<void> {
+    auto promise = runInCriticalSection(
+        [weakReader = reader->getWeak(), ex = exception.clone(), sourceIgnoresCancelReason](
+            jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
       if (weakReader.tryGet() == kj::none) {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
@@ -3992,7 +4001,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     auto& ioContext = IoContext::current();
     auto firstRead = startPumpRead(js, ioContext, *reader);
     return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end,
-        kj::mv(firstRead), sourceIgnoresCancelReason));
+        kj::mv(firstRead), ioContext.getCriticalSection(), sourceIgnoresCancelReason));
   };
 
   KJ_SWITCH_ONEOF(state) {
