@@ -177,9 +177,6 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 // own guard, or allows it again.
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
 
-// Allows or disallows eval() and WebAssembly compilation, as jsg::Lock::setAllowEval() does.
-void set_allow_eval(Isolate* isolate, bool allow);
-
 // Makes a WebAssembly.Module from `module` without recompiling it, as C++ code that Rust hands a
 // compiled module to does. Throws a KJ exception if V8 creates none.
 ::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
