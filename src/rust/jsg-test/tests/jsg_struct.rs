@@ -42,6 +42,15 @@ struct LenientStruct {
     pub count: jsg::LenientOption<u32>,
 }
 
+/// Field types shaped like those of C++ `R2ListOptions::include` and an Analytics Engine data
+/// point's `indexes`.
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct SequenceOfWrappersStruct {
+    pub include: Option<Vec<jsg::NonCoercible<String>>>,
+    pub indexes: Option<Vec<jsg::Nullable<String>>>,
+}
+
 #[jsg_struct]
 #[derive(Debug, PartialEq)]
 struct OptionalStruct {
@@ -733,6 +742,32 @@ fn lenient_struct_omits_absent_fields() {
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);
+        Ok(())
+    });
+}
+
+/// A sequence of `NonCoercible<T>` or `Nullable<T>` converts as C++ JSG's `kj::Array` of them does.
+#[test]
+fn struct_sequence_of_wrappers_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = convert::<SequenceOfWrappersStruct>(
+            lock,
+            ctx,
+            "({ include: ['httpMetadata'], indexes: ['a', null] })",
+        )?;
+        assert_eq!(
+            value,
+            SequenceOfWrappersStruct {
+                include: Some(vec![jsg::NonCoercible::new("httpMetadata".to_owned())]),
+                indexes: Some(vec![
+                    jsg::Nullable::Some("a".to_owned()),
+                    jsg::Nullable::Null,
+                ]),
+            }
+        );
+        let err = convert::<SequenceOfWrappersStruct>(lock, ctx, "({ include: [1] })").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
         Ok(())
     });
 }
