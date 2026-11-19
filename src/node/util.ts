@@ -52,6 +52,9 @@ import {
   parseEnv,
 } from 'node-internal:internal_utils';
 import { diff } from 'node-internal:internal_util_diff';
+// Sets promisify.custom on the node:timers functions, which
+// enable_nodejs_global_timers also installs on globalThis.
+import 'node-internal:internal_timers_promises';
 import {
   isReadableStream,
   isWritableStream,

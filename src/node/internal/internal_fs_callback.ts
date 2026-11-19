@@ -76,7 +76,10 @@ import {
 } from 'node-internal:internal_errors';
 import { type Dir, Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
-import { setCustomPromisifyArgs } from 'node-internal:internal_utils';
+import {
+  setCustomPromisified,
+  setCustomPromisifyArgs,
+} from 'node-internal:internal_utils';
 import { isArrayBufferView } from 'node-internal:internal_types';
 import {
   parseFileMode,
@@ -182,6 +185,10 @@ export function exists(path: FilePath, callback: ExistsCallback): void {
     callback(fssync.existsSync(path));
   });
 }
+
+setCustomPromisified(exists, function exists(path: FilePath): Promise<boolean> {
+  return Promise.resolve().then(() => fssync.existsSync(path));
+});
 
 setCustomPromisifyArgs(read, ['bytesRead', 'buffer']);
 setCustomPromisifyArgs(readv, ['bytesRead', 'buffers']);

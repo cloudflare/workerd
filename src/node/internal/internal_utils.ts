@@ -139,6 +139,15 @@ export const kCustomPromisifyArgsSymbol = Symbol.for(
   'nodejs.util.promisify.custom.args'
 );
 
+// util.promisify(fn) returns `promisified` instead of wrapping fn.
+export function setCustomPromisified(fn: object, promisified: object): void {
+  Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
+    value: promisified,
+  });
+}
+
 // Makes util.promisify(fn) resolve with an object keyed by `names` when fn
 // calls back with several values, e.g. ['bytesRead', 'buffer'] for fs.read.
 export function setCustomPromisifyArgs(fn: object, names: string[]): void {

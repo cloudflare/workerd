@@ -32,6 +32,7 @@ import {
   X_OK,
   writeFileSync,
   writeSync,
+  exists,
   read,
   readv,
   write,
@@ -275,5 +276,8 @@ export const promisifiedCallbacksTest = {
     } finally {
       closeSync(fd);
     }
+
+    strictEqual(await promisify(exists)(path), true);
+    strictEqual(await promisify(exists)('/tmp/does-not-exist'), false);
   },
 };
