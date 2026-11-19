@@ -120,9 +120,8 @@ fn is_async_function_tells_async_functions_apart() {
 #[test]
 fn a_wasm_module_compiles_from_its_bytes() {
     Harness::new().run_in_context(|lock, ctx| {
-        lock.set_allow_eval(true);
-        let module = v8::WasmModuleObject::compile(lock, ANSWER_MODULE)?;
-        lock.set_allow_eval(false);
+        let module =
+            lock.with_eval_allowed(|lock| v8::WasmModuleObject::compile(lock, ANSWER_MODULE))?;
         ctx.set_global(lock, "answerModule", v8::Local::<v8::Value>::from(module));
         assert_eq!(
             ctx.eval::<u32>(
@@ -139,10 +138,9 @@ fn a_wasm_module_compiles_from_its_bytes() {
 #[test]
 fn bytes_that_are_not_a_wasm_module_leave_a_compile_error_pending() {
     Harness::new().run_in_context(|lock, _ctx| {
-        lock.set_allow_eval(true);
-        let caught =
-            lock.try_catch(|lock| v8::WasmModuleObject::compile(lock, b"not wasm").map(|_| ()))?;
-        lock.set_allow_eval(false);
+        let caught = lock.with_eval_allowed(|lock| {
+            lock.try_catch(|lock| v8::WasmModuleObject::compile(lock, b"not wasm").map(|_| ()))
+        })?;
         let exception = caught.expect_err("the bytes must not compile");
         assert!(message(lock, exception).starts_with("CompileError"));
         Ok(())
@@ -160,6 +158,31 @@ fn set_allow_eval_turns_eval_on_and_off() {
         lock.set_allow_eval(false);
         assert!(!lock.is_eval_allowed());
         assert!(ctx.eval_raw(lock, "eval('1')").is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn with_eval_allowed_allows_eval_only_within_its_callback() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let sum = lock.with_eval_allowed(|lock| {
+            assert!(lock.is_eval_allowed());
+            ctx.eval::<u32>(lock, "eval('1 + 1')")
+        });
+        assert_eq!(sum.unwrap(), 2);
+        assert!(!lock.is_eval_allowed());
+        Ok(())
+    });
+}
+
+#[test]
+fn with_eval_allowed_disallows_eval_after_a_panic() {
+    Harness::new().run_in_context(|lock, _ctx| {
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            lock.with_eval_allowed(|_lock| panic!("in the callback"));
+        }));
+        assert!(panicked.is_err());
+        assert!(!lock.is_eval_allowed());
         Ok(())
     });
 }

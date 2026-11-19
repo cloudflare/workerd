@@ -76,6 +76,25 @@ impl Lock<'_> {
     pub(crate) fn isolate_state(&mut self) -> &Arc<IsolateState> {
         self.realm().state()
     }
+
+    /// Runs `f` with code generation from strings allowed, then disallows it, also when `f`
+    /// panics. It disallows it afterwards whatever it was before, as C++ does with
+    /// `setAllowEval(true)` followed by `KJ_DEFER(setAllowEval(false))`.
+    pub fn with_eval_allowed<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        struct Disallow(v8::IsolatePtr);
+        impl Drop for Disallow {
+            #[expect(unsafe_code, reason = "changes a JSG setting of the locked isolate")]
+            fn drop(&mut self) {
+                // SAFETY: the isolate is valid and locked: the guard lives only within
+                // `with_eval_allowed`, which borrows the lock.
+                unsafe { v8::ffi::isolate_set_allow_eval(self.0.as_ffi(), false) }
+            }
+        }
+
+        self.set_allow_eval(true);
+        let _disallow = Disallow(self.isolate);
+        f(self)
+    }
 }
 
 /// A V8 isolate that the current thread has locked.
