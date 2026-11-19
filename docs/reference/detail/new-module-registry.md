@@ -42,9 +42,11 @@ The new module registry was designed to address several limitations of the legac
    worker bundle ESM modules at startup.
 
 4. **Cross-isolate compile cache.** ESM modules cache their V8 compiled bytecode
-   in a `kj::MutexGuarded` field on the `Module` object itself. When a second
-   isolate imports the same module, the cached bytecode is consumed, skipping
-   recompilation. If the embedder gives isolates a code cache store
+   in a `kj::MutexGuarded` field on the `Module` object itself. The second
+   isolate to compile a module generates the bytecode, and later isolates
+   consume it, skipping recompilation. The first isolate does not serialize, so
+   a module compiled by only one isolate never pays for it. If the embedder
+   gives isolates a code cache store
    (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle, builtin and fallback
    modules use the store when a cache key is available. Both registries share
    the store. Embedded builtin bytecode takes precedence. Otherwise, compilation
@@ -214,9 +216,10 @@ consumption through `CompilationObserver::onCompileHintsConsumed`.
 Embedded bytecode takes precedence. For bundle modules with a `codeCacheKey`, an
 installed isolate code cache takes precedence on both misses and hits. Modules
 without an applicable store use the definition-local shared slot: existing bytecode
-takes precedence, while an empty slot compiles with hints and can cache the result
-for subsequent isolates. Hint production bypasses caches and supplied hints. Missing
-hints preserve ordinary source compilation, and builtins do not consume bundle hints.
+takes precedence, while an empty slot compiles with hints and, from the second
+compile on, caches the result for subsequent isolates. Hint production bypasses
+caches and supplied hints. Missing hints preserve ordinary source compilation, and
+builtins do not consume bundle hints.
 
 #### Source Encoding (`EncodedSource`)
 
@@ -247,10 +250,16 @@ and the shared compile cache stays consistent.
 First isolate compiles module:
   1. lockShared(sharedCompileCache) -> empty -> no cached data
   2. CompileModule(source, supplied hints if present) -> v8::Module
-  3. lockExclusive(sharedCompileCache) -> still empty?
-     -> CreateCodeCache(module) -> store Own<CachedData>
+  3. lockExclusive(sharedCompileCache) -> still empty, not yet compiled?
+     -> mark compiled, no serialization
 
 Second isolate compiles same module:
+  1. lockShared(sharedCompileCache) -> empty -> no cached data
+  2. CompileModule(source, supplied hints if present) -> v8::Module
+  3. lockExclusive(sharedCompileCache) -> still empty, already compiled?
+     -> CreateCodeCache(module) -> store Own<CachedData>
+
+Later isolates compile same module:
   1. lockShared(sharedCompileCache) -> has data -> borrow bytes under lock
      -> kConsumeCodeCache -> CompileModule(source, cache)
   2. No exclusive lock needed (cache already populated)
@@ -258,8 +267,8 @@ Second isolate compiles same module:
 
 Rejected bytecode is cleared under the exclusive lock only if the slot's
 generation has not changed, preserving replacements made by another replica.
-Snapshot preparation can consume existing bytecode but never generates or
-regenerates an entry.
+Snapshot preparation can consume existing bytecode but never marks, generates
+or regenerates an entry.
 
 #### Code cache store
 
@@ -893,7 +902,7 @@ returning a rejected promise with the cached exception.
    O(n) reverse scan is eliminated.
 
 4. **Cross-isolate caching.** ESM compile cache and Wasm compiled modules are
-   shared across isolate replicas, reducing startup time for subsequent replicas.
+   shared across isolate replicas, reducing startup time for later replicas.
    With a code cache store, bundle, builtin and fallback module caches are shared
    across registries. Builtin bundles consume embedded build-time caches first.
    Runtime cache production is deferred until startup evaluation completes;
