@@ -56,10 +56,8 @@ namespace {
 // Linux x86-64 V8 protects JIT memory, such as the WebAssembly code pointer table, with a memory
 // protection key that it allocates as the platform is created. Only the allocating thread gets
 // access to the key, and threads inherit their access from the thread that creates them, so V8
-// must start before any thread that will use it. Constructed lazily by the first test, the
-// main thread lacked access and faulted in `V8::Dispose()` once a test had compiled
-// WebAssembly. `--allow-natives-syntax` lets tests optimize functions on demand to reach fast
-// callbacks.
+// must start before any thread that will use it. `--allow-natives-syntax` lets tests optimize
+// functions on demand to reach fast callbacks.
 ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
 }  // namespace
 

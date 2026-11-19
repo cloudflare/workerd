@@ -1788,7 +1788,8 @@ impl BackingStore {
 /// between every module object made from it, in any isolate, so C++ can make another
 /// `WebAssembly.Module` from it without recompiling (`v8::WasmModuleObject::FromCompiledModule`).
 /// It is not on the V8 heap: it keeps the code and the wire bytes alive for as long as it is held,
-/// needs no lock, and can be dropped on any thread.
+/// needs no lock, and can be dropped on any thread that may use V8: one created, after V8 starts,
+/// by a thread that may use V8.
 ///
 /// Drop it before V8 is disposed: dropping the last reference to the compiled code frees it
 /// through the process-wide WebAssembly engine, which `V8::Dispose()` destroys. A value that lives
@@ -1799,9 +1800,9 @@ pub struct CompiledWasmModule {
 
 // SAFETY: a `v8::CompiledWasmModule` holds only a `std::shared_ptr` to the module's compiled code,
 // which V8 shares between isolates on different threads, and the module's source URL. Both are
-// const, so they may be read, copied and destroyed on any thread. Destroying the last reference to
-// the compiled code frees it through the process-wide `wasm::WasmEngine`, so it must happen before
-// `V8::Dispose()` destroys the engine; the type's docs say so.
+// const, so they may be read, copied and destroyed on any thread that may use V8. Destroying the
+// last reference to the compiled code frees it through the process-wide `wasm::WasmEngine`, so it
+// must happen before `V8::Dispose()` destroys the engine; the type's docs say so.
 unsafe impl Send for CompiledWasmModule {}
 // SAFETY: `&self` only reads the wire bytes, which never change.
 unsafe impl Sync for CompiledWasmModule {}
