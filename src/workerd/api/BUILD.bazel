@@ -412,7 +412,10 @@ wd_cc_library(
         "//src/node",
         "//src/pyodide",
         "//src/workerd/api/node",
+        "//src/workerd/api/unsafe-api",
+        "//src/workerd/api/unsafe-api:ffi.rs@cxx",
         "//src/workerd/io",
+        "//src/workerd/util:autogate",
     ],
 )
 

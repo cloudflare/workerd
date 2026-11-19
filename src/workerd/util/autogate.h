@@ -133,7 +133,11 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* When enabled, the unsafe modules (workerd:unsafe, workerd:unsafe-eval, internal:unsafe-eval   \
+     and workerd:stdin) and unsafeEval bindings are the Rust ones (src/workerd/api/unsafe-api)     \
+     instead of the C++ ones (api/unsafe.c++). */                                                  \
+  V(RUST_UNSAFE_MODULES)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

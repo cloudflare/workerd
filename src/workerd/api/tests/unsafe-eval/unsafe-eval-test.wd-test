@@ -1,16 +1,19 @@
 using Workerd = import "/workerd/workerd.capnp";
 using TestExtension = import "extension.capnp";
 
+# unsafe-eval-rust-test.wd-test runs these services against the Rust unsafe modules.
 const unitTests :Workerd.Config = (
-  services = [
-    ( name = "unsafe-eval-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "unsafe-eval-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat"],
-     )
-    ),
-  ],
+  services = .services,
   extensions = [ TestExtension.extension ],
 );
+
+const services :List(Workerd.Service) = [
+  ( name = "unsafe-eval-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "unsafe-eval-test.js")
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+   )
+  ),
+];
