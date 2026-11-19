@@ -1,4 +1,11 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "secrets-store-test.wd-test",
+    args = ["--experimental"],
+    data = ["secrets-store-test.js"],
+)
 
 # `workerd serve` of a wrangler.jsonc's secrets_store_secrets.
 js_test(

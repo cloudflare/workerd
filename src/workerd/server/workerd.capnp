@@ -650,8 +650,9 @@ struct Worker {
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
       # `/workerd/workflows.js`, a Workflows engine, `/workerd/d1.js`, D1 databases, or
-      # `/workerd/ratelimit.js`, rate limiting (see each one's header for the config it takes). Unlike built-in modules such as `node:` ones, user
-      # code cannot import it; it is a Worker's source. Experimental.
+      # `/workerd/ratelimit.js`, rate limiting, or `/workerd/secrets-store.js`, Secrets Store secrets
+      # (see each one's header for the config it takes). Unlike built-in modules such as `node:`
+      # ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

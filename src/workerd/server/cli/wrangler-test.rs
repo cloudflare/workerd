@@ -533,7 +533,7 @@ fn d1_databases_bind_the_d1_worker() {
 }
 
 #[test]
-fn secrets_store_secrets_read_the_environment() {
+fn secrets_store_secrets_bind_the_secrets_store_worker() {
     let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
         "no_bundle": true, "secrets_store_secrets": [
           { "binding": "A", "store_id": "s1", "secret_name": "api-key" },
@@ -554,54 +554,88 @@ fn secrets_store_secrets_read_the_environment() {
         .unwrap()
         .get_services()
         .unwrap();
-    assert_eq!(services.len(), 1);
-    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
-        panic!("not a worker");
-    };
-    let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
-    let bound: Vec<_> = w
-        .unwrap()
-        .get_bindings()
-        .unwrap()
+    let names: Vec<_> = services
         .iter()
-        .map(|b| {
-            let worker::binding::Which::Wrapped(w) = b.which().unwrap() else {
-                panic!("not wrapped");
-            };
-            let w = w.unwrap();
-            let inner = w.get_inner_bindings().unwrap();
-            let worker::binding::Which::Text(name) = inner.get(0).which().unwrap() else {
-                panic!("no name");
-            };
-            let worker::binding::Which::FromEnvironment(variable) = inner.get(1).which().unwrap()
-            else {
-                panic!("not from the environment");
-            };
-            (
-                text(b.get_name().unwrap()),
-                text(w.get_module_name().unwrap()),
-                text(name.unwrap()),
-                text(variable.unwrap()),
-            )
-        })
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    let secret = |b: &str, name: &str, variable: &str| {
-        (
-            b.into(),
-            "cloudflare-internal:secrets-store-api".into(),
-            name.into(),
-            variable.into(),
-        )
-    };
     assert_eq!(
-        bound,
+        names,
         [
-            secret("A", "api-key", "WORKERD_SECRET_API_KEY"),
-            secret("B", "api-key", "WORKERD_SECRET_API_KEY"),
-            secret("C", "Db_2", "WORKERD_SECRET_DB_2"),
+            "app",
+            "app-secrets-store",
+            "app-secrets-kv",
+            "app-secrets-kv-storage",
+            "app-secrets-kv-blobs"
         ]
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = fs::metadata(dir.join(".wrangler/state/workerd/secrets-store")).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+    }
+    let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+    let bound = |i: u32| -> Vec<String> {
+        let service::Which::Worker(w) = services.get(i).which().unwrap() else {
+            panic!("not a worker");
+        };
+        (w.unwrap().get_bindings().unwrap().iter())
+            .map(|b| {
+                let name = text(b.get_name().unwrap());
+                let (target, props) = match b.which().unwrap() {
+                    worker::binding::Which::Service(d) => {
+                        let d = d.unwrap();
+                        let entrypoint = text(d.get_entrypoint().unwrap());
+                        (
+                            format!("{} {entrypoint}", text(d.get_name().unwrap())),
+                            d.get_props(),
+                        )
+                    }
+                    worker::binding::Which::KvNamespace(d) => {
+                        let d = d.unwrap();
+                        (text(d.get_name().unwrap()), d.get_props())
+                    }
+                    worker::binding::Which::FromEnvironment(v) => {
+                        return format!("{name} {}", text(v.unwrap()));
+                    }
+                    _ => panic!("unexpected binding"),
+                };
+                let service_designator::props::Which::Json(props) = props.which().unwrap() else {
+                    panic!("no JSON props");
+                };
+                format!("{name} {target} {}", text(props.unwrap()))
+            })
+            .collect()
+    };
+    assert_eq!(
+        bound(0),
+        [
+            r#"A app-secrets-store SecretsStoreSecret {"secret_name":"api-key","store_id":"s1"}"#,
+            r#"B app-secrets-store SecretsStoreSecret {"secret_name":"api-key","store_id":"s2"}"#,
+            r#"C app-secrets-store SecretsStoreSecret {"secret_name":"Db_2","store_id":"s1"}"#,
+        ]
+    );
+    assert_eq!(
+        bound(1),
+        [
+            r#"store:s1 app-secrets-kv {"namespace":"s1"}"#,
+            r#"store:s2 app-secrets-kv {"namespace":"s2"}"#,
+            "env:Db_2 WORKERD_SECRET_DB_2",
+            "env:api-key WORKERD_SECRET_API_KEY",
+        ]
+    );
+    let service::Which::Worker(kv) = services.get(2).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let ns = kv.unwrap().get_durable_object_namespaces().unwrap().get(0);
+    let worker::durable_object_namespace::Which::UniqueKey(key) = ns.which().unwrap() else {
+        panic!("no unique key");
+    };
+    assert_eq!(text(key.unwrap()), "SecretsStoreKV");
+}
 
+#[test]
+fn secrets_store_secrets_cannot_share_a_variable() {
     let error = load_project(&[
         (
             "wrangler.jsonc",

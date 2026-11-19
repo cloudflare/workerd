@@ -33,9 +33,12 @@
 //! each binding is the D1 API over it, with the database's `preview_database_id`, else its
 //! `database_id`, else its binding name in its props, as `wrangler dev` names local databases;
 //! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`.
-//! `secrets_store_secrets`, also `--experimental`, read the environment: each secret's value is
-//! the variable [`secret_variable`] names after its `secret_name`, read when the server starts;
-//! `store_id` is ignored, so a secret name means the same secret in every store. `ratelimits`,
+//! `secrets_store_secrets`, also `--experimental`, are the entrypoint `SecretsStoreSecret` of the
+//! Worker `<name>-secrets-store` (the bundled module `/workerd/secrets-store.js`), the store and
+//! secret name in its props. Each store is a KV namespace of the Worker `<name>-secrets-kv`, in
+//! `.wrangler/state/workerd/secrets-store/`, which only this user may read. The variable
+//! [`secret_variable`] names after a `secret_name`, read when the server starts, overrides that
+//! secret in every store and is never stored. `ratelimits`,
 //! also `--experimental`, are the entrypoint `RateLimit` of the Worker `<name>-ratelimit` (the
 //! bundled module `/workerd/ratelimit.js`), its settings in its props, so they are called over JS
 //! RPC; it keeps its counts in memory. `assets`, also
@@ -52,6 +55,7 @@
 //! `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits` or `assets` yet.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -116,8 +120,7 @@ struct Wrangler {
 #[serde(deny_unknown_fields)]
 struct SecretsStoreSecret {
     binding: String,
-    #[serde(rename = "store_id")]
-    _store_id: String,
+    store_id: String,
     secret_name: String,
 }
 
@@ -467,6 +470,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         workers
             + do_storage
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
+            + 4 * u32::from(!wrangler.secrets_store_secrets.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
             + 2 * u32::from(!wrangler.workflows.is_empty())
@@ -643,8 +647,7 @@ fn secret_variable(secret_name: &str) -> String {
 }
 
 /// A rate limit's period is 10 or 60 seconds, as on Cloudflare. Two secrets of different names
-/// cannot read the same variable. A secret whose variable is not set is not found; say so now, not
-/// only when the Worker asks for it.
+/// cannot read the same variable.
 fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
     let periods = [10, 60];
     if let Some(r) = (wrangler.ratelimits.iter()).find(|r| !periods.contains(&r.simple.period)) {
@@ -656,12 +659,6 @@ fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
     let mut names = BTreeMap::new();
     for s in &wrangler.secrets_store_secrets {
         let variable = secret_variable(&s.secret_name);
-        if std::env::var_os(&variable).is_none() {
-            eprintln!(
-                "secrets_store_secrets: {variable} is not set; \"{}\" is not found",
-                s.secret_name
-            );
-        }
         match names.insert(variable.clone(), &s.secret_name) {
             Some(other) if *other != s.secret_name => {
                 return Err(format!(
@@ -688,8 +685,15 @@ fn bundled_services(
     watch: Watch,
 ) -> Result<(), String> {
     if !wrangler.kv_namespaces.is_empty() {
-        kv_services(services, at, &format!("{name}-kv"), &storage.join("kv"))?;
+        let kv = format!("{name}-kv");
+        kv_services(services, at, &kv, &storage.join("kv"), "KVNamespace")?;
         at += 3;
+    }
+    let secrets = &wrangler.secrets_store_secrets;
+    if !secrets.is_empty() {
+        let dir = storage.join("secrets-store");
+        secrets_services(services, at, name, &dir, secrets)?;
+        at += 4;
     }
     let crons = &wrangler.triggers.crons;
     if !crons.is_empty() {
@@ -711,7 +715,8 @@ fn bundled_services(
         at += 2;
     }
     if !wrangler.ratelimits.is_empty() {
-        ratelimit_service(services.reborrow().get(at), &format!("{name}-ratelimit"));
+        let service = services.reborrow().get(at);
+        stateless_worker(service, &format!("{name}-ratelimit"), "ratelimit.js", 0);
         at += 1;
     }
     if let Some(assets) = &wrangler.assets {
@@ -787,17 +792,19 @@ fn d1_services(
         dir,
     );
     let service = services.reborrow().get(at);
-    let class = Some(("DATABASE", "D1Database"));
+    let class = Some(("DATABASE", "D1Database", "D1Database"));
     bundled_worker(service, name, "d1.js", &[], class, 1);
     Ok(())
 }
 
-/// The KV Worker `name` at `services[at]`, then its disks under `dir`.
+/// The KV Worker `name` at `services[at]`, its objects' unique key `key`, then its disks under
+/// `dir`.
 fn kv_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     at: u32,
     name: &str,
     dir: &Path,
+    key: &str,
 ) -> Result<(), String> {
     let blobs = dir.join("blobs");
     fs::create_dir_all(&blobs).map_err(|e| format!("{}: {e}", blobs.display()))?;
@@ -817,7 +824,7 @@ fn kv_services(
         name,
         "kv.js",
         &[],
-        Some(("SHARD", "KVNamespace")),
+        Some(("SHARD", "KVNamespace", key)),
         2,
     );
     let mut blobs = bindings.get(1);
@@ -826,14 +833,66 @@ fn kv_services(
     Ok(())
 }
 
-/// The rate-limiting Worker `name`. Its counts are in memory, so it has no disk.
-fn ratelimit_service(mut service: service::Builder<'_>, name: &str) {
+/// The Worker `name` of the bundled module `/workerd/<module>`, without Durable Objects or a
+/// disk, and `n` bindings, returned.
+fn stateless_worker<'a>(
+    mut service: service::Builder<'a>,
+    name: &str,
+    module: &str,
+    n: u32,
+) -> capnp::struct_list::Builder<'a, worker::binding::Owned> {
     service.set_name(name);
     let mut w = service.init_worker();
     let mut m = w.reborrow().init_modules(1).get(0);
-    m.set_name("ratelimit.js");
-    m.set_bundled("/workerd/ratelimit.js");
+    m.set_name(module);
+    m.set_bundled(format!("/workerd/{module}"));
     w.set_compatibility_date("2026-01-01");
+    w.init_bindings(n)
+}
+
+/// The Secrets Store Worker `<name>-secrets-store` at `services[at]`, then the KV Worker
+/// `<name>-secrets-kv` that holds its stores and that KV Worker's disks under `dir`, which only
+/// this user may read. Each store is a KV namespace, bound as `store:<store_id>`; each secret's
+/// variable, which overrides it in every store, is bound as `env:<secret_name>`.
+fn secrets_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    dir: &Path,
+    secrets: &[SecretsStoreSecret],
+) -> Result<(), String> {
+    let kv = format!("{name}-secrets-kv");
+    kv_services(services, at + 1, &kv, dir, "SecretsStoreKV")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(dir, mode).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let stores: BTreeSet<_> = secrets.iter().map(|s| &s.store_id).collect();
+    let names: BTreeSet<_> = secrets.iter().map(|s| &s.secret_name).collect();
+    let service = services.reborrow().get(at);
+    let n = (stores.len() + names.len()) as u32;
+    let mut bindings = stateless_worker(
+        service,
+        &format!("{name}-secrets-store"),
+        "secrets-store.js",
+        n,
+    );
+    for (i, store) in (0u32..).zip(&stores) {
+        let mut b = bindings.reborrow().get(i);
+        b.set_name(format!("store:{store}"));
+        let mut designator = b.init_kv_namespace();
+        designator.set_name(&kv);
+        let props = serde_json::json!({ "namespace": store });
+        designator.init_props().set_json(props.to_string());
+    }
+    for (i, secret) in (stores.len() as u32..).zip(&names) {
+        let mut b = bindings.reborrow().get(i);
+        b.set_name(format!("env:{secret}"));
+        b.set_from_environment(secret_variable(secret));
+    }
+    Ok(())
 }
 
 /// A writable disk service `name` at `path`.
@@ -846,13 +905,13 @@ fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
 
 /// The Worker `name` of the bundled module `/workerd/<module>`, with `flags`, its Durable Objects
 /// on the disk `<name>-storage`, and `n` bindings, returned. With `class`, the SQLite-backed
-/// Durable Object class `class` is the first binding, `binding`.
+/// Durable Object class `class`, unique key `key`, is the first binding, `binding`.
 fn bundled_worker<'a>(
     mut service: service::Builder<'a>,
     name: &str,
     module: &str,
     flags: &[&str],
-    class: Option<(&str, &str)>,
+    class: Option<(&str, &str, &str)>,
     n: u32,
 ) -> capnp::struct_list::Builder<'a, worker::binding::Owned> {
     service.set_name(name);
@@ -865,17 +924,17 @@ fn bundled_worker<'a>(
     for (i, flag) in (0u32..).zip(flags) {
         list.set(i, flag);
     }
-    if let Some((_, class)) = class {
+    if let Some((_, class, key)) = class {
         let mut ns = w.reborrow().init_durable_object_namespaces(1).get(0);
         ns.set_class_name(class);
-        ns.set_unique_key(class);
+        ns.set_unique_key(key);
         ns.set_enable_sql(true);
     }
     w.reborrow()
         .init_durable_object_storage()
         .set_local_disk(format!("{name}-storage"));
     let mut bindings = w.init_bindings(n);
-    if let Some((binding, class)) = class {
+    if let Some((binding, class, _)) = class {
         let mut b = bindings.reborrow().get(0);
         b.set_name(binding);
         b.init_durable_object_namespace().set_class_name(class);
@@ -907,7 +966,7 @@ fn cron_services(
     );
     let flags = ["service_binding_extra_handlers"];
     let service = services.reborrow().get(at);
-    let class = Some(("SCHEDULE", "Schedule"));
+    let class = Some(("SCHEDULE", "Schedule", "Schedule"));
     let mut bindings = bundled_worker(service, &name, "cron.js", &flags, class, 3);
     let mut list = bindings.reborrow().get(1);
     list.set_name("CRONS");
@@ -996,7 +1055,7 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         designator.init_props().set_json(props.to_string());
     }
     for (i, secret) in secrets.iter().enumerate() {
-        set_secret(bs.reborrow().get((at + i) as u32), secret);
+        set_secret(bs.reborrow().get((at + i) as u32), secret, name);
     }
     for (i, r) in limits.iter().enumerate() {
         set_ratelimit(bs.reborrow().get((limits_at + i) as u32), r, name);
@@ -1010,19 +1069,18 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     }
 }
 
-/// The Secrets Store secret `secret`: its name, and its value from the variable
-/// [`secret_variable`] names.
-fn set_secret(mut b: worker::binding::Builder<'_>, secret: &SecretsStoreSecret) {
+/// The Secrets Store secret `secret` of the worker `name`: the entrypoint `SecretsStoreSecret` of
+/// `<name>-secrets-store`, the store and the secret's name in its props.
+fn set_secret(mut b: worker::binding::Builder<'_>, secret: &SecretsStoreSecret, name: &str) {
     b.set_name(&secret.binding);
-    let mut wrapped = b.init_wrapped();
-    wrapped.set_module_name("cloudflare-internal:secrets-store-api");
-    let mut inner = wrapped.init_inner_bindings(2);
-    let mut name = inner.reborrow().get(0);
-    name.set_name("name");
-    name.set_text(&secret.secret_name);
-    let mut value = inner.get(1);
-    value.set_name("value");
-    value.set_from_environment(secret_variable(&secret.secret_name));
+    let mut designator = b.init_service();
+    designator.set_name(format!("{name}-secrets-store"));
+    designator.set_entrypoint("SecretsStoreSecret");
+    let props = serde_json::json!({
+        "store_id": secret.store_id,
+        "secret_name": secret.secret_name,
+    });
+    designator.init_props().set_json(props.to_string());
 }
 
 /// The rate limit `r` of the worker `name`: the entrypoint `RateLimit` of
@@ -1187,7 +1245,7 @@ fn queues_services(
     let consumed = !consumers.is_empty();
     let flags = ["service_binding_extra_handlers"];
     let service = services.reborrow().get(at);
-    let class = Some(("SHARD", "QueueShard"));
+    let class = Some(("SHARD", "QueueShard", "QueueShard"));
     let n = 2 + u32::from(consumed);
     let mut bindings = bundled_worker(service, &name, "queues.js", &flags, class, n);
     let mut list = bindings.reborrow().get(1);

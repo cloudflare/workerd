@@ -116,13 +116,16 @@ are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `d1_databases`, `secrets_store_secrets`, `ratelimits` and `assets`; any other
 field is an error. With `assets`, `main` may be left out to serve files only,
 and then fields that need a Worker are an error. Each KV namespace and each D1
-database is one Durable Object, so its throughput is that of one object. A
-Secrets Store secret's value is the environment variable `WORKERD_SECRET_` plus
-its `secret_name`, upper-cased, with other characters than letters and digits as
-`_`: `api-key` is `WORKERD_SECRET_API_KEY`. `store_id` is ignored. Rate limits
-are called over JS RPC, so the Worker needs a compatibility date of 2024-04-03
-or later, or the `rpc` flag; they count in the server's memory, and a restart
-forgets the counts.
+database is one Durable Object, so its throughput is that of one object.
+Secrets Store secrets are kept in `.wrangler/state/workerd/secrets-store/`,
+which only the user can read, and are written through Miniflare's admin API on
+the binding. The environment variable `WORKERD_SECRET_` plus a `secret_name`,
+upper-cased, with other characters than letters and digits as `_` (`api-key` is
+`WORKERD_SECRET_API_KEY`), overrides that secret in every store and is never
+written to disk. Secrets Store secrets and rate limits are called over JS RPC,
+so the Worker needs a compatibility date of 2024-04-03 or later, or the `rpc`
+flag, and for secrets before 2024-03-26 also `fetcher_no_get_put_delete`. Rate
+limits count in the server's memory, and a restart forgets the counts.
 
 A simple "Hello World!" config file might look like:
 
