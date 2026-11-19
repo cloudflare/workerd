@@ -15,4 +15,7 @@ void record_async_context(uintptr_t isolate);
 // Records the IoContext that is current, from the callback of an await_io_and_run().
 void record_await_context();
 
+// Records the IoContext that is current, if any, when the data of register_reaction() is dropped.
+void record_drop_context();
+
 }  // namespace workerd::io_context::test
