@@ -1488,6 +1488,19 @@ wd_test(
 )
 
 js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
+)
+
+js_binary(
     name = "websocket-client-error-sidecar",
     entry_point = "websocket-client-error-sidecar.js",
 )
@@ -1805,6 +1818,17 @@ wd_test(
         ":js-string-builtins.wasm",
     ],
     # The test uses `import source` syntax, which eslint's parser does not yet support.
+    lint = False,
+)
+
+wd_test(
+    src = "worker-loader-liftoff-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-liftoff-test.js",
+    ],
+    # The test uses V8 natives syntax, which eslint can't parse.
     lint = False,
 )
 

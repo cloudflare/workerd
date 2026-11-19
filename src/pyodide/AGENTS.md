@@ -20,7 +20,8 @@ Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitut
 | `internal/workers-api/`                       | Python SDK package (frozen)                                            |
 | `scripts/`                                    | Standalone dev/CI scripts (not used by bazel): `make_snapshots.py`, `upload_bundles.py`, `create_vendor_zip.py` |
 | `internal/metadata.ts`                        | Config flags: `IS_WORKERD`, `MAIN_MODULE_NAME`, etc.                                                  |
-| `pyodide_extra.capnp`                         | Cap'n Proto schema for Pyodide bundle metadata                                                        |
+| `pyodide_extra.capnp` + `pyodide_extra.bzl`   | Table of Python releases compiled into the binary, generated from `BUNDLE_VERSION_INFO` in `build/python_metadata.bzl` |
+| `pyodide_static.bzl`                          | Builds `pyodide_static`: `python-entrypoint-helper.ts`, `internal/`, `types/`                         |
 
 ## Python SDK
 

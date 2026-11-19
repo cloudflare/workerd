@@ -622,7 +622,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct or enum whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. It generates a `jsg::SnapshotTransfer` impl with an empty snapshot; a type with state implements `SnapshotTransfer` itself. See [Startup snapshots](#startup-snapshots).
@@ -1220,7 +1220,10 @@ how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be 
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
 that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
-`String` converts from any value with `ToString`, copying it out of the V8 heap. A
+`String` converts from any value with `ToString`, copying it out of the V8 heap. It is a Web IDL
+`USVString`: each lone UTF-16 surrogate becomes one U+FFFD. C++ JSG's `kj::String` differs here: it
+keeps a lone surrogate as its three WTF-8 bytes, which read back in JavaScript as three U+FFFD, so
+`'\ud800x'` returns from C++ as `'\ufffd\ufffd\ufffdx'` and from Rust as `'\ufffdx'`. A
 `jsg::JsString<'s>` parameter performs the same coercion without copying or decoding the string,
 like C++ JSG's `jsg::JsString`. It preserves lone UTF-16 surrogates and returns to JavaScript
 unchanged. It dereferences to `v8::Local<'s, v8::String>` for string operations, and converts to
@@ -1274,6 +1277,13 @@ pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor {
   `...name: any[]`; give a precise type with a TypeScript override.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
+
+From JavaScript, a `Vec<T>` takes an `Array`, and a hole reads as `undefined`. An element that is
+not a `T` is a `TypeError` naming its index, and a `#[jsg_struct]` field that is not of its type is
+one naming the field, with the messages C++ JSG gives. Script that runs during the conversion,
+such as an element's getter or `valueOf`, can change the array's length. C++ JSG reads the length
+once, and Rust JSG follows the current length: when script shortens the array, C++ JSG pads the
+result with `undefined` and Rust JSG stops at the new length.
 
 A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
 `vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
