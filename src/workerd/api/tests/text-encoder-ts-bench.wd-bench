@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the TextEncoder benchmarks against the TypeScript implementation
+# (src/per_isolate/text-encoder.ts), with the same module as
+# text-encoder-bench.wd-bench, which runs them against the C++ one.
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "text-encoder-bench",
+    worker = (
+      modules = [(name = "worker", esModule = embed "text-encoder-bench.js")],
+    ),
+  )],
+  autogates = ["workerd-autogate-ts-text-encoder"],
+);
