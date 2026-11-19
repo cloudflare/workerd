@@ -502,6 +502,14 @@ static_assert(alignof(repr::Result) == alignof(std::size_t));
 // assert that 0x1 is not a valid kj::Exception* (repr::Result::canceled)
 static_assert(alignof(kj::Exception) >= alignof(std::size_t));
 
+extern "C" {
+// cxx::panic_on_exception(): returns the C++ exception that unwinds out of `call`, a Rust function,
+// thrown by a #[nothrow] function that `call` reached.
+repr::Result cxxbridge1$catch_exception(void (*call)(void *), void *data) {
+  return repr::Result::runCatchingCxx([&] { call(data); });
+}
+} // extern "C"
+
 // kj::Exception bridge
 extern "C" {
 

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 #![allow(dead_code)]
 
+use core::ffi::c_void;
 use core::mem;
 use std::panic;
 
@@ -86,4 +87,49 @@ fn panic_result(label: &'static str, err: alloc::boxed::Box<dyn core::any::Any +
         file!(),
         line!(),
     )
+}
+
+/// Runs `f`, and panics if a C++ exception unwinds out of it, with the panic that an infallible
+/// `extern "C++"` function raises when it throws.
+///
+/// Such an exception comes from a `#[nothrow]` function, whose bridge function does not catch.
+/// Rust cannot catch it either: at `catch_unwind`, or at a function that cannot unwind, it
+/// aborts the process. Run the code that calls `#[nothrow]` functions through this, inside the
+/// `catch_unwind` that handles its panics, and such an exception is handled as a panic instead.
+///
+/// # Panics
+///
+/// Panics if a C++ exception unwinds out of `f`, with a `CanceledException` payload if it is a
+/// `kj::CanceledException`. A panic in `f` propagates unchanged.
+#[track_caller]
+pub fn panic_on_exception<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    unsafe extern "C-unwind" {
+        #[link_name = "cxxbridge1$catch_exception"]
+        fn catch_exception(
+            call: unsafe extern "C-unwind" fn(*mut c_void),
+            data: *mut c_void,
+        ) -> Result;
+    }
+
+    unsafe extern "C-unwind" fn call<F, R>(data: *mut c_void)
+    where
+        F: FnOnce() -> R,
+    {
+        // Safety: `data` is the `(f, result)` of the `panic_on_exception` that passed it.
+        let (f, result) = unsafe { &mut *data.cast::<(Option<F>, Option<R>)>() };
+        if let Some(f) = f.take() {
+            *result = Some(f());
+        }
+    }
+
+    let mut data = (Some(f), None);
+    // Safety: `call::<F, R>` reads `data`, which outlives the call, as the type it has.
+    unsafe { catch_exception(call::<F, R>, (&raw mut data).cast()) }.panic_on_exception();
+    match data.1 {
+        Some(result) => result,
+        None => unreachable!(),
+    }
 }

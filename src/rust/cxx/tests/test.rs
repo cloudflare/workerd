@@ -807,6 +807,49 @@ fn test_infallible_cxx_function_throws() {
     assert!(message.contains("infallible method failure"), "{message}");
 }
 
+// The bridge function of a #[nothrow] function does not catch. If the function throws
+// regardless, the exception unwinds its Rust callers, and `cxx::panic_on_exception` turns it
+// into the panic that it is without #[nothrow].
+#[test]
+fn test_nothrow_cxx_function_throws() {
+    struct SetOnDrop<'a>(&'a Cell<bool>);
+    impl Drop for SetOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    let dropped = Cell::new(false);
+    let message = expect_panic_message(panic::AssertUnwindSafe(|| {
+        cxx::panic_on_exception(|| {
+            let _guard = SetOnDrop(&dropped);
+            let _ = ffi::c_nothrow_fail();
+        });
+    }));
+    assert!(message.contains("Disconnected"), "{message}");
+    assert!(message.contains("infallible disconnect"), "{message}");
+    assert!(dropped.get());
+
+    let payload = panic::catch_unwind(|| {
+        cxx::panic_on_exception(|| {
+            let _ = ffi::c_nothrow_cancel();
+        });
+    })
+    .expect_err("expected a panic");
+    assert!(
+        payload.downcast_ref::<cxx::CanceledException>().is_some(),
+        "expected panic payload to be CanceledException"
+    );
+
+    // A panic passes through the C++ frame that catches the exceptions, and so does a result.
+    let message = expect_panic_message(|| cxx::panic_on_exception(|| panic!("plain panic")));
+    assert_eq!("plain panic", message);
+    assert_eq!(
+        2020,
+        cxx::panic_on_exception(ffi::c_return_primitive_nothrow)
+    );
+}
+
 #[test]
 fn test_infallible_cxx_function_cancellation() {
     let payload = panic::catch_unwind(|| {

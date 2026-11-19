@@ -91,6 +91,18 @@ struct Result final {
     // This is a version of kj::runCatchingExceptions that doesn't rethrow CanceledException
     // but return it properly.
     try {
+      return runCatchingCxx(func);
+    } catch (...) {
+      return error(kj::Exception(
+          kj::Exception::Type::FAILED, "(unknown)", -1, kj::str("unknown non-KJ exception")));
+    }
+  }
+
+  // Like run(), but without the catch-all, for a `func` that runs Rust: a Rust panic unwinding
+  // through C++ matches no handler by type, and a catch-all would catch it.
+  template <typename Func>
+  inline static Result runCatchingCxx(Func func) {
+    try {
       func();
       return ok();
     } catch (kj::Exception &e) {
@@ -101,9 +113,6 @@ struct Result final {
     } catch (std::exception &e) {
       return error(kj::Exception(
           kj::Exception::Type::FAILED, "(unknown)", -1, kj::str("std::exception: ", e.what())));
-    } catch (...) {
-      return error(kj::Exception(
-          kj::Exception::Type::FAILED, "(unknown)", -1, kj::str("unknown non-KJ exception")));
     }
   }
 };

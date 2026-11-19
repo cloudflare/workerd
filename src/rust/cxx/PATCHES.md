@@ -14,7 +14,8 @@ The in-tree fork contains these major behavioral changes:
   can inline it, and the C++ function, into Rust; LLVM doesn't inline a function into one with a
   different personality, and a C++ `noexcept` function that calls anything not known not to throw
   has one. A C++ exception that escapes anyway unwinds into Rust, which aborts the process at
-  `catch_unwind` or at a function that can't unwind, as Rust can't catch a foreign exception.
+  `catch_unwind` or at a function that can't unwind, as Rust can't catch a foreign exception,
+  unless `cxx::panic_on_exception` catches it in a C++ frame first and turns it into a panic.
 - **Required lifetime annotations on returned references.** This supports the exception-safe bridge
   ABI.
 - **KJ interoperability.** Bridge generation and `kj-rs` support KJ ownership, refcounting,

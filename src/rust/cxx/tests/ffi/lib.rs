@@ -384,6 +384,14 @@ pub mod ffi {
         #[rust_name = "set_nothrow"]
         fn set(self: Pin<&mut C>, n: usize) -> usize;
 
+        // #[nothrow] declarations of functions that throw, for `cxx::panic_on_exception`.
+        #[nothrow]
+        #[rust_name = "c_nothrow_fail"]
+        fn c_infallible_fail_kj_exception_disconnected() -> usize;
+        #[nothrow]
+        #[rust_name = "c_nothrow_cancel"]
+        fn c_infallible_cancel() -> usize;
+
         #[rust_name = "i32_overloaded_method"]
         fn cOverloadedMethod(&self, x: i32) -> String;
         #[rust_name = "str_overloaded_method"]

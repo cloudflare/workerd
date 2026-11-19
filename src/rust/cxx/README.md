@@ -73,6 +73,9 @@ not known not to throw gets an exception-handling personality (`__gxx_personalit
 doesn't inline it into a Rust function, which has Rust's. If the function throws anyway, the
 exception unwinds into Rust (the bridge declares it `extern "C-unwind"`), which aborts the process
 at `catch_unwind` or at a function that can't unwind, as Rust can't catch a foreign exception.
+`cxx::panic_on_exception(f)` runs `f` under a C++ frame that catches such an exception, and panics
+as an infallible function without `#[nothrow]` does; call it inside the `catch_unwind` that handles
+the panics of `f`.
 `#[nothrow]` can't be combined with a `Result` return, `async`, or a function pointer argument.
 
 ### KJ types

@@ -451,6 +451,7 @@ pub use crate::extern_type::kind;
 pub use crate::shared_ptr::SharedPtr;
 pub use crate::string::CxxString;
 pub use crate::unique_ptr::UniquePtr;
+pub use crate::unwind::panic_on_exception;
 pub use crate::weak_ptr::WeakPtr;
 
 /// Synonym for `CxxString`.
