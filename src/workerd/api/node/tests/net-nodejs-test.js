@@ -92,31 +92,63 @@ export const testNetAccessBytesWritten = {
 };
 
 // test/parallel/test-net-better-error-messages-port-hostname.js
+async function assertHostNotFound(host, message) {
+  const { promise, resolve, reject } = Promise.withResolvers();
+  const c = net.connect(0, host);
+  c.on('connect', () => {
+    reject(new Error('should not connect'));
+  });
+  const lookupFn = mock.fn();
+  c.on('lookup', lookupFn);
+  c.on('error', resolve);
+  const error = await promise;
+  // Node reports a host that does not resolve as a getaddrinfo ENOTFOUND.
+  // connect() rejects these hosts before any lookup, so its message is kept.
+  strictEqual(error.code, 'ENOTFOUND');
+  strictEqual(error.errno, -3008);
+  strictEqual(error.syscall, 'getaddrinfo');
+  strictEqual(error.hostname, host);
+  strictEqual(error.message, message);
+  strictEqual(lookupFn.mock.callCount(), 1);
+  deepStrictEqual(lookupFn.mock.calls[0].arguments, [
+    error,
+    undefined,
+    undefined,
+    host,
+  ]);
+}
+
 export const testNetBetterErrorMessagesPortHostname = {
   async test() {
     // This is intentionally not a completely faithful reproduction of the
     // original test, as we don't have the ability to mock DNS lookups.
+    await assertHostNotFound(
+      'invalid address',
+      'Specified address could not be parsed.'
+    );
+    await assertHostNotFound(
+      'invalid~address',
+      'Specified address is empty string, contains unsupported characters or is too long.'
+    );
+  },
+};
+
+// An IP literal is never looked up, so one connect() rejects keeps its error.
+export const testNetRejectedIpLiteralIsNotLookup = {
+  async test() {
     const { promise, resolve, reject } = Promise.withResolvers();
-    const c = net.connect(0, 'invalid address');
+    const c = net.connect(80, 'fe80::1%eth0');
     c.on('connect', () => {
       reject(new Error('should not connect'));
     });
-    const errorFn = mock.fn((error) => {
-      // TODO(review): Currently our errors do not match the errors that
-      // Node.js produces. Do we need them to? Specifically, in a case like
-      // this, Node.js' error would have a meaningful `code` property along
-      // with `hostname` and `syscall` properties. We, instead, are passing
-      // along the underlying error returned from the internal Socket API.
-      try {
-        strictEqual(error.message, 'Specified address could not be parsed.');
-      } catch (err) {
-        console.log(err.message);
-      }
-      resolve();
-    });
-    c.on('error', errorFn);
-    await promise;
-    strictEqual(errorFn.mock.callCount(), 1);
+    const lookupFn = mock.fn();
+    c.on('lookup', lookupFn);
+    c.on('error', resolve);
+    const error = await promise;
+    strictEqual(error.name, 'TypeError');
+    strictEqual(error.message, 'Specified address could not be parsed.');
+    strictEqual(error.code, undefined);
+    strictEqual(lookupFn.mock.callCount(), 0);
   },
 };
 
@@ -415,8 +447,6 @@ export const testNetDnsCustomLookup = {
 };
 
 // test/parallel/test-net-dns-error.js
-// This test differs from original Node.js test since our error code for isValidHost
-// is different from Node.js.
 export const testNetDnsError = {
   async test() {
     const p1 = Promise.withResolvers();
@@ -426,24 +456,17 @@ export const testNetDnsError = {
       p1.reject(new Error('Should not have called'))
     );
     socket.on('error', function (err) {
-      strictEqual(err.name, 'TypeError');
-      strictEqual(
-        err.message,
-        'Specified address is empty string, contains unsupported characters or is too long.'
-      );
+      strictEqual(err.code, 'ENOTFOUND');
       p1.resolve();
     });
     socket.on('lookup', function (err, ip, type) {
-      strictEqual(err.name, 'TypeError');
-      strictEqual(
-        err.message,
-        'Specified address is empty string, contains unsupported characters or is too long.'
-      );
+      ok(err instanceof Error);
+      strictEqual(err.code, 'ENOTFOUND');
       strictEqual(ip, undefined);
       strictEqual(type, undefined);
       p2.resolve();
     });
-    await Promise.all([p1, p2]);
+    await Promise.all([p1.promise, p2.promise]);
   },
 };
 
