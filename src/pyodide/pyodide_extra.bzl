@@ -1,8 +1,14 @@
+"""Macro that generates the table of Python releases compiled into the binary.
+
+`releases` in the generated pyodide_extra.capnp lists every entry of BUNDLE_VERSION_INFO
+(build/python_metadata.bzl): the compatibility flag that selects it, and the bundle and baseline
+snapshot it pins. The runtime picks a Worker's release from this table.
+"""
+
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 def _fmt_python_snapshot_release(
         pyodide_version,
@@ -50,33 +56,4 @@ def pyodide_extra():
         name = "pyodide_extra_capnp",
         srcs = ["generated/pyodide_extra.capnp"],
         visibility = ["//visibility:public"],
-    )
-
-def pyodide_static():
-    internal_data_modules = native.glob([
-        "internal/*.py",
-        "internal/workers-api/src/*.py",
-        "internal/workers-api/src/workers/*.py",
-        "internal/topLevelEntropy/*.py",
-    ])
-    internal_modules = native.glob(
-        [
-            "internal/*.ts",
-            "internal/topLevelEntropy/*.ts",
-            "types/*.ts",
-            "types/*/*.ts",
-        ],
-    )
-    modules = ["python-entrypoint-helper.ts"]
-
-    wd_ts_bundle(
-        name = "pyodide_static",
-        eslintrc_json = "eslint.config.mjs",
-        import_name = "pyodide",
-        internal_data_modules = internal_data_modules,
-        internal_modules = internal_modules,
-        lint = True,
-        modules = modules,
-        schema_id = "0xdc8d02dfbdf14025",
-        tsconfig_json = "tsconfig.json",
     )

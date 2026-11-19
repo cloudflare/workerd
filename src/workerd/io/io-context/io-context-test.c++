@@ -2647,26 +2647,26 @@ KJ_TEST("an await_js() whose promise GC collects in another request releases its
 }
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
+constexpr kj::StringPtr FAILING_SPECIFIER = "test:io-context-failing"_kj;
 
-KJ_TEST("the legacy registry creates a Rust module's exports outside the request resolving it") {
-  // The type wrapper is used only to register C++ resources, which this test doesn't.
+// Has `registerModules` add Rust modules to a legacy registry, then calls `body` with the
+// registry inside a request.
+void withLegacyRustRegistry(auto&& registerModules, auto&& body) {
+  // The type wrapper is used only to register C++ resources, which these tests don't.
   struct UnusedTypeWrapper {};
   jsg::CompilationObserver observer;
   jsg::ModuleRegistryImpl<UnusedTypeWrapper> registry(observer);
   ::workerd::rust::jsg::RustModuleRegistry<decltype(registry), SuppressIoContextScope> adapter(
       registry);
-  register_probe_module(adapter);
+  registerModules(adapter);
 
   TestFixture fixture;
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    KJ_EXPECT(registry.resolve(env.js, kj::Path::parse(PROBE_SPECIFIER), kj::none,
-                  jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY) != kj::none);
-    KJ_EXPECT(IoContext::hasCurrent());
-  });
-  KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env, registry); });
 }
 
-KJ_TEST("the new registry creates a Rust module's exports outside the request resolving it") {
+// Has `registerModules` add Rust modules to the new registry, then calls `body` inside a request
+// of a worker that uses it.
+void withNewRustRegistry(auto&& registerModules, auto&& body) {
   constexpr auto mainModule = "export default {};"_kjc;
   const auto base = "file:///"_url;
   jsg::modules::ModuleRegistry::Builder registryBuilder(base);
@@ -2675,7 +2675,7 @@ KJ_TEST("the new registry creates a Rust module's exports outside the request re
   jsg::modules::ModuleBundle::BuiltinBuilder builtinBuilder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
   ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builtinBuilder);
-  register_probe_module(adapter);
+  registerModules(adapter);
   registryBuilder.add(bundleBuilder.finish()).add(builtinBuilder.finish());
 
   capnp::MallocMessageBuilder flagsMessage;
@@ -2687,7 +2687,28 @@ KJ_TEST("the new registry creates a Rust module's exports outside the request re
     .useRealTimers = false,
     .newModuleRegistry = registryBuilder.finish(),
   });
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env); });
+}
+
+// What calling `fn` throws, as a string.
+kj::String thrownBy(jsg::Lock& js, auto&& fn) {
+  return js.tryCatch([&]() -> kj::String {
+    fn();
+    return kj::str("no exception");
+  }, [&](jsg::Value value) { return kj::str(jsg::JsValue(value.getHandle(js))); });
+}
+
+KJ_TEST("the legacy registry creates a Rust module's exports outside the request resolving it") {
+  withLegacyRustRegistry(register_probe_module, [](const auto& env, auto& registry) {
+    KJ_EXPECT(registry.resolve(env.js, kj::Path::parse(PROBE_SPECIFIER), kj::none,
+                  jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY) != kj::none);
+    KJ_EXPECT(IoContext::hasCurrent());
+  });
+  KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
+}
+
+KJ_TEST("the new registry creates a Rust module's exports outside the request resolving it") {
+  withNewRustRegistry(register_probe_module, [](const auto& env) {
     KJ_EXPECT(env.js.resolveInternalModule(PROBE_SPECIFIER) != kj::none);
     KJ_EXPECT(IoContext::hasCurrent());
   });
@@ -2998,6 +3019,28 @@ KJ_TEST("await_js_local() fails without converting what another request resolves
   KJ_EXPECT(keptChannel == kj::none);
   fixture.drainAndDestroy(kj::mv(other));
   fixture.drainAndDestroy(kj::mv(owner));
+}
+
+// Each test imports the module twice, so that a failure is not remembered as success.
+KJ_TEST("the legacy registry throws the error of a failing Rust module callback") {
+  withLegacyRustRegistry(register_failing_module, [](const auto& env, auto& registry) {
+    for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+      auto thrown = thrownBy(env.js, [&] {
+        registry.resolve(env.js, kj::Path::parse(FAILING_SPECIFIER), kj::none,
+            jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY);
+      });
+      KJ_EXPECT(thrown == "TypeError: the module failed", thrown);
+    }
+  });
+}
+
+KJ_TEST("the new registry throws the error of a failing Rust module callback") {
+  withNewRustRegistry(register_failing_module, [](const auto& env) {
+    for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+      auto thrown = thrownBy(env.js, [&] { env.js.resolveInternalModule(FAILING_SPECIFIER); });
+      KJ_EXPECT(thrown == "TypeError: the module failed", thrown);
+    }
+  });
 }
 
 }  // namespace

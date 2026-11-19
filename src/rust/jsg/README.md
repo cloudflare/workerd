@@ -92,6 +92,12 @@ Prefer it to `Option<Nullable<T>>`. Both wrappers trace their contained value.
 | `Nullable<T>` | `null` or `undefined` → `Null` | `TypeError` |
 | `NullOrUndefined<T>` | `null` → `Null`; `undefined` → `Undefined` | `Undefined` |
 
+As for C++ `kj::Maybe<T>`, a value that `T` does not take, such as a number for a
+`Nullable<NonCoercible<String>>` or a plain object for a `Nullable<jsg::Rc<R>>`, is `Null`
+for a worker without the `dont_substitute_null_on_type_error` compatibility flag (dated
+before 2022-06-01), and a `TypeError` with it. Only the top-level type counts: a
+`Nullable<Vec<T>>` whose element `T` does not take is an error either way.
+
 `NullOrUndefined::default()` is `Undefined`, without requiring `T: Default`.
 `as_ref()`, `as_mut()`, and `map()` preserve `Null` and `Undefined`.
 Conversions to and from `Option<Nullable<T>>` preserve all three states;
@@ -624,10 +630,10 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct or enum whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
-- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. A live instance of such a type transfers through a V8 startup snapshot: the generated `GarbageCollected::snapshot_recreate` leaks a `Default` instance (`jsg::snapshot_recreate_leak`) for the C++ `Wrappable` that backs the restored wrapper. Every Rust resource shares one CppHeapPointerTag, so the type is recorded through C++ `snapshotClone()` rather than by tag. A live instance of any other Rust resource type keeps the Worker out of the pipeline (it starts without a snapshot). See `docs/startup-snapshot.md`.
+- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. It generates a `jsg::SnapshotTransfer` impl with an empty snapshot; a type with state implements `SnapshotTransfer` itself. See [Startup snapshots](#startup-snapshots).
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
@@ -764,6 +770,40 @@ unsafe fn is_my_resource(isolate: *mut ffi::Isolate, value: ffi::Local) -> KjMay
 
 Tested by `src/rust/jsg-test/tests/resource_from_cpp.rs`, through a C++ helper that holds the
 wrapper only in a `v8::Global` across a full GC.
+
+### Startup snapshots
+
+A Worker whose top level leaves a resource reachable can start from a V8 startup snapshot
+([`docs/startup-snapshot.md`](../../../docs/startup-snapshot.md)) only if the resource's type
+implements `jsg::SnapshotTransfer`, the counterpart of C++ `Wrappable::snapshotClone()`. The
+zygote calls `snapshot()` on the live instance and stores the `Snapshot` it returns, which holds
+no GC reference and is `Send` and `Sync`, as the threads of the Workers started from it read it.
+Each Worker started from the snapshot calls `restore()` on it, with no lock, and attaches the
+result to the restored wrapper. A type without the impl makes the Worker start without the
+snapshot. `#[jsg_resource(snapshot_stateless)]` implements it for a `Default` type with no state,
+such as `UrlUtil`; a type with state copies it into its `Snapshot`:
+
+```rust
+impl jsg::SnapshotTransfer for Point {
+    type Snapshot = (f64, f64);
+
+    fn snapshot(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
+
+    fn restore(&(x, y): &(f64, f64)) -> Self {
+        Self { x, y }
+    }
+}
+```
+
+A restored instance is new, so a `jsg::Rc` it holds would not be to the resource behind the
+restored wrapper that JavaScript sees. `snapshot_references()` lists the references whose identity
+JavaScript can observe, and `snapshot_relink()` takes the restored resources in the same order,
+with a lock, as C++ `snapshotReferences()` and `snapshotRelink()` do. `RestoredReferences::next`
+returns `None` for a resource the snapshot did not carry, such as one the context reaches only
+through Rust, which the instance then rebuilds from its own `Snapshot`; see
+`jsg-test/tests/startup_snapshot.rs`.
 
 ## V8 Handle Types
 
@@ -1194,7 +1234,10 @@ how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be 
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
 that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
-`String` converts from any value with `ToString`, copying it out of the V8 heap. A
+`String` converts from any value with `ToString`, copying it out of the V8 heap. It is a Web IDL
+`USVString`: each lone UTF-16 surrogate becomes one U+FFFD. C++ JSG's `kj::String` differs here: it
+keeps a lone surrogate as its three WTF-8 bytes, which read back in JavaScript as three U+FFFD, so
+`'\ud800x'` returns from C++ as `'\ufffd\ufffd\ufffdx'` and from Rust as `'\ufffdx'`. A
 `jsg::JsString<'s>` parameter performs the same coercion without copying or decoding the string,
 like C++ JSG's `jsg::JsString`. It preserves lone UTF-16 surrogates and returns to JavaScript
 unchanged. It dereferences to `v8::Local<'s, v8::String>` for string operations, and converts to
@@ -1248,6 +1291,13 @@ pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor {
   `...name: any[]`; give a precise type with a TypeScript override.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
+
+From JavaScript, a `Vec<T>` takes an `Array`, and a hole reads as `undefined`. An element that is
+not a `T` is a `TypeError` naming its index, and a `#[jsg_struct]` field that is not of its type is
+one naming the field, with the messages C++ JSG gives. Script that runs during the conversion,
+such as an element's getter or `valueOf`, can change the array's length. C++ JSG reads the length
+once, and Rust JSG follows the current length: when script shortens the array, C++ JSG pads the
+result with `undefined` and Rust JSG stops at the new length.
 
 A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
 `vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
@@ -1359,9 +1409,8 @@ behave as they do in C++ rather than as their position suggests:
 - `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
   also takes a number of milliseconds, before any numeric variant does.
 - `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
-  and `undefined`, and converts any other value as `T` would, coercion included. A value
-  that `T` does not take is not taken as `null`, as in C++ JSG with the
-  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+  and `undefined`, and converts any other value as `T` would, coercion included, including
+  a [type mismatch](#nullablet-and-nullorundefinedt).
 - A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
   `v8::Local<'s, v8::String>` is a string type, but never coerces, and
   `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
