@@ -132,6 +132,47 @@ fn units_talk_to_each_other_through_channels() {
 }
 
 #[test]
+fn units_with_one_turn_to_a_poll_keep_serving() {
+    // Every poll of these units ends out of turns, so each event is a poll of its own and the
+    // units yield to the runtime between them.
+    let runtime = runtime(3);
+    let exchanged = runtime.block_on(async {
+        let (to_echo, mut requests) =
+            tokio::sync::mpsc::unbounded_channel::<(u32, oneshot::Sender<u32>)>();
+        let mut echo = LoopUnit::new((), move |_| async move {
+            while let Some((value, reply)) = requests.recv().await {
+                reply.send(value).unwrap();
+            }
+        });
+        echo.core.max_turns = 1;
+        let echo = spawn_unit(echo);
+        let callers: Vec<_> = (0..4)
+            .map(|_| {
+                let to_echo = to_echo.clone();
+                let mut caller = LoopUnit::new((), move |_| async move {
+                    for i in 0..500 {
+                        let (reply, replied) = oneshot::channel();
+                        to_echo.send((i, reply)).unwrap();
+                        assert_eq!(replied.await.unwrap(), i);
+                    }
+                });
+                caller.core.max_turns = 1;
+                spawn_unit(caller)
+            })
+            .collect();
+        drop(to_echo);
+        let all = async {
+            for caller in callers {
+                caller.await.unwrap().unwrap();
+            }
+            echo.await.unwrap().unwrap();
+        };
+        tokio::time::timeout(Duration::from_secs(30), all).await
+    });
+    assert!(exchanged.is_ok(), "a unit stopped being polled");
+}
+
+#[test]
 fn the_runtime_is_the_loop_s_while_a_unit_is_entered() {
     let runtime = runtime(2);
     let id = runtime.handle().id();

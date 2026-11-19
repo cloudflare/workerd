@@ -189,6 +189,8 @@ struct Core {
     sleep: Option<Pin<Box<Sleep>>>,
     /// What `sleep` is armed for, while it has not fired.
     armed: Option<Instant>,
+    /// How many events one poll turns before it yields (`MAX_TURNS_PER_POLL`).
+    max_turns: u32,
     done: bool,
 }
 
@@ -265,7 +267,7 @@ impl Core {
             unreachable!("the context was just made");
         };
         loop {
-            let turned = match context.0.as_mut().turn(MAX_TURNS_PER_POLL) {
+            let turned = match context.0.as_mut().turn(self.max_turns) {
                 Ok(turned) => turned,
                 Err(error) => return Poll::Ready(Err(error.into())),
             };
@@ -376,6 +378,7 @@ impl<T: Send + 'static, S: UnitScope> LoopUnit<T, S> {
                 handle: None,
                 sleep: None,
                 armed: None,
+                max_turns: MAX_TURNS_PER_POLL,
                 done: false,
             },
             output,

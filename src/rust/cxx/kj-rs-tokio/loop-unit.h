@@ -109,8 +109,8 @@ class LoopUnitContext {
   void start(::rust::Box<UnitTask> task);
 
   // Enters the loop and turns events until the root future is done (UNIT_DONE), none is left
-  // (UNIT_IDLE, or UNIT_PINNED if the unit is pinned), or `maxTurns` were turned and more are
-  // ready (UNIT_YIELD; never while pinned).
+  // and the port has nothing more for the loop (UNIT_IDLE, or UNIT_PINNED if the unit is
+  // pinned), or `maxTurns` were turned (UNIT_YIELD; never while pinned).
   uint8_t turn(uint32_t maxTurns);
 
   // After UNIT_PINNED, on the same thread: turns events, blocking the thread whenever none is

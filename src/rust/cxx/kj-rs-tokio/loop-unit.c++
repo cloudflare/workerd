@@ -70,11 +70,14 @@ uint8_t LoopUnitContext::turn(uint32_t maxTurns) {
   kj::WaitScope waitScope(*loop);
   for (;;) {
     // Turns events and, each time none is left, polls the port: the timer advances and
-    // whatever other threads sent the loop is delivered.
-    waitScope.poll(maxTurns);
+    // whatever other threads sent the loop is delivered. It returns before `maxTurns` only
+    // once no event is left after such a poll.
+    uint turned = waitScope.poll(maxTurns);
     if (done) return UNIT_DONE;
     bool pinned = isPinned();
-    if (loop->isRunnable()) {
+    if (turned >= maxTurns) {
+      // Out of turns. Even if no event is left, the port was not polled after the last one, so
+      // the loop is not known to be idle: what another thread sent it may be waiting.
       // A pinned unit keeps its thread.
       if (pinned) continue;
       return UNIT_YIELD;
