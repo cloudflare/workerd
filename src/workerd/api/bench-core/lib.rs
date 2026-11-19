@@ -2,9 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The report of one group of `workerd bench`: turns the samples that the runner took for a
-//! group's cases into a `BenchReport.Group` (bench.capnp), with summary statistics computed after
-//! subtracting the runner's own overhead and flags for results that can't be trusted.
+//! The parts of `workerd bench` that need no JSG, so that both the worker side and the server can
+//! use them.
+//!
+//! This crate root turns the samples that the runner took for a group's cases into a
+//! `BenchReport.Group` (bench.capnp), with summary statistics computed after subtracting the
+//! runner's own overhead and flags for results that can't be trusted. The [`startup`] module
+//! times a Worker's startup and reports it the same way, and [`GlobFilter`] is the case filter.
 //!
 //! The group's name is left unset, since the caller knows it.
 //!
@@ -12,12 +16,27 @@
 //! C++ strings, which needn't be valid UTF-8, so a Rust `String` couldn't hold all of them.
 
 mod ffi;
+mod glob_filter;
+pub mod startup;
 
 use bench_capnp::bench_report;
 use bench_capnp::bench_report::case::Flag;
 use bench_capnp::bench_report::case::Status;
 use histogram::Histogram;
 use histogram::Options;
+
+pub use crate::glob_filter::GlobFilter;
+
+/// The sampling budget, when neither the case nor the command line sets one.
+const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
+/// The number of samples, when neither the case nor the command line sets one.
+const DEFAULT_SAMPLES: u32 = 50;
+
+/// Under `--quick`, the sampling budget and the number of samples are capped at these.
+const QUICK_MIN_TIME_NS: u64 = 10_000_000;
+const QUICK_SAMPLES: u32 = 5;
+
+const MAX_SAMPLES: u32 = 1_000_000;
 
 /// Samples are recorded into histograms in picoseconds, up to an hour per call.
 const HISTOGRAM_HIGHEST_PS: i64 = 3_600_000_000_000_000;

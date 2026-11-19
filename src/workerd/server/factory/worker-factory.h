@@ -99,6 +99,7 @@ struct WorkerInfo;
 struct ContainerRef;
 struct FacetStartInfo;
 struct HttpAnswer;
+struct WorkerStartupTiming;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
@@ -219,10 +220,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
-kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
-    const WorkerSpec& spec,
-    uint32_t configService,
-    ::rust::Slice<const uint64_t> params);
+kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 
 // =======================================================================================
 

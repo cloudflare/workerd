@@ -26,6 +26,10 @@ namespace workerd::api {
 
 namespace {
 
+// TODO(cleanup): DEFAULT_MIN_TIME_NS, DEFAULT_SAMPLES, QUICK_MIN_TIME_NS, QUICK_SAMPLES and
+// MAX_SAMPLES are also defined in the bench-core crate (src/workerd/api/bench-core), which
+// times startup groups with them. These copies go away when BenchController moves to Rust.
+
 // Defaults for options that neither the case nor the command line sets.
 constexpr uint64_t DEFAULT_MIN_TIME_NS = 1'000'000'000;
 constexpr uint64_t DEFAULT_WARMUP_NS = 200'000'000;
@@ -35,13 +39,6 @@ constexpr uint32_t DEFAULT_SAMPLES = 50;
 constexpr uint64_t QUICK_MIN_TIME_NS = 10'000'000;
 constexpr uint64_t QUICK_WARMUP_NS = 2'000'000;
 constexpr uint32_t QUICK_SAMPLES = 5;
-
-// Untimed starts before a startup group's samples, except under --quick.
-constexpr uint32_t STARTUP_WARMUPS = 1;
-
-// A startup group stops at the sampling budget only once it has at least this many samples, so
-// that a slow Worker still gets usable statistics.
-constexpr uint32_t STARTUP_MIN_SAMPLES = 5;
 
 // A calibrated batch takes at least this long, so that clock resolution and the cost of reading
 // the clocks don't matter.
@@ -195,79 +192,6 @@ void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::
 
 BenchTiming BenchTiming::now() {
   return {.wallNs = monotonicNs(), .cpuNs = threadCpuNs()};
-}
-
-kj::Promise<void> benchWorkerStartup(bench::BenchParams::Reader params,
-    kj::Function<kj::Promise<WorkerStartupTiming>()> startWorker,
-    bench::BenchReport::Group::Builder report) {
-  report.setStartup(true);
-
-  struct Phase {
-    kj::StringPtr name;
-    BenchTiming WorkerStartupTiming::*timing;
-  };
-  // The prefix keeps a pattern meant for a handler's cases, such as "w*", from selecting a phase.
-  // Its separator isn't "/", after which kj::GlobFilter starts matching the pattern again.
-  static constexpr Phase PHASES[] = {
-    {"startup:isolate"_kj, &WorkerStartupTiming::isolate},
-    {"startup:script"_kj, &WorkerStartupTiming::script},
-    {"startup:worker"_kj, &WorkerStartupTiming::worker},
-    {"startup:total"_kj, &WorkerStartupTiming::total},
-  };
-  auto caseFilter = params.getCaseFilter();
-  kj::GlobFilter filter(caseFilter == ""_kj ? "*"_kj : caseFilter);
-  kj::Vector<const Phase*> selected;
-  for (auto& phase: PHASES) {
-    if (filter.matches(phase.name)) selected.add(&phase);
-  }
-  if (selected.empty()) co_return;
-
-  // Each start is a sample, so there is no batch to calibrate. Starts stop at `samples`, or at the
-  // sampling budget once there are enough of them to summarize. Except under --quick, starts that
-  // aren't timed go first, like a case's warmup.
-  bool quick = params.getQuick();
-  auto defaults = params.getDefaults();
-  auto samples = defaults.getSamples();
-  if (samples == 0) samples = DEFAULT_SAMPLES;
-  samples = kj::min(samples, quick ? QUICK_SAMPLES : MAX_SAMPLES);
-  auto budgetNs = defaults.getMinTimeNs();
-  if (budgetNs == 0) budgetNs = DEFAULT_MIN_TIME_NS;
-  if (quick) budgetNs = kj::min(budgetNs, QUICK_MIN_TIME_NS);
-  uint32_t warmups = quick ? 0 : STARTUP_WARMUPS;
-
-  kj::Vector<WorkerStartupTiming> timings(samples);
-  kj::Maybe<kj::Exception> failure;
-  try {
-    for (uint32_t i = 0; i < warmups; ++i) {
-      co_await startWorker();
-    }
-    uint64_t sampledNs = 0;
-    while (timings.size() < samples &&
-        (timings.size() < STARTUP_MIN_SAMPLES || sampledNs < budgetNs)) {
-      auto& timing = timings.add(co_await startWorker());
-      sampledNs += static_cast<uint64_t>(kj::max(timing.total.wallNs, int64_t{0}));
-    }
-  } catch (...) {
-    failure = kj::getCaughtExceptionAsKj();
-  }
-  KJ_IF_SOME(exception, failure) {
-    report.setError(exception.getDescription());
-    co_return;
-  }
-
-  BenchGroupResult result{.cases = KJ_MAP(phase, selected) {
-    auto metric = [&](int64_t BenchTiming::*clock) {
-      return KJ_MAP(timing,
-          timings) { return static_cast<double>((timing.*(phase->timing)).*clock); };
-    };
-    return BenchCaseResult{
-      .name = kj::str(phase->name),
-      .iterationsPerSample = 1,
-      .wallNs = metric(&BenchTiming::wallNs),
-      .cpuNs = metric(&BenchTiming::cpuNs),
-    };
-  }};
-  fillBenchReport(result, report);
 }
 
 struct BenchController::CaseRun {
