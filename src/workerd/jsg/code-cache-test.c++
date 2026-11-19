@@ -554,6 +554,20 @@ void populateSharedSlot(const SharedModuleCompilationCache& cache, CountingObser
   compileInFreshIsolate(cache, observer);
 }
 
+KJ_TEST("A shared slot generates bytecode when a second replica compiles from source") {
+  SharedModuleCompilationCache cache;
+  CountingObserver observer;
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.generated == 0);
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 0);
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.rejected == 0);
+}
+
 void expectSharedSlotRejected(size_t corruptOffset, CompatibilityCheckResult expectedCheck) {
   SharedModuleCompilationCache cache;
   CountingObserver observer;
