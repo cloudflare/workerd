@@ -736,6 +736,10 @@ class IteratorBase: public Object {
   void visitForGc(GcVisitor& visitor) {
     if constexpr (hasPublicVisitForGc<State>()) {
       visitor.visit(state);
+    } else {
+      static_assert(holdsNoGcHandles<State>,
+          "A JSG_ITERATOR State must have a public visitForGc(), or be marked "
+          "JSG_HOLDS_NO_GC_HANDLES if it holds no GC handles.");
     }
   }
 
@@ -865,6 +869,10 @@ class AsyncIteratorBase: public Object {
     KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
       if constexpr (hasPublicVisitForGc<State>()) {
         visitor.visit(inner.state);
+      } else {
+        static_assert(holdsNoGcHandles<State>,
+            "A JSG_ASYNC_ITERATOR State must have a public visitForGc(), or be marked "
+            "JSG_HOLDS_NO_GC_HANDLES if it holds no GC handles.");
       }
       visitor.visit(inner.impl);
     }
@@ -1025,7 +1033,9 @@ class AsyncIteratorBase: public Object {
 // private:
 //   struct IteratorState {
 //     // The iterator's internal state.
-//     // Implement visitForGc here if the state stores any visitable references.
+//     // Implement a public visitForGc() here if the state stores any visitable references,
+//     // otherwise declare:
+//     JSG_HOLDS_NO_GC_HANDLES;
 //   };
 //
 //   static kj::Maybe<kj::String> nextFunction(jsg::Lock& js, IteratorState& state) {
@@ -1119,7 +1129,9 @@ class AsyncIteratorBase: public Object {
 // private:
 //   struct IteratorState {
 //     // The iterator's internal state.
-//     // Implement visitForGc here if the state stores any visitable references.
+//     // Implement a public visitForGc() here if the state stores any visitable references,
+//     // otherwise declare:
+//     JSG_HOLDS_NO_GC_HANDLES;
 //   };
 //
 //   static jsg::Promise<kj::Maybe<kj::String>> nextFunction(
