@@ -1176,6 +1176,13 @@ pub mod ffi {
             wrapped_elsewhere: &mut bool,
         ) -> MaybeLocal /* v8::Local<Value> */;
 
+        // The existing wrapper, as `wrap_resource` returns it, without creating one; see `ffi.h`.
+        pub unsafe fn wrappable_get_wrapper(
+            isolate: *mut Isolate,
+            wrappable: Pin<&mut Wrappable>,
+            wrapped_elsewhere: &mut bool,
+        ) -> MaybeLocal /* v8::Local<Value> */;
+
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
@@ -5699,8 +5706,8 @@ impl WrappableRc {
         handle.map(|handle| Self { handle })
     }
 
-    /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
-    /// use creating) `R`'s cached constructor template.
+    /// Returns this Wrappable's JavaScript wrapper. If it has none yet, creates one as an object
+    /// of resource type `R`, using (and on first use creating) `R`'s cached constructor template.
     ///
     /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate. That
     /// is a bug in the caller, which [`resource::wrap`](crate::resource::wrap) turns into a
@@ -5715,8 +5722,24 @@ impl WrappableRc {
         &self,
         lock: &mut Lock<'s>,
     ) -> crate::Result<Option<Local<'s, Value>>> {
-        let constructor = lock.realm().get_constructor::<R>().as_ffi();
         let mut wrapped_elsewhere = false;
+        // A resource returned again usually has its wrapper already, which needs no template.
+        // SAFETY: isolate is valid and locked, and the Wrappable is alive while `self` is.
+        let existing = unsafe {
+            ffi::wrappable_get_wrapper(
+                lock.isolate().as_ffi(),
+                self.as_pin_mut(),
+                &mut wrapped_elsewhere,
+            )
+        };
+        if wrapped_elsewhere {
+            return Ok(None);
+        }
+        // SAFETY: the wrapper is read into the scope of `lock`.
+        if let Some(wrapper) = unsafe { Local::from_ffi_maybe(existing) } {
+            return Ok(Some(wrapper));
+        }
+        let constructor = lock.realm().get_constructor::<R>().as_ffi();
         // SAFETY: isolate is valid and locked; the constructor is a function template of the
         // isolate, which the Realm's template cache keeps alive.
         let handle = unsafe {
@@ -5730,7 +5753,7 @@ impl WrappableRc {
         if wrapped_elsewhere {
             return Ok(None);
         }
-        // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
+        // SAFETY: the wrapper is created in the scope of `lock`.
         let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
         Ok(Some(wrapper))
     }

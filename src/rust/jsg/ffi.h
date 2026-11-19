@@ -520,6 +520,10 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 //   then either, so that wrapping fails the same way whether or not the wrapper exists.
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
+// The Wrappable's existing wrapper in `isolate`, as wrap_resource() returns it, without creating
+// one: empty also when the Wrappable has no wrapper yet, and `wrappedElsewhere` and a pending
+// exception or termination are as for wrap_resource().
+MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,
