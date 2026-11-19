@@ -969,3 +969,41 @@ export const urlencodedReasonableEntryCount = {
     strictEqual(fd.get('key99'), 'val99');
   },
 };
+
+export const formDataPropagatesBodyStreamError = {
+  async test() {
+    for (const kind of ['start', 'pull']) {
+      for (const make of [
+        (body) => new Response(body),
+        (body) => new Request('http://example.org', { method: 'POST', body }),
+      ]) {
+        const err = new Error(`${kind} error`);
+        const body = new ReadableStream({
+          [kind](controller) {
+            controller.error(err);
+          },
+        });
+        await rejects(make(body).formData(), (e) => e === err);
+      }
+    }
+
+    // A null body reads as empty, which is a valid urlencoded body.
+    const empty = await new Response(null, {
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    }).formData();
+    strictEqual([...empty].length, 0);
+    await rejects(new Response(null).formData(), {
+      name: 'TypeError',
+      message: 'Parsing a Body as FormData requires a Content-Type header.',
+    });
+
+    // A body that reads fine still needs a Content-Type. It is read before the check, so it is
+    // used afterwards.
+    const noType = new Response(new TextEncoder().encode('a=b'));
+    await rejects(noType.formData(), {
+      name: 'TypeError',
+      message: 'Parsing a Body as FormData requires a Content-Type header.',
+    });
+    strictEqual(noType.bodyUsed, true);
+  },
+};
