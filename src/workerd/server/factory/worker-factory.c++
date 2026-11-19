@@ -1117,13 +1117,8 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     })));
   }
   auto& threadContext = worker.factory.getImpl().threadContext;
-  tracer->setMakeUserRequestSpanFunc(
-      [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
-          tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-    return SpanParent(kj::rc<UserSpanObserver>(
-        kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
-        kj::mv(traceId), traceFlags));
-  });
+  tracer->setUserSpanSubmitter(kj::refcounted<SequentialSpanSubmitter>(
+      tracer->getWeakRef(), threadContext.getEntropySource()));
 
   // The invocation's span, under which its user spans are exported, takes the invocation's ids.
   KJ_IF_SOME(exporter, otlpExporter) {

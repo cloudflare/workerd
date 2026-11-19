@@ -379,9 +379,7 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
-    auto& invCtx = getInvocationSpanContext();
-    rootUserTraceSpan =
-        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
+    rootUserTraceSpan = workerTracer->makeUserRequestSpan(getInvocationSpanContext());
   }
 
   KJ_IF_SOME(a, context->actor) {

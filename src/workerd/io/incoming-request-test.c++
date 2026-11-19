@@ -79,6 +79,25 @@ class TraceScopeRequestObserver final: public RequestObserver {
   }
 };
 
+// Accepts spans without recording them, and gives every span the ID 0x77.
+class NullSpanSubmitter final: public SpanSubmitter {
+ public:
+  bool submitSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {
+    return true;
+  }
+  void submitSpanClose(tracing::SpanId, kj::Date, kj::Date, Span::TagMap&&) override {}
+  void submitSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
+  void submitSpanException(tracing::SpanId,
+      kj::Date,
+      kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(0x77);
+  }
+};
+
 KJ_TEST("request trace scopes capture both roots and restore enclosing tracing and storage") {
   for (bool observeUser: {false, true}) {
     TestFixture fixture({
@@ -93,12 +112,12 @@ KJ_TEST("request trace scopes capture both roots and restore enclosing tracing a
           kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
       auto workerTracer =
           kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
-      workerTracer->setMakeUserRequestSpanFunc(
-          [](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) { return traceScopeParent(22); });
+      workerTracer->setUserSpanSubmitter(kj::refcounted<NullSpanSubmitter>());
       tracer = kj::Rc<BaseTracer>(kj::mv(workerTracer));
     }
     auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
     request->delivered();
+    auto expectedUserSpanId = request->getInvocationSpanContext().getSpanId().getId();
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
       jsg::AsyncContextFrame::StorageScope storageScope(
@@ -112,7 +131,7 @@ KJ_TEST("request trace scopes capture both roots and restore enclosing tracing a
         auto userParent = context->getCurrentUserTraceSpan();
         KJ_EXPECT(userParent.isObserved() == observeUser);
         if (observeUser) {
-          KJ_EXPECT(traceScopeSpanId(kj::mv(userParent)) == 22);
+          KJ_EXPECT(traceScopeSpanId(kj::mv(userParent)) == expectedUserSpanId);
         }
         auto& current = KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js));
         auto value = KJ_ASSERT_NONNULL(current.get(*key)).getHandle(env.js);

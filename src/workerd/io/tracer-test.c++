@@ -19,6 +19,7 @@ namespace {
 class RecordingSpanSubmitter final: public SpanSubmitter {
  public:
   kj::Vector<kj::Date> starts;
+  kj::Vector<tracing::SpanId> parentSpanIds;
   kj::Vector<kj::Date> exceptions;
 
   bool submitSpanOpen(tracing::SpanId spanId,
@@ -26,6 +27,7 @@ class RecordingSpanSubmitter final: public SpanSubmitter {
       kj::ConstString operationName,
       kj::Date startTime) override {
     starts.add(startTime);
+    parentSpanIds.add(parentSpanId);
     return true;
   }
 
@@ -130,7 +132,8 @@ KJ_TEST("streaming spans use I/O time while native spans use precise time") {
     auto time = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS;
     KJ_ASSERT(env.context.now() == time);
     auto submitter = kj::refcounted<RecordingSpanSubmitter>();
-    auto observer = kj::rc<UserSpanObserver>(kj::addRef(*submitter));
+    auto observer = kj::rc<UserSpanObserver>(
+        kj::addRef(*submitter), tracing::SpanContext(tracing::TraceId(nullptr), kj::none));
     KJ_EXPECT(observer->getTime() == time);
     auto runtime = SpanBuilder(observer->newChild(), "runtime"_kjc);
     auto user =
@@ -245,7 +248,8 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
   tracer->setEventInfo(*request, tracing::CustomEventInfo());
   request->delivered();
   // Other spans go under the invocation's only when its spans are exported.
-  KJ_EXPECT(tracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none).isObserved() ==
+  KJ_EXPECT(tracer->observesUserSpans() == bool(exportSpans));
+  KJ_EXPECT(tracer->makeUserRequestSpan(request->getInvocationSpanContext()).isObserved() ==
       bool(exportSpans));
   kj::Maybe<tracing::InvocationSpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
@@ -348,6 +352,44 @@ KJ_TEST("an exported invocation has no record of its own unless asked to") {
 KJ_TEST("an exported invocation exports no logs unless asked to") {
   auto exporter = exportInvocation(ExportLogs::NO);
   KJ_EXPECT(exporter->logCount == 0);
+}
+
+KJ_TEST("delivered() gives the root user span the invocation's span context") {
+  TestFixture fixture;
+  auto submitter = kj::refcounted<RecordingSpanSubmitter>();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  KJ_EXPECT(!tracer->observesUserSpans());
+  tracer->setUserSpanSubmitter(kj::addRef(*submitter));
+  KJ_EXPECT(tracer->observesUserSpans());
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
+  request->getInvocationSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
+  request->delivered();
+
+  auto& invocation = request->getInvocationSpanContext();
+  auto root = request->getRootUserTraceSpan();
+  auto rootContext = KJ_ASSERT_NONNULL(root.toSpanContext());
+  KJ_EXPECT(rootContext.getTraceId() == invocation.getTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getSpanId()) == invocation.getSpanId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getTraceFlags()) == tracing::TraceFlags(0x01));
+
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment&) { auto child = root.newChild("child"_kjc); });
+  KJ_ASSERT(submitter->parentSpanIds.size() == 1);
+  KJ_EXPECT(submitter->parentSpanIds[0] == invocation.getSpanId());
+
+  // A UserSpanObserver without a span ID round-trips kj::none rather than a zero SpanId.
+  auto withoutSpanId = kj::rc<UserSpanObserver>(
+      kj::addRef(*submitter), tracing::SpanContext(tracing::TraceId(1, 2), kj::none));
+  auto roundTripped = KJ_ASSERT_NONNULL(withoutSpanId->toSpanContext());
+  KJ_EXPECT(roundTripped.getTraceId() == tracing::TraceId(1, 2));
+  KJ_EXPECT(roundTripped.getSpanId() == kj::none);
+
+  fixture.drainAndDestroy(kj::mv(request));
 }
 
 }  // namespace
