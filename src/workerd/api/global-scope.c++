@@ -9,7 +9,6 @@
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #ifdef WORKERD_FUZZILLI
 #include <workerd/api/fuzzilli.h>
 #endif

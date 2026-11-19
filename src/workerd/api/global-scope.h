@@ -43,7 +43,6 @@ class JsRpcProperty;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
-class EventSource;
 class FixedLengthStream;
 class SubtleCrypto;
 class TextDecoder;
@@ -1049,11 +1048,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(StorageManager);
     }
 
-    // Under the TS_EVENT_SOURCE autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript EventSource instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_EVENT_SOURCE)) {
-      JSG_NESTED_TYPE(EventSource);
-    }
+    // The per-isolate bootstrap (src/per_isolate/main.ts) defines EventSource; the TypeScript
+    // override below declares it.
 
     // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
     if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
@@ -1288,6 +1284,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
       MessageChannel: typeof MessageChannel;
       MessagePort: typeof MessagePort;
+      EventSource: typeof EventSource;
     });
   }
 
