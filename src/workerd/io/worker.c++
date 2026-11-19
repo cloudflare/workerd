@@ -4846,6 +4846,10 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
   return kj::none;
 }
 
+kj::Maybe<kj::Date> Worker::Actor::getRunningAlarmTime() {
+  return impl->maybeRunningAlarm.map([](Impl::RunningAlarm& alarm) { return alarm.scheduledTime; });
+}
+
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
     kj::Date scheduledTime) {
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
