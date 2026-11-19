@@ -952,6 +952,8 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   // matches the mapped spelling.
   kj::Maybe<kj::String> mappedOverrideKey;
 
+  // node:net reports every TypeError below whose message starts with "Specified address" as
+  // ENOTFOUND, so such a message must only mean that the address can't be used.
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.

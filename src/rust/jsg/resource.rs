@@ -164,6 +164,43 @@ impl<R: Resource> Rc<R> {
         );
     }
 
+    /// The C++ `Wrappable` of the resource.
+    pub(crate) fn wrappable_ptr(&self) -> *const v8::ffi::Wrappable {
+        self.wrappable.as_ptr().as_ptr()
+    }
+
+    /// A strong reference to the resource that `wrappable` owns, if it is an `R`.
+    ///
+    /// # Safety
+    /// `wrappable` is alive, and belongs to the lock's isolate.
+    pub(crate) unsafe fn from_restored_wrappable(
+        lock: &mut Lock<'_>,
+        wrappable: *const v8::ffi::Wrappable,
+    ) -> Option<Self> {
+        // SAFETY: forwarded from the caller.
+        let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable) };
+        Self::from_wrappable(lock, wrappable)
+    }
+
+    /// A strong reference to the resource that `wrappable` owns, if it is an `R`.
+    fn from_wrappable(lock: &mut Lock<'_>, wrappable: v8::WrappableRc) -> Option<Self> {
+        let resource_ptr = wrappable.resolve_resource::<R>()?;
+        // SAFETY: The pointer came from std::rc::Rc::into_raw when the Wrappable was made, and
+        // the Wrappable being alive guarantees the Rc allocation is still valid.
+        // increment_strong_count bumps the count so from_raw can safely create
+        // a second Rc handle without double-freeing.
+        let handle = unsafe {
+            std::rc::Rc::increment_strong_count(resource_ptr.as_ptr());
+            std::rc::Rc::from_raw(resource_ptr.as_ptr())
+        };
+        wrappable.add_strong_ref();
+        Some(Self::from_parts(
+            handle,
+            wrappable,
+            Arc::clone(lock.isolate_state()),
+        ))
+    }
+
     /// The state of the resource's isolate.
     pub(crate) fn isolate_state(&self) -> &IsolateState {
         &self.state
@@ -348,25 +385,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
         let Some(wrappable) = v8::WrappableRc::from_js(lock, value) else {
             return Ok(None);
         };
-        let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
-            return Ok(None);
-        };
-
-        // SAFETY: The pointer came from std::rc::Rc::into_raw in Rc::new(), and the
-        // Wrappable being alive guarantees the Rc allocation is still valid.
-        // increment_strong_count bumps the count so from_raw can safely create
-        // a second Rc handle without double-freeing.
-        let handle = unsafe {
-            std::rc::Rc::increment_strong_count(resource_ptr.as_ptr());
-            std::rc::Rc::from_raw(resource_ptr.as_ptr())
-        };
-
-        wrappable.add_strong_ref();
-        Ok(Some(Self::from_parts(
-            handle,
-            wrappable,
-            Arc::clone(lock.isolate_state()),
-        )))
+        Ok(Self::from_wrappable(lock, wrappable))
     }
 }
 
@@ -540,25 +559,6 @@ unsafe impl<R: Resource + Send> Send for Rc<R> {}
 // queues the `std::rc::Weak` as an `Rc`'s drop does. The Wrappable pointer is used only by
 // `upgrade`.
 unsafe impl<R: Resource + Send> Send for Weak<R> {}
-
-/// The trait object [`GarbageCollected::snapshot_recreate`] hands over: a fresh instance that a
-/// C++ `Wrappable` built for a startup-snapshot restore takes ownership of.
-pub struct SnapshotRecreated(pub(crate) v8::ffi::TraitObjectPtr);
-
-/// Leaks `resource` as a [`SnapshotRecreated`].
-///
-/// The one `std::rc::Rc` goes to the Wrappable, whose drop releases it, and nothing on the Rust
-/// side holds the instance until a JavaScript caller unwraps it into an [`Rc`]: the counterpart
-/// of [`Rc::new`] for an instance whose wrapper comes out of the snapshot rather than from
-/// `to_js`.
-pub fn snapshot_recreate_leak<R: GarbageCollected + 'static>(resource: R) -> SnapshotRecreated {
-    let raw: *const R = std::rc::Rc::into_raw(std::rc::Rc::new(resource));
-    let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
-    SnapshotRecreated(v8::ffi::TraitObjectPtr::from_raw(
-        fat,
-        std::any::TypeId::of::<R>(),
-    ))
-}
 
 /// `Rc<R>` is a strong GC edge — visited via `GcVisitor::visit_rc`.
 impl<R: Resource> Traced for Rc<R> {
@@ -1075,16 +1075,38 @@ impl Resources {
         template
     }
 
-    /// Drains every cached resource-template handle, transferring ownership of each
-    /// `v8::Global<v8::FunctionTemplate>` to the caller. Used by the `PREPARE_SNAPSHOT`
-    /// pipeline, which disposes each handle before `CreateBlob`; the cache is left empty and
-    /// templates are recreated lazily on demand.
-    pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
-        self.slots.clear();
-        self.templates
-            .drain(..)
-            .map(v8::Global::into_ffi_for_snapshot)
+    /// Drains every cached template, with its resource type, for the `PREPARE_SNAPSHOT`
+    /// pipeline, which pins each one into the snapshot and disposes its handle before
+    /// `CreateBlob`. The cache is left empty.
+    pub fn take_templates(&mut self) -> Vec<(TypeId, v8::ffi::Global)> {
+        let mut type_ids = vec![None; self.templates.len()];
+        for (type_id, slot) in self.slots.drain() {
+            type_ids[slot] = Some(type_id);
+        }
+        type_ids
+            .into_iter()
+            .zip(self.templates.drain(..))
+            .filter_map(|(type_id, template)| Some((type_id?, template.into_ffi_for_snapshot())))
             .collect()
+    }
+
+    /// Fills the empty cache with the templates a snapshot carried.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cache is not empty, which would leave a resource type with two templates.
+    pub fn restore_templates(
+        &mut self,
+        templates: impl IntoIterator<Item = (TypeId, v8::Global<v8::FunctionTemplate>)>,
+    ) {
+        assert!(
+            self.templates.is_empty(),
+            "resource templates restored into a non-empty cache"
+        );
+        for (type_id, template) in templates {
+            self.slots.insert(type_id, self.templates.len());
+            self.templates.push(template);
+        }
     }
 }
 

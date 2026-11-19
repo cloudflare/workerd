@@ -120,9 +120,15 @@ class ModuleRegistry {
 
   using Type = ModuleType;
 
-  JSG_MEMORY_INFO(ModuleRegistry) {
-    // TODO(soon): Implement memory tracking for ModuleRegistry
+  // Virtual so that ContextGlobal, which knows only this base class, reports the entries of the
+  // ModuleRegistryImpl it holds.
+  virtual kj::StringPtr jsgGetMemoryName() const {
+    return "ModuleRegistry"_kjc;
   }
+  virtual size_t jsgGetMemorySelfSize() const {
+    return sizeof(ModuleRegistry);
+  }
+  virtual void jsgGetMemoryInfo(MemoryTracker& tracker) const {}
 
   enum class ResolveOption {
     // Default resolution. Check the worker bundle first, then builtins.
@@ -145,6 +151,13 @@ class ModuleRegistry {
     CapnpModuleInfo(Value fileScope, kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls);
     CapnpModuleInfo(CapnpModuleInfo&&) = default;
     CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
+
+    JSG_MEMORY_INFO(CapnpModuleInfo) {
+      tracker.trackField("fileScope", fileScope);
+      for (const auto& decl: topLevelDecls) {
+        tracker.trackField("topLevelDecl", decl.value);
+      }
+    }
   };
 
   struct CommonJsModuleInfo {
@@ -167,6 +180,10 @@ class ModuleRegistry {
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
 
+    JSG_MEMORY_INFO(CommonJsModuleInfo) {
+      tracker.trackField("evalFunc", evalFunc);
+    }
+
     jsg::JsValue getExports(jsg::Lock& js);
 
     static jsg::Function<void()> initEvalFunc(
@@ -187,6 +204,10 @@ class ModuleRegistry {
 
     ValueModuleInfo(ValueModuleInfo&&) = default;
     ValueModuleInfo& operator=(ValueModuleInfo&&) = default;
+
+    JSG_MEMORY_INFO(ValueModuleInfo) {
+      tracker.trackField("value", value);
+    }
   };
 
   using DataModuleInfo = ValueModuleInfo<v8::ArrayBuffer>;
@@ -278,6 +299,20 @@ class ModuleRegistry {
 
     uint hashCode() const {
       return module.hashCode();
+    }
+
+    JSG_MEMORY_INFO(ModuleInfo) {
+      tracker.trackField("module", module);
+      tracker.trackField("synthetic", maybeSynthetic);
+      KJ_IF_SOME(namedExports, maybeNamedExports) {
+        size_t size = namedExports.size() * sizeof(kj::String);
+        for (const auto& name: namedExports) {
+          size += name.size();
+        }
+        tracker.trackFieldWithSize("namedExports", size);
+      }
+      tracker.trackField("moduleSourceObject", maybeModuleSourceObject);
+      tracker.trackField("mutableExports", maybeMutableExports);
     }
 
     // Set the module source object for source phase imports
@@ -460,6 +495,23 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(ModuleRegistryImpl);
+  }
+
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    if (entries.size() > 0) {
+      tracker.pushContainer("entries"_kjc, entries.size() * sizeof(kj::Own<Entry>), "entries"_kjc);
+      for (const auto& entry: entries) {
+        tracker.trackField(nullptr, entry);
+      }
+      tracker.popNode();
+    }
+    tracker.trackFieldWithSize(
+        "snapshotSeeds", snapshotSeeds.size() * sizeof(*snapshotSeeds.begin()));
+    tracker.trackField("fallbackServiceRedirects", fallbackServiceRedirects);
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
@@ -1040,6 +1092,30 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
+
+    JSG_MEMORY_INFO(Entry) {
+      size_t specifierSize = 0;
+      for (const auto& part: specifier) {
+        specifierSize += sizeof(kj::String) + part.size();
+      }
+      tracker.trackFieldWithSize("specifier", specifierSize, "kj::Path"_kjc);
+      KJ_SWITCH_ONEOF(info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          tracker.trackField("module", moduleInfo);
+        }
+        KJ_CASE_ONEOF(src, StaticSource) {
+          // The source and compile cache are static data, not owned by the entry.
+        }
+        KJ_CASE_ONEOF(src, SharedSource) {
+          // The source is shared with the V8 strings created from it, so only the compile cache
+          // belongs to the entry.
+          tracker.trackFieldWithSize("compileCache", src.compileCache.size());
+        }
+        KJ_CASE_ONEOF(callback, ModuleCallback) {
+          tracker.trackFieldWithSize("callback", sizeof(ModuleCallback));
+        }
+      }
+    }
 
     // Lazily instantiate module from source code if needed
     kj::Maybe<ModuleInfo&> module(jsg::Lock& js,

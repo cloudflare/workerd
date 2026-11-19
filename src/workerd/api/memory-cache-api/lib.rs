@@ -57,7 +57,7 @@ impl MemoryCache {
     fn read<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
-        key: v8::Local<'s, v8::Value>,
+        key: Key,
         fallback: Option<v8::Local<'s, v8::Value>>,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
         // As JSG calls a C++ method that returns a promise: under capture_async_api_throws, what
@@ -75,12 +75,7 @@ impl MemoryCache {
 
     /// `delete(key)`: removes the value cached under `key`, if any.
     #[jsg_method(name = "delete")]
-    fn remove<'s>(
-        &self,
-        lock: &mut jsg::Lock<'s>,
-        key: v8::Local<'s, v8::Value>,
-    ) -> jsg::Result<()> {
-        let key = key_bytes(lock, key, "delete")?;
+    fn remove<'s>(&self, lock: &mut jsg::Lock<'s>, Key(key): Key) -> jsg::Result<()> {
         // Keys that are too large are never cached.
         if key.len() > MAX_KEY_SIZE {
             return Err(jsg::Error::new_range_error("Key too large."));
@@ -105,10 +100,9 @@ impl MemoryCache {
     fn read_promise<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
-        key: v8::Local<'s, v8::Value>,
+        Key(key): Key,
         fallback: Option<v8::Local<'s, v8::Value>>,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
-        let key = key_bytes(lock, key, "read")?;
         // JSG checks the parameters of C++'s read() before it runs, and starts any span.
         let fallback = fallback
             .map(|fallback| {
@@ -236,23 +230,45 @@ impl Drop for CacheBinding {
     }
 }
 
-/// `key` as UTF-8, with lone surrogates encoded as such, as C++ `kj::String` holds them, so that
-/// keys differing only in them are distinct. `method` names the method in the error for a key
-/// that is not a string.
-fn key_bytes<'s>(
-    lock: &mut jsg::Lock<'s>,
-    key: v8::Local<'s, v8::Value>,
-    method: &str,
-) -> jsg::Result<Vec<u8>> {
-    let key = v8::Local::<v8::String>::try_from(key).map_err(|_| {
-        jsg::Error::new_type_error(format!(
-            "Failed to execute '{method}' on 'MemoryCache': parameter 1 is not of type 'string'."
-        ))
-    })?;
-    let mut bytes = vec![0; key.utf8_length(lock)];
-    let written = key.write_utf8(lock, &mut bytes, v8::WriteFlags::None);
-    bytes.truncate(written);
-    Ok(bytes)
+/// A key, which, as C++'s `jsg::NonCoercible<kj::String>`, only a string converts to. It holds
+/// the key as UTF-8, with lone surrogates encoded as such, as `kj::String` holds them, so that
+/// keys differing only in them are distinct.
+struct Key(Vec<u8>);
+
+impl jsg::TypeInfo for Key {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::String
+    }
+}
+
+impl<'s> jsg::FromJS<'s> for Key {
+    type ResultType = Self;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
+    fn type_name() -> String {
+        "string".to_owned()
+    }
+
+    fn from_js(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<Self> {
+        let type_name = value.type_of(lock);
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            jsg::Error::new_type_error(format!("Expected string but got {type_name}"))
+        })
+    }
+
+    fn try_from_js(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<Option<Self>> {
+        let Ok(key) = v8::Local::<v8::String>::try_from(value) else {
+            return Ok(None);
+        };
+        let mut bytes = vec![0; key.utf8_length(lock)];
+        let written = key.write_utf8(lock, &mut bytes, v8::WriteFlags::None);
+        bytes.truncate(written);
+        Ok(Some(Self(bytes)))
+    }
 }
 
 /// The request's clock in whole milliseconds since the Unix epoch, as C++ `dateNow()`.
