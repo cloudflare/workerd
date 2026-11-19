@@ -861,16 +861,24 @@ struct SpanOpenData {
   kj::ConstString operationName;
   kj::Date startTime;
 
+  // The trace the span belongs to. A null trace ID means the invocation's trace.
+  tracing::TraceId traceId;
+  kj::Maybe<tracing::TraceFlags> traceFlags;
+
   SpanOpenData(rpc::SpanOpenData::Reader reader);
   void copyTo(rpc::SpanOpenData::Builder builder) const;
-  explicit SpanOpenData(tracing::SpanId spanId,
+  explicit SpanOpenData(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime)
       : spanId(spanId),
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
-        startTime(startTime) {}
+        startTime(startTime),
+        traceId(kj::mv(traceId)),
+        traceFlags(traceFlags) {}
 };
 
 struct SpanEndData {

@@ -135,6 +135,51 @@ KJ_TEST("request trace scopes capture both roots and restore enclosing tracing a
   }
 }
 
+// Accepts spans without recording them, and gives every span the ID 0x77.
+class NullSpanSubmitter final: public SpanSubmitter {
+ public:
+  bool submitSpanOpen(tracing::TraceId,
+      kj::Maybe<tracing::TraceFlags>,
+      tracing::SpanId,
+      tracing::SpanId,
+      kj::ConstString,
+      kj::Date) override {
+    return true;
+  }
+  void submitSpanClose(tracing::SpanId, kj::Date, kj::Date, Span::TagMap&&) override {}
+  void submitSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
+  void submitSpanException(tracing::SpanId,
+      kj::Date,
+      kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(0x77);
+  }
+};
+
+KJ_TEST("a user span's invocation span context is in the span's trace") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& invocation = request->getInvocationSpanContext();
+
+  // Logs and exceptions inside a span are reported in the span's trace, even if it isn't the
+  // invocation's.
+  tracing::TraceId otherTraceId(0x1111, 0x2222);
+  SpanParent span(kj::rc<UserSpanObserver>(kj::refcounted<NullSpanSubmitter>(),
+      tracing::SpanId(0x66), otherTraceId, tracing::TraceFlags(1)));
+  auto context = request->getInvocationSpanContextForUserSpan(span);
+  KJ_EXPECT(context.getTraceId() == otherTraceId);
+  KJ_EXPECT(context.getInvocationId() == invocation.getInvocationId());
+  KJ_EXPECT(context.getSpanId() == tracing::SpanId(0x77));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(context.getTraceFlags()) == tracing::TraceFlags(1));
+
+  // Without a span, they're reported in the invocation's context.
+  SpanParent noSpan(nullptr);
+  KJ_EXPECT(request->getInvocationSpanContextForUserSpan(noSpan) == invocation);
+}
+
 KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   FrozenTimerChannel timer;
   kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
@@ -666,7 +711,12 @@ class RecordingTracer final: public BaseTracer {
       LogLevel,
       kj::String,
       tracing::LogErrorInfo) override {}
-  void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
+  void addSpanOpen(tracing::TraceId,
+      kj::Maybe<tracing::TraceFlags>,
+      tracing::SpanId,
+      tracing::SpanId,
+      kj::ConstString,
+      kj::Date) override {}
   void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
   void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
   void addSpanAttribute(
