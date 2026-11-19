@@ -220,8 +220,6 @@ KJ_TEST("fail-closed properties exist in the zygote but throw when used") {
     KJ_EXPECT(attempt("typeof WebAssembly"_kj) ==
         "Error: startup snapshot: globalThis.WebAssembly cannot be used while preparing a startup "
         "snapshot"_kj);
-    KJ_EXPECT(attempt("typeof SharedArrayBuffer"_kj)
-                  .contains("globalThis.SharedArrayBuffer cannot be used"_kj));
     KJ_EXPECT(
         attempt("Iterator.concat = () => 1"_kj).contains("Iterator.concat cannot be used"_kj));
     KJ_EXPECT(attempt("[].values().join"_kj).contains("Iterator.prototype.join cannot be used"_kj));
@@ -232,7 +230,6 @@ KJ_TEST("fail-closed properties exist in the zygote but throw when used") {
             .contains("Iterator.concat cannot be used"_kj));
     // Present and, like V8's own, not enumerable.
     KJ_EXPECT(eval(js, "'WebAssembly' in globalThis"_kj) == "true"_kj);
-    KJ_EXPECT(eval(js, "Object.hasOwn(globalThis, 'SharedArrayBuffer')"_kj) == "true"_kj);
     KJ_EXPECT(eval(js, "Object.keys(globalThis).includes('WebAssembly')"_kj) == "false"_kj);
     KJ_EXPECT(eval(js, "Object.hasOwn(Iterator.prototype, 'includes')"_kj) == "true"_kj);
     // Every attempt above caught its error; the uses were recorded all the same.
@@ -253,7 +250,6 @@ KJ_TEST("removal rejects a zygote whose top level went on after a fail-closed er
   };
   // A caught read: a feature test that bakes its wrong answer in.
   rejects("try { WebAssembly } catch {}"_kj);
-  rejects("let t; try { t = typeof SharedArrayBuffer } catch { t = 'caught' }"_kj);
   // A caught write: a polyfill that gives up.
   rejects("try { Iterator.concat = () => 1 } catch {}"_kj);
   // A caught descriptor read goes through the getter too.
@@ -289,6 +285,24 @@ KJ_TEST("removal rejects a zygote whose top level went on after a fail-closed er
     });
     KJ_EXPECT(zygote->mutableSnapshotArtifact().restoreTimeGlobalsIndex != kj::none);
   }
+}
+
+KJ_TEST("SharedArrayBuffer is the realm's constructor in the zygote") {
+  auto zygote = newZygote();
+  inNewContext(*zygote, [&](Lock& js, v8::Local<v8::Context> context) {
+    KJ_EXPECT(eval(js, "typeof SharedArrayBuffer"_kj) == "function"_kj);
+    KJ_EXPECT(
+        eval(js,
+            "new SharedArrayBuffer(8) instanceof SharedArrayBuffer && "
+            "Object.getPrototypeOf(new SharedArrayBuffer(8)) === SharedArrayBuffer.prototype"_kj) ==
+        "true"_kj);
+    // Like V8's own: writable, configurable, not enumerable.
+    KJ_EXPECT(eval(js,
+                  "const d = Object.getOwnPropertyDescriptor(globalThis, 'SharedArrayBuffer');"
+                  "d.writable && d.configurable && !d.enumerable"_kj) == "true"_kj);
+    IsolateBase::from(js.v8Isolate).removeRestoreTimeGlobalsBeforeSnapshot(js, context);
+    KJ_EXPECT(eval(js, "Object.hasOwn(globalThis, 'SharedArrayBuffer')"_kj) == "false"_kj);
+  });
 }
 
 KJ_TEST("removal removes Error.stackTraceLimit and pins its final state") {
@@ -381,7 +395,7 @@ KJ_TEST("removal rejects a property the top level put in a fail-closed property'
           "delete globalThis.SharedArrayBuffer;"
           "Object.defineProperty(globalThis, 'SharedArrayBuffer', "
           "{get() { throw new Error('disabled'); }, configurable: true})"_kj);
-      KJ_EXPECT_THROW_MESSAGE("defined a property that V8 adds",
+      KJ_EXPECT_THROW_MESSAGE("non-configurable or an accessor",
           IsolateBase::from(js.v8Isolate).removeRestoreTimeGlobalsBeforeSnapshot(js, context));
     });
   }
@@ -525,6 +539,72 @@ struct HolderThing: public Object {
   }
 };
 
+// Holds a JavaScript value that its clone cannot copy, and hands it to the restored instance
+// through snapshotValues() and snapshotRestoreValues().
+struct ValueThing: public Object {
+  kj::Maybe<JsRef<JsValue>> held;
+
+  static Ref<ValueThing> constructor(Lock& js) {
+    return js.alloc<ValueThing>();
+  }
+
+  void hold(Lock& js, JsValue value) {
+    held = JsRef<JsValue>(js, value);
+  }
+  JsValue get(Lock& js) {
+    KJ_IF_SOME(h, held) {
+      return h.getHandle(js);
+    }
+    return js.undefined();
+  }
+
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<ValueThing>());
+  }
+  kj::Array<v8::Local<v8::Value>> snapshotValues(Lock& js) const override {
+    KJ_IF_SOME(h, held) {
+      return kj::arr<v8::Local<v8::Value>>(h.getHandle(js));
+    }
+    return nullptr;
+  }
+  void snapshotRestoreValues(Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override {
+    KJ_ASSERT(values.size() == 1);
+    held = JsRef<JsValue>(js, JsValue(values[0]));
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(held);
+  }
+
+  JSG_RESOURCE_TYPE(ValueThing) {
+    JSG_METHOD(hold);
+    JSG_METHOD(get);
+  }
+};
+
+// Reads its own `label` property through a PropertyReflection, which a restored instance must
+// have initialized as a freshly wrapped one does.
+struct ReflectingThing: public Object {
+  PropertyReflection<kj::String> label;
+
+  static Ref<ReflectingThing> constructor(Lock& js) {
+    return js.alloc<ReflectingThing>();
+  }
+
+  kj::String readLabel(Lock& js) {
+    return label.get(js, "label"_kj).orDefault(kj::str("none"));
+  }
+
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<ReflectingThing>());
+  }
+
+  JSG_RESOURCE_TYPE(ReflectingThing) {
+    JSG_METHOD(readLabel);
+  }
+  JSG_REFLECTION(label);
+};
+
 struct SnapshotTransferContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(SnapshotTransferContext) {
     JSG_NESTED_TYPE(StatelessThing);
@@ -532,6 +612,8 @@ struct SnapshotTransferContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(StatefulSubThing);
     JSG_NESTED_TYPE(OpaqueThing);
     JSG_NESTED_TYPE(HolderThing);
+    JSG_NESTED_TYPE(ValueThing);
+    JSG_NESTED_TYPE(ReflectingThing);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
@@ -540,7 +622,9 @@ JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
     StatefulThing,
     StatefulSubThing,
     OpaqueThing,
-    HolderThing);
+    HolderThing,
+    ValueThing,
+    ReflectingThing);
 
 // Runs `topLevel` in a zygote's context and serializes the context the way Worker::Worker does:
 // the serializer callbacks are registered with the context, the top level runs, the
@@ -655,9 +739,76 @@ KJ_TEST("a type with no snapshot transfer fails the zygote when the context reac
 }
 
 KJ_TEST(
-    "a subclass that inherits snapshotClone() fails the zygote instead of transferring as its base") {
-  KJ_EXPECT_THROW_MESSAGE("snapshotClone() returned an instance of another type",
-      bakeSnapshot("globalThis.sub = new StatefulSubThing(4)"_kj));
+    "a subclass that inherits snapshotClone() is unclonable instead of transferring as its base") {
+  KJ_EXPECT_THROW_MESSAGE(
+      "StatefulSubThing", bakeSnapshot("globalThis.sub = new StatefulSubThing(4)"_kj));
+  // Its base still transfers.
+  auto artifact = bakeSnapshot("globalThis.base = new StatefulThing(4)"_kj);
+  KJ_EXPECT(countTransfers(*artifact) == 1, countTransfers(*artifact));
+}
+
+KJ_TEST("the JavaScript values a transferred object holds come back as the zygote's own") {
+  auto artifact = bakeSnapshot("globalThis.obj = {n: 1};"
+                               "globalThis.thing = new ValueThing();"
+                               "thing.hold(obj);"
+                               "globalThis.empty = new ValueThing();"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "thing.get() === obj"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "thing.get().n"_kj) == "1"_kj);
+    KJ_EXPECT(eval(js, "empty.get()"_kj) == "undefined"_kj);
+  });
+}
+
+KJ_TEST("the values of an object dropped from the artifact do not fail the restore") {
+  // As in the test above for HolderThing: the ValueThing is recorded, with its value, and then
+  // becomes garbage before CreateBlob().
+  auto artifact =
+      bakeSnapshot("globalThis.holder = new HolderThing();"
+                   "(() => { const t = new ValueThing(); t.hold({}); holder.hold(t); })();"
+                   "globalThis.kept = new ValueThing();"
+                   "kept.hold('kept');"_kj);
+  KJ_EXPECT(countTransfers(*artifact) == 2, countTransfers(*artifact));
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(
+      *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "kept.get()"_kj) == "kept"_kj); });
+}
+
+KJ_TEST("SharedArrayBuffer and one the top level made survive a snapshot round trip") {
+  auto artifact = bakeSnapshot("globalThis.Saved = SharedArrayBuffer;"
+                               "globalThis.buf = new SharedArrayBuffer(8);"
+                               "new Int32Array(buf)[1] = 7;"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "Saved === SharedArrayBuffer"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "buf instanceof SharedArrayBuffer"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "new Int32Array(buf)[1]"_kj) == "7"_kj);
+    KJ_EXPECT(eval(js, "Object.keys(globalThis).includes('SharedArrayBuffer')"_kj) == "false"_kj);
+  });
+}
+
+KJ_TEST("a replaced or deleted SharedArrayBuffer stays so after a snapshot round trip") {
+  {
+    auto artifact = bakeSnapshot("globalThis.SharedArrayBuffer = 5;"_kj);
+    auto restored = newIsolateFromSnapshot(*artifact);
+    inRestoredContext(*restored,
+        [&](Lock& js) { KJ_EXPECT(eval(js, "globalThis.SharedArrayBuffer"_kj) == "5"_kj); });
+  }
+  {
+    auto artifact = bakeSnapshot("delete globalThis.SharedArrayBuffer;"_kj);
+    auto restored = newIsolateFromSnapshot(*artifact);
+    inRestoredContext(*restored,
+        [&](Lock& js) { KJ_EXPECT(eval(js, "typeof SharedArrayBuffer"_kj) == "undefined"_kj); });
+  }
+}
+
+KJ_TEST("a restored object's property reflections read its wrapper") {
+  auto artifact = bakeSnapshot("globalThis.r = new ReflectingThing(); r.label = 'zygote';"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "r.readLabel()"_kj) == "zygote"_kj);
+    KJ_EXPECT(eval(js, "r.label = 'restored'; r.readLabel()"_kj) == "restored"_kj);
+  });
 }
 
 KJ_TEST("a type with no snapshot transfer does not matter once unreachable") {

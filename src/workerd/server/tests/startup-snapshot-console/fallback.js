@@ -1,6 +1,6 @@
-// An aborted AbortSignal at module scope holds its reason, a JavaScript value no snapshotClone()
-// carries, so the snapshot fails and the Worker evaluates this module a second time.
-globalThis.signal = AbortSignal.abort('fallback');
+// A FormData at module scope has no snapshotClone(), so the snapshot fails and the Worker
+// evaluates this module a second time.
+globalThis.formData = new FormData();
 
 console.log('MARK fallback log');
 console.warn('MARK fallback warn');

@@ -441,6 +441,17 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback,
       SnapshotListenerOptions options);
 
+  // A plain EventTarget (`new EventTarget()`, or an instance of a JavaScript subclass) transfers
+  // through a startup snapshot with its listeners: their types and options in the copy, their
+  // identities and callbacks as snapshotValues(). A C++ subclass inherits this clone, which makes it
+  // unclonable unless it overrides snapshotClone() (AbortSignal does). Not transferred: a target
+  // with a listener registered with a `signal`, with an on<type> event handler attribute set, or
+  // with a bootstrap listener-count hook, all of which hold state outside the listener list.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
@@ -451,6 +462,16 @@ class EventTarget: public jsg::Object {
   // removeAllHandlers() does not notify: it is only used for wholesale teardown. Hooks registered
   // through EventTargetBootstrap::setListenerCountHook() are called on the same occasions.
   virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
+
+  // For a subclass's snapshotClone(): copies the EventTarget part of this target's state into
+  // `copy`, or returns false when it holds state the snapshot cannot carry (see snapshotClone()).
+  bool copyEventTargetForSnapshot(EventTarget& copy) const;
+  // For a subclass's snapshotValues(): appends the EventTarget part's values to `values`.
+  void addEventTargetSnapshotValues(jsg::Lock& js, kj::Vector<v8::Local<v8::Value>>& values) const;
+  // For a subclass's snapshotRestoreValues(): takes the EventTarget part's values from the front
+  // of `values` and returns the rest.
+  kj::ArrayPtr<const v8::Local<v8::Value>> restoreEventTargetSnapshotValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values);
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
   // non-callable object, or activated with a callable handler.
@@ -594,6 +615,16 @@ class EventTarget: public jsg::Object {
     uint8_t warnOnHandlerReturn : 1 = 1;
   };
   Flags flags;
+
+  // In a copy snapshotClone() made: the type and options of each listener the original had, in
+  // the order of the identities and callbacks its snapshotValues() returned. Null otherwise, and
+  // once a restored instance has taken its listeners back.
+  struct SnapshotListenerShape {
+    kj::String type;
+    bool once;
+    bool passive;
+  };
+  kj::Own<kj::Array<SnapshotListenerShape>> snapshotListenerShapes;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -783,12 +814,6 @@ class AbortSignal final: public EventTarget {
   // owning IoContext to be torn down.
   void dropRpcTriggersForTest();
 
-  // A signal that has not aborted and that nothing is attached to transfers as a fresh signal
-  // with the same flag. One that has aborted holds its reason, a JavaScript value no clone
-  // carries; one with listeners, abort algorithms, native or RPC registrations or
-  // AbortSignal.any() links would lose them. Both stay unclonable.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
-
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
@@ -799,6 +824,15 @@ class AbortSignal final: public EventTarget {
   // compatibility, when this flag is not set, this signal will not be passed through to
   // subrequests derived from the incoming request.
   bool isIgnoredForSubrequests(jsg::Lock& js) const;
+
+  // Transfers through a startup snapshot with its flag, its abort state (the reason as a snapshot
+  // value) and its listeners. Not a signal that anything else follows or that follows anything
+  // (`AbortSignal.any()`), one with registered abort algorithms or native actions, or one
+  // connected over RPC: that state belongs to other objects or to an I/O context.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
 
  private:
   Flag flag;
@@ -995,28 +1029,25 @@ class AbortController final: public jsg::Object {
     return js.alloc<AbortController>(js);
   }
 
-  jsg::Ref<AbortSignal> getSignal() {
-    return signal.addRef();
-  }
-
-  void abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
-
-  // The clone gets a fresh signal with the original's flag, then takes the restored signal behind
-  // the original's wrapper, if the snapshot carried one (snapshotRelink()), so that
-  // `controller.signal` is still the object the top level saw.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return ownAsWrappable(kj::refcounted<AbortController>(jsg::Lock::current(), signal->flag));
-  }
-
+  // Transfers through a startup snapshot. The restored controller takes the restored signal
+  // behind the wrapper of its own (snapshotRelink()). When JavaScript never got that signal, it has
+  // no wrapper and so no transfer of its own: the copy holds a fresh signal with the same flag,
+  // which is only right while the signal has not been aborted.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
   kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
     return kj::arr(snapshotReferenceTo(*signal));
   }
-
   void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
     KJ_IF_SOME(restoredSignal, snapshotRelinkedRef<AbortSignal>(restored[0])) {
       signal = kj::mv(restoredSignal);
     }
   }
+
+  jsg::Ref<AbortSignal> getSignal() {
+    return signal.addRef();
+  }
+
+  void abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   JSG_RESOURCE_TYPE(AbortController, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
@@ -1030,6 +1061,9 @@ class AbortController final: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("signal", signal);
   }
+
+  // The copy snapshotClone() makes.
+  explicit AbortController(jsg::Ref<AbortSignal> signal): signal(kj::mv(signal)) {}
 
  private:
   jsg::Ref<AbortSignal> signal;
@@ -1046,6 +1080,9 @@ class AbortController final: public jsg::Object {
 // a subset of the API that is being defined.
 class Scheduler final: public jsg::Object {
  public:
+  // No state: a fresh instance is the same.
+  static constexpr bool jsgSnapshotStateless = true;
+
   struct WaitOptions {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
     JSG_STRUCT(signal);

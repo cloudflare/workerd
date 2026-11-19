@@ -31,6 +31,11 @@ class Chacha20Poly1305Key final: public CryptoKey::Impl {
     OPENSSL_cleanse(keyData.begin(), keyData.size());
   }
 
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(kj::heap<Chacha20Poly1305Key>(
+        kj::heapArray(keyData.asPtr()), isExtractable(), getUsages()));
+  }
+
   jsg::JsArrayBuffer encrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plaintext) const override {

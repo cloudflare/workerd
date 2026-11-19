@@ -475,6 +475,7 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
           const SnapshotArtifact& artifact = *finalizedSnapshot.artifact;
           KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
           params.snapshot_blob = &artifact.blob;
+          params.snapshot_native_state = artifact.v8NativeState.get();
           params.external_references = artifact.externalReferences.begin();
         }
       }
@@ -710,8 +711,13 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // before CreateBlob() checks that no V8 handles are left; by the time the serializer callbacks
   // run, the shim pointer V8 reports is all that remains of a wrapper's native side. No
   // JavaScript runs from here until CreateBlob() returns: see step 3b.
-  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
-      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+  {
+    v8::HandleScope scope(ptr);
+    auto context = defaultContextHandle.Get(ptr);
+    v8::Context::Scope contextScope(context);
+    wrappablesMetadata->recordLiveWrappables(Lock::from(ptr), context, heapTracer, artifact,
+        [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+  }
 
   // 3. Destroy every live Wrappable.
   heapTracer.destroyLiveWrappableInstances();
@@ -794,6 +800,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   artifact.blob =
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.v8NativeState = getSnapshotCreator()->TakeNativeState();
 
   KJ_REQUIRE(*badTagFieldsCount == 0,
       "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
@@ -909,6 +916,29 @@ Holders zygoteHolders(v8::Isolate* isolate,
     .iteratorCtor = handles.iteratorCtor.Get(isolate),
     .iteratorPrototype = handles.iteratorPrototype.Get(isolate),
   };
+}
+
+// The value and attributes V8 gives a DATA_DEFAULT property.
+struct DataDefault {
+  v8::Local<v8::Value> value;
+  v8::PropertyAttribute attributes;
+};
+DataDefault dataDefaultFor(Lock& js, const RestoreTimeGlobal& entry) {
+  auto isolate = js.v8Isolate;
+  if (entry.name == "stackTraceLimit"_kj) {
+    // Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
+    return {v8::Integer::New(isolate, kDefaultStackTraceLimit), v8::None};
+  }
+  if (entry.name == "SharedArrayBuffer"_kj) {
+    // Genesis::InitializeGlobal_sharedarraybuffer(): the native context's constructor, which a
+    // new SharedArrayBuffer's prototype names before any JavaScript can replace it; writable,
+    // configurable, not enumerable.
+    auto prototype = v8::SharedArrayBuffer::New(isolate, 0)->GetPrototype().As<v8::Object>();
+    auto ctor = check(prototype->Get(js.v8Context(), v8StrIntern(isolate, "constructor"_kj)));
+    KJ_ASSERT(ctor->IsFunction());
+    return {ctor, v8::DontEnum};
+  }
+  KJ_FAIL_ASSERT("no default for this DATA_DEFAULT property", entry.name);
 }
 
 // The table entry a FAIL_CLOSED property's callback data names.
@@ -1067,11 +1097,12 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(
       auto holder = getHolder(context, holders, entry.holder);
       auto name = v8StrIntern(isolate, entry.name);
       switch (entry.kind) {
-        case RestoreTimeKind::DATA_DEFAULT:
-          // As Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
-          KJ_REQUIRE(check(holder->CreateDataProperty(
-              context, name, v8::Integer::New(isolate, kDefaultStackTraceLimit))));
+        case RestoreTimeKind::DATA_DEFAULT: {
+          auto initial = dataDefaultFor(js, entry);
+          KJ_REQUIRE(
+              check(holder->DefineOwnProperty(context, name, initial.value, initial.attributes)));
           break;
+        }
         case RestoreTimeKind::TEMPORAL:
           if (!hasTemporal) break;
           [[fallthrough]];

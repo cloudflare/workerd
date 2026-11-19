@@ -97,6 +97,14 @@ class URLPattern final: public jsg::Object {
 
   explicit URLPattern(ada::url_pattern<UrlPatternRegexProvider> i): inner(kj::mv(i)) {};
 
+  // Transfers through a startup snapshot as a copy of its compiled pattern without the RegExps,
+  // which travel as snapshot values, so that a restored pattern compiles nothing. Only a
+  // component of type REGEXP has one; ada matches the others without.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
+
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
       jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
       jsg::Optional<kj::OneOf<jsg::USVString, URLPatternOptions>> baseURL,

@@ -30,6 +30,16 @@ AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, 
   KJ_DASSERT(keyType != KeyType::SECRET);
 }
 
+AsymmetricKeyData AsymmetricKeyCryptoKeyImpl::shareKeyData() const {
+  // EVP_PKEY_up_ref() counts atomically and always succeeds.
+  KJ_ASSERT(EVP_PKEY_up_ref(keyData.get()) == 1);
+  return {
+    .evpPkey = kj::Own<EVP_PKEY>(keyData.get(), SslDisposer<EVP_PKEY, &EVP_PKEY_free>::INSTANCE),
+    .keyType = keyType,
+    .usages = getUsages(),
+  };
+}
+
 kj::Own<CryptoKey::Impl> AsymmetricKeyCryptoKeyImpl::getPublicKey(
     jsg::Lock& js, CryptoKeyUsageSet usages) const {
   JSG_REQUIRE(

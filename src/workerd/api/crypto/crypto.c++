@@ -630,6 +630,15 @@ template <typename T,
 
 CryptoKey::CryptoKey(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
 CryptoKey::~CryptoKey() noexcept(false) {}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> CryptoKey::snapshotClone() const {
+  if (algorithmProperty != kj::none || usagesProperty != kj::none) return kj::none;
+  KJ_IF_SOME(copy, impl->snapshotClone()) {
+    return ownAsWrappable(kj::refcounted<CryptoKey>(kj::mv(copy)));
+  }
+  return kj::none;
+}
+
 kj::StringPtr CryptoKey::getAlgorithmName() const {
   return impl->getAlgorithmName();
 }

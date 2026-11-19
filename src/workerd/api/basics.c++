@@ -9,6 +9,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/worker.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -162,6 +163,86 @@ void EventTarget::restoreSnapshotListener(jsg::Lock& js,
   if (handlerSet.handlers.size() != sizeBefore) {
     notifyListenerCountChanged(js, type, handlerSet.handlers.size());
   }
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> EventTarget::snapshotClone() const {
+  auto copy = kj::refcounted<EventTarget>();
+  if (!copyEventTargetForSnapshot(*copy)) return kj::none;
+  return ownAsWrappable(kj::mv(copy));
+}
+
+bool EventTarget::copyEventTargetForSnapshot(EventTarget& copy) const {
+  // An event handler attribute's trampoline and value, and a listener-count hook, are state of
+  // their own that the listener list does not describe.
+  if (eventHandlerAttributes.size() != 0 || !listenerCountHooks.empty()) return false;
+  copy.flags = flags;
+  kj::Vector<SnapshotListenerShape> shapes;
+  if (snapshotListenerShapes.get() != nullptr) {
+    // The copy stored in the snapshot artifact, cloned for a restored Worker.
+    for (auto& shape: *snapshotListenerShapes) {
+      shapes.add(SnapshotListenerShape{kj::str(shape.type), shape.once, shape.passive});
+    }
+  } else {
+    // The live original. The same walk as forEachSnapshotListener(), which snapshotValues() uses,
+    // so that the shapes line up with the values.
+    for (auto& entry: typeMap) {
+      for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
+        // The signal's abort algorithm that would remove the listener belongs to the signal.
+        if (handler->abortHandler != kj::none) return false;
+        shapes.add(SnapshotListenerShape{kj::str(entry.key), handler->once, handler->passive});
+      }
+    }
+  }
+  if (shapes.size() > 0) {
+    copy.snapshotListenerShapes = kj::heap(shapes.releaseAsArray());
+  }
+  return true;
+}
+
+kj::Array<v8::Local<v8::Value>> EventTarget::snapshotValues(jsg::Lock& js) const {
+  kj::Vector<v8::Local<v8::Value>> values;
+  addEventTargetSnapshotValues(js, values);
+  return values.releaseAsArray();
+}
+
+void EventTarget::addEventTargetSnapshotValues(
+    jsg::Lock& js, kj::Vector<v8::Local<v8::Value>>& values) const {
+  // forEachSnapshotListener() only reads, but jsg::Function's handle accessors are not const.
+  const_cast<EventTarget&>(*this).forEachSnapshotListener(
+      js, [&](const SnapshotListener& listener) {
+    values.add(listener.identity);
+    values.add(listener.callback);
+    values.add(listener.receiver);
+  });
+  if (values.size() > 0) {
+    KJ_REQUIRE(Worker::Api::current().tryGetEventListenerCallbackTypeHandler(js) != kj::none,
+        "startup snapshot: this runtime cannot restore the listeners of an EventTarget");
+  }
+}
+
+void EventTarget::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  auto rest = restoreEventTargetSnapshotValues(js, values);
+  KJ_ASSERT(rest.size() == 0, "startup snapshot: unexpected EventTarget values", rest.size());
+}
+
+kj::ArrayPtr<const v8::Local<v8::Value>> EventTarget::restoreEventTargetSnapshotValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  if (snapshotListenerShapes.get() == nullptr) return values;
+  auto shapes = kj::mv(snapshotListenerShapes);
+  size_t used = shapes->size() * 3;
+  KJ_ASSERT(values.size() >= used, "startup snapshot: missing EventTarget listener values");
+  auto& callbackHandler =
+      KJ_ASSERT_NONNULL(Worker::Api::current().tryGetEventListenerCallbackTypeHandler(js));
+  for (auto i: kj::indices(*shapes)) {
+    auto& shape = (*shapes)[i];
+    auto callback = KJ_ASSERT_NONNULL(callbackHandler.tryUnwrap(js, values[i * 3 + 1]),
+        "startup snapshot: a recorded listener callback is not a function", shape.type);
+    callback.setReceiver(js.v8Ref(values[i * 3 + 2]));
+    restoreSnapshotListener(js, shape.type, values[i * 3].As<v8::Object>(), kj::mv(callback),
+        {.once = shape.once, .passive = shape.passive});
+  }
+  return values.slice(used, values.size());
 }
 
 void EventTarget::addEventListener(jsg::Lock& js,
@@ -696,17 +777,6 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
       maybeAbortException(kj::mv(exception)),
       reason(kj::mv(maybeReason)) {}
 
-kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
-  if (aborting || maybeAbortException != kj::none || reason != kj::none || hasEventListeners() ||
-      !nativeRegistrations.empty() || !abortAlgorithms.empty() || dependent ||
-      !dependentSignals.empty() || !sourceSignals.empty() || !rpcRegistrations.empty() ||
-      rpcReceiverContext != kj::none || rpcSubscriptionRequested || rpcAbortPromise != kj::none ||
-      pendingReason != kj::none) {
-    return kj::none;
-  }
-  return ownAsWrappable(kj::refcounted<AbortSignal>(kj::none, kj::none, flag));
-}
-
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return getEventHandlerAttribute(js, kAbortEvent);
 }
@@ -725,6 +795,41 @@ void AbortSignal::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
   // and any such notification means an abort could still be observed.
   if (type == kAbortEvent && count > 0) {
     subscribeToRpcAbort(js);
+  }
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
+  // Followers, sources, abort algorithms and native actions are other objects' state, and the RPC
+  // state belongs to an I/O context. `aborting` stays set once an abort completes, which the
+  // copy's abort exception stands for; without one it means an abort is under way.
+  if ((aborting && maybeAbortException == kj::none) || dependent || !dependentSignals.empty() ||
+      !sourceSignals.empty() || !abortAlgorithms.empty() || !nativeRegistrations.empty() ||
+      !rpcRegistrations.empty() || rpcReceiverContext != kj::none || rpcSubscriptionRequested ||
+      rpcAbortPromise != kj::none || pendingReason != kj::none) {
+    return kj::none;
+  }
+  auto copy = kj::refcounted<AbortSignal>(
+      maybeAbortException.map([](const kj::Exception& e) { return e.clone(); }), kj::none, flag);
+  if (!copyEventTargetForSnapshot(*copy)) return kj::none;
+  return ownAsWrappable(kj::mv(copy));
+}
+
+kj::Array<v8::Local<v8::Value>> AbortSignal::snapshotValues(jsg::Lock& js) const {
+  // The listeners' values, then the reason, if any.
+  kj::Vector<v8::Local<v8::Value>> values;
+  addEventTargetSnapshotValues(js, values);
+  KJ_IF_SOME(r, reason) {
+    values.add(r.getHandle(js));
+  }
+  return values.releaseAsArray();
+}
+
+void AbortSignal::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  auto rest = restoreEventTargetSnapshotValues(js, values);
+  KJ_ASSERT(rest.size() <= 1, "startup snapshot: unexpected AbortSignal values", rest.size());
+  if (rest.size() == 1) {
+    reason = jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(rest[0]));
   }
 }
 
@@ -1449,6 +1554,19 @@ bool AbortSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
 
   return !FeatureFlags::get(js).getRequestSignalPassthrough() &&
       flag == Flag::IGNORE_FOR_SUBREQUESTS;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> AbortController::snapshotClone() const {
+  // A signal JavaScript got transfers on its own and is relinked; the copy's fresh one stands in
+  // until then. One without a wrapper is only this fresh copy, which must not lose an abort.
+  auto& s = *signal;
+  if (!snapshotHasWrapper(s) &&
+      (s.maybeAbortException != kj::none || s.reason != kj::none ||
+          s.snapshotClone() == kj::none)) {
+    return kj::none;
+  }
+  return ownAsWrappable(kj::refcounted<AbortController>(
+      jsg::Ref<AbortSignal>(kj::refcounted<AbortSignal>(kj::none, kj::none, s.flag))));
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {

@@ -334,6 +334,11 @@ class CryptoKey: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  // A key transfers through a startup snapshot as a copy of its Impl, for the kinds of key whose
+  // Impl implements snapshotClone(). One whose `algorithm` or `usages` JavaScript has read does
+  // not: those objects' identity, and whatever the script set on them, cannot be carried.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   bool verifyX509Public(const X509* x509) const;
   bool verifyX509Private(const X509* x509) const;
 

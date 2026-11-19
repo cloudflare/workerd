@@ -123,6 +123,10 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
   virtual kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const = 0;
 
+  // This key's data, for a subclass's snapshotClone(): the copy shares the EVP_PKEY, which
+  // BoringSSL lets several threads use at once, since nothing mutates it once it is made.
+  AsymmetricKeyData shareKeyData() const;
+
  private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual jsg::JsArrayBuffer exportRaw(jsg::Lock& js) const = 0;

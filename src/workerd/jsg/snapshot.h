@@ -82,6 +82,10 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   each listener in C++ (EventTarget::restoreSnapshotListener()), without running JavaScript.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
+  // The C++ objects of the managed V8 objects the blob holds (Intl's ICU objects), which the
+  // blob refers to (v8::SnapshotCreator::TakeNativeState()); null if it holds none. Every
+  // isolate created from the blob shares them.
+  std::shared_ptr<void> v8NativeState;
   kj::Array<intptr_t> externalReferences;
   size_t externalReferenceCursor = 0;
 
@@ -107,6 +111,9 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     // The slots of the objects the original's snapshotReferences() named, in its order; none for
     // one the snapshot carries no slot for.
     kj::Array<kj::Maybe<size_t>> references;
+    // The context-level AddData index of an array of the values the original's snapshotValues()
+    // returned, when it returned any.
+    kj::Maybe<size_t> valuesIndex;
   };
   kj::Vector<LiveWrappable> liveWrappables;
 
@@ -202,8 +209,11 @@ struct WrappablesSerializeMetadata {
   // Record the native side of every live Wrappable while it still exists into the snapshot
   // artifact (by tag alone when `isStateless(tag)`, as a snapshotClone() otherwise), and build a
   // map from each one's cppgc pointer to its index in the snapshot artifact to serialize the
-  // connection: JS Wrapper -> cppgc shim -> C++ Wrappable.
-  void recordLiveWrappables(HeapTracer& tracer,
+  // connection: JS Wrapper -> cppgc shim -> C++ Wrappable. Pins into `context`'s snapshot the
+  // values each transferred original's snapshotValues() returns.
+  void recordLiveWrappables(Lock& js,
+      v8::Local<v8::Context> context,
+      HeapTracer& tracer,
       SnapshotArtifact& artifact,
       kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless);
 
@@ -253,16 +263,24 @@ struct WrappableDeserializeMetadata {
   // restored wrapper is attached to (a stateless type's fresh instance from `recreateFnFor(tag)`,
   // or a snapshotClone() of a stored clone) and pre-allocates the CppgcShim that will back it, so
   // that the deserializer callback only needs to link holder and shim. A dropped slot gets no
-  // shim. Throws only if a recreate function or a snapshotClone() does, which their contracts
-  // forbid: nothing on this path catches it and the Worker fails to start.
+  // shim. Each instance's property reflections are initialized by `initReflectionFnFor(tag)`, as
+  // wrapping a new instance would. Throws only if a recreate function or a snapshotClone() does,
+  // which their contracts forbid: nothing on this path catches it and the Worker fails to start.
   void preallocateCppgcShims(Lock& js,
       HeapTracer& tracer,
       const SnapshotArtifact& artifact,
-      kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor);
+      kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor,
+      kj::FunctionParam<kj::Maybe<SnapshotInitReflectionFn>(v8::CppHeapPointerTag)>
+          initReflectionFnFor);
 
   // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
   // original named references (Wrappable::snapshotReferences()) the linked instances of those.
   void relinkReferences(const SnapshotArtifact& artifact);
+
+  // After relinkReferences(), inside `context`: hands each linked instance whose original
+  // returned values from Wrappable::snapshotValues() those values. The values of a slot no
+  // wrapper linked are taken out of the snapshot and dropped.
+  void restoreValues(Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact);
 
   // After creating a context: verifies that every serialized slot was linked exactly once and that
   // the callback reported nothing else, then releases the roots that kept unlinked shims alive.

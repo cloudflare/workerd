@@ -48,6 +48,11 @@ class URLSearchParams: public jsg::Object {
   // Constructor called by the URL class when created.
   URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery, URL& url);
 
+  // The copy snapshotClone() makes: the same name-value pairs, with no URL. A URL's searchParams
+  // is linked to the restored URL by URL::snapshotRelink().
+  explicit URLSearchParams(jsg::UrlSearchParams inner): inner(kj::mv(inner)) {}
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
   void append(jsg::USVString name, jsg::USVString value);
@@ -138,6 +143,8 @@ class URL: public jsg::Object {
   ~URL() noexcept(false) override;
 
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override;
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override;
 
   static jsg::Ref<URL> constructor(
       jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base);
