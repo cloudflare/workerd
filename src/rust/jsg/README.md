@@ -1371,8 +1371,8 @@ So a value is coerced only when no variant takes it as it is, and coerced to a s
 in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
 `null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
 cannot become a string, or an exception thrown by `toString()`, is thrown rather than
-trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
-`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`
+or `f64`, takes part in `T`'s passes but converts only a value of
 exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 

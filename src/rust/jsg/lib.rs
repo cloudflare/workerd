@@ -687,9 +687,6 @@ impl Error {
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
 /// - `NonCoercible<f64>` - only accepts JavaScript numbers
-/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
-///   numbers, which must be in range
-/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -750,15 +747,15 @@ impl<T> Deref for NonCoercible<T> {
 
 /// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
 ///
-/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
-/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
+/// These are `String`, `bool` and `f64`, as C++ JSG's `CoercibleType` (jsg/jsg.h) is
+/// `kj::String`, `bool` and `double`.
 ///
 /// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
 /// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
 /// a coarse test. The trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
+    note = "`NonCoercible<T>` takes only `String`, `bool` or `f64`. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
 pub trait Coercible: Type + coercible::Sealed {}
 
@@ -773,7 +770,7 @@ macro_rules! impl_coercible {
     };
 }
 
-impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
+impl_coercible!(String, bool, f64);
 
 #[expect(
     unsafe_code,
