@@ -273,7 +273,10 @@ fn nullable_type_mismatch_follows_dont_substitute_null_on_type_error() {
         // Only a top-level mismatch is null: an element of the wrong type is still an error.
         let err =
             convert::<Nullable<Vec<jsg::NonCoercible<String>>>>(lock, ctx, "[1]").unwrap_err();
-        assert_eq!(err.message, "Expected a string value but got number");
+        assert_eq!(
+            err.message,
+            "Incorrect type for array element 0: the provided value is not of type 'string'."
+        );
         // Each element of a sequence of nullables is converted the same way.
         assert_eq!(
             convert::<Vec<Strict>>(lock, ctx, "['a', 1]")?,
