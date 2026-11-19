@@ -120,8 +120,9 @@ database is one Durable Object, so its throughput is that of one object. A
 Secrets Store secret's value is the environment variable `WORKERD_SECRET_` plus
 its `secret_name`, upper-cased, with other characters than letters and digits as
 `_`: `api-key` is `WORKERD_SECRET_API_KEY`. `store_id` is ignored. Rate limits
-count in the server's memory: a restart forgets the counts, and each node of a
-cluster counts on its own.
+are called over JS RPC, so the Worker needs a compatibility date of 2024-04-03
+or later, or the `rpc` flag; they count in the server's memory, and a restart
+forgets the counts.
 
 A simple "Hello World!" config file might look like:
 

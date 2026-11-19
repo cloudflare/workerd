@@ -31,7 +31,7 @@ export function serve(dir, args, vars = {}) {
     stderr += d;
     process.stderr.write(d);
   });
-  const exited = new Promise((resolve) => child.once('exit', resolve));
+  const exited = new Promise((resolve) => child.once('close', resolve));
   return new Promise((resolve, reject) => {
     let buffer = '';
     child.stdio[CONTROL_FD].on('data', (d) => {

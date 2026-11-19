@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // `workerd serve` of a wrangler.jsonc with ratelimits: a binding allows its
-// limit and then refuses, also to a Worker from before JS RPC, and without
-// --experimental the server refuses to start and says why.
+// limit and then refuses, and without --experimental the server refuses to
+// start and says why.
 
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -17,8 +17,7 @@ import { serve } from '../wrangler-serve.mjs';
 const WRANGLER = {
   name: 'ratelimit',
   main: 'index.js',
-  // Before JS RPC was on by default.
-  compatibility_date: '2021-11-03',
+  compatibility_date: '2026-01-01',
   no_bundle: true,
   ratelimits: [
     { name: 'LIMITER', namespace_id: '1001', simple: { limit: 2, period: 60 } },

@@ -647,52 +647,27 @@ fn ratelimits_bind_the_ratelimit_worker() {
         panic!("not a worker");
     };
     let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
-    let bound: Vec<_> = w
-        .unwrap()
-        .get_bindings()
-        .unwrap()
-        .iter()
+    let bound: Vec<_> = (w.unwrap().get_bindings().unwrap().iter())
         .map(|b| {
-            let worker::binding::Which::Wrapped(w) = b.which().unwrap() else {
-                panic!("not wrapped");
+            let worker::binding::Which::Service(d) = b.which().unwrap() else {
+                panic!("not a service");
             };
-            let w = w.unwrap();
-            let inner: Vec<_> = (w.get_inner_bindings().unwrap().iter())
-                .map(|i| {
-                    let value = match i.which().unwrap() {
-                        worker::binding::Which::Service(d) => text(d.unwrap().get_name().unwrap()),
-                        worker::binding::Which::Text(t) => text(t.unwrap()),
-                        worker::binding::Which::Json(j) => text(j.unwrap()),
-                        _ => panic!("unexpected inner binding"),
-                    };
-                    format!("{}={value}", text(i.get_name().unwrap()))
-                })
-                .collect();
-            (
-                text(b.get_name().unwrap()),
-                text(w.get_module_name().unwrap()),
-                inner.join(" "),
-            )
+            let d = d.unwrap();
+            let service_designator::props::Which::Json(props) = d.get_props().which().unwrap()
+            else {
+                panic!("no JSON props");
+            };
+            let name = text(b.get_name().unwrap());
+            let service = text(d.get_name().unwrap());
+            let entrypoint = text(d.get_entrypoint().unwrap());
+            format!("{name} {service} {entrypoint} {}", text(props.unwrap()))
         })
         .collect();
-    let limit = |b: &str, inner: &str| {
-        (
-            b.into(),
-            "cloudflare-internal:ratelimit-api".into(),
-            inner.into(),
-        )
-    };
     assert_eq!(
         bound,
         [
-            limit(
-                "A",
-                "fetcher=app-ratelimit namespace=1001 limit=100 period=60"
-            ),
-            limit(
-                "B",
-                "fetcher=app-ratelimit namespace=1002 limit=5 period=10"
-            ),
+            r#"A app-ratelimit RateLimit {"limit":100,"namespace":"1001","period":60}"#,
+            r#"B app-ratelimit RateLimit {"limit":5,"namespace":"1002","period":10}"#,
         ]
     );
 }

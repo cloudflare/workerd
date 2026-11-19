@@ -36,8 +36,9 @@
 //! `secrets_store_secrets`, also `--experimental`, read the environment: each secret's value is
 //! the variable [`secret_variable`] names after its `secret_name`, read when the server starts;
 //! `store_id` is ignored, so a secret name means the same secret in every store. `ratelimits`,
-//! also `--experimental`, are the rate-limit API over the Worker `<name>-ratelimit` (the bundled
-//! module `/workerd/ratelimit.js`), which keeps its counts in memory. `assets`, also
+//! also `--experimental`, are the entrypoint `RateLimit` of the Worker `<name>-ratelimit` (the
+//! bundled module `/workerd/ratelimit.js`), its settings in its props, so they are called over JS
+//! RPC; it keeps its counts in memory. `assets`, also
 //! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
 //! `AssetWorker` entrypoint. Without `main` it serves only the files. The server listens on
@@ -1024,24 +1025,19 @@ fn set_secret(mut b: worker::binding::Builder<'_>, secret: &SecretsStoreSecret) 
     value.set_from_environment(secret_variable(&secret.secret_name));
 }
 
-/// The rate limit `r` of the worker `name`, counted by `<name>-ratelimit`.
+/// The rate limit `r` of the worker `name`: the entrypoint `RateLimit` of
+/// `<name>-ratelimit`, its settings in its props.
 fn set_ratelimit(mut b: worker::binding::Builder<'_>, r: &Ratelimit, name: &str) {
     b.set_name(&r.name);
-    let mut wrapped = b.init_wrapped();
-    wrapped.set_module_name("cloudflare-internal:ratelimit-api");
-    let mut inner = wrapped.init_inner_bindings(4);
-    let mut fetcher = inner.reborrow().get(0);
-    fetcher.set_name("fetcher");
-    fetcher.init_service().set_name(format!("{name}-ratelimit"));
-    let mut namespace = inner.reborrow().get(1);
-    namespace.set_name("namespace");
-    namespace.set_text(&r.namespace_id);
-    let mut limit = inner.reborrow().get(2);
-    limit.set_name("limit");
-    limit.set_json(r.simple.limit.to_string());
-    let mut period = inner.get(3);
-    period.set_name("period");
-    period.set_json(r.simple.period.to_string());
+    let mut designator = b.init_service();
+    designator.set_name(format!("{name}-ratelimit"));
+    designator.set_entrypoint("RateLimit");
+    let props = serde_json::json!({
+        "namespace": r.namespace_id,
+        "limit": r.simple.limit,
+        "period": r.simple.period,
+    });
+    designator.init_props().set_json(props.to_string());
 }
 
 /// The Workflow API of the Workflow `workflow` of the worker `name`: the entrypoint
