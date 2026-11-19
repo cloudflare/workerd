@@ -133,7 +133,10 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                              \
+  /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
+     instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
+  V(RUST_FAILURE_WORKER_INTERFACE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

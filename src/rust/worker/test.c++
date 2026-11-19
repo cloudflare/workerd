@@ -7,12 +7,14 @@
 #include <workerd/io/worker.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/rust/worker/error.rs.h>
+#include <workerd/rust/worker/failure.rs.h>
 #include <workerd/rust/worker/kill_switch.rs.h>
 #include <workerd/rust/worker/ok.rs.h>
 #include <workerd/util/exception.h>
 
 #include <kj-rs/kj-rs.h>
 
+#include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
@@ -579,6 +581,34 @@ void expectTracedFailure(const kj::Exception& e) {
   KJ_EXPECT(context.description == "while calling the peer");
 }
 
+// A response that a failing request never uses.
+class NoResponse final: public kj::HttpService::Response {
+ public:
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    KJ_UNIMPLEMENTED();
+  }
+};
+
+// A CONNECT response that a failing connect never uses.
+class NoConnectResponse final: public kj::HttpService::ConnectResponse {
+ public:
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_UNIMPLEMENTED();
+  }
+};
+
 // Fails every event with tracedFailure().
 class FailingWorker final: public WorkerInterface {
  public:
@@ -631,17 +661,7 @@ KJ_TEST("cxx_worker hands back the wrapped C++ worker's exception whole") {
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
   kj::NullStream body;
-  struct NoResponse final: public kj::HttpService::Response {
-    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
-        kj::StringPtr statusText,
-        const kj::HttpHeaders& headers,
-        kj::Maybe<uint64_t> expectedBodySize) override {
-      KJ_UNIMPLEMENTED();
-    }
-    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-      KJ_UNIMPLEMENTED();
-    }
-  } response;
+  NoResponse response;
   expectTracedFailure(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
     worker->request(kj::HttpMethod::GET, "http://test/"_kj, headers, body, response)
         .wait(waitScope);
@@ -802,6 +822,101 @@ KJ_TEST("a Rust interface's default abandonAlarm reports no stored alarm") {
 
   auto worker = kj::from<Rust>(new_ok_worker());
   KJ_ASSERT(worker->abandonAlarm(kj::UNIX_EPOCH).wait(waitScope) == kj::none);
+}
+
+// ======================================================================================
+// failure worker
+
+// Every event of a WorkerInterface but prewarm() and customEvent(), each called on a worker of
+// its own.
+kj::Vector<kj::Function<void(WorkerInterface&, kj::WaitScope&)>> failingEvents() {
+  kj::Vector<kj::Function<void(WorkerInterface&, kj::WaitScope&)>> events;
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    kj::NullStream body;
+    NoResponse response;
+    worker.request(kj::HttpMethod::GET, "http://test/"_kj, headers, body, response).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    auto pipe = kj::newTwoWayPipe();
+    NoConnectResponse response;
+    worker.connect("example.com:443"_kj, headers, *pipe.ends[0], response, {}).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.runScheduled(kj::UNIX_EPOCH, "* * * * *"_kj).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.runAlarm(kj::UNIX_EPOCH, 0).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.abandonAlarm(kj::UNIX_EPOCH).wait(waitScope);
+  });
+  return events;
+}
+
+// Expects `worker` to tell a custom event tracedFailure() and then fail with it.
+void expectCustomEventFails(WorkerInterface& worker, kj::WaitScope& waitScope) {
+  bool failedCalled = false;
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        .customEvent(kj::heap<RecordingEvent>([&](const kj::Exception& e) {
+      failedCalled = true;
+      expectTracedFailure(e);
+    })).wait(waitScope);
+  });
+  expectTracedFailure(KJ_ASSERT_NONNULL(exception));
+  KJ_EXPECT(failedCalled);
+}
+
+KJ_TEST("failure worker fails every event with the whole exception, every time") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_failure_worker(tracedFailure()));
+  for (int attempt = 0; attempt < 2; attempt++) {
+    for (auto& event: failingEvents()) {
+      expectTracedFailure(
+          KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event(*worker, waitScope); })));
+    }
+    expectTracedFailure(
+        KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { worker->test().wait(waitScope); })));
+    expectCustomEventFails(*worker, waitScope);
+  }
+  worker->prewarm("/warm"_kj).wait(waitScope);
+}
+
+KJ_TEST("failure worker rejects a customEvent with the exception its failed() throws") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_failure_worker(tracedFailure()));
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        ->customEvent(kj::heap<RecordingEvent>([](const kj::Exception&) {
+      KJ_FAIL_REQUIRE("failed() threw");
+    })).wait(waitScope);
+  });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getDescription().contains("failed() threw"));
+}
+
+// Holds for both implementations of fromException(): the Rust worker when the
+// RUST_FAILURE_WORKER_INTERFACE autogate is enabled, as in the @all-autogates variant, and the C++
+// one otherwise. The C++ one gives its exception away at its first failure, so each event gets a
+// worker of its own.
+KJ_TEST("WorkerInterface::fromException() fails each event with the whole exception") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  for (auto& event: failingEvents()) {
+    auto worker = WorkerInterface::fromException(tracedFailure());
+    expectTracedFailure(
+        KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event(*worker, waitScope); })));
+  }
+  expectCustomEventFails(*WorkerInterface::fromException(tracedFailure()), waitScope);
+  WorkerInterface::fromException(tracedFailure())->prewarm("/warm"_kj).wait(waitScope);
 }
 
 }  // namespace
