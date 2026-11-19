@@ -11,10 +11,9 @@
 //! how many bytes it actually wrote, which is often fewer because the
 //! destination is sized for the worst case.
 //!
-//! All sizing, validation, substitute-character setup, and length checking
-//! happens here; the ICU and simdutf wrappers in [`crate::ffi`] and the
-//! ASCII and Latin-1 conversions in [`crate::single_byte`] only provide the
-//! conversions themselves.
+//! All sizing, validation, and length checking happens here; the ICU and
+//! simdutf wrappers in [`crate::ffi`] and the ASCII and Latin-1 conversions in
+//! [`crate::single_byte`] only provide the conversions themselves.
 
 use crate::error::TranscodeError;
 use crate::ffi;
@@ -173,16 +172,15 @@ impl<'a> Transcoder<'a> {
         }
     }
 
-    /// ICU `ucnv_convertEx` between two converters, substituting `?` for
-    /// unmappable characters, sized at `to`'s maximum bytes per character for
-    /// every source byte.
+    /// ICU `ucnv_convertEx` between two converters, for the UTF-8 and UTF-16LE
+    /// identity pairs, which re-encode ill-formed input as U+FFFD. Sized at
+    /// `to`'s maximum bytes per character for every source byte.
     fn transcode_default(
         source: &'a [u8],
         from: Encoding,
         to: Encoding,
     ) -> Result<Self, TranscodeError> {
         let to_conv = Converter::open(to)?;
-        to_conv.set_subst_chars(&"?".repeat(to_conv.min_char_size()))?;
         let from_conv = Converter::open(from)?;
 
         let limit = source.len().saturating_mul(to_conv.max_char_size());

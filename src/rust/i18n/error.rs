@@ -35,8 +35,6 @@ pub enum TranscodeError {
     UnableToTranscode,
     #[error("Failed to initialize converter")]
     ConverterOpenFailed,
-    #[error("Setting ICU substitute characters failed")]
-    SetSubstituteCharsFailed,
     #[error("Invalid encoding passed to transcode")]
     InvalidEncoding,
     #[error("Failed to allocate memory for Uint8Array")]

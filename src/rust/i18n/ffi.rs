@@ -171,46 +171,6 @@ impl Converter {
         // ICU reports a small positive `int8_t`.
         usize::from(size.unsigned_abs())
     }
-
-    /// The fewest bytes one character can occupy in this converter's
-    /// encoding, from `ucnv_getMinCharSize`.
-    pub fn min_char_size(&self) -> usize {
-        // SAFETY: `self.cnv` is a live converter returned by `ucnv_open`.
-        let size = unsafe { versioned_function!(ucnv_getMinCharSize)(self.cnv) };
-        // ICU reports a small positive `int8_t`.
-        usize::from(size.unsigned_abs())
-    }
-
-    /// Sets the converter's substitute character sequence, used in place of
-    /// unmappable characters during conversion. An empty `substitute` leaves
-    /// ICU's default in place.
-    pub fn set_subst_chars(&self, substitute: &str) -> Result<(), TranscodeError> {
-        if substitute.is_empty() {
-            return Ok(());
-        }
-        // ICU takes the length as an `int8_t` and reads a negative length as
-        // "NUL-terminated", which `substitute` is not. Its own limit on
-        // substitute sequences is far lower still.
-        let length =
-            i8::try_from(substitute.len()).map_err(|_| TranscodeError::SetSubstituteCharsFailed)?;
-
-        let mut err = sys::UErrorCode::U_ZERO_ERROR;
-        // SAFETY: `self.cnv` is a live converter, and `substitute` outlives the
-        // call and is `length` bytes long. ICU takes the sequence as bytes and
-        // does not require NUL termination when given an explicit length.
-        unsafe {
-            versioned_function!(ucnv_setSubstChars)(
-                self.cnv,
-                substitute.as_ptr().cast(),
-                length,
-                &raw mut err,
-            );
-        }
-        if is_failure(err) {
-            return Err(TranscodeError::SetSubstituteCharsFailed);
-        }
-        Ok(())
-    }
 }
 
 impl Drop for Converter {

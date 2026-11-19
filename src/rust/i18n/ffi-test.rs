@@ -19,7 +19,7 @@ fn utf16le(text: &str) -> Vec<u8> {
 
 /// Runs [`convert_ex`] the way `dispatch` does, and returns what it wrote.
 fn convert(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
-    let to = substituting_converter(to);
+    let to = Converter::open(to).unwrap();
     let from = Converter::open(from).unwrap();
     let mut target = vec![0; source.len() * to.max_char_size()];
     let written = convert_ex(&to, &from, source, &mut target).unwrap();
@@ -27,23 +27,13 @@ fn convert(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
     target
 }
 
-/// Opens a converter for `to` with the `?` substitute `dispatch` configures.
-fn substituting_converter(to: Encoding) -> Converter {
-    let converter = Converter::open(to).unwrap();
-    converter
-        .set_subst_chars(&"?".repeat(converter.min_char_size()))
-        .unwrap();
-    converter
-}
-
 // ICU. These pin down the ICU behaviour `dispatch` relies on.
 
 #[test]
-fn char_sizes_come_from_icu() {
+fn max_char_sizes_come_from_icu() {
     let _harness = init_icu();
-    for (encoding, min, max) in [(Encoding::Utf8, 1, 3), (Encoding::Utf16Le, 2, 2)] {
+    for (encoding, max) in [(Encoding::Utf8, 3), (Encoding::Utf16Le, 2)] {
         let converter = Converter::open(encoding).unwrap();
-        assert_eq!(converter.min_char_size(), min, "{encoding:?}");
         assert_eq!(converter.max_char_size(), max, "{encoding:?}");
     }
 }
@@ -69,7 +59,7 @@ fn ill_formed_input_decodes_to_replacement_characters() {
 #[test]
 fn a_short_target_is_a_failure() {
     let _harness = init_icu();
-    let to = substituting_converter(Encoding::Utf8);
+    let to = Converter::open(Encoding::Utf8).unwrap();
     let from = Converter::open(Encoding::Utf8).unwrap();
     let mut target = [0; 2];
     assert_eq!(
