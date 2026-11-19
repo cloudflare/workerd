@@ -12,6 +12,7 @@ import {
 import { Buffer } from 'node-internal:internal_buffer';
 import { validateUint32 } from 'node-internal:validators';
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
+import { isAnyArrayBuffer } from 'node-internal:internal_types';
 import {
   Zlib,
   Brotli,
@@ -58,6 +59,20 @@ export function crc32(
   return zlibUtil.crc32(data, value);
 }
 
+function validateInput(data: unknown): void {
+  if (
+    typeof data !== 'string' &&
+    !ArrayBuffer.isView(data) &&
+    !isAnyArrayBuffer(data)
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'buffer',
+      ['string', 'Buffer', 'TypedArray', 'DataView', 'ArrayBuffer'],
+      data
+    );
+  }
+}
+
 function processChunk(
   engine: ZlibBase,
   data: ArrayBufferView | string
@@ -77,6 +92,7 @@ function zlibSyncImpl(
   options: ZlibOptions,
   mode: (typeof ZlibMode)[keyof typeof ZlibMode]
 ): ZlibResult {
+  validateInput(data);
   if (!options.info) {
     // Fast path, where we send the data directly to C++
     return Buffer.from(zlibUtil.zlibSync(data, options, mode));
@@ -140,6 +156,7 @@ export function brotliDecompressSync(
   data: ArrayBufferView | string,
   options: BrotliOptions = {}
 ): ZlibResult {
+  validateInput(data);
   if (!options.info) {
     // Fast path, where we send the data directly to C++
     return Buffer.from(zlibUtil.brotliDecompressSync(data, options));
@@ -153,6 +170,7 @@ export function brotliCompressSync(
   data: ArrayBufferView | string,
   options: BrotliOptions = {}
 ): ZlibResult {
+  validateInput(data);
   if (!options.info) {
     // Fast path, where we send the data directly to C++
     return Buffer.from(zlibUtil.brotliCompressSync(data, options));
@@ -209,6 +227,7 @@ function zlibImpl(
     optionsOrCallback,
     callbackOrUndefined
   );
+  validateInput(data);
 
   if (!options.info) {
     // Fast path
@@ -294,6 +313,7 @@ export function brotliDecompress(
     optionsOrCallback,
     callbackOrUndefined
   );
+  validateInput(data);
 
   if (!options.info) {
     // Fast path
@@ -322,6 +342,7 @@ export function brotliCompress(
     optionsOrCallback,
     callbackOrUndefined
   );
+  validateInput(data);
 
   if (!options.info) {
     // Fast path
@@ -345,6 +366,7 @@ export function zstdDecompressSync(
   data: ArrayBufferView | string,
   options: ZstdOptions = {}
 ): ZlibResult {
+  validateInput(data);
   if (!options.info) {
     // Fast path, where we send the data directly to C++
     return Buffer.from(zlibUtil.zstdDecompressSync(data, options));
@@ -358,6 +380,7 @@ export function zstdCompressSync(
   data: ArrayBufferView | string,
   options: ZstdOptions = {}
 ): ZlibResult {
+  validateInput(data);
   if (!options.info) {
     // Fast path, where we send the data directly to C++
     return Buffer.from(zlibUtil.zstdCompressSync(data, options));
@@ -376,6 +399,7 @@ export function zstdDecompress(
     optionsOrCallback,
     callbackOrUndefined
   );
+  validateInput(data);
 
   if (!options.info) {
     // Fast path
@@ -404,6 +428,7 @@ export function zstdCompress(
     optionsOrCallback,
     callbackOrUndefined
   );
+  validateInput(data);
 
   if (!options.info) {
     // Fast path

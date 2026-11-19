@@ -31,6 +31,7 @@ pub mod resource;
 pub mod rtti;
 mod scope;
 pub mod ser;
+mod snapshot;
 mod string;
 mod structs;
 mod tunnel;
@@ -77,12 +78,10 @@ pub use resource::NestedType;
 pub use resource::NestedTypeMember;
 pub use resource::Rc;
 pub use resource::Resource;
-pub use resource::SnapshotRecreated;
 pub use resource::Undescribed;
 pub use resource::Weak;
 pub use resource::described_member;
 pub use resource::nested_type;
-pub use resource::snapshot_recreate_leak;
 pub use resource::undescribed;
 pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
@@ -102,6 +101,11 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use snapshot::ErasedSnapshotTransfer;
+pub use snapshot::RestoredReferences;
+pub use snapshot::SnapshotCopy;
+pub use snapshot::SnapshotReferences;
+pub use snapshot::SnapshotTransfer;
 pub use string::JsString;
 #[doc(hidden)]
 pub use structs::StructShape;
@@ -133,14 +137,19 @@ mod ffi {
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
-        /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
-        /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
-        /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
-        /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
-        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway). The handles
-        /// cached for struct types are reset, so the isolate must be locked, with no Rust `Lock`
-        /// in use.
-        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+        /// Drains the Realm's cached resource templates for the `PREPARE_SNAPSHOT` pipeline,
+        /// which pins each one into the snapshot and must dispose its handle before
+        /// `CreateBlob`. Each `handle` is a `v8::Global<v8::FunctionTemplate>`, recovered on
+        /// the C++ side with `global_from_ffi`; ownership transfers to the caller. The cache is
+        /// left empty. The handles cached for struct types are reset, so the isolate must be
+        /// locked, with no Rust `Lock` in use.
+        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ResourceTemplate>;
+
+        /// Fills the empty template cache of a Realm created for an isolate started from a
+        /// snapshot with the templates `realm_take_resource_templates` drained in the zygote, so
+        /// that the restored wrappers and the new ones of a resource type share its template.
+        /// Ownership of each handle transfers to the Realm.
+        fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ResourceTemplate>);
 
         /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
         /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
@@ -160,6 +169,14 @@ mod ffi {
         /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
         /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
+    }
+
+    /// A resource type's template, by the type's `TypeId`, which is stable within a binary,
+    /// as the producer and the consumer of a startup snapshot are.
+    struct ResourceTemplate {
+        type_id_lo: usize,
+        type_id_hi: usize,
+        handle: Global,
     }
 
     unsafe extern "C++" {
@@ -649,6 +666,58 @@ impl Error {
             pending: false,
         }
     }
+
+    /// The `TypeError` C++ JSG throws for a value in `context` that is not of type
+    /// `expected` (`typeErrorMessage()` in jsg/util.c++).
+    #[doc(hidden)]
+    #[cold]
+    #[must_use]
+    pub fn new_incorrect_type(context: TypeErrorContext<'_>, expected: &str) -> Self {
+        let message = match context {
+            TypeErrorContext::MethodArgument {
+                method,
+                class,
+                index,
+            } => format!(
+                "Failed to execute '{method}' on '{class}': parameter {} is not of type \
+                 '{expected}'.",
+                index + 1
+            ),
+            TypeErrorContext::StructField { field, class } => format!(
+                "Incorrect type for the '{field}' field on '{class}': the provided value is not \
+                 of type '{expected}'."
+            ),
+            TypeErrorContext::ArrayElement(index) => format!(
+                "Incorrect type for array element {index}: the provided value is not of type \
+                 '{expected}'."
+            ),
+            TypeErrorContext::DictField(name) => format!(
+                "Incorrect type for map entry '{name}': the provided value is not of type \
+                 '{expected}'."
+            ),
+        };
+        Self::new_type_error(message)
+    }
+}
+
+/// Where a value that is not of its type was, like C++ JSG's `TypeErrorContext`; see
+/// [`Error::new_incorrect_type`].
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub enum TypeErrorContext<'a> {
+    /// An argument of a `#[jsg_method]`, by the method's JavaScript name, the resource's class
+    /// name and the argument's index.
+    MethodArgument {
+        method: &'a str,
+        class: &'a str,
+        index: usize,
+    },
+    /// A `#[jsg_struct]` field, by its JavaScript name and the struct's class name.
+    StructField { field: &'a str, class: &'a str },
+    /// An element of a `Vec`, by its index.
+    ArrayElement(usize),
+    /// The value of a `Dict` entry, by its key.
+    DictField(&'a str),
 }
 
 /// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
@@ -1638,13 +1707,11 @@ pub trait GarbageCollected: Traced {
         false
     }
 
-    /// The startup-snapshot recreate hook of a stateless resource type
-    /// (`#[jsg_resource(snapshot_stateless)]`): a fresh instance, leaked as the trait object a
-    /// C++ `Wrappable` takes over for a wrapper restored from the snapshot. `None` for every other
-    /// type, whose live instance keeps the Worker out of the pipeline. Runs in the zygote before
-    /// `CreateBlob()` and in a Worker started from the snapshot before its context exists, so it
-    /// must not touch V8 or panic. See [`snapshot_recreate_leak`].
-    fn snapshot_recreate(&self) -> Option<SnapshotRecreated> {
+    /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
+    /// which makes a Worker whose top level leaves it reachable start without the snapshot.
+    /// `#[jsg_resource]` implements it.
+    #[doc(hidden)]
+    fn snapshot_transfer(&self) -> Option<&dyn ErasedSnapshotTransfer> {
         None
     }
 }
@@ -1798,17 +1865,41 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     realm.state.drain_awaiting_lock(isolate);
 }
 
-/// See the bridge declaration: drains the cached resource-template persistent handles for
-/// the `PREPARE_SNAPSHOT` pipeline.
+/// See the bridge declaration.
 #[expect(
     unsafe_code,
     reason = "frees the struct shapes, which no Lock may be using"
 )]
-unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ffi::ResourceTemplate> {
     // The struct handles are reset here, under the isolate lock, rather than handed over.
     // SAFETY: the isolate is locked with no `Lock` in use (guaranteed by the C++ caller).
     unsafe { realm.structs.clear() };
-    realm.resources.take_template_handles()
+    realm
+        .resources
+        .take_templates()
+        .into_iter()
+        .map(|(type_id, handle)| {
+            let [type_id_lo, type_id_hi] = v8::split_type_id(type_id);
+            ffi::ResourceTemplate {
+                type_id_lo,
+                type_id_hi,
+                handle,
+            }
+        })
+        .collect()
+}
+
+/// See the bridge declaration.
+fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ffi::ResourceTemplate>) {
+    realm
+        .resources
+        .restore_templates(templates.into_iter().map(|t| {
+            let type_id = v8::join_type_id([t.type_id_lo, t.type_id_hi]);
+            (
+                type_id,
+                v8::Global::from_ffi_in(t.handle, Arc::clone(&realm.state)),
+            )
+        }));
 }
 
 /// Runs `body`, the body of the generated callback of a method or property that returns a

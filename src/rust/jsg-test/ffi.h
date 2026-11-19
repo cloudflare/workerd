@@ -88,6 +88,16 @@ class TestHarness {
 // `Worker::Isolate` does, the isolate-level JSG switches derived from them.
 kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api);
 
+// Builds a startup snapshot the way a Worker's zygote does and starts an isolate from it. Calls
+// `topLevel` in a context of the zygote, with its Rust realm created from `flags`, and then, if the
+// snapshot was created, `restored` in the context of a new isolate started from it. Returns why the
+// zygote failed, or an empty string if it did not.
+::rust::String snapshot_round_trip(::rust::Slice<const uint8_t> flags,
+    size_t topLevelData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> topLevel,
+    size_t restoredData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> restored);
+
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
 enum class GcType : uint8_t;
 

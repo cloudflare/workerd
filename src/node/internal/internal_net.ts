@@ -1946,6 +1946,25 @@ function initializeConnection(
         }
       );
     } catch (err) {
+      if (
+        isIP(address) === 0 &&
+        err instanceof TypeError &&
+        err.message.startsWith('Specified address')
+      ) {
+        // connect() rejects a host name that is not a valid address before
+        // any lookup, where Node's getaddrinfo fails with ENOTFOUND. Node
+        // never looks up an IP literal, so those keep the platform's error. The
+        // platform's error keeps its message and gains the properties Node
+        // gives a failed lookup, which Node reports through 'lookup' first.
+        const { code, errno, syscall, hostname } = new GetAddrInfoException(
+          'ENOTFOUND',
+          address
+        );
+        Object.assign(err, { code, errno, syscall, hostname });
+        nextTick(() =>
+          socket.emit('lookup', err, undefined, undefined, address)
+        );
+      }
       socket.destroy(err as Error);
     }
   };
@@ -2029,9 +2048,10 @@ export function onConnectionClosed(this: Socket): void {
   // Nobody is reading (the socket is paused or stopped on backpressure), so
   // no read will observe the connection's end: end the readable here.
   // push(null) is a no-op if it already has; read(0) lets 'end' fire on a
-  // socket nobody is reading, as in Node.
+  // socket nobody is reading, as in Node. As in startRead(), it is the
+  // Readable's own read(0): the socket's read() override would start reading.
   this.push(null);
-  this.read(0);
+  Duplex.prototype.read.call(this, 0);
 }
 
 async function startRead(socket: Socket): Promise<void> {
