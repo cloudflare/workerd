@@ -620,22 +620,8 @@ fn secrets_store_secrets_bind_the_secrets_store_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(
-        names,
-        [
-            "app",
-            "app-secrets-store",
-            "app-secrets-kv",
-            "app-secrets-kv-storage",
-            "app-secrets-kv-blobs"
-        ]
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let meta = fs::metadata(dir.join(".wrangler/state/workerd/secrets-store")).unwrap();
-        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
-    }
+    assert_eq!(names, ["app", "app-secrets-store"]);
+    assert!(!dir.join(".wrangler").exists());
     let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
     let bound = |i: u32| -> Vec<String> {
         let service::Which::Worker(w) = services.get(i).which().unwrap() else {
@@ -652,10 +638,6 @@ fn secrets_store_secrets_bind_the_secrets_store_worker() {
                             format!("{} {entrypoint}", text(d.get_name().unwrap())),
                             d.get_props(),
                         )
-                    }
-                    worker::binding::Which::KvNamespace(d) => {
-                        let d = d.unwrap();
-                        (text(d.get_name().unwrap()), d.get_props())
                     }
                     worker::binding::Which::FromEnvironment(v) => {
                         return format!("{name} {}", text(v.unwrap()));
@@ -680,20 +662,10 @@ fn secrets_store_secrets_bind_the_secrets_store_worker() {
     assert_eq!(
         bound(1),
         [
-            r#"store:s1 app-secrets-kv {"namespace":"s1"}"#,
-            r#"store:s2 app-secrets-kv {"namespace":"s2"}"#,
             "env:Db_2 WORKERD_SECRET_DB_2",
             "env:api-key WORKERD_SECRET_API_KEY",
         ]
     );
-    let service::Which::Worker(kv) = services.get(2).which().unwrap() else {
-        panic!("not a worker");
-    };
-    let ns = kv.unwrap().get_durable_object_namespaces().unwrap().get(0);
-    let worker::durable_object_namespace::Which::UniqueKey(key) = ns.which().unwrap() else {
-        panic!("no unique key");
-    };
-    assert_eq!(text(key.unwrap()), "SecretsStoreKV");
 }
 
 #[test]
@@ -750,9 +722,6 @@ fn bindings_of_every_kind_keep_their_places() {
             "app-r2-storage",
             "app-r2-blobs",
             "app-secrets-store",
-            "app-secrets-kv",
-            "app-secrets-kv-storage",
-            "app-secrets-kv-blobs",
             "app-d1",
             "app-d1-storage",
             "app-ratelimit",
@@ -766,23 +735,6 @@ fn bindings_of_every_kind_keep_their_places() {
         .map(|b| b.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
     assert_eq!(bound, ["V", "KV", "R2", "D1", "S", "L", "ASSETS"]);
-}
-
-#[cfg(unix)]
-#[test]
-fn secrets_store_secrets_refuse_a_symlinked_directory() {
-    let wrangler = r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
-        "secrets_store_secrets": [{ "binding": "S", "store_id": "s", "secret_name": "x" }] }"#;
-    let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
-    let state = dir.join(".wrangler/state/workerd");
-    fs::create_dir_all(&state).unwrap();
-    std::os::unix::fs::symlink(&dir, state.join("secrets-store")).unwrap();
-    let process = Process::new(None, None, Vec::new());
-    let error = load(dir.join("wrangler.jsonc").to_str().unwrap(), &process, true)
-        .err()
-        .unwrap();
-    assert!(error.contains("symlink"), "{error}");
-    assert!(!dir.join("blobs").exists());
 }
 
 #[test]

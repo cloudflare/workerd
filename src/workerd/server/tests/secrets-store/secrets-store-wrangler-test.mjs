@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // `workerd serve` of a wrangler.jsonc with secrets_store_secrets: a secret's
-// WORKERD_SECRET_ variable is its value and is never stored, the admin API is
-// off, and without --experimental the server refuses to start.
+// WORKERD_SECRET_ variable is its value and is never stored, and without
+// --experimental the server refuses to start.
 
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,19 +25,10 @@ const WRANGLER = {
   ],
 };
 
-// GET /<binding> answers the secret, or the error as a 404; POST /<binding>
-// tries to create it through the admin API and answers the error as a 403.
+// GET /<binding> answers the secret, or the error as a 404.
 const WORKER = `export default {
   async fetch(request, env) {
     const secret = env[new URL(request.url).pathname.slice(1)];
-    if (request.method === 'POST') {
-      try {
-        const admin = await secret['SecretsStoreSecret::admin_api']();
-        return new Response(await admin.create(await request.text()));
-      } catch (e) {
-        return new Response(e.message, { status: 403 });
-      }
-    }
     try {
       return new Response(await secret.get());
     } catch (e) {
@@ -56,10 +47,8 @@ test('secrets_store_secrets in a wrangler.jsonc', async () => {
   assert.notStrictEqual(refused.code, 0);
   assert.match(refused.stderr, /secrets_store_secrets.*--experimental/s);
 
-  const call = async (server, path, body) => {
-    const method = body === undefined ? 'GET' : 'POST';
-    const url = `http://127.0.0.1:${server.port}${path}`;
-    const response = await fetch(url, { method, body });
+  const call = async (server, path) => {
+    const response = await fetch(`http://127.0.0.1:${server.port}${path}`);
     return [response.status, await response.text()];
   };
   let server = await serve(dir, ['--experimental'], {
@@ -69,10 +58,6 @@ test('secrets_store_secrets in a wrangler.jsonc', async () => {
   assert.deepStrictEqual(await call(server, '/OTHER'), [
     404,
     'Secret "other" not found',
-  ]);
-  assert.deepStrictEqual(await call(server, '/OTHER', 'stored'), [
-    403,
-    'The Secrets Store admin API is off',
   ]);
   await server.stop();
 
