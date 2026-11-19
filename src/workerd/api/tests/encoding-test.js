@@ -1009,6 +1009,8 @@ export const stickyMultibyteStateIso2022JpLoose = {
   },
 };
 
+// A fatal streaming throw keeps the bytes the decoder restored to the I/O
+// queue and the input it had not read yet; the next call decodes them.
 export const fatalStreamGb18030Gbk = {
   test() {
     for (const encoding of ['gb18030', 'gbk']) {
@@ -1020,7 +1022,7 @@ export const fatalStreamGb18030Gbk = {
             stream: true,
           })
         );
-        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+        strictEqual(d.decode(Uint8Array.of(0x80)), '0!!!\u20AC');
       }
 
       {
@@ -1031,7 +1033,17 @@ export const fatalStreamGb18030Gbk = {
             stream: true,
           })
         );
-        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+        strictEqual(d.decode(Uint8Array.of(0x80)), '0\u4E05B\u20AC');
+      }
+
+      {
+        // An empty streaming chunk still decodes what the throw left queued.
+        const d = new TextDecoder(encoding, { fatal: true });
+        throws(() =>
+          d.decode(Uint8Array.of(0x81, 0x30, 0x21, 0x21), { stream: true })
+        );
+        strictEqual(d.decode(new Uint8Array(0), { stream: true }), '0!!');
+        strictEqual(d.decode(), '');
       }
     }
   },
