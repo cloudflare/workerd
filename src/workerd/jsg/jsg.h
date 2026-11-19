@@ -2621,9 +2621,12 @@ class PropertyReflection {
   friend class TypeWrapperOps;
 };
 
+class JsString;
+
 template <typename T>
 concept CoercibleType = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
-    kj::isSameType<DOMString, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
+    kj::isSameType<DOMString, T>() || kj::isSameType<JsString, T>() || kj::isSameType<bool, T>() ||
+    kj::isSameType<double, T>();
 // When updating this list, be sure to keep the corresponding checks in the NonCoercibleWrapper
 // class in value.h updated as well.
 
@@ -2636,6 +2639,8 @@ concept CoercibleType = kj::isSameType<kj::String, T>() || kj::isSameType<USVStr
 // Here, T can be only one of several types that support coercion:
 //
 // * kj::String, jsg::USVString, jsg::DOMString (value must be a string)
+// * jsg::JsString (value must be a string, which is kept as the JavaScript string rather than
+//   converted to UTF-8, so a caller that reads it later, or never, does not pay to convert it)
 // * bool (value must be a boolean)
 // * double (value must be a number)
 //

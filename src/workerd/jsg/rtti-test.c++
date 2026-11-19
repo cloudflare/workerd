@@ -113,6 +113,7 @@ KJ_TEST("generic types") {
   KJ_EXPECT(tType<jsg::Identified<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<jsg::MemoizedIdentity<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<jsg::NonCoercible<kj::String>>() == "(string = (name = \"kj::String\"))");
+  KJ_EXPECT(tType<jsg::NonCoercible<JsString>>() == "(string = (name = \"jsg::JsString\"))");
 
   KJ_EXPECT(tType<kj::Array<int>>() ==
       "(array = (element = (number = (name = \"int\")), name = \"kj::Array\"))");

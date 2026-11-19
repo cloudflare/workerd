@@ -1171,6 +1171,18 @@ struct NonCoercibleContext: public ContextGlobalObject {
     return true;
   }
 
+  bool testOneOfJsString(kj::OneOf<NonCoercible<bool>, NonCoercible<JsString>> value) {
+    return true;
+  }
+
+  // Each returns the string it was given, as C++ holds it.
+  kj::String echoString(NonCoercible<kj::String> value) {
+    return kj::mv(value.value);
+  }
+  JsString echoJsString(NonCoercible<JsString> value) {
+    return value.value;
+  }
+
   NonCoercible<kj::String> returnString() {
     return {.value = kj::str("string")};
   }
@@ -1198,6 +1210,8 @@ struct NonCoercibleContext: public ContextGlobalObject {
     JSG_METHOD_NAMED(testUSVStringCoerced, template testCoerced<jsg::USVString>);
     JSG_METHOD_NAMED(testDOMString, template test<jsg::DOMString>);
     JSG_METHOD_NAMED(testDOMStringCoerced, template testCoerced<jsg::DOMString>);
+    JSG_METHOD_NAMED(testJsString, template test<JsString>);
+    JSG_METHOD_NAMED(testJsStringCoerced, template testCoerced<JsString>);
     JSG_METHOD_NAMED(testBoolean, template test<bool>);
     JSG_METHOD_NAMED(testBooleanCoerced, template testCoerced<bool>);
     JSG_METHOD_NAMED(testDouble, template test<double>);
@@ -1205,6 +1219,9 @@ struct NonCoercibleContext: public ContextGlobalObject {
     JSG_METHOD(testMaybeString);
     JSG_METHOD(testMaybeStringCoerced);
     JSG_METHOD(testOneOf);
+    JSG_METHOD(testOneOfJsString);
+    JSG_METHOD(echoString);
+    JSG_METHOD(echoJsString);
     JSG_METHOD(returnString);
     JSG_METHOD(returnBoolean);
     JSG_METHOD(returnNumber);
@@ -1245,6 +1262,21 @@ KJ_TEST("NonCoercible Values") {
   e.expectEval("testDOMStringCoerced('hi')", "boolean", "true");
   e.expectEval("testDOMStringCoerced(null)", "boolean", "true");
 
+  e.expectEval("testJsString('hi')", "boolean", "true");
+  e.expectEval("testJsString(null)", "throws",
+      "TypeError: Failed to execute 'testJsString' on 'NonCoercibleContext': parameter 1 is "
+      "not of type 'string'.");
+  e.expectEval("testJsString(new String('hi'))", "throws",
+      "TypeError: Failed to execute 'testJsString' on 'NonCoercibleContext': parameter 1 is "
+      "not of type 'string'.");
+  e.expectEval("testJsStringCoerced('hi')", "boolean", "true");
+  e.expectEval("testJsStringCoerced(null)", "boolean", "true");
+
+  // A lone surrogate survives only when the string is held as the JavaScript string: converting
+  // it to a kj::String writes it as WTF-8, which does not convert back.
+  e.expectEval("echoJsString('a\\ud800b') === 'a\\ud800b'", "boolean", "true");
+  e.expectEval("echoString('a\\ud800b') === 'a\\ud800b'", "boolean", "false");
+
   e.expectEval("testBoolean(true)", "boolean", "true");
   e.expectEval("testBoolean(null)", "throws",
       "TypeError: Failed to execute 'testBoolean' on 'NonCoercibleContext': parameter 1 is"
@@ -1276,6 +1308,11 @@ KJ_TEST("NonCoercible Values") {
   e.expectEval("testOneOf('')", "boolean", "true");
   e.expectEval("testOneOf(new String(''))", "throws",
       "TypeError: Failed to execute 'testOneOf' on 'NonCoercibleContext': parameter 1 is"
+      " not of type 'boolean or string'.");
+  e.expectEval("testOneOfJsString(false)", "boolean", "true");
+  e.expectEval("testOneOfJsString('')", "boolean", "true");
+  e.expectEval("testOneOfJsString(1)", "throws",
+      "TypeError: Failed to execute 'testOneOfJsString' on 'NonCoercibleContext': parameter 1 is"
       " not of type 'boolean or string'.");
 
   e.expectEval("returnString()", "string", "string");
