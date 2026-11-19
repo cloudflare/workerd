@@ -16,6 +16,7 @@
 pub mod cxx_worker;
 pub mod error;
 pub mod exception;
+pub mod failure;
 pub mod ffi;
 pub mod kill_switch;
 pub mod ok;
