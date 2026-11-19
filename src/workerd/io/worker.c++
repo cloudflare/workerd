@@ -1288,9 +1288,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
     // starting incremental marking, which we disable. What it does do is empty the isolate group's
     // memory pools, which the whole process shares.
-    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
-      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
-    }
+    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
