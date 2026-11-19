@@ -60,6 +60,16 @@ pub mod bridge {
         NO,
     }
 
+    /// C++ `IoChannelFactory::EvictWebSocketMode`, by its alias in `ffi.h`. The bridge of
+    /// `io_context`, whose public type it is, is private to that crate, so this is a copy,
+    /// which C++ checks against the same enum.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(i32)]
+    enum EvictWebSocketMode {
+        HIBERNATE,
+        CLOSE,
+    }
+
     /// C++ `InHouse` (`ffi.h`).
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     #[repr(i32)]
@@ -88,6 +98,7 @@ pub mod bridge {
 
         type RequiresHostAndProtocol;
         type InHouse;
+        type EvictWebSocketMode;
 
         // Per-type shims.
         unsafe fn fetcher_try_unwrap(
@@ -131,6 +142,10 @@ pub mod bridge {
             isolate: *mut Isolate,
             channel: &SubrequestChannel,
         ) -> bool;
+        async fn subrequest_channel_evict_for_test(
+            channel: KjRc<SubrequestChannel>,
+            web_socket_mode: EvictWebSocketMode,
+        ) -> Result<()>;
         unsafe fn durable_object_class_channel(
             isolate: *mut Isolate,
             durable_object_class: &DurableObjectClass,
@@ -289,6 +304,25 @@ impl<'s, C: Channel> ScopedChannel<'s, C> {
 
     fn into_inner(self) -> KjRc<C> {
         self.channel
+    }
+}
+
+impl ScopedChannel<'_, SubrequestChannel> {
+    /// C++ `evictForTest()`: evicts the Durable Object that the channel reaches, as the runtime
+    /// does when it goes idle, keeping its storage, and returns a future for when it is evicted,
+    /// which can be waited for with `IoContext::await_io_local()`. The future fails with what C++
+    /// throws, as it does for a channel that reaches no Durable Object, or one that is not
+    /// running.
+    pub fn evict_for_test(
+        &self,
+        web_socket_mode: io_context::EvictWebSocketMode,
+    ) -> impl Future<Output = Result<(), cxx::KjException>> + 'static + use<> {
+        let web_socket_mode = match web_socket_mode {
+            io_context::EvictWebSocketMode::HIBERNATE => bridge::EvictWebSocketMode::HIBERNATE,
+            io_context::EvictWebSocketMode::CLOSE => bridge::EvictWebSocketMode::CLOSE,
+            _ => unreachable!("C++ EvictWebSocketMode has no other value"),
+        };
+        bridge::subrequest_channel_evict_for_test(self.channel.clone(), web_socket_mode)
     }
 }
 
