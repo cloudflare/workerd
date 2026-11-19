@@ -121,16 +121,18 @@ fn is_failure(error: sys::UErrorCode) -> bool {
 
 /// The ICU converter name for `encoding`.
 ///
+/// Only UTF-8 and UTF-16LE have one. Chromium's ICU data makes `us-ascii` and
+/// `iso8859-1` aliases of windows-1252, so `dispatch` converts ASCII and
+/// Latin-1 through [`crate::single_byte`] instead.
+///
 /// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
-/// than a real Rust enum, which needs a catch-all arm. An unknown encoding is
-/// unreachable there: `dispatch` rejects an unknown source encoding up front,
+/// than a real Rust enum, which needs a catch-all arm. Any other encoding is
+/// unreachable there: `dispatch` opens converters only for UTF-8 and UTF-16LE,
 /// the C++ `fromImpl` conversion rejects anything but the four transcodable
 /// encodings before Rust is entered, and a panic in Rust reaches C++ as a
 /// `kj::Exception`.
 fn icu_name(encoding: Encoding) -> &'static CStr {
     match encoding {
-        Encoding::Ascii => c"us-ascii",
-        Encoding::Latin1 => c"iso8859-1",
         Encoding::Utf8 => c"utf-8",
         Encoding::Utf16Le => c"utf16le",
         _ => unreachable!("invalid encoding {encoding:?}"),
@@ -263,37 +265,6 @@ pub fn convert_ex(
     usize::try_from(written).ok()
 }
 
-/// Converts UTF-16LE `source` (as raw bytes) to `to`'s encoding via ICU's
-/// `ucnv_fromUChars`. A trailing odd byte is ignored. Returns the number of
-/// bytes written to `target`, or `None` if ICU reports failure.
-#[must_use]
-pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
-    let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
-    let dest_capacity = i32::try_from(target.len()).ok()?;
-    let mut err = sys::UErrorCode::U_ZERO_ERROR;
-
-    // SAFETY: the pointers and lengths describe the two live slices. `source`
-    // need not be `u16`-aligned -- it is caller-supplied buffer contents, which
-    // a Uint8Array can expose at an odd byteOffset -- and is reinterpreted as
-    // `UChar*` in place. Casting a raw pointer is well-defined in Rust
-    // regardless of alignment; no reference to the misaligned data is ever
-    // formed on this side.
-    let len = unsafe {
-        versioned_function!(ucnv_fromUChars)(
-            to.cnv,
-            target.as_mut_ptr().cast(),
-            dest_capacity,
-            source.as_ptr().cast(),
-            src_length,
-            &raw mut err,
-        )
-    };
-    if is_failure(err) {
-        return None;
-    }
-    usize::try_from(len).ok()
-}
-
 // simdutf
 //
 // simdutf's C++ functions, called through the inline forwarders in `ffi.h`,
@@ -310,7 +281,9 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
 // that estimate.
 //
 // UTF-16 is passed to simdutf as raw bytes reinterpreted as `char16_t*`, and
-// so need not be `u16`-aligned; see [`from_uchars`].
+// so need not be `u16`-aligned. Casting a raw pointer is well-defined in Rust
+// regardless of alignment, and no reference to misaligned data is formed on
+// this side.
 
 /// Widens Latin-1 `source` into UTF-16LE (written to `target` as raw bytes)
 /// via `simdutf::convert_latin1_to_utf16`. Returns the number of UTF-16 code
