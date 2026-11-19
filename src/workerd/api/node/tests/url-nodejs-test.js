@@ -144,6 +144,7 @@ export const testFileURLToPath = {
 
     // input must be a file URL
     throws(() => fileURLToPath('https://a/b/c'), {
+      name: 'TypeError',
       code: 'ERR_INVALID_URL_SCHEME',
     });
 
@@ -152,9 +153,16 @@ export const testFileURLToPath = {
       const withHost = new URL('file://host/a');
 
       throws(() => fileURLToPath(withHost), {
+        name: 'TypeError',
         code: 'ERR_INVALID_FILE_URL_HOST',
       });
     }
+
+    throws(() => fileURLToPath('file:///x', { windows: true }), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_FILE_URL_PATH',
+    });
+    throws(() => fileURLToPath('https://a/b/c'), TypeError);
 
     const windowsTestCases = [
       // Lowercase ascii alpha
