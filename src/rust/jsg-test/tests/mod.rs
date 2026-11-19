@@ -18,6 +18,7 @@ mod dict;
 mod dispose;
 mod dom_exception;
 mod drop_moved_rc;
+mod drop_moved_traced_global;
 mod eval;
 mod exception_to_kj;
 mod external_memory;
