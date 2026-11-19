@@ -4,5 +4,7 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 # read a clock, so it has no dependencies to do them with.
 wd_rust_crate(
     name = "cluster-logic",
+    # The cache simulation outruns a medium test's 15 s on a loaded runner.
+    test_size = "large",
     visibility = ["//src/workerd/server:__subpackages__"],
 )
