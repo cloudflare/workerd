@@ -41,6 +41,9 @@
 // src/tests/events/messagechannel/ specifies the behavior, and its AGENTS.md
 // indexes which test pins what.
 //
+// The Workers types declare both classes with messagechannel.public.d.ts,
+// which the classes below are checked against.
+//
 // HOW IT FITS TOGETHER
 //
 // A port is a real EventTarget, extending the C++ one through
@@ -63,6 +66,10 @@ import type {
   ExceptionPolicy,
 } from '../events/event-target-internals';
 import type { RuntimeClassHelpers } from '../runtime-class';
+import type {
+  MessageChannel as PublishedMessageChannel,
+  MessagePort as PublishedMessagePort,
+} from './messagechannel.public';
 
 const {
   ArrayIsArray,
@@ -328,6 +335,10 @@ class MessagePort extends (EventTargetHeritage as unknown as typeof EventTarget)
 ObjectSetPrototypeOf(MessagePort, EventTarget);
 
 class MessageChannel {
+  // Installed by the constructor.
+  declare readonly port1: MessagePort;
+  declare readonly port2: MessagePort;
+
   constructor() {
     const port1 = new MessagePort(kConstructPort);
     const port2 = new MessagePort(kConstructPort);
@@ -392,8 +403,17 @@ ObjectDefineProperties(MessagePort.prototype, {
 });
 
 setNameAndLength(MessagePort, 'MessagePort', 0);
-markAsRuntimeClass(MessagePort.prototype, 'MessagePort');
-markAsRuntimeClass(MessageChannel.prototype, 'MessageChannel');
+// The classes agree with their published declarations: a port with
+// MessagePort's members, and a MessageChannel constructed with no arguments
+// and holding two ports.
+markAsRuntimeClass(
+  MessagePort.prototype satisfies PublishedMessagePort,
+  'MessagePort'
+);
+markAsRuntimeClass(
+  (MessageChannel satisfies new () => PublishedMessageChannel).prototype,
+  'MessageChannel'
+);
 
 export type MessageChannelExports = {
   MessageChannel: typeof MessageChannel;
