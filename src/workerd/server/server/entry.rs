@@ -99,14 +99,7 @@ fn serve_units(
         let home = crate::units::unit(shared.clone(), role, move |factory| {
             server_serve(factory, run_options, None, structured)
         });
-        let result = runtime.block_on(async { kj_rs_tokio::spawn_unit(home).await });
-        let result = match result {
-            Ok(result) => result.and_then(|served| served),
-            Err(error) => match error.try_into_panic() {
-                Ok(panic) => std::panic::resume_unwind(panic),
-                Err(error) => Err(kj::failed!("the first loop's task ended: {error}")),
-            },
-        };
+        let result = crate::units::run_to_end(&runtime, home);
         if let Err(failure) = result {
             let failure = ffi::exception_text(cxx::KjException::from(failure));
             let message = format!("*** Uncaught exception ***\n{failure}");

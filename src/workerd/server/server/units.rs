@@ -120,6 +120,38 @@ pub fn runtime(threads: usize) -> Result<tokio::runtime::Runtime> {
         .map_err(|e| kj::failed!("starting the scheduler: {e}"))
 }
 
+/// Runs `home`, the process's first unit, on `runtime` and blocks the calling thread, the
+/// process's main thread, until its task has ended; the unit's result.
+///
+/// The main thread waits by joining a thread that waits for the task, not parked by tokio
+/// itself. The system hands a signal for the process to the main thread when that thread can
+/// take it, and tokio's handler for SIGTERM only has to run there. `ThreadSanitizer`, however,
+/// runs a handler at once only on a thread that is blocked in a call it knows to block
+/// (`pthread_join` is one), and otherwise when the thread next makes such a call: a thread in
+/// tokio's park, a futex wait, makes none, so the server would never see the signal.
+pub fn run_to_end(
+    runtime: &tokio::runtime::Runtime,
+    home: LoopUnit<Result<()>, EntryScope>,
+) -> Result<()> {
+    let task = {
+        let _context = runtime.enter();
+        kj_rs_tokio::spawn_unit(home)
+    };
+    let handle = runtime.handle().clone();
+    let waiter = std::thread::Builder::new()
+        .name("loop-wait".to_owned())
+        .spawn(move || handle.block_on(task))
+        .map_err(|e| kj::failed!("starting the thread that waits for the first loop: {e}"))?;
+    match waiter.join() {
+        Ok(Ok(result)) => result.and_then(|served| served),
+        Ok(Err(error)) => match error.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            Err(error) => Err(kj::failed!("the first loop's task ended: {error}")),
+        },
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
 /// What a unit is in its process.
 #[derive(Clone, Copy)]
 pub struct Role {
