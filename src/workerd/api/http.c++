@@ -248,7 +248,17 @@ bool Body::isNullBody() const {
 }
 
 uint64_t Body::bufferingLimit() {
-  return IoContext::current().getLimitEnforcer().getBufferingLimit();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    return context.getLimitEnforcer().getBufferingLimit();
+  }
+  // When there is no IoContext, we'll enforce a hard cap at a reasonable
+  // size. Buffered body data is fully accounted for by the isolate already
+  // and buffering creates a copy that is also accounted for by the isolate
+  // so the isolate heap limits will still be enforced.
+  static constexpr uint64_t MB = 1u << 20;
+  // In predictable mode, which tests run in, the cap is small enough for a test to reach it
+  // cheaply.
+  return (isPredictableModeForTest() ? 1 : 32) * MB;
 }
 
 kj::Maybe<JsReadableStream> Body::getBody(jsg::Lock& js) {
@@ -258,9 +268,11 @@ kj::Maybe<JsReadableStream> Body::getBody(jsg::Lock& js) {
   }
   return stream.addRef(js);
 }
+
 bool Body::getBodyUsed(jsg::Lock& js) {
   return readFromSource || bodyStream.isDisturbed(js);
 }
+
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   // A null body yields an empty result without consulting the IoContext (see bufferingLimit()).
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
@@ -307,14 +319,15 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
     // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
     // search-and-replace across your whole site and you forgot that it'll apply to images too.
     // When running with a warning handler, let's warn the developer if they do this.
-    auto& context = IoContext::current();
-    if (context.hasWarningHandler()) {
-      KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
-        maybeWarnIfNotText(js, type);
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
+      if (context.hasWarningHandler()) {
+        KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
+          maybeWarnIfNotText(js, type);
+        }
       }
     }
 
-    auto limit = context.getLimitEnforcer().getBufferingLimit();
+    auto limit = bufferingLimit();
     KJ_IF_SOME(source, tryReadFromSource(js, limit)) {
       return js.resolvedPromise(source.readText(js));
     }
@@ -355,6 +368,9 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
+  // TODO(perf): We can eliminate a promise and continuation here by duplicating
+  // the work text() is doing and run the parseJson in the same operation without
+  // the deferral.
   return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
 }
 
@@ -434,6 +450,7 @@ jsg::Ref<Request> Request::coerce(
 jsg::Optional<kj::StringPtr> Request::getCache(jsg::Lock& js) {
   return getCacheModeName(cacheMode);
 }
+
 Request::CacheMode Request::getCacheMode() {
   return cacheMode;
 }

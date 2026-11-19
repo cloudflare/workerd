@@ -23,4 +23,10 @@ export {
   crossRequestStaleParkedRead,
 } from 'global-scope-streams';
 
+export { globalScopeBodyReads } from 'global-scope-body-reads';
+export {
+  globalScopeBodyLimit,
+  requestBodyLimit,
+} from 'global-scope-body-limit';
+
 export { default } from 'global-scope-streams';

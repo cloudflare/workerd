@@ -35,21 +35,21 @@ class BodySource final {
   KJ_DISALLOW_COPY(BodySource);
 
   // Returns another BodySource over the same value.
-  BodySource clone(jsg::Lock& js);
+  BodySource clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  // Returns a new stream that reads the source from the start. Requires the current IoContext.
-  JsReadableStream createStream(jsg::Lock& js);
+  // Returns a new stream that reads the source from the start.
+  JsReadableStream createStream(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // A new ArrayBuffer holding the bytes createStream() produces.
-  jsg::JsArrayBuffer readArrayBuffer(jsg::Lock& js);
+  jsg::JsArrayBuffer readArrayBuffer(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // The bytes createStream() produces, as text, as JsReadableStream::text() reads them: that
   // removes a leading UTF-8 byte order mark under some flags.
-  kj::String readText(jsg::Lock& js);
+  kj::String readText(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // The number of bytes a stream created from the source produces, for StreamEncoding::IDENTITY.
   // kj::none for any other encoding, as for any in-memory stream.
-  kj::Maybe<uint64_t> tryGetLength(jsg::Lock& js, StreamEncoding encoding);
+  kj::Maybe<uint64_t> tryGetLength(jsg::Lock& js, StreamEncoding encoding) KJ_WARN_UNUSED_RESULT;
 
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -64,7 +64,7 @@ class BodySource final {
 
   // The source's bytes, valid while the isolate lock is held, or kj::none for a string, whose
   // bytes must be encoded.
-  kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetBytes(jsg::Lock& js);
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetBytes(jsg::Lock& js) KJ_LIFETIMEBOUND;
 
   // Encodes a string source into `output`, which must be as long as its UTF-8 length.
   void encodeText(jsg::Lock& js, jsg::JsString text, kj::ArrayPtr<char> output);

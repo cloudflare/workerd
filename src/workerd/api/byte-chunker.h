@@ -12,14 +12,21 @@
 
 namespace workerd::api {
 
-// Produces the bytes of a JavaScript string (as UTF-8), BufferSource or Blob as a sequence of new
-// Uint8Arrays, for a byte stream to enqueue. A value of at most kMaxChunkSize bytes is produced
-// as one chunk, and a longer one in chunks of up to that size. Each chunk of a string ends on a
-// code point boundary, and a lone surrogate is written as the `loneSurrogates` the chunker was
-// made with says; with LoneSurrogates::REPLACE, every chunk is valid UTF-8.
+// Produces the bytes of a JavaScript string (as UTF-8 or WTF-8), BufferSource or Blob as a
+// sequence of new Uint8Arrays, for a byte stream to enqueue. A value of at most kMaxChunkSize
+// bytes is produced as one chunk, and a longer one in chunks of up to that size. Each chunk
+// of a string ends on a code point boundary, and a lone surrogate is written as the
+// `loneSurrogates` the chunker was made with says; with LoneSurrogates::REPLACE, every chunk
+// is valid UTF-8.
 //
 // Every chunk is a copy, so the value itself is never handed to JavaScript, transferred or
 // detached. The chunker drops the value once it has produced every byte, or when cancelled.
+//
+// The intended design here trades latency for increased memory efficiency. Rather than
+// producing whole copies at once we spread them out in reasonably sized chunks. This means
+// more reads are necessary to consume the data but gc has an opportunity to clean things
+// up as we go and peak memory usage remains within reasonable levels. The kMaxChunkSize
+// is fairly arbitrary but benchmarked to provide a reasonable balance.
 class ByteChunker final {
  public:
   static constexpr size_t kMaxChunkSize = 128 * 1024;
