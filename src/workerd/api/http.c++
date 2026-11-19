@@ -247,6 +247,13 @@ bool Body::isNullBody() const {
   return bodyStream.isNull() && bodySource == kj::none;
 }
 
+kj::Maybe<kj::Promise<DeferredProxy<void>>> Body::tryDirectPump(
+    jsg::Lock& js, kj::Own<WritableStreamSink>& sink, TryWriteSync tryWriteSync) {
+  auto& source = KJ_UNWRAP_OR(tryGetUnreadSource(), return kj::none);
+  readFromSource = true;
+  return addNoopDeferredProxy(source.pumpTo(js, kj::mv(sink), tryWriteSync));
+}
+
 uint64_t Body::bufferingLimit() {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
     return context.getLimitEnforcer().getBufferingLimit();
@@ -1454,7 +1461,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       }
     }
     return wsPromise;
-  } else KJ_IF_SOME(jsBody, getBody(js)) {
+  } else if (!isNullBody()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
     if (encoding != StreamEncoding::IDENTITY) {
@@ -1470,10 +1477,15 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     auto stream = newSystemStream(
         outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), encoding, context,
         flushAfterWrite);
+    // An encoding stream compresses each write, which must not run under the isolate lock.
+    KJ_IF_SOME(pump,
+        tryDirectPump(js, stream, TryWriteSync(encoding == StreamEncoding::IDENTITY))) {
+      return kj::mv(pump);
+    }
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
-    return jsBody.pumpTo(js, kj::mv(stream), EndStream::YES);
+    return KJ_ASSERT_NONNULL(getBody(js)).pumpTo(js, kj::mv(stream), EndStream::YES);
   } else {
     outer.send(statusCode, getReasonPhrase(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
@@ -2093,7 +2105,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         kj::mv(webSocketResponse));
   } else {
     kj::Maybe<kj::HttpClient::Request> nativeRequest;
-    KJ_IF_SOME(jsBody, jsRequest->getBody(js)) {
+    if (!jsRequest->isNullBody()) {
       // Note that for requests, we do not automatically handle Content-Encoding, because the fetch()
       // standard does not say that we should. Hence, we always use StreamEncoding::IDENTITY.
       // https://github.com/whatwg/fetch/issues/589
@@ -2125,10 +2137,10 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       // We want to support bidirectional streaming, so we actually don't want to wait for the
       // request to finish before we deliver the response to the app.
 
-      // jsBody is not used directly within the function but is passed in so that
-      // the coroutine frame keeps it alive.
-      static constexpr auto handleCancelablePump = [](kj::Promise<void> promise,
-                                                       auto jsBody) -> kj::Promise<void> {
+      // jsBody, the stream being pumped, if any, is not used directly within the function but is
+      // passed in so that the coroutine frame keeps it alive.
+      static constexpr auto handleCancelablePump =
+          [](kj::Promise<void> promise, kj::Maybe<JsReadableStream> jsBody) -> kj::Promise<void> {
         try {
           co_await promise;
         } catch (...) {
@@ -2142,11 +2154,20 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         }
       };
 
+      kj::Promise<DeferredProxy<void>> pump = nullptr;
+      kj::Maybe<JsReadableStream> pumpedStream;
+      KJ_IF_SOME(direct, jsRequest->tryDirectPump(js, stream, TryWriteSync::YES)) {
+        pump = kj::mv(direct);
+      } else {
+        auto jsBody = KJ_ASSERT_NONNULL(jsRequest->getBody(js));
+        pump = jsBody.pumpTo(js, kj::mv(stream), EndStream::YES);
+        pumpedStream = kj::mv(jsBody);
+      }
+
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
       ioContext.addWaitUntil(handleCancelablePump(
-          AbortSignal::maybeCancelWrap(js, signal,
-              ioContext.waitForDeferredProxy(jsBody.pumpTo(js, kj::mv(stream), EndStream::YES))),
-          jsBody.addRef(js)));
+          AbortSignal::maybeCancelWrap(js, signal, ioContext.waitForDeferredProxy(kj::mv(pump))),
+          kj::mv(pumpedStream)));
     } else {
       setupTrace.startPhase("fetch_dispatch"_kjc);
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));

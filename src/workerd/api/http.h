@@ -113,6 +113,13 @@ class Body: public jsg::Object {
   // True for a null body: no stream and no source.
   bool isNullBody() const;
 
+  // Sends the body to `sink` straight from its source (see BodySource::pumpTo()), if it has a
+  // source and has neither created its stream nor been read: takes `sink`, marks the body used, as
+  // pumping its stream would have, and returns the pump, which never begins deferred proxying.
+  // Otherwise returns kj::none, leaving `sink` to the caller to pump the body's stream into.
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> tryDirectPump(
+      jsg::Lock& js, kj::Own<WritableStreamSink>& sink, TryWriteSync tryWriteSync);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -183,8 +190,8 @@ class Body: public jsg::Object {
   // stream when the stream is first needed, and again when the body is rewound.
   kj::Maybe<BodySource> bodySource;
 
-  // Set once the body is read straight from `bodySource`, before it has a stream. The body is
-  // then used, as reading its stream would have left it, and getBodyStream() creates the stream
+  // Set once the body is read or sent straight from `bodySource`, before it has a stream. The body
+  // is then used, as reading its stream would have left it, and getBodyStream() creates the stream
   // locked and disturbed.
   bool readFromSource = false;
 

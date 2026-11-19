@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-in-memory-body-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "Sender", uniqueKey = "4c1e9a7b2d6f40538e1b7c9a0d2f6e31"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "Sender"),
+    (name = "SELF", service = "main"),
+  ],
+);

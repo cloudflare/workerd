@@ -805,6 +805,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-in-memory-body-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-in-memory-body-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],
