@@ -1525,6 +1525,24 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
+// When the HTTP client failed to parse the response head, the part of the exception's description
+// that says why. kj's HttpClient fails with one of these descriptions, which an embedder's
+// HttpClientErrorHandler may prefix, and kj-hyper (src/rust/cxx/kj-hyper/client.rs) uses the last.
+kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
+  static constexpr kj::StringPtr DESCRIPTIONS[] = {
+    "Response headers have no terminal newline."_kj,
+    "Invalid response status line"_kj,
+    "The headers sent by the server are not valid."_kj,
+  };
+  auto description = exception.getDescription();
+  for (const auto& text: DESCRIPTIONS) {
+    KJ_IF_SOME(start, description.find(text)) {
+      return description.slice(start);
+    }
+  }
+  return kj::none;
+}
+
 // Setup spans stay on the native stack so that they finish before fetch returns its JS promise.
 // Keep the fetch span as the propagated parent of the outgoing request.
 class FetchSetupTrace {
@@ -1988,11 +2006,21 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     }
     auto responsePromise =
         kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)
-            .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
+            .catch_([typeError = FeatureFlags::get(js).getFetchInvalidResponseTypeError()](
+                        kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
       if (exception.getDescription().startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
+      }
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        // Fetch treats a response that doesn't parse as a network error, which rejects with a
+        // TypeError.
+        if (typeError) {
+          return JSG_KJ_EXCEPTION(
+              FAILED, TypeError, "Server returned invalid HTTP response: ", reason);
+        }
+        return JSG_KJ_EXCEPTION(FAILED, Error, "Server returned invalid HTTP response: ", reason);
       }
       return kj::mv(exception);
     });

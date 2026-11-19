@@ -6,10 +6,10 @@
 // `#[jsg_memory_info(skip)]`, so a field whose type has no `jsg::MemoryInfo` does not compile:
 // a field added to a resource is reported, or skipped explicitly.
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
+#[jsg_traced]
 struct NotReported;
-
-jsg::jsg_traced_unchecked!(NotReported);
 
 #[jsg_resource(memory_info)]
 struct Holder {

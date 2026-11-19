@@ -11,7 +11,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_cc_library.bzl`                        | Wraps `cc_library`; `strip_include_prefix="/src"`, arch-specific CPU flags (CRC32C)               |
 | `wd_cc_binary.bzl`                         | Wraps `cc_binary`; macOS dead-strip linkopts                                                      |
 | `wd_cc_embed.bzl`                          | Binary/text data -> C++ via C23 `#embed`; auto-detects text vs binary by extension                |
-| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; generates CSV report genrule                                            |
+| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; dry run under `bazel test`; generates CSV report genrule                |
 | `wd_test.bzl`                              | `.wd-test` config test runner; generates up to 3 variants per test                                |
 | `kj_test.bzl`                              | C++ unit test wrapper; also generates test variants                                               |
 | `wpt_test.bzl`                             | Web Platform Tests; generates JS runner + `.wd-test` config from WPT tree; delegates to `wd_test` |

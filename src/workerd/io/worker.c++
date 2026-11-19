@@ -773,6 +773,7 @@ struct Worker::Isolate::Impl {
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
+      ::workerd::rust::jsg::restoreResourceTemplatesFromSnapshot(lock->v8Isolate);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -1283,13 +1284,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, reinterpret_cast<intptr_t>(&messageCallback));
 
-    // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
-    // machine is competing for memory so it might as well use all it wants and be lazy about GC.
-    //
-    // In our production environment, however, we can safely assume that there is always memory
-    // pressure, because every machine is handling thousands of tenants all the time. So we might
-    // as well just throw the switch to "moderate" right away.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    // This notification has no lasting effect: V8 handles it synchronously because we hold the
+    // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
+    // starting incremental marking, which we disable. What it does do is free caches shared by the
+    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
+    // the Wasm it runs, and it empties the isolate group's memory pools.
+    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
@@ -2736,21 +2738,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             "the zygote's top level failed; no startup snapshot was created", e.getDescription());
       }
 
-      // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-      // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-      // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-      // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. The handles the Realm caches
-      // for struct types are reset by the same call. Templates are recreated lazily on demand and
-      // a START_FROM_SNAPSHOT isolate starts with an empty cache.
-      kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-      {
-        auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          rustTemplateHandles.add(
-              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
-        }
-      }
+      // The templates of Rust JSG resource types (e.g. node-internal:dns) are v8::Globals in the
+      // Rust Realm, invisible to the C++ template slots. They are pinned into the snapshot, and
+      // their handles reset with the other isolate handles before CreateBlob().
+      auto rustTemplateHandles =
+          ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
       auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
@@ -4853,6 +4845,10 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
   }
 
   return kj::none;
+}
+
+kj::Maybe<kj::Date> Worker::Actor::getRunningAlarmTime() {
+  return impl->maybeRunningAlarm.map([](Impl::RunningAlarm& alarm) { return alarm.scheduledTime; });
 }
 
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(

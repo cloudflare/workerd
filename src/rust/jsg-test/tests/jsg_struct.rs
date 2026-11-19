@@ -506,7 +506,11 @@ fn struct_js_object_field_rejects_other_values() {
             panic!("2 is not an object");
         };
         assert_eq!(err.name, ExceptionType::TypeError);
-        assert_eq!(err.message, "Expected Object but got number");
+        assert_eq!(
+            err.message,
+            "Incorrect type for the 'object' field on 'JsValueStruct': the provided value is not \
+             of type 'Object'."
+        );
         Ok(())
     });
 }

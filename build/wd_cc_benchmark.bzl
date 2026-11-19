@@ -17,7 +17,8 @@ def wd_cc_benchmark(
         linkstatic = CC_TEST_LINKSTATIC,
         visibility = visibility,
         deps = deps + [
-            "@google_benchmark//:benchmark_main",
+            # Runs each benchmark once under `bazel test`; see bench-main.c++.
+            "//src/workerd/tests:bench-main",
             "//src/workerd/tests:bench-tools",
             # Use same linker flags as with test binaries – wd_cc_benchmark is used with
             # microbenchmarks, which will produce relatively accurate results without thinLTO.
