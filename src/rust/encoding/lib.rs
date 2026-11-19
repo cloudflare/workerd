@@ -162,9 +162,12 @@ pub fn decode<'a>(
                     state.output.resize(state.output.len() * 2, 0);
                 }
                 encoding_rs::DecoderResult::Malformed(_, _) => {
-                    // Reset immediately on fatal error so the decoder is
-                    // ready for a fresh sequence if reused.
-                    state.inner = state.encoding.new_decoder_without_bom_handling();
+                    // Reset to drop any bytes held back for reprocessing, except
+                    // mid-stream iso-2022-jp, whose output state survives errors.
+                    // It keeps its held-back bytes too, as the spec does.
+                    if options.flush || state.encoding != encoding_rs::ISO_2022_JP {
+                        state.needs_reset = true;
+                    }
                     state.output.truncate(total_written);
                     return ffi::DecodeResult {
                         output: &state.output,

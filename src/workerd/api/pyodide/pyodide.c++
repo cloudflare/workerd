@@ -37,7 +37,7 @@ kj::Maybe<const jsg::CompiledWasmModuleHolder&> PyodideBundleManager::getPyodide
 }
 
 void PyodideBundleManager::setPyodideBundleData(
-    kj::String version, kj::Array<unsigned char> data) const {
+    kj::String version, kj::Array<const kj::byte> data) const {
   auto wordArray = kj::arrayPtr(
       reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
   // We're going to reuse this in the ModuleRegistry for every Python isolate, so set the traversal

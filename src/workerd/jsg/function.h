@@ -34,9 +34,7 @@ class WrappableFunctionBase: public Wrappable {
     Wrappable::jsgGetMemoryInfo(tracker);
     visitForMemoryInfo(tracker);
   }
-  virtual void visitForMemoryInfo(MemoryTracker& tracker) const {
-    // TODO(soon): Implement tracking for WrappableFunction.
-  }
+  virtual void visitForMemoryInfo(MemoryTracker& tracker) const {}
 };
 
 template <typename Ret, typename... Args>
@@ -95,6 +93,18 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
       }
     }
     return kj::none;
+  }
+
+  // Reports the function and what it captures. The self size counts only the base class, so the
+  // captures are counted once, here.
+  void visitForMemoryInfo(MemoryTracker& tracker) const override {
+    KJ_IF_SOME(f, func) {
+      if constexpr (MemoryRetainer<Impl>) {
+        tracker.trackField("func", f);
+      } else {
+        tracker.trackFieldWithSize("func", sizeof(Impl));
+      }
+    }
   }
 
   void jsgVisitForGc(GcVisitor& visitor) override {

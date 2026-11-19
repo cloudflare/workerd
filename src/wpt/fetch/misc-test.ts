@@ -503,14 +503,7 @@ export default {
     comment: 'Needs a window or worker global',
     omittedTests: true,
   },
-  'security/1xx-response.any.js': {
-    comment: 'A 1xx final response rejects with Error instead of TypeError',
-    expectedFailures: [
-      'Status(100) should be ignored.',
-      'Status(103) should be ignored.',
-      'Status(199) should be ignored.',
-    ],
-  },
+  'security/1xx-response.any.js': {},
   'security/dangling-markup/service-worker.js': {},
   'security/passthrough-serviceworker.js': {},
   'stale-while-revalidate/fetch.any.js': {

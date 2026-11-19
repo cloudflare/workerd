@@ -137,7 +137,11 @@ namespace workerd::util {
   V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
-  V(WRAPPABLE_EXTERNAL_MEMORY)
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
+     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
+     group's memory pools. */                                                                      \
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
