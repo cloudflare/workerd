@@ -546,6 +546,9 @@ build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
 # -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
 # expects.
 build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
+# Keep the link's relocations in the binary, so BOLT can lay it out again (build/pgo/README.md).
+# They only add sections; the code is the same.
+build:bolt --linkopt=-Wl,--emit-relocs
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types

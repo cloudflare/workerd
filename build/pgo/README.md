@@ -71,3 +71,34 @@ bazel build --config=release_linux --override_repository=workerd_pgo_profile=/tm
     //src/workerd/server:workerd
 ```
 
+## BOLT
+
+BOLT rearranges the linked binary's code using a profile of that binary, which the compiler's
+profile can't fully do: it places basic blocks and functions across the whole binary, and moves
+cold code out of the hot pages. On top of the PGO build it gave about 4% more requests per second
+on the synchronous hello world and about 1% fewer on the asynchronous one, so the release builds
+don't use it. BOLT's own instrumentation is used, so this works on machines without LBR.
+`llvm-bolt` and `merge-fdata` are in the toolchain's LLVM release, in
+`$(bazel info output_base)/external/toolchains_llvm++llvm+llvm_linux_x86_64_llvm/bin`.
+
+1. Build with `--config=release_linux --config=bolt`, which keeps the relocations BOLT needs.
+
+2. Instrument the binary. V8 finds its embedded builtins by offsets into the embedded blob, so
+   they have to stay where they are:
+
+   ```
+   llvm-bolt workerd -skip-funcs='Builtins_.*' -instrument -o workerd.inst \
+       -instrumentation-file=/tmp/bolt/workerd.fdata -instrumentation-file-append-pid
+   ```
+
+3. Run `workerd.inst serve` on representative Workers with `KJ_CLEAN_SHUTDOWN=1`, and stop it with
+   SIGTERM. Each process writes `/tmp/bolt/workerd.fdata.<pid>.fdata` as it exits.
+
+4. Merge the profiles and lay the binary out:
+
+   ```
+   merge-fdata /tmp/bolt/workerd.fdata.*.fdata > workerd.fdata
+   llvm-bolt workerd -skip-funcs='Builtins_.*' -o workerd.bolt -data=workerd.fdata \
+       -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold \
+       -split-eh -icf=1 -use-gnu-stack
+   ```
