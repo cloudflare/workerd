@@ -39,6 +39,9 @@ class CompressionAllocator final {
   static void* AllocForBrotli(void* data, size_t size);
   static void FreeForZlib(void* data, void* pointer);
 
+  // Reports the live zlib/brotli allocations as one field of the owning resource's node.
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
  private:
   struct Allocation {
     kj::Array<kj::byte> data;
@@ -224,6 +227,8 @@ class CodecStage final {
   // Teardown (frontend cancel/abort path): drops all buffered output.
   void clear();
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
  private:
   // The per-pump policy layer: one deflate()/inflate() step into the scratch buffer, with
   // the spec's TypeErrors applied to the result. The strict-mode checks are a separate step
@@ -247,6 +252,10 @@ class CodecStage final {
     void setInput(const void* in, size_t size);
     Result pumpOnce(int flush);
     void enforceStrictChecks(int flush, const Result& result);
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      allocator.visitForMemoryInfo(tracker);
+    }
 
    private:
     template <typename Func>
@@ -350,6 +359,10 @@ class CompressionCodec final: public jsg::Object {
     JSG_TS_OVERRIDE(type CompressionCodec = never);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    stage.visitForMemoryInfo(tracker);
+  }
+
  private:
   CodecStage stage;
 };
@@ -431,6 +444,9 @@ class BrotliContext {
     JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength);
   };
 
+  // Brotli allocates through the CompressionAllocator, which its owner reports.
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {}
+
  protected:
   CompressionAllocator& allocator;
   ZlibMode mode;
@@ -484,6 +500,8 @@ class BrotliDecoderContext final: public BrotliContext {
   kj::Own<BrotliDecoderStateStruct> state;
 };
 
+// zstd allocates its contexts with malloc rather than the CompressionAllocator, so the zstd
+// contexts report their own size in heap snapshots.
 class ZstdContext {
  public:
   explicit ZstdContext(ZlibMode _mode): mode(_mode) {}
@@ -536,6 +554,10 @@ class ZstdEncoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("cctx", ZSTD_sizeof_CCtx(cctx_.get()));
+  }
+
  private:
   size_t lastResult = 0;
   kj::Own<ZSTD_CCtx> cctx_;
@@ -556,6 +578,10 @@ class ZstdDecoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("dctx", ZSTD_sizeof_DCtx(dctx_.get()));
+  }
 
  private:
   enum class FrameState {
