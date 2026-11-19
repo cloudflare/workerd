@@ -341,6 +341,8 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
+  // The body of an `input` Request, when `init` doesn't replace it.
+  kj::Maybe<JsReadableStream> inputBody;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
@@ -399,16 +401,7 @@ jsg::Ref<Request> Request::constructor(
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        KJ_IF_SOME(oldJsBody, oldRequest->getBody(js)) {
-          // The stream spec says to "create a proxy" for the passed in readable, which it
-          // defines generically as creating a TransformStream and using pipeThrough to pass
-          // the input stream through, giving the TransformStream's readable to the extracted
-          // body below. We don't need to do that. Instead, we just create a new stream that
-          // takes over ownership of the internals of the given stream (carrying the retransmit
-          // buffer forward, if any). The given stream is left in a locked/disturbed mode so
-          // that it can no longer be used.
-          body = Body::ExtractedBody(js, oldJsBody.detach(js));
-        }
+        inputBody = oldRequest->getBody(js);
       }
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
@@ -515,8 +508,8 @@ jsg::Ref<Request> Request::constructor(
           // of these fields was modified, but the original Request object that we're rewriting
           // already represented a GET/HEAD method with a body, we allow that to pass through.
           // We support proxying such requests and rewriting their URL/headers/etc.)
-          JSG_REQUIRE(
-              (method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) || body == kj::none,
+          JSG_REQUIRE((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+                  (body == kj::none && inputBody == kj::none),
               TypeError, "Request with a GET or HEAD method cannot have a body.");
         }
       }
@@ -541,6 +534,20 @@ jsg::Ref<Request> Request::constructor(
 
   if (headers == kj::none) {
     headers = js.alloc<Headers>();
+  }
+
+  KJ_IF_SOME(oldJsBody, inputBody) {
+    // This runs after every check that can throw, so a failed construction leaves `input`
+    // usable.
+    //
+    // The stream spec says to "create a proxy" for the passed in readable, which it
+    // defines generically as creating a TransformStream and using pipeThrough to pass
+    // the input stream through, giving the TransformStream's readable to the extracted
+    // body below. We don't need to do that. Instead, we just create a new stream that
+    // takes over ownership of the internals of the given stream (carrying the retransmit
+    // buffer forward, if any). The given stream is left in a locked/disturbed mode so
+    // that it can no longer be used.
+    body = Body::ExtractedBody(js, oldJsBody.detach(js));
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.

@@ -751,12 +751,7 @@ export default {
     expectedFailures: ['Consume empty FormData request body as text'],
   },
   'request/request-consume.any.js': {},
-  'request/request-disturbed.any.js': {
-    comment: "They're literally passing URL, the constructor, as the URL!?!",
-    expectedFailures: [
-      'Request construction failure should not set "bodyUsed"',
-    ],
-  },
+  'request/request-disturbed.any.js': {},
   'request/request-error.any.js': {
     comment:
       'These tests would require us to throw errors for some invalid situations that we just ignore',
