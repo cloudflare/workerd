@@ -252,7 +252,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ): number;
   clearInterval(timeoutId: number | null): void;
   queueMicrotask(task: Function): void;
-  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
   reportError(error: any): void;
   fetch(
     input: RequestInfo | URL,
@@ -389,11 +388,6 @@ declare function setInterval<Args extends any[]>(
 declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-declare function structuredClone<T>(
-  value: T,
-  options?: StructuredSerializeOptions,
-): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
@@ -516,9 +510,6 @@ interface ExportedHandler<
   test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env, Props>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-}
-interface StructuredSerializeOptions {
-  transfer?: any[];
 }
 declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
@@ -3663,6 +3654,7 @@ interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
   proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  accept(): void;
 }
 interface SocketOptions {
   secureTransport?: string;
@@ -17598,6 +17590,17 @@ interface AlreadyUploadedError extends StreamError {
 interface TooManyWatermarksError extends StreamError {
   name: "TooManyWatermarksError";
 }
+interface StructuredSerializeOptions {
+  transfer?: any[];
+}
+interface ServiceWorkerGlobalScope {
+  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+declare function structuredClone<T>(
+  value: T,
+  options?: StructuredSerializeOptions,
+): T;
 type MarkdownDocument = {
   name: string;
   blob: Blob;

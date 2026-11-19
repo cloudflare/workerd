@@ -240,7 +240,34 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
-    response.accept(200, "OK", headers);
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    // A peer that asked for TLS from the start must not see the connection open before it is
+    // secure. The handler can't run that handshake, so it accepts the connection itself once it
+    // has made it secure further along. WorkerEntrypoint::connect() lets such a connection through
+    // only when connect_handler_immediate_tls is enabled.
+    kj::Maybe<kj::Rc<ConnectAcceptance>> acceptance;
+    if (settings.useTls) {
+      KJ_ASSERT(FeatureFlags::get(js).getConnectHandlerImmediateTls());
+      acceptance = kj::rc<ConnectAcceptance>(response, ioContext.getHeaderTable());
+    } else {
+      response.accept(200, "OK", headers);
+    }
+    kj::ConstString unacceptedReason =
+        "The connect() handler finished without accepting a connection that requested "
+        "secureTransport 'on'. Call socket.accept() once the connection is secure."_kjc;
+    // `response` goes away once this request is over, and the handler's socket can outlive it, so
+    // the acceptance must give `response` up however the handler finishes: by returning or
+    // throwing, synchronously or asynchronously, or by being canceled. Set up before anything below
+    // can throw. On a normal return, it moves into the returned promise's attachments.
+    auto abandonAcceptance = kj::defer(
+        [acceptance = acceptance.map([](kj::Rc<ConnectAcceptance>& a) { return a.addRef(); }),
+            reason = unacceptedReason.clone()]() mutable {
+      KJ_IF_SOME(a, acceptance) {
+        a->abandon(reason);
+      }
+    });
 
     // Using neuterable stream to manage lifetime of stream promises. We MUST neuter this when the
     // promise returned to the caller resolves because `connection` is owned by the caller and will
@@ -251,13 +278,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     });
     KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
-    auto& ioContext = IoContext::current();
-    jsg::Lock& js = lock;
-
-    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
+    // A peer that asked for TLS from the start shows up as secureTransport 'on', which tells the
+    // handler to call accept() once it has made the connection secure. Otherwise, support startTls
+    // if the transport that delivered this CONNECT offered a tlsStarter slot.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
-    KJ_IF_SOME(starter, settings.tlsStarter) {
+    if (settings.useTls) {
+      secureTransport = SecureTransportKind::ON;
+    } else KJ_IF_SOME(starter, settings.tlsStarter) {
       if (FeatureFlags::get(lock).getConnectHandlerStartTls()) {
         KJ_IF_SOME(s, starter) {
           // The transport can run a real handshake on this connection -- a TCP listener holding a
@@ -276,6 +304,13 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
       }
     }
 
+    kj::Own<kj::AsyncIoStream> socketConnection = ownConnection.addRef().toOwn();
+    KJ_IF_SOME(a, acceptance) {
+      // Nothing crosses the connection until the handler accepts it. See whenAccepted().
+      socketConnection = kj::newPromisedStream(a->whenAccepted().then(
+          [connection = kj::mv(socketConnection)]() mutable { return kj::mv(connection); }));
+    }
+
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
@@ -285,17 +320,29 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // The handler is also the server side of any TLS upgrade, so there is no peer name to verify:
     // both starters set up above ignore the hostname they are given. `host` is passed as the
     // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
-    jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::str(host),
-            SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
-            SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(socketConnection), kj::mv(clientAddress),
+        kj::str(host), SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
+        SocketProtocol::TCP, kj::str(host) /* domain */, false /* isDefaultFetchPort */, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
-    // connection is already open at this point, exception handling is not required.
+    // connection is already open at this point, exception handling is not required. This holds
+    // even while the connection waits for accept(): the handler needs its socket to make the
+    // connection secure, and the peer's `opened` is what waits.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+    KJ_IF_SOME(a, acceptance) {
+      jsSocket->setAcceptance(ioContext.addObject(a.addRef()));
+    }
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+    auto result = ioContext.awaitJs(js, kj::mv(promise));
+    KJ_IF_SOME(a, acceptance) {
+      // A handler that returns normally without accepting is an error in the handler: throwing
+      // fails the connection and reports it like any other exception the handler throws.
+      result = result.then([a = a.addRef(), reason = kj::mv(unacceptedReason)]() mutable {
+        JSG_REQUIRE(!a->abandon(reason), Error, reason);
+      });
+    }
+    return result.attach(kj::mv(span), kj::mv(abandonAcceptance), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");

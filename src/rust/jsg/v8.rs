@@ -17,6 +17,8 @@
 //!   cycle through it can be collected
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
+//! - [`CompiledWasmModule`] - Owned handle to the compiled code of a `WebAssembly.Module`,
+//!   which C++ can make another module object from without recompiling
 //!
 //! # Garbage Collection
 //!
@@ -48,6 +50,8 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use kj_rs::KjOwn;
 
 pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::JsErrorType;
@@ -182,6 +186,17 @@ pub mod ffi {
         EvalError,
     }
 
+    /// How throwing an internal error logs its message.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum InternalErrorLog {
+        /// At `ERROR`, with the reference ID that JavaScript gets when an error is created.
+        /// While execution is terminating, logs only the message without creating an error.
+        Error,
+        /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
+        /// `worker_do_not_log` that it throws to JavaScript.
+        Info,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -262,6 +277,9 @@ pub mod ffi {
         /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
         /// (see `ffi.h`).
         type ExternalMemoryAdjustment;
+        /// C++ `v8::CompiledWasmModule`, the compiled code of a `WebAssembly.Module`, which C++
+        /// holds in a `kj::Own` (see `ffi.h`).
+        type CompiledWasmModule;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -364,6 +382,18 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<WasmModuleObject>
+        pub unsafe fn local_wasm_module_object_get_compiled_module(
+            module: &Local,
+        ) -> KjOwn<CompiledWasmModule>;
+
+        // CompiledWasmModule
+        #[nothrow]
+        pub unsafe fn compiled_wasm_module_get_wire_bytes(
+            module: &CompiledWasmModule,
+            length: &mut usize,
+        ) -> *const u8;
+
         // Local<ArrayBufferView>
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
@@ -451,6 +481,8 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_date(value: &Local) -> bool;
+        #[nothrow]
+        pub unsafe fn local_is_wasm_module_object(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
         // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
         // store the result in `result` and return true, or return false if the coercion threw,
@@ -975,6 +1007,7 @@ pub mod ffi {
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
+            log: InternalErrorLog,
         ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
@@ -993,7 +1026,11 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        pub unsafe fn isolate_throw_internal_error(
+            isolate: *mut Isolate,
+            internal_message: &str,
+            log: InternalErrorLog,
+        );
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         #[nothrow]
@@ -1331,7 +1368,7 @@ impl ffi::ExceptionType {
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
 // - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
-// - WasmModuleObject, WasmMemoryObject
+// - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
 // `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
@@ -1610,6 +1647,8 @@ pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
 pub struct ArrayBufferView;
+/// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
+pub struct WasmModuleObject;
 
 // =============================================================================
 // `BackingStore` — owned handle to a heap-allocated `std::shared_ptr<v8::BackingStore>`
@@ -1756,6 +1795,62 @@ impl BackingStore {
         }
         // SAFETY: data() is non-null for non-empty stores; byte_length() bytes are valid.
         unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+    }
+}
+
+/// The compiled code of a `WebAssembly.Module`: C++ `v8::CompiledWasmModule`.
+///
+/// Obtained with [`Local<WasmModuleObject>::compiled_module()`]. V8 shares the compiled code
+/// between every module object made from it, in any isolate, so C++ can make another
+/// `WebAssembly.Module` from it without recompiling (`v8::WasmModuleObject::FromCompiledModule`).
+/// It is not on the V8 heap: it keeps the code and the wire bytes alive for as long as it is held,
+/// needs no lock, and can be dropped on any thread that may use V8: one created, after V8 starts,
+/// by a thread that may use V8.
+///
+/// Drop it before V8 is disposed: dropping the last reference to the compiled code frees it
+/// through the process-wide WebAssembly engine, which `V8::Dispose()` destroys. A value that lives
+/// until process exit, such as in a `static` or `thread_local!`, may be dropped too late.
+pub struct CompiledWasmModule {
+    inner: KjOwn<ffi::CompiledWasmModule>,
+}
+
+// SAFETY: a `v8::CompiledWasmModule` holds only a `std::shared_ptr` to the module's compiled code,
+// which V8 shares between isolates on different threads, and the module's source URL. Both are
+// const, so they may be read, copied and destroyed on any thread that may use V8. Destroying the
+// last reference to the compiled code frees it through the process-wide `wasm::WasmEngine`, so it
+// must happen before `V8::Dispose()` destroys the engine; the type's docs say so.
+unsafe impl Send for CompiledWasmModule {}
+// SAFETY: `&self` only reads the wire bytes, which never change.
+unsafe impl Sync for CompiledWasmModule {}
+
+impl CompiledWasmModule {
+    /// Returns the bytes the module was compiled from, which it owns.
+    ///
+    /// Corresponds to `v8::CompiledWasmModule::GetWireBytesRef()`.
+    #[inline]
+    pub fn wire_bytes(&self) -> &[u8] {
+        let mut length = 0;
+        // SAFETY: `inner` is a live `v8::CompiledWasmModule`.
+        let data = unsafe { ffi::compiled_wasm_module_get_wire_bytes(&self.inner, &mut length) };
+        if length == 0 {
+            return &[];
+        }
+        // SAFETY: the module owns `length` bytes at `data`, which never change, for as long as
+        // `self` holds it.
+        unsafe { std::slice::from_raw_parts(data, length) }
+    }
+
+    /// Returns the C++ `kj::Own<v8::CompiledWasmModule>`, to hand the module to C++.
+    pub fn into_ffi(self) -> KjOwn<ffi::CompiledWasmModule> {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for CompiledWasmModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledWasmModule")
+            .field("wire_bytes_len", &self.wire_bytes().len())
+            .finish()
     }
 }
 
@@ -2068,6 +2163,12 @@ impl<'s, T> Local<'s, T> {
     pub fn is_typed_array(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_typed_array(self.raw()) }
+    }
+
+    /// Returns true if the value is a `WebAssembly.Module`.
+    pub fn is_wasm_module_object(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_wasm_module_object(self.raw()) }
     }
 
     /// Returns true if the value is a `SharedArrayBuffer`.
@@ -2561,6 +2662,7 @@ impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
 impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
 impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
@@ -2977,6 +3079,19 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl Local<'_, WasmModuleObject> {
+    /// Returns the module's compiled code, which outlives this handle.
+    ///
+    /// Corresponds to `v8::WasmModuleObject::GetCompiledModule()`. It takes no context and runs
+    /// no JavaScript.
+    pub fn compiled_module(&self) -> CompiledWasmModule {
+        CompiledWasmModule {
+            // SAFETY: handle is valid within the current HandleScope and is a `WasmModuleObject`.
+            inner: unsafe { ffi::local_wasm_module_object_get_compiled_module(self.raw()) },
+        }
     }
 }
 
@@ -4508,6 +4623,28 @@ impl<T> TracedGlobal<T> {
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
+
+    /// Clears the traced reference, if any, without resetting it, and makes the strong handle
+    /// strong; see [`GcVisitor::visit_traced_global`]. The caller must hold the lock of the
+    /// handle's isolate, which must not be closed.
+    ///
+    /// V8 resets the weak handles of dead values before cppgc starts sweeping, so a weak handle
+    /// that isn't empty reaches a live value even in a `Drop` that the sweep runs.
+    fn let_go_of_traced(&self) {
+        // SAFETY: GC writes into the slot only while it runs on the thread holding the lock,
+        // which is this thread; see `GlobalSlot`.
+        let (strong, traced) = unsafe {
+            (
+                &raw mut (*self.slot.strong.get()).ptr,
+                &mut *self.slot.traced.get(),
+            )
+        };
+        if traced.ptr != 0 {
+            traced.ptr = 0;
+            // SAFETY: the strong handle is valid, and this thread holds its isolate's lock.
+            unsafe { ffi::global_clear_weak(strong) };
+        }
+    }
 }
 
 /// Dropping a `TracedGlobal` hands its slot to its isolate's state, which resets the strong handle
@@ -5327,11 +5464,12 @@ impl GcVisitor {
     /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
     /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
     /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
-    /// next owner's visit asserts against. Every `jsg::Rc` and C++ `jsg::Ref` of an isolate whose
-    /// lock this thread holds becomes strong again and forgets its parent, as a moved C++
-    /// `jsg::Ref` does; the others are left as they are, as is every `TracedGlobal`. This can run
-    /// during the garbage collector's sweep, when the value of a weak `TracedGlobal` may already
-    /// be dead, so making one strong could revive a freed value.
+    /// next owner's visit asserts against, while a moved `TracedGlobal` would stay weak and lose
+    /// its value once nothing else holds it. Every `jsg::Rc`, C++ `jsg::Ref` and `TracedGlobal` of
+    /// an isolate whose lock this thread holds becomes strong again, as a moved C++ `jsg::Ref` or
+    /// `jsg::V8Ref` does; the others are left as they are. This can run during the garbage
+    /// collector's sweep, when the value of a weak `TracedGlobal` may be dead; its handle is then
+    /// empty and stays so (see `TracedGlobal::let_go_of_traced`).
     ///
     /// A child without a wrapper is visited once here, to make what it holds strong, and again
     /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
@@ -5450,6 +5588,9 @@ impl GcVisitor {
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
     ///
+    /// A drop visit only lets go of the traced reference, under its isolate's lock; see
+    /// [`GcVisitor::detach_for_drop`].
+    ///
     /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
     /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
     /// under another isolate's lock panics. A `TracedGlobal` belongs in resources of its own
@@ -5478,60 +5619,31 @@ impl GcVisitor {
     /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         // Once the isolate is being torn down, its handles are left to `Dispose`, as those of a
-        // dropped `TracedGlobal` are. A drop visit leaves them as well; see `detach_for_drop`.
-        if global.state.is_closed() || self.mode == VisitMode::DetachForDrop {
+        // dropped `TracedGlobal` are.
+        if global.state.is_closed() {
             return;
         }
-        if let VisitMode::Detach(isolate) = self.mode {
-            assert!(
-                global.state.belongs_to(isolate),
-                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
-            );
-            // SAFETY: see below, and `GlobalSlot`.
-            let (strong, traced) = unsafe {
-                (
-                    &raw mut (*global.slot.strong.get()).ptr,
-                    &mut *global.slot.traced.get(),
-                )
-            };
-            if traced.ptr != 0 {
-                traced.ptr = 0;
-                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
-                // isolate, as checked above.
-                unsafe { ffi::global_clear_weak(strong) };
-            }
-            return;
-        }
-        // SAFETY: the visitor is valid for the duration of the visit.
-        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
-        if visiting.is_null() {
-            // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes under the lock of the resource's isolate.
-            if !global.state.this_thread_holds_lock() {
-                return;
-            }
+        // A detaching visit panics with the message `assert_in_isolate_of` uses for both kinds
+        // of handle; the debug assert of a GC visit names the only kind it visits.
+        let what = if matches!(self.mode, VisitMode::Detach(_)) {
+            "Global or TracedGlobal"
         } else {
-            let foreign = !global.state.belongs_to(visiting);
-            debug_assert!(
-                !foreign,
-                "a TracedGlobal was visited on behalf of an isolate other than its own"
-            );
-            if foreign {
-                return;
-            }
+            "TracedGlobal"
+        };
+        if !self.may_change_in(&global.state, what) {
+            return;
         }
-        // SAFETY: see above, and `GlobalSlot`.
+        global.let_go_of_traced();
+        if self.is_detaching() {
+            return;
+        }
+        // SAFETY: see `GlobalSlot`.
         let (strong, traced) = unsafe {
             (
                 &raw mut (*global.slot.strong.get()).ptr,
                 &mut *global.slot.traced.get(),
             )
         };
-        if traced.ptr != 0 {
-            traced.ptr = 0;
-            // SAFETY: the strong handle is valid, and the visit runs under the isolate lock.
-            unsafe { ffi::global_clear_weak(strong) };
-        }
         // SAFETY: the handles are valid handles of the visitor's isolate, which is locked, and
         // stay where they are for as long as they exist.
         unsafe { ffi::wrappable_visit_global(&raw mut self.handle, strong, traced) };

@@ -330,7 +330,8 @@ pub struct Error {
     /// implementation details (a raw KJ exception description, a C++ source
     /// expression, etc.). `Lock::throw_exception()` redacts it, throwing a
     /// generic `"internal error; reference = <id>"` instead and logging
-    /// `message` (with that ID) via `KJ_LOG(ERROR)`. Mirrors the `isInternal`
+    /// `message` (with that ID) via `KJ_LOG(ERROR)`, or without it via `KJ_LOG(INFO)` if
+    /// `do_not_log` is set. Mirrors the `isInternal`
     /// flag computed by C++ `jsg::tunneledErrorType()` / applied by
     /// `decodeTunneledException()` (`src/workerd/jsg/exception.c++`,
     /// `src/workerd/jsg/util.c++`). Constructors in this module (and the
@@ -340,6 +341,13 @@ pub struct Error {
     /// Whether this error stands for an exception or termination that is pending in V8; see
     /// [`Error::is_pending`].
     pending: bool,
+    /// Whether this error came from a KJ exception marked `worker_do_not_log`, as C++
+    /// `jsg::tunneledErrorType()` finds the marker. `Lock::throw_exception()` then logs the
+    /// message of an internal error at `INFO`, without its reference ID, rather than at `ERROR`,
+    /// as C++ JSG logs such an exception that it throws to JavaScript (`reportInternalException()`
+    /// in `src/workerd/jsg/util.c++`). What JavaScript gets is the same either way. Only
+    /// `from_kj_description()` sets it.
+    do_not_log: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -360,6 +368,7 @@ macro_rules! impl_error_constructors {
                         message: message.into(),
                         is_internal: false,
                         pending: false,
+                        do_not_log: false,
                     }
                 }
             )*
@@ -426,6 +435,7 @@ impl<'s> FromJS<'s> for Error {
                 message,
                 is_internal: false,
                 pending: false,
+                do_not_log: false,
             })
         } else {
             Err(Self::new_type_error("Unknown error"))
@@ -442,6 +452,7 @@ impl Error {
             message: message.to_owned(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -459,6 +470,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -474,6 +486,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -557,6 +570,9 @@ impl Error {
     const ERROR_PREFIX_DELIM: &'static str = "; ";
     /// Repeated when an error is tunneled over RPC (see `annotateBroken()`).
     const ERROR_REMOTE_PREFIX: &'static str = "remote.";
+    /// Marks a KJ exception that is not worth logging as an internal error (C++
+    /// `jsg::isDoNotLogException()`).
+    const DO_NOT_LOG_MARKER: &'static str = "worker_do_not_log";
 
     /// Parses a KJ exception description for a JSG tunneling prefix, mirroring the
     /// prefix-peeling of C++ `jsg::tunneledErrorType()`
@@ -566,9 +582,11 @@ impl Error {
     /// exposing it to guest JS.
     ///
     /// This mirrors only the *prefix-peeling structure* of `tunneledErrorType()`, not
-    /// its full semantics: `isFromRemote` / `isDurableObjectReset` /
-    /// `isDoNotLogException` are peeled off (to keep peeling in sync with C++) but the
-    /// resulting signals are discarded rather than attached to the `Error`.
+    /// its full semantics: `isFromRemote` / `isDurableObjectReset` are peeled off (to keep
+    /// peeling in sync with C++) but the resulting signals are discarded rather than attached
+    /// to the `Error`. `isDoNotLogException` is kept, as the `Error`'s `do_not_log`, and found
+    /// where C++ looks for it: anywhere in the description for a tunneled error, and only in
+    /// what is left after the prefixes for any other.
     ///
     /// A tunneled JSG error is `jsg.<Type>: <message>` or
     /// `jsg.DOMException(<Name>): <message>` (or `jsg-internal.` instead of `jsg.`,
@@ -599,12 +617,12 @@ impl Error {
             while let Some(idx) = rest.find(Self::ERROR_PREFIX_DELIM) {
                 rest = &rest[idx + Self::ERROR_PREFIX_DELIM.len()..];
                 if let Some(err) = Self::try_extract_tunneled(rest) {
-                    return err;
+                    return err.do_not_log_if_marked(description);
                 }
             }
             // No tunneling tag found: matches C++ `makeDefaultError()`, which marks
             // the message `isInternal` and redacts it before it reaches guest JS.
-            return Self::new_internal_error(description.to_owned());
+            return Self::new_internal_error(description.to_owned()).do_not_log_if_marked(rest);
         }
 
         // Trim any number of "broken.<reason>; " prefixes (from `annotateBroken()`).
@@ -615,8 +633,26 @@ impl Error {
             }
         }
 
-        Self::try_extract_tunneled(msg)
-            .unwrap_or_else(|| Self::new_internal_error(description.to_owned()))
+        match Self::try_extract_tunneled(msg) {
+            Some(err) => err.do_not_log_if_marked(description),
+            None => Self::new_internal_error(description.to_owned()).do_not_log_if_marked(msg),
+        }
+    }
+
+    /// Sets `do_not_log` if `text`, part of a KJ exception description, has the
+    /// `worker_do_not_log` marker.
+    fn do_not_log_if_marked(mut self, text: &str) -> Self {
+        self.do_not_log = text.contains(Self::DO_NOT_LOG_MARKER);
+        self
+    }
+
+    /// How throwing this error logs its message if it is internal.
+    fn internal_error_log(&self) -> v8::ffi::InternalErrorLog {
+        if self.do_not_log {
+            v8::ffi::InternalErrorLog::Info
+        } else {
+            v8::ffi::InternalErrorLog::Error
+        }
     }
 
     /// Tries to parse `msg` as a `jsg.<Type>: <message>` or
@@ -641,6 +677,7 @@ impl Error {
                 message: message.to_owned(),
                 is_internal,
                 pending: false,
+                do_not_log: false,
             });
         }
 
@@ -650,6 +687,7 @@ impl Error {
             message: message.to_owned(),
             is_internal,
             pending: false,
+            do_not_log: false,
         })
     }
 
@@ -664,6 +702,7 @@ impl Error {
             message: message.into(),
             is_internal: true,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -1087,7 +1126,7 @@ impl<'s> Lock<'s> {
             return;
         }
         if err.is_internal {
-            self.throw_internal_error(&err.message);
+            self.throw_internal_error_logged(&err.message, err.internal_error_log());
             return;
         }
         if self.is_execution_terminating() {
@@ -1220,7 +1259,7 @@ impl<'s> Lock<'s> {
             // Nothing could be rejected with the exception, so it is not created.
             if err.is_internal {
                 // Logs the message and throws nothing.
-                self.throw_internal_error(&err.message);
+                self.throw_internal_error_logged(&err.message, err.internal_error_log());
             }
             return Err(Error::pending());
         }
@@ -1231,6 +1270,7 @@ impl<'s> Lock<'s> {
                 v8::Local::from_ffi(v8::ffi::exception_create_internal(
                     self.isolate().as_ffi(),
                     &err.message,
+                    err.internal_error_log(),
                 ))
             });
         }
@@ -1245,9 +1285,18 @@ impl<'s> Lock<'s> {
     /// internal message is never exposed to JavaScript. While execution is terminating, it
     /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
+        self.throw_internal_error_logged(internal_message, v8::ffi::InternalErrorLog::Error);
+    }
+
+    /// [`Lock::throw_internal_error`], logging `internal_message` as `log` says.
+    fn throw_internal_error_logged(
+        &mut self,
+        internal_message: &str,
+        log: v8::ffi::InternalErrorLog,
+    ) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message);
+            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message, log);
         }
     }
 
@@ -1978,7 +2027,11 @@ where
             // context entered and a `HandleScope` open, while `scope` lives. The unwind closed
             // the scopes opened inside `f`.
             unsafe {
-                v8::ffi::isolate_throw_internal_error(isolate.as_ffi(), msg);
+                v8::ffi::isolate_throw_internal_error(
+                    isolate.as_ffi(),
+                    msg,
+                    v8::ffi::InternalErrorLog::Error,
+                );
                 v8::ffi::isolate_terminate_execution(isolate.as_ffi());
             }
             None

@@ -241,6 +241,12 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The structured clone of `value` (jsg::structuredClone), transferring the
+  // objects in `transfer`, a dense array the caller built. The native
+  // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
+  // any other object throws a TypeError, and an uncloneable value a
+  // DataCloneError. Consumed by structured-clone.
+  structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
 // The I/O of a bootstrap API, bound to the request that created it
