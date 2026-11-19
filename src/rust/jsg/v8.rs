@@ -1033,6 +1033,13 @@ pub mod ffi {
             exception: &mut MaybeLocal,
         );
 
+        // HandleScope
+        pub unsafe fn isolate_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize),
+        );
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_internal_error(

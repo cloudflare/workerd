@@ -2294,6 +2294,12 @@ void isolate_try_catch(
   }
 }
 
+// HandleScope
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::HandleScope scope(isolate);
+  callback(data);
+}
+
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   if (isolate->IsExecutionTerminating()) return;
