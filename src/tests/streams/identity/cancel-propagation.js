@@ -60,14 +60,19 @@ export const cancelRejectsSubsequentWrites = {
 };
 
 export const pipeCancellationWinsOverLaterReadableCancel = {
-  async test() {
+  async test(ctrl, env) {
     // The C++ implementation cancels the pending sink write when pipeTo() is aborted. That
     // disconnection must become the transform's terminal error before a later readable.cancel()
     // can supply a different reason. The TypeScript implementation has no corresponding KJ
     // operation.
     if (usingTsImpl) return;
 
-    const source = new Blob([new Uint8Array([1])]).stream();
+    // A native body holding one byte, which SELF echoes.
+    const response = await env.SELF.fetch('http://example.org', {
+      method: 'POST',
+      body: new Uint8Array([1]),
+    });
+    const source = response.body;
     const transform = new IdentityTransformStream();
     const abortController = new AbortController();
     const pipePromise = source.pipeTo(transform.writable, {

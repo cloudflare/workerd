@@ -9,3 +9,10 @@ export {
   legacyNativeByobNoDetach,
   legacyNativeReadAtLeast,
 } from 'legacy-constructors';
+
+// Serves the SELF binding: answers with the request's body.
+export default {
+  fetch(request) {
+    return new Response(request.body);
+  },
+};

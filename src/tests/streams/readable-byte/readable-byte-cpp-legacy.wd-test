@@ -13,8 +13,10 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "main", esModule = embed "legacy-main.js"),
           (name = "legacy-constructors", esModule = embed "legacy-constructors.js"),
+          (name = "helpers", esModule = embed "helpers.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [ ( name = "SELF", service = "streams-readable-byte-cpp-legacy" ) ],
       )
     ),
   ],

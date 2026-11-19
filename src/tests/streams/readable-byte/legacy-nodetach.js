@@ -8,6 +8,7 @@
 // the caller's buffer unconditionally, in every era.
 
 import { strictEqual, ok } from 'node:assert';
+import { nativeBody } from 'helpers';
 
 // JS-backed read(view) detaches at call time even in this window.
 export const nodetachJsBackedStillDetaches = {
@@ -44,8 +45,8 @@ export const nodetachJsBackedStillDetaches = {
 // Native-body reads keep the window's no-detach + done-undefined
 // semantics.
 export const nodetachNativeKeepsCallerBuffer = {
-  async test() {
-    const reader = new Blob(['hello']).stream().getReader({ mode: 'byob' });
+  async test(ctrl, env) {
+    const reader = (await nativeBody(env, 'hello')).getReader({ mode: 'byob' });
     const view = new Uint8Array(8);
     const r = await reader.read(view);
     strictEqual(r.value.buffer, view.buffer);

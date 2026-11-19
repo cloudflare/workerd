@@ -6,6 +6,13 @@
 // re-exports only: a name collision between two modules must be a load-time
 // SyntaxError, never a silently dropped test.
 
+// Serves the SELF binding: answers with the request's body.
+export default {
+  fetch(request) {
+    return new Response(request.body);
+  },
+};
+
 export { streamWebReexportsGlobals, adapterEntryPoints } from 'api-surface';
 
 export {

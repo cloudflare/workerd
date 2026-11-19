@@ -12,9 +12,10 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 let foreignStream;
 
 export class StreamOwner extends WorkerEntrypoint {
-  // Each RPC call runs in its own request, so the stream, a native one, is owned by that request.
+  // Each RPC call runs in its own request, so the stream, a native one of known length, is owned
+  // by that request.
   createStream() {
-    foreignStream = new Blob(['content']).stream();
+    foreignStream = new FixedLengthStream(7).readable;
   }
 }
 

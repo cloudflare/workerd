@@ -9,6 +9,7 @@
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { nativeBody } from 'helpers';
 
 // Helper to create a byte stream that responds with data
 function createByteStreamWithData(data) {
@@ -603,9 +604,9 @@ export const partialViewThenDefaultRead = {
 // byte source's close() mid-element does (spec).
 export const nativeByobMultiByteViews = {
   async test(ctrl, env) {
-    const aligned = new Blob([new Uint8Array([1, 2, 3, 4])])
-      .stream()
-      .getReader({ mode: 'byob' });
+    const aligned = (
+      await nativeBody(env, new Uint8Array([1, 2, 3, 4]))
+    ).getReader({ mode: 'byob' });
     const first = await aligned.read(new Uint16Array(4));
     strictEqual(first.done, false);
     ok(first.value instanceof (usingTsImpl ? Uint16Array : Uint8Array));
@@ -650,9 +651,9 @@ export const nativeByobMultiByteViews = {
     // A partial element already in the stash when the next read arrives: the
     // Uint32 read takes 4 of the body's 7 bytes, then the Uint16 read is
     // served from the 3 left over, delivering 2 and carrying 1 to EOF.
-    const odd = new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7])])
-      .stream()
-      .getReader({ mode: 'byob' });
+    const odd = (
+      await nativeBody(env, new Uint8Array([1, 2, 3, 4, 5, 6, 7]))
+    ).getReader({ mode: 'byob' });
     const word = await odd.read(new Uint32Array(2));
     strictEqual(word.done, false);
     if (usingTsImpl) {

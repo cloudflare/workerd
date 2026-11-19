@@ -812,14 +812,24 @@ export const addAbortSignalOnResponseBody = {
   },
 };
 
+// A native body holding `text`: the body of the response to a POST through
+// the SELF binding, which answers with the request's body.
+async function nativeBody(env, text) {
+  const response = await env.SELF.fetch('http://example.com/', {
+    method: 'POST',
+    body: text,
+  });
+  return response.body;
+}
+
 // A stream whose data has moved to another stream closes at the handoff,
 // as the legacy C++ streams leave it: a branch that has itself been teed,
-// the source of a native-backed tee (a Blob's stream), and a native body
-// detached by new Request(request). finished() on it settles at once,
+// the source of a native body's tee, and a native body detached by
+// new Request(request). finished() on it settles at once,
 // before the data has been read, and its error hook does nothing, so it
 // cannot reach the stream the data moved to.
 export const finishedOnHandedOffStreamSettlesAtHandoff = {
-  async test() {
+  async test(ctrl, env) {
     if (!usingTsImpl) return;
     const source = new ReadableStream({
       start(c) {
@@ -832,12 +842,12 @@ export const finishedOnHandedOffStreamSettlesAtHandoff = {
     const [a1, a2] = a.tee();
     strictEqual(await shell, undefined);
 
-    const body = new Blob(['x']).stream();
+    const body = await nativeBody(env, 'x');
     const native = callbackOf((cb) => finished(body, cb));
     const [n1, n2] = body.tee();
     strictEqual(await native, undefined);
 
-    const detachedBody = new Blob(['xyz']).stream();
+    const detachedBody = await nativeBody(env, 'xyz');
     const request = new Request('http://example.com/', {
       method: 'POST',
       body: detachedBody,

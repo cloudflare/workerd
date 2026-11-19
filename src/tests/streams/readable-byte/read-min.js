@@ -12,6 +12,7 @@
 
 import { strictEqual, deepStrictEqual, ok, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { nativeBody } from 'helpers';
 
 const enc = new TextEncoder();
 
@@ -226,11 +227,11 @@ export const closedOrderAtEndOfData = {
 // read(view) gets its buffer back in an empty view; that parity is
 // asserted first.
 export const closedOrderAtNativeEndOfData = {
-  async test() {
+  async test(ctrl, env) {
     for (const mode of [undefined, 'byob']) {
-      const reader = new Blob(['abc'])
-        .stream()
-        .getReader(mode ? { mode } : undefined);
+      const reader = (await nativeBody(env, 'abc')).getReader(
+        mode ? { mode } : undefined
+      );
       const read = () =>
         mode ? reader.read(new Uint8Array(8)) : reader.read();
       strictEqual((await read()).value.byteLength, 3);
@@ -252,7 +253,7 @@ export const closedOrderAtNativeEndOfData = {
       strictEqual(log.join(), 'closed,end', `mode ${mode}`);
     }
 
-    const reader = new Blob(['abc']).stream().getReader({ mode: 'byob' });
+    const reader = (await nativeBody(env, 'abc')).getReader({ mode: 'byob' });
     const log = [];
     reader.closed.then(() => log.push('closed'));
     const partial = await reader.readAtLeast(4, new Uint8Array(8)).then((r) => {
