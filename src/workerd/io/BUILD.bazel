@@ -454,9 +454,10 @@ wd_cc_library(
     ],
 )
 
+# The WorkerInterface declarations alone. Header-only: the Rust worker crate depends on it, and
+# :worker-interface depends on the crate, so the two cannot be one target.
 wd_cc_library(
-    name = "worker-interface",
-    srcs = ["worker-interface.c++"],
+    name = "worker-interface-hdrs",
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
@@ -468,6 +469,20 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-interface",
+    srcs = ["worker-interface.c++"],
+    hdrs = ["worker-interface.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":worker-interface-hdrs",
+        "//src/rust/worker",
+        "//src/rust/worker:bridge",
+        "//src/rust/worker:failure.rs@cxx",
+        "//src/workerd/util:autogate",
     ],
 )
 
