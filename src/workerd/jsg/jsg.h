@@ -1992,15 +1992,6 @@ struct Identified {
 template <typename Signature>
 class Function;
 
-// Whether a JavaScript function that wraps a C++ callback will be called at most once.
-//
-// A wrapped callback, and everything it captures, normally lives until the GC collects the
-// function. In practice that means the next full GC: v8::Function::New() allocates a template in
-// old space that references the callback's data, so minor GCs never free it. With Once::YES, the
-// callback is destroyed as soon as its first call returns, and a second call is an internal
-// error. Use it for functions that only ever run once, such as microtasks.
-WD_STRONG_BOOL(Once);
-
 // Use this to unwrap a JavaScript function that should be called as a constructor (with `new`).
 // The return type in this case is the constructed type. `Constructor` is a subclass of `Function`;
 // it can be used in all the same ways.
@@ -3207,26 +3198,6 @@ class Lock {
 
   v8::Local<v8::String> wrapString(kj::StringPtr text);
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
-  // Wraps a C++ callback as a JavaScript function. Pass Once::YES if the function will be called
-  // at most once; see `Once`.
-  virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
-      Once once = Once::NO) = 0;
-
-  // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
-  // implementation passes the FunctionCallbackInfo into the called function, any call to
-  // GetReturnValue().Set(...) to specify a return value will be ignored by the FunctorCallback
-  // wrapper. The wrapReturningFunction variation forces the wrapper to use the version that
-  // pays attention to the return value.
-  virtual v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
-      jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
-          returningFunction) = 0;
-  virtual v8::Local<v8::Function> wrapPromiseReturningFunction(v8::Local<v8::Context> context,
-      jsg::Function<jsg::Promise<jsg::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
-          returningFunction) = 0;
-  // TODO(later): See if we can easily combine wrapSimpleFunction and wrapReturningFunction
-  // into one.
-
   virtual v8::Local<v8::Promise> wrapSimplePromise(Promise<Value> promise) = 0;
 
   bool toBool(v8::Local<v8::Value> value);
@@ -3739,6 +3710,26 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
+
+// Returns a JavaScript function that calls `callback` with `boundArgs` as its leading arguments
+// and the caller's arguments after them: `Function.prototype.bind` applied, with no receiver, to a
+// new function over `callback`. This is how a function made from a static callback carries
+// JavaScript values as its state: a startup snapshot serializes a v8::Function's data at isolate
+// level, where context objects are not allowed, while a bound function is an ordinary context
+// object.
+//
+// The `bind` applied is the one the context was created with (see saveFunctionPrototypeBind()),
+// so JavaScript can neither observe the call nor reach the function that is bound: `callback` is
+// only ever called with `boundArgs` in front. It does not see the receiver of the call. The
+// returned function has the empty name of a function made directly over a callback, and
+// `callback` is registered as a snapshot external reference.
+v8::Local<v8::Function> newBoundFunction(
+    Lock& js, v8::FunctionCallback callback, kj::ArrayPtr<const v8::Local<v8::Value>> boundArgs);
+
+// Keeps `context`'s `Function.prototype.bind` where newBoundFunction() finds it, whatever
+// JavaScript does to `Function.prototype` later. Called on a new context before any JavaScript
+// runs in it; a context restored from a startup snapshot already carries it.
+void saveFunctionPrototypeBind(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 namespace _ {
 

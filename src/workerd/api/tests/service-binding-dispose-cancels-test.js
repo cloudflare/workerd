@@ -113,6 +113,35 @@ function usingCancelsWithoutUnhandledRejection(kind) {
   };
 }
 
+// The dispose method does not depend on what it is called on: taken off its promise, it cancels
+// the event and marks the promise's rejection as handled all the same.
+function detachedDisposeCancels(kind) {
+  return {
+    async test(_controller, env) {
+      if (!CANCELS) return;
+      const id = `${kind}-detached`;
+      const events = [];
+      const handler = (event) => {
+        events.push(event);
+        event.preventDefault();
+      };
+      addEventListener('unhandledrejection', handler);
+      try {
+        {
+          const { event } = await startEvent(env, kind, id);
+          const dispose = event[Symbol.dispose];
+          dispose();
+        }
+        await scheduler.wait(HANG_MS * 3);
+        assert.strictEqual(events.length, 0);
+        assert.strictEqual(calls.get(id), 'started');
+      } finally {
+        removeEventListener('unhandledrejection', handler);
+      }
+    },
+  };
+}
+
 // Once the event has finished, disposing its promise does nothing.
 function disposeAfterCompletionDoesNothing(kind) {
   return {
@@ -133,6 +162,9 @@ export const usingCancelsScheduledWithoutUnhandledRejection =
   usingCancelsWithoutUnhandledRejection('scheduled');
 export const usingCancelsQueueWithoutUnhandledRejection =
   usingCancelsWithoutUnhandledRejection('queue');
+export const detachedDisposeCancelsScheduled =
+  detachedDisposeCancels('scheduled');
+export const detachedDisposeCancelsQueue = detachedDisposeCancels('queue');
 export const disposeAfterScheduledCompletesDoesNothing =
   disposeAfterCompletionDoesNothing('scheduled');
 export const disposeAfterQueueCompletesDoesNothing =

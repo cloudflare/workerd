@@ -321,6 +321,14 @@ DeserializeResult deserializeJsValue(jsg::Lock& js,
   };
 }
 
+// The `[Symbol.dispose]()` deserializeRpcReturnValue() gives a returned object, called with the
+// object's disposal group in front of the caller's arguments.
+void disposeRpcResult(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() {
+    jsg::unwrapOpaqueRef<kj::Own<RpcStubDisposalGroup>>(info.GetIsolate(), info[0])->disposeAll();
+  });
+}
+
 // Does deserializeJsValue() and then adds a `dispose()` method to the returned object (if it is
 // an object) which disposes all stubs therein.
 jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
@@ -344,10 +352,9 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
       disposalGroup->disownAll();
     } else {
       // Add a dispose method to the return object that disposes the DisposalGroup.
-      v8::Local<v8::Value> func = js.wrapSimpleFunction(js.v8Context(),
-          [disposalGroup = kj::mv(disposalGroup)](jsg::Lock&,
-              const v8::FunctionCallbackInfo<v8::Value>&) mutable { disposalGroup->disposeAll(); });
-      obj.setNonEnumerable(js, js.symbolDispose(), jsg::JsValue(func));
+      v8::Local<v8::Value> boundArgs[] = {jsg::wrapOpaque(js.v8Context(), kj::mv(disposalGroup))};
+      obj.setNonEnumerable(js, js.symbolDispose(),
+          jsg::JsValue(jsg::newBoundFunction(js, &disposeRpcResult, boundArgs)));
     }
   } else {
     // Result wasn't an object, so it must not contain any stubs.

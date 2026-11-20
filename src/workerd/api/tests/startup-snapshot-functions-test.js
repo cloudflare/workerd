@@ -4,8 +4,7 @@
 
 // Functions implemented in C++ across a startup snapshot. A case Worker's top level
 // (startup-snapshot-functions-case-test.js) keeps a function that C++ created, as bundled Node.js
-// code commonly does with createRequire(import.meta.url), and calls it at request time. A function
-// whose native state cannot be copied makes the zygote reject the snapshot. This
+// code commonly does with createRequire(import.meta.url), and calls it at request time. This
 // runner asserts the reports. Under the startup-snapshot autogate every service here goes through
 // the zygote; without it they are plain Workers and the same assertions hold with snapshotUsed
 // false.
@@ -32,7 +31,6 @@ export default {
       }
     };
     await run('create-require', pipelineOn);
-    // Cases the zygote rejects: always plain Workers.
-    await run('bind', false);
+    await run('bind', pipelineOn);
   },
 };

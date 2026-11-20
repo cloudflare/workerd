@@ -26,6 +26,7 @@
 #include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
@@ -360,13 +361,16 @@ KJ_TEST("TS pumpTo: a queued stream's proxy is a no-op") {
     // under the isolate lock, so nothing can be deferred.
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "hello world"_kj.asBytes()));
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, "hello world"_kj.asBytes()));
+        auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        close.call(js, controller);
+      });
     })));
     auto constructor = webstreams::getCppExport(js, "ReadableStream");
     auto stream =

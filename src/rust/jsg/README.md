@@ -967,12 +967,11 @@ Without tracing, storing a `TracedGlobal` back to the resource's own wrapper cre
 
 ### Functions from Rust closures
 
-`v8::Function::new(lock, data, f)` creates a JavaScript function that calls `f` with `data`,
-the counterpart of C++ JSG's `Lock::wrapReturningFunction()`. `f` captures nothing; its state
-is `data`, which the function owns through a C++ `Wrappable`, as a resource's wrapper owns the
-resource. The garbage collector traces `data` (`T: Traced`) through the function and drops it
-once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data` traces may
-lead back to the function. Two things break this:
+`v8::Function::new(lock, data, f)` creates a JavaScript function that calls `f` with `data`.
+`f` captures nothing; its state is `data`, which the function owns through a C++ `Wrappable`, as
+a resource's wrapper owns the resource. The garbage collector traces `data` (`T: Traced`) through
+the function and drops it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s
+that `data` traces may lead back to the function. Two things break this:
 
 - A reference that `T::trace` does not visit, such as a `v8::Global` (which has no `Traced`
   impl, but can hide inside a type with a hand-written one). If it can reach the function, the

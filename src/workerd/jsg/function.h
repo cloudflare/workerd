@@ -18,8 +18,6 @@
 
 #include <kj/function.h>
 
-#include <concepts>
-
 namespace workerd::jsg {
 
 template <typename Signature>
@@ -43,10 +41,6 @@ class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
   WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
   virtual Ret operator()(Lock& js, Args&&... args) = 0;
 
-  // Calls the function after moving it out of this object, so that it, and everything it
-  // captures, is destroyed when the call returns. Any later call fails. See `Once`.
-  virtual Ret callOnce(Lock& js, Args&&... args) = 0;
-
   const bool needsGcTracing;
 
   size_t jsgGetMemorySelfSize() const override {
@@ -57,14 +51,6 @@ class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
 template <typename Signature, typename Impl>
 class WrappableFunctionImpl;
 
-// Whether a function can be carried through a startup snapshot (see snapshotClone() below).
-// A named concept rather than an inline requires-expression: Apple clang 21 crashes dumping the
-// AST of an instantiated requires-expression whose compound requirement failed substitution.
-template <typename Impl>
-concept SnapshotClonable = requires(const Impl& f) {
-  { f.clone() } -> std::same_as<Impl>;
-};
-
 template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Args...)> {
  public:
@@ -73,64 +59,34 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
         func(kj::fwd<Impl>(func)) {}
 
   Ret operator()(Lock& js, Args&&... args) override {
-    return require(func)(js, kj::fwd<Args>(args)...);
-  }
-
-  Ret callOnce(Lock& js, Args&&... args) override {
-    // Moving out of a kj::Maybe leaves it empty, so `taken` becomes the only owner.
-    kj::Maybe<Impl> taken = kj::mv(func);
-    return require(taken)(js, kj::fwd<Args>(args)...);
-  }
-
-  // A startup snapshot can carry the function only if the function opts in by providing
-  // `Impl clone() const`, which copies its state without referring to anything specific to the
-  // isolate it was created in. Most functions capture handles, references or pointers into the
-  // isolate, so copying them is not generally safe.
-  kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override {
-    if constexpr (SnapshotClonable<Impl>) {
-      KJ_IF_SOME(f, func) {
-        return kj::Own<Wrappable>(kj::refcounted<WrappableFunctionImpl>(f.clone()));
-      }
-    }
-    return kj::none;
+    return func(js, kj::fwd<Args>(args)...);
   }
 
   // Reports the function and what it captures. The self size counts only the base class, so the
   // captures are counted once, here.
   void visitForMemoryInfo(MemoryTracker& tracker) const override {
-    KJ_IF_SOME(f, func) {
-      if constexpr (MemoryRetainer<Impl>) {
-        tracker.trackField("func", f);
-      } else {
-        tracker.trackFieldWithSize("func", sizeof(Impl));
-      }
+    if constexpr (MemoryRetainer<Impl>) {
+      tracker.trackField("func", func);
+    } else {
+      tracker.trackFieldWithSize("func", sizeof(Impl));
     }
   }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if constexpr (hasPublicVisitForGc<Impl>()) {
-      KJ_IF_SOME(f, func) {
-        visitor.visit(f);
-      }
+      visitor.visit(func);
     }
   }
 
  private:
-  // Empty once callOnce() has taken it.
-  kj::Maybe<Impl> func;
-
-  static Impl& require(kj::Maybe<Impl>& maybeFunc) {
-    return KJ_ASSERT_NONNULL(maybeFunc, "function wrapped with Once::YES was called again");
-  }
+  Impl func;
 };
 
-// `callback<true>` calls the function through WrappableFunction::callOnce(). See `Once`.
 template <typename TypeWrapper, typename Signature, typename = ArgumentIndexes<Signature>>
 struct FunctorCallback;
 
 template <typename TypeWrapper, typename Ret, typename... Args, size_t... indexes>
 struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
-  template <bool once>
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -143,11 +99,7 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
       auto call = [&](auto&&... values) -> decltype(auto) {
-        if constexpr (once) {
-          return func.callOnce(js, kj::fwd<decltype(values)>(values)...);
-        } else {
-          return func(js, kj::fwd<decltype(values)>(values)...);
-        }
+        return func(js, kj::fwd<decltype(values)>(values)...);
       };
 
       if constexpr (isVoid<Ret>()) {
@@ -165,7 +117,6 @@ template <typename TypeWrapper, typename Ret, typename... Args, size_t... indexe
 struct FunctorCallback<TypeWrapper,
     Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
     kj::_::Indexes<indexes...>> {
-  template <bool once>
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -180,11 +131,7 @@ struct FunctorCallback<TypeWrapper,
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
       auto call = [&](auto&&... values) -> decltype(auto) {
-        if constexpr (once) {
-          return func.callOnce(js, args, kj::fwd<decltype(values)>(values)...);
-        } else {
-          return func(js, args, kj::fwd<decltype(values)>(values)...);
-        }
+        return func(js, args, kj::fwd<decltype(values)>(values)...);
       };
 
       if constexpr (isVoid<Ret>()) {
@@ -416,8 +363,7 @@ class FunctionWrapper {
   v8::Local<v8::Function> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
-      Function<Signature>&& func,
-      Once once = Once::NO) {
+      Function<Signature>&& func) {
     v8::Isolate* isolate = js.v8Isolate;
     return func.getOrCreateHandle(isolate, [&](Ref<WrappableFunction<Signature>>& ref) {
       v8::Local<v8::Object> data;
@@ -454,17 +400,11 @@ class FunctionWrapper {
       //   but I'd like to do it as a separate commit which can be reverted. We also currently fail
       //   to set this on constructors and methods (see resource.h). Remember not to count
       //   injected parameters!
-      // The trampolines end up in the heap as the function's C++ callback; a startup snapshot
-      // can only serialize them if they are in the isolate's external-reference table.
+      // The trampoline ends up in the heap as the function's C++ callback; a startup snapshot
+      // can only serialize it if it is in the isolate's external-reference table.
       using Callback = FunctorCallback<TypeWrapper, Signature>;
-      if (once) {
-        isolateRegisterExternalReference(
-            isolate, reinterpret_cast<intptr_t>(&Callback::template callback<true>));
-        return check(v8::Function::New(context, &Callback::template callback<true>, data));
-      }
-      isolateRegisterExternalReference(
-          isolate, reinterpret_cast<intptr_t>(&Callback::template callback<false>));
-      return check(v8::Function::New(context, &Callback::template callback<false>, data));
+      isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(&Callback::callback));
+      return check(v8::Function::New(context, &Callback::callback, data));
     });
   }
 

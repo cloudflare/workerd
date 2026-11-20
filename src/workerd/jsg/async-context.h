@@ -67,6 +67,10 @@ namespace workerd::jsg {
 //
 // AsyncContextFrame::StorageKey is used to define a storage cell within the storage
 // context.
+//
+// JavaScript functions bound to a frame (AsyncLocalStorage.bind()/snapshot() and
+// AsyncResource.bind() in api/node) carry the frame's opaque wrapper as plain JS data and
+// re-enter it through Scope on every call; tryUnwrap() turns that wrapper back into the frame.
 class AsyncContextFrame final: public Wrappable {
  public:
   // An opaque key that identifies an async-local storage cell within the frame.
@@ -133,6 +137,10 @@ class AsyncContextFrame final: public Wrappable {
   // Returns the reference to the AsyncContextFrame currently at the top of the stack, if any.
   static kj::Maybe<AsyncContextFrame&> current(v8::Isolate* isolate);
 
+  // If `value` is the opaque JS wrapper of an AsyncContextFrame (as returned by getJSWrapper()),
+  // returns that frame. Any other value, including undefined, yields none.
+  static kj::Maybe<AsyncContextFrame&> tryUnwrap(v8::Isolate* isolate, v8::Local<v8::Value> value);
+
   // Convenience variation on current() that returns the result wrapped in a Ref for when we
   // need to make sure the frame stays alive.
   static kj::Maybe<Ref<AsyncContextFrame>> currentRef(Lock& js);
@@ -144,34 +152,6 @@ class AsyncContextFrame final: public Wrappable {
 
   // Moves the entries into a single frame, copying inherited storage once.
   static Ref<AsyncContextFrame> create(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries);
-
-  // Wraps the given JavaScript function such that whenever the wrapper function is called,
-  // the root AsyncContextFrame will be entered.
-  static v8::Local<v8::Function> wrapRoot(
-      Lock& js, v8::Local<v8::Function> fn, kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
-
-  // Returns a function that captures the current frame and calls the function passed
-  // in as an argument within that captured context. Equivalent to wrapping a function
-  // with the signature (cb, ...args) => cb(...args).
-  // The validate function is called to ensure that the current frame is still valid.
-  // If the validate function throws, the wrapper will throw.
-  static v8::Local<v8::Function> wrapSnapshot(Lock& js, jsg::Function<void()> validate);
-
-  // Associates the given JavaScript function with this AsyncContextFrame, returning
-  // a wrapper function that will ensure appropriate propagation of the async context
-  // when the wrapper function is called.
-  v8::Local<v8::Function> wrap(Lock& js,
-      V8Ref<v8::Function>& fn,
-      jsg::Function<void()> validate,
-      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
-
-  // Associates the given JavaScript function with this AsyncContextFrame, returning
-  // a wrapper function that will ensure appropriate propagation of the async context
-  // when the wrapper function is called.
-  v8::Local<v8::Function> wrap(Lock& js,
-      v8::Local<v8::Function> fn,
-      jsg::Function<void()> validate,
-      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
 
   // AsyncContextFrame::Scope makes the given AsyncContextFrame the current in the
   // stack until the scope is destroyed.

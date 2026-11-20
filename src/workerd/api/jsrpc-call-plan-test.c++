@@ -6,6 +6,7 @@
 #include "http.h"
 #include "worker-rpc.h"
 
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
@@ -276,14 +277,22 @@ KJ_TEST("JavaScript RPC targets, functions, and proxies dup() once and stay inel
       KJ_EXPECT(externalHandler.getReplayability() == Replayability::REPLAYABLE);
       KJ_EXPECT(!makePlanWithExternals(externalHandler).getReplayable());
     };
+    // What a dup() returns and counts, pointed at by the function's data.
+    struct DupState {
+      uint& count;
+      jsg::JsRef<jsg::JsObject> ref;
+    };
+    kj::Vector<kj::Own<DupState>> dupStates;
     auto addDup = [&](jsg::JsObject object, uint& dupCount) {
-      auto ref = jsg::JsRef<jsg::JsObject>(env.js, object);
+      auto& state = *dupStates.add(kj::heap<DupState>(
+          DupState{.count = dupCount, .ref = jsg::JsRef<jsg::JsObject>(env.js, object)}));
       object.set(env.js, "dup"_kj,
-          jsg::JsValue(env.js.wrapReturningFunction(env.js.v8Context(),
-              [&dupCount, ref = kj::mv(ref)](
-                  jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
-        ++dupCount;
-        return v8::Local<v8::Value>(ref.getHandle(js));
+          jsg::JsValue(
+              makeFunction(env.js, state, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+        auto& state = stateOf<DupState>(info);
+        ++state.count;
+        info.GetReturnValue().Set(
+            v8::Local<v8::Value>(state.ref.getHandle(jsg::Lock::from(info.GetIsolate()))));
       })));
     };
 
@@ -315,10 +324,8 @@ KJ_TEST("JavaScript RPC targets, functions, and proxies dup() once and stay inel
     KJ_EXPECT(dupCount == 1);
 
     uint functionDupCount = 0;
-    auto function = jsg::JsObject(env.js.wrapReturningFunction(
-        env.js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
-      return v8::Local<v8::Value>(js.undefined());
-    }));
+    auto function =
+        jsg::JsObject(makeFunction(env.js, [](const v8::FunctionCallbackInfo<v8::Value>&) {}));
     addDup(function, functionDupCount);
     expectSingleIneligibleExternal(jsg::JsValue(function));
     KJ_EXPECT(functionDupCount == 1);
@@ -496,10 +503,10 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
 
     // Serializing `arg` reads `x` through this getter, so the count is the serialization count.
     auto arg = env.js.obj();
-    auto getter = env.js.wrapReturningFunction(env.js.v8Context(),
-        [&getterCount](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
-      ++getterCount;
-      return v8::Local<v8::Value>(js.num(42));
+    auto getter =
+        makeFunction(env.js, getterCount, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      ++stateOf<uint>(info);
+      info.GetReturnValue().Set(42);
     });
     v8::Local<v8::Object>(arg)->SetAccessorProperty(
         v8::Local<v8::Name>(v8::Local<v8::String>(env.js.str("x"_kj))), getter);
@@ -633,10 +640,7 @@ ActorCallDispatch makeActorPropertyRead() {
             kj::heap<RecordingFailingOutgoingFactory>(singleUseCount, actorAttemptCount, metadata)),
         Fetcher::RequiresHostAndProtocol::YES);
     auto property = KJ_REQUIRE_NONNULL(fetcher->getRpcMethodForTestOnly(env.js, kj::str("value")));
-    auto handler = env.js.wrapReturningFunction(
-        env.js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
-      return v8::Local<v8::Value>(js.undefined());
-    });
+    auto handler = makeFunction(env.js, [](const v8::FunctionCallbackInfo<v8::Value>&) {});
     KJ_EXPECT_LOG(ERROR, "destination failed");
     auto result = property->then(env.js, handler, {});
     return env.context.awaitJs(env.js, env.js.toPromise(result)).ignoreResult().then([]() {
@@ -1517,10 +1521,10 @@ KJ_TEST("an RPC call fails with the error of a channel token its argument's owne
     // The owner refuses only once the receiver is running the call, so the call has been
     // delivered, and would return, by the time the refusal reaches the sender.
     auto token = kj::newPromiseAndFulfiller<kj::Array<byte>>();
-    v8::Local<v8::Value> refuse = env.js.wrapReturningFunction(env.js.v8Context(),
-        [&fulfiller = *token.fulfiller](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
-      fulfiller.reject(JSG_KJ_EXCEPTION(FAILED, DOMDataCloneError, "owner refused"));
-      return v8::Local<v8::Value>(js.undefined());
+    v8::Local<v8::Value> refuse =
+        makeFunction(env.js, *token.fulfiller, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      stateOf<kj::PromiseFulfiller<kj::Array<byte>>>(info).reject(
+          JSG_KJ_EXCEPTION(FAILED, DOMDataCloneError, "owner refused"));
     });
     auto result = callWithDelayedTokenStub(
         env, receiver, "callBackThenReturn"_kj, kj::mv(token.promise), kj::arr(refuse));

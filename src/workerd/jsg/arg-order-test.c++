@@ -276,10 +276,8 @@ KJ_TEST("Argument evaluation order: jsg::Function (plain)") {
 }
 
 // Specialisation for callable signatures that take
-// `const v8::FunctionCallbackInfo<v8::Value>&` as the parameter after `Lock&`.
-// In production this shape is used by `jsg::Function<void(const
-// v8::FunctionCallbackInfo<v8::Value>&)>` (see e.g. `jsg::Lock`'s test-only
-// `simpleFunction` callback in setup.h / jsg.h).
+// `const v8::FunctionCallbackInfo<v8::Value>&` as the parameter after `Lock&`, through which a
+// `jsg::Function` a method returns reaches the V8 call (the "magic" described in jsg.h).
 
 struct InfoFirstFunctorContext: public ContextGlobalObject {
   Function<kj::String(

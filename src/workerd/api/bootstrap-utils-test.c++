@@ -4,6 +4,7 @@
 
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/jsg/script.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/test.h>
@@ -11,14 +12,11 @@
 namespace workerd::api {
 namespace {
 
-using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
-
 // The helpers as JS functions, taking the same arguments as the bootstrap's utils members.
 jsg::JsObject makeHelpers(jsg::Lock& js) {
   auto helpers = js.obj();
-  auto context = js.v8Context();
-  const auto add = [&](kj::StringPtr name, Callback callback) {
-    helpers.set(js, name, jsg::JsValue(js.wrapReturningFunction(context, kj::mv(callback))));
+  const auto add = [&](kj::StringPtr name, LiftedCallback callback) {
+    helpers.set(js, name, jsg::JsValue(makeLiftedFunction(js, callback)));
   };
 
   add("isFetcher"_kj,

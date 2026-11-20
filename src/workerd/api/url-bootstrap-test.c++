@@ -4,6 +4,7 @@
 
 #include <workerd/api/url-bootstrap.h>
 #include <workerd/jsg/script.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/test.h>
@@ -11,45 +12,43 @@
 namespace workerd::api {
 namespace {
 
-using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
+jsg::JsValue arg(const v8::FunctionCallbackInfo<v8::Value>& info, int i) {
+  return jsg::JsValue(info[i]);
+}
 
 // The helpers as JS functions, taking the same arguments as the bootstrap's utils members.
 jsg::JsObject makeHelpers(jsg::Lock& js) {
   auto helpers = js.obj();
-  auto context = js.v8Context();
-  const auto add = [&](kj::StringPtr name, Callback callback) {
-    helpers.set(js, name, jsg::JsValue(js.wrapReturningFunction(context, kj::mv(callback))));
-  };
-  const auto arg = [](const v8::FunctionCallbackInfo<v8::Value>& info, int i) {
-    return jsg::JsValue(info[i]);
+  const auto add = [&](kj::StringPtr name, LiftedCallback callback) {
+    helpers.set(js, name, jsg::JsValue(makeLiftedFunction(js, callback)));
   };
 
   add("urlParse"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::parse(js, arg(info, 0), arg(info, 1), arg(info, 2));
   });
   add("urlCanParse"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return js.boolean(UrlBootstrap::canParse(js, arg(info, 0), arg(info, 1)));
   });
   add("urlUpdate"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::update(js, arg(info, 0), arg(info, 1), arg(info, 2), arg(info, 3));
   });
   add("urlOrigin"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::origin(js, arg(info, 0));
   });
   add("createLegacyUrl"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::createLegacyUrl(js, arg(info, 0), arg(info, 1));
   });
   add("tryCreateLegacyUrl"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::tryCreateLegacyUrl(js, arg(info, 0), arg(info, 1));
   });
   add("createLegacySearchParams"_kj,
-      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::createLegacySearchParams(js);
   });
   return helpers;

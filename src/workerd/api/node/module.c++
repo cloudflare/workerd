@@ -7,24 +7,22 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 
+#include <v8-function.h>
+
 namespace workerd::api::node {
 
 namespace {
 
-// The require() function createRequire() returns. Each is a functor with a clone() rather than a
-// lambda so that a startup snapshot can carry the function (jsg::WrappableFunctionImpl's
-// snapshotClone()): bundled Node.js code commonly calls createRequire() at the top level.
+// The require() functions createRequire() returns. The referrer is each function's data, a
+// string, so a startup snapshot carries the function as it is: bundled Node.js code commonly calls
+// createRequire() at the top level.
 
-// For the new module registry.
-struct NewRegistryRequire {
-  jsg::Url referrer;
-
-  NewRegistryRequire clone() const {
-    return {referrer.clone()};
-  }
-
-  v8::Local<v8::Value> operator()(
-      jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+// For the new module registry. The data is the referrer's URL.
+void newRegistryRequire(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto referrer =
+        KJ_ASSERT_NONNULL(jsg::Url::tryParse(js.toString(args.DataV2().As<v8::Value>()).asPtr()));
     auto specifier = js.toString(jsg::check(args[0]->ToString(js.v8Context())));
     if (jsg::isNodeJsCompatEnabled(js)) {
       KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
@@ -39,20 +37,14 @@ struct NewRegistryRequire {
       return val;
     }
     JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
-  }
-};
+  });
+}
 
-// For the original module registry.
-struct LegacyRegistryRequire {
-  // The referrer's path.
-  kj::String referrer;
-
-  LegacyRegistryRequire clone() const {
-    return {kj::str(referrer)};
-  }
-
-  v8::Local<v8::Value> operator()(
-      jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+// For the original module registry. The data is the referrer's path.
+void legacyRegistryRequire(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto referrer = js.toString(args.DataV2().As<v8::Value>());
     auto registry = jsg::ModuleRegistry::from(js);
     JSG_REQUIRE(registry != nullptr, Error, "Module registry not available.");
 
@@ -111,8 +103,8 @@ struct LegacyRegistryRequire {
     }
 
     return jsg::ModuleRegistry::requireImpl(js, info, options);
-  }
-};
+  });
+}
 
 }  // namespace
 
@@ -143,8 +135,10 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
       JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
 
   if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
-    return jsg::JsValue(
-        js.wrapReturningFunction(js.v8Context(), NewRegistryRequire{parsed.clone()}));
+    jsg::isolateRegisterExternalReference(
+        js.v8Isolate, reinterpret_cast<intptr_t>(&newRegistryRequire));
+    return jsg::JsValue(jsg::check(v8::Function::New(
+        js.v8Context(), &newRegistryRequire, v8::Local<v8::Value>(js.str(parsed.getHref())))));
   }
 
   // We do not currently handle specifiers as URLs, so let's treat any
@@ -157,8 +151,10 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   // The specifier must be a file: URL
   JSG_REQUIRE(parsed.getProtocol() == "file:"_kj, TypeError, "The specifier must be a file: URL.");
 
-  return jsg::JsValue(js.wrapReturningFunction(
-      js.v8Context(), LegacyRegistryRequire{kj::str(parsed.getPathname())}));
+  jsg::isolateRegisterExternalReference(
+      js.v8Isolate, reinterpret_cast<intptr_t>(&legacyRegistryRequire));
+  return jsg::JsValue(jsg::check(v8::Function::New(
+      js.v8Context(), &legacyRegistryRequire, v8::Local<v8::Value>(js.str(parsed.getPathname())))));
 }
 
 }  // namespace workerd::api::node

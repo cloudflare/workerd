@@ -57,6 +57,37 @@ jsg::JsValue invokeMethod(jsg::Lock& js, jsg::JsObject obj, kj::StringPtr name, 
   return func.call(js, obj, args...);
 }
 
+// A TypeScript stream built over a C++ source or sink (JsReadableStream::from() and fromPull(),
+// JsWritableStream::fromWrite()) is constructed over a JS underlying source or sink object that
+// carries the C++ object under a private name and whose hooks are functions over static
+// callbacks. The stream calls a hook with the object as `this`, through which the callback
+// reaches the C++ object. The functions carry no data: a startup snapshot serializes a
+// function's data at isolate level, where context objects are not allowed.
+
+// The private name under which such an object carries its C++ object.
+constexpr auto NATIVE_BACKING_KEY = "workerd::api::webstreams::nativeBacking"_kj;
+
+// Makes `backing` the C++ object of `object`.
+template <typename T>
+void setNativeBacking(jsg::Lock& js, jsg::JsObject object, T backing) {
+  object.setPrivate(js, NATIVE_BACKING_KEY, jsg::JsValue(js.opaque(kj::mv(backing))));
+}
+
+// The C++ object of the object the hook `info` describes was called on.
+template <typename T>
+T& getNativeBacking(jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  auto self = JSG_REQUIRE_NONNULL(
+      jsg::JsValue(info.This()).tryCast<jsg::JsObject>(), TypeError, "Illegal invocation");
+  auto backing = self.getPrivate(js, NATIVE_BACKING_KEY);
+  JSG_REQUIRE(!backing.isUndefined(), TypeError, "Illegal invocation");
+  return jsg::unwrapOpaqueRef<T>(js.v8Isolate, backing);
+}
+
+// A hook of such an object: a function over `callback`, which is registered as a snapshot
+// external reference, since a stream made at a Worker's top level is alive when its startup
+// snapshot is taken.
+jsg::JsValue newNativeHook(jsg::Lock& js, v8::FunctionCallback callback);
+
 // Convert a kj::String to owned bytes, excluding the trailing NUL terminator. The returned
 // array owns the original character buffer but views only the string's bytes.
 kj::Array<kj::byte> stringToBytes(kj::String data);

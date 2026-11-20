@@ -21,6 +21,8 @@
 #include <workerd/util/strings.h>
 #include <workerd/util/uncaught-exception-source.h>
 
+#include <v8-microtask-queue.h>
+
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
 
@@ -1714,6 +1716,49 @@ jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
       "hydrated socket slot did not hold a Socket");
 }
 
+namespace {
+
+// The JS wiring of a socket transferred over RPC that hydrateRpcSocket() defers to a microtask, as
+// the data of that microtask.
+struct DeferredSocketWiring {
+  jsg::Ref<Socket> socket;
+  IoOwn<kj::Promise<bool>> disconnected;
+  kj::Maybe<jsg::Promise<void>> eof;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(socket, eof);
+  }
+};
+
+void wireDeferredSocket(v8::Local<v8::Data> data) {
+  auto& js = jsg::Lock::current();
+  jsg::liftKjMicrotask(js.v8Isolate, data, [&]() {
+    auto wiring = jsg::unwrapOpaque<DeferredSocketWiring>(js.v8Isolate, data.As<v8::Value>());
+    // The wiring touches IoContext-bound state, but the isolate's microtask queue can in principle
+    // be drained with no active IoContext; the socket is then being torn down, so there is nothing
+    // to wire up.
+    if (!IoContext::hasCurrent()) return;
+    // The wiring runs JS that can throw with no user code on the stack, so each step reports
+    // through js.reportError() (matching queueMicrotask() in global-scope.c++).
+    JSG_TRY(js) {
+      wiring.socket->wireClosedToDisconnect(js, kj::mv(*wiring.disconnected));
+    }
+    JSG_CATCH(exception) {
+      js.reportError(jsg::JsValue(exception.getHandle(js)));
+    }
+    KJ_IF_SOME(eof, wiring.eof) {
+      JSG_TRY(js) {
+        wiring.socket->handleReadableEof(js, kj::mv(eof));
+      }
+      JSG_CATCH(exception) {
+        js.reportError(jsg::JsValue(exception.getHandle(js)));
+      }
+    }
+  });
+}
+
+}  // namespace
+
 jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
     IoContext& ioContext,
     rpc::JsValue::External::Reader socketExternal,
@@ -1826,49 +1871,20 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
 
   // handleReadableEof() and wireClosedToDisconnect() both attach jsg `.then()` continuations,
   // which invoke V8 -- forbidden when this body runs as Socket::deserialize()'s in-place
-  // fallback inside the deserialize scope (JS execution is disallowed there). Defer them to
-  // microtasks that run once readValue() returns and JS is permitted again; wrapping and
-  // enqueuing don't themselves invoke JS. (The jsg promise deferral primitives can't be used:
-  // they construct a jsg promise synchronously, invoking V8 and aborting under the disallow
-  // scope.) The hydration path runs with JS allowed and shares this body; the deferral is
-  // equally correct there. The kj-side signals were already set up, so no event can be missed
-  // while the microtasks pend.
-  //
-  // The bodies touch IoContext-bound state, but the isolate's microtask queue can in principle be
-  // drained with no active IoContext, so both bail out early if there is no current context (the
-  // socket is being torn down, so there is nothing to wire up). The wiring runs JS that can throw
-  // with no user code on the stack, so each body is wrapped in JSG_TRY/JSG_CATCH and reports via
-  // js.reportError() (matching the queueMicrotask() pattern in global-scope.c++).
-  auto disconnectedOwn = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected));
-  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
-      js.wrapSimpleFunction(js.v8Context(),
-          JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
-              (self),
-              (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
-                if (!IoContext::hasCurrent()) return;
-                JSG_TRY(js) {
-                self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
-                }
-                JSG_CATCH(exception) {
-                js.reportError(jsg::JsValue(exception.getHandle(js)));
-                }
-              }),
-          jsg::Once::YES));
-  KJ_IF_SOME(p, eofPromise) {
-    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
-        js.wrapSimpleFunction(js.v8Context(),
-            JSG_VISITABLE_LAMBDA((self = socket.addRef(), eof = kj::mv(p)), (self, eof),
-                (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
-                  if (!IoContext::hasCurrent()) return;
-                  JSG_TRY(js) {
-                  self.get()->handleReadableEof(js, kj::mv(eof));
-                  }
-                  JSG_CATCH(exception) {
-                  js.reportError(jsg::JsValue(exception.getHandle(js)));
-                  }
-                }),
-            jsg::Once::YES));
-  }
+  // fallback inside the deserialize scope (JS execution is disallowed there). Defer them to a
+  // microtask that runs once readValue() returns and JS is permitted again; enqueuing it, with
+  // its state in an opaque wrapper, doesn't itself invoke JS. (The jsg promise deferral
+  // primitives can't be used: they construct a jsg promise synchronously, invoking V8 and
+  // aborting under the disallow scope.) The hydration path runs with JS allowed and shares this
+  // body; the deferral is equally correct there. The kj-side signals were already set up, so no
+  // event can be missed while the microtask pends.
+  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, &wireDeferredSocket,
+      jsg::wrapOpaque(js.v8Context(),
+          DeferredSocketWiring{
+            .socket = socket.addRef(),
+            .disconnected = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected)),
+            .eof = kj::mv(eofPromise),
+          }));
 
   // `opened` was resolved synchronously above, so the transferred socket is immediately in the
   // OPENED state and can itself be re-serialized for a further RPC hop.

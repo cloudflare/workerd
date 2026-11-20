@@ -470,19 +470,22 @@ size_t rust_wrappable_size() {
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
 }
 
-bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  auto context = isolate->GetCurrentContext();
+// A C++ Wrappable as the data of a function C++ makes, which records what Rust sees in it.
+struct Probe {
   bool found = false;
-  auto function = js.wrapReturningFunction(context,
-      [&found](::workerd::jsg::Lock& js,
-          const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+};
+
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
+  auto context = isolate->GetCurrentContext();
+  auto data = ::workerd::jsg::wrapOpaque(context, Probe{});
+  auto function = ::workerd::jsg::check(
+      v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     auto& args = const_cast<v8::FunctionCallbackInfo<v8::Value>&>(info);
-    found = ::workerd::rust::jsg::fci_get_data_wrappable(&args) != kj::none;
-    return js.v8Undefined();
-  });
+    ::workerd::jsg::unwrapOpaqueRef<Probe>(info.GetIsolate(), info.DataV2().As<v8::Value>()).found =
+        ::workerd::rust::jsg::fci_get_data_wrappable(&args) != kj::none;
+  }, data));
   ::workerd::jsg::check(function->Call(context, v8::Undefined(isolate), 0, nullptr));
-  return found;
+  return ::workerd::jsg::unwrapOpaqueRef<Probe>(isolate, data).found;
 }
 
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local() {

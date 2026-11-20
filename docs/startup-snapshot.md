@@ -253,10 +253,14 @@ for the started worker, also overrides `Wrappable::snapshotContextReady()`. The 
 handles bind to the worker's VFS there, when the `Worker` constructor, having installed the VFS
 on the context, enters it and calls `IsolateBase::notifySnapshotContextReady()`.
 
-A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
-registry's `import.meta.resolve`, for example) transfers if its functor provides
-`Impl clone() const`; V8 patch 0052 keeps functions created by `v8::Function::New()` in the
-context snapshot so that their wrapper goes through the same path.
+A function that C++ makes for JavaScript transfers when it is a `v8::Function` over a static
+callback whose data is a string or another primitive (the function `createRequire()` returns and
+the new module registry's `import.meta.resolve`, each with its referrer as data), or a
+`jsg::newBoundFunction()` whose bound arguments transfer themselves (the function
+`AsyncLocalStorage.bind()` returns in the root frame). A `jsg::Function` the top level keeps does
+not transfer: it wraps a C++ closure, which has no copy. V8 patch 0052 keeps functions created by
+`v8::Function::New()` in the context snapshot, so the closure's wrapper reaches the API-wrapper
+serializer like any other.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -352,7 +356,7 @@ once.
 | `src/rust/jsg-test/tests/startup_snapshot.rs`                       | Rust resources: state, shared templates, relinked references, and a type without `SnapshotTransfer` |
 | `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, the `process`/`Buffer` globals, and the lazy `MessageChannel`/`MessagePort` globals, read and unread at the top level |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
-| `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
+| `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function and a root-frame `AsyncLocalStorage.bind()` function across the snapshot, and binding again after the top level replaced `Function.prototype.bind` |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |

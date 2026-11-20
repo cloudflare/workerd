@@ -5,6 +5,8 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/per-isolate-bootstrap.h>
 
+#include <v8-function.h>
+
 namespace workerd::api::webstreams {
 
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
@@ -16,6 +18,11 @@ jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
       "attempted to call into the TypeScript streams implementation during a no-JS scope", name);
   return KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "webstreams/cpp_exports", name),
       "missing webstreams/cpp_exports function", name);
+}
+
+jsg::JsValue newNativeHook(jsg::Lock& js, v8::FunctionCallback callback) {
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
+  return jsg::JsValue(jsg::check(v8::Function::New(js.v8Context(), callback)));
 }
 
 kj::Array<kj::byte> stringToBytes(kj::String data) {

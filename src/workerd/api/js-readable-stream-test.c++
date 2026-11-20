@@ -10,6 +10,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/external-pusher.h>
 #include <workerd/jsg/script.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
@@ -708,14 +709,16 @@ jsg::JsObject makeMockController(
   auto obj = js.obj();
   obj.set(js, "byobRequest"_kj, byobRequest);
   obj.set(js, "enqueue"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-    auto chunk = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsUint8Array>());
-    state.enqueued.add(kj::heapArray<kj::byte>(chunk.asArrayPtr()));
+      jsg::JsValue(makeFunction(js, state, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    jsg::liftKj(info, [&]() {
+      auto& state = stateOf<MockControllerState>(info);
+      auto chunk = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsUint8Array>());
+      state.enqueued.add(kj::heapArray<kj::byte>(chunk.asArrayPtr()));
+    });
   })));
   obj.set(js, "close"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::JsValue(makeFunction(js, state, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto& state = stateOf<MockControllerState>(info);
     state.closed = true;
   })));
   return obj;
@@ -736,8 +739,8 @@ jsg::JsObject makeMockByobRequest(jsg::Lock& js,
     obj.set(js, "elementSize"_kj, js.num(size));
   }
   obj.set(js, "respond"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::JsValue(makeFunction(js, state, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto& state = stateOf<MockControllerState>(info);
     state.responded = info[0].As<v8::Number>()->Value();
   })));
   return obj;
@@ -1823,13 +1826,15 @@ JsReadableStream makeTsStream(jsg::Lock& js, jsg::JsValue underlyingSource) {
 jsg::JsValue makeQueuedByteSource(jsg::Lock& js) {
   auto underlying = js.obj();
   underlying.set(js, "start"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-    auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-    auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-    enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
-    auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-    close.call(js, controller);
+      jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    jsg::liftKj(info, [&]() {
+      auto& js = jsg::Lock::from(info.GetIsolate());
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    });
   })));
   return jsg::JsValue(underlying);
 }
@@ -1942,11 +1947,14 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
 
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, js.num(42));
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, js.num(42));
+      });
     })));
 
     auto stream = makeTsStream(js, underlying);
@@ -1975,19 +1983,23 @@ jsg::JsValue makeCancelTrackingQueuedSource(
     jsg::Lock& js, QueuedSourceCancels& cancels, bool close) {
   auto underlying = js.obj();
   underlying.set(js, "start"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [close](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-    auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-    auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-    enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
-    if (close) {
-      auto closeFn = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      closeFn.call(js, controller);
-    }
-  })));
+      jsg::JsValue(jsg::check(
+          v8::Function::New(js.v8Context(), [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    jsg::liftKj(info, [&]() {
+      auto& js = jsg::Lock::from(info.GetIsolate());
+      bool close = info.DataV2().As<v8::Value>()->IsTrue();
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+      if (close) {
+        auto closeFn = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        closeFn.call(js, controller);
+      }
+    });
+  }, v8::Local<v8::Value>(js.boolean(close))))));
   underlying.set(js, "cancel"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
-          [&cancels](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::JsValue(makeFunction(js, cancels, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto& cancels = stateOf<QueuedSourceCancels>(info);
     ++cancels.count;
     cancels.reasonWasUndefined = jsg::JsValue(info[0]).isUndefined();
   })));
@@ -2127,15 +2139,18 @@ KJ_TEST("JsReadableStream pumpTo writes a queued stream's string chunks as UTF-8
     // Bytes, then strings, in one batch, as the legacy pump's valueToBytes() writes them.
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "ab"_kjb));
-      enqueue.call(js, controller, js.str("cd"_kj));
-      enqueue.call(js, controller, js.str("\xc3\xa9"_kj));
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, "ab"_kjb));
+        enqueue.call(js, controller, js.str("cd"_kj));
+        enqueue.call(js, controller, js.str("\xc3\xa9"_kj));
+        auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        close.call(js, controller);
+      });
     })));
 
     auto stream = makeTsStream(js, underlying);
@@ -2156,16 +2171,23 @@ KJ_TEST("JsReadableStream text() over the limit cancels a queued TypeScript stre
     // breach triggers reaches its cancel().
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+      });
     })));
     underlying.set(js, "cancel"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
-            [&cancelReason](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      cancelReason = jsg::JsValue(info[0]).toString(js);
+        jsg::JsValue(
+            makeFunction(js, cancelReason, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto& cancelReason = stateOf<kj::Maybe<kj::String>>(info);
+        cancelReason = jsg::JsValue(info[0]).toString(js);
+      });
     })));
     auto stream = makeTsStream(js, jsg::JsValue(underlying));
 
@@ -2486,19 +2508,22 @@ kj::Promise<void> runConduitScript(const TestFixture::Environment& env, kj::Stri
     markers.set(js, name, js.str(name));
   }
   markers.set(js, "setPrivate"_kj,
-      jsg::JsValue(js.wrapSimpleFunction(
-          js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
-    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
-    object.setPrivate(js, name, jsg::JsValue(args[2]));
+      jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+    jsg::liftKj(args, [&]() {
+      auto& js = jsg::Lock::from(args.GetIsolate());
+      auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+      auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+      object.setPrivate(js, name, jsg::JsValue(args[2]));
+    });
   })));
   markers.set(js, "getPrivate"_kj,
-      jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
-          [](jsg::Lock& js,
-              const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
-    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
-    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
-    return object.getPrivate(js, name);
+      jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+    jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+      auto& js = jsg::Lock::from(args.GetIsolate());
+      auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+      auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+      return object.getPrivate(js, name);
+    });
   })));
   auto code = kj::str("(async (markers) => {", kConduitScriptPrologue, body, "})");
   auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "conduit-script.js"_kj)
@@ -3200,14 +3225,17 @@ KJ_TEST("JsReadableStream detach of a partially-read queued TypeScript stream") 
     // moved cursor must resume at the second chunk.
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "hello "_kj.asBytes()));
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "world"_kj.asBytes()));
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, "hello "_kj.asBytes()));
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, "world"_kj.asBytes()));
+        auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        close.call(js, controller);
+      });
     })));
 
     auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
@@ -3297,11 +3325,13 @@ KJ_TEST("JsReadableStream detach of a closed TypeScript-backed stream yields a c
     // undisturbed, so detach() succeeds and produces a closed (state-copy) stream.
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        close.call(js, controller);
+      });
     })));
     auto stream = makeTsStream(js, jsg::JsValue(underlying));
     auto detached = stream.detach(js);
@@ -3901,11 +3931,15 @@ KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prot
     auto& js = env.js;
     auto objectPrototype = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
     objectPrototype.set(js, "then"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
-            [&thenCalls](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      ++thenCalls;
-      auto onFulfilled = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsFunction>());
-      onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
+        jsg::JsValue(
+            makeFunction(js, thenCalls, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto& thenCalls = stateOf<uint>(info);
+        ++thenCalls;
+        auto onFulfilled = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsFunction>());
+        onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
+      });
     })));
 
     JsReadableStream forArrayBuffer(js, kj::str(kData));
@@ -4013,8 +4047,9 @@ KJ_TEST("JsReadableStream detach of a tee branch carries the composite cancel ho
     // the source is canceled only once BOTH branches have canceled.
     auto underlying = js.obj();
     underlying.set(js, "cancel"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
-            [&sourceCanceled](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+        jsg::JsValue(
+            makeFunction(js, sourceCanceled, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto& sourceCanceled = stateOf<bool>(info);
       sourceCanceled = true;
     })));
     auto stream = makeTsStream(js, jsg::JsValue(underlying));

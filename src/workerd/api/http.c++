@@ -2872,6 +2872,27 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
 
 namespace {
 
+// The state of the `[Symbol.dispose]()` awaitDisposableEvent() gives its promise.
+struct DisposableEvent {
+  IoOwn<kj::Canceler> canceler;
+  kj::StringPtr methodName;
+};
+
+// Called with the promise and its DisposableEvent in front of the caller's arguments; see
+// jsg::Promise<T>::setDispose().
+void disposeEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto promise = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsPromise>());
+    auto& event = jsg::unwrapOpaqueRef<DisposableEvent>(js.v8Isolate, info[1]);
+    if (promise.state() != jsg::PromiseState::PENDING) return;
+    // Nobody may be waiting for the rejection, as with a `using` declaration.
+    promise.markAsHandled(js);
+    event.canceler->cancel(JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The ", event.methodName,
+        "() call was canceled because its promise was disposed."));
+  });
+}
+
 // Awaits an event sent through a service binding. With `rpc_dispose_cancels_call`, the returned
 // promise gets a `[Symbol.dispose]()` method, as a JSRPC call's promise has: disposing the promise
 // while the event is in flight cancels the event, and the promise rejects with an `AbortError`.
@@ -2891,19 +2912,12 @@ auto awaitDisposableEvent(jsg::Lock& js,
   auto cancelable = canceler->wrap(kj::mv(event)).attach(canceler.addRef());
   auto promise = ioContext.awaitIo(js, kj::mv(cancelable), kj::fwd<Func>(func));
 
-  promise.setDispose(js,
-      js.wrapSimpleFunction(js.v8Context(),
-          [canceler = ioContext.addObject(canceler.addRef().toOwn()), methodName](
-              jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
-    // `this` is the promise when it's called as `promise[Symbol.dispose]()`, as `using` does.
-    KJ_IF_SOME(self, jsg::JsValue(info.This()).tryCast<jsg::JsPromise>()) {
-      if (self.state() != jsg::PromiseState::PENDING) return;
-      // Nobody may be waiting for the rejection, as with a `using` declaration.
-      self.markAsHandled(js);
-    }
-    canceler->cancel(JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The ", methodName,
-        "() call was canceled because its promise was disposed."));
-  }));
+  promise.setDispose(js, &disposeEvent,
+      jsg::wrapOpaque(js.v8Context(),
+          DisposableEvent{
+            .canceler = ioContext.addObject(canceler.addRef().toOwn()),
+            .methodName = methodName,
+          }));
   return promise;
 }
 

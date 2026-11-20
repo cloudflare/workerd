@@ -13,13 +13,25 @@ import unsafe from 'workerd:unsafe';
 
 const MODE = env.MODE;
 
-// createRequire() returns a jsg::Function: a v8::Function created in C++ whose native state, the
-// referrer, can be copied into a Worker started from the snapshot.
+// createRequire() returns a v8::Function over a static callback whose data is the referrer, a
+// string, which a startup snapshot serializes as it is.
 const require = MODE === 'create-require' ? createRequire('/worker.js') : null;
 
-// AsyncLocalStorage.bind() returns a jsg::Function too, but its native state holds the bound
-// function and receiver, which cannot be copied.
+// AsyncLocalStorage.bind() at the top level, in the root frame, returns a bound function with no
+// C++ state: the wrapped function and receiver ride as bound arguments of a static callback.
+// (Bound inside a frame, it would also carry the frame's opaque wrapper, which has no transfer.)
 const bound = MODE === 'bind' ? AsyncLocalStorage.bind(() => 'bound') : null;
+
+// The runtime binds with the `bind` the context was created with, which a Worker started from the
+// snapshot still has, whatever the top level did to Function.prototype.
+let replacedBindCalls = 0;
+if (MODE === 'bind') {
+  const originalBind = Function.prototype.bind;
+  Function.prototype.bind = function (...args) {
+    replacedBindCalls++;
+    return Reflect.apply(originalBind, this, args);
+  };
+}
 
 function checks() {
   switch (MODE) {
@@ -30,8 +42,15 @@ function checks() {
         cached: require('./lib.cjs') === lib,
       };
     }
-    case 'bind':
-      return { called: bound() === 'bound' };
+    case 'bind': {
+      const callsBefore = replacedBindCalls;
+      const boundAgain = AsyncLocalStorage.bind(() => 'again');
+      return {
+        called: bound() === 'bound',
+        boundAgain: boundAgain() === 'again',
+        replacedBindNotCalled: replacedBindCalls === callsBefore,
+      };
+    }
   }
   return {};
 }

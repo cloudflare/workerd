@@ -8,6 +8,7 @@
 #include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/strong-bool.h>
 
@@ -20,8 +21,6 @@ namespace workerd::api {
 WD_STRONG_BOOL(EnhancedErrorSerialization);
 
 namespace {
-
-using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
 
 // Runs `body` as the body of a function of `helpers` (the exports of the bootstrap's serialization
 // module), `setTestExports`, `roundTrip(value, preserveStackInErrors)`, `serialize(value)`, which
@@ -43,20 +42,17 @@ kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErro
   kj::String result;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
-    auto context = js.v8Context();
     auto helpers = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "serialization"_kj),
         "the bootstrap did not load the serialization module");
 
-    auto setTestExports = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto setTestExports = makeLiftedFunction(js,
+        [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
       setBootstrapExportForTest(js, "test"_kj, jsg::JsValue(info[0]));
       return js.undefined();
-    }));
+    });
 
-    auto roundTrip = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto roundTrip = makeLiftedFunction(js,
+        [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
       auto content = ({
         jsg::Serializer ser(js);
         ser.write(js, jsg::JsValue(info[0]));
@@ -65,25 +61,23 @@ kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErro
       jsg::Deserializer deser(js, content.data, kj::none, kj::none,
           jsg::Deserializer::Options{.preserveStackInErrors = info[1]->IsTrue()});
       return deser.readValue(js);
-    }));
+    });
 
-    auto serialize = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto serialize = makeLiftedFunction(js,
+        [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
       jsg::Serializer ser(js);
       ser.write(js, jsg::JsValue(info[0]));
       return js.str(kj::encodeHex(ser.release().data));
-    }));
+    });
 
-    auto deserialize = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto deserialize = makeLiftedFunction(js,
+        [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
       auto data = kj::decodeHex(jsg::JsValue(info[0]).toString(js));
       KJ_ASSERT(!data.hadErrors);
       jsg::Deserializer deser(js, data, kj::none, kj::none,
           jsg::Deserializer::Options{.preserveStackInErrors = info[1]->IsTrue()});
       return deser.readValue(js);
-    }));
+    });
 
     auto code =
         kj::str("((helpers, setTestExports, roundTrip, serialize, deserialize) => {", body, "})");
