@@ -8,11 +8,14 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
 #include <workerd/io/access-info.h>
+#include <workerd/io/entrypoint-invocation.h>
+#include <workerd/io/entrypoint/ffi.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -950,6 +953,20 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
 
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_ENTRYPOINT_SCHEDULED)) {
+    // Not wrapped with the canceler, which is set only for an actor's events. The event is
+    // cancelled by dropping the promise: that drops the Rust future, then the promise of
+    // finishScheduled(), which owns the IncomingRequest.
+    return entrypoint::runScheduled(
+        kj::heap(entrypoint::Invocation{
+          .request = kj::mv(incomingRequest),
+          .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
+          .versionInfo = kj::mv(versionInfo),
+          .props = kj::mv(props),
+        }),
+        scheduledTime, cron);
+  }
+
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
@@ -958,18 +975,8 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
   incomingRequest->delivered("scheduled"_kj);
 
-  // Scheduled handlers run entirely in waitUntil() tasks.
-  context.addWaitUntil(
-      context.run([scheduledTime, cron = kj::str(cron), entrypointName = entrypointName.clone(),
-                      versionInfo = kj::mv(versionInfo),
-                      props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
-    auto traceScope = context.makeRequestTraceScope(lock);
-
-    lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
-        lock.getExportedHandler(
-            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
-  }));
+  entrypoint::startScheduledInWaitUntil(context, scheduledTime, kj::str(cron),
+      entrypointName.clone(), kj::mv(versionInfo), kj::mv(props));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<WorkerInterface::ScheduledResult> {

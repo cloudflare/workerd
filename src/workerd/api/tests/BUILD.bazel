@@ -357,6 +357,19 @@ wd_test(
 )
 
 wd_test(
+    src = "scheduled-test.wd-test",
+    # service_binding_extra_handlers, for the scheduled() of a service binding, is experimental.
+    args = ["--experimental"],
+    data = [
+        "scheduled-test.js",
+        "scheduled-test-handler.js",
+        "scheduled-test-listener.js",
+        "scheduled-test-no-listener.js",
+        "scheduled-test-tail.js",
+    ],
+)
+
+wd_test(
     # It runs several other tests' workers to trace them, which takes up to 12.5s of the 15s
     # "medium" timeout in debug builds.
     size = "large",

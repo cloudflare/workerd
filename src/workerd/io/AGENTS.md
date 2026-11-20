@@ -28,6 +28,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 | Promise bridging KJ↔JS         | `io-context.h` — `awaitIo()`, `awaitJs()`                                         |
 | Request lifecycle / subrequests | `io-context.{h,c++}`, `worker-entrypoint.{h,c++}`                                 |
 | `IoContext` from Rust           | `io-context/` — the `io-context` crate; identifies an `IoContext` by its `Id`     |
+| Events delivered from Rust      | `entrypoint/` — the `entrypoint` crate; `WorkerEntrypoint` hands it an `Invocation` |
 | Actor storage ops               | `actor-cache.h` (`ActorCacheOps`), `actor-sqlite.h`, `actor-storage.capnp`        |
 | DO gate semantics               | `io-gate.{h,c++}` — `InputGate::CriticalSection`, `OutputGate::lockWhile()`       |
 | Worker/isolate creation         | `worker.{h,c++}`, `worker-modules.{h,c++}`                                        |
@@ -57,6 +58,15 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `IoContext::observeTime()` advances the observable clock floor only while an input lock selects the caller's scope; internal pre-entry reads see the root scope and must not override a nested timer's clamp. Timer delivery samples the channel with the callback's own deadline and retains that observation through the V8 microtask checkpoint. Handoff tests must cover callbacks that defer their first clock read to a microtask.
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
 - Module registry selection: **always** use `isNewModuleRegistryEnabled(flags)` (`features.h`), never read `getNewModuleRegistry()` directly — Python workers ignore the flag and must not end up split across the two registries
+
+## Porting C++ to Rust
+
+**Keep the shape, write Rust.** A port moves a component to Rust without redesigning the architecture around it in the same step: neither a line-by-line translation nor a rewrite.
+
+- Keep the C++ boundaries: which component owns which state, which types cross between components, and where each C++ type is bound. A C++ type gets one Rust binding, in the crate matching its header (`io/io-context.h` → `io-context/`, KJ types → `src/rust/kj`), and other crates reuse it through a cxx type alias rather than shimming its methods again. `IoContext::IncomingRequest` is bound in `io-context/`, and `entrypoint/` calls those bindings.
+- Inside those boundaries, write idiomatic Rust: ownership and typestates instead of "can only be called once" runtime checks, enums for state, `Result` for failure.
+- Don't build for callers that don't exist yet. Add holder types, traits or generic layers when a second user needs them.
+- Make architectural changes in their own step. When Rust allows a better structure than the C++ one, propose it as a separate change, so that each port stays reviewable against the C++ it replaces.
 
 ## Adding a compatibility flag
 

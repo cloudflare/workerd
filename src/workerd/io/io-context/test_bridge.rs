@@ -182,6 +182,12 @@ mod ffi {
         type SubrequestChannel = channel_interop::SubrequestChannel;
     }
 
+    #[namespace = "workerd::io_context"]
+    unsafe extern "C++" {
+        include!("workerd/io/io-context/ffi.h");
+        type IncomingRequest = io_context::IncomingRequest;
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
@@ -192,6 +198,7 @@ mod ffi {
     }
 
     extern "Rust" {
+        fn deliver_from_rust(request: Pin<&mut IncomingRequest>) -> Result<String>;
         unsafe fn await_and_record_async_context(isolate: usize) -> Result<()>;
         fn register_probe_module(registry: Pin<&mut ModuleRegistry>);
         fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
@@ -286,6 +293,21 @@ mod ffi {
         fn channel_conversion_context() -> u64;
 
     }
+}
+
+/// Delivers `request` from Rust, as an event's code does, and returns the location it records as
+/// where the request was delivered, as `kj::SourceLocation` prints it.
+fn deliver_from_rust(request: Pin<&mut ffi::IncomingRequest>) -> Result<String> {
+    let location = io_context::delivered_location!();
+    io_context::incoming_request_delivered(request, "test-event", location)
+        .map_err(|err| std::io::Error::other(err.to_string()))?;
+    Ok(format!(
+        "{}:{}:{} in {}",
+        location.file.to_string_lossy(),
+        location.line,
+        location.column,
+        location.function.to_string_lossy()
+    ))
 }
 
 /// In a request, terminates execution, then calls `IoContext::add_wait_until()` and

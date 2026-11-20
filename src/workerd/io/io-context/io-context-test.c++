@@ -163,6 +163,27 @@ KJ_TEST("in a Durable Object, write_logfwdr() waits for the output gate") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("a request that Rust delivers records the Rust caller's location") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context);
+  auto delivered = deliver_from_rust(*request);
+  auto location = kj::heapString(delivered.data(), delivered.size());
+  KJ_EXPECT(location.contains("io-context/test_bridge.rs:"), location);
+  KJ_EXPECT(location.endsWith(" in io_context_test_bridge"), location);
+  fixture.drainAndDestroy(kj::mv(request));
+
+  // With no request left, run() fails and reports where the IoContext's last request was
+  // delivered.
+  KJ_EXPECT_LOG(WARNING, location);
+  KJ_IF_SOME(e,
+      kj::runCatchingExceptions([&]() { auto promise = context->run([](Worker::Lock&) {}); })) {
+    KJ_EXPECT(e.getDescription().contains("no request in progress"), e);
+  } else {
+    KJ_FAIL_EXPECT("run() returned a promise without a current IncomingRequest");
+  }
+}
+
 KJ_TEST("an IoContext id works only while its IoContext is current") {
   TestFixture fixture;
   auto first = fixture.newIncomingRequest();
