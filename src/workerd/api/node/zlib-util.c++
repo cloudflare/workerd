@@ -52,6 +52,12 @@ namespace {
   throwWithCode(js, err, error.code);
 }
 
+// Matches Node.js' ZstdStream::Init(), which throws ERR_ZLIB_INITIALIZATION_FAILED with the
+// context's message and no errno, whichever API created the context.
+[[noreturn]] void throwZstdInitError(jsg::Lock& js, const CompressionError& error) {
+  throwWithCode(js, js.error(error.message), "ERR_ZLIB_INITIALIZATION_FAILED"_kj);
+}
+
 // Equivalent to Node.js' validateInteger() range check, which throws ERR_OUT_OF_RANGE.
 void checkRange(jsg::Lock& js, kj::StringPtr name, int64_t value, int64_t min, int64_t max) {
   if (value < min || value > max) {
@@ -711,21 +717,25 @@ bool ZlibUtil::ZstdCompressionStream<CompressionContext>::initialize(jsg::Lock& 
     jsg::JsArrayBufferView params,
     jsg::JsArrayBufferView writeResult,
     jsg::Function<void()> writeCallback,
-    jsg::Optional<uint64_t> pledgedSrcSize) {
+    jsg::Optional<uint64_t> pledgedSrcSize,
+    jsg::Optional<kj::Array<kj::byte>> dictionary) {
   this->initializeStream(js, writeResult, kj::mv(writeCallback));
 
   uint64_t srcSize = pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
+  kj::ArrayPtr<const kj::byte> dict = nullptr;
+  KJ_IF_SOME(d, dictionary) {
+    dict = d.asPtr();
+  }
 
   kj::Maybe<CompressionError> maybeError;
   if constexpr (CompressionContext::Mode == ZlibMode::ZSTD_ENCODE) {
-    maybeError = this->context()->initialize(srcSize);
+    maybeError = this->context()->initialize(srcSize, dict);
   } else {
-    maybeError = this->context()->initialize();
+    maybeError = this->context()->initialize(dict);
   }
 
   KJ_IF_SOME(err, maybeError) {
-    this->emitError(js, kj::mv(err));
-    return false;
+    throwZstdInitError(js, err);
   }
 
   auto results = params.template asArrayPtr<int>();
@@ -916,14 +926,19 @@ kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdCont
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   // Initialize the context
+  kj::ArrayPtr<const kj::byte> dictionary = nullptr;
+  KJ_IF_SOME(d, opts.dictionary) {
+    dictionary = d.asPtr();
+  }
+
   if constexpr (Context::Mode == ZlibMode::ZSTD_ENCODE) {
     uint64_t pledgedSrcSize = opts.pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
-    KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize)) {
-      throwCompressionError(js, err);
+    KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize, dictionary)) {
+      throwZstdInitError(js, err);
     }
   } else {
-    KJ_IF_SOME(err, ctx.initialize()) {
-      throwCompressionError(js, err);
+    KJ_IF_SOME(err, ctx.initialize(dictionary)) {
+      throwZstdInitError(js, err);
     }
   }
 
