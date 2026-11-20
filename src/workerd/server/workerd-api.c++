@@ -633,8 +633,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       auto usages = KJ_MAP(usage, key.getUsages()) { return kj::str(usage); };
 
       return lock.wrap(context,
-          api::SubtleCrypto::importKeySync(lock, key.getFormat(), kj::mv(keyData),
-              api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.getExtractable(), usages));
+          api::JsCryptoKey(api::SubtleCrypto::importKeySync(lock, key.getFormat(), kj::mv(keyData),
+              api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.getExtractable(), usages)));
     }
 
     case Global::MEMORY_CACHE: {

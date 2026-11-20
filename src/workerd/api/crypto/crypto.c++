@@ -1477,7 +1477,7 @@ bool SubtleCrypto::timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b)
 // SubtleCrypto backend members
 
 bool SubtleCrypto::backendIsCryptoKey(
-    jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<jsg::Ref<CryptoKey>>& handler) {
+    jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<JsCryptoKey>& handler) {
   return handler.tryUnwrap(js, value) != kj::none;
 }
 
@@ -1495,31 +1495,27 @@ kj::String SubtleCrypto::backendStructTypeName(kj::String name) {
   KJ_FAIL_REQUIRE("not a SubtleCrypto struct", name);
 }
 
-jsg::JsArrayBuffer SubtleCrypto::backendEncrypt(jsg::Lock& js,
-    EncryptAlgorithm algorithm,
-    const CryptoKey& key,
-    jsg::JsBufferSource plainText) {
-  return SubtleCrypto::encryptSync(js, kj::mv(algorithm), key, plainText);
+jsg::JsArrayBuffer SubtleCrypto::backendEncrypt(
+    jsg::Lock& js, EncryptAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource plainText) {
+  return SubtleCrypto::encryptSync(js, kj::mv(algorithm), *key, plainText);
 }
 
-jsg::JsArrayBuffer SubtleCrypto::backendDecrypt(jsg::Lock& js,
-    EncryptAlgorithm algorithm,
-    const CryptoKey& key,
-    jsg::JsBufferSource cipherText) {
-  return SubtleCrypto::decryptSync(js, kj::mv(algorithm), key, cipherText);
+jsg::JsArrayBuffer SubtleCrypto::backendDecrypt(
+    jsg::Lock& js, EncryptAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource cipherText) {
+  return SubtleCrypto::decryptSync(js, kj::mv(algorithm), *key, cipherText);
 }
 
 jsg::JsArrayBuffer SubtleCrypto::backendSign(
-    jsg::Lock& js, SignAlgorithm algorithm, const CryptoKey& key, jsg::JsBufferSource data) {
-  return SubtleCrypto::signSync(js, kj::mv(algorithm), key, data);
+    jsg::Lock& js, SignAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource data) {
+  return SubtleCrypto::signSync(js, kj::mv(algorithm), *key, data);
 }
 
 bool SubtleCrypto::backendVerify(jsg::Lock& js,
     SignAlgorithm algorithm,
-    const CryptoKey& key,
+    JsCryptoKey key,
     jsg::JsBufferSource signature,
     jsg::JsBufferSource data) {
-  return SubtleCrypto::verifySync(js, kj::mv(algorithm), key, signature, data);
+  return SubtleCrypto::verifySync(js, kj::mv(algorithm), *key, signature, data);
 }
 
 jsg::JsArrayBuffer SubtleCrypto::backendDigest(
@@ -1527,31 +1523,37 @@ jsg::JsArrayBuffer SubtleCrypto::backendDigest(
   return SubtleCrypto::digestSync(js, kj::mv(algorithm), data);
 }
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> SubtleCrypto::backendGenerateKey(jsg::Lock& js,
+kj::OneOf<JsCryptoKey, CryptoKeyPair> SubtleCrypto::backendGenerateKey(jsg::Lock& js,
     GenerateKeyAlgorithm algorithm,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
-  return SubtleCrypto::generateKeySync(js, kj::mv(algorithm), extractable, keyUsages);
+  KJ_SWITCH_ONEOF(SubtleCrypto::generateKeySync(js, kj::mv(algorithm), extractable, keyUsages)) {
+    KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
+      return JsCryptoKey(kj::mv(key));
+    }
+    KJ_CASE_ONEOF(pair, CryptoKeyPair) {
+      return kj::mv(pair);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
-jsg::Ref<CryptoKey> SubtleCrypto::backendDeriveKey(jsg::Lock& js,
+JsCryptoKey SubtleCrypto::backendDeriveKey(jsg::Lock& js,
     DeriveKeyAlgorithm algorithm,
-    const CryptoKey& baseKey,
+    JsCryptoKey baseKey,
     ImportKeyAlgorithm derivedKeyAlgorithm,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   return SubtleCrypto::deriveKeySync(
-      js, kj::mv(algorithm), baseKey, kj::mv(derivedKeyAlgorithm), extractable, keyUsages);
+      js, kj::mv(algorithm), *baseKey, kj::mv(derivedKeyAlgorithm), extractable, keyUsages);
 }
 
-jsg::JsArrayBuffer SubtleCrypto::backendDeriveBits(jsg::Lock& js,
-    DeriveKeyAlgorithm algorithm,
-    const CryptoKey& baseKey,
-    kj::Maybe<uint32_t> length) {
-  return SubtleCrypto::deriveBitsSync(js, kj::mv(algorithm), baseKey, length);
+jsg::JsArrayBuffer SubtleCrypto::backendDeriveBits(
+    jsg::Lock& js, DeriveKeyAlgorithm algorithm, JsCryptoKey baseKey, kj::Maybe<uint32_t> length) {
+  return SubtleCrypto::deriveBitsSync(js, kj::mv(algorithm), *baseKey, length);
 }
 
-jsg::Ref<CryptoKey> SubtleCrypto::backendImportKey(jsg::Lock& js,
+JsCryptoKey SubtleCrypto::backendImportKey(jsg::Lock& js,
     kj::String format,
     ImportKeyData keyData,
     ImportKeyAlgorithm algorithm,
@@ -1562,69 +1564,69 @@ jsg::Ref<CryptoKey> SubtleCrypto::backendImportKey(jsg::Lock& js,
 }
 
 SubtleCrypto::ExportKeyData SubtleCrypto::backendExportKey(
-    jsg::Lock& js, kj::String format, const CryptoKey& key) {
-  return SubtleCrypto::exportKeySync(js, kj::mv(format), key);
+    jsg::Lock& js, kj::String format, JsCryptoKey key) {
+  return SubtleCrypto::exportKeySync(js, kj::mv(format), *key);
 }
 
 jsg::JsArrayBuffer SubtleCrypto::backendWrapKey(jsg::Lock& js,
     kj::String format,
-    const CryptoKey& key,
-    const CryptoKey& wrappingKey,
+    JsCryptoKey key,
+    JsCryptoKey wrappingKey,
     EncryptAlgorithm wrapAlgorithm,
     const jsg::TypeHandler<JsonWebKey>& jwkHandler) {
   return SubtleCrypto::wrapKeySync(
-      js, kj::mv(format), key, wrappingKey, kj::mv(wrapAlgorithm), jwkHandler);
+      js, kj::mv(format), *key, *wrappingKey, kj::mv(wrapAlgorithm), jwkHandler);
 }
 
-jsg::Ref<CryptoKey> SubtleCrypto::backendUnwrapKey(jsg::Lock& js,
+JsCryptoKey SubtleCrypto::backendUnwrapKey(jsg::Lock& js,
     kj::String format,
     jsg::JsBufferSource wrappedKey,
-    const CryptoKey& unwrappingKey,
+    JsCryptoKey unwrappingKey,
     EncryptAlgorithm unwrapAlgorithm,
     ImportKeyAlgorithm unwrappedKeyAlgorithm,
     bool extractable,
     kj::Array<kj::String> keyUsages,
     const jsg::TypeHandler<JsonWebKey>& jwkHandler) {
-  return SubtleCrypto::unwrapKeySync(js, kj::mv(format), wrappedKey, unwrappingKey,
+  return SubtleCrypto::unwrapKeySync(js, kj::mv(format), wrappedKey, *unwrappingKey,
       kj::mv(unwrapAlgorithm), kj::mv(unwrappedKeyAlgorithm), extractable, keyUsages, jwkHandler);
 }
 
 SubtleCrypto::EncapsulatedBits SubtleCrypto::backendEncapsulateBits(
-    jsg::Lock& js, ImportKeyAlgorithm algorithm, const CryptoKey& encapsulationKey) {
-  return SubtleCrypto::encapsulateBitsSync(js, kj::mv(algorithm), encapsulationKey);
+    jsg::Lock& js, ImportKeyAlgorithm algorithm, JsCryptoKey encapsulationKey) {
+  return SubtleCrypto::encapsulateBitsSync(js, kj::mv(algorithm), *encapsulationKey);
 }
 
 SubtleCrypto::EncapsulatedKey SubtleCrypto::backendEncapsulateKey(jsg::Lock& js,
     ImportKeyAlgorithm algorithm,
-    const CryptoKey& encapsulationKey,
+    JsCryptoKey encapsulationKey,
     ImportKeyAlgorithm sharedKeyAlgorithm,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   return SubtleCrypto::encapsulateKeySync(
-      js, kj::mv(algorithm), encapsulationKey, kj::mv(sharedKeyAlgorithm), extractable, keyUsages);
+      js, kj::mv(algorithm), *encapsulationKey, kj::mv(sharedKeyAlgorithm), extractable, keyUsages);
 }
 
 jsg::JsArrayBuffer SubtleCrypto::backendDecapsulateBits(jsg::Lock& js,
     ImportKeyAlgorithm algorithm,
-    const CryptoKey& decapsulationKey,
+    JsCryptoKey decapsulationKey,
     kj::Array<const kj::byte> ciphertext) {
-  return SubtleCrypto::decapsulateBitsSync(js, kj::mv(algorithm), decapsulationKey, ciphertext);
+  return SubtleCrypto::decapsulateBitsSync(js, kj::mv(algorithm), *decapsulationKey, ciphertext);
 }
 
-jsg::Ref<CryptoKey> SubtleCrypto::backendDecapsulateKey(jsg::Lock& js,
+JsCryptoKey SubtleCrypto::backendDecapsulateKey(jsg::Lock& js,
     ImportKeyAlgorithm algorithm,
-    const CryptoKey& decapsulationKey,
+    JsCryptoKey decapsulationKey,
     kj::Array<const kj::byte> ciphertext,
     ImportKeyAlgorithm sharedKeyAlgorithm,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
-  return SubtleCrypto::decapsulateKeySync(js, kj::mv(algorithm), decapsulationKey, ciphertext,
+  return SubtleCrypto::decapsulateKeySync(js, kj::mv(algorithm), *decapsulationKey, ciphertext,
       kj::mv(sharedKeyAlgorithm), extractable, keyUsages);
 }
 
-jsg::Ref<CryptoKey> SubtleCrypto::backendGetPublicKey(
-    jsg::Lock& js, const CryptoKey& key, kj::Array<kj::String> keyUsages) {
-  return SubtleCrypto::getPublicKeySync(js, key, keyUsages);
+JsCryptoKey SubtleCrypto::backendGetPublicKey(
+    jsg::Lock& js, JsCryptoKey key, kj::Array<kj::String> keyUsages) {
+  return SubtleCrypto::getPublicKeySync(js, *key, keyUsages);
 }
 
 bool SubtleCrypto::backendTimingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b) {

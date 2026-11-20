@@ -351,9 +351,74 @@ class CryptoKey: public jsg::Object {
   friend class node::CryptoImpl;
 };
 
+// A CryptoKey as C++ takes it from and gives it to JavaScript: a stand-in for jsg::Ref<CryptoKey>
+// that its consumers (SubtleCrypto, node:crypto, X509Certificate, the CRYPTO_KEY binding) use, so
+// that how a key is wrapped is decided in one place.
+class JsCryptoKey {
+ public:
+  JsCryptoKey(jsg::Ref<CryptoKey> key): key(kj::mv(key)) {}
+
+  CryptoKey& operator*() {
+    return *key;
+  }
+  CryptoKey* operator->() {
+    return key.get();
+  }
+  const CryptoKey& operator*() const {
+    return *key;
+  }
+  const CryptoKey* operator->() const {
+    return key.get();
+  }
+  jsg::Ref<CryptoKey> release() && {
+    return kj::mv(key);
+  }
+  JsCryptoKey addRef() {
+    return key.addRef();
+  }
+
+  // Described to RTTI, and so to the generated types, as the C++ CryptoKey, named as it is in
+  // error messages, and tried first in a OneOf, as it is.
+  using JsgRttiDelegate = jsg::Ref<CryptoKey>;
+  static constexpr const char* jsgTypeName = "CryptoKey";
+  static constexpr bool jsgUnwrapsAsResource = true;
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      JsCryptoKey value) {
+    return typeWrapper.wrap(js, context, creator, kj::mv(value.key));
+  }
+
+  static kj::Maybe<JsCryptoKey> jsgTryUnwrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    KJ_IF_SOME(key,
+        typeWrapper.tryUnwrap(
+            js, context, handle, static_cast<jsg::Ref<CryptoKey>*>(nullptr), parentObject)) {
+      return JsCryptoKey(kj::mv(key));
+    }
+    return kj::none;
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(key);
+  }
+
+  JSG_MEMORY_INFO(JsCryptoKey) {
+    tracker.trackField("key", key);
+  }
+
+ private:
+  jsg::Ref<CryptoKey> key;
+};
+
 struct CryptoKeyPair {
-  jsg::Ref<CryptoKey> publicKey;
-  jsg::Ref<CryptoKey> privateKey;
+  JsCryptoKey publicKey;
+  JsCryptoKey privateKey;
 
   JSG_STRUCT(publicKey, privateKey);
 };
@@ -492,7 +557,7 @@ class SubtleCrypto final: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::String, HashAlgorithm>> hash;
 
     // ECDH parameters
-    jsg::Optional<jsg::Ref<CryptoKey>> $public;
+    jsg::Optional<JsCryptoKey> $public;
 
     // HKDF parameters (some shared with PBKDF2)
 
@@ -643,7 +708,7 @@ class SubtleCrypto final: public jsg::Object {
 
   // Result type for encapsulateKey()
   struct EncapsulatedKey {
-    jsg::Ref<CryptoKey> sharedKey;
+    JsCryptoKey sharedKey;
     jsg::JsRef<jsg::JsArrayBuffer> ciphertext;
     JSG_STRUCT(sharedKey, ciphertext);
     JSG_MEMORY_INFO(EncapsulatedKey) {}
@@ -780,87 +845,80 @@ class SubtleCrypto final: public jsg::Object {
   // the is*() members for the types it cannot test for. The other members are the operations,
   // which take arguments already converted that way and run synchronously, throwing what the
   // methods above reject with.
-  // Whether `value` unwraps as `const CryptoKey&`, which the TypeScript side cannot test for.
+  // Whether `value` is a CryptoKey, which the TypeScript side cannot test for.
   bool backendIsCryptoKey(
-      jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<jsg::Ref<CryptoKey>>& handler);
+      jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<JsCryptoKey>& handler);
   // typeid(T).name() of the struct `name`, which JSG quotes in conversion errors and which depends
   // on the C++ ABI.
   kj::String backendStructTypeName(kj::String name);
 
-  jsg::JsArrayBuffer backendEncrypt(jsg::Lock& js,
-      EncryptAlgorithm algorithm,
-      const CryptoKey& key,
-      jsg::JsBufferSource plainText);
-  jsg::JsArrayBuffer backendDecrypt(jsg::Lock& js,
-      EncryptAlgorithm algorithm,
-      const CryptoKey& key,
-      jsg::JsBufferSource cipherText);
+  jsg::JsArrayBuffer backendEncrypt(
+      jsg::Lock& js, EncryptAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource plainText);
+  jsg::JsArrayBuffer backendDecrypt(
+      jsg::Lock& js, EncryptAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource cipherText);
   jsg::JsArrayBuffer backendSign(
-      jsg::Lock& js, SignAlgorithm algorithm, const CryptoKey& key, jsg::JsBufferSource data);
+      jsg::Lock& js, SignAlgorithm algorithm, JsCryptoKey key, jsg::JsBufferSource data);
   bool backendVerify(jsg::Lock& js,
       SignAlgorithm algorithm,
-      const CryptoKey& key,
+      JsCryptoKey key,
       jsg::JsBufferSource signature,
       jsg::JsBufferSource data);
   jsg::JsArrayBuffer backendDigest(
       jsg::Lock& js, HashAlgorithm algorithm, jsg::JsBufferSource data);
-  kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> backendGenerateKey(jsg::Lock& js,
+  kj::OneOf<JsCryptoKey, CryptoKeyPair> backendGenerateKey(jsg::Lock& js,
       GenerateKeyAlgorithm algorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
-  jsg::Ref<CryptoKey> backendDeriveKey(jsg::Lock& js,
+  JsCryptoKey backendDeriveKey(jsg::Lock& js,
       DeriveKeyAlgorithm algorithm,
-      const CryptoKey& baseKey,
+      JsCryptoKey baseKey,
       ImportKeyAlgorithm derivedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
-  jsg::JsArrayBuffer backendDeriveBits(jsg::Lock& js,
-      DeriveKeyAlgorithm algorithm,
-      const CryptoKey& baseKey,
-      kj::Maybe<uint32_t> length);
-  jsg::Ref<CryptoKey> backendImportKey(jsg::Lock& js,
+  jsg::JsArrayBuffer backendDeriveBits(
+      jsg::Lock& js, DeriveKeyAlgorithm algorithm, JsCryptoKey baseKey, kj::Maybe<uint32_t> length);
+  JsCryptoKey backendImportKey(jsg::Lock& js,
       kj::String format,
       ImportKeyData keyData,
       ImportKeyAlgorithm algorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
-  ExportKeyData backendExportKey(jsg::Lock& js, kj::String format, const CryptoKey& key);
+  ExportKeyData backendExportKey(jsg::Lock& js, kj::String format, JsCryptoKey key);
   jsg::JsArrayBuffer backendWrapKey(jsg::Lock& js,
       kj::String format,
-      const CryptoKey& key,
-      const CryptoKey& wrappingKey,
+      JsCryptoKey key,
+      JsCryptoKey wrappingKey,
       EncryptAlgorithm wrapAlgorithm,
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
-  jsg::Ref<CryptoKey> backendUnwrapKey(jsg::Lock& js,
+  JsCryptoKey backendUnwrapKey(jsg::Lock& js,
       kj::String format,
       jsg::JsBufferSource wrappedKey,
-      const CryptoKey& unwrappingKey,
+      JsCryptoKey unwrappingKey,
       EncryptAlgorithm unwrapAlgorithm,
       ImportKeyAlgorithm unwrappedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages,
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
   SubtleCrypto::EncapsulatedBits backendEncapsulateBits(
-      jsg::Lock& js, ImportKeyAlgorithm algorithm, const CryptoKey& encapsulationKey);
+      jsg::Lock& js, ImportKeyAlgorithm algorithm, JsCryptoKey encapsulationKey);
   SubtleCrypto::EncapsulatedKey backendEncapsulateKey(jsg::Lock& js,
       ImportKeyAlgorithm algorithm,
-      const CryptoKey& encapsulationKey,
+      JsCryptoKey encapsulationKey,
       ImportKeyAlgorithm sharedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
   jsg::JsArrayBuffer backendDecapsulateBits(jsg::Lock& js,
       ImportKeyAlgorithm algorithm,
-      const CryptoKey& decapsulationKey,
+      JsCryptoKey decapsulationKey,
       kj::Array<const kj::byte> ciphertext);
-  jsg::Ref<CryptoKey> backendDecapsulateKey(jsg::Lock& js,
+  JsCryptoKey backendDecapsulateKey(jsg::Lock& js,
       ImportKeyAlgorithm algorithm,
-      const CryptoKey& decapsulationKey,
+      JsCryptoKey decapsulationKey,
       kj::Array<const kj::byte> ciphertext,
       ImportKeyAlgorithm sharedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
-  jsg::Ref<CryptoKey> backendGetPublicKey(
-      jsg::Lock& js, const CryptoKey& key, kj::Array<kj::String> keyUsages);
+  JsCryptoKey backendGetPublicKey(jsg::Lock& js, JsCryptoKey key, kj::Array<kj::String> keyUsages);
   bool backendTimingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b);
 
   // SubtleCrypto.backendSupports(), which converts its own arguments.

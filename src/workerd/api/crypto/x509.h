@@ -1,12 +1,11 @@
 #pragma once
 
+#include <workerd/api/crypto/crypto.h>
 #include <workerd/jsg/jsg.h>
 
 #include <openssl/x509.h>
 
 namespace workerd::api {
-
-class CryptoKey;
 
 class X509Certificate: public jsg::Object {
  public:
@@ -24,7 +23,7 @@ class X509Certificate: public jsg::Object {
   kj::Maybe<kj::Array<kj::String>> getKeyUsage();
   kj::Maybe<kj::Array<const char>> getSerialNumber();
   jsg::JsUint8Array getRaw(jsg::Lock& js);
-  kj::Maybe<jsg::Ref<CryptoKey>> getPublicKey(jsg::Lock& js);
+  kj::Maybe<JsCryptoKey> getPublicKey(jsg::Lock& js);
   kj::Maybe<kj::String> getPem();
   kj::Maybe<kj::String> getFingerprint();
   kj::Maybe<kj::String> getFingerprint256();
@@ -47,9 +46,9 @@ class X509Certificate: public jsg::Object {
 
   bool checkIssued(jsg::Ref<X509Certificate> other);
 
-  bool checkPrivateKey(jsg::Ref<CryptoKey> privateKey);
+  bool checkPrivateKey(JsCryptoKey privateKey);
 
-  bool verify(jsg::Ref<CryptoKey> publicKey);
+  bool verify(JsCryptoKey publicKey);
 
   jsg::JsObject toLegacyObject(jsg::Lock& js);
 

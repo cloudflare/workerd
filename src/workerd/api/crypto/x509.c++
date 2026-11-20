@@ -659,12 +659,12 @@ jsg::JsUint8Array X509Certificate::getRaw(jsg::Lock& js) {
   return buf;
 }
 
-kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey(jsg::Lock& js) {
+kj::Maybe<JsCryptoKey> X509Certificate::getPublicKey(jsg::Lock& js) {
   ClearErrorOnReturn clear_error_on_return;
   auto ptr = X509_get_pubkey(cert_.get());
   if (ptr == nullptr) return kj::none;
   auto pkey = kj::disposeWith<EVP_PKEY_free>(ptr);
-  return js.alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
+  return JsCryptoKey(js.alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey))));
 }
 
 kj::Maybe<kj::String> X509Certificate::getPem() {
@@ -759,12 +759,12 @@ bool X509Certificate::checkIssued(jsg::Ref<X509Certificate> other) {
   return X509_check_issued(other->cert_.get(), cert_.get()) == X509_V_OK;
 }
 
-bool X509Certificate::checkPrivateKey(jsg::Ref<CryptoKey> privateKey) {
+bool X509Certificate::checkPrivateKey(JsCryptoKey privateKey) {
   JSG_REQUIRE(privateKey->getType() == "private"_kj, Error, "Invalid key type");
   return privateKey->verifyX509Private(cert_.get());
 }
 
-bool X509Certificate::verify(jsg::Ref<CryptoKey> publicKey) {
+bool X509Certificate::verify(JsCryptoKey publicKey) {
   JSG_REQUIRE(publicKey->getType() == "public"_kj, Error, "Invalid key type");
   return publicKey->verifyX509Public(cert_.get());
 }

@@ -54,8 +54,7 @@ class CryptoImpl final: public jsg::Object {
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(jsg::Lock& js, kj::String name);
 
-  jsg::JsUint8Array statelessDH(
-      jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey);
+  jsg::JsUint8Array statelessDH(jsg::Lock& js, JsCryptoKey privateKey, JsCryptoKey publicKey);
 
   // Primes
   jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
@@ -99,7 +98,7 @@ class CryptoImpl final: public jsg::Object {
   // Hmac
   class HmacHandle final: public jsg::Object {
    public:
-    using KeyParam = kj::OneOf<jsg::JsBufferSource, jsg::Ref<CryptoKey>>;
+    using KeyParam = kj::OneOf<jsg::JsBufferSource, JsCryptoKey>;
 
     HmacHandle(HmacContext ctx): ctx(kj::mv(ctx)) {};
 
@@ -197,8 +196,7 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct CreateAsymmetricKeyOptions {
-    kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, SubtleCrypto::JsonWebKey, jsg::Ref<api::CryptoKey>>
-        key;
+    kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, SubtleCrypto::JsonWebKey, JsCryptoKey> key;
     kj::String format;
     jsg::Optional<kj::String> type;
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> passphrase;
@@ -214,30 +212,30 @@ class CryptoImpl final: public jsg::Object {
   static constexpr bool jsgSnapshotStateless = true;
 
   kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> exportKey(
-      jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options);
+      jsg::Lock& js, JsCryptoKey key, jsg::Optional<KeyExportOptions> options);
 
-  bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
+  bool equals(jsg::Lock& js, JsCryptoKey key, JsCryptoKey otherKey);
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
-  kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
-  double getSymmetricKeySize(jsg::Ref<CryptoKey> key);
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, JsCryptoKey key);
+  kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, JsCryptoKey key);
+  double getSymmetricKeySize(JsCryptoKey key);
 
-  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData);
-  jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
-  jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+  JsCryptoKey createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData);
+  JsCryptoKey createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+  JsCryptoKey createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
   // Implements KeyObject.prototype.toCryptoKey(): imports the key material held by `key` into a
   // new Web Crypto key through SubtleCrypto::importKeySync(), so algorithm, usage and key data
   // validation are the same as crypto.subtle.importKey(). On top of that, it rejects Ed25519 and
   // X25519 key material imported under the other algorithm, which the Web Crypto importers accept.
-  jsg::Ref<CryptoKey> toCryptoKey(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+  JsCryptoKey toCryptoKey(jsg::Lock& js,
+      JsCryptoKey key,
       kj::OneOf<kj::String, SubtleCrypto::ImportKeyAlgorithm> algorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
 
-  static kj::Maybe<ncrypto::EVPKeyPointer> tryGetKey(jsg::Ref<CryptoKey>& key);
-  static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
+  static kj::Maybe<ncrypto::EVPKeyPointer> tryGetKey(JsCryptoKey& key);
+  static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(JsCryptoKey& key);
 
   struct RsaKeyPairOptions {
     kj::String type;
@@ -286,7 +284,7 @@ class CryptoImpl final: public jsg::Object {
 
     void update(jsg::Lock& js, jsg::JsBufferSource data);
     jsg::JsUint8Array sign(jsg::Lock& js,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         jsg::Optional<int> rsaPadding,
         jsg::Optional<int> pssSaltLength,
         jsg::Optional<int> dsaSigEnc);
@@ -306,7 +304,7 @@ class CryptoImpl final: public jsg::Object {
 
     void update(jsg::Lock& js, jsg::JsBufferSource data);
     bool verify(jsg::Lock& js,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         jsg::JsBufferSource signature,
         jsg::Optional<int> rsaPadding,
         jsg::Optional<int> pssSaltLength,
@@ -322,14 +320,14 @@ class CryptoImpl final: public jsg::Object {
   };
 
   jsg::JsUint8Array signOneShot(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::Optional<kj::String> algorithm,
       jsg::JsBufferSource data,
       jsg::Optional<int> rsaPadding,
       jsg::Optional<int> pssSaltLength,
       jsg::Optional<int> dsaSigEnc);
   bool verifyOneShot(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::Optional<kj::String> algorithm,
       jsg::JsBufferSource data,
       jsg::JsBufferSource signature,
@@ -348,7 +346,7 @@ class CryptoImpl final: public jsg::Object {
 
     CipherHandle(CipherMode mode,
         ncrypto::CipherCtxPointer ctx,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         kj::Array<kj::byte> iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
@@ -356,7 +354,7 @@ class CryptoImpl final: public jsg::Object {
         CipherMode mode,
         kj::StringPtr algorithm,
         ncrypto::Cipher cipher,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength);
 
@@ -430,7 +428,7 @@ class CryptoImpl final: public jsg::Object {
     AeadHandle(CipherMode mode,
         ncrypto::Aead aead,
         ncrypto::AeadCtxPointer ctx,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         kj::Array<kj::byte> iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
@@ -438,7 +436,7 @@ class CryptoImpl final: public jsg::Object {
         CipherMode mode,
         kj::StringPtr algorithm,
         ncrypto::Aead aead,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength);
 
@@ -478,7 +476,7 @@ class CryptoImpl final: public jsg::Object {
   kj::OneOf<jsg::Ref<CipherHandle>, jsg::Ref<AeadHandle>> newHandle(jsg::Lock& js,
       kj::uint mode,
       kj::String algorithm,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::JsBufferSource iv,
       jsg::Optional<uint32_t> maybeAuthTagLength);
 
@@ -490,19 +488,19 @@ class CryptoImpl final: public jsg::Object {
   };
 
   jsg::JsUint8Array publicEncrypt(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
   jsg::JsUint8Array publicDecrypt(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
   jsg::JsUint8Array privateEncrypt(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
   jsg::JsUint8Array privateDecrypt(jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
+      JsCryptoKey key,
       jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
 

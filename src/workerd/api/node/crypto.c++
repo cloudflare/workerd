@@ -150,7 +150,7 @@ jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     KJ_CASE_ONEOF(key_data, jsg::JsBufferSource) {
       return js.alloc<HmacHandle>(HmacContext(js, algorithm, nonNullBytes(key_data.asArrayPtr())));
     }
-    KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
+    KJ_CASE_ONEOF(key, JsCryptoKey) {
       return js.alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
     }
   }
@@ -176,7 +176,7 @@ jsg::JsUint8Array CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
       ctx.update(nonNullBytes(data.asArrayPtr()));
       return ctx.digest(js);
     }
-    KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
+    KJ_CASE_ONEOF(key, JsCryptoKey) {
       HmacContext ctx(js, algorithm, key->impl.get());
       ctx.update(nonNullBytes(data.asArrayPtr()));
       return ctx.digest(js);
@@ -474,7 +474,7 @@ void CryptoImpl::SignHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
 }
 
 jsg::JsUint8Array CryptoImpl::SignHandle::sign(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> pssSaltLength,
     jsg::Optional<int> dsaSigEnc) {
@@ -528,7 +528,7 @@ void CryptoImpl::VerifyHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
 }
 
 bool CryptoImpl::VerifyHandle::verify(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource signature,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> maybeSaltLen,
@@ -558,7 +558,7 @@ bool CryptoImpl::VerifyHandle::verify(jsg::Lock& js,
 }
 
 jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::Optional<kj::String> algorithm,
     jsg::JsBufferSource data,
     jsg::Optional<int> rsaPadding,
@@ -608,7 +608,7 @@ jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
 }
 
 bool CryptoImpl::verifyOneShot(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::Optional<kj::String> algorithm,
     jsg::JsBufferSource data,
     jsg::JsBufferSource signature,
@@ -732,12 +732,12 @@ bool passAuthTagToOpenSSL(ncrypto::CipherCtxPointer& ctx, kj::ArrayPtr<const kj:
 
 CryptoImpl::CipherHandle::CipherHandle(CipherMode mode,
     ncrypto::CipherCtxPointer ctx,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     kj::Array<kj::byte> iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       ctx(kj::mv(ctx)),
-      key(kj::mv(key)),
+      key(kj::mv(key).release()),
       iv(kj::mv(iv)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
@@ -745,7 +745,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock
     CipherMode mode,
     kj::StringPtr algorithm,
     ncrypto::Cipher cipher,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource iv,
     jsg::Optional<uint32_t> maybeAuthTagLength) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
@@ -1058,13 +1058,13 @@ CryptoImpl::AeadHandle::AuthenticatedInfo initAuthenticated(ncrypto::Aead& aead,
 CryptoImpl::AeadHandle::AeadHandle(CipherMode mode,
     ncrypto::Aead aead,
     ncrypto::AeadCtxPointer ctx,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     kj::Array<kj::byte> iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       aead(aead),
       ctx(kj::mv(ctx)),
-      key(kj::mv(key)),
+      key(kj::mv(key).release()),
       iv(kj::mv(iv)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
@@ -1072,7 +1072,7 @@ jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js
     CipherMode mode,
     kj::StringPtr algorithm,
     ncrypto::Aead aead,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource iv,
     jsg::Optional<uint32_t> maybeAuthTagLength) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
@@ -1266,7 +1266,7 @@ kj::OneOf<jsg::Ref<CryptoImpl::CipherHandle>, jsg::Ref<CryptoImpl::AeadHandle>> 
     newHandle(jsg::Lock& js,
         kj::uint mode,
         kj::String algorithm,
-        jsg::Ref<CryptoKey> key,
+        JsCryptoKey key,
         jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength) {
   CipherMode cipherMode = static_cast<CipherMode>(mode);
@@ -1354,7 +1354,7 @@ jsg::JsUint8Array Cipher(jsg::Lock& js,
 }  // namespace
 
 jsg::JsUint8Array CryptoImpl::publicEncrypt(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
@@ -1365,7 +1365,7 @@ jsg::JsUint8Array CryptoImpl::publicEncrypt(jsg::Lock& js,
 }
 
 jsg::JsUint8Array CryptoImpl::privateDecrypt(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
@@ -1376,7 +1376,7 @@ jsg::JsUint8Array CryptoImpl::privateDecrypt(jsg::Lock& js,
 }
 
 jsg::JsUint8Array CryptoImpl::publicDecrypt(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
@@ -1390,7 +1390,7 @@ jsg::JsUint8Array CryptoImpl::publicDecrypt(jsg::Lock& js,
       });
 }
 jsg::JsUint8Array CryptoImpl::privateEncrypt(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+    JsCryptoKey key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");

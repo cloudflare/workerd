@@ -376,7 +376,7 @@ int getCurveFromName(kj::StringPtr name) {
 }  // namespace
 
 kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
-    jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
+    jsg::Lock& js, JsCryptoKey key, jsg::Optional<KeyExportOptions> options) {
   JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
   auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
 
@@ -420,17 +420,16 @@ kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::
   return jsg::JsArrayBuffer::create(js, data.asArrayPtr());
 }
 
-bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
+bool CryptoImpl::equals(jsg::Lock& js, JsCryptoKey key, JsCryptoKey otherKey) {
   return *key == *otherKey;
 }
 
-CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
-    jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(jsg::Lock& js, JsCryptoKey key) {
   JSG_REQUIRE(key->getType() != "secret"_kj, Error, "Secret keys do not have asymmetric details");
   return key->getAsymmetricKeyDetails(js);
 }
 
-kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, JsCryptoKey key) {
   static const std::map<kj::StringPtr, kj::StringPtr> mapping{
     {"RSASSA-PKCS1-v1_5", "rsa"},
     {"RSA-PSS", "rsa"},
@@ -448,13 +447,13 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return found != mapping.end() ? found->second : name;
 }
 
-double CryptoImpl::getSymmetricKeySize(jsg::Ref<CryptoKey> key) {
+double CryptoImpl::getSymmetricKeySize(JsCryptoKey key) {
   JSG_REQUIRE(
       key->getType() == "secret"_kj, TypeError, "Only secret keys have a symmetric key size");
   return static_cast<double>(key->impl->getSymmetricKeySize());
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData) {
+JsCryptoKey CryptoImpl::createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData) {
   // The keyData we receive here should be an exclusive copy of the key data.
   // It will have been copied on the JS side before being passed to this function.
   // We copy the raw bytes into a kj::Array for persistent storage.
@@ -496,8 +495,7 @@ std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(jsg::Lock& js,
 }
 }  // namespace
 
-jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
-    jsg::Lock& js, CreateAsymmetricKeyOptions options) {
+JsCryptoKey CryptoImpl::createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   // Unlike with Web Crypto, where the CryptoKey being created is always
@@ -525,7 +523,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
 
       JSG_FAIL_REQUIRE(Error, "JWK private key import is not implemented for this key type");
     }
-    KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
+    KJ_CASE_ONEOF(key, JsCryptoKey) {
       // This path shouldn't be reachable.
       JSG_FAIL_REQUIRE(TypeError, "Invalid key data");
     }
@@ -534,7 +532,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
+JsCryptoKey CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   KJ_SWITCH_ONEOF(options.key) {
@@ -586,7 +584,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 
       JSG_FAIL_REQUIRE(Error, "JWK public key import is not implemented for this key type");
     }
-    KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
+    KJ_CASE_ONEOF(key, JsCryptoKey) {
       JSG_REQUIRE(key->getType() == "private"_kj, TypeError,
           "Cannot create public key from secret or public key");
 
@@ -603,8 +601,8 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::toCryptoKey(jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
+JsCryptoKey CryptoImpl::toCryptoKey(jsg::Lock& js,
+    JsCryptoKey key,
     kj::OneOf<kj::String, SubtleCrypto::ImportKeyAlgorithm> algorithmParam,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
@@ -917,7 +915,7 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions opti
 }
 
 jsg::JsUint8Array CryptoImpl::statelessDH(
-    jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
+    jsg::Lock& js, JsCryptoKey privateKey, JsCryptoKey publicKey) {
   auto privateKeyAlg = privateKey->getAlgorithmName();
   auto publicKeyAlg = publicKey->getAlgorithmName();
   KJ_ASSERT(privateKeyAlg == "dh"_kj || privateKeyAlg == "ec"_kj || privateKeyAlg == "x25519"_kj,
@@ -936,7 +934,7 @@ jsg::JsUint8Array CryptoImpl::statelessDH(
   JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");
 }
 
-kj::Maybe<ncrypto::EVPKeyPointer> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key) {
+kj::Maybe<ncrypto::EVPKeyPointer> CryptoImpl::tryGetKey(JsCryptoKey& key) {
   // AsymmetricKeyCryptoKeyImpl doesn't provide a reference like AsymmetricKey,
   // so this function must return a value type since we create the EVPKeyPointer
   // in here
@@ -962,7 +960,7 @@ kj::Maybe<ncrypto::EVPKeyPointer> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key
   return kj::none;
 }
 
-kj::Maybe<kj::ArrayPtr<const kj::byte>> CryptoImpl::tryGetSecretKeyData(jsg::Ref<CryptoKey>& key) {
+kj::Maybe<kj::ArrayPtr<const kj::byte>> CryptoImpl::tryGetSecretKeyData(JsCryptoKey& key) {
   KJ_IF_SOME(secret, kj::dynamicDowncastIfAvailable<SecretKey>(*key->impl)) {
     return secret.rawKeyData();
   }
