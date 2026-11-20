@@ -10,6 +10,9 @@ namespace {
 constexpr size_t MAX_WRAPPER_MODULE_NAME_SIZE = 128;
 }
 
+Frankenvalue::CapTableReader::~CapTableReader() noexcept(false) {}
+Frankenvalue::CapTableBuilder::~CapTableBuilder() noexcept(false) {}
+
 Frankenvalue Frankenvalue::cloneImpl() const {
   Frankenvalue result;
 
