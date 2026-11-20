@@ -13,40 +13,10 @@ export default {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
-  'constructor/compile.any.js': {
-    comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
-    disabledTests: [
-      'Branding',
-      'Empty buffer',
-      'Invalid code',
-      'Result type',
-      'Stray argument',
-      'Changing the buffer',
-    ],
-  },
-  'constructor/instantiate-bad-imports.any.js': {
-    comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
-    disabledTests: [/^WebAssembly\.instantiate\(buffer\): /],
-  },
-  'constructor/instantiate.any.js': {
-    comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
-    disabledTests: [
-      'Branding',
-      /: BufferSource argument$/,
-      'Synchronous options handling: Buffer argument',
-      'Empty buffer',
-      'Invalid code',
-      'Changing the buffer',
-    ],
-  },
-  'constructor/multi-value.any.js': {
-    comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
-    disabledTests: true,
-  },
+  'constructor/compile.any.js': {},
+  'constructor/instantiate-bad-imports.any.js': {},
+  'constructor/instantiate.any.js': {},
+  'constructor/multi-value.any.js': {},
   'constructor/toStringTag.any.js': {},
   'constructor/validate.any.js': {},
   'error-interfaces-no-symbol-tostringtag.js': {},

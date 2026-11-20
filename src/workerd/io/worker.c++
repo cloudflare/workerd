@@ -1315,6 +1315,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         currentLock.gcEpilogue(type);
       }
     }, this);
+    api->installWasm(*lock);
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
       // TODO(cleanup): IoContext doesn't really need to be involved here. We are trying to call
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
@@ -1990,6 +1991,12 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
 
+  // Without one, the shim calls V8's compile functions directly.
+  v8::Local<v8::Value> compileFn = lock.v8Undefined();
+  KJ_IF_SOME(fn, Worker::Isolate::from(lock).getApi().newWasmCompileFunction(lock)) {
+    compileFn = fn;
+  }
+
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
   // WebAssembly.Instance (sync constructor).
   auto shimScript =
@@ -1997,7 +2004,7 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
 
   // Call the factory — it mutates `WebAssembly` in place.
-  shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn));
+  shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn), jsg::JsValue(compileFn));
 }
 
 namespace {
@@ -2282,6 +2289,15 @@ void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context>
   });
   if (!hasWebAssembly) {
     return;
+  }
+
+  if (!FeatureFlags::get(lock).getWebassemblyStreaming()) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
+      auto webAssembly =
+          KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
+      webAssembly.delete_(lock, "compileStreaming");
+      webAssembly.delete_(lock, "instantiateStreaming");
+    });
   }
 
   // Set WebAssembly.Module @@HasInstance

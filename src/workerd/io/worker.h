@@ -661,6 +661,18 @@ class Worker::Api {
     return kj::none;
   }
 
+  // Installs the WebAssembly features the embedder adds to V8's in a new isolate, such as V8's
+  // WebAssembly callbacks. Called once per isolate, with no context entered.
+  virtual void installWasm(jsg::Lock& js) const {}
+
+  // The function through which the WebAssembly shim (wasm-instantiate-shim.js) calls V8's
+  // asynchronous compile functions, as `compileWasm(original, thisArg, arguments)`, returning a
+  // promise for their result. Called once per context, with the context entered. With none, the
+  // shim calls V8's functions directly.
+  virtual kj::Maybe<jsg::JsFunction> newWasmCompileFunction(jsg::Lock& js) const {
+    return kj::none;
+  }
+
   // Where V8 reads the source of the per-isolate bootstrap scripts from, if the embedder keeps
   // it somewhere other than the compiled-in bundles; see jsg/module-source.h. The result must
   // outlive every isolate. The embedder passes the same object when it registers its module

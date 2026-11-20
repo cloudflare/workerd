@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, throws } from 'node:assert';
+import { rejects, strictEqual, throws } from 'node:assert';
 
 export const basics = {
   test(ctx, env) {
@@ -72,5 +72,40 @@ export const newWasmModule = {
       new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])
     );
     strictEqual(result.constructor, WebAssembly.Module);
+  },
+};
+
+const EMPTY_WASM_MODULE = 'new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])';
+
+export const asyncWasmCompileSettles = {
+  async test(ctx, env) {
+    const module = await env.unsafe.eval(
+      `WebAssembly.compile(${EMPTY_WASM_MODULE})`
+    );
+    strictEqual(module.constructor, WebAssembly.Module);
+    const { instance } = await env.unsafe.eval(
+      `WebAssembly.instantiate(${EMPTY_WASM_MODULE})`
+    );
+    strictEqual(instance.constructor, WebAssembly.Instance);
+    await rejects(
+      env.unsafe.eval(`WebAssembly.compile(new Uint8Array([0, 1, 2, 3]))`),
+      WebAssembly.CompileError
+    );
+    await rejects(
+      env.unsafe.eval(`WebAssembly.instantiate(new Uint8Array([0, 1, 2, 3]))`),
+      WebAssembly.CompileError
+    );
+  },
+};
+
+export const asyncWasmCompileContinuesInIoContext = {
+  async test(ctx, env) {
+    // The pending timer wakes the isolate, so the compile settles even without the fix, but its
+    // continuation must still run inside this request's IoContext: setTimeout() throws outside
+    // one.
+    const keepAlive = new Promise((resolve) => setTimeout(resolve, 200));
+    await env.unsafe.eval(`WebAssembly.compile(${EMPTY_WASM_MODULE})`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    await keepAlive;
   },
 };
