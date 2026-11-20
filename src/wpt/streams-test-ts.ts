@@ -153,15 +153,7 @@ export default {
       'Transferring a MessagePort with multiple streams should set `.ports`',
     ],
   },
-  'transferable/transform-stream-members.any.js': {
-    comment: 'Appears to be about the wrong type of error',
-    expectedFailures: [
-      'Transferring [object TransformStream],[object ReadableStream] should fail',
-      'Transferring [object ReadableStream],[object TransformStream] should fail',
-      'Transferring [object TransformStream],[object WritableStream] should fail',
-      'Transferring [object WritableStream],[object TransformStream] should fail',
-    ],
-  },
+  'transferable/transform-stream-members.any.js': {},
 
   'transform-streams/backpressure.any.js': {},
   'transform-streams/cancel.any.js': {},

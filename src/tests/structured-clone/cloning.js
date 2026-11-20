@@ -109,8 +109,8 @@ export const transferSemantics = {
       // ArrayBuffer, and a view over one has a buffer that cannot be detached.
       const shared = new SharedArrayBuffer(4);
       throws(() => structuredClone(shared, { transfer: [shared] }), {
-        name: 'TypeError',
-        message: 'Object is not transferable',
+        name: 'DataCloneError',
+        message: 'Object is not transferable.',
       });
       const view = new Uint8Array(shared);
       throws(
