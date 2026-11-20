@@ -69,6 +69,14 @@ impl<'s> IoContext<'s> {
         })
     }
 
+    /// The id that identifies this `IoContext` to C++, for the C++ shims of other crates: they
+    /// find the C++ `IoContext` with `io_context::currentWithId()` (`current-with-id.h`), which
+    /// fails unless it is still the current one, as every method here does.
+    #[must_use]
+    pub const fn as_ffi(&self) -> u64 {
+        self.id
+    }
+
     /// Returns the current time, as the request observes it, like `Date.now()` does in
     /// JavaScript but to the nanosecond. Mitigating Spectre, the clock advances only when
     /// JavaScript is waiting for I/O, unless the `precise_timers` compatibility flag is on.
