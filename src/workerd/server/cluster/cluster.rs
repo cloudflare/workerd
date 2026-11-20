@@ -182,6 +182,12 @@ impl Cluster {
             .at(&format!("{}services/{path}", self.bucket.prefix()))
     }
 
+    /// The bucket below `<prefix>telemetry/` (`TracingOptions.bucket` in workerd.capnp).
+    pub fn telemetry(&self) -> Bucket {
+        self.bucket
+            .at(&format!("{}telemetry/", self.bucket.prefix()))
+    }
+
     pub fn node(&self) -> &str {
         self.registry.node()
     }

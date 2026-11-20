@@ -392,6 +392,10 @@ export class Counter extends DurableObject {
     const nodeId = this.env.NODE_ID ?? '<unknown>';
     const idHex = this.state.id.toString();
 
+    if (url.pathname === '/log') {
+      console.log(`log from ${idHex}`);
+      return Response.json({ id: idHex });
+    }
     if (url.pathname === '/increment') {
       let count = (await this.state.storage.get('count')) ?? 0;
       count += 1;

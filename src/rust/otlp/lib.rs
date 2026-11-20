@@ -15,5 +15,5 @@ mod attributes;
 mod bridge;
 mod buffer;
 mod logs;
-mod proto;
+pub mod proto;
 mod rules;
