@@ -57,6 +57,7 @@ wd_cc_library(
         "async-trace-inspector.h",
         "async-trace-promises.h",
         "async-trace-stacks.h",
+        "entrypoint-invocation.h",
         "hibernation-manager.h",
         "invocation-span.h",
         "io-channels.h",
@@ -427,6 +428,9 @@ wd_cc_library(
     srcs = ["worker-entrypoint.c++"],
     hdrs = ["worker-entrypoint.h"],
     implementation_deps = [
+        "//src/workerd/io/entrypoint",
+        "//src/workerd/io/entrypoint:ffi",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:strings",
     ],

@@ -8,11 +8,14 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
 #include <workerd/io/access-info.h>
+#include <workerd/io/entrypoint-invocation.h>
+#include <workerd/io/entrypoint/ffi.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
@@ -954,6 +957,21 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // This code currently doesn't work with actors because cancellations occur immediately, without
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
+
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_ENTRYPOINT_SCHEDULED)) {
+    // Not wrapped with the canceler, which is set only for an actor's events. The event is
+    // cancelled by dropping the promise: that drops the Rust future, then the promise of
+    // finishScheduled(), which owns the IncomingRequest.
+    return entrypoint::runScheduled(
+        kj::heap(entrypoint::Invocation{
+          .request = kj::mv(incomingRequest),
+          .waitUntilTasks = waitUntilTasks,
+          .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
+          .versionInfo = kj::mv(versionInfo),
+          .props = kj::mv(props),
+        }),
+        scheduledTime, cron);
+  }
 
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
