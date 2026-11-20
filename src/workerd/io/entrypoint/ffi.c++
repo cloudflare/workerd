@@ -11,6 +11,16 @@
 
 namespace workerd::entrypoint {
 
+kj::Own<Invocation> cxx_entrypoint_take_invocation(CxxEntrypoint& entrypoint) {
+  return entrypoint.takeInvocation();
+}
+
+void invocation_assert_no_actor(Invocation& invocation) {
+  // Scheduled events don't work with actors, whose cancellations happen at once, without
+  // IoContext::IncomingRequest::drain(). Nothing sends them one.
+  KJ_ASSERT(invocation.request->getContext().getActor() == kj::none);
+}
+
 void invocation_set_scheduled_event_info(
     Invocation& invocation, kj::Date scheduledTime, ::rust::Slice<const kj::byte> cron) {
   KJ_IF_SOME(tracer, invocation.request->getWorkerTracer()) {
@@ -61,16 +71,79 @@ kj::Promise<::workerd::rust::worker::ScheduledResult> invocation_finish_schedule
   });
 }
 
-kj::Promise<WorkerInterface::ScheduledResult> runScheduled(
-    kj::Own<Invocation> invocation, kj::Date scheduledTime, kj::StringPtr cron) {
-  // Only the Rust path has this span, so a trace shows which path delivered the event.
-  TRACE_EVENT("workerd", "entrypoint::runScheduled()");
-  auto scheduled =
-      scheduled_event_start(kj::mv(invocation), scheduledTime, cron.asBytes().as<kj_rs::Rust>());
-  return scheduled_event_finish(kj::mv(scheduled))
-      .then([](::workerd::rust::worker::ScheduledResult result) {
-    return kj::from<kj_rs::Rust>(result);
-  });
+namespace {
+
+// The WorkerInterface of a Rust WorkerEntrypoint. The events that Rust delivers go to Rust, and the
+// others straight to the C++ WorkerEntrypoint, with no Rust in between.
+class RustWorkerEntrypoint final: public WorkerInterface {
+ public:
+  explicit RustWorkerEntrypoint(::rust::Box<WorkerEntrypoint> entrypoint)
+      : entrypoint(kj::mv(entrypoint)),
+        cxx(this->entrypoint->cxx()) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    return cxx.request(method, url, headers, requestBody, response);
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return cxx.connect(host, headers, connection, response, settings);
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return cxx.prewarm(url);
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled()");
+    // Only the Rust WorkerEntrypoint has this span, so a trace shows which one delivered the event.
+    TRACE_EVENT("workerd", "entrypoint::runScheduled()");
+    auto scheduled =
+        scheduled_event_start(*entrypoint, scheduledTime, cron.asBytes().as<kj_rs::Rust>());
+    return scheduled_event_finish(kj::mv(scheduled))
+        .then([](::workerd::rust::worker::ScheduledResult result) {
+      return kj::from<kj_rs::Rust>(result);
+    });
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return cxx.runAlarm(scheduledTime, retryCount);
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return cxx.abandonAlarm(scheduledTime);
+  }
+
+  kj::Promise<bool> test() override {
+    return cxx.test();
+  }
+
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    return cxx.bench(params, report);
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return cxx.customEvent(kj::mv(event));
+  }
+
+ private:
+  ::rust::Box<WorkerEntrypoint> entrypoint;
+  // Owned by `entrypoint`.
+  CxxEntrypoint& cxx;
+};
+
+}  // namespace
+
+kj::Own<WorkerInterface> newWorkerEntrypoint(kj::Own<CxxEntrypoint> cxx) {
+  return kj::heap<RustWorkerEntrypoint>(worker_entrypoint_new(kj::mv(cxx)));
 }
 
 }  // namespace workerd::entrypoint

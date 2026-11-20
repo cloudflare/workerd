@@ -6,6 +6,7 @@
 
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 
 namespace workerd::entrypoint {
@@ -19,6 +20,16 @@ struct Invocation {
   kj::Maybe<kj::String> entrypointName;
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
+};
+
+// A C++ WorkerEntrypoint (`io/worker-entrypoint.c++`), as the Rust WorkerEntrypoint that owns it
+// sees it (`entrypoint/lib.rs`). The Rust one delivers an event that Rust implements by taking
+// the invocation, and any other event by calling this one as a WorkerInterface.
+class CxxEntrypoint: public WorkerInterface {
+ public:
+  // Takes the invocation of the entrypoint's one event, for Rust to deliver. Fails if an event was
+  // already delivered.
+  virtual kj::Own<Invocation> takeInvocation() = 0;
 };
 
 // Starts the scheduled handler of the exported handler that `entrypointName`, `versionInfo` and

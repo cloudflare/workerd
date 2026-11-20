@@ -7,7 +7,7 @@ set -euo pipefail
 WORKERD_BINARY=$1
 CONFIG=$2
 
-# Runs the config with and without the autogates, among them RUST_ENTRYPOINT_SCHEDULED, which
+# Runs the config with and without the autogates, among them RUST_WORKER_ENTRYPOINT, which
 # delivers the event from Rust, and checks that both deliver it the same way. That the gate takes
 # effect is checked by scheduled-perfetto-test.
 for gates in off on; do
