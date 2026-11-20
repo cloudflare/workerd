@@ -26,8 +26,8 @@ export const structuredCloneTransform = {
       },
     });
     throws(() => structuredClone(ts, { transfer: [ts] }), {
-      name: 'TypeError',
-      message: 'Object is not transferable',
+      name: 'DataCloneError',
+      message: 'Object is not transferable.',
     });
     throws(() => structuredClone(ts), notSerializable('TransformStream'));
     throws(
