@@ -237,10 +237,20 @@ class Wrappable: public kj::Refcounted {
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
   static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
-  static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
-    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,
-               static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
-        &WORKERD_WRAPPABLE_TAG;
+  // The CppHeap pointer tag attachWrapper() gave `object`, or kj::none if `object` is not the
+  // wrapper of a Wrappable. Accepts any object and runs no JavaScript: it reads the tag of the
+  // object's CppgcShim, which outlives detachWrapper(), so a wrapper whose Wrappable is gone
+  // still has its tag.
+  static kj::Maybe<v8::CppHeapPointerTag> tryGetWrapperTag(
+      v8::Isolate* isolate, v8::Local<v8::Object> object);
+
+  // Whether `object` is the wrapper of a C++ Wrappable: a resource, an opaque wrapper or a
+  // context global. False for the wrapper of a Rust JSG resource.
+  static bool isWorkerdApiObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+    KJ_IF_SOME(tag, tryGetWrapperTag(isolate, object)) {
+      return static_cast<uint16_t>(tag) != kRustResourceWrappableTag;
+    }
+    return false;
   }
 
   // Does a live JS wrapper currently exist for this Wrappable?
@@ -402,7 +412,7 @@ class Wrappable: public kj::Refcounted {
 
   // Like unwrapFromShim(), but accepts any JSG wrappable tag. For call sites that have already
   // established the object's type by another means (a prototype-chain check, or an
-  // isWorkerdApiObject() marker check plus a dynamic-type lookup) and only need the pointer.
+  // isWorkerdApiObject() check plus a dynamic-type lookup) and only need the pointer.
   // Returns nullptr if the object was never wrapped.
   static Wrappable* unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object);
 

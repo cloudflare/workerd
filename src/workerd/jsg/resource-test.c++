@@ -849,5 +849,40 @@ KJ_TEST("JSG_PRIVATE_SYMBOL marks instances without exposing a JavaScript symbol
       "boolean", "true");
 }
 
+struct WrapperTagContext: public ContextGlobalObject {
+  bool isApiObject(Lock& js, JsObject object) {
+    return jsg::Wrappable::isWorkerdApiObject(js.v8Isolate, object);
+  }
+
+  // An opaque wrapper, like the one that carries a C++ value through a promise.
+  JsValue makeOpaque(Lock& js) {
+    return JsValue(wrapOpaque(js.v8Context(), 123));
+  }
+
+  JSG_RESOURCE_TYPE(WrapperTagContext) {
+    JSG_NESTED_TYPE(NumberBox);
+    JSG_METHOD(isApiObject);
+    JSG_METHOD(makeOpaque);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(WrapperTagIsolate, WrapperTagContext, NumberBox);
+
+KJ_TEST("isWorkerdApiObject() finds exactly the wrappers of C++ objects") {
+  Evaluator<WrapperTagContext, WrapperTagIsolate> e(v8System);
+
+  e.expectEval("isApiObject(new NumberBox(1))", "boolean", "true");
+  e.expectEval("class Sub extends NumberBox {}; isApiObject(new Sub(1))", "boolean", "true");
+  e.expectEval("isApiObject(makeOpaque())", "boolean", "true");
+  e.expectEval("isApiObject(globalThis)", "boolean", "true");
+
+  // Other objects, including API wrappers that wrap nothing of ours, and objects that only lead
+  // to a wrapper.
+  e.expectEval("[{}, [], function() {}, new ArrayBuffer(8), new Uint8Array(8), new DataView("
+               "new ArrayBuffer(8)), new Map(), Promise.resolve(), NumberBox, NumberBox.prototype, "
+               "Object.create(new NumberBox(1)), new Proxy(new NumberBox(1), {})]"
+               ".map(isApiObject).join()",
+      "string", "false,false,false,false,false,false,false,false,false,false,false,false");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

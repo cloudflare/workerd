@@ -534,6 +534,19 @@ Wrappable* Wrappable::unwrapFromShim(
   return &shim->resolve(object);
 }
 
+kj::Maybe<v8::CppHeapPointerTag> Wrappable::tryGetWrapperTag(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
+  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
+  if (!object->IsApiWrapper()) return kj::none;
+  // Other API wrappers (ArrayBuffers, module namespaces, objects made from templates that are not
+  // a resource's) have an empty slot. Not shim->resolve(): that aborts for a detached wrapper.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+  if (shim == nullptr) return kj::none;
+  return shim->tag;
+}
+
 Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   return unwrapFromShim(isolate, object, kJsgWrappableTagRange);
 }
