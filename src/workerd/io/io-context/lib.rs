@@ -27,7 +27,10 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::CatchDropPanic;
+pub use ffi::CatchPanics;
 use ffi::bridge;
+pub use ffi::panic_message;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;

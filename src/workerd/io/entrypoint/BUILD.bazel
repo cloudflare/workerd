@@ -1,0 +1,48 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The events of a C++ WorkerEntrypoint that Rust delivers. A package of its own because
+# //src/workerd/io depends on jsg.
+wd_rust_crate(
+    name = "entrypoint",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "scheduled.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/worker:bridge",
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/kj",
+        "//src/rust/worker",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/worker:bridge",
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/util:perfetto",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test, which keeps them free of C++ JSG.
+exports_files([
+    "ffi.c++",
+    "ffi.h",
+])

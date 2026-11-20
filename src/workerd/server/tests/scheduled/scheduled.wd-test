@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Sends a scheduled event to a Worker with a scheduled() handler and to one without.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "scheduled",
+      worker = (
+        modules = [(name = "worker", esModule = embed "scheduled.js")],
+        compatibilityDate = "2024-01-01",
+        compatibilityFlags = ["service_binding_extra_handlers"],
+        bindings = [
+          (name = "HANDLER", service = "handler"),
+          (name = "NO_HANDLER", service = "no-handler"),
+        ],
+      ),
+    ),
+    ( name = "handler",
+      worker = (
+        modules = [(name = "worker", esModule = embed "handler.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+    ( name = "no-handler",
+      worker = (
+        modules = [(name = "worker", esModule = embed "no-handler.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+  ],
+);

@@ -768,7 +768,8 @@ KJ_TEST("a panic while dropping a cancelled future is logged") {
   });
   fixture.pollEventLoop();
   {
-    KJ_EXPECT_LOG(ERROR, "dropping a future that the IoContext waited for panicked");
+    KJ_EXPECT_LOG(
+        ERROR, "dropping the future that IoContext::await_io_and_run() waited for panicked");
     fixture.drainAndDestroy(kj::mv(request));
   }
   KJ_EXPECT(awaited_future_dropped());
