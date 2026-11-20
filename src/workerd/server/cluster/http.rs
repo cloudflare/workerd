@@ -266,8 +266,10 @@ pub enum Repeat {
     /// bucket client reports a refusal of one sent twice as of unknown
     /// outcome (`Attempt::sent_twice`, `Error::OutcomeUnknown`). Safe only
     /// where the caller's answer to that holds when the other copy lands
-    /// later still, as a renewal's reread does: a read back, as
-    /// `Bucket::put_if_settled` makes, may come before it lands.
+    /// later still, as a renewal's reread does. `Bucket::put_if_settled`
+    /// writes again while the read back finds the guarded version, which
+    /// settles most such writes, but can still answer unknown with a copy
+    /// yet to land; its caller's answer to that must hold the same way.
     GuardedWrite,
 }
 
