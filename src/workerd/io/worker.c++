@@ -530,6 +530,15 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+jsg::Optional<api::RustCacheContext> Worker::Api::getCtxCacheRustProperty(jsg::Lock& js) const {
+  return kj::none;
+}
+
+kj::Maybe<bool> Worker::Api::isCtxCacheRustInstance(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) const {
+  return false;
+}
+
 const jsg::TypeHandler<api::BenchExportedHandler>& Worker::Api::getBenchTypeHandler(
     jsg::Lock& lock) const {
   KJ_UNIMPLEMENTED("bench handlers are only supported under `workerd bench`");

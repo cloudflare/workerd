@@ -19,6 +19,12 @@ export const navigatorUserAgent = {
   },
 };
 
+export const cacheWithoutEmbedder = {
+  test(_controller, _env, ctx) {
+    strictEqual(ctx.cache, undefined);
+  },
+};
+
 export const timeoutClamping = {
   async test() {
     // p2 should resolve, p1 should never resolve.

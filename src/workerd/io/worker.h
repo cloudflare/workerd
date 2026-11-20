@@ -5,6 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
+#include <workerd/api/cache-context-ref.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/async-lock-scheduler.h>
@@ -743,6 +744,14 @@ class Worker::Api {
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).
   virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
+
+  // A typed Rust JSG implementation of the same property. The legacy hook is used when this
+  // returns none; both return none in standalone workerd.
+  virtual jsg::Optional<api::RustCacheContext> getCtxCacheRustProperty(jsg::Lock& js) const;
+  // Whether `value` is the wrapper of the resource getCtxCacheRustProperty() returns, or none if
+  // the check left an exception pending.
+  virtual kj::Maybe<bool> isCtxCacheRustInstance(
+      v8::Isolate* isolate, v8::Local<v8::Value> value) const;
 
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;

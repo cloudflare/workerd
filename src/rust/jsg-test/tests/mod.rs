@@ -60,6 +60,7 @@ mod resource_template;
 mod resource_this;
 mod rest_arguments;
 mod serialization;
+mod set_prototype;
 mod signature_callback;
 mod startup_snapshot;
 mod string;

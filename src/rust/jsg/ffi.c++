@@ -731,6 +731,19 @@ bool local_object_set_property_by_global_name(
       .IsJust();
 }
 
+kj::Maybe<bool> local_object_set_prototype(Isolate* isolate, const Local& object, Local prototype) {
+  if (exceptionPending(isolate)) return kj::none;
+  if (local_as_ref_from_ffi<v8::Object>(object)
+          ->SetPrototype(isolate->GetCurrentContext(), local_from_ffi<v8::Value>(kj::mv(prototype)))
+          .IsJust()) {
+    return true;
+  }
+  // V8 reports a refused change as Nothing without an exception, and swallows a Proxy trap's
+  // exception, so Nothing with no exception pending means the object refused the change.
+  if (exceptionPending(isolate)) return kj::none;
+  return false;
+}
+
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
   if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
