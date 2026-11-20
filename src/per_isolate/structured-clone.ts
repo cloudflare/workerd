@@ -17,6 +17,7 @@ const {
   ObjectDefineProperty,
   SymbolIterator,
   TypeError: TypeErrorCtor,
+  kIllegalInvocation,
 } = primordials;
 
 const { structuredClone: nativeStructuredClone } = utils;
@@ -25,10 +26,6 @@ const { structuredClone: nativeStructuredClone } = utils;
 const globalReceiver: unknown = globalThis;
 
 // The C++ texts, kept where the behaviour matches.
-const ILLEGAL_INVOCATION =
-  'Illegal invocation: function called with incorrect `this` reference. See ' +
-  'https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
 const NO_VALUE =
   "Failed to execute 'structuredClone' on 'ServiceWorkerGlobalScope': " +
   "parameter 1 is not of type 'Value'.";
@@ -98,7 +95,7 @@ const { structuredClone } = {
     // WebIDL: an operation of the global takes undefined or null as the
     // global itself.
     if (this != null && this !== globalReceiver) {
-      throw new TypeErrorCtor(ILLEGAL_INVOCATION);
+      throw new TypeErrorCtor(kIllegalInvocation);
     }
     if (arguments.length === 0) {
       throw new TypeErrorCtor(NO_VALUE);

@@ -91,6 +91,9 @@ declare const primordials: {
   // result then reads.
   readonly captureJsgGetter: <T>(proto: object, name: string) => T;
 
+  // JSG's illegal-invocation TypeError message.
+  readonly kIllegalInvocation: string;
+
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
     (): Promise<void>;

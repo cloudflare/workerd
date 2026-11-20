@@ -72,6 +72,7 @@ const {
   TypedArrayPrototypeGetByteOffset,
   Uint8Array,
   captureJsgGetter,
+  kIllegalInvocation,
   uncurryThis,
 } = primordials;
 
@@ -145,11 +146,7 @@ const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
   name: string
 ) => string | null;
 
-// JSG's messages, so that misuse reads as it does for a JSG class.
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+// JSG's message, so that misuse reads as it does for a JSG class.
 const kNoRequest =
   'An EventSource can only be created within the context of a worker request.';
 

@@ -2,8 +2,14 @@
 
 // Helpers that make a bootstrap class look as a JSG resource type does.
 
-const { ObjectDefineProperties, ObjectFreeze, SymbolFor, SymbolToStringTag } =
-  primordials;
+const {
+  ObjectDefineProperties,
+  ObjectFreeze,
+  SymbolFor,
+  SymbolToStringTag,
+  TypeError,
+  kIllegalInvocation,
+} = primordials;
 
 const { getApiSymbol } = utils;
 
@@ -55,12 +61,27 @@ function markAsRuntimeClass(proto: object, name: string): void {
   });
 }
 
+// The value an instance of a bootstrap class holds under the V8-private
+// `slot`, which user code can neither read nor forge. Throws JSG's
+// illegal-invocation TypeError for any other receiver, a proxy of an instance
+// included, as a JSG member does.
+function unwrapReceiver<T>(self: unknown, slot: symbol): T {
+  const value =
+    typeof self === 'object' && self !== null
+      ? (self as Record<symbol, unknown>)[slot]
+      : undefined;
+  if (value === undefined) throw new TypeError(kIllegalInvocation);
+  return value as T;
+}
+
 export type RuntimeClassHelpers = {
   markAsRuntimeClass: typeof markAsRuntimeClass;
   setNameAndLength: typeof setNameAndLength;
+  unwrapReceiver: typeof unwrapReceiver;
 };
 
 module.exports = {
   markAsRuntimeClass,
   setNameAndLength,
+  unwrapReceiver,
 };
