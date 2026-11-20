@@ -248,12 +248,20 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
     return accessInfo.map([](kj::Own<AccessInfo>& p) -> AccessInfo& { return *p; });
   }
 
-  // The invocation span context is a unique identifier for a specific
-  // worker invocation.
-  tracing::InvocationSpanContext& getInvocationSpanContext();
+  // The onset span context (trace ID, onset span ID, and trace flags) for this worker invocation,
+  // lazily generated on first access.
+  tracing::SpanContext& getSpanContext();
+
+  // The unique invocation ID for this worker invocation, lazily generated alongside the onset span
+  // context.
+  tracing::TraceId getInvocationId();
+
+  // The triggering span ID from an upstream request, if any.
+  kj::Maybe<tracing::SpanId> getTriggerSpanId() const;
 
   // Returns this request's span context (preserving trace ID and trace flags), with the span ID
-  // replaced by that of `userSpan` if it has one. Invocation ID is owned by the tracer.
+  // replaced by that of `userSpan` if it has one. Invocation ID is retrieved separately via
+  // `getInvocationId()`.
   tracing::SpanContext getSpanContextForUserSpan(SpanParent& userSpan);
 
   // The async trace REQUEST resource for this request, created by delivered(); 0 if the context
@@ -279,13 +287,17 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
   // Upstream span context that triggered this invocation, if any; consumed lazily by
-  // getInvocationSpanContext().
+  // ensureInvocationTraceIds().
   kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext;
 
-  // The invocation span context identifies the trace id, invocation id, and root
-  // span for the current request. Every invocation of a worker function always
-  // has a root span, even if it is not explicitly traced.
-  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  struct InvocationTraceIds {
+    tracing::SpanContext spanContext;
+    tracing::TraceId invocationId;
+  };
+  InvocationTraceIds& ensureInvocationTraceIds();
+
+  // Lazily populated onset span context and invocation ID for this request.
+  kj::Maybe<InvocationTraceIds> invocationTraceIds;
 
   bool wasDelivered = false;
 

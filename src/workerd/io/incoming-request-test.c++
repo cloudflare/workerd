@@ -117,7 +117,7 @@ KJ_TEST("request trace scopes capture both roots and restore enclosing tracing a
     }
     auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
     request->delivered();
-    auto expectedUserSpanId = request->getInvocationSpanContext().getSpanId().getId();
+    auto expectedUserSpanId = KJ_ASSERT_NONNULL(request->getSpanContext().getSpanId()).getId();
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
       jsg::AsyncContextFrame::StorageScope storageScope(
@@ -982,6 +982,90 @@ KJ_TEST("run() in a critical section fails with the abort reason of an aborted c
   KJ_EXPECT_THROW_MESSAGE("test abort",
       auto promise = context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)));
   KJ_EXPECT(!ran);
+}
+
+KJ_TEST("IncomingRequest inherits trigger SpanContext and preserves upstream traceFlags") {
+  TestFixture fixture;
+
+  // Trigger with spanId and sampled traceFlags.
+  {
+    auto context = fixture.newIoContext();
+    tracing::SpanContext trigger(
+        tracing::TraceId(1, 2), tracing::SpanId(42), tracing::TraceFlags(0x01));
+    auto request = fixture.newUndeliveredIncomingRequest(
+        *context, kj::none, tracing::SpanContext::clone(trigger));
+
+    auto& spanCtx = request->getSpanContext();
+    auto invocationId = request->getInvocationId();
+    KJ_EXPECT(spanCtx.getTraceId() == trigger.getTraceId());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(spanCtx.getSpanId()) != tracing::SpanId(42));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(spanCtx.getTraceFlags()) == tracing::TraceFlags(0x01));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(request->getTriggerSpanId()) == tracing::SpanId(42));
+    KJ_EXPECT(invocationId != tracing::TraceId::nullId);
+
+    // Repeated calls return the same lazily generated IDs.
+    KJ_EXPECT(request->getSpanContext() == spanCtx);
+    KJ_EXPECT(request->getInvocationId() == invocationId);
+  }
+
+  // Trigger without spanId inherits traceId and traceFlags, with no trigger span ID.
+  {
+    auto context = fixture.newIoContext();
+    tracing::SpanContext trigger(tracing::TraceId(3, 4), kj::none, tracing::TraceFlags(0x00));
+    auto request = fixture.newUndeliveredIncomingRequest(
+        *context, kj::none, tracing::SpanContext::clone(trigger));
+
+    KJ_EXPECT(request->getSpanContext().getTraceId() == tracing::TraceId(3, 4));
+    KJ_EXPECT(request->getTriggerSpanId() == kj::none);
+    KJ_EXPECT(
+        KJ_ASSERT_NONNULL(request->getSpanContext().getTraceFlags()) == tracing::TraceFlags(0x00));
+
+    // Local default does not overwrite upstream unsampled (0x00) decision.
+    request->getSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
+    KJ_EXPECT(
+        KJ_ASSERT_NONNULL(request->getSpanContext().getTraceFlags()) == tracing::TraceFlags(0x00));
+  }
+
+  // Without a trigger, fresh IDs are generated and traceFlags is absent until defaulted.
+  {
+    auto context = fixture.newIoContext();
+    auto request = fixture.newUndeliveredIncomingRequest(*context);
+
+    KJ_EXPECT(request->getSpanContext().getTraceId() != tracing::TraceId::nullId);
+    KJ_EXPECT(request->getSpanContext().getSpanId() != kj::none);
+    KJ_EXPECT(request->getSpanContext().getTraceFlags() == kj::none);
+    KJ_EXPECT(request->getTriggerSpanId() == kj::none);
+
+    request->getSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
+    KJ_EXPECT(
+        KJ_ASSERT_NONNULL(request->getSpanContext().getTraceFlags()) == tracing::TraceFlags(0x01));
+  }
+
+  // WorkerTracer::setEventInfo forwards triggerSpanId to StartInvocationSpanFunc.
+  {
+    auto context = fixture.newIoContext();
+    auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+        kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+    auto tracer =
+        kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+    kj::Maybe<tracing::SpanId> observedParent;
+    kj::Maybe<tracing::SpanId> observedOnset;
+    tracer->setStartInvocationSpanFunc(
+        [&](tracing::SpanContext& invocation, kj::Maybe<tracing::SpanId> parentSpanId) {
+      observedParent = parentSpanId;
+      observedOnset = invocation.getSpanId();
+      invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
+      return StartedInvocationSpan(SpanBuilder(nullptr));
+    });
+    auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef(),
+        tracing::SpanContext(tracing::TraceId(5, 6), tracing::SpanId(99), kj::none));
+    tracer->setEventInfo(*request, tracing::CustomEventInfo());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observedParent) == tracing::SpanId(99));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observedOnset) ==
+        KJ_ASSERT_NONNULL(request->getSpanContext().getSpanId()));
+    KJ_EXPECT(
+        KJ_ASSERT_NONNULL(request->getSpanContext().getTraceFlags()) == tracing::TraceFlags(0x01));
+  }
 }
 
 KJ_TEST("runOnHibernate() drops the cross-context actions queued while the actor was idle") {

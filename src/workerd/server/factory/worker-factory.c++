@@ -1131,19 +1131,18 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
             serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
             identityTags = makeOtlpIdentityTags(service)](
-            tracing::InvocationSpanContext& invocation) mutable {
+            tracing::SpanContext& invocation, kj::Maybe<tracing::SpanId> parentSpanId) mutable {
       // Standalone export samples traces without an upstream decision. Set the invocation's
       // context so user spans and subrequests inherit the same flags.
       invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
-      auto parent = invocation.getParentSpanId();
       return startExportedUserSpan(entropySource, exporter.addRef(),
-          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
+          tracing::SpanContext(invocation.getTraceId(), parentSpanId, invocation.getTraceFlags()),
           OtlpSpanSubmitter::Options{
             .serviceName = serviceName,
             .resource = resource,
             .defaultTags = identityTags,
           },
-          "invocation"_kjc, invocation.getSpanId());
+          "invocation"_kjc, KJ_ASSERT_NONNULL(invocation.getSpanId()));
     });
   }
   return kj::mv(tracer);

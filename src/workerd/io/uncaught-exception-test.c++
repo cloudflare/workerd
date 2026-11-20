@@ -793,8 +793,8 @@ KJ_TEST("logUncaughtExceptionAsync() traces under the given request, or the curr
   context->logUncaughtExceptionAsync(
       UncaughtExceptionSource::INTERNAL_ASYNC, failure("jsg.Error: intermediate"), *newer);
 
-  auto olderSpanContext = kj::str(older->getInvocationSpanContext().toSpanContext());
-  auto newerSpanContext = kj::str(newer->getInvocationSpanContext().toSpanContext());
+  auto olderSpanContext = kj::str(older->getSpanContext());
+  auto newerSpanContext = kj::str(newer->getSpanContext());
   KJ_EXPECT(olderSpanContext != newerSpanContext);
 
   KJ_ASSERT(olderTracer->exceptions.size() == 1);

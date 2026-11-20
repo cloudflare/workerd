@@ -187,8 +187,9 @@ TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
     // Produce deterministic but distinct IDs per call so that traceIds of
     // independent (untriggered) invocations don't collide -- collisions confuse
     // test fixtures that key spans by traceId or invocationId. Triggered
-    // invocations still inherit their caller's traceId via newForInvocation, so
-    // the propagation chain is preserved.
+    // invocations still inherit their caller's traceId via
+    // IncomingRequest::ensureInvocationTraceIds(), so the propagation chain is
+    // preserved.
     static std::atomic<uint64_t> counter{0};
     uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
     return TraceId(staticSpanId ^ n, staticSpanId ^ n);
@@ -216,33 +217,6 @@ kj::String KJ_STRINGIFY(const TraceId& id) {
   return id;
 }
 
-InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-    TraceId traceId,
-    TraceId invocationId,
-    SpanId spanId,
-    kj::Maybe<SpanId> parentSpanId,
-    kj::Maybe<TraceFlags> traceFlags)
-    : traceId(kj::mv(traceId)),
-      invocationId(kj::mv(invocationId)),
-      spanId(kj::mv(spanId)),
-      parentSpanId(kj::mv(parentSpanId)),
-      traceFlags(kj::mv(traceFlags)) {}
-
-InvocationSpanContext InvocationSpanContext::newForInvocation(
-    kj::Maybe<const SpanContext&> triggerContext, kj::Maybe<kj::EntropySource&> entropySource) {
-  kj::Maybe<SpanId> parentSpanId;
-  kj::Maybe<TraceFlags> flags;
-  auto traceId = triggerContext
-                     .map([&](const SpanContext& ctx) {
-    parentSpanId = ctx.getSpanId();
-    flags = ctx.getTraceFlags();
-    return ctx.getTraceId();
-  }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
-  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), kj::mv(traceId),
-      TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), parentSpanId,
-      kj::mv(flags));
-}
-
 TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
   return TraceId(reader.getLow(), reader.getHigh());
 }
@@ -250,45 +224,6 @@ TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
 void TraceId::toCapnp(rpc::TraceId::Builder writer) const {
   writer.setLow(low);
   writer.setHigh(high);
-}
-
-kj::Maybe<InvocationSpanContext> InvocationSpanContext::fromCapnp(
-    rpc::InvocationSpanContext::Reader reader) {
-  if (!reader.hasTraceId() || !reader.hasInvocationId()) {
-    // If the reader does not have a traceId or invocationId field then it is
-    // invalid and we will just ignore it.
-    return kj::none;
-  }
-
-  kj::Maybe<TraceFlags> flags;
-  if (reader.hasTraceFlags() && reader.getTraceFlags().getValue().isSet()) {
-    flags = TraceFlags(reader.getTraceFlags().getValue().getSet());
-  }
-
-  auto sc = InvocationSpanContext(kj::Badge<InvocationSpanContext>(),
-      TraceId::fromCapnp(reader.getTraceId()), TraceId::fromCapnp(reader.getInvocationId()),
-      reader.getSpanId(), kj::none, flags);
-  // If the traceId or invocationId are invalid, then we'll ignore them.
-  if (!sc.getTraceId() || !sc.getInvocationId()) return kj::none;
-  return kj::mv(sc);
-}
-
-void InvocationSpanContext::toCapnp(rpc::InvocationSpanContext::Builder writer) const {
-  traceId.toCapnp(writer.initTraceId());
-  invocationId.toCapnp(writer.initInvocationId());
-  writer.setSpanId(spanId);
-  KJ_IF_SOME(flags, traceFlags) {
-    writer.initTraceFlags().getValue().setSet(flags);
-  }
-}
-
-InvocationSpanContext InvocationSpanContext::clone() const {
-  return InvocationSpanContext(
-      kj::Badge<InvocationSpanContext>(), traceId, invocationId, spanId, parentSpanId, traceFlags);
-}
-
-kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
-  return kj::str(context.getTraceId(), "-", context.getInvocationId(), "-", context.getSpanId());
 }
 
 kj::String KJ_STRINGIFY(const TailEvent::Event& event) {

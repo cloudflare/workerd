@@ -186,10 +186,10 @@ KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps"
       kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
   auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
       kj::heap<tracing::TailStreamWriter>(kj::arr(tail.makeWorkerEntrypoint()), tasks));
-  tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
+  tracer->setStartInvocationSpanFunc(
+      [&](tracing::SpanContext& context, kj::Maybe<tracing::SpanId>) {
     auto root = startExportedUserSpan(entropy, exporter.addRef(),
-        tracing::SpanContext(context.getTraceId(), context.getSpanId(), context.getTraceFlags()),
-        {.serviceName = "clock-test"}, "root"_kjc);
+        tracing::SpanContext::clone(context), {.serviceName = "clock-test"}, "root"_kjc);
     expectPreciseTime(KJ_ASSERT_NONNULL(root.getObserver()));
     return root;
   });
@@ -232,7 +232,8 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
       kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
   auto tracer =
       kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
-  tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
+  tracer->setStartInvocationSpanFunc(
+      [&](tracing::SpanContext& context, kj::Maybe<tracing::SpanId>) {
     return startExportedInvocationSpan(entropy, exporter.addRef(),
         tracing::SpanContext(context.getTraceId(), kj::none, context.getTraceFlags()),
         {
@@ -241,7 +242,7 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
           .exportSpans = exportSpans,
           .exportInvocationLog = exportInvocationLog,
         },
-        context.getSpanId());
+        KJ_ASSERT_NONNULL(context.getSpanId()));
   });
   auto context = fixture.newIoContext();
   auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
@@ -249,8 +250,8 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
   request->delivered();
   // Other spans go under the invocation's only when its spans are exported.
   KJ_EXPECT(tracer->observesUserSpans() == bool(exportSpans));
-  KJ_EXPECT(tracer->makeUserRequestSpan(request->getInvocationSpanContext().toSpanContext())
-                .isObserved() == bool(exportSpans));
+  KJ_EXPECT(
+      tracer->makeUserRequestSpan(request->getSpanContext()).isObserved() == bool(exportSpans));
   kj::Maybe<tracing::SpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     auto& c = spanContext.emplace(env.context.getCurrentSpanContext());
@@ -367,20 +368,21 @@ KJ_TEST("delivered() gives the root user span the invocation's span context") {
 
   auto context = fixture.newIoContext();
   auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
-  request->getInvocationSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
+  request->getSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
   request->delivered();
 
-  auto& invocation = request->getInvocationSpanContext();
+  auto& invocation = request->getSpanContext();
   auto root = request->getRootUserTraceSpan();
   auto rootContext = KJ_ASSERT_NONNULL(root.toSpanContext());
   KJ_EXPECT(rootContext.getTraceId() == invocation.getTraceId());
-  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getSpanId()) == invocation.getSpanId());
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(rootContext.getSpanId()) == KJ_ASSERT_NONNULL(invocation.getSpanId()));
   KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getTraceFlags()) == tracing::TraceFlags(0x01));
 
   fixture.enterContext(
       *request, [&](const TestFixture::Environment&) { auto child = root.newChild("child"_kjc); });
   KJ_ASSERT(submitter->parentSpanIds.size() == 1);
-  KJ_EXPECT(submitter->parentSpanIds[0] == invocation.getSpanId());
+  KJ_EXPECT(submitter->parentSpanIds[0] == KJ_ASSERT_NONNULL(invocation.getSpanId()));
 
   // A UserSpanObserver without a span ID round-trips kj::none rather than a zero SpanId.
   auto withoutSpanId = kj::rc<UserSpanObserver>(

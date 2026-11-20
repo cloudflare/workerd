@@ -235,102 +235,11 @@ class TraceFlags final {
   uint8_t flags;
 };
 
-struct SpanContext;
-
-// The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
-// The trace id represents a top-level request and should be shared across all
-// invocation spans and events within those spans. The invocation id identifies
-// a specific worker invocation. The span id identifies the invocation's onset
-// span. Every invocation of every worker has an InvocationSpanContext, which may
-// optionally record the parent span id from a triggering SpanContext.
-class InvocationSpanContext final {
- public:
-  // The constructor is public only so kj::rc can see it and create a new instance.
-  // User code should use the static factory methods.
-  InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-      TraceId traceId,
-      TraceId invocationId,
-      SpanId spanId,
-      kj::Maybe<SpanId> parentSpanId,
-      kj::Maybe<TraceFlags> traceFlags);
-  // Still need a constructor to be available as long as span context is not propagated everywhere
-  // we need it.
-  InvocationSpanContext(
-      TraceId traceId, TraceId invocationId, SpanId spanId, kj::Maybe<TraceFlags> traceFlags)
-      : traceId(traceId),
-        invocationId(invocationId),
-        spanId(spanId),
-        traceFlags(traceFlags) {};
-
-  KJ_DISALLOW_COPY(InvocationSpanContext);
-
-  InvocationSpanContext(InvocationSpanContext&& other) = default;
-  InvocationSpanContext& operator=(InvocationSpanContext&& other) = default;
-
-  inline bool operator==(const InvocationSpanContext& other) const {
-    return traceId == other.traceId && invocationId == other.invocationId && spanId == other.spanId;
-  }
-
-  inline const TraceId& getTraceId() const {
-    return traceId;
-  }
-
-  inline const TraceId& getInvocationId() const {
-    return invocationId;
-  }
-
-  inline const SpanId& getSpanId() const {
-    return spanId;
-  }
-
-  inline kj::Maybe<SpanId> getParentSpanId() const {
-    return parentSpanId;
-  }
-
-  // W3C trace flags propagated from upstream or selected locally. kj::none when
-  // no sampling decision exists.
-  inline kj::Maybe<TraceFlags> getTraceFlags() const {
-    return traceFlags;
-  }
-
-  // Supply a local sampling decision without overriding one propagated from upstream.
-  void setDefaultTraceFlags(TraceFlags flags) {
-    if (traceFlags == kj::none) traceFlags = flags;
-  }
-
-  // Creates a new InvocationSpanContext. If the triggerContext is given, then its
-  // traceId, optional spanId (as parentSpanId), and traceFlags are inherited.
-  // Otherwise a new traceId is generated. The invocationId and spanId are always
-  // generated new.
-  static InvocationSpanContext newForInvocation(
-      kj::Maybe<const SpanContext&> triggerContext = kj::none,
-      kj::Maybe<kj::EntropySource&> entropySource = kj::none);
-
-  // Deserializes an InvocationSpanContext from a capnp message. parentSpanId is not carried over
-  // the wire and is always kj::none on the returned value.
-  static kj::Maybe<InvocationSpanContext> fromCapnp(rpc::InvocationSpanContext::Reader reader);
-  void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
-  InvocationSpanContext clone() const;
-  SpanContext toSpanContext() const;
-
- private:
-  TraceId traceId;
-  TraceId invocationId;
-  SpanId spanId;
-
-  // Parent span ID from the triggering context, if this invocation was triggered by another span.
-  kj::Maybe<SpanId> parentSpanId;
-
-  // W3C trace flags propagated through the invocation chain. kj::none when no
-  // upstream or local sampling decision was made.
-  kj::Maybe<TraceFlags> traceFlags;
-};
-
 // Format a W3C traceparent ("{version}-{trace-id}-{parent-id}-{flags}").
 kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags);
 
-// SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
-// events that don't inherit context from another invocation.
+// SpanContext identifies a trace and span for propagation, tail events, and invocation roots.
+// spanId is always set except for Onset events that don't inherit context from another invocation.
 struct SpanContext {
   SpanContext(
       TraceId traceId, kj::Maybe<SpanId> spanId, kj::Maybe<TraceFlags> traceFlags = kj::none)
@@ -353,11 +262,15 @@ struct SpanContext {
     return spanId;
   }
 
-  // W3C trace flags from an upstream traceparent. kj::none when no upstream
-  // sampling decision was made (e.g. subrequest propagation without a
-  // worker_tracing header).
+  // W3C trace flags propagated from upstream or selected locally. kj::none when no sampling
+  // decision was made (e.g. subrequest propagation without a worker_tracing header).
   inline kj::Maybe<TraceFlags> getTraceFlags() const {
     return traceFlags;
+  }
+
+  // Supply a local sampling decision without overriding one propagated from upstream.
+  void setDefaultTraceFlags(TraceFlags flags) {
+    if (traceFlags == kj::none) traceFlags = flags;
   }
 
   static SpanContext fromCapnp(rpc::SpanContext::Reader reader);
@@ -379,13 +292,8 @@ struct SpanContext {
   kj::Maybe<TraceFlags> traceFlags;
 };
 
-inline SpanContext InvocationSpanContext::toSpanContext() const {
-  return SpanContext(traceId, spanId, traceFlags);
-}
-
 kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
-kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
 kj::String KJ_STRINGIFY(const SpanContext& context);
 
 // The various structs defined below are used in both buffered tail workers
@@ -1015,7 +923,7 @@ struct Outcome final {
 };
 
 // A streaming tail worker receives a series of Tail Events. Tail events always
-// occur within an InvocationSpanContext. The first TailEvent delivered to a
+// carry a SpanContext and invocationId. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
 // always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
 // SpanClose, and Mark events. Every SpanOpen *must* be associated with a
