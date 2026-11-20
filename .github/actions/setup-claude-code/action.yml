@@ -1,0 +1,103 @@
+name: 'Set up Claude Code'
+description: 'Installs Claude Code, and settings that run every Bash command it runs in a sandbox'
+inputs:
+  config_dir:
+    description: >-
+      The directory, written as ~/<path>, for the settings and the sandbox proxy's CA, which
+      nothing Claude Code runs may read. The CA is generated unless the directory holds ca.crt and
+      ca.key.
+    required: true
+  gateway_token:
+    description: 'The Cloudflare AI Gateway token, which reaches Claude Code only through the settings'
+    required: true
+  allow_write:
+    description: >-
+      A JSON array of the paths that sandboxed commands may write besides /tmp, ~/.cache and the
+      runner's temporary directory
+    required: false
+    default: '[]'
+outputs:
+  settings:
+    description: 'The settings file, for `claude --settings`'
+    value: ${{ steps.settings.outputs.settings }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Claude Code
+      shell: bash
+      run: |
+        npm install --global @anthropic-ai/claude-code
+        # Claude Code's Bash sandbox needs these on Linux.
+        sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
+        # Ubuntu 24.04 lets only programs with an AppArmor profile granting userns create user
+        # namespaces, which bubblewrap needs. This profile grants it to bubblewrap alone, rather
+        # than lifting the restriction for the whole runner with a sysctl.
+        sudo tee /etc/apparmor.d/bwrap > /dev/null <<'EOF'
+        abi <abi/4.0>,
+        include <tunables/global>
+
+        profile bwrap /usr/bin/bwrap flags=(unconfined) {
+          userns,
+          include if exists <local/bwrap>
+        }
+        EOF
+        sudo apparmor_parser -r /etc/apparmor.d/bwrap
+    - name: Write settings
+      id: settings
+      shell: bash
+      # The gateway token reaches Claude Code through the settings file rather than the environment
+      # of the step that runs it, which commands the agent runs can read through /proc. Neither
+      # those commands nor Claude's own file tools may read the file. Every Bash command runs in the
+      # sandbox, without the gateway token, and sees only a placeholder GH_TOKEN that the sandbox
+      # proxy replaces with the token on requests to api.github.com. Listing api.github.com in
+      # allowedDomains scopes that replacement; it does not restrict other hosts. The proxy
+      # terminates TLS with the CA in config_dir.
+      env:
+        CONFIG_DIR: ${{ inputs.config_dir }}
+        GATEWAY_TOKEN: ${{ inputs.gateway_token }}
+        ALLOW_WRITE: ${{ inputs.allow_write }}
+      run: |
+        if [[ "$CONFIG_DIR" != '~/'* ]]; then
+          echo "::error::config_dir must start with ~/, not: $CONFIG_DIR"
+          exit 1
+        fi
+        # The permission rules take the ~/ form; the CA paths and the shell need the absolute one.
+        dir="$HOME/${CONFIG_DIR#'~/'}"
+        install -d -m 700 "$dir"
+        if [ ! -f "$dir/ca.crt" ] || [ ! -f "$dir/ca.key" ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=Claude Code sandbox proxy" \
+            -addext keyUsage=critical,keyCertSign,cRLSign \
+            -keyout "$dir/ca.key" -out "$dir/ca.crt"
+        fi
+        (
+          umask 077
+          jq -n \
+            --arg token "$GATEWAY_TOKEN" --arg config "$CONFIG_DIR" --arg dir "$dir" \
+            --arg temp "$RUNNER_TEMP" --argjson allow_write "$ALLOW_WRITE" '{
+              env: {ANTHROPIC_CUSTOM_HEADERS: "cf-aig-authorization: Bearer \($token)"},
+              sandbox: {
+                enabled: true,
+                failIfUnavailable: true,
+                allowUnsandboxedCommands: false,
+                filesystem: {
+                  allowWrite: (["/tmp", "~/.cache", $temp] + $allow_write),
+                  denyRead: [$config]
+                },
+                network: {
+                  tlsTerminate: {caCertPath: "\($dir)/ca.crt", caKeyPath: "\($dir)/ca.key"},
+                  allowedDomains: ["api.github.com"]
+                },
+                credentials: {
+                  envVars: [
+                    {name: "ANTHROPIC_CUSTOM_HEADERS", mode: "deny"},
+                    {name: "ANTHROPIC_AUTH_TOKEN", mode: "deny"},
+                    {name: "GH_TOKEN", mode: "mask", injectHosts: ["api.github.com"]}
+                  ]
+                }
+              },
+              permissions: {
+                deny: ["Read(\($config)/**)", "Edit(\($config)/**)", "Edit(~/.claude/**)"]
+              }
+            }' > "$dir/settings.json"
+        )
+        echo "settings=$dir/settings.json" >> "$GITHUB_OUTPUT"
