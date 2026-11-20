@@ -174,6 +174,18 @@ static bool IsAnyArrayBufferFastApi(v8::Local<v8::Value> unused, v8::Local<v8::V
 
 static const v8::CFunction fast_is_any_array_buffer_ = v8::CFunction::Make(IsAnyArrayBufferFastApi);
 
+// What jsg::JsBufferSource unwraps: an ArrayBuffer or a view, not a SharedArrayBuffer. The view,
+// the more common, is tested first.
+static void IsBufferSource(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  args.GetReturnValue().Set(args[0]->IsArrayBufferView() || args[0]->IsArrayBuffer());
+}
+
+static bool IsBufferSourceFastApi(v8::Local<v8::Value> unused, v8::Local<v8::Value> value) {
+  return value->IsArrayBufferView() || value->IsArrayBuffer();
+}
+
+static const v8::CFunction fast_is_buffer_source_ = v8::CFunction::Make(IsBufferSourceFastApi);
+
 static void MarkPromiseHandled(const v8::FunctionCallbackInfo<v8::Value>& args) {
   if (args[0]->IsPromise()) {
     args[0].As<v8::Promise>()->MarkAsHandled();
@@ -634,6 +646,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     VALUE_METHOD_MAP(V)
 #undef V
         "isAnyArrayBuffer",
+    "isBufferSource",
     "markPromiseHandled",
     "getApiSymbol",
     "newCompressionCodec",
@@ -679,6 +692,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     VALUE_METHOD_MAP(V)
 #undef V
         getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
+    getFastMethodNoSideEffect(js, IsBufferSource, &fast_is_buffer_source_),
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),

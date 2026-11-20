@@ -113,6 +113,8 @@ declare const utils: {
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
+  // An ArrayBuffer or an ArrayBufferView, as jsg::JsBufferSource unwraps.
+  isBufferSource(value: unknown): value is ArrayBuffer | ArrayBufferView;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
   // The key of the V8-private property `name`, which C++ reaches by that
