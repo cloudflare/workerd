@@ -112,7 +112,7 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
   `this`, the lock comes right after `this`.
-- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::Lenient<T>` arguments may be omitted.
+- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::LenientOption<T>` arguments may be omitted.
   Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` for three distinct
   `Some(T)`, `Null`, and `Undefined` states; omission produces `Undefined`.
   A `jsg::Nullable<T>` argument remains required, although explicitly passing
@@ -127,7 +127,7 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
   Web IDL count of leading required arguments: `this`, the lock and a `jsg::Arguments` are not
   counted, and counting stops at the first type whose `FromJS::is_optional()` returns true (such
-  as `Option<T>` or `jsg::Lenient<T>`). Otherwise `.length` is `0`.
+  as `Option<T>` or `jsg::LenientOption<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -680,8 +680,7 @@ marker, such as a wrapper of a type from outside JSG.
 | `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
-| `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
-| `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
+| `Option<T>` / `jsg::LenientOption<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values; map keys are not visited, so they must be `jsg::HoldsNoGcReferences`, which the bounds require |
 | `std::rc::Rc<T>` | **Not allowed** — no `Traced` impl, since a clone could reach the resource's state without the isolate lock; share a resource through `jsg::Rc` or `jsg::Weak`, and plain data with a future through `Arc<T: Send + Sync>` |
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |

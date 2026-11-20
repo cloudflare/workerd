@@ -51,7 +51,7 @@ pub use external_memory::ExternalMemoryAdjustment;
 pub use external_memory::ExternalMemoryTarget;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
-pub use lenient::Lenient;
+pub use lenient::LenientOption;
 pub use lock_guarded::LockGuarded;
 pub use memory::MemoryInfo;
 pub use memory::MemoryRetainer;

@@ -29,7 +29,7 @@
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
 //! | `NullOrUndefined<T>` | `T`, `null`, or `undefined` |
-//! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
+//! | `LenientOption<T>` | `T` or `undefined` (`null` goes to `T`; shallow type mismatches become `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
@@ -41,7 +41,7 @@
 //! | `v8::Local<'s, M>` | the value itself, of `M`'s type |
 //! | `v8::TracedGlobal<M>` | as `v8::Local<'s, M>`, held past the scope (C++ JSG's `jsg::JsRef<T>`) |
 //!
-//! [`Option`], [`NullOrUndefined`], and [`Lenient`] method arguments may be omitted.
+//! [`Option`], [`NullOrUndefined`], and [`LenientOption`] method arguments may be omitted.
 //! [`Nullable`] arguments remain required even though explicitly passing `undefined` converts to `Null`.
 //! Prefer [`NullOrUndefined<T>`] to `Option<Nullable<T>>` to preserve all three states.
 //!
@@ -83,7 +83,7 @@
 use crate::Coercible;
 use crate::Dict;
 use crate::Error;
-use crate::Lenient;
+use crate::LenientOption;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::NullOrUndefined;
@@ -182,7 +182,7 @@ pub trait Traced: Send {
 /// after construction is a [`crate::Cell`] or [`crate::RefCell`], which take any `Traced` type.
 ///
 /// Every built-in `Traced` type implements it, except those that can hold GC references:
-/// `jsg::Rc`, `TracedGlobal`, `Lenient`, `TracedPromise`, `TracedPromiseResolver` and
+/// `jsg::Rc`, `TracedGlobal`, `TracedPromise`, `TracedPromiseResolver` and
 /// `TracedAsyncContextFrame`. Wrappers and collections implement it when their contents do.
 /// `jsg_traced_unchecked!` implements it for the types it covers, and `#[jsg_traced]`,
 /// `#[jsg_struct]` and `#[jsg_oneof]` implement it when every field or variant does, so for those
@@ -249,20 +249,17 @@ impl<T: Traced> Traced for Option<T> {
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
 
-impl<T: Traced> Traced for Lenient<T> {
+impl<T: Traced> Traced for LenientOption<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        if let Self::Some(inner) = self {
-            inner.trace(visitor);
-        }
-        if let Self::Unconvertable(inner) = self {
-            inner.trace(visitor);
-        }
+        self.0.trace(visitor);
     }
 
     fn needs_drop_detach() -> bool {
         T::needs_drop_detach()
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for LenientOption<T> {}
 
 impl<T: Traced> Traced for Nullable<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
@@ -495,7 +492,7 @@ pub trait ToJS<'s>: Sized {
 /// Trait for converting JavaScript values to Rust.
 ///
 /// `from_js()` is the normal, required conversion path. `try_from_js()` is an
-/// internal shallow-probing path used by [`Lenient`] and by `#[jsg_oneof]`
+/// internal shallow-probing path used by [`LenientOption`] and by `#[jsg_oneof]`
 /// unions. Implementations only need to override `try_from_js()` when their
 /// top-level type can fail to match, and the override must return `Ok(None)`
 /// rather than an error for a value of the wrong type, so that a union can go
@@ -1221,7 +1218,7 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
     }
 }
 
-impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
+impl<'s, T: ToJS<'s>> ToJS<'s> for LenientOption<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         self.to_js_with_creator(lock, None)
     }
@@ -1231,11 +1228,7 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
         lock: &mut Lock<'s>,
         creator: Option<v8::Local<'s, v8::Object>>,
     ) -> Result<v8::Local<'s, v8::Value>, Error> {
-        match self {
-            Self::Some(value) => value.to_js_with_creator(lock, creator),
-            Self::Null => Ok(lock.null()),
-            Self::Undefined | Self::Unconvertable(_) => Ok(lock.undefined()),
-        }
+        self.0.to_js_with_creator(lock, creator)
     }
 }
 
@@ -1414,8 +1407,10 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
     }
 }
 
-impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
-    type ResultType = Lenient<T::ResultType>;
+// Like C++ `jsg::LenientOptional<T>`, only `undefined` and a top-level type mismatch are absent;
+// `null` goes to `T`.
+impl<'s, T: FromJS<'s>> FromJS<'s> for LenientOption<T> {
+    type ResultType = LenientOption<T::ResultType>;
 
     const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
@@ -1431,15 +1426,10 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            Ok(Lenient::Null)
-        } else if value.is_undefined() {
-            Ok(Lenient::Undefined)
+        if value.is_undefined() {
+            Ok(LenientOption(None))
         } else {
-            match T::try_from_js(lock, value)? {
-                Some(v) => Ok(Lenient::Some(v)),
-                None => Ok(Lenient::Unconvertable(v8::TracedGlobal::new(lock, value))),
-            }
+            Ok(LenientOption(T::try_from_js(lock, value)?))
         }
     }
 }

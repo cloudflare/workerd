@@ -16,8 +16,9 @@ through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
   which honors `name = "..."`. Explicit names must be unique among emitted Rust
   and C++ declarations; inactive compatibility variants may reuse a name.
 - `Option<T>` describes `T | undefined` and `Nullable<T>` describes `T | null`,
-  so a `Nullable<T>` parameter is required, as at runtime. `NullOrUndefined<T>`,
-  `Option<Nullable<T>>` and `Lenient<T>` describe an optional `T | null | undefined`.
+  so a `Nullable<T>` parameter is required, as at runtime. `LenientOption<T>` describes
+  `T | undefined`, as `Option<T>` does. `NullOrUndefined<T>` and `Option<Nullable<T>>`
+  describe an optional `T | null | undefined`.
 - `Dict<V>` describes `Record<string, V>`, as C++ describes `jsg::Dict`.
 - Vectors and slices describe JavaScript arrays, numbers included; a typed array
   is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
@@ -108,11 +109,9 @@ When converting back to JavaScript, `Null` produces a `null` property; `Undefine
 is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
 that flag, just as `None` does for an `Option<T>` field.
 
-`Lenient<T>` additionally preserves shallow conversion mismatches as `Unconvertable`.
-Converting it to `NullOrUndefined<T>` maps those mismatches to `Undefined`;
-`Lenient::to_parts()` returns `(NullOrUndefined<T>, Option<TracedGlobal<Value>>)`,
-with the original mismatched JavaScript value in the second element when present.
-Errors from nested conversions or JavaScript execution still propagate.
+`LenientOption<T>` is C++ `jsg::LenientOptional<T>`: an optional `T` for which a top-level
+type mismatch is absent rather than an error, while `null` goes through `T`. See its rustdoc
+in `lenient.rs`.
 
 ## Safety rules
 
@@ -595,7 +594,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
-| `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
+| `jsg::LenientOption<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | Use `jsg::Cell` when the field is set after construction; `take` and `replace` make the `Rc` strong |
 | `jsg::Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `jsg::Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
@@ -1429,7 +1428,7 @@ variants of nested unions and the inner types of nullable types: at most one boo
 numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
 nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
 without resources, dictionary-like or sequence-like types; no `Option<T>` or
-`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`LenientOption<T>`, which mark optional parameters and fields; and no type twice, counting a
 `Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
 have several resource types, as Web IDL allows, but not the same one in both a union and
 a union nested in it.
