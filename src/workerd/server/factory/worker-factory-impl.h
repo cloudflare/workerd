@@ -255,9 +255,15 @@ class RpcClient::Impl final {
   struct Session: public kj::Refcounted {
     explicit Session(kj::Own<kj::AsyncIoStream> connection)
         : connection(kj::mv(connection)),
-          rpcSystem(*this->connection) {}
+          rpcSystem(*this->connection),
+          bootstrap(rpcSystem.bootstrap()) {}
     kj::Own<kj::AsyncIoStream> connection;
     capnp::TwoPartyClient rpcSystem;
+    // The peer's bootstrap, obtained once. A bootstrap after the connection failed with calls out
+    // starts a new RPC connection over the same TwoPartyVatNetwork, which still counts the failed
+    // one as busy: capnp's check of that throws from the bootstrap call itself, instead of
+    // failing its calls as disconnected.
+    capnp::Capability::Client bootstrap;
   };
 
   Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)

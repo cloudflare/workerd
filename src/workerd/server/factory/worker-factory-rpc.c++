@@ -341,14 +341,14 @@ RpcClient::Impl& RpcClient::getImpl() const {
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
   auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream));
-  auto target = session->rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
+  auto target = session->bootstrap.castAs<rpc::WorkerdBootstrap>();
   return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
 }
 
 kj::Own<RpcClient> rpc_client_debug_actor(
     const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId) {
   auto& impl = session.getImpl();
-  auto peer = impl.session->rpcSystem.bootstrap().castAs<rpc::WorkerdDebugPort>();
+  auto peer = impl.session->bootstrap.castAs<rpc::WorkerdDebugPort>();
   auto request = peer.getActorRequest();
   request.setService(kj::str(service));
   request.setEntrypoint(kj::str(className));

@@ -690,7 +690,7 @@ pub mod ffi {
             service: &str,
             class_name: &str,
             actor_id: &str,
-        ) -> KjOwn<RpcClient>;
+        ) -> Result<KjOwn<RpcClient>>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
