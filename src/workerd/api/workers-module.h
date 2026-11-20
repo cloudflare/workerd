@@ -10,6 +10,9 @@
 namespace workerd::api {
 
 class CacheContext;
+namespace exportedhandler {
+class ExecutionContext;
+}  // namespace exportedhandler
 
 // Base class for exported RPC services.
 //
@@ -66,7 +69,7 @@ class DurableObjectBase: public jsg::Object {
 class WorkflowEntrypoint: public jsg::Object {
  public:
   static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
+      exportedhandler::ExecutionContext ctx,
       jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}

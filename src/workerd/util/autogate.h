@@ -133,7 +133,13 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* The `ctx` of a stateless entrypoint is the Rust ExecutionContext                              \
+     (src/workerd/api/execution-context/) rather than the C++ class in api/global-scope.h. The     \
+     C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
+     toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
+     ones are of the other. */                                                                     \
+  V(RUST_EXECUTION_CONTEXT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
