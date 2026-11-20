@@ -970,6 +970,16 @@ export default {
     const era = Cloudflare.compatibilityFlags['capture_async_api_throws']
       ? newest
       : oldest;
+    // The canary that the TypeScript config installed the TypeScript class: without it, the
+    // comparison would pass against the C++ one too.
+    if (env.typescript) {
+      strictEqual(
+        String(globalThis.SubtleCrypto.prototype.digest).includes(
+          '[native code]'
+        ),
+        false
+      );
+    }
     compare(
       await run(env.variant !== 'classic'),
       era[env.variant],
