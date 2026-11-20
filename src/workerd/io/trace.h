@@ -240,19 +240,18 @@ struct SpanContext;
 // The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
 // The trace id represents a top-level request and should be shared across all
 // invocation spans and events within those spans. The invocation id identifies
-// a specific worker invocation. The span id identifies a specific span within an
-// invocation. Every invocation of every worker should have an InvocationSpanContext.
-// That may or may not have a trigger InvocationSpanContext.
+// a specific worker invocation. The span id identifies the invocation's onset
+// span. Every invocation of every worker has an InvocationSpanContext, which may
+// optionally record the parent span id from a triggering SpanContext.
 class InvocationSpanContext final {
  public:
   // The constructor is public only so kj::rc can see it and create a new instance.
-  // User code should use the static factory methods or the newChild method.
+  // User code should use the static factory methods.
   InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-      kj::Maybe<kj::EntropySource&> entropySource,
       TraceId traceId,
       TraceId invocationId,
       SpanId spanId,
-      kj::Maybe<const InvocationSpanContext&> parentSpanContext,
+      kj::Maybe<SpanId> parentSpanId,
       kj::Maybe<TraceFlags> traceFlags);
   // Still need a constructor to be available as long as span context is not propagated everywhere
   // we need it.
@@ -284,11 +283,8 @@ class InvocationSpanContext final {
     return spanId;
   }
 
-  inline kj::Maybe<const InvocationSpanContext&> getParent() const {
-    KJ_IF_SOME(p, parentSpanContext) {
-      return *p;
-    }
-    return kj::none;
+  inline kj::Maybe<SpanId> getParentSpanId() const {
+    return parentSpanId;
   }
 
   // W3C trace flags propagated from upstream or selected locally. kj::none when
@@ -302,47 +298,28 @@ class InvocationSpanContext final {
     if (traceFlags == kj::none) traceFlags = flags;
   }
 
-  // Creates a new child span. If the current context does not have an entropy
-  // source this will assert. If isTrigger() is true then it will not have an
-  // entropy source.
-  InvocationSpanContext newChild() const;
-
-  // An InvocationSpanContext is a trigger context if it has no entropy source.
-  // This generally means the SpanContext was create from a capnp message and
-  // represents an InvocationSpanContext that was propagated from a parent
-  // or triggering context.
-  bool isTrigger() const {
-    return entropySource == kj::none;
-  }
-
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
-  // traceId is used as the traceId for the newly created context. Otherwise a new
-  // traceId is generated. The invocationId and spanId are always generated new.
+  // traceId, optional spanId (as parentSpanId), and traceFlags are inherited.
+  // Otherwise a new traceId is generated. The invocationId and spanId are always
+  // generated new.
   static InvocationSpanContext newForInvocation(
-      kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
+      kj::Maybe<const SpanContext&> triggerContext = kj::none,
       kj::Maybe<kj::EntropySource&> entropySource = kj::none);
 
-  // Creates a new InvocationSpanContext from a capnp message. The returned
-  // InvocationSpanContext will not be capable of creating child spans and
-  // is considered only a "trigger" span.
+  // Deserializes an InvocationSpanContext from a capnp message. parentSpanId is not carried over
+  // the wire and is always kj::none on the returned value.
   static kj::Maybe<InvocationSpanContext> fromCapnp(rpc::InvocationSpanContext::Reader reader);
   void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
   InvocationSpanContext clone() const;
   SpanContext toSpanContext() const;
 
  private:
-  // If there is no entropy source, then child spans cannot be created from
-  // this InvocationSpanContext.
-  kj::Maybe<kj::EntropySource&> entropySource;
   TraceId traceId;
   TraceId invocationId;
   SpanId spanId;
 
-  // The parentSpanContext can be either a direct parent or a trigger
-  // context. If it is a trigger context, then it should have the same
-  // traceId but a different invocationId (unless predictable mode for
-  // testing is enabled). The isTrigger() should also return true.
-  kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
+  // Parent span ID from the triggering context, if this invocation was triggered by another span.
+  kj::Maybe<SpanId> parentSpanId;
 
   // W3C trace flags propagated through the invocation chain. kj::none when no
   // upstream or local sampling decision was made.

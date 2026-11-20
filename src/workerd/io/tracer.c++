@@ -434,10 +434,8 @@ void WorkerTracer::setEventInfo(
   weakIoContext = incomingRequest.getContext().getWeakRef();
   startInvocationSpan(incomingRequest, info);
   auto& context = incomingRequest.getInvocationSpanContext();
-  setEventInfoInternal(context,
-      context.getParent().map(
-          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); }),
-      incomingRequest.nowForTraceOnset(), kj::mv(info));
+  setEventInfoInternal(
+      context, context.getParentSpanId(), incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& context,

@@ -1135,8 +1135,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
       // Standalone export samples traces without an upstream decision. Set the invocation's
       // context so user spans and subrequests inherit the same flags.
       invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
-      auto parent = invocation.getParent().map(
-          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
+      auto parent = invocation.getParentSpanId();
       return startExportedUserSpan(entropySource, exporter.addRef(),
           tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
           OtlpSpanSubmitter::Options{
@@ -1170,11 +1169,10 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   kj::Own<RequestObserver> observer =
       kj::refcounted<RequestObserverWithTracer>(workerTracer.clone());
 
-  kj::Maybe<tracing::InvocationSpanContext> triggerContext;
+  kj::Maybe<tracing::SpanContext> triggerContext;
   KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
-    KJ_IF_SOME(spanId, ctx.getSpanId()) {
-      triggerContext = tracing::InvocationSpanContext(
-          ctx.getTraceId(), tracing::TraceId::nullId, spanId, ctx.getTraceFlags());
+    if (ctx.getSpanId() != kj::none) {
+      triggerContext = kj::mv(ctx);
     }
   }
 

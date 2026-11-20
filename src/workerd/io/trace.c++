@@ -217,42 +217,29 @@ kj::String KJ_STRINGIFY(const TraceId& id) {
 }
 
 InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-    kj::Maybe<kj::EntropySource&> entropySource,
     TraceId traceId,
     TraceId invocationId,
     SpanId spanId,
-    kj::Maybe<const InvocationSpanContext&> parentSpanContext,
+    kj::Maybe<SpanId> parentSpanId,
     kj::Maybe<TraceFlags> traceFlags)
-    : entropySource(entropySource),
-      traceId(kj::mv(traceId)),
+    : traceId(kj::mv(traceId)),
       invocationId(kj::mv(invocationId)),
       spanId(kj::mv(spanId)),
-      parentSpanContext(parentSpanContext.map([](const InvocationSpanContext& ctx) {
-        return kj::heap<InvocationSpanContext>(ctx.clone());
-      })),
+      parentSpanId(kj::mv(parentSpanId)),
       traceFlags(kj::mv(traceFlags)) {}
 
-InvocationSpanContext InvocationSpanContext::newChild() const {
-  KJ_ASSERT(!isTrigger(), "unable to create child spans on this context");
-  kj::Maybe<kj::EntropySource&> otherEntropySource = entropySource.map(
-      [](auto& es) -> kj::EntropySource& { return const_cast<kj::EntropySource&>(es); });
-  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
-      invocationId, SpanId::fromEntropy(otherEntropySource), *this, traceFlags);
-}
-
 InvocationSpanContext InvocationSpanContext::newForInvocation(
-    kj::Maybe<const InvocationSpanContext&> triggerContext,
-    kj::Maybe<kj::EntropySource&> entropySource) {
-  kj::Maybe<const InvocationSpanContext&> parent;
+    kj::Maybe<const SpanContext&> triggerContext, kj::Maybe<kj::EntropySource&> entropySource) {
+  kj::Maybe<SpanId> parentSpanId;
   kj::Maybe<TraceFlags> flags;
   auto traceId = triggerContext
-                     .map([&](auto& ctx) mutable {
-    parent = ctx;
-    flags = ctx.traceFlags;
-    return ctx.traceId;
+                     .map([&](const SpanContext& ctx) {
+    parentSpanId = ctx.getSpanId();
+    flags = ctx.getTraceFlags();
+    return ctx.getTraceId();
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
-  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource, kj::mv(traceId),
-      TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent),
+  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), kj::mv(traceId),
+      TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), parentSpanId,
       kj::mv(flags));
 }
 
@@ -278,7 +265,7 @@ kj::Maybe<InvocationSpanContext> InvocationSpanContext::fromCapnp(
     flags = TraceFlags(reader.getTraceFlags().getValue().getSet());
   }
 
-  auto sc = InvocationSpanContext(kj::Badge<InvocationSpanContext>(), kj::none,
+  auto sc = InvocationSpanContext(kj::Badge<InvocationSpanContext>(),
       TraceId::fromCapnp(reader.getTraceId()), TraceId::fromCapnp(reader.getInvocationId()),
       reader.getSpanId(), kj::none, flags);
   // If the traceId or invocationId are invalid, then we'll ignore them.
@@ -296,12 +283,8 @@ void InvocationSpanContext::toCapnp(rpc::InvocationSpanContext::Builder writer) 
 }
 
 InvocationSpanContext InvocationSpanContext::clone() const {
-  kj::Maybe<kj::EntropySource&> otherEntropySource = entropySource.map(
-      [](auto& es) -> kj::EntropySource& { return const_cast<kj::EntropySource&>(es); });
-  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
-      invocationId, spanId,
-      parentSpanContext.map([](auto& ctx) -> const InvocationSpanContext& { return *ctx.get(); }),
-      traceFlags);
+  return InvocationSpanContext(
+      kj::Badge<InvocationSpanContext>(), traceId, invocationId, spanId, parentSpanId, traceFlags);
 }
 
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
