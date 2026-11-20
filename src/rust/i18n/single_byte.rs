@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Conversions that have ASCII or Latin-1 on either side, apart from widening
-//! them into UTF-16LE.
+//! Conversions that have ASCII or Latin-1 on either side, apart from those
+//! `dispatch` leaves to simdutf: widening into UTF-16LE, Latin-1 to UTF-8, and
+//! leading ASCII bytes, which are the same in every encoding here and copied.
 //!
 //! These do not use ICU: Chromium's ICU data aliases `us-ascii` and
 //! `iso8859-1` to `windows-1252`, which maps bytes 0x80-0x9F to other code
@@ -22,15 +23,12 @@ use std::char::REPLACEMENT_CHARACTER;
 use crate::ffi::Encoding;
 
 /// The most bytes converting `source` from `from` to `to` can write: exact
-/// for ASCII and Latin-1 to UTF-8, an upper bound otherwise. Saturates on
-/// overflow.
+/// for ASCII to UTF-8, an upper bound otherwise. Saturates on overflow.
 pub fn dest_len(source: &[u8], from: Encoding, to: Encoding) -> usize {
     let non_ascii = || source.iter().filter(|byte| !byte.is_ascii()).count();
     match (from, to) {
         // At most one output byte per code unit.
         (Encoding::Utf16Le, _) => source.len() / size_of::<u16>(),
-        // A non-ASCII byte decodes to U+0080-U+00FF, two bytes in UTF-8.
-        (Encoding::Latin1, Encoding::Utf8) => source.len().saturating_add(non_ascii()),
         // A non-ASCII byte decodes to U+FFFD, three bytes in UTF-8.
         (Encoding::Ascii, Encoding::Utf8) => {
             source.len().saturating_add(non_ascii().saturating_mul(2))
@@ -45,10 +43,6 @@ pub fn dest_len(source: &[u8], from: Encoding, to: Encoding) -> usize {
 ///
 /// A UTF-16LE `source` must have even length.
 pub fn transcode_into(source: &[u8], from: Encoding, to: Encoding, dest: &mut [u8]) -> usize {
-    if from == Encoding::Latin1 && to == Encoding::Latin1 {
-        dest[..source.len()].copy_from_slice(source);
-        return source.len();
-    }
     // The highest code point the target encodes as a single byte.
     let max = if to == Encoding::Ascii { 0x7F } else { 0xFF };
     let mut written = 0;

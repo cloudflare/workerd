@@ -71,6 +71,34 @@ fn a_short_target_is_a_failure() {
 // simdutf. These pin down the simdutf behaviour `dispatch` relies on.
 
 #[test]
+fn ascii_prefix_stops_at_the_first_non_ascii_byte() {
+    let long = [&[b'a'; 100][..], &[0xff, b'a']].concat();
+    let cases: [&[u8]; 5] = [
+        b"",
+        b"plain ascii",
+        "caf\u{e9}".as_bytes(),
+        &[0x80, 0x41],
+        &long,
+    ];
+    for source in cases {
+        let ascii = source.iter().take_while(|byte| byte.is_ascii()).count();
+        assert_eq!(ascii_prefix_len(source), ascii, "{source:x?}");
+    }
+}
+
+#[test]
+fn latin1_to_utf8_encodes_every_byte() {
+    let source: Vec<u8> = (0..=255).collect();
+    let expected: String = source.iter().map(|&byte| char::from(byte)).collect();
+    let latin1 = Latin1Source::new(&source);
+    assert_eq!(latin1.utf8_len(), expected.len());
+    let mut target = vec![0; latin1.utf8_len()];
+    assert_eq!(latin1.convert_to_utf8(&mut target), Some(expected.len()));
+    assert_eq!(target, expected.as_bytes());
+    assert_eq!(latin1.convert_to_utf8(&mut target[1..]), None);
+}
+
+#[test]
 fn latin1_widens_every_byte() {
     let source: Vec<u8> = (0..=255).collect();
     let mut target = vec![0; source.len() * 2];

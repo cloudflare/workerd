@@ -56,6 +56,13 @@ mod bridge {
             length: usize,
             utf16_output: *mut u16,
         ) -> usize;
+        unsafe fn simdutf_ascii_prefix_len(input: *const u8, length: usize) -> usize;
+        unsafe fn simdutf_utf8_length_from_latin1(input: *const u8, length: usize) -> usize;
+        unsafe fn simdutf_convert_latin1_to_utf8(
+            input: *const u8,
+            length: usize,
+            utf8_output: *mut u8,
+        ) -> usize;
         unsafe fn simdutf_utf16_length_from_utf8(input: *const u8, length: usize) -> usize;
         unsafe fn simdutf_convert_utf8_to_utf16le(
             input: *const u8,
@@ -262,6 +269,54 @@ pub fn convert_latin1_to_utf16(source: &[u8], target: &mut [u8]) -> Option<usize
             target.as_mut_ptr().cast(),
         )
     })
+}
+
+/// The number of leading ASCII bytes in `source`: the position of its first
+/// non-ASCII byte, or its length if it has none. Via
+/// `simdutf::validate_ascii_with_errors`, which stops scanning at the first
+/// 64-byte block that holds a non-ASCII byte and finds the exact position in
+/// that block.
+pub fn ascii_prefix_len(source: &[u8]) -> usize {
+    // SAFETY: pointer and length describe a live slice.
+    unsafe { bridge::simdutf_ascii_prefix_len(source.as_ptr(), source.len()) }
+}
+
+/// Latin-1 bytes measured by `simdutf::utf8_length_from_latin1`.
+pub struct Latin1Source<'a> {
+    bytes: &'a [u8],
+    utf8_len: usize,
+}
+
+impl<'a> Latin1Source<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        // SAFETY: pointer and length describe a live slice.
+        let utf8_len =
+            unsafe { bridge::simdutf_utf8_length_from_latin1(bytes.as_ptr(), bytes.len()) };
+        Self { bytes, utf8_len }
+    }
+
+    /// The exact UTF-8 length, in bytes: one per ASCII byte, two per other
+    /// byte. Every byte sequence is valid Latin-1.
+    pub const fn utf8_len(&self) -> usize {
+        self.utf8_len
+    }
+
+    /// Converts to UTF-8 via `simdutf::convert_latin1_to_utf8`. Returns the
+    /// number of bytes written, or `None` if `target` cannot hold
+    /// [`Latin1Source::utf8_len`] bytes.
+    pub fn convert_to_utf8(&self, target: &mut [u8]) -> Option<usize> {
+        if target.len() < self.utf8_len {
+            return None;
+        }
+        // SAFETY: `target` holds the exact UTF-8 length of these bytes.
+        Some(unsafe {
+            bridge::simdutf_convert_latin1_to_utf8(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                target.as_mut_ptr(),
+            )
+        })
+    }
 }
 
 /// UTF-8 bytes measured by `simdutf::utf16_length_from_utf8`.

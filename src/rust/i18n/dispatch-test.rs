@@ -90,6 +90,73 @@ fn identity_pairs_round_trip() {
 }
 
 #[test]
+fn ascii_sources_are_copied_into_single_byte_and_utf8_targets() {
+    let source = b"plain ascii";
+    for (from, to) in [
+        (Encoding::Ascii, Encoding::Ascii),
+        (Encoding::Ascii, Encoding::Latin1),
+        (Encoding::Ascii, Encoding::Utf8),
+        (Encoding::Latin1, Encoding::Ascii),
+        (Encoding::Latin1, Encoding::Utf8),
+        (Encoding::Utf8, Encoding::Ascii),
+        (Encoding::Utf8, Encoding::Latin1),
+    ] {
+        let transcoder = Transcoder::new(source, from, to).unwrap();
+        assert_eq!(transcoder.dest_len(), source.len(), "{from:?} -> {to:?}");
+        assert_eq!(
+            transcode(source, from, to).unwrap(),
+            source,
+            "{from:?} -> {to:?}"
+        );
+    }
+}
+
+#[test]
+fn text_after_an_ascii_prefix_is_still_converted() {
+    // Long enough that the first non-ASCII byte is past simdutf's first
+    // 64-byte block.
+    let prefix = "a".repeat(100);
+    let cases = [
+        (
+            Encoding::Ascii,
+            Encoding::Utf8,
+            vec![0xe9],
+            "\u{fffd}".as_bytes(),
+        ),
+        (
+            Encoding::Ascii,
+            Encoding::Latin1,
+            vec![0xe9],
+            b"?".as_slice(),
+        ),
+        (Encoding::Latin1, Encoding::Ascii, vec![0xe9], b"?"),
+        (Encoding::Utf8, Encoding::Latin1, "\u{e9}".into(), &[0xe9]),
+        (Encoding::Utf8, Encoding::Ascii, "\u{20ac}".into(), b"?"),
+        (Encoding::Utf8, Encoding::Latin1, vec![0xe2, 0x82], b"?"),
+    ];
+    for (from, to, tail, expected) in cases {
+        let source = [prefix.as_bytes(), &tail, b"z"].concat();
+        let expected = [prefix.as_bytes(), expected, b"z"].concat();
+        assert_eq!(
+            transcode(&source, from, to).unwrap(),
+            expected,
+            "{from:?} -> {to:?}"
+        );
+    }
+}
+
+#[test]
+fn latin1_to_utf8_is_sized_exactly() {
+    let source = [0x41, 0xe9, 0xff];
+    let transcoder = Transcoder::new(&source, Encoding::Latin1, Encoding::Utf8).unwrap();
+    assert_eq!(transcoder.dest_len(), 5);
+    assert_eq!(
+        transcode(&source, Encoding::Latin1, Encoding::Utf8).unwrap(),
+        "A\u{e9}\u{ff}".as_bytes()
+    );
+}
+
+#[test]
 fn unmappable_characters_become_question_marks() {
     let _harness = init_icu();
     // '☕' (U+2615, HOT BEVERAGE) has no representation in ASCII or Latin-1.
