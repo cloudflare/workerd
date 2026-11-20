@@ -34,6 +34,32 @@ def bep_event(label, status):
     )
 
 
+def job_log(*lines):
+    """A job's log as GitHub serves it, from a Windows runner."""
+    return "".join(
+        f"2026-11-19T10:00:00.1234567Z {line}\r\n" for line in lines
+    ).encode()
+
+
+def failed_test_log(label, *output, artifact=None):
+    """The log of a job whose tests include a failure of `label`."""
+    lines = [
+        f"\x1b[31m\x1b[1mFAIL: \x1b[0m{label} (Exit 1) (see /tmp/test.log)",
+        f"\x1b[32mINFO: \x1b[0mFrom Testing {label}:",
+        f"==================== Test output for {label}:",
+        *output,
+        "=" * 80,
+    ]
+    if artifact is not None:
+        lines += [
+            "##[group]Run actions/upload-artifact@v7",
+            "with:",
+            f"  name: {artifact}",
+            "##[endgroup]",
+        ]
+    return job_log(*lines)
+
+
 def results_zip(tests, version=flaky_tests.RESULTS_VERSION):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -57,13 +83,22 @@ class FakeGitHub:
         # Artifact IDs whose downloads, and run IDs whose artifact listings, fail.
         self.failing_downloads = set()
         self.failing_listings = set()
+        # The jobs of each (run ID, attempt), and the log of each job ID, which may be an exception
+        # that downloading it raises.
+        self.jobs = {}
+        self.job_logs = {}
+        self.log_downloads = []
+        self.comments = {}
 
-    def add_run(self, run_id, event="pull_request", pull_request=8700, attempts=2):
+    def add_run(
+        self, run_id, event="pull_request", pull_request=8700, attempts=2, fork=False
+    ):
         self.runs[run_id] = {
             "id": run_id,
             "path": flaky_tests.TESTS_WORKFLOW,
             "run_attempt": attempts,
             "head_sha": "0123456789abcdef0123456789abcdef01234567",
+            "head_repository": {"full_name": "fork/repo" if fork else REPO},
             "event": event,
             "pull_requests": [{"number": pull_request}] if pull_request else [],
         }
@@ -99,6 +134,8 @@ class FakeGitHub:
         return number
 
     def get(self, path):
+        if match := re.fullmatch(rf"repos/{REPO}/issues/(\d+)", path):
+            return self.issues[int(match[1])]
         match = re.fullmatch(rf"repos/{REPO}/actions/runs/(\d+)", path)
         assert match, path
         return self.runs[int(match[1])]
@@ -106,6 +143,13 @@ class FakeGitHub:
     def paginate(self, path, key=None):
         if self.fail_reads:
             raise OSError("network down")
+        if match := re.fullmatch(
+            rf"repos/{REPO}/actions/runs/(\d+)/attempts/(\d+)/jobs\?.*", path
+        ):
+            assert key == "jobs"
+            return iter(self.jobs[(int(match[1]), int(match[2]))])
+        if match := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments\?.*", path):
+            return iter(self.comments.get(int(match[1]), []))
         if match := re.fullmatch(
             rf"repos/{REPO}/actions/runs/(\d+)/artifacts\?.*", path
         ):
@@ -132,6 +176,12 @@ class FakeGitHub:
         raise AssertionError(path)
 
     def download(self, path):
+        if match := re.fullmatch(rf"repos/{REPO}/actions/jobs/(\d+)/logs", path):
+            self.log_downloads.append(int(match[1]))
+            log = self.job_logs[int(match[1])]
+            if isinstance(log, Exception):
+                raise log
+            return log
         match = re.fullmatch(rf"repos/{REPO}/actions/artifacts/(\d+)/zip", path)
         assert match, path
         self.downloads.append(int(match[1]))
@@ -170,7 +220,7 @@ class RepoRootTestCase(unittest.TestCase):
     def record(self, gh, run_ids, dry_run=False):
         runs = [gh.runs[run_id] for run_id in run_ids]
         recorder = flaky_tests.Recorder(gh, self.root, NOW, self.logged.append, dry_run)
-        recorder.record(runs)
+        return recorder.record(runs)
 
     def issues_by_target(self, gh):
         return {
@@ -548,11 +598,58 @@ class RecordTest(RepoRootTestCase):
     def test_dry_run_changes_nothing(self):
         gh = FakeGitHub()
         self.flaky_run(gh)
-        self.record(gh, [1], dry_run=True)
+        self.assertEqual(self.record(gh, [1], dry_run=True), [])
         self.assertEqual(gh.writes, [])
         self.assertIn(
             "Opening an issue for //src/workerd/api:streams-test.", self.logged
         )
+        self.assertIn("Analysing //src/workerd/api:streams-test.", self.logged)
+
+    def test_asks_for_one_analysis_of_a_flaky_test(self):
+        gh = FakeGitHub()
+        self.flaky_run(gh, 1)
+        analyses = self.record(gh, [1])
+        flaky = self.issues_by_target(gh)["//src/workerd/api:streams-test"]
+        self.assertEqual(analyses, [flaky.number])
+        self.assertTrue(flaky.analysis_requested)
+        self.flaky_run(gh, 2, event="push", pull_request=None)
+        self.assertEqual(self.record(gh, [2]), [])
+
+    def test_waits_for_a_failure_in_a_run_of_this_repositorys_code(self):
+        gh = FakeGitHub()
+        self.flaky_run(gh, 1, pull_request=None, fork=True)
+        self.assertEqual(self.record(gh, [1]), [])
+        flaky = self.issues_by_target(gh)["//src/workerd/api:streams-test"]
+        self.assertFalse(flaky.analysis_requested)
+        self.flaky_run(gh, 2, event="push", pull_request=None)
+        self.assertEqual(self.record(gh, [2]), [flaky.number])
+
+    def test_asks_again_when_the_issue_reopens(self):
+        gh = FakeGitHub()
+        self.flaky_run(gh, 1)
+        [number] = self.record(gh, [1])
+        gh.issues[number].update(state="closed", closed_at="2026-11-19T10:30:00Z")
+        # A failure from before the issue was closed doesn't reopen it.
+        self.flaky_run(gh, 2)
+        self.assertEqual(self.record(gh, [2]), [])
+        self.flaky_run(gh, 3)
+        gh.artifacts[3][0]["created_at"] = "2026-11-19T11:30:00Z"
+        self.assertEqual(self.record(gh, [3]), [number])
+
+    def test_limits_the_analyses_one_run_asks_for(self):
+        gh = FakeGitHub()
+        gh.add_run(1)
+        labels = [f"//src/workerd/api:test-{n}@" for n in range(5)]
+        gh.add_results(1, "linux-X64", 1, {label: "FAILED" for label in labels})
+        gh.add_results(1, "linux-X64", 2, {label: "PASSED" for label in labels})
+        analyses = self.record(gh, [1])
+        self.assertEqual(len(analyses), flaky_tests.MAX_ANALYSES_PER_RECORD)
+        waiting = [
+            flaky
+            for flaky in self.issues_by_target(gh).values()
+            if not flaky.analysis_requested
+        ]
+        self.assertEqual(len(waiting), 5 - flaky_tests.MAX_ANALYSES_PER_RECORD)
 
     def test_issue_data_cant_end_its_comment(self):
         flaky = flaky_tests.FlakyIssue("//src/workerd/api:streams-test")
@@ -569,10 +666,12 @@ class RecordTest(RepoRootTestCase):
                 pull_request=None,
             )
         )
+        flaky.analysis_requested = True
         self.assertEqual(flaky_tests.data_block(flaky).count("-->"), 1)
         body = flaky_tests.render_issue(flaky, REPO)
         parsed = flaky_tests.parse_issue({"number": 1, "state": "open", "body": body})
         self.assertEqual(parsed.occurrences, flaky.occurrences)
+        self.assertTrue(parsed.analysis_requested)
 
     def test_runs_to_record(self):
         gh = FakeGitHub()
@@ -690,6 +789,303 @@ class SummarizeTest(RepoRootTestCase):
             FakeGitHub(), {"//src/workerd/api:ok-test@": "PASSED"}
         )
         self.assertEqual((summary, log), ("", ""))
+
+
+class TestOutputTest(unittest.TestCase):
+    def test_reads_each_run_of_the_test(self):
+        lines = flaky_tests.job_log_lines(
+            job_log(
+                "==================== Test output for //a:b@all-autogates:",
+                "another variant",
+                "=" * 80,
+                "==================== Test output for //a:b@ (shard 1 of 2):",
+                "\x1b[31mfirst\x1b[0m",
+                "=" * 80,
+                "between",
+                # A job stopped while Bazel printed the output.
+                "==================== Test output for //a:b@ (shard 2 of 2):",
+                "second",
+            )
+        )
+        self.assertEqual(
+            flaky_tests.test_output(lines, "//a:b@"),
+            "==================== Test output for //a:b@ (shard 1 of 2):\nfirst\n"
+            + "=" * 80
+            + "\n\n==================== Test output for //a:b@ (shard 2 of 2):\nsecond\n",
+        )
+        self.assertIsNone(flaky_tests.test_output(lines, "//a:c@"))
+
+    def test_shorten_keeps_the_start_and_the_end(self):
+        text = "\n".join(f"line {n}" for n in range(1000))
+        short = flaky_tests.shorten(text, 1000)
+        self.assertTrue(short.startswith("line 0\n"))
+        self.assertTrue(short.endswith("\nline 999"))
+        self.assertIn(" lines omitted ...]", short)
+        self.assertLess(len(short), 1100)
+        self.assertEqual(flaky_tests.shorten("short", 10), "short")
+
+
+class PrepareAnalysisTest(unittest.TestCase):
+    LABEL = "//src/workerd/api:streams-test@"
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.output = Path(directory.name, "input")
+        self.gh = FakeGitHub()
+        self.logged = []
+
+    def add_failure(self, run_id, time, logs, fork=False):
+        """Adds a run whose attempt 1 failed LABEL in linux-X64; `logs` are its failed jobs'."""
+        self.gh.add_run(run_id, fork=fork)
+        jobs = [{"id": run_id * 100, "conclusion": "success"}]
+        for log in logs:
+            job_id = run_id * 100 + len(jobs)
+            self.gh.job_logs[job_id] = log
+            jobs.append({"id": job_id, "conclusion": "failure"})
+        self.gh.jobs[(run_id, 1)] = jobs
+        return flaky_tests.Occurrence(
+            label=self.LABEL,
+            job="linux-X64",
+            status="FAILED",
+            run_id=run_id,
+            attempt=1,
+            sha="0123456789abcdef0123456789abcdef01234567",
+            time=time,
+            event="pull_request",
+            pull_request=None if fork else 8700,
+        )
+
+    def add_issue(self, *occurrences):
+        flaky = flaky_tests.FlakyIssue("//src/workerd/api:streams-test")
+        for occurrence in occurrences:
+            flaky.add(occurrence)
+        return self.gh.add_issue(
+            flaky_tests.render_issue(flaky, REPO),
+            title="Flaky test: //src/workerd/api:streams-test",
+        )
+
+    def prepare(self, number):
+        return flaky_tests.prepare_analysis(
+            self.gh, number, self.output, self.logged.append
+        )
+
+    def read(self, name):
+        return (self.output / name).read_text()
+
+    def test_analyses_the_latest_failure_in_a_run_of_this_repositorys_code(self):
+        recorded = failed_test_log(
+            self.LABEL, "timed out", artifact="test-results-linux-X64-attempt1"
+        )
+        number = self.add_issue(
+            self.add_failure(
+                1, "2026-11-18T10:00:00Z", [job_log("build failed"), recorded]
+            ),
+            self.add_failure(
+                2,
+                "2026-11-19T10:00:00Z",
+                [failed_test_log(self.LABEL, "a fork's output")],
+                fork=True,
+            ),
+        )
+        self.gh.comments[number] = [
+            {
+                "user": {"login": "maintainer"},
+                "author_association": "MEMBER",
+                "created_at": "2026-11-19T12:00:00Z",
+                "body": "Probably the timer.",
+            },
+            {
+                "user": {"login": "anyone"},
+                "author_association": "NONE",
+                "created_at": "2026-11-19T13:00:00Z",
+                "body": "A stranger's comment.",
+            },
+        ]
+        self.assertTrue(self.prepare(number))
+
+        failure = json.loads(self.read(flaky_tests.ANALYSIS_FAILURE_FILE))
+        self.assertEqual(
+            (failure["issue"], failure["run_id"], failure["label"]),
+            (number, 1, self.LABEL),
+        )
+        self.assertEqual(
+            self.read(flaky_tests.ANALYSIS_OUTPUT_FILE),
+            f"==================== Test output for {self.LABEL}:\ntimed out\n{'=' * 80}\n",
+        )
+        issue = self.read(flaky_tests.ANALYSIS_ISSUE_FILE)
+        self.assertTrue(
+            issue.startswith("# Flaky test: //src/workerd/api:streams-test\n")
+        )
+        self.assertIn("| `linux-X64` |", issue)
+        self.assertNotIn("flaky-test-data", issue)
+        self.assertIn("Comment by maintainer, 2026-11-19T12:00:00Z:", issue)
+        self.assertNotIn("A stranger's comment.", issue)
+        # The fork's run's logs aren't read.
+        self.assertEqual(self.gh.log_downloads, [101, 102])
+
+    def test_prefers_the_log_of_the_job_that_recorded_the_failure(self):
+        number = self.add_issue(
+            self.add_failure(
+                1,
+                "2026-11-18T10:00:00Z",
+                [
+                    failed_test_log(
+                        self.LABEL,
+                        "another job's output",
+                        artifact="test-results-macOS-ARM64-attempt1",
+                    ),
+                    failed_test_log(
+                        self.LABEL,
+                        "its output",
+                        artifact="test-results-linux-X64-attempt1",
+                    ),
+                ],
+            )
+        )
+        self.assertTrue(self.prepare(number))
+        self.assertIn("\nits output\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
+
+    def test_falls_back_to_another_job_that_failed_the_test(self):
+        number = self.add_issue(
+            self.add_failure(
+                1,
+                "2026-11-18T10:00:00Z",
+                [job_log("no tests"), failed_test_log(self.LABEL, "the output")],
+            )
+        )
+        self.assertTrue(self.prepare(number))
+        self.assertIn("\nthe output\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
+
+    def test_skips_a_failure_whose_log_cant_be_read(self):
+        gone = urllib.error.HTTPError("logs", 410, "Gone", None, None)
+        number = self.add_issue(
+            self.add_failure(
+                1, "2026-11-18T10:00:00Z", [failed_test_log(self.LABEL, "older")]
+            ),
+            self.add_failure(2, "2026-11-19T10:00:00Z", [gone]),
+        )
+        self.assertTrue(self.prepare(number))
+        self.assertIn("\nolder\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
+        self.assertTrue(any("410" in message for message in self.logged))
+
+    def test_analyses_nothing_without_a_usable_failure(self):
+        number = self.add_issue(
+            self.add_failure(1, "2026-11-18T10:00:00Z", [job_log("build failed")]),
+            self.add_failure(
+                2,
+                "2026-11-19T10:00:00Z",
+                [failed_test_log(self.LABEL, "output")],
+                fork=True,
+            ),
+        )
+        self.assertFalse(self.prepare(number))
+        self.assertFalse(self.output.exists())
+
+    def test_requires_a_flaky_test_issue(self):
+        number = self.gh.add_issue("An unrelated issue.")
+        self.assertRaises(SystemExit, self.prepare, number)
+
+
+class PostAnalysesTest(unittest.TestCase):
+    RUN_URL = f"https://github.com/{REPO}/actions/runs/99"
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+        self.gh = FakeGitHub()
+        self.logged = []
+
+    def write_analysis(self, number, report):
+        occurrence = flaky_tests.Occurrence(
+            label="//src/workerd/api:streams-test@all-autogates",
+            job="linux-X64",
+            status="TIMEOUT",
+            run_id=7,
+            attempt=1,
+            sha="0123456789abcdef0123456789abcdef01234567",
+            time="2026-11-19T10:00:00Z",
+            event="push",
+            pull_request=None,
+        )
+        inputs = self.directory / f"flaky-analysis-input-{number}"
+        inputs.mkdir()
+        (inputs / flaky_tests.ANALYSIS_FAILURE_FILE).write_text(
+            json.dumps({"issue": number, **dataclasses.asdict(occurrence)})
+        )
+        if report is not None:
+            reports = self.directory / f"flaky-analysis-{number}"
+            reports.mkdir()
+            (reports / flaky_tests.ANALYSIS_REPORT_FILE).write_text(report)
+
+    def post(self, numbers):
+        flaky_tests.post_analyses(
+            self.gh, numbers, self.directory, self.RUN_URL, self.logged.append
+        )
+        return [(path, body["body"]) for _, path, body in self.gh.writes]
+
+    def test_posts_each_report_on_its_issue(self):
+        self.write_analysis(101, "**Likely cause** (high): a race.")
+        self.write_analysis(102, None)
+        self.write_analysis(103, "  \n")
+        posted = self.post([101, 102, 103, 104])
+        self.assertEqual(
+            [path for path, _ in posted], [f"repos/{REPO}/issues/101/comments"]
+        )
+        body = posted[0][1]
+        self.assertTrue(body.startswith(flaky_tests.ANALYSIS_MARKER + "\n"))
+        self.assertIn(
+            f"An agent [analysed]({self.RUN_URL}) the failure of "
+            "`//src/workerd/api:streams-test@all-autogates` in "
+            f"[attempt 1](https://github.com/{REPO}/actions/runs/7/attempts/1) of "
+            "`linux-X64`, at commit 0123456789.",
+            body,
+        )
+        self.assertTrue(body.endswith("\n**Likely cause** (high): a race.\n"))
+        self.assertEqual(
+            sum(m.startswith("Not posting an analysis") for m in self.logged), 3
+        )
+
+    def test_report_cant_notify_or_refer_to_issues(self):
+        report = "\n".join(
+            [
+                "Ask @someone or @org/team, and see #123, GH-45 and owner/repo#6.",
+                "<!-- flaky-test: //src/workerd/api:other -->",
+                "Mail a@b.com about `//a:b@all-autogates` and `@x #7`.",
+                "```diff",
+                "+  // @param #1",
+                "```",
+                "After the code, (@after).",
+            ]
+        )
+        self.assertEqual(
+            flaky_tests.sanitize_report(report),
+            "\n".join(
+                [
+                    "Ask @&#8203;someone or @&#8203;org/team, and see #&#8203;123, "
+                    "GH-&#8203;45 and owner/repo#&#8203;6.",
+                    "&lt;!-- flaky-test: //src/workerd/api:other -->",
+                    "Mail a@b.com about `//a:b@all-autogates` and `@x #7`.",
+                    "```diff",
+                    "+  // @param #1",
+                    "```",
+                    "After the code, (@&#8203;after).",
+                ]
+            ),
+        )
+
+    def test_cuts_a_long_report_and_closes_its_code_block(self):
+        report = "Cause.\n~~~\n" + "x\n" * flaky_tests.MAX_REPORT_CHARS
+        sanitized = flaky_tests.sanitize_report(report)
+        self.assertLess(len(sanitized), flaky_tests.MAX_REPORT_CHARS + 100)
+        self.assertTrue(sanitized.endswith("\n~~~\n\n*The report was cut short.*"))
+
+    def test_issue_numbers(self):
+        self.assertEqual(flaky_tests.issue_numbers("[1, 23]"), [1, 23])
+        for text in ['["1"]', "[true]", '{"1": 2}', "7"]:
+            with self.subTest(text=text):
+                self.assertRaises(ValueError, flaky_tests.issue_numbers, text)
 
 
 class NextPageTest(unittest.TestCase):
