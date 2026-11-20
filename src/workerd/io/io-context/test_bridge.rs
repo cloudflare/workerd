@@ -152,6 +152,7 @@ mod ffi {
         unsafe fn await_and_record_async_context(isolate: usize) -> Result<()>;
         fn register_probe_module(registry: Pin<&mut ModuleRegistry>);
         fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
+        fn register_terminating_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn release_await(value: i32);
@@ -323,6 +324,17 @@ fn register_failing_module(registry: Pin<&mut ffi::ModuleRegistry>) {
         |_lock| -> jsg::Result<jsg::Rc<probe::Probe>> {
             Err(jsg::Error::new_type_error("the module failed"))
         },
+        jsg::modules::ModuleType::Internal,
+    );
+}
+
+/// Registers the internal module `test:io-context-terminating`, whose callback terminates
+/// execution.
+fn register_terminating_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "test:io-context-terminating",
+        |lock| -> jsg::Result<jsg::Rc<probe::Probe>> { Err(lock.terminate_execution_now()) },
         jsg::modules::ModuleType::Internal,
     );
 }

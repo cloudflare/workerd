@@ -2655,6 +2655,7 @@ KJ_TEST("an await_js() whose promise GC collects in another request releases its
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
 constexpr kj::StringPtr FAILING_SPECIFIER = "test:io-context-failing"_kj;
+constexpr kj::StringPtr TERMINATING_SPECIFIER = "test:io-context-terminating"_kj;
 
 // Has `registerModules` add Rust modules to a legacy registry, then calls `body` with the
 // registry inside a request.
@@ -2695,6 +2696,20 @@ void withNewRustRegistry(auto&& registerModules, auto&& body) {
     .newModuleRegistry = registryBuilder.finish(),
   });
   fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env); });
+}
+
+// Whether calling `fn` throws `JsExceptionThrown` with execution terminating. Cancels the
+// termination.
+bool terminates(const TestFixture::Environment& env, auto&& fn) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+  v8::TryCatch tryCatch(env.isolate);
+  KJ_DEFER(env.isolate->CancelTerminateExecution());
+  try {
+    fn();
+    return false;
+  } catch (jsg::JsExceptionThrown&) {
+    return tryCatch.HasTerminated();
+  }
 }
 
 // What calling `fn` throws, as a string.
@@ -2741,6 +2756,21 @@ KJ_TEST("the new registry throws the error of a failing Rust module callback") {
       auto thrown = thrownBy(env.js, [&] { env.js.resolveInternalModule(FAILING_SPECIFIER); });
       KJ_EXPECT(thrown == "TypeError: the module failed", thrown);
     }
+  });
+}
+
+KJ_TEST("the legacy registry keeps the termination of a terminating Rust module callback") {
+  withLegacyRustRegistry(register_terminating_module, [](const auto& env, auto& registry) {
+    KJ_EXPECT(terminates(env, [&] {
+      registry.resolve(env.js, kj::Path::parse(TERMINATING_SPECIFIER), kj::none,
+          jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY);
+    }));
+  });
+}
+
+KJ_TEST("the new registry keeps the termination of a terminating Rust module callback") {
+  withNewRustRegistry(register_terminating_module, [](const auto& env) {
+    KJ_EXPECT(terminates(env, [&] { env.js.resolveInternalModule(TERMINATING_SPECIFIER); }));
   });
 }
 
