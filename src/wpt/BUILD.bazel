@@ -373,6 +373,18 @@ wpt_test(
 )
 
 wpt_test(
+    name = "html/webappapis/scripting",
+    config = "html/webappapis/scripting-test.ts",
+    exclude_test_dirs = [
+        # Window, worker and agent-cluster tests that need a browser
+        "event-loops",
+        "events",
+        "processing-model-2",
+    ],
+    wpt_directory = "@wpt//:html/webappapis/scripting@module",
+)
+
+wpt_test(
     name = "html/webappapis/structured-clone",
     config = "html/webappapis/structured-clone-test.ts",
     # META scripts name the battery helpers by absolute path, e.g.
