@@ -3505,7 +3505,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
   // The session's own tracer and incoming request. IoContext::getWorkerTracer() and
-  // IoContext::getInvocationSpanContext() may refer to a different request to the same actor. The
+  // IoContext::getCurrentSpanContext() may refer to a different request to the same actor. The
   // incoming request outlives this target (see CantOutliveIncomingRequest).
   kj::Maybe<kj::Rc<BaseTracer>> tracer;
   IoContext::IncomingRequest& incomingRequest;
@@ -3546,8 +3546,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       // callImpl() runs without a user span in its async context, so the current request's
       // context would use its root user span. Do the same for this session's request.
       auto userSpan = incomingRequest.getRootUserTraceSpan();
-      t->setJsRpcInfo(incomingRequest.getInvocationSpanContextForUserSpan(userSpan), ctx.now(),
-          methodNameForTrace);
+      t->setJsRpcInfo(
+          incomingRequest.getSpanContextForUserSpan(userSpan), ctx.now(), methodNameForTrace);
     }
   }
 

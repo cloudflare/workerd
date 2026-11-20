@@ -257,14 +257,14 @@ void addExceptionToTrace(jsg::Lock& js,
   auto timestamp = ioContext.now();
   auto errorInfo = getErrorInfoForTrace(js, exception, errorTypeHandler);
 
-  tracing::InvocationSpanContext spanContext = [&]() {
+  tracing::SpanContext spanContext = [&]() {
     KJ_IF_SOME(request, incomingRequest) {
       // The exception belongs to the request as a whole rather than to whichever user span is
       // active in the current async context, so report it under the request's root user span.
       auto userSpan = request.getRootUserTraceSpan();
-      return request.getInvocationSpanContextForUserSpan(userSpan);
+      return request.getSpanContextForUserSpan(userSpan);
     }
-    return ioContext.getInvocationSpanContext();
+    return ioContext.getCurrentSpanContext();
   }();
 
   tracer.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
@@ -2164,8 +2164,8 @@ void handleLog(jsg::Lock& js,
         }
       }
 
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
-          kj::mv(capturedErrors));
+      tracer.addLog(
+          ioContext.getCurrentSpanContext(), timestamp, level, message(), kj::mv(capturedErrors));
     }
   }
 
@@ -4064,14 +4064,14 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
       auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
 
       // The wrapped call needs a HandleScope on the stack, because
-      // `getInvocationSpanContext()` probes the current async context for the
+      // `getCurrentSpanContext()` probes the current async context for the
       // active user span, which creates V8 handles. Our callers are not
       // required to have a HandleScope and eg. the GC destructors in
       // worker-rpc.c++ reach here without one.  We establish one here.
       js.withinHandleScope([&] {
         auto timestamp = ioContext.now();
-        tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
-            kj::mv(jsonDescription));
+        tracer.addLog(
+            ioContext.getCurrentSpanContext(), timestamp, LogLevel::WARN, kj::mv(jsonDescription));
       });
     }
   }

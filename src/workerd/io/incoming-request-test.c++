@@ -680,17 +680,15 @@ class RecordingTracer final: public BaseTracer {
     events = kj::str(events, "return;");
   }
 
-  void addLog(const tracing::InvocationSpanContext&,
-      kj::Date,
-      LogLevel,
-      kj::String,
-      tracing::LogErrorInfo) override {}
+  void addLog(
+      const tracing::SpanContext&, kj::Date, LogLevel, kj::String, tracing::LogErrorInfo) override {
+  }
   void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
   void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
   void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
   void addSpanAttribute(
-      const tracing::InvocationSpanContext&, kj::ConstString, tracing::Attribute::Value) override {}
-  void addException(const tracing::InvocationSpanContext&,
+      const tracing::SpanContext&, kj::ConstString, tracing::Attribute::Value) override {}
+  void addException(const tracing::SpanContext&,
       kj::Date,
       kj::String,
       kj::String,
@@ -702,11 +700,10 @@ class RecordingTracer final: public BaseTracer {
       kj::String,
       kj::Maybe<kj::String>) override {}
   void addDiagnosticChannelEvent(
-      const tracing::InvocationSpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
+      const tracing::SpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
   void setOutcome(EventOutcome, kj::Duration, kj::Duration) override {}
   void recordTimestamp(kj::Date) override {}
-  void setJsRpcInfo(
-      const tracing::InvocationSpanContext&, kj::Date, const kj::ConstString&) override {}
+  void setJsRpcInfo(const tracing::SpanContext&, kj::Date, const kj::ConstString&) override {}
   void markUnused() override {}
 };
 

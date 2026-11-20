@@ -316,7 +316,7 @@ class InvocationSpanState final: public SpanState {
  public:
   InvocationSpanState(workerd::SpanParent parent,
       kj::Maybe<kj::Own<BaseTracer::WeakRef>> tracer,
-      kj::Maybe<tracing::InvocationSpanContext> context)
+      kj::Maybe<tracing::SpanContext> context)
       : parent(kj::mv(parent)),
         tracer(kj::mv(tracer)),
         context(kj::mv(context)) {}
@@ -335,10 +335,7 @@ class InvocationSpanState final: public SpanState {
   }
 
   kj::Maybe<tracing::SpanContext> getSpanContext() override {
-    KJ_IF_SOME(value, context) {
-      return tracing::SpanContext(value.getTraceId(), value.getSpanId(), value.getTraceFlags());
-    }
-    return kj::none;
+    return context.map(tracing::SpanContext::clone);
   }
 
   workerd::SpanParent makeSpanParent() override {
@@ -347,21 +344,24 @@ class InvocationSpanState final: public SpanState {
 
   void updateName(kj::ConstString operationName) override {
     KJ_IF_SOME(valueContext, context) {
-      KJ_IF_SOME(valueTracer, tracer) {
-        valueTracer->runIfAlive([&](BaseTracer& tracer) {
-          tracer.addSpanUpdate(
-              valueContext.getSpanId(), tracing::SpanUpdate(kj::mv(operationName)));
-        });
+      KJ_IF_SOME(spanId, valueContext.getSpanId()) {
+        KJ_IF_SOME(valueTracer, tracer) {
+          valueTracer->runIfAlive([&](BaseTracer& tracer) {
+            tracer.addSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(operationName)));
+          });
+        }
       }
     }
   }
 
   void setStatus(tracing::SpanStatus status) override {
     KJ_IF_SOME(valueContext, context) {
-      KJ_IF_SOME(valueTracer, tracer) {
-        valueTracer->runIfAlive([&](BaseTracer& tracer) {
-          tracer.addSpanUpdate(valueContext.getSpanId(), tracing::SpanUpdate(kj::mv(status)));
-        });
+      KJ_IF_SOME(spanId, valueContext.getSpanId()) {
+        KJ_IF_SOME(valueTracer, tracer) {
+          valueTracer->runIfAlive([&](BaseTracer& tracer) {
+            tracer.addSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(status)));
+          });
+        }
       }
     }
   }
@@ -369,10 +369,11 @@ class InvocationSpanState final: public SpanState {
  protected:
   void recordLinks(tracing::SpanLinks links) override {
     KJ_IF_SOME(valueContext, context) {
-      KJ_IF_SOME(valueTracer, tracer) {
-        valueTracer->runIfAlive([&](BaseTracer& tracer) {
-          tracer.addSpanLinks(valueContext.getSpanId(), kj::mv(links));
-        });
+      KJ_IF_SOME(spanId, valueContext.getSpanId()) {
+        KJ_IF_SOME(valueTracer, tracer) {
+          valueTracer->runIfAlive(
+              [&](BaseTracer& tracer) { tracer.addSpanLinks(spanId, kj::mv(links)); });
+        }
       }
     }
   }
@@ -407,14 +408,16 @@ class InvocationSpanState final: public SpanState {
       kj::String message,
       kj::Maybe<kj::String> stack) override {
     KJ_IF_SOME(valueContext, context) {
-      if (parent.isObserved()) {
-        // Tail events use I/O time; the native invocation span records its own precise timestamp.
-        auto timestamp = IoContext::current().now();
-        KJ_IF_SOME(valueTracer, tracer) {
-          valueTracer->runIfAlive([&](BaseTracer& tracer) {
-            tracer.addSpanException(valueContext.getSpanId(), timestamp, kj::mv(code), kj::mv(name),
-                kj::mv(message), kj::mv(stack));
-          });
+      KJ_IF_SOME(spanId, valueContext.getSpanId()) {
+        if (parent.isObserved()) {
+          // Tail events use I/O time; the native invocation span records its own precise timestamp.
+          auto timestamp = IoContext::current().now();
+          KJ_IF_SOME(valueTracer, tracer) {
+            valueTracer->runIfAlive([&](BaseTracer& tracer) {
+              tracer.addSpanException(
+                  spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+            });
+          }
         }
       }
     }
@@ -423,7 +426,7 @@ class InvocationSpanState final: public SpanState {
  private:
   workerd::SpanParent parent;
   kj::Maybe<kj::Own<BaseTracer::WeakRef>> tracer;
-  kj::Maybe<tracing::InvocationSpanContext> context;
+  kj::Maybe<tracing::SpanContext> context;
 };
 
 class NoopSpanState final: public SpanState {
@@ -966,9 +969,7 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
             tracer = value.addRef();
           }
           state = kj::refcounted<user_tracing::InvocationSpanState>(asyncContext->getSpan(),
-              kj::mv(tracer), asyncContext->getInvocationSpanContext().map([](auto& context) {
-            return context.clone();
-          }));
+              kj::mv(tracer), asyncContext->getSpanContext().map(tracing::SpanContext::clone));
         }
       }
       auto span = js.alloc<user_tracing::Span>(ioContext.addObject(kj::mv(state)));

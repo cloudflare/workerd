@@ -249,11 +249,11 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
   request->delivered();
   // Other spans go under the invocation's only when its spans are exported.
   KJ_EXPECT(tracer->observesUserSpans() == bool(exportSpans));
-  KJ_EXPECT(tracer->makeUserRequestSpan(request->getInvocationSpanContext()).isObserved() ==
-      bool(exportSpans));
-  kj::Maybe<tracing::InvocationSpanContext> spanContext;
+  KJ_EXPECT(tracer->makeUserRequestSpan(request->getInvocationSpanContext().toSpanContext())
+                .isObserved() == bool(exportSpans));
+  kj::Maybe<tracing::SpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
-    auto& c = spanContext.emplace(env.context.getInvocationSpanContext());
+    auto& c = spanContext.emplace(env.context.getCurrentSpanContext());
     // The second argument was an Error, which the JSON message does not describe.
     auto errorInfo = kj::heapArrayBuilder<kj::Maybe<tracing::ErrorInfo>>(2);
     errorInfo.add(kj::none);

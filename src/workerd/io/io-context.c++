@@ -324,15 +324,13 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
-tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
-    SpanParent& userSpan) {
+tracing::SpanContext IoContext::IncomingRequest::getSpanContextForUserSpan(SpanParent& userSpan) {
   auto& base = getInvocationSpanContext();
   tracing::SpanId sid = userSpan.getSpanId();
   if (sid != tracing::SpanId::nullId) {
-    return tracing::InvocationSpanContext(
-        base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
+    return tracing::SpanContext(base.getTraceId(), sid, base.getTraceFlags());
   }
-  return base.clone();
+  return base.toSpanContext();
 }
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
@@ -377,7 +375,8 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
-    rootUserTraceSpan = workerTracer->makeUserRequestSpan(getInvocationSpanContext());
+    rootUserTraceSpan =
+        workerTracer->makeUserRequestSpan(getInvocationSpanContext().toSpanContext());
   }
 
   KJ_IF_SOME(a, context->actor) {
@@ -690,7 +689,7 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
       // context could name a more specific user span, so report it under the request's root user
       // span.
       auto userSpan = request.getRootUserTraceSpan();
-      auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
+      auto spanContext = request.getSpanContextForUserSpan(userSpan);
 
       auto errorInfo =
           tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
@@ -1616,23 +1615,15 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
   }
 
-  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
-  auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
-  auto spanId = userSpan.getSpanId();
-  if (spanId != tracing::SpanId::nullId) {
-    invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
-        baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
-  } else {
-    invocationSpanContext = baseContext.clone();
-  }
+  auto spanContext = getCurrentIncomingRequest().getSpanContextForUserSpan(userSpan);
 
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   KJ_IF_SOME(value, getWorkerTracer()) {
     tracer = value.getWeakRef();
   }
 
-  auto asyncContext = kj::heap<UserTraceAsyncContext>(
-      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
+  auto asyncContext =
+      kj::heap<UserTraceAsyncContext>(kj::mv(userSpan), kj::mv(tracer), kj::mv(spanContext));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));

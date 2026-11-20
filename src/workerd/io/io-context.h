@@ -78,16 +78,16 @@ class IoContext;
 
 // Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
 // share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
-// an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
+// an older continuation resumes. Keeping the span, tracer, and span context together ensures
 // tracing events remain attributed to the request that created the async context.
 class UserTraceAsyncContext final {
  public:
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
-      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      kj::Maybe<tracing::SpanContext> spanContext)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
-        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+        spanContext(kj::mv(spanContext)) {}
 
   SpanParent getSpan() {
     return span.addRef();
@@ -100,14 +100,14 @@ class UserTraceAsyncContext final {
     return kj::none;
   }
 
-  kj::Maybe<tracing::InvocationSpanContext&> getInvocationSpanContext() {
-    return invocationSpanContext;
+  kj::Maybe<tracing::SpanContext&> getSpanContext() {
+    return spanContext;
   }
 
  private:
   SpanParent span;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
-  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  kj::Maybe<tracing::SpanContext> spanContext;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
@@ -252,9 +252,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
 
-  // Returns this request's invocation span context, with the span ID replaced by that of
-  // `userSpan` if it has one.
-  tracing::InvocationSpanContext getInvocationSpanContextForUserSpan(SpanParent& userSpan);
+  // Returns this request's span context (preserving trace ID and trace flags), with the span ID
+  // replaced by that of `userSpan` if it has one. Invocation ID is owned by the tracer.
+  tracing::SpanContext getSpanContextForUserSpan(SpanParent& userSpan);
 
   // The async trace REQUEST resource for this request, created by delivered(); 0 if the context
   // is not traced.
@@ -1351,12 +1351,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  // Returns the invocation's traceId/invocationId paired with the currently-active user
-  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
-  // root's spanId when no user span is active.
-  tracing::InvocationSpanContext getInvocationSpanContext() {
+  // Returns the invocation's traceId and traceFlags paired with the currently-active user span's
+  // spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation root's spanId
+  // when no user span is active.
+  tracing::SpanContext getCurrentSpanContext() {
     auto userSpan = getCurrentUserTraceSpan();
-    return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
+    return getCurrentIncomingRequest().getSpanContextForUserSpan(userSpan);
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
