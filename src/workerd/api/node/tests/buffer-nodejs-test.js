@@ -6105,11 +6105,14 @@ export const transcodeFromUTF16BufferSizeTest = {
   },
 };
 
-// Ill-formed input to the UTF-8/UTF-16LE pairs fails as in Node.
+// Ill-formed input to the UTF-8/UTF-16LE pairs fails as in Node, with ICU's
+// error name in `code` and its number in `errno`.
 export const transcodeInvalidCharTest = {
   test() {
     const invalidChar = {
       name: 'Error',
+      code: 'U_INVALID_CHAR_FOUND',
+      errno: 10,
       message: 'Unable to transcode Buffer [U_INVALID_CHAR_FOUND]',
     };
     for (const bytes of [
@@ -6164,6 +6167,59 @@ export const transcodeFromUTF16OddByteInputTest = {
         );
       }
     }
+  },
+};
+
+// Adapted from test/parallel/test-icu-transcode.js
+export const transcodeInvalidArgumentsTest = {
+  test() {
+    throws(() => transcode(null, 'utf8', 'ascii'), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "source" argument must be an instance of Buffer or Uint8Array. ' +
+        'Received null',
+    });
+    for (const source of [
+      new Uint16Array([0x61]),
+      new Uint8ClampedArray([0x61]),
+      new DataView(new ArrayBuffer(2)),
+      new ArrayBuffer(2),
+      'abc',
+    ]) {
+      throws(() => transcode(source, 'utf8', 'ucs2'), {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+
+    const illegalArgument = {
+      name: 'Error',
+      code: 'U_ILLEGAL_ARGUMENT_ERROR',
+      errno: 1,
+      message: 'Unable to transcode Buffer [U_ILLEGAL_ARGUMENT_ERROR]',
+    };
+    for (const [from, to] of [
+      ['b', 'utf8'],
+      ['uf8', 'b'],
+      ['utf8', 'hex'],
+      ['base64', 'utf8'],
+      ['utf8', 1],
+    ]) {
+      throws(
+        () => transcode(Buffer.from('a'), from, to),
+        illegalArgument,
+        `${from}->${to}`
+      );
+    }
+
+    // An empty source returns before the encodings are checked.
+    deepStrictEqual(transcode(Buffer.alloc(0), 'foo', 'hex'), Buffer.alloc(0));
+    // A nullish encoding is UTF-8.
+    deepStrictEqual(
+      transcode(Buffer.from('a'), undefined, null),
+      Buffer.from('a')
+    );
   },
 };
 
