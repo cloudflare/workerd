@@ -10,12 +10,15 @@
     reason = "every compared value is exactly representable"
 )]
 
+use std::cell::Cell;
+
 use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::NonCoercible;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
+use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]
@@ -260,6 +263,115 @@ fn non_coercible_f64_accepts_only_numbers() {
                 err.message
             );
         }
+        Ok(())
+    });
+}
+
+#[jsg_resource]
+struct NumberReturns {
+    value: Cell<f64>,
+}
+
+#[jsg_resource]
+impl NumberReturns {
+    #[jsg_method]
+    pub fn float64(&self, value: f64) -> f64 {
+        value
+    }
+
+    #[jsg_method]
+    pub fn int32(&self, value: i32) -> i32 {
+        value
+    }
+
+    #[jsg_method]
+    pub fn uint32(&self, value: u32) -> u32 {
+        value
+    }
+
+    #[jsg_property(prototype)]
+    pub fn get_proto(&self) -> f64 {
+        self.value.get()
+    }
+
+    #[jsg_property(prototype)]
+    pub fn set_proto(&self, value: f64) {
+        self.value.set(value);
+    }
+
+    #[jsg_property(instance)]
+    pub fn get_own(&self) -> f64 {
+        self.value.get()
+    }
+
+    #[jsg_property(instance)]
+    pub fn set_own(&self, value: f64) {
+        self.value.set(value);
+    }
+}
+
+/// A number result reaches JavaScript unchanged, whether it fits a Smi, needs a `HeapNumber`, or
+/// is -0 or NaN, from a method or from a prototype or instance getter.
+#[test]
+fn number_returns_keep_their_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let returns = jsg::Rc::new(
+            lock,
+            NumberReturns {
+                value: Cell::new(0.0),
+            },
+        )
+        .to_js(lock)?;
+        ctx.set_global(lock, "n", returns);
+
+        // Asserts that `returned` (an expression over `x`) is `x` for each of `values`.
+        let mut check = |returned: &str, values: &[&str]| {
+            for value in values {
+                let expr =
+                    format!("(() => {{ const x = {value}; return Object.is({returned}, x); }})()");
+                assert!(
+                    ctx.eval::<bool>(lock, &expr).unwrap(),
+                    "{returned} for {value}"
+                );
+            }
+        };
+
+        let float64 = [
+            "0",
+            "-0",
+            "-1",
+            "2 ** 30 - 1",
+            "2 ** 30",
+            "-(2 ** 30)",
+            "-(2 ** 30) - 1",
+            "2 ** 31 - 1",
+            "-(2 ** 31)",
+            "2 ** 31",
+            "-(2 ** 31) - 1",
+            "2 ** 32 - 1",
+            "0.5",
+            "-0.5",
+            "2 ** 53",
+            "NaN",
+            "Infinity",
+            "-Infinity",
+        ];
+        check("n.float64(x)", &float64);
+        check("(n.proto = x, n.proto)", &float64);
+        check("(n.own = x, n.own)", &float64);
+        check(
+            "n.int32(x)",
+            &[
+                "0",
+                "-1",
+                "2 ** 30 - 1",
+                "2 ** 30",
+                "-(2 ** 31)",
+                "2 ** 31 - 1",
+            ],
+        );
+        check("n.uint32(x)", &["0", "2 ** 30", "2 ** 31", "2 ** 32 - 1"]);
         Ok(())
     });
 }
