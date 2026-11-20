@@ -215,3 +215,30 @@ export const asyncIteratorTest = {
     deepStrictEqual(names, ['bundle', 'tmp', 'dev']);
   },
 };
+
+// Names are stored as written, so names that differ only in how a URL would
+// encode them are different entries.
+export const namesAsWritten = {
+  async test() {
+    const sub = await temp.getDirectoryHandle('names', { create: true });
+    const names = ['sp ace å', 'p%20q', 'p q', '%41', 'A', 'h#a?sh'];
+    for (const name of names) {
+      const file = await sub.getFileHandle(name, { create: true });
+      strictEqual(file.name, name);
+      const writable = await file.createWritable();
+      await writable.write(name);
+      await writable.close();
+    }
+    const listed = [];
+    for await (const [name] of sub) listed.push(name);
+    deepStrictEqual(listed.sort(), [...names].sort());
+    for (const name of names) {
+      const file = await (await sub.getFileHandle(name)).getFile();
+      strictEqual(await file.text(), name);
+    }
+    await sub.removeEntry('p q');
+    const left = [];
+    for await (const [name] of sub) left.push(name);
+    deepStrictEqual(left.sort(), names.filter((n) => n !== 'p q').sort());
+  },
+};
