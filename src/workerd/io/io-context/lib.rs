@@ -371,10 +371,11 @@ impl<'s> IoContext<'s> {
     ///
     /// Unlike `addFunctor()`, which gives the `IoContext` ownership of the continuation, `data` is
     /// held by the reaction, which the garbage collector traces, so it may hold `jsg::Rc`s and
-    /// `TracedGlobal`s, and a cycle through them can be collected. It is dropped once a reaction has run, in whatever `IoContext` is current
-    /// then: by a rejection that passes through, or a reaction that fails, it may be dropped in
-    /// another request's `IoContext`, or in none. Otherwise it is dropped when the garbage
-    /// collector collects the reactions, rather than when the `IoContext` is destroyed.
+    /// `TracedGlobal`s, and a cycle through them can be collected. It is dropped once a reaction
+    /// has run, in whatever `IoContext` is current then: by a rejection that passes through, or a
+    /// reaction that fails, it may be dropped in another request's `IoContext`, or in none.
+    /// Otherwise it is dropped when the garbage collector collects the reactions, rather than when
+    /// the `IoContext` is destroyed.
     ///
     /// # Errors
     /// Fails unless this `IoContext` is the current one, as `addFunctor()` does, or, leaving an
@@ -1210,7 +1211,8 @@ jsg::jsg_traced_unchecked!(<T> IoOwned<T>);
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);
 
-/// The data of the reactions [`IoContext::then`] and [`IoContext::then_or_catch`] register.
+/// The data of the reactions [`IoContext::then`], [`IoContext::catch`] and
+/// [`IoContext::then_or_catch`] register.
 struct ReactionData<D> {
     data: D,
     // The id of the IoContext the reactions run in.
