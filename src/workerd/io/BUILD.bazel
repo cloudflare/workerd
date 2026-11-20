@@ -544,6 +544,9 @@ wd_capnp_library(
         ":outcome_capnp",
         ":script-version_capnp",
         ":trace_capnp",
+        # A direct dependency for the Rust library: capnpc-rust's code names
+        # `crate::byte_stream_capnp`, which only a direct dependency provides.
+        "@capnp-cpp//src/capnp/compat:byte-stream_capnp",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
 )

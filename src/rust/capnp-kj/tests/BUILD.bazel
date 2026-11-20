@@ -1,0 +1,58 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_capnp_library(src = "test.capnp")
+
+# The Rust half of capnp-kj-test: Rust servers and clients of TestEcho, called from C++.
+wd_rust_crate(
+    name = "capnp-kj-test-rust",
+    testonly = True,
+    cxx_bridge_deps = [
+        "//src/rust/capnp-kj:ffi",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    deps = [
+        ":test_capnp_rust",
+        "//src/rust/capnp-kj",
+        "//src/workerd/io:container_capnp_rust",
+        "@capnp-cpp//src/capnp/compat:byte-stream_capnp_rust",
+        "@crates_vendor//capnp",
+        "@crates_vendor//futures",
+    ],
+)
+
+kj_test(
+    src = "capnp-kj-test.c++",
+    deps = [
+        ":capnp-kj-test-rust",
+        ":test_capnp",
+        "//src/rust/capnp-kj:ffi",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
+
+kj_test(
+    src = "container-test.c++",
+    deps = [
+        ":capnp-kj-test-rust",
+        "//src/rust/capnp-kj:ffi",
+        "//src/workerd/io:container_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+    ],
+)
+
+# How much the bridge adds to a call, and what copying a message costs on its own.
+wd_cc_benchmark(
+    name = "bench-capnp-kj",
+    srcs = ["bench-capnp-kj.c++"],
+    deps = [
+        ":capnp-kj-test-rust",
+        ":test_capnp",
+        "//src/rust/capnp-kj:ffi",
+        "//src/workerd/io:worker-interface_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
