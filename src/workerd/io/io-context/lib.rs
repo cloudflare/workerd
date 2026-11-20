@@ -12,11 +12,13 @@ mod ffi;
 mod trace;
 
 use std::any::Any;
+use std::cell::Cell;
 use std::ffi::CStr;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -265,7 +267,8 @@ impl<'s> IoContext<'s> {
     /// under the isolate lock, and the future resolves with what `map` returns. `map` is `Copy`,
     /// so that what it captures holds no GC references, and `Send`, as the reaction's data must
     /// be. What it returns holds no GC references either ([`jsg::HoldsNoGcReferences`]), since
-    /// nothing traces it while the future holds it.
+    /// nothing traces it while the future holds it. For a conversion that needs the `IoContext`, or
+    /// whose output is not `Send`, use [`await_js_local`](Self::await_js_local).
     ///
     /// The future fails with a [`cxx::KjException`], so that an exception C++ created reaches C++
     /// as it is:
@@ -352,6 +355,56 @@ impl<'s> IoContext<'s> {
         self.await_js(lock, promise, |lock, value| T::from_js(lock, value))
     }
 
+    /// [`await_js`](Self::await_js) for a conversion that runs with this `IoContext` and may
+    /// produce a value local to its thread, as the continuation that C++ `awaitJs()` waits for
+    /// does when it is wrapped in `IoContext::addFunctor()`: for example a `KjOwn<Frankenvalue>`,
+    /// a `KjRc<SubrequestChannel>`, or a C++ struct that holds them, which are neither `Send` nor
+    /// `Sync`. Nothing moves to another thread: the conversion, the future and its output all stay
+    /// on this `IoContext`'s.
+    ///
+    /// The wait is that of `await_js`, with the same failures and cancellation, and the
+    /// conversion runs as `await_js`'s `map` does, with this `IoContext` as well. A reaction that
+    /// runs while this `IoContext` is not the current one, as for a promise that another request
+    /// resolves, fails before the conversion runs, and the wait never settles; it fails once GC
+    /// collects the reactions or this `IoContext` is destroyed, as when C++ `awaitJs()` waits for
+    /// such a promise.
+    ///
+    /// The returned future is neither `Send` nor `Sync`, so it is polled and dropped on this
+    /// `IoContext`'s thread, as the future a reentry callback's function returns is (see
+    /// [`make_reentry_callback_weak`](Self::make_reentry_callback_weak)). The output need only be
+    /// `'static`, as a reentry callback's is. Nothing traces it, so a `jsg::Rc` or `v8::Global` in
+    /// it is a strong reference, held untraced until the future's caller drops it.
+    ///
+    /// # Errors
+    /// As for `await_js`.
+    pub fn await_js_local<T, M>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        map: M,
+    ) -> jsg::Result<AwaitJsLocal<T>>
+    where
+        T: 'static,
+        M: Copy
+            + Send
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<T>,
+    {
+        let wait = self.await_js(lock, promise, move |lock, value| {
+            // The reaction has taken its sender, which succeeds only in this IoContext.
+            let context = IoContext::current(lock)?;
+            Ok(ThreadBound::new(map(lock, &context, value)?))
+        })?;
+        Ok(AwaitJsLocal {
+            wait,
+            _thread: PhantomData,
+        })
+    }
+
     /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
     /// dropped when the `IoContext` is destroyed, or when the returned handle is dropped, unless
     /// [`IoOwned::take`] has taken it. How the value is reached differs from C++; see
@@ -434,6 +487,107 @@ impl<'s> IoContext<'s> {
             self.id,
             Box::new(future),
         )?)
+    }
+
+    /// Returns a callback that re-enters this `IoContext` each time it is called, from KJ rather
+    /// than from JavaScript, and runs `function` there, as the callback of C++
+    /// `IoContext::makeReentryCallbackWeak()` does: it is one, around `function`. Use it to hand a
+    /// JavaScript callback to code that calls it later, such as a C++ `kj::Function` given to
+    /// I/O; see [`ReentryCallback`].
+    ///
+    /// The callback holds this `IoContext` weakly. Unlike C++ `makeReentryCallback()`'s, it adds
+    /// no task, so holding it neither keeps the request alive nor, in a Durable Object, blocks
+    /// hibernation. It does hold a pending event, as C++'s does, so the request is not treated as
+    /// hung while the callback exists. `function` is dropped when the callback is and no call of
+    /// it is still running in `IoContext::run()`, which keeps it alive until it returns, or when
+    /// this `IoContext` is destroyed, whichever is first.
+    ///
+    /// Each call runs `function` in C++ `IoContext::run()`, in the critical section that was
+    /// current when this was called, if any, with a new lock and the `IoContext`. What `function`
+    /// returns is waited for as part of the request, and the call's future completes with its
+    /// output. To wait for a JavaScript promise, return the future of an
+    /// [`await_js_local`](Self::await_js_local), whose conversion runs in this
+    /// `IoContext` or not at all, and can build an output that belongs to its thread, as the
+    /// continuation C++ wraps in `addFunctor()` does; the future can be returned as it is.
+    ///
+    /// If `function` fails, the call fails with a KJ exception, as a C++ function that `run()`
+    /// runs does:
+    ///
+    /// - With an exception that JavaScript threw, logged as uncaught from
+    ///   [`UncaughtExceptionSource::Internal`], then tunneled as [`jsg::Lock::exception_to_kj`]
+    ///   does.
+    /// - With an error it returned, tunneled as the exception throwing it would throw, and not
+    ///   logged, as a KJ exception from C++ is not.
+    /// - If execution is terminating, with the exception C++ `run()` fails with then: the
+    ///   exceeded limit, or the exception the request was aborted with.
+    /// - If it panics, with an internal error, and execution is terminated, as for
+    ///   [`await_io_and_run`](Self::await_io_and_run).
+    ///
+    /// Neither `function`, nor the futures it returns, nor their output need be `Send`, so the
+    /// output can hold C++ objects that belong to this `IoContext`'s thread. C++ holds `function`
+    /// in this `IoContext` and runs and drops it only on its thread, KJ polls the futures there,
+    /// and the output reaches only the call's future, which is not `Send` either. The futures are
+    /// polled and dropped without the isolate lock, and are `'static`, as `function` is, so they
+    /// can't hold a `v8::Local` of a lock; a `v8::Global` or `jsg::Rc` they hold can only be
+    /// dropped, which needs no lock.
+    ///
+    /// # Example
+    ///
+    /// An API that keeps a JavaScript callback returning a Worker's code, for C++ to call later,
+    /// as `WorkerLoader.get()` does. The conversion runs in this `IoContext` when the code's
+    /// promise is fulfilled, and builds an output that is not `Send`, here an `Rc`; for
+    /// `WorkerLoader.get()`, the `DynamicWorkerSource` with the Worker's `env` as a
+    /// `KjOwn<Frankenvalue>` and its outbound channels. The `ok-reentry-callback` compile test
+    /// builds this example.
+    ///
+    /// ```ignore
+    /// #[jsg_struct]
+    /// pub struct WorkerCode {
+    ///     pub main_module: String,
+    ///     pub compatibility_date: String,
+    /// }
+    ///
+    /// pub fn keep<'s>(
+    ///     lock: &mut jsg::Lock<'s>,
+    ///     get_code: v8::Local<'s, v8::Function>,
+    /// ) -> jsg::Result<ReentryCallback<Rc<WorkerCode>>> {
+    ///     let get_code = get_code.to_global(lock);
+    ///     IoContext::current(lock)?.make_reentry_callback_weak(move |lock, context| {
+    ///         let code = get_code.as_local(lock).call(lock, None, &[])?;
+    ///         let code = v8::Promise::resolved(lock, code)?;
+    ///         context.await_js_local(lock, code, |lock, _context, value| {
+    ///             Ok(Rc::new(WorkerCode::from_js(lock, value)?))
+    ///         })
+    ///     })
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn make_reentry_callback_weak<T, Fut, F>(
+        &self,
+        function: F,
+    ) -> jsg::Result<ReentryCallback<T>>
+    where
+        T: 'static,
+        Fut: Future<Output = Result<T, cxx::KjException>> + 'static,
+        F: for<'t> FnMut(&mut jsg::Lock<'t>, &IoContext<'t>) -> jsg::Result<Fut> + 'static,
+    {
+        let mut function = function;
+        let function = ffi::ReentryFn(Box::new(move |lock| {
+            let context = IoContext::current(lock)?;
+            let future = function(lock, &context)?;
+            let future: ffi::ReentryFuture = Box::pin(async move {
+                let output: Box<dyn Any> = Box::new(future.await?);
+                Ok(output)
+            });
+            Ok(future)
+        }));
+        let callback = bridge::io_context_make_reentry_callback_weak(self.id, Box::new(function))?;
+        Ok(ReentryCallback {
+            callback,
+            _output: PhantomData,
+        })
     }
 
     /// Has the request fail open, as `ctx.passThroughOnException()` does through C++
@@ -885,6 +1039,104 @@ impl<T> Drop for AwaitJs<T> {
     }
 }
 
+/// A future for the outcome of a JavaScript promise, converted in its `IoContext`, from
+/// [`IoContext::await_js_local`].
+///
+/// It is an [`AwaitJs`] whose output belongs to the `IoContext`'s thread, so it is neither `Send`
+/// nor `Sync`. It is polled without the isolate lock, and dropping it cancels the wait, as for an
+/// `AwaitJs`.
+pub struct AwaitJsLocal<T> {
+    wait: AwaitJs<ThreadBound<T>>,
+    // Keeps the future, and so the output it takes, on the thread that created it.
+    _thread: PhantomData<*const ()>,
+}
+
+impl<T> Future for AwaitJsLocal<T> {
+    type Output = Result<T, cxx::KjException>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.get_mut().wait)
+            .poll(cx)
+            .map(|result| result.map(ThreadBound::into_inner))
+    }
+}
+
+/// The output of an [`AwaitJsLocal`], while the wait's shared state holds it.
+///
+/// It records the thread that created it, and debug builds assert that it is taken out or
+/// dropped there. The SAFETY comment below does not rely on that check; it catches a change to
+/// `AwaitJs` that breaks what the comment relies on.
+struct ThreadBound<T> {
+    // `None` only once `into_inner()` has taken the value.
+    value: Option<T>,
+    thread: std::thread::ThreadId,
+}
+
+impl<T> ThreadBound<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value: Some(value),
+            thread: std::thread::current().id(),
+        }
+    }
+
+    fn into_inner(mut self) -> T {
+        self.debug_assert_thread();
+        let Some(value) = self.value.take() else {
+            unreachable!("only into_inner() takes the value, and it consumes the ThreadBound")
+        };
+        value
+    }
+
+    fn debug_assert_thread(&self) {
+        debug_assert_eq!(
+            self.thread,
+            std::thread::current().id(),
+            "the output of an AwaitJsLocal is touched only on its IoContext's thread"
+        );
+    }
+}
+
+impl<T> Drop for ThreadBound<T> {
+    fn drop(&mut self) {
+        if self.value.is_some() {
+            self.debug_assert_thread();
+        }
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "the output of an AwaitJsLocal is touched only on its IoContext's thread; see the \
+              SAFETY comment"
+)]
+// SAFETY: the value belongs to its IoContext's thread, and is touched only there. The conversion
+// of `await_js_local()` creates it, in a reaction that has taken its sender through
+// `IoOwned::take()`, which requires the IoContext to be current, so on its thread. It goes into
+// the wait's state, which only the sender, the abort watcher's callback and the `AwaitJsLocal`
+// reach. The `AwaitJsLocal` takes it out or drops it, on the thread that created it, which is
+// the IoContext's, since `await_js_local()` requires the IoContext to be current and the
+// future is neither `Send` nor `Sync`. The other references to the state, through which the last
+// one may drop the value, are those of the sender, which is dropped on the IoContext's thread (see
+// `ThreadBoundAbortWatcher`), and of the abort watcher's callback, which upgrades its weak one
+// only while it runs, on that thread. A value that the wait discards, because it was aborted
+// first, is dropped where it was created, in the reaction. No reaction data holds one, so GC never
+// drops one.
+unsafe impl<T> Send for ThreadBound<T> {}
+
+// These impls exist only so that the wait's state can sit in the data of a reaction, whose sender
+// `IoOwned` holds the state outside any traced value. `ThreadBound` is private, and only the state
+// of an `AwaitJsLocal` wait holds one: never a resource, a reaction's data or anything else
+// that GC traces. So a `T` that holds a `jsg::Rc` or a `TracedGlobal` is never visited, and its
+// references stay strong, as in any untraced Rust value, until the caller of the future drops
+// them. Written out rather than with `jsg_traced_unchecked!`, which would bound `T` by
+// `HoldsNoGcReferences`.
+impl<T> jsg::Traced for ThreadBound<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T> jsg::HoldsNoGcReferences for ThreadBound<T> {}
+
 /// The data of the reactions [`IoContext::await_js`] registers.
 struct AwaitJsReaction<T, M> {
     sender: IoOwned<AwaitJsSender<T>>,
@@ -1096,6 +1348,144 @@ impl<T> Drop for SlotRef<T> {
         let value = lock_slot(&self.0).take();
         drop(value);
     }
+}
+
+/// A callback that re-enters the `IoContext` that created it, from
+/// [`IoContext::make_reentry_callback_weak`].
+///
+/// It can be called any number of times, and each call returns a future for the output of the
+/// function the callback runs.
+///
+/// It is the C++ callback that `IoContext::makeReentryCallbackWeak()` returns, which belongs to
+/// its `IoContext`'s thread, so it is neither `Send` nor `Sync`, nor are the futures it returns.
+/// Code that hands it to C++, as a `kj::Function` that returns a `kj::Promise`, wraps it in an
+/// `extern "Rust"` type of its own bridge, with an `async` function that calls it and converts
+/// its output. C++ must then call and destroy that type on the `IoContext`'s thread, as it would
+/// the C++ callback.
+pub struct ReentryCallback<T> {
+    // Neither `Send` nor `Sync`, as a C++ type the bridge declares is not, which keeps the
+    // callback on its thread (the `reentry-callback-is-not-send` compile test).
+    callback: KjOwn<bridge::ReentryCallback>,
+    // The callback holds no `T`.
+    _output: PhantomData<fn() -> T>,
+}
+
+impl<T: 'static> ReentryCallback<T> {
+    /// Calls the callback, and returns a future for the output of its function.
+    ///
+    /// The call starts now, as the C++ callback's does: it checks the `IoContext` and schedules
+    /// `IoContext::run()`, which runs the function once the isolate lock is free. Dropping the
+    /// future cancels the call, as dropping the C++ promise does. Dropping the callback does not:
+    /// the call keeps the function alive until it finishes.
+    ///
+    /// The future fails with a [`cxx::KjException`]:
+    ///
+    /// - If the `IoContext` that created the callback is gone, with an `Error` whose message is
+    ///   `The execution context which hosts this callback is no longer running.`, before the
+    ///   function runs.
+    /// - In a Durable Object that is hibernating, with an `Error` whose message is
+    ///   `The Durable Object is hibernating.`, before the function runs.
+    /// - If the `IoContext` handles no request, with the error C++ `IoContext::run()` fails with
+    ///   then, before the function runs.
+    /// - If the `IoContext` is destroyed or aborted while the call waits, with the exception it
+    ///   is cancelled or aborted with.
+    /// - If the function fails, as [`IoContext::make_reentry_callback_weak`] says.
+    #[must_use = "the call is cancelled if its future is dropped"]
+    pub fn call(&self) -> ReentryCallFuture<T> {
+        let output = Rc::new(Cell::new(None));
+        let call = ffi::ReentryCall {
+            future: None,
+            output: Rc::clone(&output),
+        };
+        let wait: ReentryWait = match bridge::reentry_callback_call(&self.callback, Box::new(call))
+        {
+            Ok(promise) => Box::pin(bridge::reentry_promise_wait(promise)),
+            Err(err) => Box::pin(std::future::ready(Err(err))),
+        };
+        ReentryCallFuture {
+            wait,
+            output,
+            _output: PhantomData,
+        }
+    }
+}
+
+/// What a [`ReentryCallFuture`] waits for: the C++ promise of the call.
+type ReentryWait = Pin<Box<dyn Future<Output = Result<(), cxx::KjException>>>>;
+
+/// The output of a [`ReentryCallFuture`], once the future of the function has completed.
+type ReentryOutput = Rc<Cell<Option<Box<dyn Any>>>>;
+
+/// The future of one call of a [`ReentryCallback`], from [`ReentryCallback::call`].
+pub struct ReentryCallFuture<T> {
+    wait: ReentryWait,
+    output: ReentryOutput,
+    _output: PhantomData<fn() -> T>,
+}
+
+impl<T: 'static> Future for ReentryCallFuture<T> {
+    type Output = Result<T, cxx::KjException>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.wait.as_mut().poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            Poll::Ready(Ok(())) => {
+                let Some(output) = self.output.take() else {
+                    unreachable!("the call succeeds only once its output is set")
+                };
+                // The function of `make_reentry_callback_weak()` produced `output` from this `T`.
+                let output = output
+                    .downcast::<T>()
+                    .unwrap_or_else(|_| unreachable!("the output of a reentry callback"));
+                Poll::Ready(Ok(*output))
+            }
+        }
+    }
+}
+
+/// Runs the function of a [`ReentryCallback`], for `reentry_fn_run()`, and returns the future the
+/// call waits for. Fails only while execution is terminating, with an error for which
+/// [`jsg::Error::is_pending`] is true. Otherwise, a failure of `function` becomes the exception
+/// the future fails with; see [`IoContext::make_reentry_callback_weak`].
+fn start_reentry(
+    lock: &mut jsg::Lock<'_>,
+    function: &mut ffi::ReentryFnBox,
+) -> jsg::Result<ffi::ReentryFuture> {
+    // Only the exceptions that JavaScript threw are caught here. An error that `function`
+    // returned is converted without being thrown.
+    let result = lock.try_catch(|lock| match function(lock) {
+        Err(err) if !err.is_pending() => Ok(Err(err)),
+        result => result.map(Ok),
+    })?;
+    let result = match result {
+        Ok(Ok(future)) => return Ok(future),
+        Ok(Err(err)) => lock.try_catch(|lock| {
+            let exception = lock.exception(&err)?;
+            lock.exception_to_kj(exception)
+        })?,
+        // As C++ `IoContext::run()` does for an exception that JavaScript threw in the function
+        // it runs, before it tunnels it.
+        Err(exception) => lock.try_catch(|lock| {
+            IoContext::current(lock)?.log_uncaught_exception(
+                lock,
+                UncaughtExceptionSource::Internal,
+                exception,
+            )?;
+            lock.exception_to_kj(exception)
+        })?,
+    };
+    // JavaScript that converting the failure runs can throw, as a getter of the exception's
+    // `stack`, `overloaded` or `retryable` property: then the call fails with an internal error.
+    let exception = result.unwrap_or_else(|_| {
+        cxx::KjError::new(
+            cxx::KjExceptionType::Failed,
+            "converting what the function of a reentry callback failed with threw".to_owned(),
+        )
+    });
+    Ok(Box::pin(std::future::ready(Err(cxx::KjException::from(
+        exception,
+    )))))
 }
 
 fn lock_slot<T>(slot: &Mutex<Option<T>>) -> MutexGuard<'_, Option<T>> {
