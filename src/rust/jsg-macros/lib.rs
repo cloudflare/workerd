@@ -149,10 +149,6 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             const UNION_TYPES: jsg::UnionTypes = jsg::UnionTypes::DICTIONARY;
 
             fn class_name() -> &'static str { #class_name }
-
-            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                value.is_object()
-            }
         }
 
         impl<'s> jsg::ToJS<'s> for #name {

@@ -349,36 +349,21 @@ pub trait UnionVariant {
 
     /// The names of the variant's types, flattened; see [`Type::UNION_NAMES`].
     const UNION_NAMES: &'static [&'static str];
-
-    /// Whether `value` is exactly of the variant's type; see [`Type::is_exact`].
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
 }
 
 impl<T: Type> UnionVariant for T {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES;
     const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        T::is_exact(value)
-    }
 }
 
 impl<T: UnionVariant> UnionVariant for Option<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.optional();
     const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_undefined() || T::is_exact(value)
-    }
 }
 
 impl<T: UnionVariant> UnionVariant for LenientOption<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.optional();
     const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_undefined() || T::is_exact(value)
-    }
 }
 
 #[cfg(test)]

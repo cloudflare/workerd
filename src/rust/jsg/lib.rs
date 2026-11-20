@@ -841,27 +841,33 @@ impl<T> Deref for NonCoercible<T> {
 /// These are `String`, `bool` and `f64`, as C++ JSG's `CoercibleType` (jsg/jsg.h) is
 /// `kj::String`, `bool` and `double`.
 ///
-/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
-/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
-/// a coarse test. The trait is sealed.
+/// Other types, such as resources and unions, have no coercion of their own to disable. The
+/// trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
     note = "`NonCoercible<T>` takes only `String`, `bool` or `f64`. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
-pub trait Coercible: Type + coercible::Sealed {}
+pub trait Coercible: Type + coercible::Sealed {
+    /// Whether `value` is of exactly this type, so that converting it coerces nothing.
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+}
 
 mod coercible {
     pub trait Sealed {}
 }
 
 macro_rules! impl_coercible {
-    ($($t:ty),* $(,)?) => {
+    ($($t:ty: $is_exact:ident),* $(,)?) => {
         $(impl coercible::Sealed for $t {}
-        impl Coercible for $t {})*
+        impl Coercible for $t {
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                value.$is_exact()
+            }
+        })*
     };
 }
 
-impl_coercible!(String, bool, f64);
+impl_coercible!(String: is_string, bool: is_boolean, f64: is_number);
 
 #[expect(
     unsafe_code,
@@ -1510,20 +1516,12 @@ fn up_to_nul(text: &str) -> &str {
 
 /// Provides metadata about Rust types exposed to JavaScript.
 ///
-/// This trait provides type information used for error messages and type validation (for
-/// `NonCoercible<T>`). The actual conversion logic is in `ToJS` (Rust → JS) and `FromJS`
-/// (JS → Rust). What a resource reports to heap snapshots is in [`GarbageCollected`].
+/// This trait provides type information used for error messages. The actual conversion logic is
+/// in `ToJS` (Rust → JS) and `FromJS` (JS → Rust). What a resource reports to heap snapshots is
+/// in [`GarbageCollected`].
 pub trait Type: Sized {
     /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
-
-    /// Returns true if the V8 value is exactly this type (no coercion).
-    /// Used by `NonCoercible<T>` to reject values that would require coercion.
-    ///
-    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
-    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
-    /// object, and a union's any value that one of its variants' accepts.
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
 
     /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
     /// at compile time; see [`UnionTypes`].
