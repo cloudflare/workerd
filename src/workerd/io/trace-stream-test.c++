@@ -42,6 +42,18 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
     kj::Maybe<uint32_t> droppedCount;
   };
 
+  // The trace context of an event, in the order received.
+  struct Event {
+    rpc::Trace::TailEvent::Event::Which which;
+    TraceId traceId;
+    TraceId invocationId;
+    kj::Maybe<uint64_t> spanId;
+    kj::Maybe<TraceFlags> traceFlags;
+    // For SpanOpen events, the opened span's ID.
+    uint64_t openedSpanId = 0;
+  };
+
+  kj::Vector<Event> events;
   kj::Vector<Batch> batches;
   bool stopOnOnset = false;
 
@@ -50,6 +62,22 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
     for (auto event: context.getParams().getEvents()) {
       auto e = event.getEvent();
       batch.events.add(e.which());
+      auto spanContext = event.getSpanContext();
+      Event recorded{
+        .which = e.which(),
+        .traceId = TraceId::fromCapnp(spanContext.getTraceId()),
+        .invocationId = TraceId::fromCapnp(event.getInvocationId()),
+      };
+      if (spanContext.getInfo().isSpanId()) {
+        recorded.spanId = spanContext.getInfo().getSpanId();
+      }
+      if (spanContext.hasTraceFlags() && spanContext.getTraceFlags().getValue().isSet()) {
+        recorded.traceFlags = TraceFlags(spanContext.getTraceFlags().getValue().getSet());
+      }
+      if (e.isSpanOpen()) {
+        recorded.openedSpanId = e.getSpanOpen().getSpanId();
+      }
+      events.add(kj::mv(recorded));
       if (e.isStreamDiagnostics()) {
         batch.droppedCount = e.getStreamDiagnostics().getDiagnostic().getDroppedEvents().getCount();
       }
@@ -68,6 +96,15 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
   void ack() {
     KJ_ASSERT(nextAck < acks.size());
     acks[nextAck++]->fulfill();
+  }
+
+  // Receives and acknowledges batches until the writer has nothing more to send.
+  void drain(kj::WaitScope& waitScope) {
+    for (;;) {
+      waitScope.poll();
+      if (nextAck == acks.size()) break;
+      while (nextAck < acks.size()) ack();
+    }
   }
 
  private:
@@ -163,7 +200,7 @@ struct WriterTest {
   }
 
   void reportOnset() {
-    writer->report(context,
+    writer->report(context.toSpanContext(), context.getInvocationId(),
         kj::heap<Onset>(SpanId(1),
             Onset::Info(FetchEventInfo(
                 kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr)),
@@ -173,13 +210,13 @@ struct WriterTest {
 
   // Reports a log whose message is reported to own `size` bytes.
   void reportLog(size_t size) {
-    writer->report(
-        context, Log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("x")), kj::UNIX_EPOCH, size);
+    writer->report(context.toSpanContext(), context.getInvocationId(),
+        Log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("x")), kj::UNIX_EPOCH, size);
   }
 
   void reportOutcome() {
-    writer->report(
-        context, Outcome(EventOutcome::OK, 0 * kj::SECONDS, 0 * kj::SECONDS), kj::UNIX_EPOCH, 0);
+    writer->report(context.toSpanContext(), context.getInvocationId(),
+        Outcome(EventOutcome::OK, 0 * kj::SECONDS, 0 * kj::SECONDS), kj::UNIX_EPOCH, 0);
   }
 
   void poll() {
@@ -291,6 +328,44 @@ KJ_TEST("TailStreamWriter gives back its budget when the tail worker stops the s
 
   KJ_EXPECT(budget->held == 0);
   KJ_EXPECT(test.target->batches.size() == 1);
+}
+
+KJ_TEST("TailStreamWriter::report() preserves SpanContext and invocationId") {
+  WriterTest test;
+  TraceId traceId(0x1111, 0x2222);
+  TraceId invocationId(0x3333, 0x4444);
+
+  // Onset with no parent spanId omits spanId on the wire.
+  test.writer->report(SpanContext(traceId, kj::none, TraceFlags(0x01)), invocationId,
+      kj::heap<Onset>(SpanId(10),
+          Onset::Info(FetchEventInfo(
+              kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr)),
+          Onset::WorkerInfo{}, nullptr),
+      kj::UNIX_EPOCH, 0);
+  // Log with a concrete spanId and unsampled traceFlags (0x00, distinct from absent).
+  test.writer->report(SpanContext(traceId, SpanId(42), TraceFlags(0x00)), invocationId,
+      Log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("hi")), kj::UNIX_EPOCH, 2);
+  // Explicit SpanId::nullId is normalized to absent on the wire.
+  test.writer->report(SpanContext(traceId, SpanId::nullId, kj::none), invocationId,
+      Outcome(EventOutcome::OK, 0 * kj::SECONDS, 0 * kj::SECONDS), kj::UNIX_EPOCH, 0);
+
+  test.target->drain(test.waitScope);
+  KJ_ASSERT(test.target->events.size() == 3);
+
+  KJ_EXPECT(test.target->events[0].traceId == traceId);
+  KJ_EXPECT(test.target->events[0].invocationId == invocationId);
+  KJ_EXPECT(test.target->events[0].spanId == kj::none);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.target->events[0].traceFlags) == TraceFlags(0x01));
+
+  KJ_EXPECT(test.target->events[1].traceId == traceId);
+  KJ_EXPECT(test.target->events[1].invocationId == invocationId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.target->events[1].spanId) == 42u);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.target->events[1].traceFlags) == TraceFlags(0x00));
+
+  KJ_EXPECT(test.target->events[2].traceId == traceId);
+  KJ_EXPECT(test.target->events[2].invocationId == invocationId);
+  KJ_EXPECT(test.target->events[2].spanId == kj::none);
+  KJ_EXPECT(test.target->events[2].traceFlags == kj::none);
 }
 
 }  // namespace
