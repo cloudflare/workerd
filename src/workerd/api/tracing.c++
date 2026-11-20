@@ -153,6 +153,17 @@ kj::Maybe<tracing::SpanLink> toSpanLink(jsg::Lock& js,
 // SpanState
 
 void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
+  if (key == "user.id"_kj || key == "session.id"_kj || key == "account.id"_kj) {
+    KJ_IF_SOME(value, maybeValue) {
+      KJ_IF_SOME(text, value.tryGet<kj::String>()) {
+        KJ_IF_SOME(context, IoContext::tryCurrent()) {
+          KJ_IF_SOME(collector, context.getIssueCollector()) {
+            collector.noteUserContext(key, text);
+          }
+        }
+      }
+    }
+  }
   if (!canRecordAttributes()) {
     return;
   }
