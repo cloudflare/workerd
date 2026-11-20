@@ -126,15 +126,7 @@ export default {
     comment: 'ReferenceError: window is not defined',
     omittedTests: true,
   },
-  'textdecoder-arguments.any.js': {
-    comment:
-      'TextDecoder does not detach the underlying ArrayBuffer during options argument conversion',
-    disabledTests: [
-      // Behavior differs between platforms: on Windows this test passes while
-      // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
-      'TextDecoder decode() with array buffer detached during arg conversion',
-    ],
-  },
+  'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
   'textdecoder-copy.any.js': {},
   'textdecoder-eof.any.js': {},
