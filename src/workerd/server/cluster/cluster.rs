@@ -159,8 +159,15 @@ impl Cluster {
         // Named open here, but not open here. Evicted here with the bucket
         // holding the epoch: resume it (`take_over`); a stale owner that
         // writes on cannot acknowledge, since every acknowledgement rereads
-        // own.json. Otherwise, dropped after a failure or evicted before its
-        // upload completed: recover it at the next epoch.
+        // own.json. Otherwise, dropped after a failure, evicted before its
+        // upload completed or its files failed to sync: recover it at the
+        // next epoch. An eviction of the epoch still running decides which.
+        if let Claim::Owned(owned) = &claim
+            && owned.recover.is_none()
+            && !self.owners.holds(ns, actor)
+        {
+            self.owners.evicted(ns, actor, owned.epoch).await;
+        }
         if let Claim::Owned(owned) = &claim
             && owned.recover.is_none()
             && !self.owners.holds(ns, actor)
@@ -317,6 +324,12 @@ impl Cluster {
         self.owners.tier().await;
     }
 
+    /// Counts an eviction of an object as running, for the claims here to
+    /// wait for, until the guard is dropped (`Owners::evicting`).
+    pub fn evicting(&self, ns: &str, actor: &str, epoch: u64) -> crate::Evicting {
+        self.owners.evicting(ns, actor, epoch)
+    }
+
     /// Keep an object workerd evicted, uploading what the bucket lacks.
     pub async fn evict_actor(&self, ns: &str, actor: &str, epoch: u64) {
         self.owners.evict(ns, actor, epoch).await;
@@ -414,22 +427,27 @@ impl Cluster {
                 }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
             }
-            let delay = match step {
+            let wait = match step {
                 Step::Fence(reason) => return reason,
                 Step::Retry(reason) => {
                     tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
-                    timing.retry_ms
+                    tokio::time::sleep(ms(timing.retry_ms)).await;
+                    continue;
                 }
-                Step::Renew => timing.interval_ms,
+                Step::Renew => tokio::time::sleep(ms(timing.interval_ms)),
             };
             // A stale listing only delays routing to a new peer: its
-            // failure is logged, never fatal.
-            match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
-                Err(_) => tracing::warn!("listing the cluster timed out"),
-            }
-            tokio::time::sleep(ms(delay)).await;
+            // failure is logged, never fatal. It runs during the wait for
+            // the next renewal, which a slow one delays only past that wait,
+            // and not after a failed renewal, whose retry it would delay.
+            let list = async {
+                match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
+                    Err(_) => tracing::warn!("listing the cluster timed out"),
+                }
+            };
+            futures::join!(list, wait);
         }
     }
 
@@ -491,8 +509,8 @@ impl Cluster {
         !self.ownership.may_claim.get()
     }
 
-    /// The first renewal, before the node links its services: their
-    /// storage opens only under a lease.
+    /// The first renewal, before the node links its services, after a
+    /// check that the bucket keeps conditional writes.
     pub async fn join(&self) -> Result<()> {
         let probe = format!("nodes/{}.probe", self.node());
         check_conditional_writes(&self.bucket, &probe).await?;
@@ -500,12 +518,16 @@ impl Cluster {
     }
 
     /// Renews the lease once more as the node starts serving, so that its
-    /// first maintenance round finds the lease held. Linking, after `join`,
-    /// opens every namespace's storage, which on a slow disk takes most of
-    /// a lease. A lease that lapsed meanwhile is renewed, not fenced on:
-    /// the node has run no actor and claimed nothing a peer could take over.
+    /// first maintenance round finds the lease held; from then on its actors
+    /// run only while the lease holds (`actors_may_run`). Linking, after
+    /// `join`, opens every namespace's storage, which on a slow disk or a
+    /// loaded machine outlasts a lease. A lease that lapsed meanwhile is
+    /// renewed, not fenced on: the node has run no actor and claimed nothing
+    /// a peer could take over.
     pub async fn renew_to_serve(&self) -> Result<()> {
-        self.take_lease().await
+        self.take_lease().await?;
+        self.lease.borrow_mut().requires_live_lease = true;
+        Ok(())
     }
 
     async fn take_lease(&self) -> Result<()> {
@@ -514,10 +536,15 @@ impl Cluster {
         Ok(())
     }
 
-    /// Whether this node's lease holds now: an actor database opens only
-    /// while it does.
+    /// Whether this node's lease holds now.
     pub fn lease_holds(&self) -> bool {
         self.lease.borrow().holds(now_ms())
+    }
+
+    /// Whether this node's actors may run and open their databases now:
+    /// before it serves, always; then while its lease holds.
+    pub fn actors_may_run(&self) -> bool {
+        self.lease.borrow().allows_actors(now_ms())
     }
 }
 

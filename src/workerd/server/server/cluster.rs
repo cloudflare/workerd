@@ -960,8 +960,11 @@ impl Retire {
         let cluster = Rc::clone(&self.node.cluster);
         cluster.close_actor(&self.namespace, &self.actor);
         let (namespace, actor, epoch) = (self.namespace, self.actor, self.epoch);
+        // From now, not once the task runs: a request meanwhile waits for the eviction.
+        let evicting = cluster.evicting(&namespace, &actor, epoch);
         self.node.factory.spawn_detached(async move {
             cluster.evict_actor(&namespace, &actor, epoch).await;
+            drop(evicting);
         });
     }
 }

@@ -233,15 +233,22 @@ class ActorStorage::Impl final: public kj::Refcounted {
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
 
+  // Whether this namespace's facet indexes sync: not in a cluster, whose takeovers remove them.
+  SyncFacetIndex syncFacetIndex() const;
+
   // The facet index of the root actor `rootKey`, read from disk for one operation; none when it
   // does not exist (so no facet can have storage).
-  kj::Maybe<kj::Own<FacetTreeIndex>> getFacetTreeIndexIfNotEmpty(
-      const kj::Directory& dir, kj::StringPtr rootKey);
+  static kj::Maybe<kj::Own<FacetTreeIndex>> getFacetTreeIndexIfNotEmpty(
+      const kj::Directory& dir, kj::StringPtr rootKey, SyncFacetIndex sync);
 
-  kj::Path getSqlitePath(kj::StringPtr rootKey, uint facetId, kj::StringPtr suffix = ""_kj);
-  void deleteFacet(
+  static kj::Path getSqlitePath(kj::StringPtr rootKey, uint facetId, kj::StringPtr suffix = ""_kj);
+  static void deleteFacet(
       const kj::Directory& dir, kj::StringPtr rootKey, FacetTreeIndex& index, uint facetId);
-  void deleteDescendantStorage(const kj::Directory& dir, kj::StringPtr rootKey, uint parentId);
+  static void deleteDescendantStorage(
+      const kj::Directory& dir, kj::StringPtr rootKey, uint parentId, SyncFacetIndex sync);
+  // Removes the root actor `rootKey`'s databases, its facets', and their index from `dir`. Static,
+  // so it can run off the event loop on a directory of its own.
+  static void clearObject(const kj::Directory& dir, kj::StringPtr rootKey);
   void cloneFacet(const kj::Directory& dir,
       kj::StringPtr rootKey,
       FacetTreeIndex& index,

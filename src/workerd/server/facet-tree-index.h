@@ -1,9 +1,15 @@
 #pragma once
 
+#include <workerd/util/strong-bool.h>
+
 #include <kj/filesystem.h>
 #include <kj/map.h>
 
 namespace workerd::server {
+
+// Whether a FacetTreeIndex syncs its file after each write. NO for an index nothing reads after a
+// crash of the machine, such as a cluster node's, which a takeover removes.
+WD_STRONG_BOOL(SyncFacetIndex);
 
 using kj::uint;
 
@@ -51,7 +57,7 @@ class FacetTreeIndex {
  public:
   // Construct the index, reading the given file to populate the initial index, and then arranging
   // to append new entries to the file as needed.
-  FacetTreeIndex(kj::Own<const kj::File> file);
+  FacetTreeIndex(kj::Own<const kj::File> file, SyncFacetIndex sync = SyncFacetIndex::YES);
 
   // Gets the ID for the given facet, assigning it if needed.
   uint getId(uint parent, kj::StringPtr name);
@@ -68,6 +74,7 @@ class FacetTreeIndex {
 
  private:
   kj::Own<const kj::File> file;
+  SyncFacetIndex sync;
 
   // Offset at which to write the next entry. Typically points to the end of the file (except when
   // a corrupted tail was detected).

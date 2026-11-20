@@ -300,13 +300,14 @@ impl ActorNamespace {
         }
     }
 
-    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
-    /// have been taken over: running its actors, even to read their databases, could act on stale
-    /// data.
+    /// Fails in a cluster once this instance serves and its lease has lapsed. A node stalled past
+    /// its lease may have been taken over: running its actors, even to read their databases, could
+    /// act on stale data. Before it serves, linking opens the namespace's storage under no lease
+    /// (`Cluster::actors_may_run`).
     fn require_lease(&self) -> Result<()> {
         if self
             .cluster()
-            .is_some_and(|node| !node.cluster.lease_holds())
+            .is_some_and(|node| !node.cluster.actors_may_run())
         {
             return Err(kj::failed!(
                 "this instance's cluster lease in the bucket has lapsed"
@@ -589,6 +590,7 @@ impl ActorNamespace {
                     ));
                 }
                 claim_directory(&directory)?;
+                clear_directory(&directory)?;
             }
             let _ = self.directory.set(directory);
         }
@@ -598,11 +600,6 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
-        if self.cluster().is_some() {
-            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
-            // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
-        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -658,25 +655,86 @@ impl ActorNamespace {
     }
 }
 
-/// Marks a namespace's `directory` as the cluster's. The cluster replaces an
-/// object's database with the bucket's copy, so a directory holding Durable
-/// Objects from before cluster mode is refused rather than deleted.
+/// Empties a cluster namespace's `directory` but for its `.cluster` marker, as the process starts.
+/// What an earlier process left there goes unread: the bucket holds the objects, a takeover
+/// restores each from it, and peers adopt the earlier process's alarms from it. Those files were
+/// written with no syncs, so after a crash of the machine any of them may be torn, a facet index
+/// or the alarm scheduler's database included, and none can be trusted to clean up the rest. The
+/// files this process writes it reads only while the OS has kept them for it.
+fn clear_directory(directory: &str) -> Result<()> {
+    let entries = std::fs::read_dir(directory).map_err(|e| kj::failed!("{directory}: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| kj::failed!("{directory}: {e}"))?;
+        if entry.file_name() == ".cluster" {
+            continue;
+        }
+        let path = entry.path();
+        let removed = match entry.file_type() {
+            Ok(kind) if kind.is_dir() => std::fs::remove_dir_all(&path),
+            Ok(_) => std::fs::remove_file(&path),
+            Err(e) => Err(e),
+        };
+        match removed {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(kj::failed!("{}: {e}", path.display()));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Marks a namespace's `directory` as the cluster's, which `clear_directory` then empties at each
+/// start. The cluster replaces an object's database with the bucket's copy, so a directory holding
+/// Durable Objects from before cluster mode is refused rather than deleted, and so is one holding
+/// anything else but the alarm scheduler's database of a namespace with no objects, which is all
+/// workerd would have left there: regular files of its names, not directories nor symlinks.
 fn claim_directory(directory: &str) -> Result<()> {
     let directory = std::path::Path::new(directory);
     let marker = directory.join(".cluster");
     if marker.exists() {
         return Ok(());
     }
-    let databases = std::fs::read_dir(directory).into_iter().flatten().flatten();
-    let held = databases.map(|e| e.file_name()).any(|name| {
-        let name = name.to_string_lossy();
-        name.ends_with(".sqlite") && name != "metadata.sqlite"
-    });
-    if held {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries.collect::<std::io::Result<Vec<_>>>(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e),
+    };
+    let entries = entries.map_err(|e| kj::failed!("{}: {e}", directory.display()))?;
+    // Each entry's name, and whether it is a regular file: not a directory, nor a symlink.
+    let mut names: Vec<(String, bool)> = entries
+        .iter()
+        .map(|e| {
+            let file = e.file_type().is_ok_and(|t| t.is_file());
+            (e.file_name().to_string_lossy().into_owned(), file)
+        })
+        .collect();
+    names.sort();
+    let scheduler = |name: &str| {
+        ["", "-wal", "-shm", "-journal"]
+            .iter()
+            .any(|suffix| name == format!("metadata.sqlite{suffix}"))
+    };
+    if names
+        .iter()
+        .any(|(name, _)| name.ends_with(".sqlite") && !scheduler(name))
+    {
         return Err(kj::failed!(
             "{} holds Durable Objects from before cluster mode, which the cluster would \
              replace: move them away",
             directory.display()
+        ));
+    }
+    let foreign: Vec<&str> = names
+        .iter()
+        .filter(|(name, file)| !(*file && scheduler(name)))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if !foreign.is_empty() {
+        return Err(kj::failed!(
+            "{} holds files that are not a cluster's, which it would delete: {}; move them away",
+            directory.display(),
+            foreign.join(", ")
         ));
     }
     std::fs::create_dir_all(directory)
@@ -2174,10 +2232,16 @@ impl cluster::Layout for Databases {
         Ok(path.into())
     }
 
-    fn clear(&self) -> cluster::Result<()> {
-        let storage = self.ns.storage().map_err(|e| layout_error(&e))?;
-        ffi::actor_storage_clear(storage, &self.root_key)
-            .map_err(|e| layout_error(&crate::Error::from(e)))
+    fn clear(&self) -> cluster::Result<cluster::Removal> {
+        // Storage in memory, with no directory, keeps no object's files.
+        let Some(directory) = self.ns.directory.get().cloned() else {
+            return Ok(Box::new(|| Ok(())));
+        };
+        let root_key = self.root_key.clone();
+        Ok(Box::new(move || {
+            ffi::actor_storage_clear_at(&directory, &root_key)
+                .map_err(|e| layout_error(&crate::Error::from(e)))
+        }))
     }
 }
 

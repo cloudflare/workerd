@@ -150,6 +150,11 @@ pub struct Lease {
     until_ms: u64,
     /// The instance left the cluster: it renews no more.
     pub left: bool,
+    /// Set as the instance starts serving: from then on its actors run
+    /// only while the lease holds. Until then none has run and a peer can
+    /// take nothing over, so its storage opens whether or not the lease
+    /// holds.
+    pub requires_live_lease: bool,
 }
 
 impl Lease {
@@ -192,6 +197,12 @@ impl Lease {
     /// for: an actor serves only while it does.
     pub fn holds(&self, now_ms: u64) -> bool {
         now_ms + self.timing.safety_ms() < self.until_ms
+    }
+
+    /// Whether the instance's actors may run and open their databases at
+    /// `now_ms`: before it serves, always; then while the lease holds.
+    pub fn allows_actors(&self, now_ms: u64) -> bool {
+        !self.requires_live_lease || self.holds(now_ms)
     }
 }
 

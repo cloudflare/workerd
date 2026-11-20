@@ -515,7 +515,8 @@ class FakeS3 {
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
 // the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
-// what a node adds to its environment.
+// what a node adds to its environment, and `prepare` fills a node's directory
+// before it starts.
 async function withCluster(
   numNodes,
   fn,
@@ -527,6 +528,7 @@ async function withCluster(
     before = async () => {},
     dialect = 's3',
     nodeEnv = () => ({}),
+    prepare = async () => {},
   } = {}
 ) {
   // Each test run gets its own bucket and disks, so state doesn't leak
@@ -540,6 +542,7 @@ async function withCluster(
     for (let i = 0; i < numNodes; i++) {
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
+      await prepare(localPath);
       nodes.push(
         new ClusterNode({
           binary: env.WORKERD_BINARY,
@@ -1424,6 +1427,58 @@ test('cluster: Durable Objects from before cluster mode are refused', async () =
   });
 });
 
+test('cluster: a directory holding files of its own is refused, not cleared', async () => {
+  await withCluster(1, async ({ bucket }) => {
+    const local = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+    const start = (nodeId) =>
+      new ClusterNode({
+        binary: env.WORKERD_BINARY,
+        config: env.WD_TEST_CONFIG,
+        configName: 'config',
+        localPath: local,
+        s3Port: bucket.port,
+        nodeId,
+      });
+    const dir = join(local, 'counter-test-namespace');
+    await mkdir(dir);
+    await writeFile(join(dir, 'notes.txt'), 'keep me');
+    await writeFile(join(dir, 'metadata.sqlite'), '');
+    const refused = start('foreign');
+    await assert.rejects(refused.start(), /exited before listening/);
+    assert.match(
+      refused.stderr,
+      /holds files that are not a cluster's.*notes\.txt/
+    );
+    assert.deepStrictEqual((await readdir(dir)).sort(), [
+      'metadata.sqlite',
+      'notes.txt',
+    ]);
+    // Nor a directory of the scheduler database's name, which would go with
+    // what it holds.
+    await rm(join(dir, 'notes.txt'));
+    await rm(join(dir, 'metadata.sqlite'));
+    await mkdir(join(dir, 'metadata.sqlite'));
+    await writeFile(join(dir, 'metadata.sqlite', 'notes.txt'), 'keep me');
+    const nested = start('nested');
+    await assert.rejects(nested.start(), /exited before listening/);
+    assert.match(
+      nested.stderr,
+      /holds files that are not a cluster's.*metadata\.sqlite/
+    );
+    assert.deepStrictEqual(await readdir(join(dir, 'metadata.sqlite')), [
+      'notes.txt',
+    ]);
+    // What workerd leaves in a namespace with no objects, it claims.
+    await rm(join(dir, 'metadata.sqlite'), { recursive: true });
+    await writeFile(join(dir, 'metadata.sqlite'), '');
+    const claimed = start('claimed');
+    await claimed.start();
+    await claimed.stop({ signal: 'SIGKILL', timeoutMs: 5000 });
+    assert((await readdir(dir)).includes('.cluster'));
+    await rm(local, { recursive: true });
+  });
+});
+
 test('cluster: each running instance holds a lease record', async () => {
   await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
     const records = await bucket.nodes();
@@ -1497,6 +1552,68 @@ test("cluster: an alarm runs once on its object's owner", async () => {
     const res = await fetchJson(nodes[1].httpPort, '/alarms?name=alarm');
     assert.deepStrictEqual(res.body.fired, [set.body.nodeId]);
   });
+});
+
+test('cluster: a node starts over the torn files of an earlier process', async () => {
+  // A cluster writes its files with no syncs, so a crash of the machine can
+  // leave any of them torn: the next process starts without them. First the
+  // name of the object's files, its id.
+  let id;
+  await withCluster(1, async ({ nodes: [node] }) => {
+    ({ id } = (
+      await fetchJson(node.httpPort, '/alarms?name=over-garbage')
+    ).body);
+  });
+  const garbage = Buffer.concat([
+    Buffer.from('SQLite format 3\0'),
+    Buffer.alloc(8192, 0xa5),
+  ]);
+  const prepare = async (localPath) => {
+    for (const ns of ['counter-test-namespace', 'kv']) {
+      const dir = join(localPath, ns);
+      await mkdir(dir);
+      await writeFile(join(dir, '.cluster'), '');
+      await writeFile(join(dir, 'metadata.sqlite'), garbage);
+      await writeFile(join(dir, 'metadata.sqlite-wal'), 'not a WAL');
+    }
+    // The object's: a facet index a takeover cannot read, a facet's database
+    // it would not name, and the copies of an epoch.
+    const dir = join(localPath, 'counter-test-namespace');
+    await writeFile(join(dir, `${id}.sqlite`), garbage);
+    await writeFile(join(dir, `${id}.facets`), Buffer.alloc(100, 0xa5));
+    await writeFile(join(dir, `${id}.3.sqlite`), garbage);
+    await mkdir(join(dir, `${id}.sqlite.log`, 'e7'), { recursive: true });
+    await writeFile(join(dir, `${id}.sqlite.log`, 'e7', '1'), garbage);
+  };
+  await withCluster(
+    1,
+    async ({ nodes: [node] }) => {
+      // Only the marker is left, and the scheduler's new database.
+      for (const ns of ['counter-test-namespace', 'kv']) {
+        const entries = await readdir(join(node.localPath, ns));
+        const left = entries.filter(
+          (name) => name !== '.cluster' && !name.startsWith('metadata.sqlite')
+        );
+        assert.deepStrictEqual(left, [], ns);
+      }
+      const set = await fetchJson(
+        node.httpPort,
+        '/set-alarm?name=over-garbage&ms=200'
+      );
+      assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+      assert.strictEqual(set.body.id, id);
+      assert.strictEqual(await facetAdd(node.httpPort, 'over-garbage', 'a'), 1);
+      // The scheduler's new database holds the alarm, which runs.
+      const deadline = Date.now() + 10_000;
+      let res;
+      do {
+        await sleep(100);
+        res = await fetchJson(node.httpPort, '/alarms?name=over-garbage');
+      } while (res.body.fired?.length !== 1 && Date.now() < deadline);
+      assert.deepStrictEqual(res.body.fired, [node.nodeId]);
+    },
+    { prepare }
+  );
 });
 
 test("cluster: a killed owner's alarm runs once on a survivor", async () => {
@@ -2114,6 +2231,27 @@ test(
     );
   }
 );
+
+test('cluster: a node opening many DOs at once keeps its lease', async () => {
+  await withCluster(1, async ({ nodes: [node] }) => {
+    // Opening this many at once keeps the node's event loop busy for seconds
+    // in a slow build: its lease is renewed meanwhile.
+    const names = Array.from({ length: 64 }, (_, i) => `many-${i}`);
+    const responses = await Promise.all(
+      names.map((name) =>
+        fetchJson(node.httpPort, `/increment?name=${name}`, {
+          timeoutMs: 20_000,
+        }).catch((e) => ({ status: 0, body: { error: String(e) } }))
+      )
+    );
+    for (const response of responses) {
+      assert.strictEqual(response.status, 200, JSON.stringify(response));
+    }
+    // A renewal round past the burst.
+    await sleep(1000);
+    assert.doesNotMatch(node.stderr, /leaving the cluster/);
+  });
+});
 
 test(
   'cluster: requests to a DO of a stopping node wait for its handoff and follow it',
