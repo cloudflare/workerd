@@ -12,6 +12,7 @@ use clap::ValueEnum;
 use workerd_server::bench;
 use workerd_server::bridge::ffi as server;
 
+use crate::dotenv;
 use crate::help;
 
 #[derive(Parser, Debug)]
@@ -34,6 +35,9 @@ pub struct CompiledMain {
     pub serve_or_test: ServeOrTestArgs,
 
     #[command(flatten)]
+    pub mode: ModeArgs,
+
+    #[command(flatten)]
     pub serve: ServeArgs,
 }
 
@@ -52,6 +56,21 @@ pub enum Command {
 
         #[command(flatten)]
         const_name: ConstNameArg,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        mode: ModeArgs,
+
+        #[command(flatten)]
+        serve: ServeArgs,
+    },
+
+    #[command(override_help = help::DEV)]
+    Dev {
+        #[arg(value_name = "project", default_value = ".")]
+        project: String,
 
         #[command(flatten)]
         serve_or_test: ServeOrTestArgs,
@@ -79,6 +98,9 @@ pub enum Command {
 
         #[command(flatten)]
         serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        mode: ModeArgs,
     },
 
     #[command(override_help = help::TEST)]
@@ -88,6 +110,9 @@ pub enum Command {
 
         #[command(flatten)]
         serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        mode: ModeArgs,
 
         #[command(flatten)]
         test: TestArgs,
@@ -100,6 +125,9 @@ pub enum Command {
 
         #[command(flatten)]
         serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        mode: ModeArgs,
 
         #[command(flatten)]
         bench: BenchArgs,
@@ -167,11 +195,19 @@ pub struct ServeOrTestArgs {
     #[arg(long)]
     pub async_trace_promises: bool,
 
-    #[arg(short, long)]
+    /// From [`ModeArgs`], or set by `workerd dev`.
+    #[arg(skip)]
     pub watch: bool,
 
-    #[arg(long)]
+    #[arg(skip)]
     pub experimental: bool,
+
+    #[arg(long = "env-file", value_name = "path")]
+    pub env_files: Vec<String>,
+
+    /// `workerd dev`, which reads `.env` files without `--env-file`.
+    #[arg(skip)]
+    pub dev: bool,
 
     #[arg(long, value_name = "path")]
     pub pyodide_bundle_disk_cache_dir: Option<String>,
@@ -187,6 +223,24 @@ pub struct ServeOrTestArgs {
 
     #[arg(long, value_name = "path")]
     pub python_snapshot_dir: Option<String>,
+}
+
+/// `--watch` and `--experimental`, which `workerd dev` turns on and does not take.
+#[derive(Args, Clone, Copy, Debug)]
+pub struct ModeArgs {
+    #[arg(short, long)]
+    pub watch: bool,
+
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+impl ServeOrTestArgs {
+    pub fn with_mode(mut self, mode: ModeArgs) -> Self {
+        self.watch = mode.watch;
+        self.experimental = mode.experimental;
+        self
+    }
 }
 
 #[derive(Args, Debug)]
@@ -472,6 +526,15 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
             python_load_snapshot: args.python_load_snapshot.clone().into(),
             python_snapshot_dir: args.python_snapshot_dir.clone().into(),
+        }
+    }
+}
+
+impl<'a> From<&'a ServeOrTestArgs> for dotenv::Sources<'a> {
+    fn from(args: &'a ServeOrTestArgs) -> Self {
+        Self {
+            env_files: &args.env_files,
+            dev: args.dev,
         }
     }
 }

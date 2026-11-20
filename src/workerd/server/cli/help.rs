@@ -17,11 +17,18 @@ macro_rules! config_arg {
     };
 }
 
+macro_rules! mode_options {
+    () => {
+        "  -w, --watch                        Reload when files change
+      --experimental                 Allow experimental features
+"
+    };
+}
+
 macro_rules! run_options {
     () => {
         "  -i, --inspector-addr <addr>        Accept DevTools connections
-  -w, --watch                        Reload when files change
-      --experimental                 Allow experimental features
+      --env-file <path>              Add a .env file's variables; repeatable
       --verbose                      Log to stderr
   -d, --directory-path <name>=<dir>  Point disk service name at dir
   -e, --external-addr <name>=<addr>  Point external service name at addr
@@ -75,6 +82,18 @@ Cluster setup:
 
   key is at least 32 bytes, the same everywhere (openssl rand -hex 32).
   address is where peers reach this instance, on a private network.
+"
+    };
+}
+
+macro_rules! env_files {
+    () => {
+        "\
+Environment files:
+  --env-file adds the variables of a .env file, in wrangler's format, to
+  workerd's environment, for fromEnvironment bindings; one already set,
+  and not empty, keeps its value. Later files win. Under a wrangler config
+  each is also a string binding of the Worker, over vars.
 "
     };
 }
@@ -145,6 +164,7 @@ assets are built in.
 
 Usage:
   workerd serve <config>             Serve the Worker
+  workerd dev [project]              Serve it, reloading on edits
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
@@ -200,7 +220,10 @@ Usage:
     config_arg!(),
     "\nOptions:\n",
     socket_options!(),
+    mode_options!(),
     run_options!(),
+    "\n",
+    env_files!(),
     "\n",
     cluster_options!(),
     "\n",
@@ -213,6 +236,36 @@ Usage:
     capnp_options!(),
     "\n",
     cluster_setup!(),
+);
+
+pub const DEV: &str = concat!(
+    "\
+workerd dev: serve a wrangler project while editing it.
+
+Usage:
+  workerd dev [options] [project]
+
+Serves [project], . by default, a wrangler project directory or its
+wrangler.json or wrangler.jsonc, as serve --watch --experimental does.
+As for wrangler dev, the Worker gets string bindings, over vars, from
+.dev.vars beside the config, else from .env and .env.local there, and
+.env and .env.local in the current directory join workerd's environment.
+With --env-file, its files replace both. Edits to these files reload too.
+
+Options:
+",
+    socket_options!(),
+    run_options!(),
+    "\n",
+    env_files!(),
+    "\n",
+    cluster_options!(),
+    "\n",
+    tool_options!(),
+    "\n",
+    trace_options!(),
+    "\n",
+    python_options!(),
 );
 
 pub const TEST: &str = concat!(
@@ -246,6 +299,7 @@ Options:
       --gc-stress                    GC at each awaitIo; very slow
   -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
 ",
+    mode_options!(),
     run_options!(),
     "\n",
     shared_note!(),
@@ -288,6 +342,7 @@ Options:
       --no-verbose                   Don't log uncaught exceptions
       --all-autogates                Enable every autogate
 ",
+    mode_options!(),
     run_options!(),
     "\n",
     shared_note!(),
@@ -366,6 +421,7 @@ Usage:
 Options:
 ",
     socket_options!(),
+    mode_options!(),
     run_options!(),
     "  -V, --version                      Print the newest supported compat date\n\n",
     cluster_options!(),
@@ -387,6 +443,7 @@ Usage:
 ",
     config_arg!(),
     "\nOptions:\n",
+    mode_options!(),
     run_options!(),
     "\n",
     trace_options!(),

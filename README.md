@@ -131,6 +131,13 @@ later, or the `rpc` flag, and for secrets before 2024-03-26 also
 `fetcher_no_get_put_delete`. Rate limits count in the server's memory, and a
 restart forgets the counts.
 
+`workerd dev [project]` serves a Wrangler project as `workerd serve --watch
+--experimental` does, and reads `.env` files as `wrangler dev` does: the Worker
+gets string bindings, over `vars`, from `.dev.vars` beside the config, else from
+`.env` and `.env.local` there, and `.env` and `.env.local` in the current
+directory join workerd's environment, where Secrets Store secrets are read.
+`--env-file <path>`, on `serve` and `dev`, reads the given files instead.
+
 A simple "Hello World!" config file might look like:
 
 ```capnp

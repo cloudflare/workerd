@@ -135,6 +135,12 @@ impl Process {
         if let Some(arg0) = args.next() {
             command.arg0(arg0);
         }
+        // Without the variables of `.env` files, which the new process reads again.
+        if let Some(environment) = crate::dotenv::original_environment() {
+            command
+                .env_clear()
+                .envs(environment.iter().map(|(k, v)| (k, v)));
+        }
         let error = command.args(args).exec();
         if error.kind() == io::ErrorKind::NotFound {
             Ok(())

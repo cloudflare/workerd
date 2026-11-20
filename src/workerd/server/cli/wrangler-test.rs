@@ -8,6 +8,11 @@ use workerd_capnp::worker;
 
 use super::*;
 
+/// [`super::load`] without `.env` files.
+fn load(path: &str, process: &Process, experimental: bool) -> Result<Config, String> {
+    super::load(path, process, experimental, Sources::default())
+}
+
 /// A fresh directory in the test's temp directory holding `files`.
 fn project(files: &[(&str, &str)]) -> PathBuf {
     use std::sync::atomic::AtomicUsize;
@@ -1405,4 +1410,45 @@ fn assets_without_main_serve_only_files() {
         let error = load_project(&[("wrangler.jsonc", wrangler)]).err().unwrap();
         assert!(error.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn env_files_bind_strings_over_vars() {
+    let wrangler = r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+        "vars": { "A": 1, "B": "b" } }"#;
+    let dir = project(&[
+        ("wrangler.jsonc", wrangler),
+        ("index.js", ""),
+        (".dev.vars", "A=dev\nC=c"),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let dev = Sources {
+        env_files: &[],
+        dev: true,
+    };
+    let path = dir.join("wrangler.jsonc");
+    let message = read(super::load(path.to_str().unwrap(), &process, false, dev).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let bound: Vec<_> = (w.unwrap().get_bindings().unwrap().iter())
+        .map(|b| {
+            let worker::binding::Which::Text(t) = b.which().unwrap() else {
+                panic!("not text");
+            };
+            let name = b.get_name().unwrap().to_str().unwrap();
+            format!("{name}={}", t.unwrap().to_str().unwrap())
+        })
+        .collect();
+    assert_eq!(bound, ["A=dev", "B=b", "C=c"]);
+    // Assets alone have no Worker to bind them to.
+    let wrangler = r#"{ "compatibility_date": "2026-01-01", "assets": { "directory": "." } }"#;
+    let dir = project(&[("wrangler.jsonc", wrangler), (".dev.vars", "A=1")]);
+    let path = dir.join("wrangler.jsonc");
+    super::load(path.to_str().unwrap(), &process, true, dev).unwrap();
 }
