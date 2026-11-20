@@ -694,7 +694,8 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
   // Internal field 0 holds a marker identifying this as a workerd API object (see
   // isWorkerdApiObject()), or as a Rust resource. The marker's address is a small integer
-  // type-tagged by slot index.
+  // type-tagged by slot index. The field is stored only once, as V8 allocates a new cppgc object
+  // for every store of a non-null pointer.
   auto tagAddress = const_cast<uint16_t*>(static_cast<uint16_t>(tag) == kRustResourceWrappableTag
           ? &WORKERD_RUST_WRAPPABLE_TAG
           : &WORKERD_WRAPPABLE_TAG);
