@@ -77,6 +77,7 @@ class WorkerLoader: public jsg::Object {
     JSG_STRUCT(js, cjs, text, data, json, py, wasm);
 
     JSG_STRUCT_TS_OVERRIDE(WorkerLoaderModule {
+      data?: ArrayBuffer | ArrayBufferView;
       wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
     });
 
