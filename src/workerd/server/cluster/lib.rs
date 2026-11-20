@@ -82,6 +82,7 @@ pub use cluster::Setup;
 pub use cluster::now_ms;
 pub use cluster::open_bucket;
 pub use keeper::Fence;
+pub use keeper::Progress;
 pub use keeper::Within;
 pub use log::DB;
 pub use log::facet_path;

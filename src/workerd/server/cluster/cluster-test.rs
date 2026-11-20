@@ -19,11 +19,12 @@ use crate::bucket::memory::Memory;
 
 /// Linking, after `join`, opens storage, which on a slow disk takes longer
 /// than a lease, in turns of the loop that let nothing else run: the lease
-/// thread's rounds, which `join` starts, keep the lease held throughout.
+/// thread's rounds, which `join` starts, keep the lease held throughout,
+/// and watch the loop only once the node serves (`Cluster::watch`).
 #[test]
 fn the_lease_holds_however_long_startup_takes_after_join() {
     // Rounds that fence only once the lease thread got no time for most of
-    // the lease.
+    // the lease, and a loop that stands still for less than linking takes.
     let timing = Timing {
         lease_ms: 400,
         interval_ms: 10,
@@ -34,6 +35,7 @@ fn the_lease_holds_however_long_startup_takes_after_join() {
         list_attempt_ms: 10,
         contended_pause_ms: 5,
         max_skew_ms: 5,
+        stall_ms: 50,
     };
     let setup = Setup {
         url: String::new(),
@@ -60,6 +62,15 @@ fn the_lease_holds_however_long_startup_takes_after_join() {
     // What an actor database checks before it opens (`require_lease`).
     assert!(cluster.lease_holds());
     assert!(fence.try_recv().is_err());
+    // Serving, the loop that stands still from here on fences the node.
+    cluster.watch(Box::new(|| 0));
+    let reason = fence
+        .recv_timeout(Duration::from_millis(10 * timing.lease_ms))
+        .unwrap();
+    assert!(
+        reason.starts_with("its event loop made no progress for "),
+        "{reason}"
+    );
 }
 
 #[test]

@@ -20,7 +20,8 @@ use crate::bucket::memory::Memory;
 /// A lease of `lease_ms`, short enough for a test to wait out, renewed
 /// every 10 ms, a failed renewal retried every 5 ms. Half a lease bounds a
 /// round, so that a lease thread that cannot renew fences with most of a
-/// round to spare: a loaded machine may run it late by that much.
+/// round to spare: a loaded machine may run it late by that much. A loop
+/// that makes no progress for two leases fences the node.
 fn timing(lease_ms: u64) -> Timing {
     Timing {
         lease_ms,
@@ -32,6 +33,7 @@ fn timing(lease_ms: u64) -> Timing {
         list_attempt_ms: lease_ms / 4,
         contended_pause_ms: 5,
         max_skew_ms: lease_ms / 20,
+        stall_ms: 2 * lease_ms,
     }
 }
 
@@ -241,7 +243,7 @@ fn a_lease_thread_that_ends_unasked_fences() {
     thread.maintain();
     close_commands(&mut thread);
     let (reason, _, remaining) = fence.recv_timeout(ms(timing.lease_ms)).unwrap();
-    assert_eq!(reason, "the lease thread stopped");
+    assert_eq!(reason, "its lease cannot be kept: the lease thread stopped");
     assert!(remaining > Duration::ZERO);
     wait_for_end(&thread);
     assert!(fence.try_recv().is_err());
@@ -256,7 +258,7 @@ fn a_lease_thread_that_panics_fences() {
     thread.maintain();
     thread.send(Command::Panic);
     let (reason, _, remaining) = fence.recv_timeout(ms(timing.lease_ms)).unwrap();
-    assert_eq!(reason, "the lease thread stopped");
+    assert_eq!(reason, "its lease cannot be kept: the lease thread stopped");
     assert!(remaining > Duration::ZERO);
 }
 
@@ -291,8 +293,131 @@ fn a_lease_thread_fences_once() {
     thread.maintain();
     down.store(true, Ordering::Relaxed);
     let (reason, _, _) = fence.recv_timeout(ms(10 * timing.lease_ms)).unwrap();
-    assert_ne!(reason, "the lease thread stopped");
+    assert!(reason.starts_with("its lease cannot be kept: "), "{reason}");
+    assert_ne!(reason, "its lease cannot be kept: the lease thread stopped");
     close_commands(&mut thread);
     wait_for_end(&thread);
     assert!(fence.try_recv().is_err());
+}
+
+/// For the watchdog's tests: a lease that a loaded machine keeps, and a
+/// stall shorter than it, so that they wait little.
+fn watching() -> Timing {
+    Timing {
+        stall_ms: 200,
+        ..timing(400)
+    }
+}
+
+/// A loop that makes progress while `moving` is set.
+#[derive(Default)]
+struct Loop {
+    moving: AtomicBool,
+    /// When the loop last made progress.
+    last_ms: std::sync::atomic::AtomicU64,
+}
+
+/// The progress of `the_loop`, whose count advances at each reading while
+/// it moves.
+fn progress(the_loop: &Arc<Loop>) -> Progress {
+    let the_loop = Arc::clone(the_loop);
+    let count = std::sync::atomic::AtomicU64::new(0);
+    Box::new(move || {
+        if the_loop.moving.load(Ordering::Relaxed) {
+            the_loop.last_ms.store(now_ms(), Ordering::Relaxed);
+            count.fetch_add(1, Ordering::Relaxed);
+        }
+        count.load(Ordering::Relaxed)
+    })
+}
+
+fn moving() -> Arc<Loop> {
+    let the_loop = Arc::new(Loop::default());
+    the_loop.moving.store(true, Ordering::Relaxed);
+    the_loop
+}
+
+#[test]
+fn a_loop_that_makes_progress_keeps_the_lease() {
+    let timing = watching();
+    let the_loop = moving();
+    let (thread, _, fence) = start(timing);
+    block_on(thread.take_lease()).unwrap();
+    thread.maintain();
+    thread.watch(progress(&the_loop));
+    std::thread::sleep(ms(2 * timing.stall_ms));
+    assert!(fence.try_recv().is_err());
+    assert!(thread.held().holds(now_ms()));
+}
+
+/// The lease thread renews the lease all the while, and fences with it
+/// still held.
+#[test]
+fn a_loop_that_makes_no_progress_fences_the_node_while_its_lease_holds() {
+    // A stall longer than the lease, which only renewals keep.
+    let timing = Timing {
+        stall_ms: 600,
+        ..watching()
+    };
+    let the_loop = moving();
+    let (thread, _, fence) = start(timing);
+    block_on(thread.take_lease()).unwrap();
+    thread.maintain();
+    thread.watch(progress(&the_loop));
+    std::thread::sleep(ms(timing.lease_ms / 2));
+    the_loop.moving.store(false, Ordering::Relaxed);
+    let (reason, fenced_ms, remaining) = fence.recv_timeout(ms(10 * timing.stall_ms)).unwrap();
+    assert!(
+        reason.starts_with("its event loop made no progress for "),
+        "{reason}"
+    );
+    // The loop's last progress is stamped as the lease thread reads it,
+    // just after the watchdog's clock: a lease thread descheduled between
+    // the two opens a gap that `slack` allows for.
+    let stuck_ms = the_loop.last_ms.load(Ordering::Relaxed);
+    assert!(
+        fenced_ms + slack(&timing) >= stuck_ms + timing.stall_ms,
+        "fenced at {fenced_ms}, stuck since {stuck_ms}"
+    );
+    let until = until_ms(&thread);
+    assert!(
+        timing.holds(until, fenced_ms),
+        "fenced at {fenced_ms}, the lease expiring at {until}"
+    );
+    assert!(remaining > Duration::ZERO);
+}
+
+/// Linking, between `join` and serving, runs in turns as long as itself:
+/// the rounds watch no loop before `watch`, and time a loop that stands
+/// still from then.
+#[test]
+fn the_rounds_watch_the_loop_only_from_watch_on() {
+    let timing = watching();
+    let (thread, _, fence) = start(timing);
+    block_on(thread.take_lease()).unwrap();
+    thread.maintain();
+    // Startup, in one turn of a loop no one watches yet.
+    std::thread::sleep(ms(2 * timing.stall_ms));
+    assert!(fence.try_recv().is_err());
+    assert!(thread.held().holds(now_ms()));
+    let watched_ms = now_ms();
+    thread.watch(progress(&Arc::new(Loop::default())));
+    let (reason, fenced_ms, _) = fence.recv_timeout(ms(10 * timing.stall_ms)).unwrap();
+    assert!(
+        reason.starts_with("its event loop made no progress for "),
+        "{reason}"
+    );
+    assert!(
+        fenced_ms + slack(&timing) >= watched_ms + timing.stall_ms,
+        "fenced at {fenced_ms}, watched since {watched_ms}"
+    );
+}
+
+/// How much earlier than `stall_ms` after a reading a fence may look, as
+/// the tests' wall clock sees it: the watchdog times the stall on a clock
+/// of its own, read apart from the count, by a thread a loaded machine may
+/// delay in between. A quarter of the stall still tells a fence that waits
+/// for the stall from one that does not.
+const fn slack(timing: &Timing) -> u64 {
+    timing.stall_ms / 4
 }

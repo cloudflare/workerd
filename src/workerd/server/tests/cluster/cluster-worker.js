@@ -137,6 +137,14 @@ export default {
       return Response.json({ sum, took: Date.now() - start });
     }
 
+    // A turn of the node's event loop that never ends.
+    if (url.pathname === '/wedge') {
+      let sum = 0;
+      for (;;) {
+        sum = (sum * 31 + 1) | 0;
+      }
+    }
+
     if (url.pathname.startsWith('/kv/')) {
       if (url.pathname === '/kv/clock' || url.pathname === '/kv/gc') {
         const r = await env.KV_WORKER.fetch(

@@ -1615,15 +1615,20 @@ test('cluster: a node keeps its lease through a turn of its event loop that outl
       n *= 4;
       ({ took } = await spin(n));
     }
-    n = Math.ceil((n * 1.5 * LEASE_MS) / took);
+    // Aim at a turn of one and a half leases: one of three (`stall_ms`)
+    // would fence the node, whose loop makes no progress meanwhile.
+    const aim = (n, took) =>
+      Math.min(Math.ceil((n * 1.5 * LEASE_MS) / Math.max(took, 1)), 4 * n);
+    n = aim(n, took);
     const armed = node.stderr.length;
     // Optimized code may run faster than the measurement did.
     let writes;
     ({ took, writes } = await spin(n));
-    while (took <= LEASE_MS) {
-      n *= 2;
+    for (let tries = 0; took <= LEASE_MS && tries < 3; tries++) {
+      n = aim(n, took);
       ({ took, writes } = await spin(n));
     }
+    assert(took > LEASE_MS, `a turn of ${took} ms outlasts no lease`);
     // The lease held as the turn began expired during it, so the node renewed
     // while its loop ran nothing else, once a round (`interval_ms`) or nearly.
     const rounds = Math.floor(took / RENEW_INTERVAL_MS);
@@ -1642,6 +1647,40 @@ test('cluster: a node keeps its lease through a turn of its event loop that outl
     );
     assert.strictEqual(status, 200, JSON.stringify(body));
   });
+});
+
+// How long a node's event loop may make no progress before the node fences,
+// in cluster-test.wd-test's `shortLease`, a tenth of the default.
+const SHORT_LEASE_STALL_MS = 60_000 / 10;
+
+// A loop that stands still keeps a lease, which is kept on a thread of its
+// own, but not its objects: it fences while the lease holds, and peers may
+// take its objects over once the lease lapses.
+test('cluster: a node whose event loop makes no progress fences', async () => {
+  await withCluster(
+    1,
+    async ({ nodes }) => {
+      const [node] = nodes;
+      const armed = node.stderr.length;
+      const start = Date.now();
+      // The node exits rather than answer.
+      const wedged = fetchJson(node.httpPort, '/wedge').catch(() => {});
+      const { code } = await node.exited({
+        timeoutMs: 3 * SHORT_LEASE_STALL_MS,
+      });
+      const took = Date.now() - start;
+      assert.strictEqual(code, 1);
+      const stderr = node.stderr.slice(armed);
+      const stalled =
+        /leaving the cluster: its event loop made no progress for (\d+) ms/;
+      assert.match(stderr, stalled);
+      const still = Number(stderr.match(stalled)[1]);
+      assert(still >= SHORT_LEASE_STALL_MS, `stood still for ${still} ms`);
+      assert(took >= SHORT_LEASE_STALL_MS, `fenced after ${took} ms`);
+      await wedged;
+    },
+    { configName: 'shortLease' }
+  );
 });
 
 test("cluster: under structured logging, the lease thread's lines are JSON", async () => {

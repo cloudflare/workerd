@@ -39,6 +39,7 @@ use crate::keeper::Fence;
 #[cfg(test)]
 use crate::keeper::Keeper;
 use crate::keeper::Lessee;
+use crate::keeper::Progress;
 use crate::keeper::Within;
 use crate::namespace_hash;
 use crate::owner::Layout;
@@ -104,7 +105,8 @@ pub struct Cluster {
 impl Cluster {
     /// This instance's part in the cluster `setup` names, its lease kept on
     /// a thread of its own, which runs `within` the process's setup for its
-    /// threads. `fence` ends the process once the lease cannot be kept.
+    /// threads. `fence` ends the process once the lease cannot be kept, or
+    /// once the loop it watches (`watch`) makes no progress.
     pub fn new(setup: Setup, fence: Fence, within: Within) -> Result<Rc<Self>> {
         let bucket = open_bucket(&setup.url, &setup.options)?;
         // The lease thread's client is its own: a bucket's client belongs
@@ -525,6 +527,14 @@ impl Cluster {
         self.registered.set(Some(now_ms()));
         self.keep_lease();
         Ok(())
+    }
+
+    /// From here on, the lease thread watches the event loop that
+    /// `progress` counts, and fences the node once it makes no progress for
+    /// `Timing::stall_ms`. For once the node serves: linking, after `join`,
+    /// runs in turns as long as itself.
+    pub fn watch(&self, progress: Progress) {
+        self.lessee.watch(progress);
     }
 
     /// Whether this node's lease holds now: an actor database opens only
