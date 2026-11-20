@@ -6105,34 +6105,65 @@ export const transcodeFromUTF16BufferSizeTest = {
   },
 };
 
-// Invalid UTF-8 input to transcode('utf8', 'utf16le') should produce
-// "Unable to transcode buffer", not an internal assertion mismatch.
-// Regression test for a bug where JSG_REQUIRE(actual == expected) threw
-// before the `if (actual == 0) return kj::none` path could be reached.
-export const transcodeUTF8ToUTF16InvalidInputTest = {
+// Ill-formed input to the UTF-8/UTF-16LE pairs fails as in Node.
+export const transcodeInvalidCharTest = {
   test() {
-    throws(
-      () =>
-        transcode(
-          Buffer.from([0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80]),
-          'utf8',
-          'utf16le'
-        ),
-      { message: /Unable to transcode buffer/ }
-    );
+    const invalidChar = {
+      name: 'Error',
+      message: 'Unable to transcode Buffer [U_INVALID_CHAR_FOUND]',
+    };
+    for (const bytes of [
+      [0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80],
+      [0x80],
+      [0x80, 0xbf],
+      [0xc0, 0xaf],
+      [0xe2, 0x82],
+    ]) {
+      throws(
+        () => transcode(Buffer.from(bytes), 'utf8', 'utf16le'),
+        invalidChar,
+        `utf8 [${bytes}]`
+      );
+    }
+    for (const bytes of [[0x00, 0xd8], [0x41, 0x00, 0x00, 0xdc], [0x61]]) {
+      throws(
+        () => transcode(Buffer.from(bytes), 'utf16le', 'utf8'),
+        invalidChar,
+        `utf16le [${bytes}]`
+      );
+    }
   },
 };
 
-// TranscodeFromUTF16 should reject odd-byte UTF-16LE input, matching
-// the guard that TranscodeUTF8FromUTF16 already has.
-// Regression test for a bug where `source.size() / sizeof(char16_t)`
-// silently dropped the trailing byte.
+// Like Node, a UTF-16LE source converts only its whole code units into
+// another encoding and ignores a trailing odd byte.
 export const transcodeFromUTF16OddByteInputTest = {
   test() {
     const oddInput = Buffer.from([0x41, 0x00, 0x42]);
-    throws(() => transcode(oddInput, 'utf16le', 'utf8'));
-    throws(() => transcode(oddInput, 'utf16le', 'latin1'));
-    throws(() => transcode(oddInput, 'utf16le', 'ascii'));
+    deepStrictEqual(transcode(oddInput, 'utf16le', 'utf8'), Buffer.from('A'));
+    deepStrictEqual(transcode(oddInput, 'utf16le', 'latin1'), Buffer.from('A'));
+    deepStrictEqual(transcode(oddInput, 'utf16le', 'ascii'), Buffer.from('A'));
+    deepStrictEqual(
+      transcode(oddInput, 'utf16le', 'utf16le'),
+      Buffer.from([0x41, 0x00, 0xfd, 0xff])
+    );
+    deepStrictEqual(
+      transcode(Buffer.from([0x41]), 'ucs2', 'latin1'),
+      Buffer.alloc(0)
+    );
+
+    // Adapted from test/parallel/test-icu-transcode.js
+    for (const len of [2049, 4099]) {
+      const src = Buffer.alloc(len, 0x61);
+      const wholeUnits = src.subarray(0, len - 1);
+      for (const to of ['utf8', 'latin1', 'ascii']) {
+        deepStrictEqual(
+          transcode(src, 'utf16le', to),
+          transcode(wholeUnits, 'utf16le', to),
+          `ucs2->${to} odd length ${len}`
+        );
+      }
+    }
   },
 };
 
