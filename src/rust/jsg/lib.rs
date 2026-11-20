@@ -1746,15 +1746,6 @@ pub trait GarbageCollected: Traced {
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
 
-    /// Whether the resource implements `Drop` itself or a field's type needs it (see
-    /// [`Traced::needs_drop_detach`]). If so, its references are made strong and forget their
-    /// parent before it is dropped, so that a `Drop` impl may move them out (see
-    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
-    /// type that needs it must override it to return `true`.
-    fn detach_before_drop(&self) -> bool {
-        false
-    }
-
     /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
     /// which makes a Worker whose top level leaves it reachable start without the snapshot.
     /// `#[jsg_resource]` implements it.
