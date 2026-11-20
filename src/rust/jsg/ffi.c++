@@ -21,6 +21,7 @@
 #include <kj/mutex.h>
 #include <kj/string.h>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -1521,6 +1522,25 @@ void wrappable_visit_ref(
   }
 }
 
+namespace {
+
+// V8's `ReturnValue::Set(double)` goes through `Number::New`, which allocates a local handle even
+// when the result is a Smi. `Set(int32_t)` stores a Smi in place. For a double that is an int32
+// and not -0, it produces the same value `Number::New` would.
+void setReturnNumber(auto returnValue, double value) {
+  if (value >= std::numeric_limits<int32_t>::min() &&
+      value <= std::numeric_limits<int32_t>::max()) {
+    auto integer = static_cast<int32_t>(value);
+    if (integer == value && (integer != 0 || !std::signbit(value))) {
+      returnValue.Set(integer);
+      return;
+    }
+  }
+  returnValue.Set(value);
+}
+
+}  // namespace
+
 // FunctionCallbackInfo
 Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
@@ -1547,7 +1567,7 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 }
 
 void fci_set_return_number(FunctionCallbackInfo* args, double value) {
-  args->GetReturnValue().Set(value);
+  setReturnNumber(args->GetReturnValue(), value);
 }
 
 void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
@@ -1576,7 +1596,7 @@ void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
 }
 
 void pci_set_return_number(PropertyCallbackInfo* info, double value) {
-  info->GetReturnValue().Set(value);
+  setReturnNumber(info->GetReturnValue(), value);
 }
 
 void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
