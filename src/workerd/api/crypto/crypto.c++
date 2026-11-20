@@ -1667,13 +1667,6 @@ jsg::JsValue createSubtleCryptoBackend(jsg::Lock& js) {
 // =======================================================================================
 // Crypto implementation
 
-kj::OneOf<jsg::Ref<SubtleCrypto>, jsg::JsValue> Crypto::getSubtleForJs(jsg::Lock& js) {
-  KJ_IF_SOME(ts, tryCallTsWebCrypto(js, "crypto/subtle"_kj, "getSubtleCrypto"_kj)) {
-    return ts;
-  }
-  return subtle.addRef();
-}
-
 jsg::JsArrayBufferView Crypto::getRandomValues(jsg::Lock& js, jsg::JsArrayBufferView buffer) {
   // NOTE: TypeMismatchError is deprecated (obviated by TypeError), but the spec and W3C tests still
   //   expect a TypeMismatchError here.

@@ -4,8 +4,10 @@
 
 // Pins the observable behaviour of the `crypto` global and its class: getRandomValues() and
 // randomUUID() for every kind of argument, inside and outside a request, `crypto.subtle`,
-// `crypto.DigestStream`, and the shape of the class, the instance and the globals, as the lines
-// in crypto-global-parity-expected.js.
+// `crypto.DigestStream`, and the shape of the class, the instance and the globals. The C++ Crypto
+// and the TypeScript one (src/per_isolate/crypto/crypto.ts, under the ts-webcrypto autogate)
+// must both produce exactly the lines in crypto-global-parity-expected.js. The @all-autogates
+// variant and crypto-global-parity-ts-test.wd-test run the TypeScript one.
 
 import { strictEqual } from 'node:assert';
 import { inspect } from 'node:util';
@@ -429,6 +431,16 @@ export default {
     const era = Cloudflare.compatibilityFlags['capture_async_api_throws']
       ? newest
       : oldest;
+    // The canary that the TypeScript config installed the TypeScript class: without it, the
+    // comparison would pass against the C++ one too.
+    if (env.typescript) {
+      strictEqual(
+        String(globalThis.Crypto.prototype.getRandomValues).includes(
+          '[native code]'
+        ),
+        false
+      );
+    }
     compare(run(), era[env.variant], env.variant);
   },
 };

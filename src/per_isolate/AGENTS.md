@@ -46,8 +46,8 @@ at context creation, before any user code. C++ entry point:
   `prototype`, which `extends` reads; see `EventTargetHeritage` in
   `messagechannel/messagechannel.ts`.
 - Under the `TS_WEBCRYPTO` autogate, `main.ts` installs the TypeScript
-  `SubtleCrypto` (`crypto/subtle.ts`), which `crypto.subtle` then returns;
-  see `crypto/AGENTS.md`.
+  `SubtleCrypto` (`crypto/subtle.ts`) and `Crypto` (`crypto/crypto.ts`),
+  whose instance is the `crypto` global; see `crypto/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which

@@ -30,3 +30,12 @@ wd_test(
         "crypto-global-parity-test.js",
     ],
 )
+
+wd_test(
+    src = "crypto-global-parity-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-global-parity-expected.js",
+        "crypto-global-parity-test.js",
+    ],
+)

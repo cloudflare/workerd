@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# crypto-global-parity-test against the TypeScript Crypto.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-global-parity-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-global-parity-test.js"),
+          (name = "crypto-global-parity-expected.js",
+           esModule = embed "crypto-global-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "variant", text = "classic"), (name = "typescript", json = "true")],
+      )
+    ),
+    ( name = "crypto-global-parity-ts-test-spec",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-global-parity-test.js"),
+          (name = "crypto-global-parity-expected.js",
+           esModule = embed "crypto-global-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "spec_compliant_property_attributes", "immutable_api_prototypes", "experimental"],
+        bindings = [(name = "variant", text = "spec"), (name = "typescript", json = "true")],
+      )
+    ),
+    ( name = "crypto-global-parity-ts-test-streams",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-global-parity-test.js"),
+          (name = "crypto-global-parity-expected.js",
+           esModule = embed "crypto-global-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "typescript_implemented_streams", "experimental"],
+        bindings = [(name = "variant", text = "streams"), (name = "typescript", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

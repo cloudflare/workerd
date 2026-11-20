@@ -1240,20 +1240,17 @@ class Crypto final: public jsg::Object {
 
   kj::String randomUUID();
 
-  // The C++ SubtleCrypto, which C++ callers use whether or not TS_WEBCRYPTO is enabled.
+  // The C++ SubtleCrypto. Under the TS_WEBCRYPTO autogate, JavaScript sees the TypeScript Crypto
+  // (src/per_isolate/crypto/crypto.ts) and its SubtleCrypto instead; C++ callers keep this one.
   jsg::Ref<SubtleCrypto> getSubtle() {
     return subtle.addRef();
   }
 
-  // `crypto.subtle`: under the TS_WEBCRYPTO autogate, the context's TypeScript SubtleCrypto
-  // (src/per_isolate/crypto/subtle.ts).
-  kj::OneOf<jsg::Ref<SubtleCrypto>, jsg::JsValue> getSubtleForJs(jsg::Lock& js);
-
   JSG_RESOURCE_TYPE(Crypto, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
-      JSG_READONLY_PROTOTYPE_PROPERTY(subtle, getSubtleForJs);
+      JSG_READONLY_PROTOTYPE_PROPERTY(subtle, getSubtle);
     } else {
-      JSG_READONLY_INSTANCE_PROPERTY(subtle, getSubtleForJs);
+      JSG_READONLY_INSTANCE_PROPERTY(subtle, getSubtle);
     }
     JSG_METHOD(getRandomValues);
     JSG_METHOD(randomUUID);

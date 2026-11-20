@@ -436,7 +436,8 @@ if (autogates['ts-structured-clone']) {
 
 // The TypeScript SubtleCrypto replaces the C++ one, which global-scope.h then
 // leaves out. Installed as EventSource is, matching JSG_NESTED_TYPE.
-// `crypto.subtle` is the module's getSubtleCrypto().
+// `crypto.subtle` is the module's getSubtleCrypto(), which the TypeScript
+// Crypto below returns.
 if (autogates['ts-webcrypto']) {
   const { SubtleCrypto } = require('crypto/subtle');
   ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
@@ -456,6 +457,41 @@ if (autogates['ts-webcrypto']) {
         enumerable: false,
         writable: true,
         value: SubtleCrypto,
+      },
+    });
+  }
+
+  // The TypeScript Crypto replaces the C++ one as the global Crypto, over the
+  // existing properties so they keep their place, and as `crypto`, which
+  // ServiceWorkerGlobalScope::getCrypto() (api/global-scope.h) takes from the
+  // module's getCrypto(). Its DigestStream is the TypeScript one under
+  // typescript_implemented_streams, and otherwise the C++ class's.
+  const { defineCrypto } = require('crypto/crypto');
+  const DigestStream: unknown = compatFlags['typescript_implemented_streams']
+    ? require('crypto/digest-stream').DigestStream
+    : (
+        globalThis as unknown as {
+          Crypto: { prototype: { DigestStream: unknown } };
+        }
+      ).Crypto.prototype.DigestStream;
+  const Crypto = defineCrypto(DigestStream);
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    Crypto: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: Crypto,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      Crypto: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: Crypto,
       },
     });
   }
