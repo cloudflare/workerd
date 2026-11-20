@@ -14,6 +14,8 @@ use crate::rust_child_echo;
 use crate::rust_echo;
 use crate::rust_fail;
 use crate::rust_hang;
+use crate::rust_noop;
+use crate::rust_tail_echo;
 use crate::rust_write;
 use crate::rust_write_awaited_in_reverse;
 
@@ -47,6 +49,12 @@ pub mod bridge {
             text: String,
         ) -> Result<String>;
         async fn rust_call_back(
+            echo: KjOwn<ClientHook>,
+            callee: KjOwn<ClientHook>,
+            text: String,
+        ) -> Result<String>;
+        async fn rust_noop(echo: KjOwn<ClientHook>) -> Result<()>;
+        async fn rust_tail_echo(
             echo: KjOwn<ClientHook>,
             callee: KjOwn<ClientHook>,
             text: String,

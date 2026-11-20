@@ -156,7 +156,8 @@ struct KjRequest {
     client: KjOwn<bridge::ClientHook>,
     interface_id: u64,
     method_id: u16,
-    params: RustMessage,
+    // Boxed, for C++ to take.
+    params: Box<RustMessage>,
 }
 
 impl KjRequest {
@@ -165,7 +166,7 @@ impl KjRequest {
             client,
             interface_id,
             method_id,
-            params: RustMessage::new(),
+            params: Box::new(RustMessage::new()),
         }
     }
 }
@@ -188,9 +189,9 @@ impl RequestHook for KjRequest {
             client,
             interface_id,
             method_id,
-            mut params,
+            params,
         } = *self;
-        match bridge::client_send(&client, interface_id, method_id, &mut params) {
+        match bridge::client_call(&client, interface_id, method_id, params) {
             Ok(call) => {
                 // A call whose results can't hold a capability has nothing to pipeline on; its
                 // pipeline needs no allocation.
@@ -203,10 +204,9 @@ impl RequestHook for KjRequest {
                 };
                 RemotePromise {
                     promise: Promise::from_future(async move {
-                        let response =
-                            bridge::call_response(call).await.map_err(|e| from_kj(&e))?;
+                        let context = bridge::call_response(call).await.map_err(|e| from_kj(&e))?;
                         Ok(Response::new(
-                            Box::new(KjResponse::new(response)) as Box<dyn ResponseHook>
+                            Box::new(KjResponse::new(context)?) as Box<dyn ResponseHook>
                         ))
                     }),
                     pipeline: any_pointer::Pipeline::new(pipeline),
@@ -233,7 +233,7 @@ impl RequestHook for KjRequest {
         } = *self;
         // Sent now rather than when the promise is first polled, so that streaming calls reach
         // the server in the order they were sent, as `send()`'s do.
-        let sent = bridge::client_send_streaming(client, interface_id, method_id, Box::new(params));
+        let sent = bridge::client_send_streaming(client, interface_id, method_id, params);
         Promise::from_future(async move { sent.await.map_err(|e| from_kj(&e)) })
     }
 
@@ -243,22 +243,47 @@ impl RequestHook for KjRequest {
     }
 }
 
-/// The response to a call from Rust to C++.
-struct KjResponse {
-    message: CxxMessageReader,
+/// The response to a call from Rust, read in place.
+enum KjResponse {
+    /// Results a Rust server built.
+    Rust(Box<RustMessage>),
+    /// Results a C++ server built.
+    Cxx(CxxMessageReader),
+    /// The server wrote no results: a message whose root is null.
+    Empty(capnp::message::Reader<capnp::message::SegmentArray<'static>>),
 }
 
+/// The segments of a message whose root is a null pointer.
+#[repr(align(8))]
+struct NullRoot([u8; 8]);
+static NULL_ROOT: NullRoot = NullRoot([0; 8]);
+static NULL_ROOT_SEGMENTS: [&[u8]; 1] = [&NULL_ROOT.0];
+
 impl KjResponse {
-    fn new(message: KjOwn<bridge::CxxMessage>) -> Self {
-        Self {
-            message: CxxMessageReader::new(message),
+    fn new(mut context: KjOwn<bridge::CallContextHook>) -> capnp::Result<Self> {
+        if bridge::context_has_rust_results(&context) {
+            let results =
+                bridge::context_take_rust_results(context.pin_mut()).map_err(|e| from_kj(&e))?;
+            return Ok(Self::Rust(results));
         }
+        let message = bridge::context_into_message(context);
+        if bridge::message_segment_count(&message) == 0 {
+            return Ok(Self::Empty(capnp::message::Reader::new(
+                capnp::message::SegmentArray::new(&NULL_ROOT_SEGMENTS),
+                capnp::message::ReaderOptions::new(),
+            )));
+        }
+        Ok(Self::Cxx(CxxMessageReader::new(message)))
     }
 }
 
 impl ResponseHook for KjResponse {
     fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
-        self.message.root()
+        match self {
+            Self::Rust(message) => message.root_as_reader(),
+            Self::Cxx(message) => message.root(),
+            Self::Empty(message) => message.get_root(),
+        }
     }
 }
 

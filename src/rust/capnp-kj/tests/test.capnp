@@ -31,4 +31,11 @@ interface TestEcho {
 
   bounce @7 (data :Data) -> (data :Data);
   # Returns `data`. For benchmarks: no work besides moving the bytes each way.
+
+  noop @8 () -> ();
+  # Writes no results.
+
+  tailEcho @9 (callee :TestEcho, text :Text) -> (text :Text);
+  # Returns `callee.echo(text)`. The C++ server answers with a tail call; the Rust server leaves
+  # the method unimplemented.
 }

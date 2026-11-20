@@ -122,12 +122,44 @@ pub fn dispatch_call(
     params: KjOwn<bridge::CxxMessage>,
     context: KjOwn<bridge::CallContextHook>,
 ) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    dispatch(
+        server,
+        interface_id,
+        method_id,
+        KjParams::Cxx(CxxMessageReader::new(params)),
+        ResultsContext::Cxx(context),
+    )
+}
+
+/// Like [`dispatch_call`], for a call from Rust: the server reads the caller's message, and the
+/// caller reads the server's.
+pub fn dispatch_rust_call(
+    server: &RustServer,
+    interface_id: u64,
+    method_id: u16,
+    params: Box<RustMessage>,
+    context: KjOwn<bridge::CallContextHook>,
+) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    dispatch(
+        server,
+        interface_id,
+        method_id,
+        KjParams::Rust(params),
+        ResultsContext::Rust(context),
+    )
+}
+
+fn dispatch(
+    server: &RustServer,
+    interface_id: u64,
+    method_id: u16,
+    params: KjParams,
+    context: ResultsContext,
+) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
     let dispatched = server.server.dispatch_call(
         interface_id,
         method_id,
-        Params::new(Box::new(KjParams {
-            message: CxxMessageReader::new(params),
-        })),
+        Params::new(Box::new(params)),
         Results::new(Box::new(KjResults {
             message: None,
             context,
@@ -138,32 +170,56 @@ pub fn dispatch_call(
     async move { promise.await.map_err(to_kj) }
 }
 
-/// A call's params, read in place from the C++ message.
-struct KjParams {
-    message: CxxMessageReader,
+/// A call's params, read in place.
+enum KjParams {
+    /// From a C++ caller.
+    Cxx(CxxMessageReader),
+    /// From a Rust caller.
+    Rust(Box<RustMessage>),
 }
 
 impl ParamsHook for KjParams {
     fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
-        self.message.root()
+        match self {
+            Self::Cxx(message) => message.root(),
+            Self::Rust(message) => message.root_as_reader(),
+        }
     }
 }
 
-/// A call's results, built in Rust and copied into the C++ call's results when the server drops
-/// them, which generated code does before the server's future completes. The message is created
-/// on the server's first `get()`, so a call whose server writes no results builds none, and its
-/// caller reads empty results, as from a C++ server that writes none.
+/// The C++ call that a Rust server's results go to.
+enum ResultsContext {
+    /// Any call: the results are copied into it.
+    Cxx(KjOwn<bridge::CallContextHook>),
+    /// A call from Rust: the results are handed over.
+    Rust(KjOwn<bridge::CallContextHook>),
+}
+
+/// A call's results, built in Rust and handed to the C++ call when the server drops them, which
+/// generated code does before the server's future completes. The message is created on the
+/// server's first `get()`, so a call whose server writes no results builds none, and its caller
+/// reads empty results, as from a C++ server that writes none.
 struct KjResults {
     message: Option<RustMessage>,
-    context: KjOwn<bridge::CallContextHook>,
+    context: ResultsContext,
 }
 
 impl Drop for KjResults {
     fn drop(&mut self) {
-        if let Some(mut message) = self.message.take() {
-            // Fails only on a malformed segment, which capnp-rust does not produce.
-            let _ = bridge::context_set_results(self.context.pin_mut(), &mut message);
-        }
+        let Some(mut message) = self.message.take() else {
+            return;
+        };
+        // Neither fails unless the bridge is broken: copying fails only on a malformed segment,
+        // which capnp-rust does not produce, and handing over only if C++ set the results
+        // first, which nothing does for a Rust server's call.
+        let _ = match &mut self.context {
+            ResultsContext::Cxx(context) => {
+                bridge::context_set_results(context.pin_mut(), &mut message)
+            }
+            ResultsContext::Rust(context) => {
+                bridge::context_set_rust_results(context.pin_mut(), Box::new(message))
+            }
+        };
     }
 }
 

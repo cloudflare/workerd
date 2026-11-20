@@ -117,6 +117,14 @@ impl test_echo::Server for EchoServer {
         Ok(())
     }
 
+    async fn noop(
+        self: Rc<Self>,
+        _params: test_echo::NoopParams,
+        _results: test_echo::NoopResults,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     async fn hang(
         self: Rc<Self>,
         _params: test_echo::HangParams,
@@ -194,6 +202,36 @@ async fn rust_child_echo(
         child_request.get().set_prefix(prefix.as_str());
         let child = child_request.send().pipeline.get_child();
         let mut request = child.echo_request();
+        request.get().set_text(text.as_str());
+        let response = request.send().promise.await?;
+        Ok(response.get()?.get_text()?.to_string()?)
+    }
+    .await
+    .map_err(capnp_kj::to_kj)
+}
+
+/// Calls `echo.noop()`, and reads its results.
+async fn rust_noop(echo: KjOwn<capnp_kj::ClientHook>) -> Result<(), KjError> {
+    let echo: test_echo::Client = capnp_kj::client_from_kj(echo);
+    async move {
+        let response = echo.noop_request().send().promise.await?;
+        response.get()?;
+        Ok(())
+    }
+    .await
+    .map_err(capnp_kj::to_kj)
+}
+
+async fn rust_tail_echo(
+    echo: KjOwn<capnp_kj::ClientHook>,
+    callee: KjOwn<capnp_kj::ClientHook>,
+    text: String,
+) -> Result<String, KjError> {
+    let echo: test_echo::Client = capnp_kj::client_from_kj(echo);
+    let callee: test_echo::Client = capnp_kj::client_from_kj(callee);
+    async move {
+        let mut request = echo.tail_echo_request();
+        request.get().set_callee(callee);
         request.get().set_text(text.as_str());
         let response = request.send().promise.await?;
         Ok(response.get()?.get_text()?.to_string()?)

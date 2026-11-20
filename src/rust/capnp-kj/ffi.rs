@@ -16,6 +16,7 @@
 use crate::message::RustMessage;
 use crate::server::RustServer;
 use crate::server::dispatch_call;
+use crate::server::dispatch_rust_call;
 
 #[cxx::bridge(namespace = "workerd::rust::capnp_kj")]
 #[expect(
@@ -48,12 +49,12 @@ pub mod bridge {
         async fn client_when_resolved(hook: KjOwn<ClientHook>) -> Result<()>;
         fn new_broken_cap(description: &str) -> KjOwn<ClientHook>;
 
-        /// Sends a call to `hook`, copying `params` into the request.
-        fn client_send(
+        /// Sends a call to `hook` with `params`, which the capability reads in place.
+        fn client_call(
             hook: &ClientHook,
             interface_id: u64,
             method_id: u16,
-            params: &mut RustMessage,
+            params: Box<RustMessage>,
         ) -> Result<KjOwn<CxxCall>>;
 
         /// Sends a `-> stream` call to `hook`, copying `params` into the request.
@@ -68,7 +69,25 @@ pub mod bridge {
         /// False if the call was sent with `noPromisePipelining`; see `noPromisePipelining()` in
         /// ffi.h.
         fn call_can_pipeline(call: &CxxCall) -> bool;
-        async fn call_response(call: KjOwn<CxxCall>) -> Result<KjOwn<CxxMessage>>;
+        /// Resolves to the call's context once the call completes, holding its results. The
+        /// context, and those passed to the `context_*_rust_results()` functions and to
+        /// `dispatch_rust_call()`, are a `RustCallContext` (see ffi.h); cxx can't hold one, which
+        /// is reference counted, so they cross as the hook it implements.
+        async fn call_response(call: KjOwn<CxxCall>) -> Result<KjOwn<CallContextHook>>;
+
+        /// Whether a completed call's results are a Rust message, from a Rust server.
+        fn context_has_rust_results(context: &CallContextHook) -> bool;
+        /// Takes a completed call's Rust results. Throws if they aren't Rust's.
+        fn context_take_rust_results(
+            context: Pin<&mut CallContextHook>,
+        ) -> Result<Box<RustMessage>>;
+        /// A completed call's C++ results, which have no segments if the server wrote none.
+        fn context_into_message(context: KjOwn<CallContextHook>) -> KjOwn<CxxMessage>;
+        /// Gives the call `context` a Rust server's results.
+        fn context_set_rust_results(
+            context: Pin<&mut CallContextHook>,
+            results: Box<RustMessage>,
+        ) -> Result<()>;
 
         fn pipeline_add_ref(pipeline: &PipelineHook) -> KjOwn<PipelineHook>;
         /// `pointer_indices` is the path through the results to the capability, one pointer
@@ -78,7 +97,8 @@ pub mod bridge {
         fn message_segment_count(message: &CxxMessage) -> usize;
         fn message_segment<'a>(message: &'a CxxMessage, index: usize) -> &'a [u8];
         fn message_cap_count(message: &CxxMessage) -> usize;
-        fn message_take_cap(
+        /// Returns a new reference to capability `index`.
+        fn message_get_cap(
             message: Pin<&mut CxxMessage>,
             index: usize,
         ) -> KjMaybe<KjOwn<ClientHook>>;
@@ -112,6 +132,13 @@ pub mod bridge {
             interface_id: u64,
             method_id: u16,
             params: KjOwn<CxxMessage>,
+            context: KjOwn<CallContextHook>,
+        ) -> Result<()>;
+        async fn dispatch_rust_call(
+            server: &RustServer,
+            interface_id: u64,
+            method_id: u16,
+            params: Box<RustMessage>,
             context: KjOwn<CallContextHook>,
         ) -> Result<()>;
     }

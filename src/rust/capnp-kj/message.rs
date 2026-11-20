@@ -4,8 +4,8 @@
 
 //! Messages crossing between Rust and C++.
 //!
-//! [`RustMessage`] is a message Rust built, which C++ copies from. [`CxxMessageReader`] reads a
-//! message C++ built, in place.
+//! [`RustMessage`] is a message Rust built, which C++ reads in place or copies from.
+//! [`CxxMessageReader`] reads a message C++ built, in place.
 
 use capnp::any_pointer;
 use capnp::message;
@@ -164,6 +164,13 @@ impl RustMessage {
         Ok(root)
     }
 
+    /// The root of the message, read in place, imbued with its capability table.
+    pub fn root_as_reader(&self) -> capnp::Result<any_pointer::Reader<'_>> {
+        let mut root: any_pointer::Reader<'_> = self.builder.get_root_as_reader()?;
+        root.imbue(&self.caps);
+        Ok(root)
+    }
+
     pub fn segment_count(&self) -> usize {
         self.builder.get_segments_for_output().len()
     }
@@ -241,8 +248,8 @@ impl message::ReaderSegments for CxxSegments {
             reason = "reads a segment of the C++ message that `self` owns"
         )]
         // Safety: the segments belong to `self.message`, which lives as long as `self`, on the
-        // heap, and whose segments never change once it is built (taking its capabilities
-        // changes only its capability table).
+        // heap. It is a copy, or the results of a completed call, and nothing writes to either
+        // once Rust has it.
         Some(unsafe { &*segment })
     }
 
@@ -262,7 +269,7 @@ impl CxxMessageReader {
         let cap_count = bridge::message_cap_count(&message);
         let caps = (0..cap_count)
             .map(|index| {
-                Option::<KjOwn<bridge::ClientHook>>::from(bridge::message_take_cap(
+                Option::<KjOwn<bridge::ClientHook>>::from(bridge::message_get_cap(
                     message.pin_mut(),
                     index,
                 ))

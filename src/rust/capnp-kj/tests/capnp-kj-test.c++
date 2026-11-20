@@ -61,6 +61,19 @@ class CxxEcho final: public TestEcho::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> noop(NoopContext context) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> tailEcho(TailEchoContext context) override {
+    auto params = context.getParams();
+    auto request = params.getCallee().echoRequest();
+    request.setText(params.getText());
+    // echo()'s results have the same layout as tailEcho()'s, so they can answer for it.
+    return capnp::CallContextHook::from(context).tailCall(
+        capnp::RequestHook::from(kj::mv(request)));
+  }
+
   kj::Promise<void> hang(HangContext context) override {
     ++hangStarts;
     struct Guard {
@@ -139,6 +152,48 @@ KJ_TEST("Rust pipelines on a capability a C++ server returns") {
   auto result =
       rust_child_echo(clientToRust(f.cxxEcho("cxx:")), rs("child:"), rs("hello")).wait(f.waitScope);
   KJ_EXPECT(toString(kj::mv(result)) == "cxx:child:hello");
+}
+
+KJ_TEST("Rust pipelines on a capability a Rust server returns") {
+  Fixture f;
+  auto result = rust_child_echo(clientToRust(f.rustEcho("rust:")), rs("child:"), rs("hello"))
+                    .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(result)) == "rust:child:hello");
+}
+
+KJ_TEST("a Rust server calls a capability that Rust passed in params") {
+  Fixture f;
+  auto viaCxx = rust_call_back(
+      clientToRust(f.rustEcho("rust:")), clientToRust(f.cxxEcho("cxx:")), rs("hello"))
+                    .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaCxx)) == "cxx:hello");
+  auto viaRust = rust_call_back(
+      clientToRust(f.rustEcho("rust:")), clientToRust(f.rustEcho("callee:")), rs("hello"))
+                     .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaRust)) == "callee:hello");
+}
+
+KJ_TEST("Rust reads the empty results of a server that writes none") {
+  Fixture f;
+  rust_noop(clientToRust(f.cxxEcho("cxx:"))).wait(f.waitScope);
+  rust_noop(clientToRust(f.rustEcho("rust:"))).wait(f.waitScope);
+}
+
+KJ_TEST("C++ reads the empty results of a Rust server that writes none") {
+  Fixture f;
+  f.rustEcho("rust:").noopRequest().send().wait(f.waitScope);
+}
+
+KJ_TEST("a C++ server answers a call from Rust with a tail call") {
+  Fixture f;
+  auto toCxx = rust_tail_echo(
+      clientToRust(f.cxxEcho("outer:")), clientToRust(f.cxxEcho("cxx:")), rs("hello"))
+                   .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(toCxx)) == "cxx:hello");
+  auto toRust = rust_tail_echo(
+      clientToRust(f.cxxEcho("outer:")), clientToRust(f.rustEcho("rust:")), rs("hello"))
+                    .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(toRust)) == "rust:hello");
 }
 
 KJ_TEST("a Rust server calls a C++ capability passed in params") {
