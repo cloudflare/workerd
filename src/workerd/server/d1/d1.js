@@ -148,18 +148,41 @@ function* dumpSql(db, { noSchema, noData, tables: only }) {
   }
 }
 
-// shell.c.in's output_quoted_escaped_string.
+// shell.c.in's output_quoted_escaped_string. A value that already contains
+// the literal `\n` (or `\r`) must keep those occurrences: the replace()
+// wrapper below rewrites every occurrence of its escape, so the escape is
+// picked from `\n`, `\012`, `(\n0)`, `(\n1)`, ... (and `\r`, `\015`,
+// `(\r0)`, ...) until one is found that the value does not contain.
+// Ported from Miniflare's dumpSql.ts (workers-sdk#15334), which ports the
+// same shell.c.in code.
 function quote(text) {
-  let lf = false;
-  let cr = false;
-  let out = `'${text.replace(/'|(\n)|(\r)/g, (_, n, r) => {
-    if (n) return ((lf = true), '\\n');
-    if (r) return ((cr = true), '\\r');
-    return "''";
-  })}'`;
-  if (cr) out = `replace(${out},'\\r',char(13))`;
-  if (lf) out = `replace(${out},'\\n',char(10))`;
+  const hasLf = text.includes('\n');
+  const hasCr = text.includes('\r');
+  if (!hasLf && !hasCr) return `'${text.replaceAll("'", "''")}'`;
+  const lf = hasLf ? unusedEscape(text, '\\n', '\\012') : '';
+  const cr = hasCr ? unusedEscape(text, '\\r', '\\015') : '';
+  const escaped = text
+    .replaceAll("'", "''")
+    .replaceAll('\n', lf)
+    .replaceAll('\r', cr);
+  let out = `'${escaped}'`;
+  if (hasCr) out = `replace(${out},'${cr}',char(13))`;
+  if (hasLf) out = `replace(${out},'${lf}',char(10))`;
   return out;
+}
+
+// The first of `primary`, `secondary`, `(${primary}0)`, `(${primary}1)`,
+// ... that does not occur in `text`, so the replace() wrapper in quote()
+// only rewrites the escapes it inserted.
+function unusedEscape(text, primary, secondary) {
+  if (!text.includes(primary)) return primary;
+  if (!text.includes(secondary)) return secondary;
+  let suffix = 0;
+  let candidate;
+  do {
+    candidate = `(${primary}${suffix++})`;
+  } while (text.includes(candidate));
+  return candidate;
 }
 
 const escapeId = (id) => `"${id.replace(/"/g, '""')}"`;
