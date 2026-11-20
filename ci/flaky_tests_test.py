@@ -200,6 +200,15 @@ class LabelTest(RepoRootTestCase):
             flaky_tests.split_label("//:top@all-compat-flags"),
             ("//:top", "@all-compat-flags"),
         )
+        # A benchmark's smoke tests (build/wd_bench.bzl).
+        self.assertEqual(
+            flaky_tests.split_label("//src/bench/x:x-cpp@all-compat-flags@smoke"),
+            ("//src/bench/x:x-cpp", "@all-compat-flags@smoke"),
+        )
+        self.assertEqual(
+            flaky_tests.split_label("//src/bench/x:x-cpp@smoke"),
+            ("//src/bench/x:x-cpp", "@smoke"),
+        )
 
     def test_rejects_labels_that_could_inject_markdown(self):
         for label in [
@@ -208,7 +217,7 @@ class LabelTest(RepoRootTestCase):
             "@other//a:b",
             "//a:b\n",
             "//a:b|c",
-            "//a:b@x@y",
+            "//a:b@x y",
         ]:
             with self.subTest(label=label):
                 self.assertRaises(ValueError, flaky_tests.split_label, label)

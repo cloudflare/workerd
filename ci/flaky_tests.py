@@ -63,9 +63,10 @@ PASSED = frozenset({"PASSED", "FLAKY"})
 
 # A test in this repository, `//package:target`, and the variant suffix that build/wd_test.bzl and
 # build/kj_test.bzl add to its name (`@`, `@all-autogates`, `@all-compat-flags`), if any.
+# build/wd_bench.bzl adds `@smoke` to those suffixes, as in `@all-autogates@smoke`.
 LABEL_RE = re.compile(
     r"\A(?P<target>//(?P<package>[A-Za-z0-9_.+-]+(?:/[A-Za-z0-9_.+-]+)*)?"
-    r":[A-Za-z0-9_.+=,~-]+(?:/[A-Za-z0-9_.+=,~-]+)*)(?P<variant>@[A-Za-z0-9_-]*)?\Z"
+    r":[A-Za-z0-9_.+=,~-]+(?:/[A-Za-z0-9_.+=,~-]+)*)(?P<variant>(?:@[A-Za-z0-9_-]*)+)?\Z"
 )
 
 ISSUE_MARKER = "<!-- flaky-test: {target} -->"
