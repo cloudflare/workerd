@@ -258,7 +258,10 @@ impl Ownership {
                 Some(Guard::Absent)
             } else {
                 let body = serde_json::to_vec(&record)?;
-                let version = self.bucket.put_if_settled(&key, body, guard).await?;
+                let version = self
+                    .bucket
+                    .put_if_settled(&key, body, guard, self.registry.pause_when_contended())
+                    .await?;
                 version.map(Guard::Match)
             };
             // Draining may have started during the write: the object it
@@ -347,7 +350,12 @@ impl Ownership {
         let body = serde_json::to_vec(&released)?;
         let written = self
             .bucket
-            .put_if_settled(&key, body, Guard::Match(version))
+            .put_if_settled(
+                &key,
+                body,
+                Guard::Match(version),
+                self.registry.pause_when_contended(),
+            )
             .await?;
         Ok(written.is_some())
     }
@@ -407,7 +415,7 @@ impl Ownership {
         let body = serde_json::to_vec(&record)?;
         Ok(self
             .bucket
-            .put_if_settled(&key, body, guard)
+            .put_if_settled(&key, body, guard, self.registry.pause_when_contended())
             .await?
             .is_some())
     }
@@ -431,7 +439,12 @@ impl Ownership {
         let body = serde_json::to_vec(&record)?;
         let Some(version) = self
             .bucket
-            .put_if_settled(&key, body, Guard::Match(version))
+            .put_if_settled(
+                &key,
+                body,
+                Guard::Match(version),
+                self.registry.pause_when_contended(),
+            )
             .await?
         else {
             return Ok(None);
