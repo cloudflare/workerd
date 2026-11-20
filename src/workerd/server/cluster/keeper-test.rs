@@ -32,6 +32,7 @@ fn timing(lease_ms: u64) -> Timing {
         renew_attempt_ms: lease_ms / 4,
         list_attempt_ms: lease_ms / 4,
         contended_pause_ms: 5,
+        safety_ms: lease_ms / 10,
         max_skew_ms: lease_ms / 20,
         stall_ms: 2 * lease_ms,
     }
@@ -169,6 +170,7 @@ fn a_node_that_left_renews_no_more() {
     let timing = Timing {
         renew_timeout_ms: 20,
         renew_attempt_ms: 10,
+        safety_ms: 10,
         max_skew_ms: 5,
         ..timing(300)
     };

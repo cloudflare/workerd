@@ -134,10 +134,10 @@ impl Keeper {
         self.lease.try_borrow().is_ok_and(|lease| lease.left)
     }
 
-    /// How far this node's wall clock is outside the bucket's, in ms; 0
-    /// before any response.
-    fn clock_skew_ms(&self) -> i64 {
-        self.bucket.clock_skew_ms().unwrap_or(0)
+    /// How far this node's wall clock may be off from the bucket's
+    /// (`Client::clock_skew_ms`); `None` before an answer with a date.
+    fn clock_skew_ms(&self) -> Option<u64> {
+        self.bucket.clock_skew_ms()
     }
 
     /// Reports a renewal's outcome to the lease, and a new expiry to
@@ -221,11 +221,37 @@ impl Keeper {
     }
 
     /// Renews the lease outside the maintenance rounds, whether or not it
-    /// lapsed: as the node joins, before the rounds start.
+    /// lapsed: as the node joins, before the rounds start, once it knows
+    /// its clock.
     pub async fn take_lease(&self) -> Result<()> {
+        self.know_clock().await?;
         let until = self.registry.renew(now_ms()).await?;
         self.renewed(Ok(until));
         Ok(())
+    }
+
+    /// Reads this node's record until the bucket's dates bound its clock to
+    /// within `max_skew_ms` of the bucket's (`Lease::clock`), as peers judge
+    /// its lease by their own: each answer comes at another point of the
+    /// bucket's second. Fails after a lease's time.
+    async fn know_clock(&self) -> Result<()> {
+        let timing = self.held.timing;
+        let deadline = tokio::time::Instant::now() + ms(timing.lease_ms);
+        loop {
+            // With a lease's drift to spare: a node that joined just within
+            // the bound would exit at its first round.
+            let skew_ms = self.clock_skew_ms().map(|ms| ms + timing.lease_ms / 100);
+            let known = self.lease.borrow().clock(skew_ms);
+            match known {
+                Ok(()) => return Ok(()),
+                Err(e) if tokio::time::Instant::now() >= deadline => return Err(Error::Http(e)),
+                Err(_) => {}
+            }
+            // A read that fails or stalls only costs its answer.
+            let read = self.registry.recorded(self.registry.node());
+            let _ = timeout(ms(timing.renew_attempt_ms), read).await;
+            tokio::time::sleep(ms(timing.retry_ms / 4)).await;
+        }
     }
 
     /// The record says that this instance drains from its next renewal.

@@ -207,9 +207,9 @@ pub trait Store {
     }
     /// Idempotent: deleting an absent key succeeds.
     async fn delete(&self, key: &str) -> Result<()>;
-    /// See `Client::clock_skew_ms`.
-    fn clock_skew_ms(&self) -> Option<i64> {
-        None
+    /// See `Client::clock_skew_ms`. A store on this machine shares its clock.
+    fn clock_skew_ms(&self) -> Option<u64> {
+        Some(0)
     }
 
     // The calls R2 makes of an object mapped onto a store object. The other
@@ -326,7 +326,7 @@ impl Bucket {
         Self::new(memory::Memory::default(), prefix)
     }
 
-    pub fn clock_skew_ms(&self) -> Option<i64> {
+    pub fn clock_skew_ms(&self) -> Option<u64> {
         self.store.clock_skew_ms()
     }
 

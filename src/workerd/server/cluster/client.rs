@@ -14,11 +14,14 @@
 use std::cell::Cell;
 use std::fmt::Write;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
+use cluster_logic::lease::Skew;
 use futures::StreamExt;
 
 use crate::Error;
@@ -90,8 +93,8 @@ pub struct Client<D> {
     /// `<scheme>://<host>[:<port>]`.
     endpoint: String,
     bucket: String,
-    /// This node's wall clock less the bucket's, at the last response.
-    skew_ms: Cell<Option<i64>>,
+    /// This node's wall clock less the bucket's, from the responses so far.
+    skew: Cell<Option<Skew>>,
     /// The first pause of the 429/503 backoff (`BACKOFF`).
     backoff: Duration,
 }
@@ -103,7 +106,7 @@ impl<D> Client<D> {
             http,
             endpoint: endpoint.trim_end_matches('/').to_owned(),
             bucket: bucket.to_owned(),
-            skew_ms: Cell::new(None),
+            skew: Cell::new(None),
             backoff: BACKOFF,
         }
     }
@@ -182,10 +185,11 @@ impl<D: Dialect> Store for Client<D> {
         Ok(self.listing(prefix, true).await?.1)
     }
 
-    /// How far this node's wall clock is outside the bucket's, from the last
-    /// response's `Date` header: 0 when the header fits the request's window.
-    fn clock_skew_ms(&self) -> Option<i64> {
-        self.skew_ms.get()
+    /// How far this node's wall clock may be off from the bucket's, from the
+    /// responses' `Date` headers.
+    fn clock_skew_ms(&self) -> Option<u64> {
+        let wall = unix_ms(SystemTime::now());
+        self.skew.get().map(|skew| skew.most_ms(mono_ms(), wall))
     }
 
     // R2's calls. A read is a `Repeat::Read`: `http::prompt` may send it
@@ -560,7 +564,7 @@ impl<D: Dialect> Client<D> {
             Payload::File(path) => std::fs::metadata(path).map_or(0, |m| m.len()),
         };
         let head = REQUEST_TIMEOUT + Duration::from_secs(size >> 20);
-        let sent = SystemTime::now();
+        let sent = mono_ms();
         let (url, bounds) = (url.to_owned(), (head, REQUEST_TIMEOUT));
         let response = if call.stream {
             self.http
@@ -573,8 +577,11 @@ impl<D: Dialect> Client<D> {
                 .await
         };
         let response = response.map_err(|error| request_error(method, key, &error))?;
-        if let Some(skew) = skew_ms(sent, SystemTime::now(), &response.date) {
-            self.skew_ms.set(Some(skew));
+        // Measured from the send alone, a write R2 held 8 s at its 5-minute
+        // mark read as a clock 8 s slow: the window takes the whole request.
+        if let Some(date) = http_date_ms(&response.date) {
+            let skew = Skew::answered(self.skew.get(), sent, mono_ms(), date);
+            self.skew.set(Some(skew));
         }
         Ok(response)
     }
@@ -759,22 +766,10 @@ fn listing_page(
     }
 }
 
-/// How far this clock is outside the bucket's, from a response's `Date`
-/// header, for a request sent at `sent` and answered at `received`.
-fn skew_ms(sent: SystemTime, received: SystemTime, date: &str) -> Option<i64> {
-    let date = http_date_ms(date)?;
-    // The bucket stamped the header, in whole seconds, between the send and
-    // the answer: this clock is off only by what lies outside that window.
-    // Measured from the send alone, a write R2 held 8 s at its 5-minute mark
-    // read as a clock 8 s slow.
-    let (sent, received) = (unix_ms(sent), unix_ms(received));
-    Some(if received < date {
-        received - date
-    } else if sent > date + 1000 {
-        sent - date - 1000
-    } else {
-        0
-    })
+/// Milliseconds by the monotonic clock, from the first call.
+fn mono_ms() -> i64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    i64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
 /// The text of each `<name>…</name>` element, in order. S3's listing XML has
