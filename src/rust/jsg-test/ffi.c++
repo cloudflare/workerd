@@ -25,6 +25,7 @@
 
 #include <capnp/message.h>
 #include <kj/common.h>
+#include <kj/exception.h>
 #include <kj/map.h>
 
 using namespace kj_rs;
@@ -454,6 +455,14 @@ int64_t external_memory(Isolate* isolate) {
       isolate->GetHeapProfiler()->TakeHeapSnapshot(&activity, nullptr, true, true), deleter);
   snapshot->Serialize(&writer, v8::HeapSnapshot::kJSON);
   return ::rust::String(serialized.begin(), serialized.size());
+}
+
+kj::Own<TestAsyncObject> new_test_async_object() {
+  return kj::heap<TestAsyncObject>();
+}
+
+void print_stack_trace_on_crash() {
+  kj::printStackTraceOnCrash();
 }
 
 size_t rust_wrappable_size() {

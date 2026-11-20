@@ -412,6 +412,10 @@ How the code keeps the rule:
 - A C++ object that a resource holds is `Send` only by an `unsafe impl` that says why the object
   belongs to no thread, as for `ffi::InspectorSession` (`src/rust/api/inspector.rs`) and
   `IoOwnedObject` (`src/workerd/io/io-context/ffi.rs`).
+- A KJ I/O object belongs to its event loop, so a resource holds one only through an `IoOwned`
+  (`src/workerd/io/io-context/lib.rs`). As for a C++ JSG object, destroying a resource that holds
+  one otherwise aborts the process, whichever thread destroys it: the C++ `Wrappable` that owns
+  a resource drops it under `kj::DisallowAsyncDestructorsScope` (`ffi.c++`).
 
 `Traced` is a safe trait: a hand-written `impl Traced` can't cause a data race, since the type
 must be `Send`. Its other duties, visiting every GC reference, following rule 2 and changing
