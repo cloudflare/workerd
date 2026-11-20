@@ -204,15 +204,6 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
   static jsg::Ref<WorkerGlobalScope> constructor() = delete;
 };
 
-// Controller type for test handler.
-//
-// At present, this has no methods. It is defined for consistency with other handlers and on the
-// assumption that we'll probably want to put something here someday.
-class TestController: public jsg::Object {
- public:
-  JSG_RESOURCE_TYPE(TestController) {}
-};
-
 // Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
@@ -423,6 +414,11 @@ class ExecutionContext: public jsg::Object {
 
     JSG_METHOD(abort);
 
+    // TestController, the first argument of a test() handler, is a Rust resource (api/test-api),
+    // which C++ RTTI can't describe. It is declared here rather than with ExportedHandler's
+    // declarations to keep its place among the generated declarations.
+    JSG_TS_DEFINE(interface TestController {});
+
     // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
       if (flags.getEnableVersionApi()) {
@@ -544,11 +540,6 @@ struct ExportedHandler {
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<TestHandler>> test;
-
   using HibernatableWebSocketMessageHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketMessageHandler>> webSocketMessage;
@@ -570,7 +561,6 @@ struct ExportedHandler {
       tailStream,
       scheduled,
       alarm,
-      test,
       webSocketMessage,
       webSocketClose,
       webSocketError,
@@ -590,7 +580,12 @@ struct ExportedHandler {
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown, Props = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
   );
+  // `test` isn't a member of the struct: it is read from the export only when a test runs (see
+  // src/workerd/io/entrypoint/test.rs), so this adds it. Members the struct lacks are appended in
+  // the order they appear here, so `test` comes first, to keep its place in the generated
+  // declaration.
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
+    test?: ExportedHandlerTestHandler<Env, Props>;
     email?: EmailExportedHandler<Env, Props>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
     connect?: ExportedHandlerConnectHandler<Env, Props>;
@@ -603,7 +598,6 @@ struct ExportedHandler {
     webSocketClose: never;
     webSocketError: never;
     queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-    test?: ExportedHandlerTestHandler<Env, Props>;
   });
   // Make `env` parameter generic
 
@@ -777,11 +771,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       IoContext_IncomingRequest& incomingRequest,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
-
-  // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns
-  // a jsg::Promise<void>; it fails if an exception is thrown. WorkerEntrypoint will catch these
-  // and report them.
-  jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
   // register cases, then runs them. Failures, of the handler or of a case, are recorded in the
@@ -1317,11 +1306,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 };
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
-  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
-      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, EW_BENCH_ISOLATE_TYPES,                   \
+      api::ExecutionContext, api::ExportedHandler, api::BenchExportedHandler,                      \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

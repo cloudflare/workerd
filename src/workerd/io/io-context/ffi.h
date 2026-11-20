@@ -111,6 +111,7 @@ int64_t io_context_now(uint64_t id);
 void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const uint8_t> message);
 
 // Rust types, defined in ffi.rs.
+enum class IoCallbackOutcome : uint8_t;
 struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
@@ -122,6 +123,13 @@ struct WaitUntilFuture;
 // destroyed first. If `future` panics, or `callback` fails or panics, the task fails.
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback);
+
+// Ends a function that IoContext::run() runs, which called a Rust callback that ended with
+// `outcome`: returns if the callback succeeded. If it failed, the exception, or termination, is
+// pending in V8, and this throws JsExceptionThrown, which is how IoContext::run() expects to learn
+// of it: run() then logs the exception as uncaught, with its stack, and fails with it, as for C++
+// code it runs. If it panicked, this fails with a KJ exception saying that `callback` panicked.
+void endRunOfIoCallback(IoCallbackOutcome outcome, kj::StringPtr callback);
 
 // Holds what IoContext::addObject() returns for a Rust value, which the IoContext then destroys
 // when it is destroyed, unless this is destroyed first.

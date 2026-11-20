@@ -6,11 +6,35 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/entrypoint/ffi.rs.h>
+#include <workerd/io/io-context/ffi.h>
 #include <workerd/io/tracer.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/util/use-perfetto-categories.h>
 
 namespace workerd::entrypoint {
+
+namespace {
+
+// The NUL-terminated string `bytes` holds with its NUL, for a name that Rust passes as the bytes
+// of a `&'static CStr`. `what` names it in the exception for bytes that aren't one.
+kj::StringPtr staticName(::rust::Slice<const kj::byte> bytes, kj::StringPtr what) {
+  // A kj::StringPtr needs a NUL right after its text and none within it. A CStr's bytes with its
+  // NUL meet both, but this doesn't rely on that.
+  auto all = kj::arrayPtr(bytes.data(), bytes.size());
+  KJ_REQUIRE(all.size() > 0 && all.back() == '\0', "not NUL-terminated", what);
+  auto text = all.first(all.size() - 1);
+  KJ_REQUIRE(text.findFirst('\0') == kj::none, "contains a NUL", what);
+  return kj::StringPtr(text.asChars().begin(), text.size());
+}
+
+}  // namespace
+
+void invocation_set_custom_event_info(Invocation& invocation) {
+  KJ_IF_SOME(tracer, invocation.request->getWorkerTracer()) {
+    tracer.setEventInfo(*invocation.request, tracing::CustomEventInfo());
+  }
+}
 
 void invocation_set_scheduled_event_info(
     Invocation& invocation, kj::Date scheduledTime, ::rust::Slice<const kj::byte> cron) {
@@ -22,13 +46,7 @@ void invocation_set_scheduled_event_info(
 }
 
 void invocation_delivered(Invocation& invocation, ::rust::Slice<const kj::byte> eventType) {
-  // A kj::StringPtr needs a NUL right after its text and none within it. Rust passes a CStr's
-  // bytes with its NUL (see ffi::delivered()), which meet both, but this doesn't rely on that.
-  auto bytes = kj::arrayPtr(eventType.data(), eventType.size());
-  KJ_REQUIRE(bytes.size() > 0 && bytes.back() == '\0', "the event type is not NUL-terminated");
-  auto text = bytes.first(bytes.size() - 1);
-  KJ_REQUIRE(text.findFirst('\0') == kj::none, "the event type contains a NUL");
-  invocation.request->delivered(kj::StringPtr(text.asChars().begin(), text.size()));
+  invocation.request->delivered(staticName(eventType, "the event type"));
 }
 
 void invocation_drain(kj::Own<Invocation> invocation) {
@@ -37,6 +55,35 @@ void invocation_drain(kj::Own<Invocation> invocation) {
   })) {
     KJ_LOG(ERROR, "draining an entrypoint invocation failed", exception);
   }
+}
+
+void invocation_run_in_wait_until(Invocation& invocation,
+    ::rust::Slice<const kj::byte> spanName,
+    ::rust::Box<HandlerCallback> callback,
+    ::rust::Box<WaitUntilContinuation> then) {
+  auto name = staticName(spanName, "the span name");
+  auto& context = invocation.request->getContext();
+  context.addWaitUntil(
+      context
+          .run([name, entrypointName = invocation.entrypointName.map([](kj::String& name) {
+    return kj::str(name);
+  }),
+                   versionInfo = kj::mv(invocation.versionInfo), props = kj::mv(invocation.props),
+                   callback = kj::mv(callback)](Worker::Lock& lock, IoContext& context) mutable {
+    // Used only in Perfetto builds.
+    (void)name;
+    TRACE_EVENT("workerd", perfetto::StaticString(name.cStr()));
+    auto traceScope = context.makeRequestTraceScope(lock);
+    auto handles = getHandlerHandles(lock, context,
+        entrypointName.map([](kj::String& name) -> kj::StringPtr { return name; }),
+        kj::mv(versionInfo), kj::mv(props));
+    auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
+    // A KJ exception that the callback failed with is thrown on from here.
+    auto outcome =
+        handler_callback_run(isolate, kj::mv(callback), rust::jsg::to_ffi(kj::mv(handles.handler)),
+            rust::jsg::to_ffi(kj::mv(handles.env)), rust::jsg::to_ffi(kj::mv(handles.ctx)));
+    io_context::endRunOfIoCallback(outcome, "the callback of an entrypoint event");
+  }).then([then = kj::mv(then)]() mutable { return wait_until_continuation_wait(kj::mv(then)); }));
 }
 
 void invocation_start_scheduled_in_wait_until(
@@ -60,8 +107,11 @@ void invocation_start_scheduled_in_wait_until(
 }
 
 kj::Promise<::workerd::rust::worker::ScheduledResult> invocation_finish_scheduled(
-    kj::Own<Invocation> invocation) {
-  TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
+    kj::Own<Invocation> invocation, ::rust::Slice<const kj::byte> spanName) {
+  auto name = staticName(spanName, "the span name");
+  // Used only in Perfetto builds.
+  (void)name;
+  TRACE_EVENT("workerd", perfetto::StaticString(name.cStr()));
   auto& request = *invocation->request;
   return request.finishScheduled(kj::mv(invocation->request))
       .then([](WorkerInterface::ScheduledResult result) {
@@ -82,6 +132,10 @@ kj::Promise<WorkerInterface::ScheduledResult> runScheduled(
       .then([](::workerd::rust::worker::ScheduledResult result) {
     return kj::from<kj_rs::Rust>(result);
   });
+}
+
+kj::Promise<bool> runTest(kj::Own<Invocation> invocation) {
+  return test_event_finish(test_event_start(kj::mv(invocation)));
 }
 
 }  // namespace workerd::entrypoint

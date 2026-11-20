@@ -20,12 +20,16 @@
 
 mod ffi;
 mod scheduled;
+mod test;
 
+use std::cell::Cell;
 use std::ffi::CStr;
 use std::future::Future;
+use std::rc::Rc;
 
 use cxx::KjException;
 use ffi::bridge;
+use jsg::v8;
 use kj_rs::KjDate;
 use kj_rs::KjOwn;
 
@@ -41,6 +45,14 @@ impl Invocation {
     #[must_use]
     pub fn new(invocation: KjOwn<bridge::Invocation>) -> Self {
         Self { invocation }
+    }
+
+    /// Tells the request's tracer, if it has one, that the event is a custom event.
+    ///
+    /// # Errors
+    /// Fails with the exception the tracer throws.
+    pub fn set_custom_event_info(&mut self) -> Result<(), KjException> {
+        bridge::invocation_set_custom_event_info(self.invocation.pin_mut())
     }
 
     /// Tells the request's tracer, if it has one, that the event is a scheduled event for
@@ -98,7 +110,76 @@ impl Drop for Request {
 /// background.
 pub struct Delivered(Request);
 
+/// The handles that [`Delivered::run_in_wait_until`] runs its callback on.
+pub struct Handler<'s> {
+    /// The event's exported handler, or undefined if there is none, as under Service Workers
+    /// syntax.
+    pub handler: v8::Local<'s, v8::Value>,
+    /// The Worker's env, or undefined if there is no exported handler.
+    pub env: v8::Local<'s, v8::Value>,
+    /// The handler's ctx, or undefined if it has none.
+    pub ctx: v8::Local<'s, v8::Value>,
+}
+
+/// How a callback that [`Delivered::run_in_wait_until`] runs fails.
+#[derive(Debug)]
+pub enum RunError {
+    /// A JavaScript error, which the run throws, unless it stands for an exception that is
+    /// pending (see [`jsg::Error::is_pending`]). `IoContext::run()` then fails with the exception,
+    /// which it logs as uncaught.
+    Js(jsg::Error),
+    /// A KJ exception, as a C++ call fails with, which `IoContext::run()` fails with unchanged.
+    Kj(KjException),
+}
+
+impl From<jsg::Error> for RunError {
+    fn from(err: jsg::Error) -> Self {
+        Self::Js(err)
+    }
+}
+
+impl From<KjException> for RunError {
+    fn from(err: KjException) -> Self {
+        Self::Kj(err)
+    }
+}
+
 impl Delivered {
+    /// Runs `f` in a waitUntil task of the request, as C++ `context.addWaitUntil(context.run(...))`
+    /// does, under the Perfetto span `span_name`: in the request's `IoContext`, with the isolate
+    /// locked and the request's async trace scopes entered, on the event's [`Handler`]. Once `f`
+    /// has run, the task waits for the future `f` returns, outside the isolate lock. The task
+    /// fails with the error `f` fails with, as `IoContext::run()` converts it, or with the error
+    /// of the future.
+    ///
+    /// # Errors
+    /// Fails with the exception that keeps the task from being added. The request then finishes
+    /// in the background.
+    pub fn run_in_wait_until<F>(
+        mut self,
+        span_name: &'static CStr,
+        f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, Handler<'s>) -> Result<F, RunError> + 'static,
+    ) -> Result<Running, KjException>
+    where
+        F: Future<Output = Result<(), KjException>> + 'static,
+    {
+        let output = Rc::new(Cell::new(None));
+        let sink = Rc::clone(&output);
+        let callback = ffi::HandlerCallback::new(Box::new(move |lock, handler| {
+            sink.set(Some(f(lock, handler)?));
+            Ok(())
+        }));
+        // Waited for only once the callback has run, so the future is there.
+        let then = ffi::WaitUntilContinuation::new(async move {
+            let future = output.take().ok_or_else(|| -> KjException {
+                kj::failed!("the callback of an entrypoint event did not run").into()
+            })?;
+            future.await
+        });
+        ffi::run_in_wait_until(self.0.invocation_mut().pin_mut(), span_name, callback, then)?;
+        Ok(Running(self.0))
+    }
+
     /// Starts the event's scheduled handler with a `ScheduledEvent` for `scheduled_time` and
     /// `cron`, in a waitUntil task of the request, in C++, as `WorkerEntrypoint::runScheduled()`
     /// does: `ServiceWorkerGlobalScope::startScheduled()` calls the exported handler's
@@ -130,15 +211,17 @@ pub struct Running(Request);
 
 impl Running {
     /// Finishes the event as a scheduled event, as `IoContext::IncomingRequest::finishScheduled()`
-    /// does: waits for the request's waitUntil tasks, up to the time limit of scheduled events.
+    /// does, under the Perfetto span `span_name`: waits for the request's waitUntil tasks, up to
+    /// the time limit of scheduled events.
     /// Returns its result: whether the event should be retried, and its outcome.
     ///
     /// The request finishes in the returned future, not in the background: dropping the future
     /// cancels it.
     pub fn finish_scheduled(
         mut self,
+        span_name: &'static CStr,
     ) -> impl Future<Output = Result<worker::ScheduledResult, KjException>> + 'static {
-        let finished = bridge::invocation_finish_scheduled(self.0.take());
+        let finished = ffi::finish_scheduled(self.0.take(), span_name);
         async move { Ok(finished.await?.into()) }
     }
 }

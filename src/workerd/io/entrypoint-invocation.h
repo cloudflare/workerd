@@ -21,4 +21,21 @@ struct Invocation {
   Frankenvalue props;
 };
 
+// The handles of the exported handler that an event is delivered to, for Rust, which takes them
+// as V8 handles. Each is undefined if there is no handler, as under Service Workers syntax, and
+// `ctx` is also undefined if the handler has none.
+struct HandlerHandles {
+  v8::Local<v8::Value> handler;
+  v8::Local<v8::Value> env;
+  v8::Local<v8::Value> ctx;
+};
+
+// Finds the exported handler with Worker::Lock::getExportedHandler(), for the current request
+// `context`, and returns its handles, in the lock's HandleScope.
+HandlerHandles getHandlerHandles(Worker::Lock& lock,
+    IoContext& context,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
+    Frankenvalue props);
+
 }  // namespace workerd::entrypoint

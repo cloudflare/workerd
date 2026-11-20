@@ -30,6 +30,8 @@ wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
+    # The entrypoint crate's shims end their runs of Rust callbacks with endRunOfIoCallback().
+    visibility = ["//src/workerd/io/entrypoint:__pkg__"],
     deps = [
         ":current-with-id",
         ":ffi.rs@cxx",

@@ -9,9 +9,12 @@ wd_rust_crate(
         "ffi.rs",
         "lib.rs",
         "scheduled.rs",
+        "test.rs",
     ],
     cxx_bridge_deps = [
+        "//src/rust/jsg",
         "//src/rust/worker:bridge",
+        "//src/workerd/io/io-context",
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
     ],
@@ -21,8 +24,11 @@ wd_rust_crate(
     link_deps = [":ffi"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/jsg",
         "//src/rust/kj",
         "//src/rust/worker",
+        "//src/workerd/api/test-api",
+        "//src/workerd/io:outcome_capnp_rust",
         "//src/workerd/io/io-context",
     ],
 )
@@ -34,9 +40,11 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
         "//src/rust/worker:bridge",
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
+        "//src/workerd/io/io-context:ffi",
         "//src/workerd/util:perfetto",
     ],
 )

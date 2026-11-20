@@ -37,6 +37,7 @@ wd_cc_library(
         "async-trace-inspector.c++",
         "async-trace-promises.c++",
         "async-trace-stacks.c++",
+        "entrypoint-invocation.c++",
         "features.c++",
         "hibernation-manager.c++",
         "invocation-span.c++",

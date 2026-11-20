@@ -1196,40 +1196,16 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "test() can only be called once"));
   this->incomingRequest = kj::none;
-  auto& context = incomingRequest->getContext();
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
-  }
 
-  incomingRequest->delivered("test"_kj);
-
-  context.addWaitUntil(
-      context.run([entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-                      props = kj::mv(props)](
-                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
-    auto traceScope = context.makeRequestTraceScope(lock);
-
-    return context.awaitJs(lock,
-        lock.getGlobalScope().test(lock,
-            lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
-  }));
-
-  static auto constexpr waitForFinished =
-      [](kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::test() waitForFinished()");
-
-    auto scheduledResult = co_await request->finishScheduled(kj::mv(request));
-
-    // Not adding a return event here – we only provide rudimentary tracing support for test events
-    // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
-    // practice.
-
-    co_return scheduledResult.outcome == EventOutcome::OK;
-  };
-
-  return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
+  // Rust reports the event to the tracer, delivers it, calls the handler's test() in a waitUntil
+  // task and waits for the request to finish (see entrypoint/test.rs).
+  return wrapWithCanceler(entrypoint::runTest(kj::heap(entrypoint::Invocation{
+    .request = kj::mv(incomingRequest),
+    .waitUntilTasks = waitUntilTasks,
+    .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
+    .versionInfo = kj::mv(versionInfo),
+    .props = kj::mv(props),
+  })));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(

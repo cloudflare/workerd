@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Workers whose test events pass and fail in the ways that `workerd test` reports.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "modules",
+      worker = (
+        modules = [(name = "worker", esModule = embed "modules.js")],
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+    ( name = "service-worker",
+      worker = (
+        serviceWorkerScript = embed "service-worker.js",
+        compatibilityDate = "2024-01-01",
+      ),
+    ),
+  ],
+);
