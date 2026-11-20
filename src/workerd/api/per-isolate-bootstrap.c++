@@ -8,6 +8,7 @@
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/crypto/random-bootstrap.h>
 #include <workerd/api/crypto/subtle-bootstrap.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
@@ -233,6 +234,28 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
       args.GetReturnValue().Set(
           v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
     });
+  });
+}
+
+// Fills an integer-typed view with random bytes for the TypeScript Crypto, which has checked the
+// view. Throws outside a request, so it needs liftKj.
+static void FillRandomValues(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    JSG_REQUIRE(
+        args[0]->IsArrayBufferView(), TypeError, "fillRandomValues() expects an ArrayBufferView");
+    jsg::JsArrayBufferView view(args[0].As<v8::ArrayBufferView>());
+    JSG_REQUIRE(view.isIntegerType() && view.size() <= 0x10000, TypeError,
+        "fillRandomValues() expects a view getRandomValues() accepts");
+    api::fillRandomValues(js, view);
+  });
+}
+
+// A random UUID for the TypeScript Crypto's randomUUID(). Throws outside a request.
+static void NewRandomUUID(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    args.GetReturnValue().Set(v8::Local<v8::Value>(api::newRandomUUID(js)));
   });
 }
 
@@ -657,6 +680,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "getApiSymbol",
     "newCompressionCodec",
     "createDigestContext",
+    "fillRandomValues",
+    "newRandomUUID",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
@@ -703,6 +728,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
+    getMethod(js, FillRandomValues),
+    getMethod(js, NewRandomUUID),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),

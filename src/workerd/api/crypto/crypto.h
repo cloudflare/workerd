@@ -1236,7 +1236,7 @@ class Crypto final: public jsg::Object {
     }
   }
 
-  jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
+  jsg::JsArrayBufferView getRandomValues(jsg::Lock& js, jsg::JsArrayBufferView buffer);
 
   kj::String randomUUID();
 

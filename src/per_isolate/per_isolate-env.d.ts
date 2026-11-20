@@ -135,6 +135,11 @@ declare const utils: {
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
   createDigestContext(algorithm: string, toWellFormed: boolean): DigestContext;
+  // Fills an integer-typed view from the request's entropy source
+  // (api/crypto/random-bootstrap.h). Throws outside a request.
+  fillRandomValues(view: ArrayBufferView): void;
+  // A random UUID from the request's entropy source. Throws outside a request.
+  newRandomUUID(): string;
   // The C++ write-context factory (api/filesystem-bootstrap.h), consumed by
   // webfs/writable-file-stream. Throws the DOMException that createWritable
   // reports for an unopenable file.

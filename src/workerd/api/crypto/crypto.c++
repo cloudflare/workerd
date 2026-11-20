@@ -5,6 +5,7 @@
 #include "crypto.h"
 
 #include "impl.h"
+#include "random-bootstrap.h"
 #include "rsa.h"
 #include "simdutf.h"
 #include "subtle-bootstrap.h"
@@ -1673,7 +1674,7 @@ kj::OneOf<jsg::Ref<SubtleCrypto>, jsg::JsValue> Crypto::getSubtleForJs(jsg::Lock
   return subtle.addRef();
 }
 
-jsg::JsArrayBufferView Crypto::getRandomValues(jsg::JsArrayBufferView buffer) {
+jsg::JsArrayBufferView Crypto::getRandomValues(jsg::Lock& js, jsg::JsArrayBufferView buffer) {
   // NOTE: TypeMismatchError is deprecated (obviated by TypeError), but the spec and W3C tests still
   //   expect a TypeMismatchError here.
   JSG_REQUIRE(buffer.isIntegerType(), DOMTypeMismatchError,
@@ -1681,8 +1682,16 @@ jsg::JsArrayBufferView Crypto::getRandomValues(jsg::JsArrayBufferView buffer) {
   JSG_REQUIRE(buffer.size() <= 0x10000, DOMQuotaExceededError,
       "getRandomValues() only accepts buffers of size <= 64K but provided ", buffer.size(),
       " bytes.");
-  IoContext::current().getEntropySource().generate(buffer.asArrayPtr());
+  fillRandomValues(js, buffer);
   return buffer;
+}
+
+void fillRandomValues(jsg::Lock& js, jsg::JsArrayBufferView view) {
+  IoContext::current().getEntropySource().generate(view.asArrayPtr());
+}
+
+jsg::JsString newRandomUUID(jsg::Lock& js) {
+  return js.str(::workerd::randomUUID(IoContext::current().getEntropySource()));
 }
 
 kj::String Crypto::randomUUID() {
