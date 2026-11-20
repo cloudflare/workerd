@@ -557,6 +557,23 @@ export class Store extends DurableObject {
   }
 }
 
+// Lives in a facet and mints further stubs through the facet's ctx.restore().
+class FacetMinter extends RpcTarget {
+  constructor(ctx, id) {
+    super();
+    this.ctx = ctx;
+    this.id = id;
+  }
+
+  ping(value) {
+    return `facet-minter:${this.id}:${value}`;
+  }
+
+  async mint(id) {
+    return await this.ctx.restore({ kind: 'facet-minter', id });
+  }
+}
+
 export class RestorableFacet extends DurableObject {
   ping(value) {
     return `${this.ctx.props.prefix}:${value}`;
@@ -566,8 +583,15 @@ export class RestorableFacet extends DurableObject {
     return await this.ctx.restore({ kind: 'facet-inner', id });
   }
 
+  async makeMinter(id) {
+    return await this.ctx.restore({ kind: 'facet-minter', id });
+  }
+
   async [restore](params) {
     restoreEvents.push(`facet:${params.kind}:${params.id}`);
+    if (params.kind === 'facet-minter') {
+      return new FacetMinter(this.ctx, params.id);
+    }
     return this.ctx.exports.StaticTarget({
       props: { prefix: `facet-inner:${params.id}` },
     });
@@ -588,6 +612,21 @@ export class FacetRoot extends DurableObject {
     await this.ctx.storage.put('inner', inner);
     let loaded = await this.ctx.storage.get('inner');
     return await loaded.ping(value);
+  }
+
+  // Each stub is stored and replayed before its target mints the next one.
+  async replayedFacetTargetMints(id, value) {
+    let facet = await this.ctx.restore({ kind: 'facet', id });
+    let first = await facet.makeMinter(`${id}-1`);
+    await this.ctx.storage.put('first', first);
+
+    let replayedFirst = await this.ctx.storage.get('first');
+    let second = await replayedFirst.mint(`${id}-2`);
+    await this.ctx.storage.put('second', second);
+
+    let replayedSecond = await this.ctx.storage.get('second');
+    let third = await replayedSecond.mint(`${id}-3`);
+    return await third.ping(value);
   }
 
   async directFacetRestoreError(id) {
@@ -754,6 +793,19 @@ export let nestedFacetRestoreChains = {
     assert.strictEqual(
       await ctx.exports.Source.restoreCount('facet:facet-inner:nested'),
       2
+    );
+  },
+};
+
+// A target in a facet that was reached by replaying a stored stub can call ctx.restore(), and so
+// can the target of the stub that makes.
+export let replayedFacetTargetsCanRestore = {
+  async test(ctrl, env, ctx) {
+    let id = ctx.exports.FacetRoot.idFromName('replayed-facet-minter');
+    let root = ctx.exports.FacetRoot.get(id);
+    assert.strictEqual(
+      await root.replayedFacetTargetMints('minter', 'value'),
+      'facet-minter:minter-3:value'
     );
   },
 };
