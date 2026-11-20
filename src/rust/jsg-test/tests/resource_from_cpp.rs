@@ -186,7 +186,7 @@ fn is_rejects_primitives_and_cpp_objects() {
             let value = ctx.eval_raw(lock, code).unwrap();
             assert!(!jsg::resource::is::<Held>(lock, value), "{code}");
         }
-        let cpp = Harness::create_cpp_tagged_object(lock);
+        let cpp = Harness::create_cpp_wrapped_object(lock);
         assert!(!jsg::resource::is::<Held>(lock, cpp));
         Ok(())
     });

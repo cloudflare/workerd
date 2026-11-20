@@ -1627,8 +1627,7 @@ pub enum Member {
     },
     Method {
         name: String,
-        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback skips the
-        /// marker check of its receiver.
+        /// Registered with the type's `v8::Signature`, which V8 checks before calling it.
         callback: RawFunctionCallback,
         fast: Option<fast_api::FastCallback>,
         length: u32,

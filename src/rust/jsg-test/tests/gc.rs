@@ -770,7 +770,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 
 /// Tests that `FromJS` returns `Err` for a plain JS object.
 ///
-/// A plain `{}` object has no internal fields and no wrappable tag.
+/// A plain `{}` object is not the wrapper of a resource.
 /// `FromJS::from_js` must return `Err` without crashing.
 #[test]
 fn from_js_returns_err_for_plain_js_object() {

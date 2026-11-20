@@ -617,7 +617,6 @@ bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value);
-const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value);
 
 // ArrayBuffer detach/detachable/was-detached
 // Returns false, and detaches nothing, if an exception or a termination is pending.

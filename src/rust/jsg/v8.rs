@@ -1267,13 +1267,6 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
-        // Like `unwrap_resource_trait_object`, without the marker check, for the receiver of a
-        // method registered with a `v8::Signature`.
-        #[nothrow]
-        pub unsafe fn unwrap_method_receiver(
-            isolate: *mut Isolate,
-            value: Local, /* v8::LocalValue */
-        ) -> *const TraitObjectPtr;
 
         // Empty if an exception or a termination is pending; see `call_into_js()`.
         pub unsafe fn function_template_get_function(
@@ -5737,11 +5730,12 @@ pub(crate) struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
 }
 
-/// Resolves the receiver `value` of a callback registered without a `v8::Signature`
-/// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
-/// a reference.
+/// Resolves the receiver `value` of a callback to the resource `R` without taking a reference.
 ///
-/// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+/// Returns `None` when `value` is not a wrapper of an `R`. A callback registered without a
+/// `v8::Signature` (an accessor, inspect property, wildcard interceptor or call handler) gets
+/// any value as its receiver, and so does a method callback that safe code registers without
+/// one, which then throws rather than aborting the process. The pointer is only valid while
 /// `value` is reachable, which a callback's `this` is for the duration of the call.
 #[doc(hidden)]
 pub fn resolve_receiver<R: 'static>(
@@ -5756,25 +5750,8 @@ pub fn resolve_receiver<R: 'static>(
     ptr?.resolve::<R>()
 }
 
-/// Like [`resolve_receiver`], for the receiver of a method registered with a
-/// `v8::Signature`, which makes it a Rust resource wrapper, so it skips the marker check.
-///
-/// Any other value gives `None`, so a method callback that safe code registers without a
-/// signature throws rather than aborting the process.
-#[doc(hidden)]
-pub fn resolve_method_receiver<R: 'static>(
-    lock: &mut Lock<'_>,
-    value: Local<'_, Value>,
-) -> Option<NonNull<R>> {
-    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
-    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
-    let ptr =
-        unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
-    ptr?.resolve::<R>()
-}
-
-/// Borrows the resource that [`resolve_receiver`] or [`resolve_method_receiver`] resolved from
-/// `this`, for no longer than `this` is borrowed.
+/// Borrows the resource that [`resolve_receiver`] resolved from `this`, for no longer than
+/// `this` is borrowed.
 ///
 /// A callback passes a borrow of its own `this` handle, a local, so the borrow of the resource
 /// ends with the call, whatever lifetime the method names for its receiver.

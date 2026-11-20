@@ -1067,8 +1067,8 @@ MaybeLocal wrap_resource(
     return MaybeLocal{.ptr = 0};
   }
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
-  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. The tag marks the
+  // object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
@@ -1088,8 +1088,8 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   KJ_REQUIRE(::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, object) == nullptr,
       "`this` already wraps a resource");
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
-  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. The tag marks the
+  // object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 }
@@ -1156,28 +1156,20 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
-// For an object already known to be a Rust resource wrapper, from the marker.
-// Anything else is an invariant violation and aborts.
-Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
-  return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
-      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange));
-}
-
-// Creates no handles, so fast callbacks can use it without a HandleScope.
+// The Rust Wrappable that `v8_val` is the wrapper of, or kj::none for any other value: the
+// wrappers of Rust resources, and nothing else, have kRustResourceWrappableTag. Creates no
+// handles, so fast callbacks can use it without a HandleScope.
 kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
   if (!v8_val->IsObject()) return kj::none;
   auto v8_obj = v8_val.As<v8::Object>();
-  // Plain JS objects have no internal fields; check before reading to avoid V8 fatal error.
-  if (v8_obj->InternalFieldCount() < ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT ||
-      v8_obj->GetAlignedPointerFromInternalField(
-          ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-          static_cast<v8::EmbedderDataTypeTag>(
-              ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) !=
-          const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
-    return kj::none;
-  }
-  return unwrapRustWrapper(isolate, v8_obj);
+  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
+  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
+  if (!v8_obj->IsApiWrapper()) return kj::none;
+  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShim(
+      isolate, v8_obj, ::workerd::jsg::kRustResourceWrappableTagRange);
+  if (wrappable == nullptr) return kj::none;
+  return *static_cast<Wrappable*>(wrappable);
 }
 }  // namespace
 
@@ -1193,22 +1185,6 @@ const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value
     return &wrappable.trait_object;
   }
   return nullptr;
-}
-
-const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
-  // The receiver of a method registered with the type's Signature is a wrapper made from a Rust
-  // resource template, so this skips the marker check. A method callback registered without one
-  // gets any value, which is not found rather than aborting.
-  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
-  if (!v8Value->IsObject()) return nullptr;
-  auto object = v8Value.As<v8::Object>();
-  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
-  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
-  if (!object->IsApiWrapper()) return nullptr;
-  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShim(
-      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange);
-  if (wrappable == nullptr) return nullptr;
-  return &static_cast<Wrappable*>(wrappable)->trait_object;
 }
 
 // Uses V8's Array::Iterate(), which is faster than indexed access. Iterate() opens HandleScopes of

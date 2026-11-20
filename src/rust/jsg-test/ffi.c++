@@ -456,18 +456,9 @@ size_t rust_wrappable_size() {
   return sizeof(::workerd::rust::jsg::Wrappable);
 }
 
-::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
-  auto tmpl = v8::ObjectTemplate::New(isolate);
-  tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
-  auto obj = ::workerd::jsg::check(tmpl->NewInstance(isolate->GetCurrentContext()));
-
-  // Set the C++ wrappable tag (NOT the Rust tag) to simulate a C++ JSG object
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_WRAPPABLE_TAG);
-  obj->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
-
-  return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
+::workerd::rust::jsg::Local create_cpp_wrapped_object(Isolate* isolate) {
+  return ::workerd::rust::jsg::to_ffi(
+      ::workerd::jsg::wrapOpaque(isolate->GetCurrentContext(), kj::str("a C++ value")));
 }
 
 bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
