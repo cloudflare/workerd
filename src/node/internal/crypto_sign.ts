@@ -30,7 +30,6 @@ import {
   default as cryptoImpl,
   type SignHandle,
   type VerifyHandle,
-  type CreateAsymmetricKeyOptions,
 } from 'node-internal:crypto';
 
 import { validateString } from 'node-internal:validators';
@@ -38,11 +37,11 @@ import { validateString } from 'node-internal:validators';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
-  KeyObject,
   isKeyObject,
   getKeyObjectHandle,
-  createPrivateKey,
-  createPublicKey,
+  normalizeKeyInput,
+  createPrivateKeyInternal,
+  createPublicKeyInternal,
 } from 'node-internal:crypto_keys';
 
 import {
@@ -134,27 +133,50 @@ function getDSASignatureEncoding(options: any): number {
   return 0;
 }
 
+// Options objects can carry the key under options.key as a KeyObject or
+// CryptoKey; other options like padding, saltLength, and dsaEncoding are
+// still read from the outer options object.
 function getPrivateKey(options: any): CryptoKey {
-  if (options instanceof CryptoKey) {
-    return options as CryptoKey;
-  } else if (isKeyObject(options)) {
-    const keyObject = options as KeyObject;
-    if (keyObject.type === 'secret') {
+  const data = normalizeKeyInput(options);
+  const key = data.key;
+  if (key instanceof CryptoKey) {
+    return key;
+  } else if (isKeyObject(key)) {
+    if (key.type === 'secret') {
       throw new ERR_INVALID_ARG_TYPE(
         'options',
         ['PublicKeyObject', 'PrivateKeyObject', 'CryptoKey', 'object'],
-        keyObject.type
+        key.type
       );
     }
-    if (keyObject.type === 'public') {
+    if (key.type === 'public') {
       throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE('public', 'private');
     }
-    return getKeyObjectHandle(keyObject);
+    return getKeyObjectHandle(key);
   } else {
-    return getKeyObjectHandle(
-      createPrivateKey(options as CreateAsymmetricKeyOptions)
+    return getKeyObjectHandle(createPrivateKeyInternal(data));
+  }
+}
+
+function getPublicKey(options: any): CryptoKey {
+  const data = normalizeKeyInput(options);
+  const dataKey = data.key;
+  let key: CryptoKey;
+  if (dataKey instanceof CryptoKey) {
+    key = dataKey;
+  } else if (isKeyObject(dataKey)) {
+    key = getKeyObjectHandle(dataKey);
+  } else {
+    key = getKeyObjectHandle(createPublicKeyInternal(data));
+  }
+  if (!(key instanceof CryptoKey)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'options',
+      ['KeyObject', 'CryptoKey', 'object'],
+      key
     );
   }
+  return key;
 }
 
 Sign.prototype.sign = function (
@@ -237,23 +259,7 @@ Verify.prototype.verify = function (
     throw new ERR_CRYPTO_SIGN_KEY_REQUIRED();
   }
 
-  let key: CryptoKey;
-  if (options instanceof CryptoKey) {
-    key = options as CryptoKey;
-  } else if (isKeyObject(options)) {
-    key = getKeyObjectHandle(options as KeyObject);
-  } else {
-    key = getKeyObjectHandle(
-      createPublicKey(options as CreateAsymmetricKeyOptions)
-    );
-  }
-  if (!(key instanceof CryptoKey)) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'options',
-      ['KeyObject', 'CryptoKey', 'object'],
-      key
-    );
-  }
+  const key = getPublicKey(options);
 
   // Options specific to RSA
   const rsaPadding = getIntOption('padding', options);
@@ -383,23 +389,7 @@ export function verify(
     throw new ERR_CRYPTO_SIGN_KEY_REQUIRED();
   }
 
-  let key: CryptoKey;
-  if (options instanceof CryptoKey) {
-    key = options;
-  } else if (isKeyObject(options)) {
-    key = getKeyObjectHandle(options as KeyObject);
-  } else {
-    key = getKeyObjectHandle(
-      createPublicKey(options as CreateAsymmetricKeyOptions)
-    );
-  }
-  if (!(key instanceof CryptoKey)) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'options',
-      ['KeyObject', 'CryptoKey', 'object'],
-      key
-    );
-  }
+  const key = getPublicKey(options);
 
   // Options specific to RSA
   const rsaPadding = getIntOption('padding', options);

@@ -306,6 +306,23 @@ int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
 #pragma region SignVerify
 
 namespace {
+
+// Applies the Node.js RSA padding/saltLength options to an operation context.
+// The ctx may be a borrowed EVP_PKEY_CTX owned by a digest context or one
+// owned by an EVPKeyCtxPointer; callers must not free it.
+void setRsaOptions(EVP_PKEY_CTX* pkctx,
+    const ncrypto::EVPKeyPointer& pkey,
+    int padding,
+    jsg::Optional<int> pss_salt_len) {
+  if (!pkey.isRsaVariant()) return;
+  std::optional<int> maybeSaltLen = std::nullopt;
+  KJ_IF_SOME(len, pss_salt_len) {
+    maybeSaltLen = len;
+  }
+  JSG_REQUIRE(ncrypto::EVPKeyCtxPointer::setRsaPadding(pkctx, padding, maybeSaltLen), Error,
+      "Failed to set RSA parameters for signature");
+}
+
 jsg::JsUint8Array signFinal(jsg::Lock& js,
     ncrypto::EVPMDCtxPointer&& mdctx,
     const ncrypto::EVPKeyPointer& pkey,
@@ -328,14 +345,7 @@ jsg::JsUint8Array signFinal(jsg::Lock& js,
   ncrypto::EVPKeyCtxPointer pkctx = pkey.newCtx();
   JSG_REQUIRE(pkctx.initForSign(), Error, "Failed to initialize signing context");
 
-  if (pkey.isRsaVariant()) {
-    std::optional<int> maybeSaltLen = std::nullopt;
-    KJ_IF_SOME(len, pss_salt_len) {
-      maybeSaltLen = len;
-    }
-    JSG_REQUIRE(ncrypto::EVPKeyCtxPointer::setRsaPadding(pkctx.get(), padding, maybeSaltLen), Error,
-        "Failed to set RSA parameters for signature");
-  }
+  setRsaOptions(pkctx.get(), pkey, padding, pss_salt_len);
 
   JSG_REQUIRE(pkctx.setSignatureMd(mdctx), Error, "Failed to set signature digest");
   JSG_REQUIRE(pkctx.signInto(data, &sig_buf), Error, "Failed to generate signature");
@@ -368,14 +378,7 @@ bool verifyFinal(jsg::Lock& js,
   const int init_ret = pkctx.initForVerify();
   JSG_REQUIRE(init_ret != -2, Error, "Failed to initialize key for verification");
 
-  if (pkey.isRsaVariant()) {
-    std::optional<int> maybeSaltLen = std::nullopt;
-    KJ_IF_SOME(len, pss_salt_len) {
-      maybeSaltLen = len;
-    }
-    JSG_REQUIRE(ncrypto::EVPKeyCtxPointer::setRsaPadding(pkctx.get(), padding, maybeSaltLen), Error,
-        "Failed to set RSA parameters for signature");
-  }
+  setRsaOptions(pkctx.get(), pkey, padding, pss_salt_len);
 
   JSG_REQUIRE(pkctx.setSignatureMd(mdctx), Error,
       "Failed to set digest context for signature verification");
@@ -437,13 +440,29 @@ jsg::JsUint8Array convertSignatureToDER(
   return jsg::JsUint8Array::create(js, kj::ArrayPtr<kj::byte>(buf.data, buf.len));
 }
 
-const EVP_MD* maybeGetDigest(jsg::Optional<kj::String>& maybeAlgorithm) {
+// When Node's sign/verify APIs are called with a null or undefined algorithm,
+// OpenSSL resolves the digest from the key itself
+// (EVP_PKEY_get_default_digest_nid): SHA-256 for RSA and EC keys. Digest-free
+// key types (Ed25519, Ed448) resolve to no digest, which is the null digest
+// BoringSSL requires for them.
+const EVP_MD* defaultDigestForKey(const ncrypto::EVPKeyPointer& pkey) {
+  switch (pkey.id()) {
+    case EVP_PKEY_RSA:
+    case EVP_PKEY_EC:
+      return EVP_sha256();
+    default:
+      return nullptr;
+  }
+}
+
+const EVP_MD* maybeGetDigest(
+    jsg::Optional<kj::String>& maybeAlgorithm, const ncrypto::EVPKeyPointer& pkey) {
   KJ_IF_SOME(alg, maybeAlgorithm) {
     auto md = ncrypto::getDigestByName(alg.cStr());
     JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", alg));
     return md;
   }
-  return nullptr;
+  return defaultDigestForKey(pkey);
 }
 }  // namespace
 
@@ -577,9 +596,12 @@ jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
   // TODO(later): When DSA keys are supported, uncomment to validate DSA params.
   // JSG_REQUIRE(pkey.validateDsaParameters(), Error, "Invalid DSA parameters");
 
-  auto md = maybeGetDigest(algorithm);
+  auto md = maybeGetDigest(algorithm, pkey);
 
-  JSG_REQUIRE(mdctx.signInit(pkey, md).has_value(), Error, "Failed to initialize signing context");
+  auto pkctx = mdctx.signInit(pkey, md);
+  JSG_REQUIRE(pkctx.has_value(), Error, "Failed to initialize signing context");
+
+  setRsaOptions(*pkctx, pkey, rsaPadding.orDefault(pkey.getDefaultSignPadding()), pssSaltLength);
 
   ncrypto::Buffer<const kj::byte> buf{
     .data = data.asArrayPtr().begin(),
@@ -629,10 +651,12 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
   // TODO(later): When DSA keys are supported, uncomment to validate DSA params.
   // JSG_REQUIRE(pkey.validateDsaParameters(), Error, "Invalid DSA parameters");
 
-  auto md = maybeGetDigest(algorithm);
+  auto md = maybeGetDigest(algorithm, pkey);
 
-  JSG_REQUIRE(
-      mdctx.verifyInit(pkey, md).has_value(), Error, "Failed to initialize verification context");
+  auto pkctx = mdctx.verifyInit(pkey, md);
+  JSG_REQUIRE(pkctx.has_value(), Error, "Failed to initialize verification context");
+
+  setRsaOptions(*pkctx, pkey, rsaPadding.orDefault(pkey.getDefaultSignPadding()), pssSaltLength);
 
   auto sigCopy = jsg::JsUint8Array::create(js, signature.asArrayPtr());
 
