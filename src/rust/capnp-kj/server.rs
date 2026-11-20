@@ -8,6 +8,7 @@
 //! `capnp::Capability::Server` and calls [`RustServer::dispatch`] for each call.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use capnp::Error;
 use capnp::any_pointer;
@@ -22,6 +23,7 @@ use capnp::private::capability::RequestHook;
 use capnp::private::capability::ResultsHook;
 use kj_rs::KjOwn;
 
+use crate::error::from_kj;
 use crate::error::to_kj;
 use crate::ffi::bridge;
 use crate::message::CxxMessageReader;
@@ -114,7 +116,8 @@ impl RustServer {
 /// can read [`RustServer::last_is_streaming`] right away; the call needs no state on the heap
 /// besides the future.
 ///
-/// The call's results are in the C++ call by the time the future completes; see [`KjResults`].
+/// The call's results are in the C++ call by the time the future completes, or the call fails;
+/// see [`KjResults`].
 pub fn dispatch_call(
     server: &RustServer,
     interface_id: u64,
@@ -128,6 +131,24 @@ pub fn dispatch_call(
         method_id,
         KjParams::Cxx(CxxMessageReader::new(params)),
         ResultsContext::Cxx(context),
+    )
+}
+
+/// Like [`dispatch_call`], for the bridge's own call from C++: the server reads the caller's
+/// message in place, and the caller reads the server's.
+pub fn dispatch_bridge_call(
+    server: &RustServer,
+    interface_id: u64,
+    method_id: u16,
+    params: KjOwn<bridge::CxxMessage>,
+    context: KjOwn<bridge::CallContextHook>,
+) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    dispatch(
+        server,
+        interface_id,
+        method_id,
+        KjParams::Cxx(CxxMessageReader::new(params)),
+        ResultsContext::Bridge(context),
     )
 }
 
@@ -145,7 +166,7 @@ pub fn dispatch_rust_call(
         interface_id,
         method_id,
         KjParams::Rust(params),
-        ResultsContext::Rust(context),
+        ResultsContext::Bridge(context),
     )
 }
 
@@ -156,6 +177,7 @@ fn dispatch(
     params: KjParams,
     context: ResultsContext,
 ) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    let delivery = Delivery::default();
     let dispatched = server.server.dispatch_call(
         interface_id,
         method_id,
@@ -163,12 +185,30 @@ fn dispatch(
         Results::new(Box::new(KjResults {
             message: None,
             context,
+            delivery: Rc::clone(&delivery),
         })),
     );
     server.last_is_streaming.set(dispatched.is_streaming);
     let promise = dispatched.promise;
-    async move { promise.await.map_err(to_kj) }
+    async move {
+        promise.await.map_err(to_kj)?;
+        // Generated code drops the results before the server's future completes, unless the
+        // server moved them somewhere that outlives the call.
+        if Rc::strong_count(&delivery) > 1 {
+            return Err(to_kj(Error::failed(
+                "capnp-kj: the server kept its results past the end of the call".to_owned(),
+            )));
+        }
+        match delivery.take() {
+            Some(error) => Err(to_kj(error)),
+            None => Ok(()),
+        }
+    }
 }
+
+/// Why a call's results didn't reach the C++ call, if they didn't; shared between the results and
+/// the call's future, which fails with it.
+type Delivery = Rc<Cell<Option<Error>>>;
 
 /// A call's params, read in place.
 enum KjParams {
@@ -191,8 +231,8 @@ impl ParamsHook for KjParams {
 enum ResultsContext {
     /// Any call: the results are copied into it.
     Cxx(KjOwn<bridge::CallContextHook>),
-    /// A call from Rust: the results are handed over.
-    Rust(KjOwn<bridge::CallContextHook>),
+    /// The bridge's own call, a `BridgeContext`: the results are handed over.
+    Bridge(KjOwn<bridge::CallContextHook>),
 }
 
 /// A call's results, built in Rust and handed to the C++ call when the server drops them, which
@@ -202,24 +242,25 @@ enum ResultsContext {
 struct KjResults {
     message: Option<RustMessage>,
     context: ResultsContext,
+    delivery: Delivery,
 }
 
 impl Drop for KjResults {
     fn drop(&mut self) {
-        let Some(mut message) = self.message.take() else {
+        let Some(message) = self.message.take() else {
             return;
         };
-        // Neither fails unless the bridge is broken: copying fails only on a malformed segment,
-        // which capnp-rust does not produce, and handing over only if C++ set the results
-        // first, which nothing does for a Rust server's call.
-        let _ = match &mut self.context {
+        let delivered = match &mut self.context {
             ResultsContext::Cxx(context) => {
-                bridge::context_set_results(context.pin_mut(), &mut message)
+                bridge::context_set_results(context.pin_mut(), &message)
             }
-            ResultsContext::Rust(context) => {
+            ResultsContext::Bridge(context) => {
                 bridge::context_set_rust_results(context.pin_mut(), Box::new(message))
             }
         };
+        if let Err(error) = delivered {
+            self.delivery.set(Some(from_kj(&error)));
+        }
     }
 }
 

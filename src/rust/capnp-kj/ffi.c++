@@ -10,57 +10,96 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 
+#include <atomic>
 #include <typeinfo>
 
 namespace workerd::rust::capnp_kj {
 
 namespace {
 
-// The source message was already valid, and its own limits applied when it was built or read.
+// For messages that need no limits: a copy of a message that was already valid, whose own limits
+// applied when it was read, or a message built in this process.
 capnp::ReaderOptions unlimitedReaderOptions() {
   capnp::ReaderOptions options;
   options.traversalLimitInWords = kj::maxValue;
+  options.nestingLimit = kj::maxValue;
   return options;
 }
 
-// Copies a message Rust built into the builder `getDest(size)` returns, moving its capabilities
-// into that builder's message. `size` is the copy's exact size, for `getDest` to pass as a size
-// hint: without one, KJ allocates and zeroes 1024 words for the message, which costs more than the
-// copy for a small one.
-kj::ArrayPtr<const capnp::word> rustSegment(RustMessage& message, size_t index) {
-  auto bytes = message.segment(index);
+kj::ArrayPtr<const capnp::word> asWords(::rust::Slice<const uint8_t> bytes) {
   KJ_REQUIRE(bytes.size() % sizeof(capnp::word) == 0);
   KJ_REQUIRE(reinterpret_cast<uintptr_t>(bytes.data()) % alignof(capnp::word) == 0);
   return kj::arrayPtr(
       reinterpret_cast<const capnp::word*>(bytes.data()), bytes.size() / sizeof(capnp::word));
 }
 
-kj::Array<kj::Maybe<kj::Own<capnp::ClientHook>>> takeRustCaps(RustMessage& message);
-
-template <typename GetDest>
-void copyFromRust(RustMessage& message, GetDest&& getDest) {
-  auto segmentCount = message.segment_count();
-  // Usually one segment, so kept off the heap.
-  KJ_STACK_ARRAY(kj::ArrayPtr<const capnp::word>, segments, segmentCount, 4, 32);
-  // The segments include the root pointer, so their total is the size of a message holding
-  // the copy.
-  uint64_t wordCount = 0;
-  for (auto i: kj::zeroTo(segmentCount)) {
-    segments[i] = rustSegment(message, i);
-    wordCount += segments[i].size();
+// Every segment of `message`, unless it has just one.
+kj::Array<kj::ArrayPtr<const capnp::word>> rustSegments(const RustMessage& message) {
+  if (message.segment_count() == 1) {
+    return nullptr;
   }
-  capnp::SegmentArrayMessageReader reader(segments, unlimitedReaderOptions());
-  auto capCount = message.cap_count();
-  capnp::ReaderCapabilityTable capTable(takeRustCaps(message));
-  capnp::AnyPointer::Builder dest =
-      getDest(capnp::MessageSize{.wordCount = wordCount, .capCount = static_cast<uint>(capCount)});
-  dest.set(capTable.imbue(reader.getRoot<capnp::AnyPointer>()));
+  auto segments = message.segments();
+  auto result = kj::heapArray<kj::ArrayPtr<const capnp::word>>(segments.size());
+  for (auto i: kj::zeroTo(segments.size())) {
+    result[i] = asWords(segments[i].bytes);
+  }
+  return result;
+}
+
+// New references to the capabilities of `message`.
+kj::Array<kj::Maybe<kj::Own<capnp::ClientHook>>> rustCaps(const RustMessage& message) {
+  auto count = message.cap_count();
+  // Most messages have no capabilities; an empty table needs no allocation.
+  if (count == 0) {
+    return nullptr;
+  }
+  auto builder = kj::heapArrayBuilder<kj::Maybe<kj::Own<capnp::ClientHook>>>(count);
+  for (auto i: kj::zeroTo(count)) {
+    builder.add(message.get_cap(i));
+  }
+  return builder.finish();
+}
+
+// Copies a message Rust built into the builder `getDest(size)` returns, with new references to its
+// capabilities. `size` is the copy's exact size, for `getDest` to pass as a size hint: without
+// one, KJ allocates and zeroes 1024 words for the message, which costs more than the copy for a
+// small one.
+template <typename GetDest>
+void copyFromRust(const RustMessage& message, GetDest&& getDest) {
+  RustMessageReader reader(message);
+  capnp::AnyPointer::Builder dest = getDest(capnp::MessageSize{
+    .wordCount = reader.wordCount(), .capCount = static_cast<uint>(message.cap_count())});
+  dest.set(reader.getRoot());
 }
 
 capnp::ClientHook& mut(const capnp::ClientHook& hook) {
   // capnp's hooks are reference counted and their methods are not const; Rust holds them as
   // shared references.
   return const_cast<capnp::ClientHook&>(hook);
+}
+
+uint firstSegmentWords(kj::Maybe<capnp::MessageSize> sizeHint) {
+  KJ_IF_SOME(size, sizeHint) {
+    return size.wordCount;
+  }
+  return capnp::SUGGESTED_FIRST_SEGMENT_WORDS;
+}
+
+// Whether `context` is a BridgeContext: an exact type check, which costs less than a failed
+// dynamic_cast for every call from C++.
+kj::Maybe<BridgeContext&> tryBridgeContext(capnp::CallContextHook& context) {
+  if (typeid(context) == typeid(BridgeContext)) {
+    return kj::downcast<BridgeContext>(context);
+  }
+  return kj::none;
+}
+
+BridgeContext& bridgeContext(capnp::CallContextHook& context) {
+  return KJ_REQUIRE_NONNULL(tryBridgeContext(context), "not a capnp-kj call context");
+}
+
+const BridgeContext& bridgeContext(const capnp::CallContextHook& context) {
+  return bridgeContext(const_cast<capnp::CallContextHook&>(context));
 }
 
 // A capnp server whose calls a Rust server handles.
@@ -81,23 +120,73 @@ class RustServerAdapter final: public capnp::Capability::Server {
  private:
   kj::Promise<void> dispatch(
       uint64_t interfaceId, uint16_t methodId, capnp::CallContextHook& context) {
-    // A call from Rust hands over its Rust params, and takes the Rust results back.
-    // An exact type check, which costs less than a failed dynamic_cast for every call from C++.
-    if (typeid(context) == typeid(RustCallContext)) {
-      auto& rustContext = kj::downcast<RustCallContext>(context);
-      KJ_IF_SOME(params, rustContext.takeRustParams()) {
-        return dispatch_rust_call(
-            *server, interfaceId, methodId, kj::mv(params), rustContext.addRef());
+    // The bridge's own call hands its params to the server in place, and takes the server's
+    // results as a Rust message.
+    KJ_IF_SOME(bridge, tryBridgeContext(context)) {
+      KJ_IF_SOME(params, bridge.takeRustParams()) {
+        return dispatch_rust_call(*server, interfaceId, methodId, kj::mv(params), bridge.addRef());
+      }
+      KJ_IF_SOME(params, bridge.shareCxxParams()) {
+        return dispatch_bridge_call(
+            *server, interfaceId, methodId, kj::mv(params), bridge.addRef());
       }
     }
+    // Any other call: a membrane's, or the RPC system's.
     auto params = CxxMessage::copy(context.getParams());
     context.releaseParams();
-    // The Rust server's results copy themselves into the context when the server drops them; see
-    // KjResults in server.rs.
     return dispatch_call(*server, interfaceId, methodId, kj::mv(params), context.addRef());
   }
 
   ::rust::Box<RustServer> server;
+};
+
+// The client of a Rust server. KJ's LocalClient delivers its calls, so that ordering, streaming,
+// cancellation and pipelining are KJ's; this client only creates the requests that C++ builds, as
+// BridgeContexts whose params a Rust server can read in place.
+class RustClient final: public capnp::ClientHook, public kj::Refcounted {
+ public:
+  explicit RustClient(kj::Own<capnp::ClientHook> local): local(kj::mv(local)) {}
+
+  capnp::Request<capnp::AnyPointer, capnp::AnyPointer> newCall(uint64_t interfaceId,
+      uint16_t methodId,
+      kj::Maybe<capnp::MessageSize> sizeHint,
+      CallHints hints) override {
+    auto context =
+        kj::refcounted<BridgeContext>(local->addRef(), interfaceId, methodId, sizeHint, hints);
+    auto root = context->paramsRoot();
+    return capnp::Request<capnp::AnyPointer, capnp::AnyPointer>(
+        root, kj::Own<capnp::RequestHook>(kj::mv(context)));
+  }
+
+  VoidPromiseAndPipeline call(uint64_t interfaceId,
+      uint16_t methodId,
+      kj::Own<capnp::CallContextHook>&& context,
+      CallHints hints) override {
+    return local->call(interfaceId, methodId, kj::mv(context), hints);
+  }
+
+  kj::Maybe<capnp::ClientHook&> getResolved() override {
+    return local->getResolved();
+  }
+
+  kj::Maybe<kj::Promise<kj::Own<capnp::ClientHook>>> whenMoreResolved() override {
+    return local->whenMoreResolved();
+  }
+
+  kj::Own<capnp::ClientHook> addRef() override {
+    return kj::addRef(*this);
+  }
+
+  kj::Maybe<int> getFd() override {
+    return local->getFd();
+  }
+
+  void debugInfo(kj::Vector<kj::ConstString>& chain) override {
+    local->debugInfo(chain);
+  }
+
+ private:
+  kj::Own<capnp::ClientHook> local;
 };
 
 }  // namespace
@@ -159,88 +248,114 @@ kj::Maybe<kj::Own<capnp::ClientHook>> CxxMessage::getCap(size_t index) {
   return caps[index].map([](kj::Own<capnp::ClientHook>& cap) { return cap->addRef(); });
 }
 
-namespace {
-
-kj::Array<kj::ArrayPtr<const capnp::word>> rustSegments(RustMessage& message) {
-  auto count = message.segment_count();
-  if (count == 1) {
-    return nullptr;
-  }
-  auto segments = kj::heapArray<kj::ArrayPtr<const capnp::word>>(count);
-  for (auto i: kj::zeroTo(count)) {
-    segments[i] = rustSegment(message, i);
-  }
-  return segments;
-}
-
-kj::Array<kj::Maybe<kj::Own<capnp::ClientHook>>> takeRustCaps(RustMessage& message) {
-  auto count = message.cap_count();
-  // Most messages have no capabilities; an empty table needs no allocation.
-  if (count == 0) {
-    return nullptr;
-  }
-  auto builder = kj::heapArrayBuilder<kj::Maybe<kj::Own<capnp::ClientHook>>>(count);
-  for (auto i: kj::zeroTo(count)) {
-    builder.add(message.take_cap(i));
-  }
-  return builder.finish();
-}
-
-uint firstSegmentWords(kj::Maybe<capnp::MessageSize> sizeHint) {
-  KJ_IF_SOME(size, sizeHint) {
-    return size.wordCount;
-  }
-  return capnp::SUGGESTED_FIRST_SEGMENT_WORDS;
-}
-
-}  // namespace
-
-RustCallContext::ParamsReader::ParamsReader(RustMessage& message)
-    : firstSegment(rustSegment(message, 0)),
+RustMessageReader::RustMessageReader(const RustMessage& message)
+    : firstSegment(asWords(message.segment(0))),
       allSegments(rustSegments(message)),
       reader(allSegments == nullptr ? kj::arrayPtr(firstSegment) : allSegments.asPtr(),
           unlimitedReaderOptions()),
-      caps(takeRustCaps(message)) {}
+      caps(rustCaps(message)) {}
 
-RustCallContext::CxxResults::CxxResults(kj::Maybe<capnp::MessageSize> sizeHint)
+uint64_t RustMessageReader::wordCount() const {
+  if (allSegments == nullptr) {
+    return firstSegment.size();
+  }
+  uint64_t count = 0;
+  for (const auto& segment: allSegments) {
+    count += segment.size();
+  }
+  return count;
+}
+
+capnp::AnyPointer::Reader RustMessageReader::getRoot() {
+  return caps.imbue(reader.getRoot<capnp::AnyPointer>());
+}
+
+CxxMessageBuilder::CxxMessageBuilder(kj::Maybe<capnp::MessageSize> sizeHint)
     : message(firstSegmentWords(sizeHint)),
       root(caps.imbue(message.getRoot<capnp::AnyPointer>())) {}
 
-RustCallContext::RustCallContext(::rust::Box<RustMessage> params): params(kj::mv(params)) {}
-
-RustCallContext::~RustCallContext() noexcept(false) {}
-
-capnp::AnyPointer::Reader RustCallContext::getParams() {
-  KJ_IF_SOME(reader, paramsReader) {
-    return reader.caps.imbue(reader.reader.getRoot<capnp::AnyPointer>());
+class ContextMessage::Disposer final: public kj::Disposer {
+ public:
+  void disposeImpl(void* pointer) const override {
+    // Releasing the owner may destroy the view, so it is released last.
+    auto owner = kj::mv(static_cast<ContextMessage*>(pointer)->owner);
   }
-  KJ_IF_SOME(message, params) {
-    auto& reader = paramsReader.emplace(*message);
-    return reader.caps.imbue(reader.reader.getRoot<capnp::AnyPointer>());
+};
+
+kj::Own<CxxMessage> ContextMessage::share(
+    kj::ArrayPtr<const kj::ArrayPtr<const capnp::word>> segments,
+    kj::ArrayPtr<kj::Maybe<kj::Own<capnp::ClientHook>>> caps,
+    kj::Own<capnp::CallContextHook> owner) {
+  static const Disposer disposer;
+  KJ_REQUIRE(!isShared(), "a message of a capnp-kj call is shared twice");
+  this->segments = kj::mv(segments);
+  this->caps = kj::mv(caps);
+  this->owner = kj::mv(owner);
+  return kj::Own<CxxMessage>(this, disposer);
+}
+
+BridgeContext::BridgeContext(::rust::Box<RustMessage> params, CallHints hints)
+    : hints(hints),
+      rustParams(kj::mv(params)) {}
+
+BridgeContext::BridgeContext(kj::Own<capnp::ClientHook> target,
+    uint64_t interfaceId,
+    uint16_t methodId,
+    kj::Maybe<capnp::MessageSize> sizeHint,
+    CallHints hints)
+    : target(kj::mv(target)),
+      interfaceId(interfaceId),
+      methodId(methodId),
+      hints(hints) {
+  cxxParams.emplace(sizeHint);
+}
+
+BridgeContext::~BridgeContext() noexcept(false) {}
+
+capnp::AnyPointer::Builder BridgeContext::paramsRoot() {
+  return KJ_ASSERT_NONNULL(cxxParams).root;
+}
+
+capnp::AnyPointer::Reader BridgeContext::getParams() {
+  KJ_IF_SOME(params, cxxParams) {
+    return params.root.asReader();
+  }
+  KJ_IF_SOME(reader, rustParamsReader) {
+    return reader.getRoot();
+  }
+  KJ_IF_SOME(params, rustParams) {
+    return rustParamsReader.emplace(*params).getRoot();
   }
   KJ_FAIL_REQUIRE("Can't call getParams() after releaseParams().");
 }
 
-void RustCallContext::releaseParams() {
-  paramsReader = kj::none;
-  params = kj::none;
+void BridgeContext::releaseParams() {
+  rustParamsReader = kj::none;
+  rustParams = kj::none;
+  // A Rust server reading the params in place holds the context, which frees them when it goes.
+  if (!paramsView.isShared()) {
+    cxxParams = kj::none;
+  }
 }
 
-capnp::AnyPointer::Builder RustCallContext::getResults(kj::Maybe<capnp::MessageSize> sizeHint) {
+capnp::AnyPointer::Builder BridgeContext::getResults(kj::Maybe<capnp::MessageSize> sizeHint) {
+  if (tailCallResults != kj::none) {
+    // As KJ's LocalCallContext does: a tail call's results are read-only.
+    return nullptr;
+  }
   KJ_IF_SOME(results, cxxResults) {
     return results.root;
   }
-  KJ_IF_SOME(rust, rustResults) {
-    // C++ wants the results of a Rust server.
-    auto message = kj::mv(rust);
-    rustResults = kj::none;
-    copyFromRust(*message, [&](capnp::MessageSize size) { return cxxResults.emplace(size).root; });
+  KJ_IF_SOME(results, rustResults) {
+    // C++ wants a Rust server's results to build on, as KJ's pipelining does. The Rust results
+    // stay, for whoever reads them.
+    copyFromRust(*results, [&](capnp::MessageSize size) { return cxxResults.emplace(size).root; });
     return KJ_ASSERT_NONNULL(cxxResults).root;
   }
   return cxxResults.emplace(sizeHint).root;
 }
 
-kj::Promise<void> RustCallContext::tailCall(kj::Own<capnp::RequestHook>&& request) {
+kj::Promise<void> BridgeContext::tailCall(kj::Own<capnp::RequestHook>&& request) {
   auto result = directTailCall(kj::mv(request));
   KJ_IF_SOME(fulfiller, tailCallPipelineFulfiller) {
     fulfiller->fulfill(capnp::AnyPointer::Pipeline(kj::mv(result.pipeline)));
@@ -248,24 +363,29 @@ kj::Promise<void> RustCallContext::tailCall(kj::Own<capnp::RequestHook>&& reques
   return kj::mv(result.promise);
 }
 
-void RustCallContext::setPipeline(kj::Own<capnp::PipelineHook>&& pipeline) {
+void BridgeContext::setPipeline(kj::Own<capnp::PipelineHook>&& pipeline) {
   KJ_IF_SOME(fulfiller, tailCallPipelineFulfiller) {
     fulfiller->fulfill(capnp::AnyPointer::Pipeline(kj::mv(pipeline)));
   }
 }
 
-kj::Promise<capnp::AnyPointer::Pipeline> RustCallContext::onTailCall() {
+kj::Promise<capnp::AnyPointer::Pipeline> BridgeContext::onTailCall() {
   auto paf = kj::newPromiseAndFulfiller<capnp::AnyPointer::Pipeline>();
   tailCallPipelineFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
-// As KJ's LocalCallContext does. Rust sends `-> stream` calls as requests, so this context is never
-// a streaming call's.
-capnp::ClientHook::VoidPromiseAndPipeline RustCallContext::directTailCall(
+// As KJ's LocalCallContext does.
+capnp::ClientHook::VoidPromiseAndPipeline BridgeContext::directTailCall(
     kj::Own<capnp::RequestHook>&& request) {
   KJ_REQUIRE(cxxResults == kj::none && rustResults == kj::none,
       "Can't call tailCall() after initializing the results struct.");
+  if (hints.onlyPromisePipeline) {
+    return {kj::NEVER_DONE, capnp::PipelineHook::from(request->sendForPipeline())};
+  }
+  if (isStreaming) {
+    return {request->sendStreaming(), capnp::getDisabledPipeline()};
+  }
   auto promise = request->send();
   auto voidPromise = promise.then(
       [self = kj::addRef(*this)](capnp::Response<capnp::AnyPointer>&& response) mutable {
@@ -274,44 +394,95 @@ capnp::ClientHook::VoidPromiseAndPipeline RustCallContext::directTailCall(
   return {kj::mv(voidPromise), capnp::PipelineHook::from(kj::mv(promise))};
 }
 
-kj::Own<capnp::CallContextHook> RustCallContext::addRef() {
+kj::Own<capnp::CallContextHook> BridgeContext::addRef() {
   return kj::addRef(*this);
 }
 
-kj::Maybe<::rust::Box<RustMessage>> RustCallContext::takeRustParams() {
-  if (paramsReader != kj::none) {
+capnp::RemotePromise<capnp::AnyPointer> BridgeContext::send() {
+  kj::Own<capnp::ClientHook> client;
+  KJ_IF_SOME(t, target) {
+    client = kj::mv(t);
+  } else {
+    KJ_FAIL_REQUIRE("Already called send() on this request.");
+  }
+  target = kj::none;
+  auto call = client->call(interfaceId, methodId, kj::addRef(*this), hints);
+  auto promise =
+      call.promise.then([self = kj::addRef(*this)]() mutable { return self->response(); });
+  return capnp::RemotePromise<capnp::AnyPointer>(
+      kj::mv(promise), capnp::AnyPointer::Pipeline(kj::mv(call.pipeline)));
+}
+
+kj::Promise<void> BridgeContext::sendStreaming() {
+  // As KJ's LocalRequest does: the flag only matters if the call is forwarded and tail-called.
+  isStreaming = true;
+  return send().ignoreResult();
+}
+
+capnp::AnyPointer::Pipeline BridgeContext::sendForPipeline() {
+  hints.onlyPromisePipeline = true;
+  KJ_IF_SOME(client, target) {
+    auto call = client->call(interfaceId, methodId, kj::addRef(*this), hints);
+    target = kj::none;
+    return capnp::AnyPointer::Pipeline(kj::mv(call.pipeline));
+  }
+  KJ_FAIL_REQUIRE("Already called send() on this request.");
+}
+
+// The response of a request C++ sent, read in place. The context is the response's hook, so it
+// holds whatever the reader reads.
+capnp::Response<capnp::AnyPointer> BridgeContext::response() {
+  releaseParams();
+  capnp::AnyPointer::Reader reader;
+  KJ_IF_SOME(results, tailCallResults) {
+    reader = results;
+  } else KJ_IF_SOME(results, rustResults) {
+    reader = rustResultsReader.emplace(*results).getRoot();
+  } else KJ_IF_SOME(results, cxxResults) {
+    reader = results.root.asReader();
+  }
+  return capnp::Response<capnp::AnyPointer>(reader, kj::addRef(*this));
+}
+
+kj::Maybe<::rust::Box<RustMessage>> BridgeContext::takeRustParams() {
+  if (rustParamsReader != kj::none) {
     return kj::none;
   }
-  auto taken = kj::mv(params);
-  params = kj::none;
+  auto taken = kj::mv(rustParams);
+  rustParams = kj::none;
   return taken;
 }
 
-void RustCallContext::setRustResults(::rust::Box<RustMessage> results) {
-  KJ_REQUIRE(cxxResults == kj::none && tailCallResults == kj::none,
-      "a Rust server set results that C++ already set");
+kj::Maybe<kj::Own<CxxMessage>> BridgeContext::shareCxxParams() {
+  KJ_IF_SOME(params, cxxParams) {
+    return paramsView.share(
+        params.message.getSegmentsForOutput(), params.caps.getTable(), addRef());
+  }
+  return kj::none;
+}
+
+void BridgeContext::setRustResults(::rust::Box<RustMessage> results) {
+  KJ_REQUIRE(cxxResults == kj::none && tailCallResults == kj::none && rustResults == kj::none,
+      "a Rust server set results that are already set");
   rustResults = kj::mv(results);
 }
 
-void RustCallContext::finish() {
-  releaseParams();
-  if (rustResults != kj::none) {
-    return;
-  }
-  KJ_IF_SOME(response, tailCallResults) {
-    auto& copy = resultsCopy.emplace(CxxMessage::copy(response));
-    segments = copy->segments;
-    caps = copy->caps;
-  } else KJ_IF_SOME(results, cxxResults) {
-    segments = results.message.getSegmentsForOutput();
-    caps = results.caps.getTable();
-  }
+kj::Maybe<const RustMessage&> BridgeContext::getRustResults() const {
+  return rustResults.map(
+      [](const ::rust::Box<RustMessage>& results) -> const RustMessage& { return *results; });
 }
 
-::rust::Box<RustMessage> RustCallContext::takeRustResults() {
-  auto results = KJ_REQUIRE_NONNULL(kj::mv(rustResults));
-  rustResults = kj::none;
-  return results;
+kj::Own<CxxMessage> BridgeContext::shareResults() {
+  // The same precedence as response(): a tail call's results, then Rust's, which Rust reads
+  // through getRustResults() first, then C++'s.
+  KJ_IF_SOME(results, tailCallResults) {
+    return CxxMessage::copy(results);
+  }
+  KJ_IF_SOME(results, cxxResults) {
+    return resultsView.share(
+        results.message.getSegmentsForOutput(), results.caps.getTable(), addRef());
+  }
+  return resultsView.share(nullptr, nullptr, addRef());
 }
 
 kj::Own<capnp::ClientHook> client_add_ref(const capnp::ClientHook& hook) {
@@ -349,12 +520,18 @@ namespace {
 
 // For each registered interface, by id, whether each of its methods, by index, can be called
 // with `noPromisePipelining`. Interfaces are only ever added, and each interface's entry never
-// changes once added.
+// changes once added, so a view of an entry stays valid.
 using PipelineHints = kj::HashMap<uint64_t, kj::Array<bool>>;
 
-kj::MutexGuarded<PipelineHints>& pipelineHints() {
-  static kj::MutexGuarded<PipelineHints> hints;
-  return hints;
+struct PipelineHintRegistry {
+  kj::MutexGuarded<PipelineHints> hints;
+  // Incremented whenever an interface is added, for threads to see that their caches are stale.
+  std::atomic<uint64_t> version = 0;
+};
+
+PipelineHintRegistry& pipelineHintRegistry() {
+  static PipelineHintRegistry registry;
+  return registry;
 }
 
 // Collects the hints of an interface, its superclasses, and every interface reachable from their
@@ -429,7 +606,7 @@ class HintCollector {
 capnp::Request<capnp::AnyPointer, capnp::AnyPointer> newRequest(capnp::ClientHook& hook,
     uint64_t interfaceId,
     uint16_t methodId,
-    RustMessage& params,
+    const RustMessage& params,
     capnp::Capability::Client::CallHints hints) {
   capnp::Capability::Client client(hook.addRef());
   kj::Maybe<capnp::Request<capnp::AnyPointer, capnp::AnyPointer>> request;
@@ -442,11 +619,12 @@ capnp::Request<capnp::AnyPointer, capnp::AnyPointer> newRequest(capnp::ClientHoo
 }  // namespace
 
 void registerInterface(capnp::InterfaceSchema schema) {
+  auto& registry = pipelineHintRegistry();
   // Collected outside the lock: schemas load lazily, and collecting may be slow for an interface
   // that reaches many others. Two threads may collect the same interface; both find the same.
   PipelineHints found;
   {
-    auto known = pipelineHints().lockShared();
+    auto known = registry.hints.lockShared();
     HintCollector collector(*known);
     collector.visitInterface(schema);
     found = kj::mv(collector.found);
@@ -454,16 +632,34 @@ void registerInterface(capnp::InterfaceSchema schema) {
   if (found.size() == 0) {
     return;
   }
-  auto known = pipelineHints().lockExclusive();
+  auto known = registry.hints.lockExclusive();
   for (auto& entry: found) {
     known->findOrCreate(
         entry.key, [&]() -> PipelineHints::Entry { return {entry.key, kj::mv(entry.value)}; });
   }
+  registry.version.fetch_add(1, std::memory_order_release);
 }
 
 bool noPromisePipelining(uint64_t interfaceId, uint16_t methodId) {
-  auto known = pipelineHints().lockShared();
-  KJ_IF_SOME(methods, known->find(interfaceId)) {
+  // Each thread looks hints up in its own copy of the registry's views, refreshed when an
+  // interface is added, so that calls take no lock shared across threads. Interfaces are
+  // registered when C++ first hands them to Rust, so refreshes stop early.
+  struct Cache {
+    uint64_t version = 0;
+    kj::HashMap<uint64_t, kj::ArrayPtr<const bool>> methods;
+  };
+  static thread_local Cache cache;
+  auto& registry = pipelineHintRegistry();
+  auto version = registry.version.load(std::memory_order_acquire);
+  if (cache.version != version) {
+    auto known = registry.hints.lockShared();
+    cache.methods.clear();
+    for (auto& entry: *known) {
+      cache.methods.insert(entry.key, entry.value.asPtr());
+    }
+    cache.version = version;
+  }
+  KJ_IF_SOME(methods, cache.methods.find(interfaceId)) {
     return methodId < methods.size() && methods[methodId];
   }
   return false;
@@ -475,7 +671,7 @@ kj::Own<CxxCall> client_call(const capnp::ClientHook& hook,
     ::rust::Box<RustMessage> params) {
   capnp::Capability::Client::CallHints hints;
   hints.noPromisePipelining = noPromisePipelining(interfaceId, methodId);
-  auto context = kj::refcounted<RustCallContext>(kj::mv(params));
+  auto context = kj::refcounted<BridgeContext>(kj::mv(params), hints);
   auto call = mut(hook).call(interfaceId, methodId, kj::addRef(*context), hints);
   return kj::heap<CxxCall>(CxxCall{
     .context = kj::mv(context),
@@ -507,7 +703,7 @@ kj::Promise<kj::Own<capnp::CallContextHook>> call_response(kj::Own<CxxCall> call
   // A continuation rather than a coroutine: KJ can place it in the completion promise's arena,
   // where a coroutine frame is an allocation of its own.
   return call->completion.then([context = kj::mv(call->context)]() mutable {
-    context->finish();
+    context->releaseParams();
     return kj::Own<capnp::CallContextHook>(kj::mv(context));
   });
 }
@@ -531,7 +727,9 @@ size_t message_segment_count(const CxxMessage& message) {
 }
 
 ::rust::Slice<const uint8_t> message_segment(const CxxMessage& message, size_t index) {
-  auto segment = message.getSegments()[index].asBytes();
+  auto segments = message.getSegments();
+  KJ_REQUIRE(index < segments.size());
+  auto segment = segments[index].asBytes();
   return ::rust::Slice<const uint8_t>(segment.begin(), segment.size());
 }
 
@@ -544,28 +742,28 @@ kj::Maybe<kj::Own<capnp::ClientHook>> message_get_cap(CxxMessage& message, size_
 }
 
 kj::Own<capnp::ClientHook> new_rust_server_client(::rust::Box<RustServer> server) {
-  return capnp::ClientHook::from(
-      capnp::Capability::Client(kj::heap<RustServerAdapter>(kj::mv(server))));
+  return kj::refcounted<RustClient>(capnp::ClientHook::from(
+      capnp::Capability::Client(kj::heap<RustServerAdapter>(kj::mv(server)))));
 }
 
-void context_set_results(capnp::CallContextHook& context, RustMessage& results) {
+void context_set_results(capnp::CallContextHook& context, const RustMessage& results) {
   copyFromRust(results, [&](capnp::MessageSize size) { return context.getResults(size); });
 }
 
 void context_set_rust_results(capnp::CallContextHook& context, ::rust::Box<RustMessage> results) {
-  kj::downcast<RustCallContext>(context).setRustResults(kj::mv(results));
+  bridgeContext(context).setRustResults(kj::mv(results));
 }
 
 bool context_has_rust_results(const capnp::CallContextHook& context) {
-  return kj::downcast<const RustCallContext>(context).hasRustResults();
+  return bridgeContext(context).getRustResults() != kj::none;
 }
 
-::rust::Box<RustMessage> context_take_rust_results(capnp::CallContextHook& context) {
-  return kj::downcast<RustCallContext>(context).takeRustResults();
+const RustMessage& context_rust_results(const capnp::CallContextHook& context) {
+  return KJ_REQUIRE_NONNULL(bridgeContext(context).getRustResults());
 }
 
-kj::Own<CxxMessage> context_into_message(kj::Own<capnp::CallContextHook> context) {
-  return kj::Own<CxxMessage>(context.downcast<RustCallContext>());
+kj::Own<CxxMessage> context_results_message(capnp::CallContextHook& context) {
+  return bridgeContext(context).shareResults();
 }
 
 }  // namespace workerd::rust::capnp_kj

@@ -27,11 +27,12 @@ use crate::ffi::bridge;
 use crate::message::CxxMessageReader;
 use crate::message::RustMessage;
 
-/// Identifies a [`KjClient`] among `ClientHook`s (`ClientHook::get_brand`).
+/// Identifies a [`KjClient`] among `ClientHook`s (`ClientHook::get_brand`), with the address of
+/// the client, so that a hook that wraps a `KjClient` and forwards its brand doesn't pass for one.
 static KJ_BRAND: u8 = 0;
 
-fn kj_brand() -> usize {
-    std::ptr::from_ref(&KJ_BRAND) as usize
+fn kj_brand(client: *const ()) -> usize {
+    std::ptr::from_ref(&KJ_BRAND).addr() ^ client.addr()
 }
 
 /// A Rust `ClientHook` over a C++ capability.
@@ -50,11 +51,12 @@ impl KjClient {
     /// creates no other kind; a foreign one becomes a broken capability.
     ///
     /// The downcast trusts `get_brand()`, a safe trait method, so its soundness rests on an
-    /// invariant: no `ClientHook` but `KjClient` returns `kj_brand()`. A hook that wraps a
-    /// `KjClient` must return a brand of its own rather than forward the inner one. `kj_brand()`
-    /// is private to this module, so only code here can break the invariant.
+    /// invariant: no `ClientHook` but `KjClient` returns `kj_brand()` of its own address.
+    /// `kj_brand()` is private to this module, and a hook that wraps a `KjClient` and forwards its
+    /// brand returns the brand of the inner client's address, not its own.
     pub fn into_kj(hook: Box<dyn ClientHook>) -> KjOwn<bridge::ClientHook> {
-        if hook.get_brand() != kj_brand() {
+        let address = std::ptr::from_ref::<dyn ClientHook>(&*hook).cast::<()>();
+        if hook.get_brand() != kj_brand(address) {
             return bridge::new_broken_cap("capability is not backed by KJ");
         }
         #[expect(
@@ -66,8 +68,9 @@ impl KjClient {
             unsafe_code,
             reason = "downcasting a trait object identified by its brand"
         )]
-        // Safety: by the invariant above, only `KjClient` returns `kj_brand()` from `get_brand()`,
-        // so the box holds a `KjClient`, allocated by `Box::new` with its layout.
+        // Safety: by the invariant above, only a `KjClient` at `address` returns
+        // `kj_brand(address)` from `get_brand()`, so the box holds a `KjClient`, allocated by
+        // `Box::new` with its layout.
         let client = unsafe { Box::from_raw(raw) };
         client.hook
     }
@@ -116,7 +119,7 @@ impl ClientHook for KjClient {
     }
 
     fn get_brand(&self) -> usize {
-        kj_brand()
+        kj_brand(std::ptr::from_ref(self).cast())
     }
 
     fn get_ptr(&self) -> usize {
@@ -245,8 +248,8 @@ impl RequestHook for KjRequest {
 
 /// The response to a call from Rust, read in place.
 enum KjResponse {
-    /// Results a Rust server built.
-    Rust(Box<RustMessage>),
+    /// Results a Rust server built, which stay in the call's context.
+    Rust(KjOwn<bridge::CallContextHook>),
     /// Results a C++ server built.
     Cxx(CxxMessageReader),
     /// The server wrote no results: a message whose root is null.
@@ -261,12 +264,11 @@ static NULL_ROOT_SEGMENTS: [&[u8]; 1] = [&NULL_ROOT.0];
 
 impl KjResponse {
     fn new(mut context: KjOwn<bridge::CallContextHook>) -> capnp::Result<Self> {
-        if bridge::context_has_rust_results(&context) {
-            let results =
-                bridge::context_take_rust_results(context.pin_mut()).map_err(|e| from_kj(&e))?;
-            return Ok(Self::Rust(results));
+        if bridge::context_has_rust_results(&context).map_err(|e| from_kj(&e))? {
+            return Ok(Self::Rust(context));
         }
-        let message = bridge::context_into_message(context);
+        let message =
+            bridge::context_results_message(context.pin_mut()).map_err(|e| from_kj(&e))?;
         if bridge::message_segment_count(&message) == 0 {
             return Ok(Self::Empty(capnp::message::Reader::new(
                 capnp::message::SegmentArray::new(&NULL_ROOT_SEGMENTS),
@@ -280,7 +282,9 @@ impl KjResponse {
 impl ResponseHook for KjResponse {
     fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
         match self {
-            Self::Rust(message) => message.root_as_reader(),
+            Self::Rust(context) => bridge::context_rust_results(context)
+                .map_err(|e| from_kj(&e))?
+                .root_as_reader(),
             Self::Cxx(message) => message.root(),
             Self::Empty(message) => message.get_root(),
         }

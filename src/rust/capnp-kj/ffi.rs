@@ -15,12 +15,14 @@
 
 use crate::message::RustMessage;
 use crate::server::RustServer;
+use crate::server::dispatch_bridge_call;
 use crate::server::dispatch_call;
 use crate::server::dispatch_rust_call;
 
 #[cxx::bridge(namespace = "workerd::rust::capnp_kj")]
 #[expect(
     clippy::needless_lifetimes,
+    clippy::elidable_lifetime_names,
     reason = "cxx needs explicit lifetimes on unsafe fns"
 )]
 pub mod bridge {
@@ -70,19 +72,20 @@ pub mod bridge {
         /// ffi.h.
         fn call_can_pipeline(call: &CxxCall) -> bool;
         /// Resolves to the call's context once the call completes, holding its results. The
-        /// context, and those passed to the `context_*_rust_results()` functions and to
-        /// `dispatch_rust_call()`, are a `RustCallContext` (see ffi.h); cxx can't hold one, which
-        /// is reference counted, so they cross as the hook it implements.
+        /// context, and those that the `context_*()` functions other than
+        /// `context_set_results()` take, and that `dispatch_bridge_call()` and
+        /// `dispatch_rust_call()` are given, are a `BridgeContext` (see ffi.h), which C++ checks;
+        /// cxx can't hold one, which is reference counted, so they cross as the hook it
+        /// implements.
         async fn call_response(call: KjOwn<CxxCall>) -> Result<KjOwn<CallContextHook>>;
 
         /// Whether a completed call's results are a Rust message, from a Rust server.
-        fn context_has_rust_results(context: &CallContextHook) -> bool;
-        /// Takes a completed call's Rust results. Throws if they aren't Rust's.
-        fn context_take_rust_results(
-            context: Pin<&mut CallContextHook>,
-        ) -> Result<Box<RustMessage>>;
+        fn context_has_rust_results(context: &CallContextHook) -> Result<bool>;
+        /// A completed call's Rust results.
+        fn context_rust_results<'a>(context: &'a CallContextHook) -> Result<&'a RustMessage>;
         /// A completed call's C++ results, which have no segments if the server wrote none.
-        fn context_into_message(context: KjOwn<CallContextHook>) -> KjOwn<CxxMessage>;
+        fn context_results_message(context: Pin<&mut CallContextHook>)
+        -> Result<KjOwn<CxxMessage>>;
         /// Gives the call `context` a Rust server's results.
         fn context_set_rust_results(
             context: Pin<&mut CallContextHook>,
@@ -113,21 +116,36 @@ pub mod bridge {
         /// Copies `results` into the results of the call `context`.
         fn context_set_results(
             context: Pin<&mut CallContextHook>,
-            results: &mut RustMessage,
+            results: &RustMessage,
         ) -> Result<()>;
+    }
+
+    /// A segment of a Rust message.
+    struct RustSegment<'a> {
+        bytes: &'a [u8],
     }
 
     extern "Rust" {
         type RustMessage;
         fn segment_count(self: &RustMessage) -> usize;
         unsafe fn segment<'a>(self: &'a RustMessage, index: usize) -> &'a [u8];
+        /// Every segment, for a message with more than one, whose segments `segment()` would
+        /// look up afresh each time.
+        unsafe fn segments<'a>(self: &'a RustMessage) -> Vec<RustSegment<'a>>;
         fn cap_count(self: &RustMessage) -> usize;
-        fn take_cap(self: &mut RustMessage, index: usize) -> KjMaybe<KjOwn<ClientHook>>;
+        fn get_cap(self: &RustMessage, index: usize) -> KjMaybe<KjOwn<ClientHook>>;
 
         type RustServer;
         fn allows_cancellation(self: &RustServer, interface_id: u64, method_id: u16) -> bool;
         fn last_is_streaming(self: &RustServer) -> bool;
         async fn dispatch_call(
+            server: &RustServer,
+            interface_id: u64,
+            method_id: u16,
+            params: KjOwn<CxxMessage>,
+            context: KjOwn<CallContextHook>,
+        ) -> Result<()>;
+        async fn dispatch_bridge_call(
             server: &RustServer,
             interface_id: u64,
             method_id: u16,
