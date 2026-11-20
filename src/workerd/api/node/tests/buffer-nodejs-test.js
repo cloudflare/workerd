@@ -6143,20 +6143,40 @@ export const transcodeFromUTF16OddByteInputTest = {
 export const transcodeSubstitutionTest = {
   test() {
     const bytes = (buf) => [...buf];
-    // windows-1252 decoding, and identity pairs passing high bytes through.
+    // Latin-1 bytes decode to U+0000-U+00FF, and non-ASCII bytes decode to
+    // U+FFFD in ASCII.
     deepStrictEqual(
       bytes(transcode(Buffer.from([0x80, 0x81, 0xe9]), 'latin1', 'utf8')),
-      [0xe2, 0x82, 0xac, 0xc2, 0x81, 0xc3, 0xa9]
+      [0xc2, 0x80, 0xc2, 0x81, 0xc3, 0xa9]
     );
     deepStrictEqual(
-      bytes(transcode(Buffer.from([0x61, 0x80, 0xff]), 'ascii', 'ascii')),
+      bytes(transcode(Buffer.from([0x61, 0x80, 0xff]), 'latin1', 'latin1')),
       [0x61, 0x80, 0xff]
     );
-    // windows-1252 encoding: unmappable characters become '?', but
-    // unmappable default-ignorable code points are dropped.
+    deepStrictEqual(
+      bytes(transcode(Buffer.from([0x61, 0x80, 0xff]), 'ascii', 'utf8')),
+      [0x61, 0xef, 0xbf, 0xbd, 0xef, 0xbf, 0xbd]
+    );
+    for (const [from, to] of [
+      ['ascii', 'ascii'],
+      ['ascii', 'latin1'],
+      ['latin1', 'ascii'],
+    ]) {
+      deepStrictEqual(
+        bytes(transcode(Buffer.from([0x61, 0x80, 0xff]), from, to)),
+        [0x61, 0x3f, 0x3f],
+        `${from}->${to}`
+      );
+    }
+    // Unmappable characters become '?', but unmappable default-ignorable
+    // code points are dropped.
     deepStrictEqual(
       bytes(transcode(Buffer.from('€\u0080☕a\u200bb'), 'utf8', 'latin1')),
-      [0x80, 0x3f, 0x3f, 0x61, 0x62]
+      [0x3f, 0x80, 0x3f, 0x61, 0x62]
+    );
+    deepStrictEqual(
+      bytes(transcode(Buffer.from('\ufeff€é', 'utf16le'), 'utf16le', 'latin1')),
+      [0x3f, 0xe9]
     );
     // One U+FFFD per maximal subpart of ill-formed UTF-8.
     deepStrictEqual(
@@ -6183,7 +6203,7 @@ export const transcodeSubstitutionTest = {
     );
     // The destination is sized for the worst case, and JavaScript can see it.
     strictEqual(
-      transcode(Buffer.from([0x61]), 'latin1', 'utf8').buffer.byteLength,
+      transcode(Buffer.from('☕'), 'utf8', 'latin1').buffer.byteLength,
       3
     );
   },
