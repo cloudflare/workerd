@@ -106,13 +106,14 @@ fn traced_global_moved_out_in_drop_keeps_its_value() {
     });
     harness.run_in_context(|lock, _ctx| {
         let stashed = stashed.take().expect("stashed above");
+        assert!(!stashed.is_empty(lock));
         assert!(stashed.as_local(lock).is_object());
         Ok(())
     });
 }
 
 /// The value dies with the resource, in the GC that sweeps it. The `TracedGlobal` that `Drop`
-/// moves out is then empty, and dropping it touches no handle.
+/// moves out is then empty, `try_as_local` returns `None`, and dropping it touches no handle.
 #[test]
 fn traced_global_whose_value_died_with_the_resource_drops_cleanly() {
     let _serial = SERIAL
@@ -127,7 +128,10 @@ fn traced_global_whose_value_died_with_the_resource_drops_cleanly() {
         let baseline = crate::Harness::used_global_handles_size(lock);
 
         // V8 reset the handle when its value died, so the drop has nothing left to release.
-        drop(stash_from_swept_resource(lock, ctx, "{}"));
+        let stashed = stash_from_swept_resource(lock, ctx, "{}");
+        assert!(stashed.is_empty(lock));
+        assert!(stashed.try_as_local(lock).is_none());
+        drop(stashed);
         crate::Harness::request_gc(lock);
         assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
         Ok(())
@@ -159,7 +163,7 @@ fn traced_global_moved_out_after_a_scavenge_keeps_its_value() {
     });
     harness.run_in_context(|lock, _ctx| {
         let stashed = stashed.take().expect("checked above");
-        assert!(stashed.as_local(lock).is_object());
+        assert!(stashed.try_as_local(lock).expect("not empty").is_object());
         Ok(())
     });
 }
