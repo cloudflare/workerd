@@ -8,6 +8,7 @@
 
 pub mod test_date;
 mod test_futures;
+mod test_loop_checked;
 mod test_maybe;
 pub mod test_own;
 mod test_refcount;
@@ -41,6 +42,15 @@ use test_futures::stashed_future_poll_count;
 use test_futures::unstash_and_await_promise_future;
 use test_futures::wake_retained_waker_from_background_thread;
 use test_futures::wake_stashed_waker;
+use test_loop_checked::LoopCheckedFuture;
+use test_loop_checked::LoopCheckedSlot;
+use test_loop_checked::loop_checked_drops;
+use test_loop_checked::loop_checked_get;
+use test_loop_checked::loop_checked_set;
+use test_loop_checked::loop_checked_take;
+use test_loop_checked::new_loop_checked_future;
+use test_loop_checked::new_loop_checked_slot;
+use test_loop_checked::poll_loop_checked_future;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -334,6 +344,26 @@ pub mod ffi {
         // NaughtyFuture test helpers.
         async fn poll_and_stash_promise_future() -> Result<()>;
         async fn unstash_and_await_promise_future() -> Result<()>;
+    }
+
+    extern "Rust" {
+        type LoopCheckedSlot;
+        /// A `LoopChecked` value that counts its drops.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_loop_checked_slot(value: u32) -> Box<LoopCheckedSlot>;
+        fn loop_checked_get(slot: &LoopCheckedSlot) -> Result<u32>;
+        fn loop_checked_set(slot: &mut LoopCheckedSlot, value: u32) -> Result<()>;
+        /// Takes the value out of its `LoopChecked`, leaving it in `slot` if that fails.
+        fn loop_checked_take(slot: &mut LoopCheckedSlot) -> Result<u32>;
+        /// How many `LoopChecked` values have been dropped.
+        fn loop_checked_drops() -> usize;
+
+        type LoopCheckedFuture;
+        /// A ready KJ promise's future, wrapped to be `Send`.
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_loop_checked_future(value: i32) -> Box<LoopCheckedFuture>;
+        /// Polls `future` once, returning its value, or -1 if it is pending.
+        fn poll_loop_checked_future(future: &mut LoopCheckedFuture) -> Result<i32>;
     }
 
     // these are used to check compilation only

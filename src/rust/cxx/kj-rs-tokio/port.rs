@@ -231,10 +231,10 @@ impl TokioPort {
     /// operation: repeated calls find nothing to do, but later spawn, wait, or poll operations are
     /// invalid. A call from another thread is a no-op and never touches that caller's `LocalSet`.
     ///
-    /// Tasks spawned with plain `tokio::spawn` onto the runtime are unaffected (they are
-    /// cancelled when the runtime drops); being `Send`, they cannot hold KJ objects
-    /// (`OwnPromiseNode` and friends are `!Send`), so their order relative to the loop does
-    /// not matter.
+    /// Tasks spawned with plain `tokio::spawn` onto the runtime are unaffected: they are
+    /// cancelled when the runtime drops, after the loop. Being `Send`, they can hold KJ objects
+    /// only in a `kj_rs::LoopChecked`, which aborts the process when dropped then, so a task that
+    /// holds one must be spawned with [`spawn`].
     pub fn cancel_spawned_tasks(&self) {
         if self.owner_thread != std::thread::current().id() {
             return;
@@ -366,7 +366,8 @@ impl Drop for TokioPort {
         // bare `TokioPort` (Rust unit tests) reaches here with its tasks still pending.
         self.cancel_spawned_tasks();
         // Dropping `self.runtime` cancels any tasks spawned via `tokio::spawn` (as opposed to the
-        // LocalSet); those are `Send` and so cannot hold KJ objects.
+        // LocalSet). Being `Send`, they hold KJ objects only in a `kj_rs::LoopChecked`, which
+        // aborts here; see `cancel_spawned_tasks`.
     }
 }
 

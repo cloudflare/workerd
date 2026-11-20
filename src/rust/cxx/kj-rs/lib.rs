@@ -4,6 +4,7 @@ use awaiter::WakerRef;
 pub use date::KjDate;
 pub use future::FuturePollStatus;
 pub use future::map_err;
+pub use loop_checked::LoopChecked;
 pub use maybe::repr::KjMaybe;
 pub use own::OwnTarget;
 pub use own::repr::KjOwn;
@@ -20,6 +21,7 @@ pub use crate::ffi::KjWaker;
 mod awaiter;
 mod date;
 mod future;
+mod loop_checked;
 pub mod maybe;
 mod own;
 mod promise;
@@ -85,6 +87,24 @@ mod ffi {
         /// # Safety
         /// `node` must point to a live `OwnPromiseNode`.
         unsafe fn own_promise_node_drop_in_place(node: *mut OwnPromiseNode);
+    }
+
+    unsafe extern "C++" {
+        include!("kj-rs/loop-checked.h");
+
+        type EventLoopId = crate::loop_checked::EventLoopId;
+
+        fn event_loop_id_current() -> EventLoopId;
+        #[nothrow]
+        fn event_loop_id_is_current(id: EventLoopId) -> bool;
+        /// Fails with the exception for using a value off its event loop.
+        fn event_loop_id_wrong_loop() -> Result<()>;
+        /// Aborts the process.
+        #[nothrow]
+        fn loop_checked_dropped_off_loop();
+        /// Aborts the process in a `kj::DisallowAsyncDestructorsScope`.
+        #[nothrow]
+        fn require_async_destructors_allowed();
     }
 
     unsafe extern "C++" {

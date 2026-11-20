@@ -93,6 +93,10 @@ Bridge declarations support async calls in both directions:
 These bridge futures and promises are driven by the KJ event loop. Rust-native futures that do not
 cross the bridge can still use executors such as Tokio.
 
+A future of a C++ promise belongs to the event loop it was made on, so it is not `Send`. To hold
+one in a `Send` future, wrap it in a `kj_rs::LoopChecked`, which is `Send`: polling it off its
+loop panics, and dropping it off its loop aborts the process.
+
 ### Shared Rust type aliases
 
 The fork includes support for reusing Rust type aliases across bridge modules, based on
