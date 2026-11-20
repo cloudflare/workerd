@@ -122,7 +122,7 @@ Without the explicit lifetime, the CXX macro requires the future to be `'static`
 
 ### Rust calling async C++ (`extern "C++"`)
 
-Mark an `extern "C++"` function `async` to wrap a C++ function returning `kj::Promise<T>` as a Rust `Future`. The Rust caller can `.await` it:
+Mark an `extern "C++"` function `async` to wrap a C++ function returning `kj::Promise<T>` as a `!Send`, `!Unpin` `kj_rs::KjFuture` (requires a current KJ event loop). Single-loop callers (e.g. `kj_rs_tokio::spawn`) `.await` it directly; inside a `Send` future driven on the same KJ event loop (e.g. `IoContext::await_io`), call `.into_send()` (and wrap non-future loop-bound KJ objects in `kj_rs::LoopChecked` at their binding's construction site — see `cxx/kj-rs/README.md`):
 
 ```rust
 unsafe extern "C++" {

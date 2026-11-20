@@ -180,6 +180,15 @@ kj_test(
 )
 
 kj_test(
+    src = "send-kj-future-test.c++",
+    deps = [
+        ":bridge",
+        ":tests",
+        "@@//deps:rust_runtime",
+    ],
+)
+
+kj_test(
     src = "own-test.c++",
     deps = [
         ":bridge",

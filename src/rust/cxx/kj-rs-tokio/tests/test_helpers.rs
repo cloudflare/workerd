@@ -125,6 +125,14 @@ pub fn spawn_task_awaiting_kj_never_promise() {
     }));
 }
 
+/// Like `spawn_task_awaiting_kj_never_promise`, but the task holds the promise's future as a
+/// `kj_rs::SendKjFuture`, which aborts the process if dropped off its event loop.
+pub fn spawn_task_awaiting_send_kj_never_promise() {
+    drop(kj_rs_tokio::spawn(async {
+        let _ = kj_rs::KjFuture::into_send(crate::ffi::kj_never_promise()).await;
+    }));
+}
+
 /// A bridged future woken from a plain `std::thread` (no tokio, no KJ) ~20ms after its first
 /// poll, while the loop is parked in the port's `wait()`. Exercises the full cross-thread path
 /// into a PARKED tokio port: `FutureWakerCell` cross-thread fulfiller -> loop `Executor` -> port

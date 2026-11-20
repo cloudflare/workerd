@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kj-rs/loop-checked.h"
+
 #include <rust/cxx.h>
 
 #include <kj/async.h>
@@ -27,8 +29,13 @@ struct KjPromiseNodeImpl {
   template <typename T>
   inline KjPromiseNodeImpl(kj::Promise<T>&& p);
 
+  template <typename T>
+  inline KjPromiseNodeImpl(EventLoopId loopId, kj::Promise<T>&& p);
+
   kj::_::PromiseNode* node;
   repr::UnwrapCallback unwrap;
+  // The id of the event loop `node` belongs to.
+  EventLoopId loopId;
 };
 
 #pragma GCC diagnostic pop
@@ -59,10 +66,17 @@ repr::Result unwrapCallback(void* nodePtr, void* ret) noexcept {
 
 namespace repr {
 
+// Gets the event loop's id before taking `p`, so that if there is no event loop, `p` still owns
+// its node.
 template <typename T>
 inline KjPromiseNodeImpl::KjPromiseNodeImpl(kj::Promise<T>&& p)
+    : KjPromiseNodeImpl(kj::EventLoop::Id::current(), kj::mv(p)) {}
+
+template <typename T>
+inline KjPromiseNodeImpl::KjPromiseNodeImpl(EventLoopId loopIdParam, kj::Promise<T>&& p)
     : node(kj::_::PromiseNode::from(kj::mv(p)).template disown<kj::_::PromiseDisposer>()),
-      unwrap(::kj_rs::_::unwrapCallback<T>) {}
+      unwrap(::kj_rs::_::unwrapCallback<T>),
+      loopId(loopIdParam) {}
 
 }  // namespace repr
 

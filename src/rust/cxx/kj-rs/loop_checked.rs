@@ -29,12 +29,12 @@ impl EventLoopId {
     }
 
     /// Whether the event loop is the current thread's.
-    fn is_current(self) -> bool {
+    pub(crate) fn is_current(self) -> bool {
         crate::ffi::event_loop_id_is_current(self)
     }
 
     /// Fails unless the event loop is the current thread's.
-    fn require_current(self) -> Result<(), KjException> {
+    pub(crate) fn require_current(self) -> Result<(), KjException> {
         if self.is_current() {
             Ok(())
         } else {

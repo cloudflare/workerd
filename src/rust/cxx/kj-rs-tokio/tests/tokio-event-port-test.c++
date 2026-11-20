@@ -502,6 +502,19 @@ KJ_TEST("context destruction with a spawned task awaiting a KJ promise is clean"
   KJ_EXPECT(kj::evalLater([]() { return 8; }).wait(io.getWaitScope()) == 8);
 }
 
+KJ_TEST("a port destroyed after its WaitScope drops a spawned task's SendKjFuture on its loop") {
+  {
+    auto port = kj::heap<kj_rs_tokio::TokioEventPort>();
+    kj::WaitScope ws(port->getLoop());
+    spawn_task_awaiting_send_kj_never_promise();
+    kj::evalLater([]() {}).wait(ws);
+    ws.poll();
+    // `ws` is destroyed first, so the port cancels the task with no loop current.
+  }
+  auto io = setupTokioAsyncIo();
+  KJ_EXPECT(kj::evalLater([]() { return 9; }).wait(io.getWaitScope()) == 9);
+}
+
 KJ_TEST("one TokioEventPort per thread") {
   auto io = setupTokioAsyncIo();
   // A second port on this thread is refused (KJ's one-loop-per-thread model): the C++ side

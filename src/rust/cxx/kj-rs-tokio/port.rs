@@ -233,8 +233,8 @@ impl TokioPort {
     ///
     /// Tasks spawned with plain `tokio::spawn` onto the runtime are unaffected: they are
     /// cancelled when the runtime drops, after the loop. Being `Send`, they can hold KJ objects
-    /// only in a `kj_rs::LoopChecked`, which aborts the process when dropped then, so a task that
-    /// holds one must be spawned with [`spawn`].
+    /// only in a `kj_rs::LoopChecked` or a `kj_rs::SendKjFuture`, which abort the process when
+    /// dropped then, so a task that holds one must be spawned with [`spawn`].
     pub fn cancel_spawned_tasks(&self) {
         if self.owner_thread != std::thread::current().id() {
             return;
@@ -366,8 +366,8 @@ impl Drop for TokioPort {
         // bare `TokioPort` (Rust unit tests) reaches here with its tasks still pending.
         self.cancel_spawned_tasks();
         // Dropping `self.runtime` cancels any tasks spawned via `tokio::spawn` (as opposed to the
-        // LocalSet). Being `Send`, they hold KJ objects only in a `kj_rs::LoopChecked`, which
-        // aborts here; see `cancel_spawned_tasks`.
+        // LocalSet). Being `Send`, they hold KJ objects only in a `kj_rs::LoopChecked` or a
+        // `kj_rs::SendKjFuture`, which abort here; see `cancel_spawned_tasks`.
     }
 }
 
