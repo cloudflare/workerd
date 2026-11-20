@@ -253,10 +253,12 @@ some other way or reaches it through another kind of cell, a std cell included, 
 C++ JSG will be removed, so Rust JSG must not depend on it. New code in the C++ shims in
 `src/rust/jsg` calls V8 directly (`v8::TryCatch`, `v8::MaybeLocal`, `isolate->ThrowException`) and
 leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are listed in the
-allowlist described below, and are to be removed. The one exception is in
-`src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
-`JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+allowlist described below, and are to be removed. The one exception is `throwPendingToRun()` in
+`src/workerd/io/io-context/ffi.c++`, which throws `JsExceptionThrown` to pass an exception or a
+termination that Rust left pending to `IoContext::run()`, which learns of them no other way. Only
+Rust code that `run()` itself runs reaches it: the callback of `io_context_await_io_and_run()` and
+the function of a `ReentryCallback`. Don't add another throw, or another caller that `run()`
+doesn't run.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),

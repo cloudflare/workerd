@@ -31,11 +31,22 @@ wd_cc_library(
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
     deps = [
+        ":current-with-id",
         ":ffi.rs@cxx",
         "//src/rust/jsg:ffi",
         "//src/workerd/io",
         "//src/workerd/jsg:inspector",
     ],
+)
+
+# The IoContext that an `io_context::IoContext` stands for, by its id. A library of its own so that
+# the per-type and per-method shims of API crates, which take that id, need not depend on :ffi.
+wd_cc_library(
+    name = "current-with-id",
+    srcs = ["current-with-id.c++"],
+    hdrs = ["current-with-id.h"],
+    visibility = ["//src/workerd/api:__subpackages__"],
+    deps = ["//src/workerd/io"],
 )
 
 # Snippets that must not compile against io-context (each annotates the errors it expects) and
@@ -62,7 +73,10 @@ wd_rust_crate(
     testonly = True,
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
-    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/api/channel-interop:ffi.rs@cxx",
+    ],
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     link_deps = [":test-bridge"],
@@ -70,6 +84,8 @@ wd_rust_crate(
     deps = [
         ":io-context",
         "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
         "@crates_vendor//futures",
     ],
 )

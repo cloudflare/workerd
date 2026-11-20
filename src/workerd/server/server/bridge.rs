@@ -52,6 +52,15 @@ pub use crate::tasks::task_run;
 )]
 #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
 pub mod ffi {
+    // A JS value that can cross the RPC boundary: the props of an entrypoint, an actor class or
+    // a dynamic worker's env. The frankenvalue crate's bridge declares it, and so defines the
+    // one `KjOwn<Frankenvalue>` drop a binary may link.
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/frankenvalue/ffi.h");
+        type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
         type AsyncInputStream = kj::io::ffi::AsyncInputStream;
@@ -157,6 +166,22 @@ pub mod ffi {
         status: u32,
         header: String,
         body: KjOwn<AsyncInputStream>,
+    }
+
+    /// How long one phase of starting a worker took, on the monotonic and thread CPU clocks, in
+    /// nanoseconds.
+    struct StartupPhaseTiming {
+        wall_ns: i64,
+        cpu_ns: i64,
+    }
+
+    /// How long the phases of starting a worker took, for `workerd bench`; see
+    /// `BenchReport.Group.startup` (bench.capnp) for what each covers.
+    struct WorkerStartupTiming {
+        isolate: StartupPhaseTiming,
+        script: StartupPhaseTiming,
+        worker: StartupPhaseTiming,
+        total: StartupPhaseTiming,
     }
 
     /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
@@ -390,17 +415,15 @@ pub mod ffi {
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
         ) -> Result<KjOwn<CompiledWorker>>;
-        /// Times starting the config's worker `services[config_service]`, which `spec` compiled,
-        /// for `workerd bench`: compiles and destroys throwaway copies of it in new isolates, as
-        /// `params` (an encoded `BenchParams` message, bench.capnp, in words) ask. Returns the
-        /// startup `BenchReport.Group` of the timings, encoded, without its name. A copy that
-        /// fails to start fails the group; an error means it could not be run at all.
-        async fn factory_bench_startup(
+        /// Compiles a throwaway copy of the config's worker `services[config_service]`, which
+        /// `spec` compiled, in a new isolate, destroys it, and returns how long the phases of
+        /// starting it took, for `workerd bench`. The copy has no inspector. Fails if the copy
+        /// fails to start.
+        async fn factory_start_throwaway_worker(
             factory: &WorkerFactory,
             spec: &WorkerSpec,
             config_service: u32,
-            params: &[u64],
-        ) -> Result<Vec<u64>>;
+        ) -> Result<WorkerStartupTiming>;
 
         /// Whether the config's assets service `services[config_service]` prefers serving an
         /// asset to a navigation (`assetsSecFetchModeNavigateHeaderPrefersAssetServing`), under
@@ -648,10 +671,6 @@ pub mod ffi {
         /// Without a stack trace, which a `KjError` does not carry.
         fn exception_text(error: KjException) -> String;
 
-        /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
-        /// class or a dynamic worker's env.
-        #[namespace = "workerd"]
-        type Frankenvalue;
         fn frankenvalue_from_json(json: &str) -> KjOwn<Frankenvalue>;
         fn frankenvalue_clone(value: &Frankenvalue) -> KjOwn<Frankenvalue>;
         fn frankenvalue_is_empty(value: &Frankenvalue) -> bool;
