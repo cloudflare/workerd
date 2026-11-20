@@ -530,8 +530,11 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
-const jsg::TypeHandler<api::BenchExportedHandler>& Worker::Api::getBenchTypeHandler(
-    jsg::Lock& lock) const {
+v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
+    v8::Local<v8::Value> handler,
+    v8::Local<v8::Value> env,
+    v8::Local<v8::Value> ctx,
+    kj::ArrayPtr<const capnp::word> params) const {
   KJ_UNIMPLEMENTED("bench handlers are only supported under `workerd bench`");
 }
 
