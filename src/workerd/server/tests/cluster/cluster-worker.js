@@ -120,6 +120,23 @@ export default {
       return env.ON_HIBERNATE.fetch(request);
     }
 
+    // One turn of the node's event loop, as long as the caller makes it:
+    // JavaScript that yields to nothing for `n` million iterations. `took` is
+    // how long the turn took by the node's clock, which a Worker reads anew
+    // only once it awaits something: from the request's start to the timer's.
+    if (url.pathname === '/spin') {
+      const start = Date.now();
+      const n = Number(url.searchParams.get('n'));
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < 1_000_000; j++) {
+          sum = (sum * 31 + j) | 0;
+        }
+      }
+      await scheduler.wait(1);
+      return Response.json({ sum, took: Date.now() - start });
+    }
+
     if (url.pathname.startsWith('/kv/')) {
       if (url.pathname === '/kv/clock' || url.pathname === '/kv/gc') {
         const r = await env.KV_WORKER.fetch(

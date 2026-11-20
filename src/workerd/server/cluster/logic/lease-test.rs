@@ -102,3 +102,24 @@ fn skew_fences_at_once() {
         assert!(matches!(skewed(-max - 1), Step::Fence(_)));
     }
 }
+
+#[test]
+fn a_lease_holds_for_as_long_as_it_has_time_remaining() {
+    for t in timings() {
+        let until = 1_000_000;
+        for now in [
+            0,
+            until - t.safety_ms() - 1,
+            until - t.safety_ms(),
+            until,
+            2 * until,
+        ] {
+            let remaining = t.remaining_ms(until, now);
+            assert_eq!(t.holds(until, now), remaining > 0, "{t:?} at {now}");
+            if remaining > 0 {
+                assert!(t.holds(until, now + remaining - 1), "{t:?} at {now}");
+                assert!(!t.holds(until, now + remaining), "{t:?} at {now}");
+            }
+        }
+    }
+}

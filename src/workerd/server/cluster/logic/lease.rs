@@ -7,7 +7,8 @@
 //!
 //! The executor runs one round every `interval_ms` (`retry_ms` after a
 //! failed renewal): it asks `before_renew`, renews if told to and reports
-//! the result to `renewed`.
+//! the result to `renewed`. It runs on a thread of its own, so a round
+//! waits on the bucket alone, never on the server's event loop.
 
 /// A lease's times, in ms. Each is sized against the others, so a test
 /// that waits out leases divides them all by one number (`divided`).
@@ -36,9 +37,10 @@ pub struct Timing {
     /// second, which no bound cuts short. Each bound is below its round's
     /// deadline.
     ///
-    /// The bounds are a request's wall time, so a stall of this node's
-    /// event loop past one looks like a stalled bucket and costs a resend,
-    /// and a slowdown of the whole bucket doubles a round's requests.
+    /// The bounds are a request's wall time, so a slowdown of the whole
+    /// bucket doubles a round's requests. A listing runs on the server's
+    /// event loop, so a stall of the loop past its bound looks like a
+    /// stalled bucket and costs a resend.
     ///
     /// A renewal is a write, and after a refusal a reread and a write
     /// again. A stalled write, its copy's answer, the reread and the
@@ -118,6 +120,27 @@ impl Timing {
     const fn safety_ms(&self) -> u64 {
         2 * self.max_skew_ms
     }
+
+    /// Whether a lease that expires at `until_ms` holds at `now_ms`, with
+    /// peers' clocks allowed for.
+    #[must_use]
+    pub const fn holds(&self, until_ms: u64, now_ms: u64) -> bool {
+        now_ms + self.safety_ms() < until_ms
+    }
+
+    /// How much longer than `now_ms` a lease that expires at `until_ms`
+    /// holds (`holds`), in ms: 0 once it does not.
+    #[must_use]
+    pub const fn remaining_ms(&self, until_ms: u64, now_ms: u64) -> u64 {
+        until_ms.saturating_sub(now_ms + self.safety_ms())
+    }
+
+    /// When peers, by clocks up to `safety_ms` ahead, may judge a lease that
+    /// expires at `until_ms` expired: it `holds` before.
+    #[must_use]
+    pub const fn holds_until(&self, until_ms: u64) -> u64 {
+        until_ms.saturating_sub(self.safety_ms())
+    }
 }
 
 impl Default for Timing {
@@ -165,8 +188,9 @@ impl Lease {
         if o.skew_ms.unsigned_abs() > self.timing.max_skew_ms {
             return Step::Fence(format!("clock off from the bucket's by {} ms", o.skew_ms));
         }
-        // A node stalled past its lease (a paused process, a blocked loop)
-        // may have been taken over: it must not renew and serve on.
+        // A node stalled past its lease (a paused process, a lease thread
+        // that got no time) may have been taken over: it must not renew
+        // and serve on.
         if self.until_ms != 0 && !self.holds(o.now_ms + self.timing.renew_timeout_ms) {
             return Step::Fence("the lease lapsed before it could be renewed".into());
         }
@@ -191,7 +215,7 @@ impl Lease {
     /// Whether the lease holds at `now_ms`, with peers' clocks allowed
     /// for: an actor serves only while it does.
     pub fn holds(&self, now_ms: u64) -> bool {
-        now_ms + self.timing.safety_ms() < self.until_ms
+        self.timing.holds(self.until_ms, now_ms)
     }
 
     /// When peers, by clocks up to `safety_ms` ahead, may judge this lease expired: it
@@ -201,7 +225,7 @@ impl Lease {
         if self.left {
             return 0;
         }
-        self.until_ms.saturating_sub(self.timing.safety_ms())
+        self.timing.holds_until(self.until_ms)
     }
 }
 
