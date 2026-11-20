@@ -168,11 +168,11 @@ build:unix --cxxopt=-D_LIBCPP_NO_ABI_TAG --host_cxxopt=-D_LIBCPP_NO_ABI_TAG
 # downstream, this reduces the include overhead for <algorithm>.
 build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL
 
-# V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
-# a global define for this, we need to apply it for everything.
-# TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
-build:windows --copt='-Wno-macro-redefined'
-build:windows --host_copt='-Wno-macro-redefined'
+# Set _WIN32_WINNT to request Windows 10-level features. The Windows SDK only declares APIs such
+# as htonll when it is at least 0x0602, Bazel defaults to 0x0601 (Windows 7). V8 already defines
+# this value itself, but we want to have the same value used consistently including for code that
+# doesn't depend on V8, and we want to avoid warnings about redefining _WIN32_WINNT.
+build:windows --repo_env=BAZEL_WIN32_WINNT=/D_WIN32_WINNT=0x0A00
 
 # typescript configuration
 # do more correct type checking
