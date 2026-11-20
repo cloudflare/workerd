@@ -57,6 +57,7 @@ use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
 use crate::cluster::PeerSession;
+use crate::cluster::SessionService;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
@@ -415,7 +416,7 @@ impl Reporter {
 /// The CLI's substitutions for config values, by service or socket name.
 #[derive(Default)]
 pub struct Overrides {
-    /// `--directory-path`: a disk service's path.
+    /// `--directory-path`: a disk or cache service's path.
     pub directories: HashMap<String, String>,
     /// `--external-addr`: an external service's address.
     pub externals: HashMap<String, String>,
@@ -1464,6 +1465,7 @@ impl Server {
     ///
     /// `inbound_listeners` are the sockets bound ahead of the services, by the service they
     /// serve, for `Worker::Api::getInboundListeners()`.
+    #[expect(clippy::too_many_lines, reason = "the config's passes, in order")]
     pub async fn start(
         factory: Rc<Factory>,
         overrides: &Overrides,
@@ -1552,7 +1554,8 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
-        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
+        let node = cluster.as_ref();
+        cluster_services(config, &mut services, node, overrides, &factory, &report)?;
 
         let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
 
@@ -1891,8 +1894,10 @@ async fn make_service(
                     .map(Service::Assets),
             ))
         }
-        // Made once the cluster is joined (`make_bucket_services`).
-        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
+        // Made once the cluster, if any, is joined (`cluster_services`).
+        Ok(service::Which::Bucket(_) | service::Which::Cache(_)) => {
+            Ok(Service::Leaf(Rc::new(InvalidConfigChannel)))
+        }
         Err(capnp::NotInSchema(_)) => {
             report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -2053,6 +2058,24 @@ impl ServerHandle {
             namespace.peer_channel(id, Some(session)),
         ))
     }
+
+    /// A cluster peer's `getEntrypoint`: a clustered `cache` service, for its messages.
+    pub(crate) fn resolve_peer_cache(
+        &self,
+        session: &PeerSession,
+        service_name: &str,
+    ) -> Result<Box<SubrequestChannel>> {
+        let server = self.server()?;
+        let node = server
+            .cluster()
+            .filter(|node| node.caches.borrow().contains(service_name))
+            .ok_or_else(|| kj::failed!("jsg.Error: no clustered cache \"{service_name}\""))?;
+        Ok(SubrequestChannel::new(Rc::new(SessionService {
+            node: Rc::clone(node),
+            session: Rc::clone(&session.requests),
+            service: server.debug_service(service_name)?.channel(),
+        })))
+    }
 }
 
 impl Server {
@@ -2079,20 +2102,37 @@ impl Server {
 #[path = "config-test.rs"]
 mod tests;
 
-/// Replaces each `bucket` service's stand-in with the directory it names:
-/// of the cluster's bucket, or without a cluster of its `localDisk`.
-fn make_bucket_services(
+/// Replaces the stand-ins of the services made once the cluster, if any, is joined: each `bucket`
+/// with the directory it names, of the cluster's bucket or without a cluster of its `localDisk`,
+/// and each `cache` with one whose entries the cluster's nodes share, else in its directory.
+fn cluster_services(
     config: config::Reader<'_>,
     services: &mut Services,
     cluster: Option<&Rc<ClusterNode>>,
+    overrides: &Overrides,
     factory: &Rc<Factory>,
     report: &Reporter,
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
-        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
-            continue;
-        };
         let name = text(conf.get_name())?;
+        let bucket = match conf.which() {
+            Ok(service::Which::Bucket(bucket)) => bucket,
+            Ok(service::Which::Cache(cache)) => {
+                let cache = cache.map_err(capnp_error)?;
+                let path = overrides
+                    .directories
+                    .get(&name)
+                    .filter(|_| !report.from_deployment(&name))
+                    .map(String::as_str);
+                let made = crate::services::cache::make_cache_service(
+                    &name, cache, path, factory, cluster,
+                );
+                let service = invalid_on_error(&name, report, made.map(Service::Leaf));
+                services.0.insert(name, service);
+                continue;
+            }
+            _ => continue,
+        };
         let bucket = bucket.map_err(capnp_error)?;
         let disk = text(bucket.get_local_disk())?;
         let disk = match services.0.get(&disk) {

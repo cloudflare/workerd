@@ -199,10 +199,10 @@ kj::Promise<void> factory_accept_debug_port(
 // Cluster peers
 
 namespace {
-// What a cluster peer's session serves: the debug port's interface, with only `getActor`, for the
-// actors of clustered namespaces. Every request on one of those is counted on the session, so that
-// a stopping instance knows which it started (`ClusterNode::stop_peer_sessions`); `getEntrypoint`
-// is unimplemented.
+// What a cluster peer's session serves: the debug port's interface, its `getActor` for the actors
+// of clustered namespaces and its `getEntrypoint` for the cluster's `cache` services. Every
+// request is counted on the session, so that a stopping instance knows which it started
+// (`ClusterNode::stop_peer_sessions`).
 class ClusterPeerPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
   ClusterPeerPortImpl(::rust::Box<ServerHandle> server,
@@ -218,6 +218,14 @@ class ClusterPeerPortImpl final: public rpc::WorkerdDebugPort::Server {
         toRust(params.getService()), toRust(params.getEntrypoint()), toRust(params.getActorId())));
     context.initResults(capnp::MessageSize{4, 1})
         .setActor(kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
+    auto target = subrequest_channel_into_kj(
+        server->resolve_peer_cache(*session, toRust(context.getParams().getService())));
+    context.initResults(capnp::MessageSize{4, 1})
+        .setEntrypoint(kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory));
     return kj::READY_NOW;
   }
 
@@ -357,6 +365,15 @@ kj::Own<RpcClient> rpc_client_debug_actor(
       impl.factory, kj::addRef(*impl.session), request.send().getActor()));
 }
 
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service) {
+  auto& impl = session.getImpl();
+  auto peer = impl.session->bootstrap.castAs<rpc::WorkerdDebugPort>();
+  auto request = peer.getEntrypointRequest();
+  request.setService(kj::str(service));
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(
+      impl.factory, kj::addRef(*impl.session), request.send().getEntrypoint()));
+}
+
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson) {
@@ -385,6 +402,31 @@ kj::Own<WorkerInterface> rpc_client_start_request(
   auto& factory = impl.factory.getImpl();
   return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,
       getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+}
+
+kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
+    kj::HttpMethod method,
+    ::rust::Str url,
+    const kj::HttpHeaders& headers,
+    uint64_t length) {
+  auto client = kj::newHttpClient(*interface).attach(kj::mv(interface));
+  auto request = client->request(method, kj::str(url), headers, length);
+  return kj::heap<HttpCall>(kj::mv(client), kj::mv(request));
+}
+
+kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str header) {
+  auto name = kj::str(header);
+  call->request.body = nullptr;
+  auto response = co_await kj::mv(call->request.response);
+  ::rust::String value;
+  response.headers->forEach([&](kj::StringPtr n, kj::StringPtr v) {
+    if (n == name) value = toRustString(v);
+  });
+  co_return HttpAnswer{
+    .status = response.statusCode,
+    .header = kj::mv(value),
+    .body = response.body.attach(kj::mv(call)),
+  };
 }
 
 namespace {

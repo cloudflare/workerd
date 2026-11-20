@@ -98,6 +98,7 @@ struct WorkerSpec;
 struct WorkerInfo;
 struct ContainerRef;
 struct FacetStartInfo;
+struct HttpAnswer;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
@@ -458,12 +459,26 @@ void actor_close_storage(const ActorHandle& actor);
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 kj::Own<RpcClient> rpc_client_debug_actor(
     const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+struct HttpCall {
+  kj::Own<kj::HttpClient> client;
+  kj::HttpClient::Request request;
+};
+kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
+    kj::HttpMethod method,
+    ::rust::Str url,
+    const kj::HttpHeaders& headers,
+    uint64_t length);
+inline kj::AsyncOutputStream& http_call_body(HttpCall& call) {
+  return *call.request.body;
+}
+kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str header);
 kj::Own<WorkerInterface> worker_interface_watch_moved(
     kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 kj::Own<WorkerInterface> worker_interface_watch_peer(

@@ -494,6 +494,9 @@ struct Service {
 
     assets @7 :AssetsService;
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
+    cache @8 :CacheDirectory;
+    # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
+    # directory on disk.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -563,6 +566,23 @@ struct AssetsService {
   compatibilityFlags @4 :List(Text);
   # Without a user Worker, the compatibility date and flags that select assets behavior, compiled
   # as a Worker's are.
+}
+
+struct CacheDirectory {
+  # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
+  # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
+  # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
+  # file, so entries survive a restart, in a directory per cache: `default/` for `caches.default`,
+  # and for `caches.open(name)` the SHA-256 of `name` in lowercase hex, so that one cache can be
+  # removed by itself. With `Config.cluster`, the instances share one cache instead, which every
+  # instance must name the same: an entry lives on one instance, and the directory holds this
+  # instance's in `cluster-<instance>/`, emptied as it starts. While an instance drains, the keys
+  # it is home to, about 1/N, miss, and puts to them are not stored. Experimental: requires
+  # `--experimental`.
+
+  path @0 :Text;
+  # The directory, as in `DiskDirectory`: relative to the current directory, and if not
+  # specified, given on the command line with `--directory-path <service-name>=<path>`.
 }
 
 struct ServiceDesignator {

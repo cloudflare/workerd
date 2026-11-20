@@ -53,6 +53,10 @@
 //      large value in the bucket, and tokens come from the metadata server,
 //      replaced before they expire, or from a service account key's signed
 //      JWT.
+//  16. The Cache API is one cache across the nodes (services/cache-cluster.rs,
+//      over `ClusterNode::peer_service`): a write is seen at once on the
+//      other node, named caches are apart, a large value crosses, and a
+//      killed node's entries miss at once.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -65,7 +69,7 @@
 //     orphan scan finds them. alarms-test.rs.
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import {
@@ -1375,6 +1379,117 @@ test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigne
     assert.match(await clusterConnect(port, other), / 403 /, 'instance');
     assert.match(await clusterConnect(port), / 403 /, 'unsigned');
   });
+});
+
+// The Cache API through the Worker of cluster-test.wd-test's `cache` on
+// `node`: `method` on the entry of `key`, in the cache named `ns` if given,
+// for `ttl` seconds if given.
+async function cacheCall(node, method, key, { body, ns, ttl } = {}) {
+  const query = new URLSearchParams({ ...(ns && { ns }), ...(ttl && { ttl }) });
+  const res = await fetch(`http://127.0.0.1:${node.httpPort}/${key}?${query}`, {
+    method,
+    body,
+    signal: AbortSignal.timeout(10_000),
+  });
+  const data = Buffer.from(await res.arrayBuffer());
+  return res.status === 404 ? null : data;
+}
+const cachePut = (node, key, value, ns) =>
+  cacheCall(node, 'PUT', key, { body: value, ns });
+const cacheMatch = async (node, key, ns) =>
+  (await cacheCall(node, 'GET', key, { ns }))?.toString() ?? null;
+const cacheDelete = async (node, key) =>
+  JSON.parse(await cacheCall(node, 'DELETE', key));
+
+test('cluster: the nodes share one Cache API cache', async () => {
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      const [a, b] = nodes;
+      // Sixteen keys, so that each node is almost surely home to some.
+      const keys = Array.from({ length: 16 }, (_, i) => `k${i}`);
+      const each = (f) => Promise.all(keys.map(f));
+      // A node serves once it has been registered for `join_ms`.
+      await until(
+        async () => {
+          await each((key) => cachePut(a, key, `a-${key}`));
+          const got = await each((key) => cacheMatch(b, key));
+          return got.every((value, i) => value === `a-${keys[i]}`);
+        },
+        20_000,
+        "b never saw a's puts"
+      );
+      for (const key of keys) {
+        // A copy a just read is gone once b's overwrite is done.
+        assert.strictEqual(await cacheMatch(a, key), `a-${key}`);
+        await cachePut(b, key, `b-${key}`);
+        assert.strictEqual(await cacheMatch(a, key), `b-${key}`);
+        // And once a's delete is done.
+        assert.strictEqual(await cacheMatch(b, key), `b-${key}`);
+        assert.strictEqual(await cacheDelete(a, key), true);
+        assert.strictEqual(await cacheMatch(b, key), null);
+        assert.strictEqual(await cacheDelete(b, key), false);
+      }
+
+      // An expired entry is none, at its home too: deleting it finds nothing.
+      await each((key) => cacheCall(a, 'PUT', key, { body: 'e', ttl: 1 }));
+      await sleep(1_500);
+      assert.deepStrictEqual(
+        await each((key) => cacheDelete(b, key)),
+        keys.map(() => false)
+      );
+
+      await cachePut(a, 'named', 'one', 'one');
+      assert.strictEqual(await cacheMatch(b, 'named'), null);
+      assert.strictEqual(await cacheMatch(b, 'named', 'two'), null);
+      assert.strictEqual(await cacheMatch(b, 'named', 'one'), 'one');
+
+      const big = randomBytes(10 << 20);
+      await cachePut(a, 'big', big);
+      for (const node of [b, a]) {
+        const got = await cacheCall(node, 'GET', 'big');
+        assert(got?.equals(big), `${node.nodeId} got ${got?.length} bytes`);
+      }
+      // Dropped, its files leave both nodes' disks.
+      assert.strictEqual(await cacheDelete(a, 'big'), true);
+      for (const node of [a, b]) {
+        assert.strictEqual(await cacheMatch(node, 'big'), null);
+        const [dir] = (await readdir(node.localPath)).filter((name) =>
+          name.startsWith('cluster-')
+        );
+        const sizes = await Promise.all(
+          (await readdir(join(node.localPath, dir))).map(
+            async (name) => (await stat(join(node.localPath, dir, name))).size
+          )
+        );
+        assert(
+          sizes.every((size) => size < 1 << 20),
+          `${sizes}`
+        );
+      }
+
+      // Killed, b's record stays live for its lease, but its entries miss at
+      // once on a: the session to it is refused. Windows retries a refused
+      // connect for 2 s, so there a match's 2 s answer deadline bounds it.
+      await each((key) => cachePut(a, key, `c-${key}`));
+      await b.stop({ signal: 'SIGKILL' });
+      await sleep(200);
+      const bound = process.platform === 'win32' ? 4_000 : 1_000;
+      const got = await each(async (key) => {
+        const start = Date.now();
+        const value = await cacheMatch(a, key);
+        assert(Date.now() - start < bound, `${Date.now() - start} ms`);
+        return value;
+      });
+      const hits = got.filter((value, i) => value === `c-${keys[i]}`);
+      assert.strictEqual(
+        hits.length + got.filter((v) => v === null).length,
+        16
+      );
+      assert(0 < hits.length && hits.length < 16, `${hits.length} hits`);
+    },
+    { configName: 'cache', disk: 'cache' }
+  );
 });
 
 test('cluster: a public cluster address is refused', async () => {
