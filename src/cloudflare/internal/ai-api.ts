@@ -354,7 +354,10 @@ export class Ai extends wrappedBinding.WrappedBinding {
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
 
-    if (this.#options.returnRawResponse || this.#options.websocket) {
+    // Use the options from this call, not `this.#options`: that field is a
+    // single slot shared by every run() call on this binding, so by the time
+    // the fetch resolves it may hold another concurrent call's options.
+    if (options.returnRawResponse || options.websocket) {
       return res;
     }
 
