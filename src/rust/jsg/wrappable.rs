@@ -483,6 +483,14 @@ pub trait ToJS<'s>: Sized {
         let _ = creator;
         self.to_js(lock)
     }
+
+    /// Whether this is an absent optional value, such as `None`, which a `#[jsg_struct]` leaves
+    /// out of the object it converts to, as C++ JSG's `JSG_STRUCT` leaves out an absent
+    /// `jsg::Optional<T>`. A type that overrides it also overrides [`FromJS::is_optional`].
+    #[doc(hidden)]
+    fn is_absent(&self) -> bool {
+        false
+    }
 }
 
 // =============================================================================
@@ -515,7 +523,9 @@ pub trait FromJS<'s>: Sized {
         name.rsplit("::").next().unwrap_or(name).to_owned()
     }
 
-    /// Whether a method may omit this argument, like C++ JSG's optional types.
+    /// Whether a method may omit this argument, like C++ JSG's optional types. It also makes a
+    /// `#[jsg_struct]` field optional; a type that overrides it also overrides
+    /// [`ToJS::is_absent`].
     #[doc(hidden)]
     fn is_optional() -> bool {
         false
@@ -1131,6 +1141,10 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
             None => Ok(lock.undefined()),
         }
     }
+
+    fn is_absent(&self) -> bool {
+        self.is_none()
+    }
 }
 
 impl<'s, T: Coercible + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
@@ -1180,6 +1194,10 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
             Self::Undefined => Ok(lock.undefined()),
         }
     }
+
+    fn is_absent(&self) -> bool {
+        self.is_undefined()
+    }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for LenientOption<T> {
@@ -1193,6 +1211,10 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for LenientOption<T> {
         creator: Option<v8::Local<'s, v8::Object>>,
     ) -> Result<v8::Local<'s, v8::Value>, Error> {
         self.0.to_js_with_creator(lock, creator)
+    }
+
+    fn is_absent(&self) -> bool {
+        self.is_none()
     }
 }
 

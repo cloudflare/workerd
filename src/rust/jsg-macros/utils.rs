@@ -335,24 +335,6 @@ pub fn this_param(sig: &syn::Signature) -> Option<&syn::PatType> {
     }
 }
 
-/// Returns true if `ty` is `NullOrUndefined<T>`.
-pub fn is_null_or_undefined_type(ty: &syn::Type) -> bool {
-    matches!(ty, syn::Type::Path(p)
-        if p.path.segments.last().is_some_and(|s| s.ident == "NullOrUndefined"))
-}
-
-/// Returns true if `ty` is `Option<T>`.
-pub fn is_option_type(ty: &syn::Type) -> bool {
-    matches!(ty, syn::Type::Path(p)
-        if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
-}
-
-/// Returns true if `ty` is `jsg::LenientOption<T>`.
-pub fn is_lenient_option_type(ty: &syn::Type) -> bool {
-    matches!(ty, syn::Type::Path(p)
-        if p.path.segments.last().is_some_and(|s| s.ident == "LenientOption"))
-}
-
 /// Returns the tokens of `ty` with every named lifetime other than `'static`
 /// replaced by `'_`.
 ///

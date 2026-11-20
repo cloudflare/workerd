@@ -58,6 +58,28 @@ struct OptionalStruct {
     pub count: Option<u32>,
 }
 
+type AliasedLenient = jsg::LenientOption<String>;
+type AliasedOption = Option<u32>;
+type AliasedNullOrUndefined = jsg::NullOrUndefined<String>;
+type AliasedRequired = u32;
+
+/// Optional fields declared through type aliases, which are optional because their types'
+/// conversions say so, not because of how the types are spelled.
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct AliasedOptionalStruct {
+    pub label: AliasedLenient,
+    pub count: AliasedOption,
+    pub note: AliasedNullOrUndefined,
+}
+
+#[jsg_struct]
+#[derive(Debug)]
+struct AliasedRequiredStruct {
+    pub count: AliasedRequired,
+    pub label: AliasedOption,
+}
+
 #[jsg_struct]
 #[derive(Debug)]
 struct RequiredStruct {
@@ -742,6 +764,71 @@ fn lenient_struct_omits_absent_fields() {
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);
+        Ok(())
+    });
+}
+
+/// A field whose type is an alias of an optional type is optional: a struct of them converts from
+/// null or undefined, and an absent field is left out of the JS object without
+/// `fast_jsg_struct`.
+#[test]
+fn aliased_optional_struct_fields_are_optional() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, ctx| {
+            let empty = AliasedOptionalStruct {
+                label: jsg::LenientOption(None),
+                count: None,
+                note: jsg::NullOrUndefined::Undefined,
+            };
+            assert_eq!(convert::<AliasedOptionalStruct>(lock, ctx, "null")?, empty);
+            assert_eq!(
+                convert::<AliasedOptionalStruct>(lock, ctx, "undefined")?,
+                empty
+            );
+            assert_eq!(convert::<AliasedOptionalStruct>(lock, ctx, "({})")?, empty);
+            assert_eq!(
+                convert::<AliasedOptionalStruct>(lock, ctx, "({ count: 3, note: null })")?,
+                AliasedOptionalStruct {
+                    label: jsg::LenientOption(None),
+                    count: Some(3),
+                    note: jsg::NullOrUndefined::Null,
+                }
+            );
+
+            let value = AliasedOptionalStruct {
+                label: jsg::LenientOption(None),
+                count: Some(1),
+                note: jsg::NullOrUndefined::Undefined,
+            }
+            .to_js(lock)?;
+            ctx.set_global(lock, "value", value);
+            let keys = if fast { "label,count,note" } else { "count" };
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    &format!("Object.keys(value).join() === '{keys}' && value.count === 1"),
+                )
+                .unwrap();
+            assert!(ok, "fast_jsg_struct = {fast}");
+            Ok(())
+        });
+    }
+}
+
+/// A field whose type is an alias of a required type is still required.
+#[test]
+fn aliased_required_struct_field_is_required() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<AliasedRequiredStruct>(lock, ctx, "null").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "Cannot initialize AliasedRequiredStruct with required members from an undefined or null value."
+        );
+        let value = convert::<AliasedRequiredStruct>(lock, ctx, "({ count: 2 })")?;
+        assert_eq!((value.count, value.label), (2, None));
         Ok(())
     });
 }
