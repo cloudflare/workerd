@@ -12,8 +12,10 @@
 //!
 //! The group's name is left unset, since the caller knows it.
 //!
-//! Names and errors are bytes, written to the report's `Text` fields unchanged: they come from
-//! C++ strings, which needn't be valid UTF-8, so a Rust `String` couldn't hold all of them.
+//! Names and errors that come through the C++ bridge are bytes, written to the report's `Text`
+//! fields unchanged: C++ strings needn't be valid UTF-8, so a Rust `String` couldn't hold all of
+//! them. The [`startup`] module makes its own phase names, and gets a failed start's error as a
+//! `String`.
 
 mod ffi;
 mod glob_filter;
