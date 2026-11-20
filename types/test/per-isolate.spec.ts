@@ -317,6 +317,30 @@ export type { Gadget };
   );
 });
 
+test('collectPerIsolateDeclarations: rejects an @internal member of a hand-written declaration file', () => {
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Gadget } from './gadget.public';\n`,
+        'gadget.public.d.ts': `interface Gadget {
+    open(): void;
+    /** @internal */
+    secret(): void;
+}
+declare var Gadget: {
+    prototype: Gadget;
+    new (): Gadget;
+};
+export type { Gadget };
+`,
+      }),
+    {
+      message:
+        'Gadget: /per_isolate/gadget.public.d.ts marks a declaration @internal, which would be published; leave it out of the file',
+    }
+  );
+});
+
 function rootWith(structureName?: string): StructureGroups {
   const root = new Message().initRoot(StructureGroups);
   if (structureName !== undefined) {

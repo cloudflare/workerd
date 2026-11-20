@@ -99,9 +99,9 @@ function withOnlyJSDoc(fileName: string, text: string): string {
 // ambient TypeScript source. `manifestPath` is absolute, and `readFile`
 // reads the declaration files its module specifiers resolve to. Throws if
 // the manifest publishes something other than a class, an interface (with
-// or without a variable for its constructor) or a type alias, or if a
+// or without a variable for its constructor) or a type alias, if a
 // published declaration refers to one of the bootstrap's declarations that
-// the manifest does not publish.
+// the manifest does not publish, or if it has an `@internal` member.
 export function collectPerIsolateDeclarations(
   manifestPath: string,
   readFile: (fileName: string) => string | undefined
@@ -126,6 +126,7 @@ export function collectPerIsolateDeclarations(
         declaration,
         publishedSymbols
       );
+      checkNotInternal(name, declaration);
     }
     for (const declaration of mergeDeclarations(name, declarations)) {
       printed.push(
@@ -273,6 +274,21 @@ function checkEntity(
   throw new Error(
     `${name} refers to ${symbol.name}, which ${declaration.getSourceFile().fileName} declares but ${manifestPath} does not publish`
   );
+}
+
+// TypeScript leaves `@internal` members out of the declaration files it
+// emits, so only a hand-written declaration file can have one, and the
+// generator would publish it: such a file is the public surface as written.
+function checkNotInternal(name: string, declaration: ts.Node): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.getJSDocTags(node).some((tag) => tag.tagName.text === 'internal')) {
+      throw new Error(
+        `${name}: ${declaration.getSourceFile().fileName} marks a declaration @internal, which would be published; leave it out of the file`
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration);
 }
 
 // A published name's declarations as they print: a class absorbs the

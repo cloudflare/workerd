@@ -107,8 +107,10 @@ emits is what users get:
   an import that renames it, which would print as the new name, and a
   published name that RTTI or a define also declares.
 - `#private` members, `@internal` members and comments other than JSDoc do
-  not reach the output, from a hand-written declaration file either. JSDoc
-  does, and the comments transform adds the standard MDN comments by name.
+  not reach the output. JSDoc does, and the comments transform adds the
+  standard MDN comments by name. TypeScript leaves `@internal` members out
+  only of the declaration files it emits, so the generator rejects one in a
+  hand-written declaration file, which declares only the public surface.
 
 ### Porting an API to the bootstrap
 
