@@ -208,6 +208,11 @@ Serializer::Serializer(Lock& js, Options options)
   }
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
+    // SetWriteVersion() rejects a version above V8's latest with a DataCloneError whose message
+    // template expects an argument it isn't given, and V8 aborts the process formatting it.
+    KJ_ASSERT(version <= v8::CurrentValueSerializerFormatVersion(),
+        "The serialization version is newer than V8 supports.", version,
+        v8::CurrentValueSerializerFormatVersion());
     KJ_ASSERT(jsg::check(ser.SetWriteVersion(version)));
   }
   if (!options.omitHeader) {
@@ -699,6 +704,11 @@ void Deserializer::init(Lock& js,
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
+    // Unlike ReadHeader(), which rejects a version above V8's latest, SetWireFormatVersion()
+    // accepts any version and reads the data as if it were the latest.
+    KJ_ASSERT(version <= v8::CurrentValueSerializerFormatVersion(),
+        "The deserialization version is newer than V8 supports.", version,
+        v8::CurrentValueSerializerFormatVersion());
     deser.SetWireFormatVersion(version);
   }
   KJ_IF_SOME(arrayBuffers, transferredArrayBuffers) {
