@@ -891,6 +891,14 @@ export const structuredCloneError = {
         return returnVal;
       },
     };
-    globalThis.structuredClone(globalProp);
+    // p2 recurses until the stack runs out, catching the overflow at each level, so it returns
+    // arrays nested about as deep as the stack allows. Cloning them may run out of stack too,
+    // depending on how much stack each level of the serializer takes in this build, and that's a
+    // RangeError rather than a crash.
+    try {
+      globalThis.structuredClone(globalProp);
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+    }
   },
 };
