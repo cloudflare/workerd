@@ -26,3 +26,14 @@ wd_bench(
     src = "global-ts.wd-bench",
     data = ["global.js"],
 )
+
+wd_bench(
+    src = "key-cpp.wd-bench",
+    data = ["key.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "key-ts.wd-bench",
+    data = ["key.js"],
+)

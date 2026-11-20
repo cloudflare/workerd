@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the CryptoKey benchmarks against the C++ implementation
+# (api/crypto/crypto.h). No compatibilityDate, so
+# that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "key-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "key.js")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
