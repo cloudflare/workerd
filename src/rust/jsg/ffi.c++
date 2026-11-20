@@ -1038,19 +1038,25 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& wrappedElsewhere) {
   // Checked first, also while an exception is pending: the caller must then leak its reference
   // rather than release it, which would need the other isolate's lock. Reading the wrapper's
   // isolate enters nothing in V8.
-  wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
+  wrappedElsewhere = wrappable.hasWrapper() && wrappable.getIsolate() != isolate;
   if (wrappedElsewhere || exceptionPending(isolate)) {
     return MaybeLocal{.ptr = 0};
   }
-
-  // Check if already wrapped
-  KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
+  KJ_IF_SOME(handle, wrappable.tryGetHandle(isolate)) {
     return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(handle));
+  }
+  return MaybeLocal{.ptr = 0};
+}
+
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+  auto existing = wrappable_get_wrapper(isolate, *wrappable, wrappedElsewhere);
+  if (existing.ptr != 0 || wrappedElsewhere || exceptionPending(isolate)) {
+    return existing;
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
