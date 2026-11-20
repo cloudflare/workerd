@@ -85,6 +85,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         &memory_info.gc_fn,
         &drop_detach_types(custom_trace, &fields),
     );
+    let drop_check = generate_drop_check(&name, &fields);
     let snapshot_transfer_impl = snapshot_stateless_impl(&name, snapshot_stateless);
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
@@ -149,6 +150,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #drop_check
 
         #snapshot_transfer_impl
         #visit_for_memory_info_impl
@@ -647,6 +649,39 @@ fn drop_probe_items() -> proc_macro2::TokenStream {
                 T::needs_drop_detach()
             }
         }
+    }
+}
+
+/// A check, evaluated at compile time, that a resource named `name` with `fields` implements
+/// `Drop` only if every field's type is `jsg::HoldsNoGcReferences`. `Drop` has `&mut self`, so it
+/// could move a `jsg::Rc` or `TracedGlobal` out of a field that the garbage collector made weak,
+/// and nothing would make it strong again. Only the resource's own `Drop` is checked: `Vec`,
+/// `Box` and `jsg::Rc` implement `Drop` too, so asking the fields' types would reject almost
+/// every resource.
+fn generate_drop_check(
+    name: &syn::Ident,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let field_types = fields.iter().map(|field| &field.ty);
+    let message = format!(
+        "`{name}` may hold GC references (a field's type isn't `jsg::HoldsNoGcReferences`), \
+         so it must not implement `Drop`; see src/rust/jsg/README.md, \"Safety rules\""
+    );
+    // An associated const, so that a field's type may name `Self`, which the `const _` item
+    // evaluates.
+    quote! {
+        #[automatically_derived]
+        impl #name {
+            #[doc(hidden)]
+            const __JSG_DROP_CHECK: () = {
+                use jsg::DropCheckFallback as _;
+                let holds_gc_references =
+                    false #(|| !jsg::DropCheck::<#field_types>::HOLDS_NO_GC_REFERENCES)*;
+                ::std::assert!(!(jsg::DropCheck::<Self>::HAS_DROP && holds_gc_references), #message);
+            };
+        }
+
+        const _: () = #name::__JSG_DROP_CHECK;
     }
 }
 

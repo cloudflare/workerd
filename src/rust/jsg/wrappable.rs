@@ -190,6 +190,31 @@ pub trait Traced: Send {
 /// for a hand-written `Traced` type only if its `trace` visits nothing.
 pub trait HoldsNoGcReferences: Traced {}
 
+/// What `#[jsg_resource]`'s compile-time check that a resource holding GC references has no
+/// `Drop` impl asks about a type `T`. An inherent associated const whose impl's bound holds is
+/// picked over the one of [`DropCheckFallback`], which must be in scope, so each const is true
+/// exactly when its bound holds.
+#[doc(hidden)]
+pub struct DropCheck<T>(std::marker::PhantomData<T>);
+
+/// The answers of [`DropCheck`] for a type that doesn't meet a bound.
+#[doc(hidden)]
+pub trait DropCheckFallback {
+    const HAS_DROP: bool = false;
+    const HOLDS_NO_GC_REFERENCES: bool = false;
+}
+
+impl<T> DropCheckFallback for DropCheck<T> {}
+
+#[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
+impl<T: Drop> DropCheck<T> {
+    pub const HAS_DROP: bool = true;
+}
+
+impl<T: HoldsNoGcReferences> DropCheck<T> {
+    pub const HOLDS_NO_GC_REFERENCES: bool = true;
+}
+
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {

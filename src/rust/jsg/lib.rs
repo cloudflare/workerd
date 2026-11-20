@@ -120,6 +120,10 @@ pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
+#[doc(hidden)]
+pub use wrappable::DropCheck;
+#[doc(hidden)]
+pub use wrappable::DropCheckFallback;
 pub use wrappable::FromJS;
 pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
