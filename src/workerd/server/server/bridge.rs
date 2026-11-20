@@ -52,6 +52,15 @@ pub use crate::tasks::task_run;
 )]
 #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
 pub mod ffi {
+    // A JS value that can cross the RPC boundary: the props of an entrypoint, an actor class or
+    // a dynamic worker's env. The frankenvalue crate's bridge declares it, and so defines the
+    // one `KjOwn<Frankenvalue>` drop a binary may link.
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/frankenvalue/ffi.h");
+        type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
         type AsyncInputStream = kj::io::ffi::AsyncInputStream;
@@ -648,10 +657,6 @@ pub mod ffi {
         /// Without a stack trace, which a `KjError` does not carry.
         fn exception_text(error: KjException) -> String;
 
-        /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
-        /// class or a dynamic worker's env.
-        #[namespace = "workerd"]
-        type Frankenvalue;
         fn frankenvalue_from_json(json: &str) -> KjOwn<Frankenvalue>;
         fn frankenvalue_clone(value: &Frankenvalue) -> KjOwn<Frankenvalue>;
         fn frankenvalue_is_empty(value: &Frankenvalue) -> bool;
