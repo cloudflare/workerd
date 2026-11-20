@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "js-rpc-disposal-gc-test", worker = (
+      modules = .modules,
+      compatibilityFlags = .flags,
+      bindings = [(name = "SERVICE", service = (name = "helper", entrypoint = "Service"))],
+    )),
+    (name = "helper", worker = (
+      modules = .modules,
+      compatibilityFlags = .flags,
+      bindings = [(name = "SERVICE", service = (name = "callee", entrypoint = "Service"))],
+    )),
+    (name = "callee", worker = (
+      modules = .modules,
+      compatibilityFlags = .flags,
+    )),
+  ],
+  v8Flags = ["--expose-gc"],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "js-rpc-disposal-gc-test.js"),
+];
+
+const flags :List(Text) = ["nodejs_compat", "experimental"];
