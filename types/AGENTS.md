@@ -98,8 +98,9 @@ emits is what users get:
   `messagechannel/messagechannel.public.d.ts` declare them.
 - **A published declaration refers only to globals and published
   declarations.** The generator rejects a reference to another of the
-  bootstrap's declarations, and a published name that RTTI or a define also
-  declares.
+  bootstrap's declarations, a reference to a published declaration through
+  an import that renames it, which would print as the new name, and a
+  published name that RTTI or a define also declares.
 - `#private` members, `@internal` members and comments other than JSDoc do
   not reach the output, from a hand-written declaration file either. JSDoc
   does, and the comments transform adds the standard MDN comments by name.

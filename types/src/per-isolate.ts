@@ -207,8 +207,9 @@ function publishedDeclarationsOf(
 
 // The declaration's references must resolve to globals, which the rest of
 // the Workers types or TypeScript's libraries declare, or to published
-// declarations: the bootstrap's other declarations do not reach the output.
-// The program has no libraries, so a reference resolves only to one of the
+// declarations by their published names: the bootstrap's other declarations
+// do not reach the output, and a reference prints as it is spelled. The
+// program has no libraries, so a reference resolves only to one of the
 // bootstrap's declaration files.
 function checkReferences(
   checker: ts.TypeChecker,
@@ -249,7 +250,16 @@ function checkEntity(
   const isImport =
     local !== undefined && (local.flags & ts.SymbolFlags.Alias) !== 0;
   const symbol = isImport ? checker.getAliasedSymbol(local) : local;
-  if (symbol !== undefined && publishedSymbols.has(symbol)) return;
+  if (symbol !== undefined && publishedSymbols.has(symbol)) {
+    // Imported under another name, the reference would print as that name,
+    // which in the output means a global or nothing.
+    if (local !== undefined && local.name !== symbol.name) {
+      throw new Error(
+        `${name} refers to ${symbol.name} as ${local.name}; import it under its own name`
+      );
+    }
+    return;
+  }
   const declaration = symbol?.declarations?.[0];
   if (declaration === undefined) {
     // Unresolved: a global the bootstrap's declaration files do not declare,
