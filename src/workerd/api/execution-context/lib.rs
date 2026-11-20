@@ -12,6 +12,7 @@
 
 mod ffi;
 
+use channel_interop::Fetcher;
 use ffi::bridge;
 use io_context::IoContext;
 use jsg::MemberRegistry;
@@ -125,7 +126,7 @@ impl ExecutionContext {
     pub fn map_virtual_host(
         &self,
         lock: &mut jsg::Lock<'_>,
-        fetcher: jsg_cpp::Ref<bridge::Fetcher>,
+        fetcher: jsg_cpp::Ref<Fetcher>,
         port: u16,
     ) -> jsg::Result<String> {
         fetcher.get(lock).map_virtual_host(lock, port)

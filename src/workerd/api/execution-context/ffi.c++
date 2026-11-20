@@ -57,14 +57,6 @@ bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) {
 
 namespace workerd::api::execution_context {
 
-kj::Maybe<kj::Own<jsg_cpp::CppRef>> fetcher_try_unwrap(v8::Isolate* isolate, jsg_cpp::Local value) {
-  return jsg_cpp::cppRefTryUnwrap<Fetcher>(isolate, kj::mv(value));
-}
-
-jsg_cpp::MaybeLocal fetcher_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref) {
-  return jsg_cpp::cppRefWrap<Fetcher>(isolate, ref);
-}
-
 kj::Maybe<kj::Own<jsg_cpp::CppRef>> tracing_try_unwrap(v8::Isolate* isolate, jsg_cpp::Local value) {
   return jsg_cpp::cppRefTryUnwrap<Tracing>(isolate, kj::mv(value));
 }
@@ -89,15 +81,6 @@ kj::Maybe<kj::Own<jsg_cpp::CppRef>> access_context_try_unwrap(
 
 jsg_cpp::MaybeLocal access_context_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref) {
   return jsg_cpp::cppRefWrap<AccessContext>(isolate, ref);
-}
-
-// Rust's `&T` of an opaque type is interior-mutable, so the shims may call non-const methods.
-bool fetcher_map_virtual_host(
-    v8::Isolate* isolate, const Fetcher& fetcher, uint16_t port, ::rust::String& result) {
-  return jsg_cpp::callCpp(isolate, [&](jsg::Lock& js) {
-    auto host = const_cast<Fetcher&>(fetcher).mapVirtualHost(js, port);
-    result = ::rust::String(host.cStr(), host.size());
-  });
 }
 
 bool new_tracing(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result) {

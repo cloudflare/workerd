@@ -21,7 +21,6 @@
 namespace workerd::api {
 class AccessContext;
 class CacheContext;
-class Fetcher;
 class Tracing;
 }  // namespace workerd::api
 
@@ -30,8 +29,6 @@ namespace workerd::api::execution_context {
 namespace jsg_cpp = ::workerd::rust::jsg_cpp;
 
 // Per-type shims.
-kj::Maybe<kj::Own<jsg_cpp::CppRef>> fetcher_try_unwrap(v8::Isolate* isolate, jsg_cpp::Local value);
-jsg_cpp::MaybeLocal fetcher_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref);
 kj::Maybe<kj::Own<jsg_cpp::CppRef>> tracing_try_unwrap(v8::Isolate* isolate, jsg_cpp::Local value);
 jsg_cpp::MaybeLocal tracing_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref);
 kj::Maybe<kj::Own<jsg_cpp::CppRef>> cache_context_try_unwrap(
@@ -42,8 +39,6 @@ kj::Maybe<kj::Own<jsg_cpp::CppRef>> access_context_try_unwrap(
 jsg_cpp::MaybeLocal access_context_wrap(v8::Isolate* isolate, const jsg_cpp::CppRef& ref);
 
 // Per-method shims.
-bool fetcher_map_virtual_host(
-    v8::Isolate* isolate, const Fetcher& fetcher, uint16_t port, ::rust::String& result);
 bool new_tracing(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);
 bool current_cache_context(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);
 bool current_access_context(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);

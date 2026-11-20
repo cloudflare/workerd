@@ -26,6 +26,7 @@ wd_rust_crate(
     deps = [
         "//src/rust/jsg",
         "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
         "//src/workerd/io/io-context",
     ],
 )

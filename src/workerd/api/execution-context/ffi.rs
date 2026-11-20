@@ -39,7 +39,6 @@ pub mod bridge {
     #[namespace = "workerd::api"]
     unsafe extern "C++" {
         include!("workerd/api/execution-context/ffi.h");
-        type Fetcher;
         type Tracing;
         type CacheContext;
         type AccessContext;
@@ -49,11 +48,6 @@ pub mod bridge {
         include!("workerd/api/execution-context/ffi.h");
 
         // Per-type shims.
-        unsafe fn fetcher_try_unwrap(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> Result<KjMaybe<KjOwn<CppRef>>>;
-        unsafe fn fetcher_wrap(isolate: *mut Isolate, cpp_ref: &CppRef) -> MaybeLocal;
         unsafe fn tracing_try_unwrap(
             isolate: *mut Isolate,
             value: Local,
@@ -71,12 +65,6 @@ pub mod bridge {
         unsafe fn access_context_wrap(isolate: *mut Isolate, cpp_ref: &CppRef) -> MaybeLocal;
 
         // Per-method shims. Each returns false, with an exception pending, if the C++ threw.
-        unsafe fn fetcher_map_virtual_host(
-            isolate: *mut Isolate,
-            fetcher: &Fetcher,
-            port: u16,
-            result: &mut String,
-        ) -> bool;
         unsafe fn new_tracing(isolate: *mut Isolate, result: &mut KjMaybe<KjOwn<CppRef>>) -> bool;
         unsafe fn current_cache_context(
             isolate: *mut Isolate,
@@ -134,7 +122,6 @@ macro_rules! cpp_resource {
     };
 }
 
-cpp_resource!(Fetcher, "Fetcher", fetcher_try_unwrap, fetcher_wrap);
 cpp_resource!(Tracing, "Tracing", tracing_try_unwrap, tracing_wrap);
 cpp_resource!(
     CacheContext,
@@ -148,18 +135,6 @@ cpp_resource!(
     access_context_try_unwrap,
     access_context_wrap
 );
-
-impl bridge::Fetcher {
-    /// `Fetcher::mapVirtualHost()`.
-    pub fn map_virtual_host(&self, lock: &mut jsg::Lock<'_>, port: u16) -> jsg::Result<String> {
-        let mut result = String::new();
-        // SAFETY: `call_cpp` calls the shim with the lock's isolate.
-        jsg_cpp::call_cpp(lock, |isolate| unsafe {
-            bridge::fetcher_map_virtual_host(isolate, self, port, &mut result)
-        })?;
-        Ok(result)
-    }
-}
 
 impl bridge::Tracing {
     /// A new `Tracing`, which is stateless.
