@@ -300,7 +300,7 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Rc<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
     : context(kj::mv(contextParam)),
@@ -309,7 +309,7 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
       accessInfo(kj::mv(accessInfo)),
       selfTokenFactory(kj::mv(selfTokenFactory)),
-      maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
+      maybeTriggerSpanContext(kj::mv(maybeTriggerSpanContext)) {}
 
 tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
   // Creating a new InvocationSpanContext can be a bit expensive since it needs to
@@ -320,9 +320,7 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   }
 
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource());
+      maybeTriggerSpanContext, context->getEntropySource());
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 

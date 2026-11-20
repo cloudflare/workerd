@@ -98,6 +98,7 @@ KJ_TEST("InvocationSpanContext") {
   auto initialTraceId = sc.getTraceId();
   auto initialInvocationId = sc.getInvocationId();
   KJ_EXPECT(sc.getSpanId() == SpanId(1));
+  KJ_EXPECT(sc.getParentSpanId() == kj::none);
 
   // And serialize that to a capnp struct...
   capnp::MallocMessageBuilder builder;
@@ -109,35 +110,24 @@ KJ_TEST("InvocationSpanContext") {
   KJ_EXPECT(sc2.getTraceId() == initialTraceId);
   KJ_EXPECT(sc2.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc2.getSpanId() == SpanId(1));
-  KJ_EXPECT(sc2.isTrigger());
+  KJ_EXPECT(sc2.getParentSpanId() == kj::none);
 
-  // The one that has been deserialized from capnp cannot create children...
-  try {
-    sc2.newChild();
-    KJ_FAIL_ASSERT("should not be able to create child span with SpanContext from capnp");
-  } catch (kj::Exception& ex) {
-    KJ_EXPECT(ex.getDescription() ==
-        "expected !isTrigger(); unable to create child spans on this context"_kj);
-  }
-
-  // Children inherit both the traceId and invocationId of their parent.
-  auto sc3 = sc.newChild();
+  // Trigger-context propagation: traceId and parentSpanId are inherited from the trigger
+  // SpanContext, while invocationId and spanId are freshly generated for the new invocation.
+  auto sc3 = InvocationSpanContext::newForInvocation(sc2.toSpanContext(), fakeEntropySource);
   KJ_EXPECT(sc3.getTraceId() == initialTraceId);
-  KJ_EXPECT(sc3.getInvocationId() == initialInvocationId);
+  KJ_EXPECT(sc3.getInvocationId() != initialInvocationId);
   KJ_EXPECT(sc3.getSpanId() == SpanId(2));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc3.getParentSpanId()) == SpanId(1));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc3.clone().getParentSpanId()) == SpanId(1));
 
-  // Trigger-context propagation: traceId is inherited from sc2, but the
-  // invocationId is freshly generated for the new invocation.
-  auto sc4 = InvocationSpanContext::newForInvocation(sc2, fakeEntropySource);
-  KJ_EXPECT(sc4.getTraceId() == initialTraceId);
-  KJ_EXPECT(sc4.getInvocationId() != initialInvocationId);
+  // Trigger SpanContext without a spanId inherits traceId and traceFlags, with no parentSpanId.
+  auto spanlessTrigger = SpanContext(TraceId(9, 10), kj::none, TraceFlags(0x01));
+  auto sc4 = InvocationSpanContext::newForInvocation(spanlessTrigger, fakeEntropySource);
+  KJ_EXPECT(sc4.getTraceId() == TraceId(9, 10));
+  KJ_EXPECT(sc4.getParentSpanId() == kj::none);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc4.getTraceFlags()) == TraceFlags(0x01));
   KJ_EXPECT(sc4.getSpanId() == SpanId(3));
-
-  auto& sc5 = KJ_ASSERT_NONNULL(sc4.getParent());
-  KJ_EXPECT(sc5.getTraceId() == initialTraceId);
-  KJ_EXPECT(sc5.getInvocationId() == initialInvocationId);
-  KJ_EXPECT(sc5.getSpanId() == SpanId(1));
-  KJ_EXPECT(sc5.isTrigger());
 }
 
 KJ_TEST("InvocationSpanContext propagates traceFlags from trigger") {
@@ -145,22 +135,17 @@ KJ_TEST("InvocationSpanContext propagates traceFlags from trigger") {
   FakeEntropySource fakeEntropySource;
 
   // Trigger with traceFlags set — propagates to new invocation
-  auto trigger = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x01));
+  auto trigger = SpanContext(TraceId(1, 2), SpanId(5), TraceFlags(0x01));
   KJ_EXPECT(KJ_ASSERT_NONNULL(trigger.getTraceFlags()) == TraceFlags(0x01));
 
   auto sc = InvocationSpanContext::newForInvocation(trigger, fakeEntropySource);
   KJ_EXPECT(KJ_ASSERT_NONNULL(sc.getTraceFlags()) == TraceFlags(0x01));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc.getParentSpanId()) == SpanId(5));
 
   // No trigger — traceFlags is absent
   auto sc2 = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
   KJ_EXPECT(sc2.getTraceFlags() == kj::none);
-
-  // newChild() propagates traceFlags
-  auto child = sc.newChild();
-  KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == TraceFlags(0x01));
-
-  auto child2 = sc2.newChild();
-  KJ_EXPECT(child2.getTraceFlags() == kj::none);
+  KJ_EXPECT(sc2.getParentSpanId() == kj::none);
 }
 
 KJ_TEST(
@@ -170,43 +155,41 @@ KJ_TEST(
 
   auto root = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
   root.setDefaultTraceFlags(TraceFlags(0x01));
-  KJ_EXPECT(root.getParent() == kj::none);
+  KJ_EXPECT(root.getParentSpanId() == kj::none);
   KJ_EXPECT(KJ_ASSERT_NONNULL(root.getTraceFlags()) == TraceFlags(0x01));
   KJ_EXPECT(KJ_ASSERT_NONNULL(root.clone().getTraceFlags()) == TraceFlags(0x01));
-  auto child = root.newChild();
-  KJ_EXPECT(child.getTraceId() == root.getTraceId());
-  KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == TraceFlags(0x01));
 
   for (auto flags: {0x00, 0x03}) {
-    auto trigger =
-        InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(flags));
+    auto trigger = SpanContext(TraceId(1, 2), SpanId(5), TraceFlags(flags));
     auto invocation = InvocationSpanContext::newForInvocation(trigger, fakeEntropySource);
     invocation.setDefaultTraceFlags(TraceFlags(0x01));
     KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getTraceFlags()) == TraceFlags(flags));
-    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParent()).getSpanId() == trigger.getSpanId());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParentSpanId()) ==
+        KJ_ASSERT_NONNULL(trigger.getSpanId()));
 
     capnp::MallocMessageBuilder builder;
     invocation.toCapnp(builder.initRoot<rpc::InvocationSpanContext>());
     auto restored = KJ_ASSERT_NONNULL(
         InvocationSpanContext::fromCapnp(builder.getRoot<rpc::InvocationSpanContext>()));
-    auto next = InvocationSpanContext::newForInvocation(restored, fakeEntropySource);
-    KJ_EXPECT(KJ_ASSERT_NONNULL(next.newChild().getTraceFlags()) == TraceFlags(flags));
+    auto next =
+        InvocationSpanContext::newForInvocation(restored.toSpanContext(), fakeEntropySource);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(next.getTraceFlags()) == TraceFlags(flags));
   }
 }
 
-KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagation") {
+KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and trigger propagation") {
   setPredictableModeForTest();
   FakeEntropySource fakeEntropySource;
 
-  // traceFlags=0x01 (sampled) survives round-trip and propagates through newChild
+  // traceFlags=0x01 (sampled) survives round-trip and propagates to triggered invocations
   auto sampled = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x01));
   capnp::MallocMessageBuilder b1;
   sampled.toCapnp(b1.initRoot<rpc::InvocationSpanContext>());
   auto rt1 =
       KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b1.getRoot<rpc::InvocationSpanContext>()));
   KJ_EXPECT(KJ_ASSERT_NONNULL(rt1.getTraceFlags()) == TraceFlags(0x01));
-  auto child1 = InvocationSpanContext::newForInvocation(rt1, fakeEntropySource);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(child1.newChild().getTraceFlags()) == TraceFlags(0x01));
+  auto child1 = InvocationSpanContext::newForInvocation(rt1.toSpanContext(), fakeEntropySource);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child1.getTraceFlags()) == TraceFlags(0x01));
 
   // traceFlags=0x00 (unsampled) is distinct from absent
   auto unsampled = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x00));
@@ -215,8 +198,8 @@ KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagat
   auto rt2 =
       KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b2.getRoot<rpc::InvocationSpanContext>()));
   KJ_EXPECT(KJ_ASSERT_NONNULL(rt2.getTraceFlags()) == TraceFlags(0x00));
-  auto child2 = InvocationSpanContext::newForInvocation(rt2, fakeEntropySource);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(child2.newChild().getTraceFlags()) == TraceFlags(0x00));
+  auto child2 = InvocationSpanContext::newForInvocation(rt2.toSpanContext(), fakeEntropySource);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child2.getTraceFlags()) == TraceFlags(0x00));
 
   // traceFlags absent stays absent
   auto absent = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), kj::none);
@@ -225,8 +208,8 @@ KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagat
   auto rt3 =
       KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b3.getRoot<rpc::InvocationSpanContext>()));
   KJ_EXPECT(rt3.getTraceFlags() == kj::none);
-  auto child3 = InvocationSpanContext::newForInvocation(rt3, fakeEntropySource);
-  KJ_EXPECT(child3.newChild().getTraceFlags() == kj::none);
+  auto child3 = InvocationSpanContext::newForInvocation(rt3.toSpanContext(), fakeEntropySource);
+  KJ_EXPECT(child3.getTraceFlags() == kj::none);
 }
 
 KJ_TEST("SpanContext") {

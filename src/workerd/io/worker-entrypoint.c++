@@ -66,7 +66,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
       IsDynamicDispatch isDynamicDispatch,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
@@ -125,7 +125,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
@@ -247,7 +247,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
     IsDynamicDispatch isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
@@ -278,7 +278,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
       kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientAddress));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
+      kj::mv(maybeTriggerSpanContext), kj::mv(accessInfo), kj::mv(selfTokenFactory));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -312,7 +312,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
@@ -344,7 +344,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
-      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerSpanContext), kj::mv(accessInfo),
       kj::mv(selfTokenFactory))
                         .attach(kj::mv(actor));
 }
@@ -1257,7 +1257,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
     IsDynamicDispatch isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
@@ -1267,7 +1267,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
-      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
+      kj::mv(maybeTriggerSpanContext), isDynamicDispatch, kj::mv(accessInfo),
       kj::mv(selfTokenFactory), fromPersistentStub, kj::mv(clientAddress));
 }
 
