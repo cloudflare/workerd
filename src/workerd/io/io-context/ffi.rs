@@ -336,59 +336,74 @@ pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn
 /// rather than unwinding into the KJ event loop, which would abort the process. A panic while
 /// dropping it, when the wait is cancelled, is logged.
 async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjError> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll.map(|output| Ok(Box::new(IoOutput(output)))),
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future that IoContext::await_io_and_run() waited for panicked: {}",
-                    panic_message(&*payload)
-                ),
-            ))),
-        }
-    })
-    .await
+    let output = CatchPanics::new(
+        future.0,
+        "the future that IoContext::await_io_and_run() waited for",
+    )
+    .await?;
+    Ok(Box::new(IoOutput(output)))
 }
 
 /// Waits for `future` as a waitUntil task. A panic while polling it fails the task, and a panic
 /// while dropping it is logged, as in `io_future_wait()`. The task fails with the future's
 /// exception as it is.
 async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<(), cxx::KjException> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll,
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future of a waitUntil task panicked: {}",
-                    panic_message(&*payload)
-                ),
-            )
-            .into())),
-        }
-    })
-    .await
+    CatchPanics::new(future.0, "the future of a waitUntil task").await?
 }
 
-/// Holds the future of an `io_future_wait()` or `wait_until_future_wait()`, which kj-rs drops
-/// through an `extern "C"` function, where a panic would abort the process.
-struct CatchDropPanic<F>(Option<F>);
+/// A future that fails with a KJ exception if polling the future it holds panics, and otherwise
+/// gives that future's output.
+///
+/// It is for futures that KJ polls and drops, through kj-rs, whose `extern "C"` calls abort the
+/// process if a panic reaches them. A panic while dropping the future, when the wait is cancelled,
+/// is logged. The future is `Unpin`, such as a `Pin<Box<dyn Future>>`, so that it is not boxed
+/// again.
+pub struct CatchPanics<F> {
+    future: CatchDropPanic<F>,
+    what: &'static str,
+}
 
-impl<F> Drop for CatchDropPanic<F> {
+impl<F> CatchPanics<F> {
+    /// Holds `future`, which `what`, such as "the future of a waitUntil task", names in the
+    /// exception for a panic and in the log line for a panic while dropping it.
+    pub fn new(future: F, what: &'static str) -> Self {
+        Self {
+            future: CatchDropPanic(Some(future), what),
+            what,
+        }
+    }
+}
+
+impl<F: Future + Unpin> Future for CatchPanics<F> {
+    type Output = Result<F::Output, cxx::KjError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let Some(inner) = this.future.0.as_mut() else {
+            unreachable!("dropped only with the wait")
+        };
+        match std::panic::catch_unwind(AssertUnwindSafe(|| Pin::new(inner).poll(cx))) {
+            Ok(poll) => poll.map(Ok),
+            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
+                cxx::KjExceptionType::Failed,
+                format!("{} panicked: {}", this.what, panic_message(&*payload)),
+            ))),
+        }
+    }
+}
+
+/// Holds the future of a [`CatchPanics`], which C++ drops through an `extern "C"` function, where
+/// a panic would abort the process. A panic while dropping it is logged instead, with the name
+/// it holds.
+struct CatchDropPanic<T>(Option<T>, &'static str);
+
+impl<T> Drop for CatchDropPanic<T> {
     fn drop(&mut self) {
-        let future = self.0.take();
-        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(future))) {
+        let value = self.0.take();
+        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(value))) {
             bridge::io_context_log_error(&format!(
-                "dropping a future that the IoContext waited for panicked: {}",
+                "dropping {} panicked: {}",
+                self.1,
                 panic_message(&*payload)
             ));
         }

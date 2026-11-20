@@ -1,0 +1,43 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Delivers scheduled events with the autogates off and on, and checks what neither a wd-test nor a
+# tail worker sees: the async trace and the uncaught exceptions logged.
+sh_test(
+    name = "scheduled-test",
+    size = "medium",
+    srcs = ["scheduled-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scheduled.wd-test)",
+    ],
+    data = [
+        "handler.js",
+        "no-handler.js",
+        "scheduled.js",
+        "scheduled.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+# Checks the Perfetto spans of scheduled events with the autogates off and on, and that with them
+# on the Rust path delivers the events.
+sh_test(
+    name = "scheduled-perfetto-test",
+    size = "medium",
+    srcs = ["scheduled-perfetto-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scheduled.wd-test)",
+    ],
+    data = [
+        "handler.js",
+        "no-handler.js",
+        "scheduled.js",
+        "scheduled.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    target_compatible_with = select({
+        "//src/workerd/util:really_use_perfetto": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

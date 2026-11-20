@@ -27,6 +27,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::CatchPanics;
 use ffi::bridge;
 use jsg::v8;
 use kj_rs::KjOwn;

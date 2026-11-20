@@ -28,6 +28,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 | Promise bridging KJ↔JS         | `io-context.h` — `awaitIo()`, `awaitJs()`                                         |
 | Request lifecycle / subrequests | `io-context.{h,c++}`, `worker-entrypoint.{h,c++}`                                 |
 | `IoContext` from Rust           | `io-context/` — the `io-context` crate; identifies an `IoContext` by its `Id`     |
+| Events delivered from Rust      | `entrypoint/` — the `entrypoint` crate; `WorkerEntrypoint` hands it an `Invocation` |
 | Actor storage ops               | `actor-cache.h` (`ActorCacheOps`), `actor-sqlite.h`, `actor-storage.capnp`        |
 | DO gate semantics               | `io-gate.{h,c++}` — `InputGate::CriticalSection`, `OutputGate::lockWhile()`       |
 | Worker/isolate creation         | `worker.{h,c++}`, `worker-modules.{h,c++}`                                        |
