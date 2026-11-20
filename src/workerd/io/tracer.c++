@@ -228,9 +228,9 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Fallback for old behavior during rollout. If a span has a null id, it is mapped to the onset
-  // span id instead and logged. Once we see no "reported span without a parent span" logs in
-  // production, we can remove this fallback.
+  // Fallback for old behavior during rollout. If a span is reported with a null parent span id, the
+  // onset span id is used as its parent instead and a warning is logged. Once we see no "reported
+  // span without a parent span" logs in production, we can remove this fallback.
   if (parentSpanId == tracing::SpanId::nullId) {
     if (isPredictableModeForTest()) {
       KJ_FAIL_ASSERT("reported span without a parent span", operationName);
