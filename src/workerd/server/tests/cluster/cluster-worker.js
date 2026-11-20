@@ -541,6 +541,9 @@ export class Counter extends DurableObject {
           `http://do/chain?ms=${ms}&targets=${rest.join(',')}`
         );
         if (!response.ok) return response;
+        // Until its body is read, the called DO counts as busy, and a drain
+        // waits for it until it cancels the requests in flight.
+        await response.arrayBuffer();
       }
       const count = ((await this.state.storage.get('count')) ?? 0) + 1;
       await this.state.storage.put('count', count);
