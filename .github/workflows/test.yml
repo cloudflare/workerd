@@ -20,6 +20,8 @@ permissions:
   actions: write
   # Authenticate to bazelflare
   id-token: write
+  # Look up the known flaky tests (see _bazel.yml)
+  issues: read
   # Required for adding comments to PR.
   # Specifically for sticky-pull-request-comment workflow action.
   pull-requests: write

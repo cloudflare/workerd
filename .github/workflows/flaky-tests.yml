@@ -1,0 +1,86 @@
+name: Flaky tests
+
+# Records the Bazel tests of Tests runs that fail in one attempt of a job and pass in another, as
+# issues labelled flaky-test (see ci/flaky_tests.py). Re-runs the failed jobs of a failed run on
+# main once, so that its failures turn out either flaky or broken.
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+  schedule:
+    # Records the re-runs whose completion the record job missed: GitHub cancels a pending run of it
+    # when another queues behind it, and may not report the completion of a re-run that the
+    # rerun-main job started.
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'ID of the Tests run to record; empty records the re-runs of the last two days'
+        required: false
+        type: string
+      dry_run:
+        description: 'Print the changes to issues instead of making them'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  rerun-main:
+    if: >-
+      github.repository == 'cloudflare/workerd' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-run failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+
+  record:
+    # A run's first attempt has no other attempt to compare with.
+    if: >-
+      github.repository == 'cloudflare/workerd' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.run_attempt > 1)
+    runs-on: ubuntu-latest
+    # One at a time, so that two runs can't each open an issue for the same test.
+    concurrency:
+      group: flaky-tests-record
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      # The default branch, never the recorded run's commit: its artifacts are data from a pull
+      # request, possibly one from a fork.
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+          persist-credentials: false
+      - name: Record flaky tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY")
+          if [ -n "$RUN_ID" ]; then
+            args+=(--run-id "$RUN_ID")
+          else
+            args+=(--sweep-days 2)
+          fi
+          if [ "$DRY_RUN" = true ]; then
+            args+=(--dry-run)
+          fi
+          python3 ci/flaky_tests.py record "${args[@]}"

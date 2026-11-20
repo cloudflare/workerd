@@ -119,6 +119,8 @@ permissions:
   actions: write
   # Authenticate to bazelflare
   id-token: write
+  # Look up the known flaky tests (see the "Note known flaky tests" step)
+  issues: read
 
 jobs:
   bazel:
@@ -210,6 +212,7 @@ jobs:
         run: |
           bash build/rust_io_graph_check.sh ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }}
       - name: Bazel test
+        id: test
         if: inputs.run_tests
         run: |
           bazel test ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.test_target }}
@@ -242,6 +245,35 @@ jobs:
         with:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
+      # flaky-tests.yml compares the results of a job's attempts to find flaky tests, so each attempt
+      # uploads its own.
+      - name: Record test results
+        if: ${{ !cancelled() && inputs.run_tests }}
+        # Tracking flaky tests never fails a job.
+        continue-on-error: true
+        shell: bash
+        run: |
+          # The Windows runners' Python may answer only to `python`.
+          python3 -c '' 2>/dev/null && PYTHON=python3 || PYTHON=python
+          "$PYTHON" ci/flaky_tests.py extract test.bep.json test-results.json
+      - name: Upload test results
+        if: ${{ !cancelled() && inputs.run_tests }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-attempt${{ github.run_attempt }}
+          path: test-results.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Note known flaky tests
+        if: ${{ failure() && steps.test.outcome == 'failure' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -c '' 2>/dev/null && PYTHON=python3 || PYTHON=python
+          "$PYTHON" ci/flaky_tests.py summarize test-results.json --repo "$GITHUB_REPOSITORY"
       - name: Report disk usage (in MB)
         if: always() && runner.os != 'Windows'
         shell: bash

@@ -26,6 +26,12 @@ build:ci --terminal_columns=100
 build:ci --profile build.bazel-profile.gz
 test:ci --profile test.bazel-profile.gz
 test:ci --test_output=errors --test_summary=terse
+# Each test job uploads the status of every test it ran, which the flaky-tests workflow compares
+# across the attempts of a re-run job (see ci/flaky_tests.py). Only the file's test events are
+# read, so it names outputs by their local paths instead of having Bazel upload them to the remote
+# cache.
+test:ci --build_event_json_file=test.bep.json
+test:ci --experimental_build_event_upload_strategy=local
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things

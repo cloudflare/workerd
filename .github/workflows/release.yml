@@ -18,6 +18,8 @@ permissions:
   id-token: write
   contents: write
   actions: write
+  # Look up the known flaky tests (see _bazel.yml)
+  issues: read
 
 jobs:
   version:

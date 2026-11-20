@@ -18,6 +18,8 @@ permissions:
   actions: write
   # Authenticate to bazelflare
   id-token: write
+  # Look up the known flaky tests (see _bazel.yml)
+  issues: read
 
 jobs:
   coverage-linux:
