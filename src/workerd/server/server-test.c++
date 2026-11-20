@@ -40,10 +40,10 @@ namespace {
 
 #ifndef KJ_EXPECT_AT
 #define KJ_EXPECT_AT(cond, location, ...)                                                          \
-  if (auto _kjCondition = ::kj::_::MAGIC_ASSERT << cond)                                           \
-    ;                                                                                              \
-  else                                                                                             \
-    KJ_FAIL_EXPECT_AT(location, "failed: expected " #cond, _kjCondition, ##__VA_ARGS__)
+  if (auto _kjCondition = ::kj::_::MAGIC_ASSERT << cond) {                                         \
+  } else {                                                                                         \
+    KJ_FAIL_EXPECT_AT(location, "failed: expected " #cond, _kjCondition, ##__VA_ARGS__)            \
+  }
 #endif
 
 jsg::V8System v8System({"--expose-gc"_kj});
