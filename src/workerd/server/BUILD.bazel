@@ -89,6 +89,9 @@ wd_rust_crate(
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
     test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
+    # Its tests run one at a time (RUST_TEST_THREADS=1); on Windows CI they took over the 15 s of
+    # "medium".
+    test_size = "large",
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
@@ -258,6 +261,8 @@ wd_cc_library(
         "//src/workerd/server/kv:kv-js",
         "//src/workerd/server/queues:queues-js",
         "//src/workerd/server/r2:r2-js",
+        "//src/workerd/server/ratelimit:ratelimit-js",
+        "//src/workerd/server/secrets-store:secrets-store-js",
         "//src/workerd/server/workflows:workflows-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",

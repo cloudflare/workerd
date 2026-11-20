@@ -657,6 +657,228 @@ fn d1_databases_bind_the_d1_worker() {
 }
 
 #[test]
+fn secrets_store_secrets_bind_the_secrets_store_worker() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+        "no_bundle": true, "secrets_store_secrets": [
+          { "binding": "A", "store_id": "s1", "secret_name": "api-key" },
+          { "binding": "B", "store_id": "s2", "secret_name": "api-key" },
+          { "binding": "C", "store_id": "s1", "secret_name": "Db_2" }] }"#;
+    let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("secrets_store_secrets"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("secrets_store_secrets"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-secrets-store", "app-cache"]);
+    // Nothing is stored but the cache's empty directory.
+    let state = dir.join(".wrangler/state/workerd");
+    let stored: Vec<_> = fs::read_dir(&state)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(stored, ["cache"]);
+    assert_eq!(fs::read_dir(state.join("cache")).unwrap().count(), 0);
+    let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+    let bound = |i: u32| -> Vec<String> {
+        let service::Which::Worker(w) = services.get(i).which().unwrap() else {
+            panic!("not a worker");
+        };
+        (w.unwrap().get_bindings().unwrap().iter())
+            .map(|b| {
+                let name = text(b.get_name().unwrap());
+                let (target, props) = match b.which().unwrap() {
+                    worker::binding::Which::Service(d) => {
+                        let d = d.unwrap();
+                        let entrypoint = text(d.get_entrypoint().unwrap());
+                        (
+                            format!("{} {entrypoint}", text(d.get_name().unwrap())),
+                            d.get_props(),
+                        )
+                    }
+                    worker::binding::Which::FromEnvironment(v) => {
+                        return format!("{name} {}", text(v.unwrap()));
+                    }
+                    _ => panic!("unexpected binding"),
+                };
+                let service_designator::props::Which::Json(props) = props.which().unwrap() else {
+                    panic!("no JSON props");
+                };
+                format!("{name} {target} {}", text(props.unwrap()))
+            })
+            .collect()
+    };
+    assert_eq!(
+        bound(0),
+        [
+            r#"A app-secrets-store SecretsStoreSecret {"secret_name":"api-key","store_id":"s1"}"#,
+            r#"B app-secrets-store SecretsStoreSecret {"secret_name":"api-key","store_id":"s2"}"#,
+            r#"C app-secrets-store SecretsStoreSecret {"secret_name":"Db_2","store_id":"s1"}"#,
+        ]
+    );
+    assert_eq!(
+        bound(1),
+        [
+            "env:Db_2 WORKERD_SECRET_DB_2",
+            "env:api-key WORKERD_SECRET_API_KEY",
+        ]
+    );
+}
+
+#[test]
+fn secrets_store_secrets_cannot_share_a_variable() {
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "secrets_store_secrets": [
+                   { "binding": "A", "store_id": "s", "secret_name": "api-key" },
+                   { "binding": "B", "store_id": "s", "secret_name": "API_KEY" }] }"#,
+        ),
+        ("index.js", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(error.contains("WORKERD_SECRET_API_KEY"), "{error}");
+}
+
+#[test]
+fn bindings_of_every_kind_keep_their_places() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+        "no_bundle": true, "vars": { "V": "v" },
+        "kv_namespaces": [{ "binding": "KV", "id": "kv" }],
+        "r2_buckets": [{ "binding": "R2", "bucket_name": "r2" }],
+        "d1_databases": [{ "binding": "D1", "database_id": "d1" }],
+        "secrets_store_secrets": [{ "binding": "S", "store_id": "s", "secret_name": "x" }],
+        "ratelimits": [{ "name": "L", "namespace_id": "1", "simple": { "limit": 1, "period": 10 } }],
+        "assets": { "directory": "public", "binding": "ASSETS" } }"#;
+    let config = load_project(&[
+        ("wrangler.jsonc", wrangler),
+        ("index.js", ""),
+        ("public/a.txt", "a"),
+    ])
+    .unwrap();
+    let message = read(config);
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "app",
+            "app-kv",
+            "app-kv-storage",
+            "app-kv-blobs",
+            "app-r2",
+            "app-r2-storage",
+            "app-r2-blobs",
+            "app-secrets-store",
+            "app-d1",
+            "app-d1-storage",
+            "app-ratelimit",
+            "app-assets",
+            "app-cache",
+        ]
+    );
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let bound: Vec<_> = (w.unwrap().get_bindings().unwrap().iter())
+        .map(|b| b.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(bound, ["V", "KV", "R2", "D1", "S", "L", "ASSETS"]);
+}
+
+#[test]
+fn ratelimits_bind_the_ratelimit_worker() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+        "no_bundle": true, "ratelimits": [
+          { "name": "A", "namespace_id": "1001", "simple": { "limit": 100, "period": 60 } },
+          { "name": "B", "namespace_id": "1002", "simple": { "limit": 5, "period": 10 } }] }"#;
+    let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("ratelimits"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("ratelimits"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-ratelimit", "app-cache"]);
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+    let bound: Vec<_> = (w.unwrap().get_bindings().unwrap().iter())
+        .map(|b| {
+            let worker::binding::Which::Service(d) = b.which().unwrap() else {
+                panic!("not a service");
+            };
+            let d = d.unwrap();
+            let service_designator::props::Which::Json(props) = d.get_props().which().unwrap()
+            else {
+                panic!("no JSON props");
+            };
+            let name = text(b.get_name().unwrap());
+            let service = text(d.get_name().unwrap());
+            let entrypoint = text(d.get_entrypoint().unwrap());
+            format!("{name} {service} {entrypoint} {}", text(props.unwrap()))
+        })
+        .collect();
+    assert_eq!(
+        bound,
+        [
+            r#"A app-ratelimit RateLimit {"limit":100,"namespace":"1001","period":60}"#,
+            r#"B app-ratelimit RateLimit {"limit":5,"namespace":"1002","period":10}"#,
+        ]
+    );
+}
+
+#[test]
+fn ratelimits_period_is_10_or_60() {
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "ratelimits": [
+                   { "name": "A", "namespace_id": "1", "simple": { "limit": 1, "period": 30 } }] }"#,
+        ),
+        ("index.js", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(error.contains("10 or 60"), "{error}");
+}
+
+#[test]
 fn triggers_crons_require_experimental() {
     let dir = project(&[
         (

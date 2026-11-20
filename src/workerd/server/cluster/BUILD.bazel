@@ -10,6 +10,10 @@ wd_rust_crate(
     test_compile_data = ["google_auth-test.pem"],
     # The capture's tests drive a real SQLite.
     test_deps = ["@sqlite3"],
+    # Four tests at a time: many of them mostly wait out bounds on bucket
+    # requests, and none shares state with another but through its own
+    # thread or its own files.
+    test_env = {"RUST_TEST_THREADS": "4"},
     # The alarm simulation and the log tests outrun a medium test's 15 s
     # under ASan.
     test_size = "large",

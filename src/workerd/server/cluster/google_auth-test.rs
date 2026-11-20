@@ -737,13 +737,16 @@ fn metadata(server: &Server, timing: Timing) -> Credentials {
     )
 }
 
-/// Short limits, for tests that wait through them on a real socket.
+/// Short limits, for tests that wait through them: a budget of one
+/// attempt, and an attempt longer than a stall of a busy machine, so that
+/// one answered at once, or a byte the fake server dribbles every 20 ms,
+/// is never late for it.
 fn quick() -> Timing {
     Timing {
-        attempt: Duration::from_millis(300),
-        budget: Duration::from_millis(800),
-        pause: Duration::from_millis(50),
-        max_pause: Duration::from_millis(100),
+        attempt: Duration::from_millis(600),
+        budget: Duration::from_millis(600),
+        pause: Duration::from_millis(15),
+        max_pause: Duration::from_millis(30),
         ..patient()
     }
 }
@@ -752,7 +755,7 @@ fn quick() -> Timing {
 fn a_dribbling_endpoint_is_given_up_on() {
     runtime().block_on(async {
         let endpoint = Server::serving(|_, _| Answer::Dribble(Vec::new())).await;
-        // Each 300 ms attempt would take over half an hour to read the whole answer, which
+        // Each 600 ms attempt would take over half an hour to read the whole answer, which
         // never pauses for as long as an attempt.
         let credentials = metadata(&endpoint, quick());
         let answers = tokens(&credentials, 5, PATIENCE).await;
@@ -765,7 +768,7 @@ fn a_dribbling_endpoint_is_given_up_on() {
         until("the request to fail", || !requesting(&credentials)).await;
         assert_eq!(endpoint.requests(), requests + 1);
         let error = credentials.shared.lock().error.clone();
-        assert_eq!(error.as_deref(), Some("no answer within 0.3 s"));
+        assert_eq!(error.as_deref(), Some("no answer within 0.6 s"));
     });
 }
 

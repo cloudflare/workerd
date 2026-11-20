@@ -636,8 +636,8 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 
 ### Dropping references
 
-An `Rc` holds the resource in an `std::rc::Rc` and its C++ `Wrappable` in a `kj::Rc`, and a `Weak`
-holds an `std::rc::Weak`. None of their reference counts is atomic: the isolate lock is what keeps
+An `Rc` holds its C++ `Wrappable`, whose allocation holds the resource, in a `kj::Rc`, and a `Weak`
+holds a `kj::WeakRc` of it. None of their reference counts is atomic: the isolate lock is what keeps
 two threads from updating them at once. Releasing a strong reference may also touch the resource's
 wrapper. Yet an `Rc` or a `Weak` can be dropped without the lock, for example by C++ code that
 owns the Rust object holding it. So each one keeps the state of the isolate its resource was
@@ -1391,8 +1391,8 @@ So a value is coerced only when no variant takes it as it is, and coerced to a s
 in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
 `null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
 cannot become a string, or an exception thrown by `toString()`, is thrown rather than
-trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
-`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`
+or `f64`, takes part in `T`'s passes but converts only a value of
 exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 

@@ -103,7 +103,21 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
       .ToLocalChecked();
 }
 
+// Rust's WrappableRc::new() allows alignments up to 16.
+static_assert(__STDCPP_DEFAULT_NEW_ALIGNMENT__ >= 16);
+
 // Wrappable implementation - calls into Rust via CXX bridge
+kj::Rc<Wrappable> Wrappable::allocate(size_t size, size_t align, uintptr_t& storage) {
+  // Larger alignments would need the aligned forms of operator new and delete.
+  KJ_REQUIRE(align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__ && (align & (align - 1)) == 0,
+      "unsupported alignment of a Rust object", align);
+  size_t offset = (sizeof(Wrappable) + align - 1) & ~(align - 1);
+  auto* wrappable = new (Extra{offset - sizeof(Wrappable) + size}) Wrappable();
+  storage = reinterpret_cast<uintptr_t>(wrappable) + offset;
+  // A Refcounted object starts with one reference.
+  return kj::Rc<Wrappable>::reown(wrappable);
+}
+
 Wrappable::~Wrappable() {
   wrappable_invoke_drop(*this);
 }
@@ -177,12 +191,11 @@ void restoreResourceTemplatesFromSnapshot(v8::Isolate* isolate) {
 }
 
 kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> Wrappable::snapshotClone() const {
-  TraitObjectPtr copy = {0, 0, 0, 0};
+  size_t copy = 0;
   if (!wrappable_invoke_snapshot_clone(*this, copy)) return kj::none;
-  // Unlike wrappable_new(), it adds no strong reference: no Rust Rc refers to the copy.
-  auto clone = kj::refcounted<Wrappable>();
-  clone->trait_object = copy;
-  return kj::Own<::workerd::jsg::Wrappable>(kj::mv(clone));
+  // Rust passes the copy's Wrappable with its only kj::Rc reference, and no strong reference.
+  return kj::Own<::workerd::jsg::Wrappable>(
+      kj::Rc<Wrappable>::reown(reinterpret_cast<Wrappable*>(copy)).toOwn());
 }
 
 kj::Array<const ::workerd::jsg::Wrappable*> Wrappable::snapshotReferences() const {
@@ -1048,15 +1061,10 @@ MaybeLocal wrap_resource(
     return MaybeLocal{.ptr = 0};
   }
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
@@ -1074,15 +1082,10 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   KJ_REQUIRE(::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, object) == nullptr,
       "`this` already wraps a resource");
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
 MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
@@ -1328,15 +1331,63 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable) {
 }
 
 // Wrappable lifecycle
-kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr) {
-  auto rc = kj::rc<Wrappable>();
-  rc->trait_object = kj::mv(ptr);
-  rc->addStrongRef();
-  return kj::mv(rc);
+kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
+  return Wrappable::allocate(size, align, storage);
+}
+
+void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
+  wrappable.trait_object = kj::mv(ptr);
+  wrappable.addStrongRef();
+}
+
+void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr) {
+  wrappable.trait_object = kj::mv(ptr);
 }
 
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {
   return wrappable.toRc();
+}
+
+namespace {
+
+static_assert(sizeof(WrappableWeakRc) == sizeof(kj::WeakRc<Wrappable>) &&
+    alignof(WrappableWeakRc) == alignof(kj::WeakRc<Wrappable>));
+
+// A kj::WeakRc holds only its cell and referent pointers, so Rust may move its bytes.
+const kj::WeakRc<Wrappable>& weakRcFromFfi(const WrappableWeakRc& weak) {
+  return *reinterpret_cast<const kj::WeakRc<Wrappable>*>(&weak);
+}
+
+WrappableWeakRc weakRcToFfi(kj::WeakRc<Wrappable> weak) {
+  WrappableWeakRc result;
+  new (&result) kj::WeakRc<Wrappable>(kj::mv(weak));
+  return result;
+}
+
+}  // namespace
+
+WrappableWeakRc wrappable_downgrade(Wrappable& wrappable) {
+  return weakRcToFfi(wrappable.toWeakRc());
+}
+
+WrappableWeakRc wrappable_weak_clone(const WrappableWeakRc& weak) {
+  // clone() only adds a reference to the shared cell.
+  return weakRcToFfi(const_cast<kj::WeakRc<Wrappable>&>(weakRcFromFfi(weak)).clone());
+}
+
+bool wrappable_weak_is_alive(const WrappableWeakRc& weak) {
+  KJ_IF_SOME(wrappable, weakRcFromFfi(weak).tryGet()) {
+    return !wrappable.isCondemned();
+  }
+  return false;
+}
+
+kj::Maybe<kj::Rc<Wrappable>> wrappable_weak_upgrade(const WrappableWeakRc& weak) {
+  return weakRcFromFfi(weak).upgrade();
+}
+
+void wrappable_weak_drop(WrappableWeakRc& weak) {
+  reinterpret_cast<kj::WeakRc<Wrappable>*>(&weak)->~WeakRc();
 }
 
 void wrappable_add_strong_ref(Wrappable& wrappable) {

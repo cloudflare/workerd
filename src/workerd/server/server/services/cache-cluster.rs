@@ -110,6 +110,7 @@ pub fn store(
     };
     let (dir, lock) = claim(root, me).map_err(|e| io_kj_error(&e))?;
     node.leave_wait_ms.set(timing.lease_wait_ms());
+    node.caches.borrow_mut().insert(name.to_owned());
     let shared = Rc::new(Shared {
         name: name.to_owned(),
         node: Rc::clone(node),

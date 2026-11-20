@@ -28,6 +28,7 @@ pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
+pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
@@ -676,6 +677,17 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
+        /// Serves a cluster peer's session: the debug port's interface, its `getActor` for
+        /// clustered namespaces (`resolve_peer_actor`) and its `getEntrypoint` for the cluster's
+        /// caches (`resolve_peer_cache`). Once `closing` fails, the session disconnects with its
+        /// error, which fails every call the peer still has out on it; it resolves once the peer
+        /// shut its side of the connection too.
+        async fn factory_accept_cluster_peer(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            session: Box<PeerSession>,
+            closing: Box<ResultTask>,
+        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
@@ -690,11 +702,14 @@ pub mod ffi {
             service: &str,
             class_name: &str,
             actor_id: &str,
-        ) -> KjOwn<RpcClient>;
+        ) -> Result<KjOwn<RpcClient>>;
         /// A service on a cluster peer, by `WorkerdDebugPort.getEntrypoint` over `session`: a
         /// worker's default entrypoint, or a service that is not a worker. Pipelined, and it
         /// keeps the session alive, as `rpc_client_debug_actor`.
-        fn rpc_client_debug_entrypoint(session: &RpcClient, service: &str) -> KjOwn<RpcClient>;
+        fn rpc_client_debug_entrypoint(
+            session: &RpcClient,
+            service: &str,
+        ) -> Result<KjOwn<RpcClient>>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -930,6 +945,24 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
+        /// requests `session` counts.
+        fn resolve_peer_actor(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getEntrypoint`: a clustered `cache` service, whose requests
+        /// `session` counts.
+        fn resolve_peer_cache(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A session a cluster peer has open here (`ClusterNode`).
+        type PeerSession;
 
         /// A worker's I/O channel table for one request: what its bindings reach.
         type ChannelFactory;
