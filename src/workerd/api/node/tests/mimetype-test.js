@@ -218,6 +218,53 @@ export const test_parse = {
   },
 };
 
+// MIMEType.parse() returns null for every input the constructor rejects as
+// invalid, and an equal MIMEType for every input it accepts.
+export const test_static_parse = {
+  test() {
+    for (const [input, expected, params] of parseCases) {
+      const label = JSON.stringify(input);
+      const mt = MIMEType.parse(input);
+      if (expected === null) {
+        strictEqual(mt, null, label);
+        continue;
+      }
+      ok(mt instanceof MIMEType, label);
+      strictEqual(mt.toString(), expected, label);
+      strictEqual(mt.essence, `${mt.type}/${mt.subtype}`, label);
+      deepStrictEqual([...mt.params], params, label);
+    }
+
+    const mt = MIMEType.parse('text/plain;Charset=value');
+    strictEqual(mt.params.get('charset'), 'value');
+    strictEqual(`${mt.params}`, 'charset=value');
+    strictEqual(MIMEType.parse('text plain'), null);
+    // The result is live: params and setters write through to toString().
+    mt.params.set('x', 'y');
+    mt.subtype = 'html';
+    strictEqual(mt.toString(), 'text/html;charset=value;x=y');
+
+    // The argument goes through ToString even when missing (the constructor
+    // throws for a missing argument instead); a Symbol still throws.
+    strictEqual(MIMEType.parse(), null);
+    strictEqual(MIMEType.parse(undefined), null);
+    strictEqual(MIMEType.parse(null), null);
+    strictEqual(MIMEType.parse({ toString: () => 'a/b' }).essence, 'a/b');
+    throws(() => MIMEType.parse(Symbol('x')), TypeError);
+
+    // Lone surrogates are replaced before parsing, as in the constructor.
+    strictEqual(
+      MIMEType.parse('a/b;x=\ud800').params.get('x'),
+      '\ufffd\ufffd\ufffd'
+    );
+    strictEqual(MIMEType.parse('\ud800'), null);
+
+    strictEqual(MIMEType.parse.length, 1);
+    strictEqual(typeof MIMEType.parse, 'function');
+    deepStrictEqual(Reflect.ownKeys(MIMEType.parse('a/b')), []);
+  },
+};
+
 export const test_lone_surrogates = {
   test() {
     // Each lone surrogate becomes three U+FFFD, the result of converting it to UTF-8 and back.
@@ -675,7 +722,7 @@ export const test_ignores_patched_builtins = {
       key,
       value,
       done;
-    let invalid, invalidSet, standalone;
+    let invalid, invalidSet, standalone, parsedStatic, rejectedStatic;
 
     try {
       patchMethods(String.prototype, [
@@ -753,6 +800,8 @@ export const test_ignores_patched_builtins = {
         invalidSet = e;
       }
       standalone = new MIMEParams().toString();
+      parsedStatic = MIMEType.parse(' Text/Plain ;a=b ').toString();
+      rejectedStatic = MIMEType.parse('nope');
     } finally {
       for (let i = count - 1; i >= 0; i--) {
         const { target, key, original } = saved[i];
@@ -777,5 +826,7 @@ export const test_ignores_patched_builtins = {
     ok(invalidSet instanceof OriginalTypeError);
     strictEqual(invalidSet.message, 'Not a valid MIME parameter');
     strictEqual(standalone, '');
+    strictEqual(parsedStatic, 'text/plain;a=b');
+    strictEqual(rejectedStatic, null);
   },
 };
