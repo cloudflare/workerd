@@ -2,8 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use jsg_test::Harness;
-
 use super::*;
 
 /// All four transcodable encodings, for exhaustively testing every pair.
@@ -13,13 +11,6 @@ const ENCODINGS: [Encoding; 4] = [
     Encoding::Utf8,
     Encoding::Utf16Le,
 ];
-
-// `Harness::new()` initializes the V8 platform, which is what installs the
-// embedded ICU data. ICU converter opens fail without it, even though these
-// tests never create an isolate or run JavaScript.
-fn init_icu() -> Harness {
-    Harness::new()
-}
 
 /// Runs both transcode steps the way [`crate::transcode`] does -- size,
 /// allocate, convert, narrow to the written length -- against a plain
@@ -39,7 +30,6 @@ fn transcode(source: &[u8], from: Encoding, to: Encoding) -> Result<Vec<u8>, Tra
 
 #[test]
 fn every_pair_round_trips_ascii_text() {
-    let _harness = init_icu();
     for &from in &ENCODINGS {
         // UTF16LE source bytes must have even length; every other encoding
         // is happy with plain ASCII bytes.
@@ -57,7 +47,6 @@ fn every_pair_round_trips_ascii_text() {
 
 #[test]
 fn every_pair_empty_input_is_empty_output() {
-    let _harness = init_icu();
     for &from in &ENCODINGS {
         for &to in &ENCODINGS {
             let result = transcode(&[], from, to);
@@ -72,7 +61,6 @@ fn every_pair_empty_input_is_empty_output() {
 
 #[test]
 fn identity_pairs_round_trip() {
-    let _harness = init_icu();
     for &encoding in &ENCODINGS {
         // UTF16LE source bytes must be well-formed UTF-16LE to pass through
         // unchanged.
@@ -87,6 +75,61 @@ fn identity_pairs_round_trip() {
             "{encoding:?} identity"
         );
     }
+}
+
+#[test]
+fn identity_pairs_replace_ill_formed_input() {
+    const FFFD: &[u8] = "\u{fffd}".as_bytes();
+    for (source, expected) in [
+        (&[0xe2, 0x82][..], FFFD.to_vec()),
+        (&[0xed, 0xa0, 0x80], FFFD.repeat(3)),
+        (&[0x41, 0xff, 0x42], [b"A", FFFD, b"B"].concat()),
+    ] {
+        assert_eq!(
+            transcode(source, Encoding::Utf8, Encoding::Utf8).unwrap(),
+            expected,
+            "{source:x?}"
+        );
+    }
+    for (source, expected) in [
+        (&[0x61, 0x00, 0x62][..], &[0x61, 0x00, 0xfd, 0xff][..]),
+        (&[0x00, 0xde, 0x3d, 0xd8], &[0xfd, 0xff, 0xfd, 0xff]),
+        (&[0x3d, 0xd8, 0x00, 0xde], &[0x3d, 0xd8, 0x00, 0xde]),
+        (&[0x61], &[0xfd, 0xff]),
+        (&[0x41, 0x00, 0x00, 0xd8, 0x42], &[0x41, 0x00, 0xfd, 0xff]),
+        (&[0x00, 0xdc, 0x42], &[0xfd, 0xff, 0xfd, 0xff]),
+    ] {
+        assert_eq!(
+            transcode(source, Encoding::Utf16Le, Encoding::Utf16Le).unwrap(),
+            expected,
+            "{source:x?}"
+        );
+    }
+}
+
+#[test]
+fn identity_pairs_copy_the_well_formed_prefix() {
+    let prefix = "\u{e9}".repeat(50);
+    let source = [prefix.as_bytes(), &[0xe2, 0x82], b"z"].concat();
+    let transcoder = Transcoder::new(&source, Encoding::Utf8, Encoding::Utf8).unwrap();
+    // The prefix is copied, and only the three bytes after it are sized at
+    // three bytes each.
+    assert_eq!(transcoder.dest_len(), prefix.len() + 9);
+    assert_eq!(
+        transcode(&source, Encoding::Utf8, Encoding::Utf8).unwrap(),
+        [prefix.as_bytes(), "\u{fffd}z".as_bytes()].concat()
+    );
+
+    let prefix: Vec<u8> = "\u{1f600}"
+        .repeat(20)
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let source = [&prefix[..], &[0x00, 0xd8, 0x42]].concat();
+    assert_eq!(
+        transcode(&source, Encoding::Utf16Le, Encoding::Utf16Le).unwrap(),
+        [&prefix[..], &[0xfd, 0xff]].concat()
+    );
 }
 
 #[test]
@@ -158,7 +201,6 @@ fn latin1_to_utf8_is_sized_exactly() {
 
 #[test]
 fn unmappable_characters_become_question_marks() {
-    let _harness = init_icu();
     // '☕' (U+2615, HOT BEVERAGE) has no representation in ASCII or Latin-1.
     let utf8_source = "☕".as_bytes();
     let utf16le_source = [0x15, 0x26];
@@ -207,7 +249,6 @@ fn odd_length_utf16le_to_utf8_is_rejected() {
 
 #[test]
 fn odd_length_utf16le_to_latin1_is_rejected() {
-    let _harness = init_icu();
     let result = transcode(&[0x61], Encoding::Utf16Le, Encoding::Latin1);
     assert_eq!(result, Err(TranscodeError::OddUtf16leInput));
 }

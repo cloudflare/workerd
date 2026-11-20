@@ -124,6 +124,7 @@ fn unrepresentable_default_ignorables_are_dropped() {
 fn sized_input_fills_the_destination() {
     for (source, from, to) in [
         (&[0x41, 0xff, 0xe9][..], Encoding::Ascii, Encoding::Utf8),
+        (&[0x41, 0x00, 0x42], Encoding::Utf16Le, Encoding::Utf16Le),
         (&[0xff; 3], Encoding::Latin1, Encoding::Ascii),
         (&[0x41, 0x00], Encoding::Utf16Le, Encoding::Latin1),
     ] {

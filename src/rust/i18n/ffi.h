@@ -49,6 +49,22 @@ inline size_t simdutf_ascii_prefix_len(const uint8_t* input, size_t length) {
   return simdutf::validate_ascii_with_errors(reinterpret_cast<const char*>(input), length).count;
 }
 
+inline size_t simdutf_utf8_valid_prefix_len(const uint8_t* input, size_t length) {
+  // On failure `count` is the position of the lead byte of the first ill-formed sequence.
+  return simdutf::validate_utf8_with_errors(reinterpret_cast<const char*>(input), length).count;
+}
+
+inline size_t simdutf_utf16le_valid_prefix_len(const uint16_t* input, size_t length) {
+  auto utf16 = reinterpret_cast<const char16_t*>(input);
+  // `validate_utf16le` is about half again as fast as `validate_utf16le_with_errors`, so check
+  // well-formed input with it and ask for the error position only when there is one.
+  if (simdutf::validate_utf16le(utf16, length)) {
+    return length;
+  }
+  // `count` is the position of the first unpaired surrogate, in code units.
+  return simdutf::validate_utf16le_with_errors(utf16, length).count;
+}
+
 inline size_t simdutf_utf8_length_from_latin1(const uint8_t* input, size_t length) {
   return simdutf::utf8_length_from_latin1(reinterpret_cast<const char*>(input), length);
 }
