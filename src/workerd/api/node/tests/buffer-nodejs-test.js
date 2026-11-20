@@ -1205,6 +1205,18 @@ export const misc = {
       strictEqual(buf[4], 128);
     }
 
+    {
+      // encoding is ignored when fill is not a string
+      // https://github.com/cloudflare/workerd/issues/8286
+      deepStrictEqual(Buffer.alloc(3, 5, 'utf8'), Buffer.from([5, 5, 5]));
+      deepStrictEqual(Buffer.alloc(3, 0, 'utf8'), Buffer.from([0, 0, 0]));
+      deepStrictEqual(
+        Buffer.alloc(3, Buffer.from([7]), 'utf8'),
+        Buffer.from([7, 7, 7])
+      );
+      deepStrictEqual(Buffer.alloc(3, 'ab', 'utf8'), Buffer.from('aba'));
+    }
+
     // Call .fill() first, stops Valgrind warning about uninitialized memory reads.
     Buffer.allocUnsafe(3.3).fill().toString();
     // Throws bad argument error in commit 43cb4ec
