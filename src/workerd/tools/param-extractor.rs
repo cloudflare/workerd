@@ -20,7 +20,6 @@ enum Clang {
     FunctionDecl { name: Option<String> },
     CXXMethodDecl { name: Option<String> },
     CXXRecordDecl { name: Option<String> },
-    CXXConstructorDecl,
 
     // Parameter names
     ParmVarDecl { name: Option<String> },
@@ -31,9 +30,11 @@ enum Clang {
 
 impl Clang {
     fn is_function_like(&self) -> bool {
+        // JavaScript constructors are static methods named "constructor". Native
+        // C++ constructors must not overwrite those methods' parameter names.
         matches!(
             *self,
-            Self::FunctionDecl { .. } | Self::CXXMethodDecl { .. } | Self::CXXConstructorDecl
+            Self::FunctionDecl { .. } | Self::CXXMethodDecl { .. }
         )
     }
 
@@ -45,7 +46,6 @@ impl Clang {
             | Self::CXXRecordDecl { name }
             | Self::ParmVarDecl { name }
             | Self::Other { name } => name.as_ref().map(AsRef::as_ref),
-            Self::CXXConstructorDecl => Some("constructor"),
         }
     }
 }
@@ -162,3 +162,7 @@ fn traverse_function_like(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "param-extractor-test.rs"]
+mod tests;
