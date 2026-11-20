@@ -7,7 +7,10 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "http-client-path-ssrf-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules"],
+        # url_standard gives the WHATWG URL parser that production Workers
+        # use, which strips leading control characters and spaces and removes
+        # tabs and newlines. The legacy parser does neither.
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "url_standard"],
       )
     ),
   ],

@@ -7,7 +7,7 @@
 // request targets in options.path, preventing SSRF via URL authority override.
 
 import http from 'node:http';
-import { throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 
 // Absolute URLs in options.path must be rejected.
 // Without the fix, new URL('http://evil.test/x', baseUrl) in #onFinish
@@ -141,29 +141,91 @@ export const testBackslashPathsCannotOverrideAuthority = {
   },
 };
 
-// Defense-in-depth: mutating req.path after construction must not bypass
-// the SSRF guard.  The #onFinish check should catch it and destroy the
-// request with an error.
-export const testRejectsPathMutationAfterConstruction = {
+// Replaces fetch() while `fn` runs, recording the URL of every request
+// node:http sends and answering each with an empty 200 response.
+async function recordFetches(fn) {
+  const original = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(new URL(url).href);
+    return new Response(null);
+  };
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+  return urls;
+}
+
+// Sends a request to api.example.test whose path is reassigned after
+// construction. Resolves with the request's error, or its response status.
+function sendWithPathChangedTo(path) {
+  const req = http.request({
+    hostname: 'api.example.test',
+    port: 80,
+    path: '/safe',
+  });
+  req.path = path;
+  return new Promise((resolve) => {
+    req.on('error', (error) => resolve({ error }));
+    req.on('response', (res) => {
+      res.resume();
+      resolve({ status: res.statusCode });
+    });
+    req.end();
+  });
+}
+
+// VULN-146188: the constructor validates options.path, but `path` is a
+// public field. A path assigned afterwards must be validated the same way
+// when the request is sent. The URL parser strips leading control
+// characters and spaces and removes tabs and newlines anywhere, so each of
+// these would otherwise send the request to evil.test.
+export const testRejectsAuthorityOverridingPathSetAfterConstruction = {
   async test() {
-    const req = http.request({
-      hostname: 'api.example.test',
-      port: 80,
-      path: '/safe',
-    });
-    // Mutate the public field to an authority-overriding value.
-    req.path = '//evil.test/steal';
-
-    const error = await new Promise((resolve) => {
-      req.on('error', resolve);
-      req.end();
-    });
-
-    if (error.code !== 'ERR_INVALID_ARG_VALUE') {
-      throw new Error(
-        `Expected ERR_INVALID_ARG_VALUE but got ${error.code}: ${error.message}`
+    const cases = [
+      ['//evil.test/steal', 'ERR_INVALID_ARG_VALUE'],
+      ['http://evil.test/steal', 'ERR_INVALID_ARG_VALUE'],
+      ['\t//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\n//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\r\n//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\u0000//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\u001f//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      [' //evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['/\t/evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\t\\\\evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\thttp://evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+    ];
+    for (const [path, code] of cases) {
+      // Each case must be one that would reach evil.test if it got through.
+      strictEqual(
+        new URL(path, 'http://api.example.test/').host,
+        'evil.test',
+        JSON.stringify(path)
       );
+
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await sendWithPathChangedTo(path);
+      });
+      deepStrictEqual(urls, [], JSON.stringify(path));
+      strictEqual(result.error?.code, code, JSON.stringify(path));
     }
+  },
+};
+
+// A valid path assigned after construction is still sent, to the
+// configured host. This also shows that recordFetches() sees the requests
+// node:http makes, so the empty lists above mean nothing was sent.
+export const testSendsValidPathSetAfterConstruction = {
+  async test() {
+    let result;
+    const urls = await recordFetches(async () => {
+      result = await sendWithPathChangedTo('/changed?q=1');
+    });
+    deepStrictEqual(urls, ['http://api.example.test/changed?q=1']);
+    strictEqual(result.status, 200);
   },
 };
 
