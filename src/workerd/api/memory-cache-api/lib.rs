@@ -60,17 +60,9 @@ impl MemoryCache {
         key: Key,
         fallback: Option<v8::Local<'s, v8::Value>>,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
-        // As JSG calls a C++ method that returns a promise: under capture_async_api_throws, what
-        // it throws rejects the promise instead, and otherwise it is thrown.
         // The promise C++ returns, JSG follows through a reaction of its own.
-        if !lock.feature_flags().get_capture_throws_as_rejections() {
-            let promise = self.read_promise(lock, key, fallback)?;
-            return pass_through(lock, promise);
-        }
-        match lock.try_catch(|lock| self.read_promise(lock, key, fallback))? {
-            Ok(promise) => pass_through(lock, promise),
-            Err(exception) => v8::Promise::rejected(lock, exception),
-        }
+        let promise = self.read_promise(lock, key, fallback)?;
+        pass_through(lock, promise)
     }
 
     /// `delete(key)`: removes the value cached under `key`, if any.

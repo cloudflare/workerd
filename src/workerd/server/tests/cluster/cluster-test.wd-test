@@ -43,6 +43,25 @@ const shortStop :Workerd.Config = (
   ),
 );
 
+# As `config`, with a Worker whose Cache API is `cache`, whose entries the nodes share
+# (services/cache-cluster.rs), each spooling them to a directory of its own.
+const cache :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-cache-worker.js", esModule = embed "cluster-cache-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        cacheApiOutbound = "cache",
+      )
+    ),
+    ( name = "cache", cache = () ),
+  ],
+  sockets = .sockets,
+  cluster = .cluster,
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (
@@ -68,6 +87,8 @@ const services :List(Workerd.Service) = [
         ( name = "KV_WORKER",
           service = (
             name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ( name = "R2",
+          r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"cluster-r2\"}" ) ) ),
       ],
       durableObjectNamespaces = [
         ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -96,6 +117,18 @@ const services :List(Workerd.Service) = [
     )
   ),
   ( name = "kv-blobs", bucket = ( path = "kv" ) ),
+
+  # R2, each object an object in the bucket at `services/r2/<bucket>/<key>`.
+  ( name = "r2",
+    worker = (
+      modules = [ ( name = "r2.js", bundled = "/workerd/r2.js" ) ],
+      compatibilityDate = "2026-01-01",
+      bindings = [
+        ( name = "BLOBS", service = "r2-blobs" ),
+      ],
+    )
+  ),
+  ( name = "r2-blobs", bucket = ( path = "r2" ) ),
 
   ( name = "on-hibernate",
     worker = (

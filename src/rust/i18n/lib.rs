@@ -14,6 +14,7 @@ use jsg::v8;
 mod dispatch;
 mod error;
 mod ffi;
+mod single_byte;
 
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;

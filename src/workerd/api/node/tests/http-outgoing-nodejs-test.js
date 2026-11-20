@@ -357,8 +357,7 @@ export const testHttpOutgoingEndTypes = {
 // Test is taken from test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
 export const testHttpOutgoingFirstChunkSingleByteEncoding = {
   async test(_ctrl, env) {
-    // TODO(soon): Add utf-16 to this list when it's supported.
-    for (const enc of ['utf8', 'latin1', 'UTF-8']) {
+    for (const enc of ['utf8', 'utf16le', 'latin1', 'UTF-8']) {
       await using server = http.createServer((req, res) => {
         res.setHeader('content-type', `text/plain; charset=${enc}`);
         res.write('helloworld', enc);
@@ -378,7 +377,7 @@ export const testHttpOutgoingFirstChunkSingleByteEncoding = {
         `text/plain; charset=${enc}`
       );
       const buf = await res.arrayBuffer();
-      strictEqual(Buffer.from(buf, enc).toString(), 'helloworld');
+      strictEqual(Buffer.from(buf).toString(enc), 'helloworld');
     }
   },
 };

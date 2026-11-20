@@ -73,6 +73,7 @@ pub mod tls;
 
 use std::result;
 
+pub use body::Head;
 pub use body::HeaderBlock;
 use cxx::KjError;
 pub use ffi::WebSocketCompression;

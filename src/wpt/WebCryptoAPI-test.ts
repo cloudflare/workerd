@@ -73,6 +73,7 @@ export default {
   'digest/digest_test_data.js': {},
   'encrypt_decrypt/aes.js': supportFile,
   'encrypt_decrypt/aes_cbc.https.any.js': {},
+  'encrypt_decrypt/aes_cbc_invalid_length.https.any.js': {},
   'encrypt_decrypt/aes_cbc_vectors.js': {},
   'encrypt_decrypt/aes_common_fixtures.js': {},
   'encrypt_decrypt/aes_ctr.https.any.js': {},

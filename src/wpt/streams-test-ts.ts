@@ -20,6 +20,11 @@ export default {
   'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
+  'queuing-strategies-size-function-navigation.window.js': {
+    comment:
+      'Requires document, iframes, and cross-origin navigation between browsing contexts',
+    omittedTests: true,
+  },
   'queuing-strategies-size-function-per-global.window.js': {
     comment: 'document is not defined',
     disabledTests: true,

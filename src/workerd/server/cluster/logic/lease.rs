@@ -193,6 +193,16 @@ impl Lease {
     pub fn holds(&self, now_ms: u64) -> bool {
         now_ms + self.timing.safety_ms() < self.until_ms
     }
+
+    /// When peers, by clocks up to `safety_ms` ahead, may judge this lease expired: it
+    /// [`Lease::holds`] before. 0 once it left.
+    #[must_use]
+    pub fn holds_until(&self) -> u64 {
+        if self.left {
+            return 0;
+        }
+        self.until_ms.saturating_sub(self.timing.safety_ms())
+    }
 }
 
 #[cfg(test)]

@@ -36,8 +36,24 @@ export default {
     ],
   },
   'idlharness.any.js': {
-    comment: 'idl_test setup hangs the Worker runtime',
-    disabledTests: ['idl_test setup'],
+    comment:
+      'PerformanceObserver never calls its callback, so the setup does not wait for it and there is no entryList. PerformanceEntry has no id or navigationId.',
+    expectedFailures: [
+      'PerformanceEntry interface: attribute id',
+      'PerformanceEntry interface: attribute navigationId',
+      'PerformanceObserverEntryList must be primary interface of entryList',
+      'Stringification of entryList',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntries()" with the proper type',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntriesByType(DOMString)" with the proper type',
+      'PerformanceObserverEntryList interface: calling getEntriesByType(DOMString) on entryList with too few arguments must throw TypeError',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntriesByName(DOMString, optional DOMString)" with the proper type',
+      'PerformanceObserverEntryList interface: calling getEntriesByName(DOMString, optional DOMString) on entryList with too few arguments must throw TypeError',
+    ],
+    replace: (code): string =>
+      code.replace(
+        'self.entryList = await new Promise(',
+        'self.entryList = undefined; void new Promise('
+      ),
   },
   'multiple-buffered-flag-observers.any.js': {
     comment: 'This is not yet implemented',
@@ -49,6 +65,66 @@ export default {
   'not-restored-reasons/abort-block-bfcache.window.js': {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
+  },
+  'not-restored-reasons/attributes.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/bfcache-reasons-stay.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/cross-origin-bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/fetch.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/iframes-without-attributes.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/navigation-failure.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/not-bfcached.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/redirect-on-history.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/reload.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/same-origin-bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/same-origin-replace.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
   },
   'observer-buffered-false.any.js': {
     comment: 'This is not yet implemented',

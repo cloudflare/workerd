@@ -397,7 +397,9 @@ fn report_unmatched_overrides(
         }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
-            Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
+            Ok(service::Which::Disk(_) | service::Which::Cache(_)) => {
+                directories.retain(|n| *n != name);
+            }
             _ => {}
         }
     }
@@ -467,7 +469,8 @@ pub async fn run(
             // `preventEviction` or not, while it serves on: a request for one waits for it and
             // then goes where it runs next. Then it leaves the cluster, so peers take over what
             // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
+            // balancers may still send some, and lets its connections finish, its peers' sessions
+            // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
@@ -486,14 +489,18 @@ pub async fn run(
                     }
                     Either::Right((stopped, _)) => stopped,
                 };
-                // Released before the lease goes, so nothing is served after it. Until the
-                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again. With
-                // objects still running, which stopping very many can leave, it stays a member:
-                // peers take over every object it did not hand off once its lease expires, after
-                // this process exited.
+                // Released before the lease goes, so nothing is served after it, and gone no
+                // sooner than `leave`, so no cache copy outlives it either. Until the
+                // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
+                // a peer that reads this node's record still finds it live and routes here again.
+                // With objects still running, which stopping very many can leave, it stays a
+                // member: peers take over every object it did not hand off once its lease
+                // expires, after this process exited.
                 if stopped {
-                    let deregister = node.cluster.deregister();
+                    let deregister = async {
+                        tokio::time::sleep_until(deadlines.leave).await;
+                        node.cluster.deregister().await
+                    };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
@@ -520,7 +527,7 @@ pub async fn run(
                     if !serving.is_terminated() {
                         serving.as_mut().await?;
                     }
-                    node.peer_requests_done().await;
+                    node.stop_peer_sessions().await;
                     Ok::<_, crate::Error>(())
                 };
                 let finished = tokio::time::timeout_at(deadlines.connections, finished);
