@@ -416,9 +416,8 @@ class PrimitiveWrapper {
 // same reason discussed in PrimitiveWrapper.
 class StringWrapper {
  public:
-  // TODO(someday): The conversion to kj::String doesn't explicitly consider the distinction
-  // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
-  // points are always replaced with U+FFFD). Code should make an explict choice between the two.
+  // A kj::String unwrapped from JS keeps unpaired surrogates, encoded as WTF-8, like Web IDL's
+  // DOMString. A USVString replaces them with U+FFFD, like Web IDL's USVString.
 
   template <typename T>
     requires(kj::isSameType<T, kj::ArrayPtr<const char>>() ||
@@ -428,14 +427,9 @@ class StringWrapper {
   }
 
   template <typename T>
-    requires(kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>())
+    requires(kj::isSameType<T, USVString>())
   static constexpr const char* getName(T*) {
-    if constexpr (kj::isSameType<T, USVString>()) {
-      return "USVString";
-    } else {
-      static_assert(kj::isSameType<T, DOMString>());
-      return "DOMString";
-    }
+    return "USVString";
   }
 
   v8::Local<v8::String> wrap(
@@ -458,7 +452,7 @@ class StringWrapper {
   }
 
   template <typename T>
-    requires(kj::isSameType<T, const USVString&>() || kj::isSameType<T, const DOMString&>())
+    requires(kj::isSameType<T, const USVString&>())
   v8::Local<v8::String> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
@@ -474,17 +468,14 @@ class StringWrapper {
 
     if constexpr (kj::isSameType<kj::String, T>()) {
       return kj::mv(out);
-    } else if constexpr (kj::isSameType<USVString, T>()) {
-      return USVString(kj::mv(out));
     } else {
-      static_assert(kj::isSameType<DOMString, T>());
-      return DOMString(kj::mv(out));
+      static_assert(kj::isSameType<USVString, T>());
+      return USVString(kj::mv(out));
     }
   }
 
   template <typename T>
-    requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, USVString>() ||
-        kj::isSameType<T, DOMString>())
+    requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, USVString>())
   kj::Maybe<T> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
@@ -500,8 +491,6 @@ class StringWrapper {
       return str.toString(js);
     } else if constexpr (kj::isSameType<T, USVString>()) {
       return str.toUSVString(js);
-    } else if constexpr (kj::isSameType<T, DOMString>()) {
-      return str.toDOMString(js);
     }
 
     KJ_UNREACHABLE;
@@ -1240,8 +1229,7 @@ class NonCoercibleWrapper {
       v8::Local<v8::Value> handle,
       NonCoercible<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
-        kj::isSameType<jsg::DOMString, T>()) {
+    if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value,
           self.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)) {

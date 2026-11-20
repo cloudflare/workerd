@@ -615,7 +615,6 @@ class JsString final: public JsBase<v8::String, JsString> {
   JSG_NO_JS size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   int hashCode() const;
 

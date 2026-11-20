@@ -925,27 +925,14 @@ KJ_TEST("jsg::USVStrings") {
 }
 
 // ========================================================================================
-struct DOMStringContext: public ContextGlobalObject {
-  jsg::DOMString takeDOMString(jsg::DOMString s) {
-    return kj::mv(s);
-  }
-
-  JSG_RESOURCE_TYPE(DOMStringContext) {
-    JSG_METHOD(takeDOMString);
-  }
-};
-
-JSG_DECLARE_ISOLATE_TYPE(DOMStringIsolate, DOMStringContext);
-
-KJ_TEST("jsg::DOMStrings") {
-  Evaluator<DOMStringContext, DOMStringIsolate> e(v8System);
-  e.expectEval("takeDOMString('hello world')", "string", "hello world");
+KJ_TEST("kj::String keeps unpaired surrogates") {
+  Evaluator<StringContext, StringIsolate> e(v8System);
   // From JS to C++: Characters forbidden in UTF-8, like unpaired surrogates, are encoded anyway making this a WTF-8 encoded value.
   // From C++ to JS: Each invalid byte in the encoding of the unpaired surrogate is replaced with the Unicode replacement character.
   // WTF, that's 3 replacement characters for each unpaired surrogate.
   // TODO(someday): Fix the conversion back into a V8 string such that we get back the WTF-16 value we had originally (an unpaired surrogate)
-  e.expectEval("[...takeDOMString('\\uD835x')]", "object", u8"\uFFFD,\uFFFD,\uFFFD,x");
-  e.expectEval("[...takeDOMString('\\uD835x\\uDC53')]", "object",
+  e.expectEval("[...takeString('\\uD835x')]", "object", u8"\uFFFD,\uFFFD,\uFFFD,x");
+  e.expectEval("[...takeString('\\uD835x\\uDC53')]", "object",
       u8"\uFFFD,\uFFFD,\uFFFD,x,\uFFFD,\uFFFD,\uFFFD");
 }
 
@@ -1196,8 +1183,6 @@ struct NonCoercibleContext: public ContextGlobalObject {
     JSG_METHOD_NAMED(testStringCoerced, template testCoerced<kj::String>);
     JSG_METHOD_NAMED(testUSVString, template test<jsg::USVString>);
     JSG_METHOD_NAMED(testUSVStringCoerced, template testCoerced<jsg::USVString>);
-    JSG_METHOD_NAMED(testDOMString, template test<jsg::DOMString>);
-    JSG_METHOD_NAMED(testDOMStringCoerced, template testCoerced<jsg::DOMString>);
     JSG_METHOD_NAMED(testBoolean, template test<bool>);
     JSG_METHOD_NAMED(testBooleanCoerced, template testCoerced<bool>);
     JSG_METHOD_NAMED(testDouble, template test<double>);
@@ -1237,13 +1222,6 @@ KJ_TEST("NonCoercible Values") {
       "not of type 'USVString'.");
   e.expectEval("testUSVStringCoerced('hi')", "boolean", "true");
   e.expectEval("testUSVStringCoerced(null)", "boolean", "true");
-
-  e.expectEval("testDOMString('hi')", "boolean", "true");
-  e.expectEval("testDOMString(null)", "throws",
-      "TypeError: Failed to execute 'testDOMString' on 'NonCoercibleContext': parameter 1 is "
-      "not of type 'DOMString'.");
-  e.expectEval("testDOMStringCoerced('hi')", "boolean", "true");
-  e.expectEval("testDOMStringCoerced(null)", "boolean", "true");
 
   e.expectEval("testBoolean(true)", "boolean", "true");
   e.expectEval("testBoolean(null)", "throws",
