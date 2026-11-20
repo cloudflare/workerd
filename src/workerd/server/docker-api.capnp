@@ -142,7 +142,9 @@ struct Docker {
       blkioDeviceReadIOps @20 :List(ThrottleDevice) $Json.name("BlkioDeviceReadIOps");
       blkioDeviceWriteBps @21 :List(ThrottleDevice) $Json.name("BlkioDeviceWriteBps");
       blkioDeviceWriteIOps @22 :List(ThrottleDevice) $Json.name("BlkioDeviceWriteIOps");
-      memorySwappiness @23 :UInt32 $Json.name("MemorySwappiness");
+      # An unset value must be omitted, not encoded as zero: zero explicitly configures
+      # swappiness, which is unsupported by OCI runtimes on cgroup v2.
+      memorySwappiness @23 :Json.Value $Json.name("MemorySwappiness");
       oomKillDisable @24 :Bool $Json.name("OomKillDisable");
       oomScoreAdj @25 :Int32 $Json.name("OomScoreAdj");
       pidMode @26 :Text $Json.name("PidMode");
