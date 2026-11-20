@@ -6,6 +6,7 @@ import assert from 'node:assert';
 import { StructureGroups } from '@workerd/jsg/rtti';
 import ts from 'typescript';
 import { generateDefinitions } from './generator';
+import { PER_ISOLATE_MANIFEST } from './per-isolate';
 import { printNodeList, printer } from './print';
 import { SourcesMap, createMemoryProgram } from './program';
 import {
@@ -100,15 +101,16 @@ function checkPerIsolateNames(
 ): void {
   const generatedNames = declaredNames(generated);
   const defineNames = declaredNames(defines);
+  const manifest = `src/per_isolate/${PER_ISOLATE_MANIFEST}`;
   for (const name of declaredNames(perIsolate)) {
     if (generatedNames.has(name)) {
       throw new Error(
-        `${name} is declared by both the per-isolate bootstrap and JSG RTTI; override the RTTI declaration to \`never\``
+        `${name} is published by ${manifest} and also declared by JSG RTTI; override the RTTI declaration to \`never\``
       );
     }
     if (defineNames.has(name)) {
       throw new Error(
-        `${name} is declared by both the per-isolate bootstrap and types/defines`
+        `${name} is published by ${manifest} and also declared in types/defines`
       );
     }
   }

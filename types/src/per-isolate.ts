@@ -119,7 +119,13 @@ export function collectPerIsolateDeclarations(
   for (const [name, symbol] of published) {
     const declarations = publishedDeclarationsOf(name, symbol);
     for (const declaration of declarations) {
-      checkReferences(checker, name, declaration, publishedSymbols);
+      checkReferences(
+        checker,
+        manifestPath,
+        name,
+        declaration,
+        publishedSymbols
+      );
     }
     for (const declaration of mergeDeclarations(name, declarations)) {
       printed.push(
@@ -206,6 +212,7 @@ function publishedDeclarationsOf(
 // bootstrap's declaration files.
 function checkReferences(
   checker: ts.TypeChecker,
+  manifestPath: string,
   name: string,
   declaration: ts.Node,
   publishedSymbols: Set<ts.Symbol>
@@ -216,7 +223,7 @@ function checkReferences(
     else if (ts.isExpressionWithTypeArguments(node)) entity = node.expression;
     else if (ts.isTypeQueryNode(node)) entity = node.exprName;
     if (entity !== undefined) {
-      checkEntity(checker, name, entity, publishedSymbols);
+      checkEntity(checker, manifestPath, name, entity, publishedSymbols);
     }
     ts.forEachChild(node, visit);
   };
@@ -225,6 +232,7 @@ function checkReferences(
 
 function checkEntity(
   checker: ts.TypeChecker,
+  manifestPath: string,
   name: string,
   entity: ts.Node,
   publishedSymbols: Set<ts.Symbol>
@@ -253,7 +261,7 @@ function checkEntity(
   }
   if (ts.isTypeParameterDeclaration(declaration)) return;
   throw new Error(
-    `${name} refers to ${symbol.name}, which ${declaration.getSourceFile().fileName} declares but the bootstrap does not publish`
+    `${name} refers to ${symbol.name}, which ${declaration.getSourceFile().fileName} declares but ${manifestPath} does not publish`
   );
 }
 
