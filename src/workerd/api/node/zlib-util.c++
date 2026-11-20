@@ -52,6 +52,12 @@ namespace {
   throwWithCode(js, err, error.code);
 }
 
+// Matches Node.js' ZstdStream::Init(), which throws ERR_ZLIB_INITIALIZATION_FAILED with the
+// context's message and no errno, whichever API created the context.
+[[noreturn]] void throwZstdInitError(jsg::Lock& js, const CompressionError& error) {
+  throwWithCode(js, js.error(error.message), "ERR_ZLIB_INITIALIZATION_FAILED"_kj);
+}
+
 // Equivalent to Node.js' validateInteger() range check, which throws ERR_OUT_OF_RANGE.
 void checkRange(jsg::Lock& js, kj::StringPtr name, int64_t value, int64_t min, int64_t max) {
   if (value < min || value > max) {
@@ -729,8 +735,7 @@ bool ZlibUtil::ZstdCompressionStream<CompressionContext>::initialize(jsg::Lock& 
   }
 
   KJ_IF_SOME(err, maybeError) {
-    this->emitError(js, kj::mv(err));
-    return false;
+    throwZstdInitError(js, err);
   }
 
   auto results = params.template asArrayPtr<int>();
@@ -929,11 +934,11 @@ kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdCont
   if constexpr (Context::Mode == ZlibMode::ZSTD_ENCODE) {
     uint64_t pledgedSrcSize = opts.pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
     KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize, dictionary)) {
-      throwCompressionError(js, err);
+      throwZstdInitError(js, err);
     }
   } else {
     KJ_IF_SOME(err, ctx.initialize(dictionary)) {
-      throwCompressionError(js, err);
+      throwZstdInitError(js, err);
     }
   }
 

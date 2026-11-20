@@ -864,27 +864,53 @@ export const zstdTrainedDictionaryTest = {
 };
 
 // The decoder parses a trained dictionary when it is loaded, so a corrupt one fails before
-// any data is read. Node throws ERR_ZLIB_INITIALIZATION_FAILED from the constructor.
+// any data is read. Node 26.13 throws the same error from every API, with no errno.
 export const zstdCorruptDictionaryDecoderTest = {
-  test() {
+  async test() {
     const frame = zlib.zstdCompressSync(Buffer.from(TRAINED_INPUT));
     const dictionary = CORRUPT_TRAINED_DICTIONARY;
+    const expected = {
+      name: 'Error',
+      code: 'ERR_ZLIB_INITIALIZATION_FAILED',
+      message: 'Failed to load zstd dictionary',
+      ownKeys: ['code'],
+    };
+    const shape = (err) => ({
+      name: err.name,
+      code: err.code,
+      message: err.message,
+      ownKeys: Object.keys(err),
+    });
+    const thrown = (fn) => {
+      try {
+        fn();
+      } catch (err) {
+        return shape(err);
+      }
+      assert.fail('Expected a throw');
+    };
 
-    assert.throws(
-      () => zlib.zstdDecompressSync(frame, { dictionary }),
-      /Failed to load zstd dictionary/,
-      'The fast path should report the dictionary'
+    assert.deepStrictEqual(
+      thrown(() => zlib.zstdDecompressSync(frame, { dictionary })),
+      expected,
+      'The fast path should throw'
     );
-    assert.throws(
-      () => zlib.createZstdDecompress({ dictionary }),
-      { code: 'ERR_ZLIB_INITIALIZATION_FAILED' },
+    assert.deepStrictEqual(
+      thrown(() => zlib.createZstdDecompress({ dictionary })),
+      expected,
       'The stream constructor should throw'
     );
-    assert.throws(
-      () => zlib.zstdDecompressSync(frame, { dictionary, info: true }),
-      { code: 'ERR_ZLIB_INITIALIZATION_FAILED' },
-      'The engine path should throw the same way'
+    assert.deepStrictEqual(
+      thrown(() => zlib.zstdDecompressSync(frame, { dictionary, info: true })),
+      expected,
+      'The engine path should throw'
     );
+
+    // Node throws this one synchronously too, because its constructor runs before the call
+    // returns. Here the fast path hands it to the callback instead, with the same shape.
+    const { promise, resolve } = Promise.withResolvers();
+    zlib.zstdDecompress(frame, { dictionary }, resolve);
+    assert.deepStrictEqual(shape(await promise), expected);
   },
 };
 
