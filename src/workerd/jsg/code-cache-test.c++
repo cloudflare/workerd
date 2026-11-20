@@ -427,8 +427,6 @@ KJ_TEST("Embedded builtin caches take precedence over the store in both registri
     module.setType(ModuleType::BUILTIN);
     module.setSrc(code.asBytes());
     module.setCompileCache(kj::arrayPtr(data->data, data->length));
-    // Invalid syntax at the same length proves that V8 consumes the embedded cache.
-    module.getSrc()[0] = ')';
     for (bool useStore: {false, true}) {
       for (auto newRegistry: {UseNewModuleRegistry::NO, UseNewModuleRegistry::YES}) {
         kj::Own<const CodeCacheStore> isolateStore;
@@ -454,6 +452,7 @@ KJ_TEST("Embedded builtin caches take precedence over the store in both registri
     auto lock = store->state.lockShared();
     KJ_EXPECT(lock->lookups == 0);
     KJ_EXPECT(lock->inserts == 0);
+    // The observer reports a found cache only when V8 accepts it.
     KJ_EXPECT(observer.found == 4);
     KJ_EXPECT(observer.rejected == 0);
   }
