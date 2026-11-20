@@ -91,8 +91,7 @@ test('collectPerIsolateDeclarations: rejects references to unpublished declarati
         'kind.d.ts': kKind,
       }),
     {
-      message:
-        'Thing refers to Kind, which /per_isolate/kind.d.ts declares but the bootstrap does not publish',
+      message: `Thing refers to Kind, which /per_isolate/kind.d.ts declares but ${kManifest} does not publish`,
     }
   );
 });
@@ -269,7 +268,7 @@ test('printDefinitions: rejects a per-isolate name that RTTI or a define declare
   assert.throws(
     () =>
       printDefinitions(rootWith('Thing'), {}, '', 'declare class Thing {}\n'),
-    /Thing is declared by both the per-isolate bootstrap and JSG RTTI/
+    /Thing is published by src\/per_isolate\/public-types\.d\.ts and also declared by JSG RTTI/
   );
   assert.throws(
     () =>
@@ -279,6 +278,6 @@ test('printDefinitions: rejects a per-isolate name that RTTI or a define declare
         'interface Thing {}\n',
         'declare class Thing {}\n'
       ),
-    /Thing is declared by both the per-isolate bootstrap and types\/defines/
+    /Thing is published by src\/per_isolate\/public-types\.d\.ts and also declared in types\/defines/
   );
 });
