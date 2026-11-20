@@ -182,6 +182,68 @@ export type { Thing };
   );
 });
 
+test('collectPerIsolateDeclarations: rejects a member declared by both a class and a merged interface', () => {
+  // TypeScript tries the later interface's overload first, which the folded
+  // class would try last.
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Thing } from './thing';\n`,
+        'thing.d.ts': `declare class Thing {
+    read(value: object): 'generic';
+}
+interface Thing {
+    read(value: { id: string }): 'specific';
+}
+export type { Thing };
+`,
+      }),
+    {
+      message:
+        'Thing: read is declared by more than one of the class and the interfaces merged with it; declare it, with all its overloads, in one of them',
+    }
+  );
+  // A static member does not merge with an instance member.
+  assert.strictEqual(
+    collect({
+      'public-types.d.ts': `export type { Thing } from './thing';\n`,
+      'thing.d.ts': `declare class Thing {
+    static read(): Thing;
+}
+interface Thing {
+    read(): string;
+}
+export type { Thing };
+`,
+    }),
+    `declare class Thing {
+    static read(): Thing;
+    read(): string;
+}`
+  );
+});
+
+test('collectPerIsolateDeclarations: gives a class the type parameter constraints and defaults of a merged interface', () => {
+  const printed = collect({
+    'public-types.d.ts': `export type { Thing } from './thing';\n`,
+    'thing.d.ts': `declare class Thing<T, U = number> {
+    get(): T;
+}
+interface Thing<T extends string = 'a', U = number> {
+    other(): U;
+}
+export type { Thing };
+`,
+  });
+  assert.strictEqual(
+    printed,
+    `declare class Thing<T extends string = 'a', U = number> {
+    get(): T;
+    other(): U;
+}`
+  );
+});
+
 // A hand-written declaration file in the standard library's form.
 const kGadget = `// A header that is not part of the declarations.
 
