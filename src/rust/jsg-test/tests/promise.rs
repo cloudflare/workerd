@@ -18,6 +18,7 @@ use jsg::v8::PromiseState;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
 /// and returns the log joined with `|`.
@@ -574,6 +575,7 @@ fn panic_in_then_callback_is_an_internal_error() {
 }
 
 /// Counts its drops in the counter it points to.
+#[jsg_traced]
 struct DropCounter(&'static AtomicUsize);
 
 impl Drop for DropCounter {
@@ -581,8 +583,6 @@ impl Drop for DropCounter {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
-
-jsg::jsg_traced!(DropCounter);
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 

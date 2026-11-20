@@ -170,6 +170,18 @@ fn out_of_range_source_encoding_is_rejected() {
 }
 
 #[test]
+fn out_of_range_destination_encoding_is_rejected() {
+    let invalid = Encoding { repr: 4 };
+    for &from in &ENCODINGS {
+        assert_eq!(
+            Transcoder::new(b"Hi", from, invalid).err(),
+            Some(TranscodeError::InvalidEncoding),
+            "{from:?}"
+        );
+    }
+}
+
+#[test]
 fn destination_size_mismatch_is_rejected() {
     let transcoder = Transcoder::new(b"Hi", Encoding::Latin1, Encoding::Utf16Le).unwrap();
     let mut too_small = vec![0u8; transcoder.dest_len() - 1];

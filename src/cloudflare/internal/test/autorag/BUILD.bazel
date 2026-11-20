@@ -1,5 +1,5 @@
 load("//:build/wd_test.bzl", "wd_test")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "py_wd_test")
 
 wd_test(
     src = "autorag-api-test.wd-test",

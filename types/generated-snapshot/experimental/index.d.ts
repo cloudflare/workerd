@@ -15,60 +15,6 @@ and limitations under the License.
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;
-/**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
-declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  /**
-   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
-   */
-  readonly message: string;
-  /**
-   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
-   */
-  readonly name: string;
-  /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
-   */
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: number;
-  static readonly DOMSTRING_SIZE_ERR: number;
-  static readonly HIERARCHY_REQUEST_ERR: number;
-  static readonly WRONG_DOCUMENT_ERR: number;
-  static readonly INVALID_CHARACTER_ERR: number;
-  static readonly NO_DATA_ALLOWED_ERR: number;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
-  static readonly NOT_FOUND_ERR: number;
-  static readonly NOT_SUPPORTED_ERR: number;
-  static readonly INUSE_ATTRIBUTE_ERR: number;
-  static readonly INVALID_STATE_ERR: number;
-  static readonly SYNTAX_ERR: number;
-  static readonly INVALID_MODIFICATION_ERR: number;
-  static readonly NAMESPACE_ERR: number;
-  static readonly INVALID_ACCESS_ERR: number;
-  static readonly VALIDATION_ERR: number;
-  static readonly TYPE_MISMATCH_ERR: number;
-  static readonly SECURITY_ERR: number;
-  static readonly NETWORK_ERR: number;
-  static readonly ABORT_ERR: number;
-  static readonly URL_MISMATCH_ERR: number;
-  static readonly QUOTA_EXCEEDED_ERR: number;
-  static readonly TIMEOUT_ERR: number;
-  static readonly INVALID_NODE_TYPE_ERR: number;
-  static readonly DATA_CLONE_ERR: number;
-  get stack(): any;
-  set stack(value: any);
-}
 type WorkerGlobalScopeEventMap = {
   fetch: FetchEvent;
   scheduled: ScheduledEvent;
@@ -306,7 +252,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ): number;
   clearInterval(timeoutId: number | null): void;
   queueMicrotask(task: Function): void;
-  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
   reportError(error: any): void;
   fetch(
     input: RequestInfo | URL,
@@ -338,14 +283,11 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
   FileSystemHandle: typeof FileSystemHandle;
   FileSystemFileHandle: typeof FileSystemFileHandle;
   FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
   FileSystemWritableFileStream: typeof FileSystemWritableFileStream;
   StorageManager: typeof StorageManager;
-  EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
   ReadableByteStreamController: typeof ReadableByteStreamController;
@@ -390,6 +332,9 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   PerformanceResourceTiming: typeof PerformanceResourceTiming;
   PerformanceObserver: typeof PerformanceObserver;
   PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
+  EventSource: typeof EventSource;
 }
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
   type: Type,
@@ -443,11 +388,6 @@ declare function setInterval<Args extends any[]>(
 declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-declare function structuredClone<T>(
-  value: T,
-  options?: StructuredSerializeOptions,
-): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
@@ -570,9 +510,6 @@ interface ExportedHandler<
   test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env, Props>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-}
-interface StructuredSerializeOptions {
-  transfer?: any[];
 }
 declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
@@ -1217,6 +1154,7 @@ declare class Blob {
 }
 interface BlobOptions {
   type?: string;
+  endings?: "transparent" | "native";
 }
 /**
  * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
@@ -1245,6 +1183,7 @@ declare class File extends Blob {
 interface FileOptions {
   type?: string;
   lastModified?: number;
+  endings?: "transparent" | "native";
 }
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
@@ -3356,7 +3295,7 @@ declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3367,7 +3306,7 @@ declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3625,6 +3564,12 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    */
   readyState: number;
   /**
+   * The **`WebSocket.bufferedAmount`** read-only property returns the number of bytes of data that have been queued using calls to send() but not yet transmitted to the network. This value resets to zero once all queued data has been sent. This value does not reset to zero when the connection is closed; if you keep calling send(), this will continue to climb.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/bufferedAmount)
+   */
+  bufferedAmount: number;
+  /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/url)
@@ -3709,6 +3654,7 @@ interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
   proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  accept(): void;
 }
 interface SocketOptions {
   secureTransport?: string;
@@ -3729,58 +3675,6 @@ interface SocketInfo {
 declare class Datagram {
   constructor(data: Uint8Array);
   get data(): Uint8Array;
-}
-/**
- * The **`EventSource`** interface is web content's interface to server-sent events.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
- */
-declare class EventSource extends EventTarget {
-  constructor(url: string, init?: EventSourceEventSourceInit);
-  /**
-   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
-   */
-  close(): void;
-  /**
-   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
-   */
-  get url(): string;
-  /**
-   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
-   */
-  get withCredentials(): boolean;
-  /**
-   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
-   */
-  get readyState(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  get onopen(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  set onopen(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  get onmessage(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  set onmessage(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  get onerror(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  set onerror(value: any | null);
-  static readonly CONNECTING: number;
-  static readonly OPEN: number;
-  static readonly CLOSED: number;
-  static from(stream: ReadableStream): EventSource;
-}
-interface EventSourceEventSourceInit {
-  withCredentials?: boolean;
-  fetcher?: Fetcher;
 }
 interface ExecOutput {
   readonly stdout: ArrayBuffer;
@@ -4068,59 +3962,6 @@ interface FileSystemFileWriteParams {
 }
 interface FileSystemHandleRemoveOptions {
   recursive?: boolean;
-}
-/**
- * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
- */
-declare abstract class MessagePort extends EventTarget {
-  /**
-   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
-   */
-  postMessage(
-    data?: any,
-    options?: any[] | MessagePortPostMessageOptions,
-  ): void;
-  /**
-   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
-   */
-  close(): void;
-  /**
-   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
-   */
-  start(): void;
-  get onmessage(): any | null;
-  set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
-}
-interface MessagePortPostMessageOptions {
-  transfer?: any[];
 }
 type LoopbackForExport<
   T extends
@@ -4606,6 +4447,11 @@ interface Tracing {
   ): T;
   Span: typeof Span;
 }
+interface TracingSpanLink {
+  context: TracingSpanContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4638,6 +4484,8 @@ declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 type TracingSpanStatusCode = "unset" | "ok" | "error";
 interface TracingSpanStatus {
@@ -13570,6 +13418,59 @@ type BrowserRunDevtools = {
 type BrowserRunCloseSessionResult = {
   status: "closing" | "closed";
 };
+/** Library the script runs against. Omit it to receive a raw CDP client. */
+type BrowserRunScriptLibrary = "playwright" | "puppeteer";
+/** Options for `script()`. */
+type BrowserRunScriptOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds, not counting browser
+   * acquisition. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** How long the session stays open without activity after the run, in
+   * milliseconds. Between 10000 and 1200000.
+   * @default 60000
+   */
+  keepAlive?: number;
+  /** Use the experimental pool, whose browsers enable Chrome features before
+   * they reach stable Chrome.
+   * @default false
+   */
+  lab?: boolean;
+  /** Record the browser session. @default false */
+  recording?: boolean;
+  /** Run the script on an alternate browser backend. Only the raw CDP client is
+   * supported, and no session is kept open afterwards. Setting `library`,
+   * `keepAlive`, `lab` or `recording` with it returns an HTTP 400 error
+   * response.
+   */
+  browser?: "kitesurf";
+};
+/** Options for `script()` in an existing browser session. */
+type BrowserRunScriptSessionOptions = {
+  /** Session to run in, such as the `cf-browser-session-id` header returned by
+   * `script()`. The session keeps the launch options it was acquired with.
+   */
+  sessionId: string;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+};
+/** JSON success body of `script()`. */
+type BrowserRunScriptSuccessResponse = {
+  success: true;
+  /** The script's return value, or `null` when it returned nothing. */
+  result: unknown;
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13784,6 +13685,58 @@ declare abstract class BrowserRun {
   getSession(sessionId: string): Promise<BrowserRunSession | null>;
   /** Close a browser session. */
   closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /**
+   * Run a script against a new browser session.
+   * @param code - Source of an async function. It receives the selected
+   * library's objects (Playwright `{ page, context, browser }`, Puppeteer
+   * `{ page, browser }`) or, without `library`, a CDP client.
+   * @param options - Library, timeout, session launch and backend options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScriptSuccessResponse` JSON with `Content-Type: application/json`
+   * when the script returns a JSON-serializable value or nothing
+   * - The raw body and content type when the script returns binary or other
+   * non-JSON output
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 502, 503)
+   * - HTTP 408 when the script exceeds `timeout`
+   * - HTTP 422 when the script fails to compile or throws
+   * - HTTP 502 when the script fails on the `browser: 'kitesurf'` backend
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers** (not returned with `browser: 'kitesurf'`):
+   * - `cf-browser-session-id`: Session kept open for a later `script()` call
+   * with `sessionId`
+   * - `cf-browser-target-id`: Page target the script ran on
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
+  /**
+   * Run a script against an existing browser session, such as one kept open by
+   * an earlier `script()` call.
+   * @param code - Source of an async function, as for a new session.
+   * @param options - The session to run in, plus page target, library and
+   * timeout options. Launch options such as `keepAlive` cannot be set, because
+   * the session keeps the ones it was acquired with.
+   * @returns A `Response` with the same success bodies as a new-session run.
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
+   * - HTTP 404 when the session or `targetId` does not exist
+   * - HTTP 410 when the session is already closed
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  script(
+    code: string,
+    options: BrowserRunScriptSessionOptions,
+  ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
 }
@@ -15100,6 +15053,60 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+/**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+declare class DOMException extends Error {
+  constructor(message?: string, name?: string);
+  /**
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
+  readonly message: string;
+  /**
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
+  readonly name: string;
+  /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
+   */
+  readonly code: number;
+  static readonly INDEX_SIZE_ERR: number;
+  static readonly DOMSTRING_SIZE_ERR: number;
+  static readonly HIERARCHY_REQUEST_ERR: number;
+  static readonly WRONG_DOCUMENT_ERR: number;
+  static readonly INVALID_CHARACTER_ERR: number;
+  static readonly NO_DATA_ALLOWED_ERR: number;
+  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
+  static readonly NOT_FOUND_ERR: number;
+  static readonly NOT_SUPPORTED_ERR: number;
+  static readonly INUSE_ATTRIBUTE_ERR: number;
+  static readonly INVALID_STATE_ERR: number;
+  static readonly SYNTAX_ERR: number;
+  static readonly INVALID_MODIFICATION_ERR: number;
+  static readonly NAMESPACE_ERR: number;
+  static readonly INVALID_ACCESS_ERR: number;
+  static readonly VALIDATION_ERR: number;
+  static readonly TYPE_MISMATCH_ERR: number;
+  static readonly SECURITY_ERR: number;
+  static readonly NETWORK_ERR: number;
+  static readonly ABORT_ERR: number;
+  static readonly URL_MISMATCH_ERR: number;
+  static readonly QUOTA_EXCEEDED_ERR: number;
+  static readonly TIMEOUT_ERR: number;
+  static readonly INVALID_NODE_TYPE_ERR: number;
+  static readonly DATA_CLONE_ERR: number;
+  get stack(): any;
+  set stack(value: any);
+}
 declare module "cloudflare:durable-objects" {
   /**
    * Marks Durable Object methods as safe to run more than once. The runtime may then retry calls
@@ -15278,6 +15285,59 @@ declare module "cloudflare:email" {
     new (from: string, to: string, raw: ReadableStream | string): EmailMessage;
   };
   export { _EmailMessage as EmailMessage };
+}
+// EventSource, a global at every compatibility date.
+/**
+ * The **`EventSource`** interface is web content's interface to server-sent events.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
+ */
+declare class EventSource extends EventTarget {
+  constructor(url: string, init?: EventSourceEventSourceInit);
+  /**
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
+   */
+  close(): void;
+  /**
+   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
+   */
+  get url(): string;
+  /**
+   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
+   */
+  get withCredentials(): boolean;
+  /**
+   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
+   */
+  get readyState(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  get onopen(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  set onopen(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  get onmessage(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  set onmessage(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  get onerror(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  set onerror(value: any | null);
+  static readonly CONNECTING: number;
+  static readonly OPEN: number;
+  static readonly CLOSED: number;
+  static from(stream: ReadableStream): EventSource;
+}
+interface EventSourceEventSourceInit {
+  withCredentials?: boolean;
+  fetcher?: Fetcher;
 }
 /**
  * Evaluation context for targeting rules.
@@ -16057,6 +16117,62 @@ interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
+}
+// MessageChannel and MessagePort, declared at every compatibility date. They
+// are globals under the expose_global_message_channel compatibility flag (the
+// default from 2025-08-15); node:worker_threads exports them at any date.
+/**
+ * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+declare abstract class MessagePort extends EventTarget {
+  /**
+   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+declare class MessageChannel {
+  constructor();
+  /**
+   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+interface MessagePortPostMessageOptions {
+  transfer?: any[];
 }
 declare module "cloudflare:node" {
   interface NodeStyleServer {
@@ -17478,6 +17594,17 @@ interface AlreadyUploadedError extends StreamError {
 interface TooManyWatermarksError extends StreamError {
   name: "TooManyWatermarksError";
 }
+interface StructuredSerializeOptions {
+  transfer?: any[];
+}
+interface ServiceWorkerGlobalScope {
+  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+declare function structuredClone<T>(
+  value: T,
+  options?: StructuredSerializeOptions,
+): T;
 type MarkdownDocument = {
   name: string;
   blob: Blob;
@@ -17705,6 +17832,22 @@ declare namespace TailStream {
     readonly type: "spanUpdate";
     readonly info: SpanUpdateInfo;
   }
+  /** A causal relationship to a span, including spans in another trace. */
+  interface SpanLink {
+    readonly context: {
+      readonly traceId: string;
+      readonly spanId: string;
+      readonly traceFlags: number;
+    };
+    readonly attributes: readonly Attribute[];
+    /** Attributes dropped before this link was recorded. */
+    readonly droppedAttributesCount: number;
+  }
+  /** Links added to the receiver identified by the event's spanContext. */
+  interface SpanLinks {
+    readonly type: "spanLinks";
+    readonly links: readonly SpanLink[];
+  }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
     readonly channel: string;
@@ -17775,6 +17918,7 @@ declare namespace TailStream {
     | SpanOpen
     | SpanClose
     | SpanUpdate
+    | SpanLinks
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17818,6 +17962,7 @@ declare namespace TailStream {
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
+    spanLinks?: TailEventHandler<SpanLinks>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

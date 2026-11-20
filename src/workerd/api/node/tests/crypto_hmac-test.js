@@ -550,3 +550,18 @@ export const hmac_misc_tests = {
     }
   },
 };
+
+export const hmacDigestAfterStreamEnd = {
+  test() {
+    // Ending the stream computes the digest, and a later digest() returns the cached copy.
+    const expected = crypto
+      .createHmac('sha256', 'key')
+      .update('abc')
+      .digest('hex');
+    const hmac = crypto.createHmac('sha256', 'key');
+    hmac.end('abc');
+    assert.strictEqual(hmac.read().toString('hex'), expected);
+    assert.strictEqual(hmac.digest('hex'), expected);
+    assert.strictEqual(hmac.digest('hex'), '');
+  },
+};

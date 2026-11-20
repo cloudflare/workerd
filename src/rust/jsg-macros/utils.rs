@@ -347,6 +347,12 @@ pub fn is_option_type(ty: &syn::Type) -> bool {
         if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
 }
 
+/// Returns true if `ty` is `jsg::LenientOption<T>`.
+pub fn is_lenient_option_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "LenientOption"))
+}
+
 /// Returns the tokens of `ty` with every named lifetime other than `'static`
 /// replaced by `'_`.
 ///
@@ -388,6 +394,8 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
 const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
+/// The numeric types in `FAST_API_RETURN_TYPES`, each of which converts to `f64` without loss.
+const NUMERIC_RETURN_TYPES: &[&str] = &["i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
@@ -422,6 +430,44 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
         },
     };
     fast_return.then_some(args)
+}
+
+/// How a callback sets a primitive return value in V8.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PrimitiveReturn {
+    /// `()`: V8's default result, `undefined`, stays.
+    Void,
+    /// `bool`: set with `set_return_boolean`.
+    Boolean,
+    /// A type in `NUMERIC_RETURN_TYPES`: set with `set_return_number`.
+    Number,
+}
+
+/// How a callback sets the result of `sig` in V8, if `sig` returns `()` or one of the types a
+/// fast callback returns, directly or in a `Result`. None of these keeps a `creator` (see
+/// `ToJS::to_js_with_creator`). An `async fn` returns a future, so it has no primitive result.
+pub fn primitive_return(sig: &syn::Signature) -> Option<PrimitiveReturn> {
+    if sig.asyncness.is_some() {
+        return None;
+    }
+    let syn::ReturnType::Type(_, ty) = &sig.output else {
+        return Some(PrimitiveReturn::Void);
+    };
+    let mut ty = ty.as_ref();
+    if is_result_type(ty)
+        && let syn::Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ok)) = args.args.first()
+    {
+        ty = ok;
+    }
+    match ty {
+        syn::Type::Tuple(tuple) if tuple.elems.is_empty() => Some(PrimitiveReturn::Void),
+        ty if is_named_type(ty, &["bool"]) => Some(PrimitiveReturn::Boolean),
+        ty if is_named_type(ty, NUMERIC_RETURN_TYPES) => Some(PrimitiveReturn::Number),
+        _ => None,
+    }
 }
 
 /// Whether `ty` is one of `names`, written bare.

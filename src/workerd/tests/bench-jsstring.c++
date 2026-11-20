@@ -188,13 +188,15 @@ static void JsString_Utf8Length_Latin1_NonFlat_256(benchmark::State& state) {
     auto piece = createLatin1String<32>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 8 pieces (depth ~7-8)
-      auto result = piece;
-      for (int i = 1; i < 8; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 8 pieces (depth ~7-8)
+        auto result = piece;
+        for (int i = 1; i < 8; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -207,13 +209,15 @@ static void JsString_Utf8Length_Latin1_NonFlat_1024(benchmark::State& state) {
     auto piece = createLatin1String<64>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 16 pieces (depth ~15-16)
-      auto result = piece;
-      for (int i = 1; i < 16; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 16 pieces (depth ~15-16)
+        auto result = piece;
+        for (int i = 1; i < 16; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -226,13 +230,15 @@ static void JsString_Utf8Length_Latin1_NonFlat_8192(benchmark::State& state) {
     auto piece = createLatin1String<256>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 32 pieces (depth ~31-32)
-      auto result = piece;
-      for (int i = 1; i < 32; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 32 pieces (depth ~31-32)
+        auto result = piece;
+        for (int i = 1; i < 32; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -245,13 +251,15 @@ static void JsString_Utf8Length_Utf16_NonFlat_256(benchmark::State& state) {
     auto piece = createUtf16String<32>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 8 pieces (depth ~7-8)
-      auto result = piece;
-      for (int i = 1; i < 8; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 8 pieces (depth ~7-8)
+        auto result = piece;
+        for (int i = 1; i < 8; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -264,13 +272,15 @@ static void JsString_Utf8Length_Utf16_NonFlat_1024(benchmark::State& state) {
     auto piece = createUtf16String<64>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 16 pieces (depth ~15-16)
-      auto result = piece;
-      for (int i = 1; i < 16; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 16 pieces (depth ~15-16)
+        auto result = piece;
+        for (int i = 1; i < 16; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -283,13 +293,15 @@ static void JsString_Utf8Length_Utf16_NonFlat_8192(benchmark::State& state) {
     auto piece = createUtf16String<256>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 32 pieces (depth ~31-32)
-      auto result = piece;
-      for (int i = 1; i < 32; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 32 pieces (depth ~31-32)
+        auto result = piece;
+        for (int i = 1; i < 32; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -302,13 +314,15 @@ static void JsString_Utf8Length_Utf16_Invalid_NonFlat_256(benchmark::State& stat
     auto piece = createInvalidUtf16String<32>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 8 pieces (depth ~7-8)
-      auto result = piece;
-      for (int i = 1; i < 8; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 8 pieces (depth ~7-8)
+        auto result = piece;
+        for (int i = 1; i < 8; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -321,13 +335,15 @@ static void JsString_Utf8Length_Utf16_Invalid_NonFlat_1024(benchmark::State& sta
     auto piece = createInvalidUtf16String<64>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 16 pieces (depth ~15-16)
-      auto result = piece;
-      for (int i = 1; i < 16; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 16 pieces (depth ~15-16)
+        auto result = piece;
+        for (int i = 1; i < 16; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }
@@ -340,13 +356,15 @@ static void JsString_Utf8Length_Utf16_Invalid_NonFlat_8192(benchmark::State& sta
     auto piece = createInvalidUtf16String<256>(js);
 
     for (auto _: state) {
-      // Build deep tree by concatenating 32 pieces (depth ~31-32)
-      auto result = piece;
-      for (int i = 1; i < 32; i++) {
-        result = jsg::JsString::concat(js, result, piece);
-      }
-      KJ_ASSERT(!result.isFlat());
-      benchmark::DoNotOptimize(result.utf8Length(js));
+      js.withinHandleScope([&] {
+        // Build deep tree by concatenating 32 pieces (depth ~31-32)
+        auto result = piece;
+        for (int i = 1; i < 32; i++) {
+          result = jsg::JsString::concat(js, result, piece);
+        }
+        KJ_ASSERT(!result.isFlat());
+        benchmark::DoNotOptimize(result.utf8Length(js));
+      });
     }
   });
 }

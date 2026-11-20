@@ -13,6 +13,7 @@ import {
   finalizeBootstrap,
   isRestoringSnapshot,
   KEEP_RESTORED_IMPORT_CACHES,
+  LOADED_BAD_ENTROPY_FLAG_ADDR,
   LOADED_SNAPSHOT_TYPE,
   type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
@@ -39,7 +40,6 @@ import {
   invalidateCaches,
   loadPythonMod,
   reportError,
-  setInternalErrorReporter,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
@@ -48,14 +48,11 @@ import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
 import { instantiateEmscriptenModule } from 'pyodide-internal:emscriptenSetup';
+import {
+  setGetRandomValues,
+  setSetTimeout,
+} from 'pyodide-internal:builtin_wrappers';
 import { createImportProxy } from 'pyodide-internal:serializeJsModule';
-
-// Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
-// See util.ts for why this indirection is needed (pool bundling constraints).
-// TODO: Remove once the Python pool is gone and util.ts can import FatalReporter directly.
-setInternalErrorReporter(() => {
-  FatalReporter.reportPythonWorkersInternalError();
-});
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -70,7 +67,7 @@ function prepareWasmLinearMemory(
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   enterJaegerSpan('entropy_after_runtime_init', () => {
-    entropyAfterRuntimeInit(Module);
+    entropyAfterRuntimeInit(Module, LOADED_BAD_ENTROPY_FLAG_ADDR);
   });
   if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
@@ -276,8 +273,8 @@ export async function loadPyodide(
     } else {
       Module.API.config.jsglobals = globalThis;
     }
-    Module.setGetRandomValues(getRandomValues);
-    Module.setSetTimeout(
+    setGetRandomValues(getRandomValues);
+    setSetTimeout(
       makeSetTimeout(Module),
       clearTimeout,
       setInterval,
@@ -343,5 +340,5 @@ export async function loadPyodide(
 
 export function beforeRequest(Module: Module): void {
   entropyBeforeRequest(Module);
-  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
+  setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 }

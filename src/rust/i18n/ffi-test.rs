@@ -17,18 +17,9 @@ fn utf16le(text: &str) -> Vec<u8> {
     text.encode_utf16().flat_map(u16::to_le_bytes).collect()
 }
 
-/// Opens a converter for `to` with the `?` substitute `dispatch` configures.
-fn substituting_converter(to: Encoding) -> Converter {
-    let converter = Converter::open(to).unwrap();
-    converter
-        .set_subst_chars(&"?".repeat(converter.min_char_size()))
-        .unwrap();
-    converter
-}
-
 /// Runs [`convert_ex`] the way `dispatch` does, and returns what it wrote.
 fn convert(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
-    let to = substituting_converter(to);
+    let to = Converter::open(to).unwrap();
     let from = Converter::open(from).unwrap();
     let mut target = vec![0; source.len() * to.max_char_size()];
     let written = convert_ex(&to, &from, source, &mut target).unwrap();
@@ -36,49 +27,14 @@ fn convert(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
     target
 }
 
-/// Runs [`from_uchars`] the way `dispatch` does, and returns what it wrote.
-fn from_utf16le(to: Encoding, source: &[u8]) -> Vec<u8> {
-    let to = substituting_converter(to);
-    let mut target = vec![0; source.len() / 2 * to.max_char_size()];
-    let written = from_uchars(&to, source, &mut target).unwrap();
-    target.truncate(written);
-    target
-}
-
 // ICU. These pin down the ICU behaviour `dispatch` relies on.
 
 #[test]
-fn char_sizes_come_from_icu() {
+fn max_char_sizes_come_from_icu() {
     let _harness = init_icu();
-    for (encoding, min, max) in [
-        (Encoding::Ascii, 1, 1),
-        (Encoding::Latin1, 1, 1),
-        (Encoding::Utf8, 1, 3),
-        (Encoding::Utf16Le, 2, 2),
-    ] {
+    for (encoding, max) in [(Encoding::Utf8, 3), (Encoding::Utf16Le, 2)] {
         let converter = Converter::open(encoding).unwrap();
-        assert_eq!(converter.min_char_size(), min, "{encoding:?}");
         assert_eq!(converter.max_char_size(), max, "{encoding:?}");
-    }
-}
-
-#[test]
-fn ascii_and_latin1_are_windows_1252() {
-    // Chromium's ICU makes `us-ascii` and `iso8859-1` aliases of
-    // windows-1252.
-    let _harness = init_icu();
-    let euro = "\u{20ac}".as_bytes();
-    for encoding in [Encoding::Ascii, Encoding::Latin1] {
-        assert_eq!(convert(encoding, Encoding::Utf8, &[0x80]), euro);
-        assert_eq!(
-            convert(encoding, Encoding::Utf8, &[0x81]),
-            "\u{81}".as_bytes()
-        );
-        assert_eq!(convert(Encoding::Utf8, encoding, euro), [0x80]);
-        assert_eq!(
-            convert(encoding, encoding, &[0x61, 0x80, 0xff]),
-            [0x61, 0x80, 0xff]
-        );
     }
 }
 
@@ -101,49 +57,15 @@ fn ill_formed_input_decodes_to_replacement_characters() {
 }
 
 #[test]
-fn unrepresentable_characters_encode_as_question_marks() {
-    let _harness = init_icu();
-    assert_eq!(
-        convert(Encoding::Utf8, Encoding::Latin1, "é☕".as_bytes()),
-        [0xe9, b'?']
-    );
-    // A supplementary character is one character, so one `?`.
-    assert_eq!(
-        convert(Encoding::Utf8, Encoding::Ascii, "😀".as_bytes()),
-        b"?"
-    );
-    assert_eq!(from_utf16le(Encoding::Ascii, &utf16le("😀")), b"?");
-    assert_eq!(
-        from_utf16le(Encoding::Latin1, &utf16le("é☕")),
-        [0xe9, b'?']
-    );
-}
-
-#[test]
-fn unrepresentable_default_ignorables_are_dropped() {
-    let _harness = init_icu();
-    assert_eq!(
-        convert(
-            Encoding::Utf8,
-            Encoding::Latin1,
-            "a\u{200b}b\u{feff}".as_bytes()
-        ),
-        b"ab"
-    );
-    assert_eq!(from_utf16le(Encoding::Ascii, &utf16le("a\u{200b}b")), b"ab");
-}
-
-#[test]
 fn a_short_target_is_a_failure() {
     let _harness = init_icu();
-    let to = substituting_converter(Encoding::Utf8);
-    let from = Converter::open(Encoding::Latin1).unwrap();
+    let to = Converter::open(Encoding::Utf8).unwrap();
+    let from = Converter::open(Encoding::Utf8).unwrap();
     let mut target = [0; 2];
-    assert_eq!(convert_ex(&to, &from, &[0xe9, 0xe9], &mut target), None);
-
-    let to = substituting_converter(Encoding::Latin1);
-    let mut target = [0; 1];
-    assert_eq!(from_uchars(&to, &utf16le("ab"), &mut target), None);
+    assert_eq!(
+        convert_ex(&to, &from, "\u{e9}\u{e9}".as_bytes(), &mut target),
+        None
+    );
 }
 
 // simdutf. These pin down the simdutf behaviour `dispatch` relies on.

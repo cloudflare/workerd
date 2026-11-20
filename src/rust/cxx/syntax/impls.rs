@@ -73,7 +73,7 @@ impl Hash for Type {
             Self::Fn(t) => t.hash(state),
             Self::SliceRef(t) => t.hash(state),
             Self::Array(t) => t.hash(state),
-            Self::Void(_) | Self::KjDate(_) => {}
+            Self::Void(_) | Self::KjDate(_) | Self::KjException(_) => {}
             Self::Future(t) => t.hash(state),
         }
     }
@@ -98,6 +98,7 @@ impl PartialEq for Type {
             (Self::SliceRef(lhs), Self::SliceRef(rhs)) => lhs == rhs,
             (Self::Void(_), Self::Void(_)) => true,
             (Self::KjDate(_), Self::KjDate(_)) => true,
+            (Self::KjException(_), Self::KjException(_)) => true,
             (Self::Future(lhs), Self::Future(rhs)) => lhs == rhs,
             (_, _) => false,
         }

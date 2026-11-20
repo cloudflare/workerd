@@ -37,13 +37,10 @@ all of these hold:
   top-level code has to run there for DevTools to see its console output and stop at its
   breakpoints;
 - `supportsStartupSnapshot()` accepts the Worker: ES-modules syntax (not a service-worker
-  script), no Wasm modules, not a Python Worker, the legacy module registry (no
-  `new_module_registry`), the `typescript_implemented_streams` flag, and only bindings of kinds
-  that transfer (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). The C++
-  streams implementation leaves a pending `pull()` as a C++ promise continuation reachable from
-  the context, which `CreateBlob()` cannot serialize; the TypeScript implementation keeps it in
-  JavaScript. A dynamically loaded Worker (`dynamicSource`), whose `env` arrives as capabilities
-  rather than channel numbers, never qualifies.
+  script), no Wasm modules, not a Python Worker, and only bindings of kinds that transfer
+  (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). A dynamically loaded
+  Worker (`dynamicSource`), whose `env` arrives as capabilities rather than channel numbers,
+  never qualifies.
 
 ## The zygote (PREPARE_SNAPSHOT)
 
@@ -105,7 +102,10 @@ all of these hold:
 6. The zygote's global scope is cleared, the script's module context handle dropped, and
    `IsolateBase::createSnapshotBlob()` runs. Its steps are numbered in `setup.c++`:
    1. `bakeModuleRegistryIntoSnapshot()`: every materialized module handle of the legacy registry
-      is pinned and recorded in `artifact.moduleRecords`; the handles are reset.
+      is pinned and recorded in `artifact.moduleRecords`; the handles are reset. With the new
+      module registry, `modules::recordIsolateModuleRegistryForSnapshot()` instead pins the
+      `v8::Module` of each of the registry's resolutions (a context type and a specifier, query
+      and fragment included) and records them in `artifact.newModuleRegistryRecords`.
    2. `WrappablesSerializeMetadata::recordLiveWrappables()`: every live JSG object is recorded
       while it still exists, by its tag alone for a stateless type, as a `snapshotClone()`
       otherwise (`artifact.liveWrappables`), keyed by its CppgcShim address. The metadata roots
@@ -118,8 +118,10 @@ all of these hold:
       V8's cleanup task pops each cell and the callback call throws instead of running. No
       JavaScript runs past step 2. Any such cell fails the zygote: those objects are C++-held
       state the snapshot does not carry, and their cleanups must not be dropped silently.
-   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`,
-      template handles drained from Rust JSG).
+   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`).
+      The templates of Rust JSG resource types are first pinned at isolate level and recorded by
+      `TypeId` in `artifact.rustResourceTemplates` (`pinResourceTemplatesIntoSnapshot()`,
+      `src/rust/jsg/ffi.h`).
    5. `bakeConstructorTemplatesIntoSnapshot()`: every materialized JSG resource constructor
       template is pinned at isolate level and recorded, by position, in
       `artifact.constructorTemplateIndices`.
@@ -173,6 +175,12 @@ long as the isolate does. In order:
    (`tryTakeSnapshotModule()`) and still registers the lazily compilable builtins the zygote
    never touched, then `applySnapshotSeeds()`. Runtime `import()`, `require()` and the
    `Buffer`/`process` globals therefore resolve to the instances the top level evaluated against.
+   With the new module registry, `ModuleRegistry::attachToIsolate()` instead rebuilds the
+   isolate's resolution and instantiation tables from `newModuleRegistryRecords`
+   (`IsolateModuleRegistry::restoreFromSnapshot()`), so that `import()` and `import.meta` find
+   the modules the top level evaluated. Every synthetic module of the new registry is created
+   with the same evaluation steps, which `Worker::Isolate` registers as an external reference
+   (`getSyntheticModuleEvaluationStepsRef()`).
 5. The `Worker` constructor takes `env` from the snapshot (`extractOnceFromSnapshot()`), complete
    with its bindings: `factory_new_worker()` compiles no bindings for a Worker started from a
    snapshot, while `ctx.exports` is still built for it afterwards, by `worker_set_ctx_exports()`.
@@ -187,12 +195,14 @@ long as the isolate does. In order:
 | C++ callback addresses the blob refers to    | `registerExternalReference()` table                         | `externalReferences`              |
 | `env` with its bindings, main module namespace | context-level `AddData`, fixed indices                     | `blob` (indices in `snapshot.h`)  |
 | JSG resource constructor templates           | isolate-level `AddData`, by position                        | `constructorTemplateIndices`      |
+| Rust JSG resource templates                  | isolate-level `AddData`, by `TypeId`                        | `rustResourceTemplates`           |
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
 | `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
 | `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
+| New module registry's resolutions            | pinned `v8::Module`s, rebuilt into the restored registry    | `newModuleRegistryRecords`        |
 | Global-scope event listeners                 | pinned identity, callback and receiver; re-registered in C++ | `listenerRecords`                |
 
 Not transferred, by design: `ctx.exports` (built for the real Worker after the zygote has run),
@@ -215,18 +225,38 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   type's `Lock&` constructor, or its default constructor. The type must be `final` (a
   `static_assert` enforces it), since a subclass would inherit the flag.
 - an override of `Wrappable::snapshotClone()` returning a deep, isolate-independent copy
-  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`): no V8 handles, no `jsg::Ref` members,
-  no IoContext. It is called in the zygote on the live original, and once more per started
-  worker on the stored copy.
+  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`, `Performance`): no V8 handles, no
+  IoContext, and no `jsg::Ref` members except to a fresh object the copy owns, which has never
+  been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
+  `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
+  live original, and once more per started worker on the stored copy.
+- for a Rust JSG resource, an impl of `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`); see
+  below. `#[jsg_resource(snapshot_stateless)]` (`UrlUtil`, `DnsUtil`, `InspectorModule`)
+  generates one, with an empty snapshot, for a type that implements `Default`. Every Rust
+  resource shares one CppHeapPointerTag, so a Rust type is never recorded by tag alone: it goes
+  through the Rust-side `Wrappable`'s `snapshotClone()`.
 
 A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
 
-A `jsg::Function` the top level keeps (the function `createRequire()` returns, for example)
-transfers if its functor provides `Impl clone() const`; V8 patch 0052 keeps functions created by
-`v8::Function::New()` in the context snapshot so that their wrapper goes through the same path.
+`jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
+two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
+`snapshot_references()` and `snapshot_relink()` for their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
+into its new `Realm` (`restoreResourceTemplatesFromSnapshot()`) before anything is wrapped, so
+that its new wrappers of a type and the restored ones share a template. `relinkReferences()` runs
+with the new context entered, for the `Lock` of `snapshot_relink()`.
+
+A type whose state lives on the context, and so does not exist yet when `snapshotClone()` runs
+for the started worker, also overrides `Wrappable::snapshotContextReady()`. The file system
+handles bind to the worker's VFS there, when the `Worker` constructor, having installed the VFS
+on the context, enters it and calls `IsolateBase::notifySnapshotContextReady()`.
+
+A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
+registry's `import.meta.resolve`, for example) transfers if its functor provides
+`Impl clone() const`; V8 patch 0052 keeps functions created by `v8::Function::New()` in the
+context snapshot so that their wrapper goes through the same path.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -235,9 +265,14 @@ the zygote's error
 (`live wrapper types that neither set jsgSnapshotStateless nor implement snapshotClone() ...`).
 
 A binding type's `snapshotClone()` copies the binding's description (its channel number and
-names) and returns none when the object is bound to one IoContext instead (a live channel or
-factory, a stub minted per request) or has registered a connect override on the zygote's global
-scope (`ctx.mapVirtualHost()`), which the restored Worker's fresh global scope would lack. A
+names) and returns none when the object is bound to one IoContext instead (a live channel or an
+IoContext-bound factory, a stub minted per request) or has registered a connect override on the
+zygote's global scope (`ctx.mapVirtualHost()`, or reading an `ExtendedFetcher`'s `host`), which
+the restored Worker's fresh global scope would lack. A `Fetcher` on a
+`CrossContextOutgoingFactory`, which is not tied to one IoContext, transfers if the factory copies
+itself (`CrossContextOutgoingFactory::cloneForSnapshot()`; none by default). An embedder's
+loopback Durable Object namespace in `env` transfers as its channel numbers and a copy of its ID
+factory, and a `WrappedBinding` with a copy of its `Fetcher` (`Fetcher::cloneForSnapshot()`). A
 subclass that does not override `snapshotClone()` fails the zygote rather than transferring as
 its base type.
 
@@ -246,15 +281,19 @@ its base type.
 Two outcomes are possible for a Worker that qualifies:
 
 - **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a module
-  fallback service, a service-worker script, Wasm modules, Python, the new module registry, C++
-  streams, or a binding
+  fallback service, a service-worker script, Wasm modules, Python, or a binding
   of a kind that cannot transfer (`cryptoKey`, `memoryCache`, `wrapped`, logged at INFO as
   `startup snapshot skipped: a binding of this kind cannot be transferred`), or a dynamically
   loaded Worker. No zygote runs.
 - **The zygote fails.** A KJ exception while compiling, evaluating, recording or serializing: a
   top-level exception or parse error (the `Worker` constructor throws before anything is
-  recorded), an unclonable type reachable from the context such as an `AbortController` or an
-  RPC method taken off a stub (`const { ping } = env.RPC`), a restore-time global the top level
+  recorded), an unclonable type reachable from the context such as an aborted `AbortSignal`, an
+  RPC method taken off a stub (`const { ping } = env.RPC`) or a C++ promise continuation that is
+  still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
+  left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
+  their callbacks as external references while a snapshot is prepared, so that the serializer
+  reports the continuation's opaque data instead of aborting on an unknown address), a
+  restore-time global the top level
   redefined, a listener registered with a `signal` option, FinalizationRegistry cleanups that
   keep dooming new objects or that become due only once the zygote's objects are destroyed, ...
   Or an error reported to the zygote's `ErrorReporter` without an exception (a module that does
@@ -272,6 +311,15 @@ Two outcomes are possible for a Worker that qualifies:
 V8 fatal errors (`CHECK` failures) abort the process and cannot be caught at either stage. The
 one known way for a Worker's top level to cause one, a duplicate of a property V8 adds on restore,
 is what the restore-time-globals handling exists to prevent.
+
+A typed array that keeps its bytes off the V8 heap, over a zero-length ArrayBuffer that is not
+detached (`new Uint8Array(new ArrayBuffer(0))`), neither fails the zygote nor restores soundly: V8
+serializes its backing store although it holds no bytes, and on restore copies the zero bytes to
+the null start of a zero-length allocation. That is undefined behavior, which UBSan aborts on. The
+zygote cannot detect it in every build: the internal-field serializer that would see the view is
+not called for ArrayBuffer views when V8 is built with `v8_array_buffer_view_internal_field_count
+= 0`. workerd's own modules avoid leaving such a view reachable at their top level (`node:zlib`'s
+flush buffers are `Buffer.alloc(0)`, which V8 keeps on its heap).
 
 ## Console output
 
@@ -301,11 +349,14 @@ once.
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `dropUnreachableWrappables()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
-| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, and the `process`/`Buffer` globals |
+| `src/rust/jsg-test/tests/startup_snapshot.rs`                       | Rust resources: state, shared templates, relinked references, and a type without `SnapshotTransfer` |
+| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, the `process`/`Buffer` globals, and the lazy `MessageChannel`/`MessagePort` globals, read and unread at the top level |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
 | `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and ineligible cases fall back |
+| `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
+| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

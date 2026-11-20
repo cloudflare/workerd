@@ -248,6 +248,18 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Generator<T>`         | Sync generator                   |
 | `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
+| `jsg::TracedOwn<T>`         | Owned heap object with handles   |
+
+Hold a heap object whose handles you visit in a `jsg::TracedOwn<T>`, not a `kj::Own<T>`.
+Moving a `kj::Own<T>` moves only the pointer, so an object moved out of the owner that
+visited it keeps traced handles that nothing visits, and the GC can free their targets
+while the object still uses them. A `TracedOwn<T>` makes them strong again when it moves.
+This is behind the `gc-complete-tracing` autogate; with it disabled, a `TracedOwn<T>` behaves
+like a `kj::Own<T>`.
+The `jsg-traced-own` clang-tidy check flags a `visitForGc()`, or a helper handed the
+visitor, that visits through a `kj::Own`, and moving or swapping a container whose
+elements hold a `TracedOwn`, or a struct that holds such a container. Moving a
+non-reference local isn't flagged, since the function that moves it filled it.
 
 **Not GC-visitable** (compile error if visited):
 `jsg::WeakRef<T>`.
@@ -618,7 +630,7 @@ Guide: [docs/startup-snapshot.md](../../../docs/startup-snapshot.md). Declaratio
 | Declaration on a resource type | Meaning |
 | --- | --- |
 | `static constexpr bool jsgSnapshotStateless = true;` | Any fresh instance is interchangeable: the snapshot records only the wrapper's tag, and the restored wrapper gets an instance from the type's `Lock&` (or default) constructor |
-| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles, `jsg::Ref` or IoContext); called in the zygote on the original and again per started worker on the stored copy |
+| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles or IoContext, and no `jsg::Ref` except to a fresh, never-wrapped object the copy owns); called in the zygote on the original and again per started worker on the stored copy |
 | neither | Not transferable: a Worker whose top level leaves an instance reachable starts without a snapshot |
 
 Both run outside any IoContext and must not throw. `IsolateBase::isPreparingSnapshot()` and

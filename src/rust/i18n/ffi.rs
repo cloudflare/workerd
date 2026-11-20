@@ -102,7 +102,7 @@ unsafe fn transcode(
     // feature callback operates only on safe JSG types.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            crate::transcode_impl(lock, source, from_encoding, to_encoding)
+            crate::transcode(lock, source, from_encoding, to_encoding)
         })
     }
 }
@@ -121,16 +121,18 @@ fn is_failure(error: sys::UErrorCode) -> bool {
 
 /// The ICU converter name for `encoding`.
 ///
+/// Only UTF-8 and UTF-16LE have one. Chromium's ICU data makes `us-ascii` and
+/// `iso8859-1` aliases of windows-1252, so `dispatch` converts ASCII and
+/// Latin-1 through [`crate::single_byte`] instead.
+///
 /// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
-/// than a real Rust enum, which needs a catch-all arm. An unknown encoding is
-/// unreachable there: `dispatch` rejects an unknown source encoding up front,
+/// than a real Rust enum, which needs a catch-all arm. Any other encoding is
+/// unreachable there: `dispatch` opens converters only for UTF-8 and UTF-16LE,
 /// the C++ `fromImpl` conversion rejects anything but the four transcodable
 /// encodings before Rust is entered, and a panic in Rust reaches C++ as a
 /// `kj::Exception`.
 fn icu_name(encoding: Encoding) -> &'static CStr {
     match encoding {
-        Encoding::Ascii => c"us-ascii",
-        Encoding::Latin1 => c"iso8859-1",
         Encoding::Utf8 => c"utf-8",
         Encoding::Utf16Le => c"utf16le",
         _ => unreachable!("invalid encoding {encoding:?}"),
@@ -168,46 +170,6 @@ impl Converter {
         let size = unsafe { versioned_function!(ucnv_getMaxCharSize)(self.cnv) };
         // ICU reports a small positive `int8_t`.
         usize::from(size.unsigned_abs())
-    }
-
-    /// The fewest bytes one character can occupy in this converter's
-    /// encoding, from `ucnv_getMinCharSize`.
-    pub fn min_char_size(&self) -> usize {
-        // SAFETY: `self.cnv` is a live converter returned by `ucnv_open`.
-        let size = unsafe { versioned_function!(ucnv_getMinCharSize)(self.cnv) };
-        // ICU reports a small positive `int8_t`.
-        usize::from(size.unsigned_abs())
-    }
-
-    /// Sets the converter's substitute character sequence, used in place of
-    /// unmappable characters during conversion. An empty `substitute` leaves
-    /// ICU's default in place.
-    pub fn set_subst_chars(&self, substitute: &str) -> Result<(), TranscodeError> {
-        if substitute.is_empty() {
-            return Ok(());
-        }
-        // ICU takes the length as an `int8_t` and reads a negative length as
-        // "NUL-terminated", which `substitute` is not. Its own limit on
-        // substitute sequences is far lower still.
-        let length =
-            i8::try_from(substitute.len()).map_err(|_| TranscodeError::SetSubstituteCharsFailed)?;
-
-        let mut err = sys::UErrorCode::U_ZERO_ERROR;
-        // SAFETY: `self.cnv` is a live converter, and `substitute` outlives the
-        // call and is `length` bytes long. ICU takes the sequence as bytes and
-        // does not require NUL termination when given an explicit length.
-        unsafe {
-            versioned_function!(ucnv_setSubstChars)(
-                self.cnv,
-                substitute.as_ptr().cast(),
-                length,
-                &raw mut err,
-            );
-        }
-        if is_failure(err) {
-            return Err(TranscodeError::SetSubstituteCharsFailed);
-        }
-        Ok(())
     }
 }
 
@@ -263,37 +225,6 @@ pub fn convert_ex(
     usize::try_from(written).ok()
 }
 
-/// Converts UTF-16LE `source` (as raw bytes) to `to`'s encoding via ICU's
-/// `ucnv_fromUChars`. A trailing odd byte is ignored. Returns the number of
-/// bytes written to `target`, or `None` if ICU reports failure.
-#[must_use]
-pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
-    let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
-    let dest_capacity = i32::try_from(target.len()).ok()?;
-    let mut err = sys::UErrorCode::U_ZERO_ERROR;
-
-    // SAFETY: the pointers and lengths describe the two live slices. `source`
-    // need not be `u16`-aligned -- it is caller-supplied buffer contents, which
-    // a Uint8Array can expose at an odd byteOffset -- and is reinterpreted as
-    // `UChar*` in place. Casting a raw pointer is well-defined in Rust
-    // regardless of alignment; no reference to the misaligned data is ever
-    // formed on this side.
-    let len = unsafe {
-        versioned_function!(ucnv_fromUChars)(
-            to.cnv,
-            target.as_mut_ptr().cast(),
-            dest_capacity,
-            source.as_ptr().cast(),
-            src_length,
-            &raw mut err,
-        )
-    };
-    if is_failure(err) {
-        return None;
-    }
-    usize::try_from(len).ok()
-}
-
 // simdutf
 //
 // simdutf's C++ functions, called through the inline forwarders in `ffi.h`,
@@ -310,7 +241,9 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
 // that estimate.
 //
 // UTF-16 is passed to simdutf as raw bytes reinterpreted as `char16_t*`, and
-// so need not be `u16`-aligned; see [`from_uchars`].
+// so need not be `u16`-aligned. Casting a raw pointer is well-defined in Rust
+// regardless of alignment, and no reference to misaligned data is formed on
+// this side.
 
 /// Widens Latin-1 `source` into UTF-16LE (written to `target` as raw bytes)
 /// via `simdutf::convert_latin1_to_utf16`. Returns the number of UTF-16 code

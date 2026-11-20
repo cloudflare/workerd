@@ -107,19 +107,13 @@ export default {
     disabledTests: true,
   },
   'Create-extensions-empty.any.js': {
-    comment: 'workerd WebSocket.extensions is null instead of empty string',
-    expectedFailures: [
-      "Create WebSocket - wsocket.extensions should be set to '' after connection is established - Connection should be closed",
-    ],
     replace: removeUseCapture,
   },
-  'Create-http-urls.any.js': {
-    comment: 'workerd requires ws/wss scheme, not http/https',
-    expectedFailures: ['WebSocket: ensure both HTTP schemes are supported'],
-  },
+  'Create-http-urls.any.js': {},
   'Create-invalid-urls.any.js': {},
   'Create-non-absolute-url.any.js': {
-    comment: 'workerd throws SyntaxError for non-absolute URLs',
+    comment:
+      'A Worker has no base URL, so a relative URL throws a SyntaxError, as fetch() rejects it. The test resolves against location, which only the harness defines.',
     expectedFailures: [
       // Trailing space is significant: the subtest name interpolates the input, which is ''.
       'Create WebSocket - Pass a non absolute URL: ',
@@ -171,9 +165,7 @@ export default {
     disabledTests: true,
   },
   'Send-65K-data.any.js': {
-    comment:
-      'workerd returns byte count instead of undefined for bufferedAmount; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-before-open.any.js': {
     comment:
@@ -182,102 +174,71 @@ export default {
       'Send data on a WebSocket before connection is opened - INVALID_STATE_ERR is returned',
     ],
   },
-  // The following Send tests all check bufferedAmount which returns byte count in workerd
-  // instead of undefined as expected by the spec. They also hang after failures.
   'Send-binary-65K-arraybuffer.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybuffer.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-float16.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-float32.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-float64.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-int16-offset.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-int32.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-int8.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-uint16-offset-length.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-uint32-offset.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-uint8-offset-length.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-arraybufferview-uint8-offset.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-binary-blob.any.js': {
     comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
+      'workerd send() does not accept a Blob, so no message is received and the test hangs',
     disabledTests: true,
   },
   'Send-data.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-data.worker.js': {
     comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+      'Loads its helpers with importScripts(), which is not available in workerd; Send-data.any.js covers the same case',
+    omittedTests: true,
   },
   'Send-null.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-paired-surrogates.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-unicode-data.any.js': {
-    comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-unpaired-surrogates.any.js': {
     comment:
-      'bufferedAmount returns byte count instead of undefined; test hangs',
-    disabledTests: true,
+      'send() does not replace an unpaired surrogate with U+FFFD as the standard requires, so the echo server never sends the message back',
+    expectedFailures: [
+      'Send unpaired surrogates on a WebSocket - Connection should be closed',
+    ],
+    replace: removeUseCapture,
   },
   'back-forward-cache-with-closed-websocket-connection.window.js': {
     comment: 'Back/forward cache tests are browser-specific',
@@ -342,12 +303,10 @@ export default {
       'Some interface/attribute tests still fail due to event handler and inherited property checks',
     expectedFailures: [
       'WebSocket interface: existence and properties of interface object',
-      'WebSocket interface: attribute bufferedAmount',
       'WebSocket interface: attribute onopen',
       'WebSocket interface: attribute onerror',
       'WebSocket interface: attribute onclose',
       'WebSocket interface: attribute onmessage',
-      'WebSocket interface: new WebSocket("ws://invalid") must inherit property "bufferedAmount" with the proper type',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onopen" with the proper type',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onerror" with the proper type',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onclose" with the proper type',

@@ -47,7 +47,6 @@ use worker::PromisedInterface;
 use crate::Result;
 use crate::bindings::ActorConfig;
 use crate::bridge::ffi;
-use crate::channels::AbortReason;
 use crate::channels::ActorClass;
 use crate::channels::ActorHooks;
 use crate::channels::ActorIdHandle;
@@ -64,6 +63,7 @@ use crate::channels::WorkerInterface;
 use crate::channels::attach;
 use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
+use crate::cluster::Count;
 use crate::cluster::Deadlines;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
@@ -427,12 +427,17 @@ impl ActorNamespace {
     /// The channel of the actor with `id`, started on first use. `persistent` is recorded on the
     /// channel: whether stubs to it may be stored.
     pub fn channel(&self, id: KjOwn<ActorIdHandle>, persistent: Persistent) -> Rc<dyn Channel> {
-        self.channel_for(id, persistent, false)
+        self.channel_for(id, persistent, false, None)
     }
 
-    /// The channel of the actor with `id` for a peer's or the debug port's request.
-    pub fn peer_channel(&self, id: KjOwn<ActorIdHandle>) -> Rc<dyn Channel> {
-        self.channel_for(id, false, true)
+    /// The channel of the actor with `id` for the debug port's request, or with `session` a
+    /// peer's, which counts the requests started on it.
+    pub fn peer_channel(
+        &self,
+        id: KjOwn<ActorIdHandle>,
+        session: Option<Rc<Count>>,
+    ) -> Rc<dyn Channel> {
+        self.channel_for(id, false, true, session)
     }
 
     fn channel_for(
@@ -440,6 +445,7 @@ impl ActorNamespace {
         id: KjOwn<ActorIdHandle>,
         persistent: Persistent,
         remote: bool,
+        session: Option<Rc<Count>>,
     ) -> Rc<dyn Channel> {
         if self.cluster().is_some() {
             return Rc::new(RoutedChannel {
@@ -447,6 +453,7 @@ impl ActorNamespace {
                 id,
                 persistent,
                 remote,
+                session,
                 bound: Rc::default(),
             });
         }
@@ -827,7 +834,43 @@ struct RoutedChannel {
     persistent: Persistent,
     /// Whether its requests come from a peer (or the debug port).
     remote: bool,
+    /// The peer's session, which counts the requests started on it.
+    session: Option<Rc<Count>>,
     bound: Rc<RefCell<Option<Rc<Resolved>>>>,
+}
+
+/// Answers `moved` to a peer's request for the object `key` that waited for its handoff, past
+/// the time to relay it (`ClusterNode::handed_off_relay_deadline`).
+fn handed_off(key: &str) -> crate::Error {
+    tracing::info!(
+        "cluster: {key}: a peer's request that waited for its handoff is answered moved"
+    );
+    moved("the Durable Object was handed off")
+}
+
+/// Whether `deadline` passed.
+fn passed(deadline: Option<Instant>) -> bool {
+    deadline.is_some_and(|deadline| Instant::now() >= deadline)
+}
+
+/// Resolves the object `id` of `namespace` for a request (`ActorNamespace::resolve`), which a
+/// relay of a request that waited for its handoff must have started by `relay_by`. Resolving runs
+/// nothing on the object, so a resolution that outlasts that is answered `moved` still: the outer
+/// error; the inner one is the resolution's.
+async fn resolve_by(
+    namespace: &ActorNamespace,
+    id: KjOwn<ActorIdHandle>,
+    remote: bool,
+    relay_by: Option<Instant>,
+    key: &str,
+) -> Result<Result<Resolved>> {
+    let resolving = namespace.resolve(id, remote);
+    match relay_by {
+        Some(by) => tokio::time::timeout_at(by, resolving)
+            .await
+            .map_err(|_| handed_off(key)),
+        None => Ok(resolving.await),
+    }
 }
 
 impl Channel for RoutedChannel {
@@ -856,14 +899,23 @@ impl Channel for RoutedChannel {
             ffi::stamp_current_actor_cause(metadata.as_mut());
         }
         let cause = Cause::of_request(&metadata);
-        let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
+        let peer = remote && self.session.is_some();
+        let counted = match namespace.cluster() {
+            Some(node) if remote => Some(node.peer_request(self.session.as_ref())?),
+            _ => None,
+        };
         Ok(PromisedInterface::new(async move {
             // A peer's request that waited for a handoff is sent on to where the object went, so
-            // that it does not outlast its caller's retries. It binds nothing, so that the peer's
-            // next request is answered `moved` and finds the object itself (`resolve`). Any request
-            // a draining instance sends to a peer names it, so that the peer does not route it back
-            // here on a route from before the handoff.
+            // that it does not outlast its caller's retries, while there is time for it: until
+            // `ClusterNode::handed_off_relay_deadline`, as it is resolved and as it starts. After
+            // that it is answered `moved`, nothing having run. The debug port's requests are always
+            // sent on. It binds nothing, so that the peer's next request is answered `moved` and
+            // finds the object itself (`resolve`). Any request a draining instance sends to a peer
+            // names it, so that the peer does not route it back here on a route from before the
+            // handoff.
             let mut forward = false;
+            // When a relay of a peer's request that waited for a handoff must have started by.
+            let mut relay_by: Option<Instant> = None;
             let resolved = loop {
                 // A resolution over a session known to be down would fail unsent: resolve again.
                 let live = bound
@@ -873,8 +925,9 @@ impl Channel for RoutedChannel {
                 let resolved = if let Some(resolved) = live.filter(|_| !forward) {
                     resolved
                 } else {
-                    let resolved = namespace.resolve(ffi::actor_id_clone(&id), remote && !forward);
-                    let resolved = Rc::new(resolved.await.map_err(not_delivered)?);
+                    let id = ffi::actor_id_clone(&id);
+                    let resolved = resolve_by(&namespace, id, remote && !forward, relay_by, &key);
+                    let resolved = Rc::new(resolved.await?.map_err(not_delivered)?);
                     let mut bound = bound.borrow_mut();
                     match &*bound {
                         _ if forward => resolved,
@@ -897,6 +950,12 @@ impl Channel for RoutedChannel {
                 // Nothing ran: once the object is gone, the request follows it.
                 let _ = handoff.wait_for(|done| *done).await;
                 forget(&bound, &resolved);
+                if peer && let Some(node) = namespace.cluster() {
+                    relay_by = node.handed_off_relay_deadline();
+                    if passed(relay_by) {
+                        return Err(handed_off(&key));
+                    }
+                }
                 forward = remote;
             };
             if matches!(&*resolved, Resolved::Remote(..))
@@ -924,6 +983,8 @@ impl Channel for RoutedChannel {
                         Err(e)
                     }
                 },
+                // Checked again as it starts: resolving can take long.
+                Resolved::Remote(..) if passed(relay_by) => Err(handed_off(&hook.key)),
                 Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_peer(
                     attach(connection.start_request(metadata), Rc::clone(connection)),
                     Box::new(hook),
@@ -1603,7 +1664,10 @@ impl ActorContainer {
                     )
                 })
             });
-            ffi::actor_abort(actor, &AbortReason(actor_reason));
+            match actor_reason {
+                Some(reason) => ffi::actor_abort(actor, cxx::KjException::from(reason)),
+                None => ffi::actor_stop(actor),
+            }
         }
         for facet in self.facets.borrow().values() {
             facet.abort(reason.clone());
@@ -1868,7 +1932,7 @@ async fn retire_actor(
     if let Err(error) = &result
         && container.require_not_broken().is_ok()
     {
-        ffi::actor_abort(&actor, &AbortReason(Some(error.clone())));
+        ffi::actor_abort(&actor, cxx::KjException::from(error.clone()));
         container.broken(error);
     }
     // Close the old actor's storage before releasing requests to its successor.
@@ -2000,7 +2064,7 @@ impl Drop for ActorContainer {
         }
         let actor = self.actor.get_mut().take();
         if let Some(actor) = &actor {
-            ffi::actor_abort(actor, &AbortReason(None));
+            ffi::actor_stop(actor);
         }
         drop(self.release(actor.as_deref()));
     }
@@ -2338,6 +2402,10 @@ pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadline
         .flat_map(|ns| ns.handoffs(deadlines.in_flight, &slots))
         .map(Some)
         .collect();
+    tracing::info!(
+        "cluster: stopping: handing off Durable Objects: {}",
+        handoffs.len()
+    );
     let heats: Vec<Heat> = handoffs.iter().flatten().map(|(heat, _)| *heat).collect();
     let order = cluster_logic::handoff::busiest_first(&heats, cluster::now_ms());
     let ordered: Vec<_> = order

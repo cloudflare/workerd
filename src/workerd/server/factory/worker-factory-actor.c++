@@ -730,8 +730,8 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   auto actor = kj::refcounted<Worker::Actor>(impl.getWorker(), *requestTracker, kj::mv(actorId),
       true, kj::mv(makeActorCache), classNameStr.asPtr(), kj::mv(propsValue), kj::mv(makeStorage),
       kj::addRef(*actorHooks), impl.timerChannel, kj::refcounted<ActorObserver>(),
-      hibernationManager.map([](kj::Rc<HibernationManager>& m) { return m.toOwn(); }),
-      hibernationEventTypeId, kj::mv(containerClient), kj::mv(images), *actorHooks);
+      kj::mv(hibernationManager), hibernationEventTypeId, kj::mv(containerClient), kj::mv(images),
+      *actorHooks);
   return kj::heap<ActorHandle>(kj::mv(actorHooks), kj::mv(requestTracker), kj::mv(actor));
 }
 
@@ -743,13 +743,12 @@ kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken) {
   return kj::mv(*broken);
 }
 
-void actor_abort(const ActorHandle& actor, const AbortReason& reason) {
-  // Raising the reason across the bridge is the bridge's own KjError -> kj::Exception conversion.
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { reason.raise(); })) {
-    actor.getActor().abort(exception);
-  } else {
-    actor.getActor().shutdown(0, kj::none);
-  }
+void actor_abort(const ActorHandle& actor, kj::Exception reason) {
+  actor.getActor().abort(reason);
+}
+
+void actor_stop(const ActorHandle& actor) {
+  actor.getActor().shutdown(0, kj::none);
 }
 
 bool actor_has_on_hibernate_handler(const ActorHandle& actor) {
@@ -772,7 +771,7 @@ bool actor_shutdown(
   KJ_IF_SOME(asyncLock, lock) {
     KJ_IF_SOME(manager, actor.getHibernationManager()) {
       actor.getWorker().runInLockScope(
-          *asyncLock, [&](Worker::Lock& lock) { manager.hibernateWebSockets(lock); });
+          *asyncLock, [&](Worker::Lock& lock) { manager->hibernateWebSockets(lock); });
     }
   }
   actor.shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
@@ -796,8 +795,7 @@ void actor_close_storage(const ActorHandle& actor) {
 }
 
 kj::Maybe<kj::Rc<HibernationManager>> actor_hibernation_manager(const ActorHandle& actor) {
-  return actor.getActor().getHibernationManager().map(
-      [](HibernationManager& m) { return kj::Rc<HibernationManager>(m.addRef()); });
+  return actor.getActor().getHibernationManager();
 }
 
 kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start) {

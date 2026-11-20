@@ -59,7 +59,7 @@ wd_rust_crate(
         "//src/workerd/io:compatibility-date_capnp_rust",
         "//src/workerd/jsg:exception_metadata_capnp_rust",
         "//src/workerd/jsg:rtti_capnp_rust",
-        "@crates_vendor//:capnp",
+        "@crates_vendor//capnp",
     ],
 )
 
@@ -93,6 +93,7 @@ wd_cc_library(
         ":v8.rs@cxx",
         "//src/rust/cxx/kj-rs",
         "//src/workerd/jsg:jsg-core",
+        "//src/workerd/util:sentry",
         "@workerd-v8//:v8",
     ],
 )

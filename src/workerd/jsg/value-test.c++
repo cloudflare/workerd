@@ -591,6 +591,9 @@ KJ_TEST("bigints") {
   e.expectEval("takeOneOfUint64(1)", "bigint", "1");
   e.expectEval("takeOneOfUint64(1n)", "bigint", "1");
 
+  e.expectEval("takeOneOfUint64(18446744073709551615n)", "bigint", "18446744073709551615");
+  e.expectEval("takeOneOfUint64(9223372036854775808n)", "bigint", "9223372036854775808");
+
   e.expectEval("takeOneOfInt64(1)", "bigint", "1");
   e.expectEval("takeOneOfInt64(1n)", "bigint", "1");
 
@@ -660,6 +663,18 @@ KJ_TEST("bigints range-check the untruncated number") {
       "API expects a positive bigint.");
   e.expectEval("takeUint64(123.5)", "string", "uint64_t: 123");
   e.expectEval("takeInt64(123.5)", "string", "int64_t: 123");
+
+  // The largest doubles below 2^64 and 2^63 convert, and 2^64 and 2^63 themselves, which the
+  // integer types' maximums round to as doubles, are out of range.
+  e.expectEval("takeUint64(2 ** 64 - 2048)", "string", "uint64_t: 18446744073709549568");
+  e.expectEval("takeUint64(2 ** 64)", "throws",
+      "TypeError: Value out of range. Must be less than or equal to 18446744073709551615.");
+  e.expectEval("takeInt64(2 ** 63 - 1024)", "string", "int64_t: 9223372036854774784");
+  constexpr auto int64OutOfRange = "TypeError: Value out of range. Must be between "
+                                   "-9223372036854775808 and 9223372036854775807 (inclusive).";
+  e.expectEval("takeInt64(2 ** 63)", "throws", int64OutOfRange);
+  e.expectEval("takeInt64(-(2 ** 63))", "string", "int64_t: -9223372036854775808");
+  e.expectEval("takeInt64(-(2 ** 63) - 2048)", "throws", int64OutOfRange);
 }
 
 // ========================================================================================

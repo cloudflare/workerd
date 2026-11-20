@@ -4,9 +4,9 @@
 
 // An EventSource stays alive while a read of its stream is pending, and is
 // collectable once its stream has ended. An event that had a JavaScript
-// wrapper before it was dispatched, as every event the TypeScript
-// implementation dispatches has, keeps its target alive until the event
-// itself is swept, so collection is checked over a few major GCs.
+// wrapper before it was dispatched, as every event an EventSource dispatches
+// has, keeps its target alive until the event itself is swept, so collection
+// is checked over a few major GCs.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';

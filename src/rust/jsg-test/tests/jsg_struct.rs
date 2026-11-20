@@ -8,6 +8,7 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_struct;
+use jsg_macros::jsg_traced;
 
 #[jsg_struct]
 struct TestStruct {
@@ -21,9 +22,33 @@ struct MultiPropertyStruct {
     pub active: String,
 }
 
+/// Has a field with the name of the local that holds the struct's shape in generated code.
+#[jsg_struct]
+struct ShapeFieldStruct {
+    pub shape: String,
+    pub other: u32,
+}
+
 #[jsg_struct]
 struct NestedStruct {
     pub inner: String,
+}
+
+/// Every field is optional, as C++ `jsg::LenientOptional<T>` fields of a `JSG_STRUCT` are.
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct LenientStruct {
+    pub label: jsg::LenientOption<jsg::NonCoercible<String>>,
+    pub count: jsg::LenientOption<u32>,
+}
+
+/// Field types shaped like those of C++ `R2ListOptions::include` and an Analytics Engine data
+/// point's `indexes`.
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct SequenceOfWrappersStruct {
+    pub include: Option<Vec<jsg::NonCoercible<String>>>,
+    pub indexes: Option<Vec<jsg::Nullable<String>>>,
 }
 
 #[jsg_struct]
@@ -40,8 +65,8 @@ struct RequiredStruct {
 }
 
 /// A field type whose conversion to JavaScript fails.
+#[jsg_traced]
 struct Unconvertible;
-jsg::jsg_traced!(Unconvertible);
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
@@ -498,7 +523,11 @@ fn struct_js_object_field_rejects_other_values() {
             panic!("2 is not an object");
         };
         assert_eq!(err.name, ExceptionType::TypeError);
-        assert_eq!(err.message, "Expected Object but got number");
+        assert_eq!(
+            err.message,
+            "Incorrect type for the 'object' field on 'JsValueStruct': the provided value is not \
+             of type 'Object'."
+        );
         Ok(())
     });
 }
@@ -552,4 +581,193 @@ fn struct_vec_of_bytes_field_is_an_array() {
             Ok(())
         });
     }
+}
+
+/// A struct type's handles are cached in the realm on its first conversion and reused, with and
+/// without `fast_jsg_struct`: each conversion still makes a new object with the struct's fields
+/// in order, and each struct type has handles of its own.
+#[test]
+fn struct_conversions_reuse_the_realms_cached_handles() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, ctx| {
+            assert_eq!(lock.struct_shapes_cached(), 0);
+            let first = MultiPropertyStruct {
+                name: "Alice".to_owned(),
+                age: 25,
+                active: "yes".to_owned(),
+            }
+            .to_js(lock)?;
+            let second = MultiPropertyStruct {
+                name: "Bob".to_owned(),
+                age: 30,
+                active: "no".to_owned(),
+            }
+            .to_js(lock)?;
+            assert_eq!(lock.struct_shapes_cached(), 1);
+            ctx.set_global(lock, "first", first);
+            ctx.set_global(lock, "second", second);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    "first !== second && Object.keys(first).join() === 'name,age,active' &&
+                     Object.keys(second).join() === 'name,age,active' &&
+                     first.name === 'Alice' && first.age === 25 && first.active === 'yes' &&
+                     second.name === 'Bob' && second.age === 30 && second.active === 'no'",
+                )
+                .unwrap();
+            assert!(ok, "fast_jsg_struct = {fast}");
+
+            let back = MultiPropertyStruct::from_js(lock, second)?;
+            assert_eq!((back.name.as_str(), back.age), ("Bob", 30));
+            assert_eq!(lock.struct_shapes_cached(), 1);
+
+            let label = OptionalStruct {
+                label: Some("x".to_owned()),
+                count: None,
+            }
+            .to_js(lock)?;
+            assert_eq!(lock.struct_shapes_cached(), 2);
+            ctx.set_global(lock, "label", label);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    if fast {
+                        "Object.keys(label).join() === 'label,count' && label.label === 'x'"
+                    } else {
+                        "Object.keys(label).join() === 'label' && label.label === 'x'"
+                    },
+                )
+                .unwrap();
+            assert!(ok, "fast_jsg_struct = {fast}");
+            Ok(())
+        });
+    }
+}
+
+/// The startup snapshot pipeline resets the handles the realm caches before it creates the
+/// snapshot, which fails on a handle left behind. A later conversion caches them again.
+#[test]
+fn taking_the_realms_templates_resets_the_cached_struct_handles() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, _ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock)?;
+        assert_eq!(OptionalStruct::from_js(lock, value)?.count, Some(1));
+        assert_eq!(lock.struct_shapes_cached(), 1);
+        Ok(())
+    });
+    harness.take_realm_templates();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(lock.struct_shapes_cached(), 0);
+        let value = OptionalStruct {
+            label: Some("again".to_owned()),
+            count: None,
+        }
+        .to_js(lock)?;
+        assert_eq!(lock.struct_shapes_cached(), 1);
+        ctx.set_global(lock, "value", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Object.keys(value).join() === 'label,count' && value.label === 'again' &&
+                 value.count === undefined",
+            )
+            .unwrap();
+        assert!(ok);
+        Ok(())
+    });
+}
+
+/// A field may have any name, including those of the locals in the generated conversions.
+#[test]
+fn struct_fields_can_have_the_names_of_generated_locals() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = ShapeFieldStruct {
+            shape: "round".to_owned(),
+            other: 7,
+        }
+        .to_js(lock)?;
+        let back = ShapeFieldStruct::from_js(lock, value)?;
+        assert_eq!((back.shape.as_str(), back.other), ("round", 7));
+        Ok(())
+    });
+}
+
+/// Like C++ JSG, a `LenientOption` field is optional: an all-lenient struct converts from null or
+/// undefined, an absent property is `None`, and so is a value of the wrong type.
+#[test]
+fn lenient_struct_fields_are_optional() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let empty = LenientStruct {
+            label: jsg::LenientOption(None),
+            count: jsg::LenientOption(None),
+        };
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "null")?, empty);
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "undefined")?, empty);
+        assert_eq!(convert::<LenientStruct>(lock, ctx, "({})")?, empty);
+        assert_eq!(
+            convert::<LenientStruct>(lock, ctx, "({ label: 1, count: 3 })")?,
+            LenientStruct {
+                label: jsg::LenientOption(None),
+                count: jsg::LenientOption(Some(3)),
+            }
+        );
+        assert_eq!(
+            convert::<LenientStruct>(lock, ctx, "({ label: 'x' })")?,
+            LenientStruct {
+                label: jsg::LenientOption(Some(jsg::NonCoercible::new("x".to_owned()))),
+                count: jsg::LenientOption(None),
+            }
+        );
+        Ok(())
+    });
+}
+
+/// An absent `LenientOption` field is left out of the JS object, as an absent `Option` field is.
+#[test]
+fn lenient_struct_omits_absent_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = LenientStruct {
+            label: jsg::LenientOption(None),
+            count: jsg::LenientOption(Some(1)),
+        }
+        .to_js(lock)?;
+        let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+        assert!(!obj.has(lock, "label")?);
+        assert!(obj.has(lock, "count")?);
+        Ok(())
+    });
+}
+
+/// A sequence of `NonCoercible<T>` or `Nullable<T>` converts as C++ JSG's `kj::Array` of them does.
+#[test]
+fn struct_sequence_of_wrappers_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = convert::<SequenceOfWrappersStruct>(
+            lock,
+            ctx,
+            "({ include: ['httpMetadata'], indexes: ['a', null] })",
+        )?;
+        assert_eq!(
+            value,
+            SequenceOfWrappersStruct {
+                include: Some(vec![jsg::NonCoercible::new("httpMetadata".to_owned())]),
+                indexes: Some(vec![
+                    jsg::Nullable::Some("a".to_owned()),
+                    jsg::Nullable::Null,
+                ]),
+            }
+        );
+        let err = convert::<SequenceOfWrappersStruct>(lock, ctx, "({ include: [1] })").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        Ok(())
+    });
 }

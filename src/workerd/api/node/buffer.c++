@@ -101,6 +101,8 @@ uint32_t writeInto(jsg::Lock& js,
       // dest may start at an odd byte offset, so a uint16_t view of it is misaligned. Write into
       // an aligned temporary and copy the bytes across so UBSan sees only byte-sized accesses.
       kj::Array<uint16_t> tmpBuf = kj::heapArray<uint16_t>(dest.size() / sizeof(uint16_t));
+      // Zeroed because V8 may not fill it; see JsString::writeInto().
+      tmpBuf.asPtr().fill(0);
       auto result = string.writeInto(js, tmpBuf, flags);
       dest.first(result.written * sizeof(uint16_t))
           .copyFrom(tmpBuf.first(result.written).asBytes());
@@ -119,8 +121,8 @@ uint32_t writeInto(jsg::Lock& js,
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, string.length(js), 1024, 536870888);
-      string.writeInto(js, buf, flags);
-      auto backing = decodeHexTruncated(js, buf, false);
+      auto written = string.writeInto(js, buf, flags).written;
+      auto backing = decodeHexTruncated(js, buf.first(written), false);
       auto bytes = backing.asArrayPtr();
       auto amountToCopy = kj::min(bytes.size(), dest.size());
       dest.write(bytes.first(amountToCopy));
@@ -177,8 +179,8 @@ jsg::JsUint8Array decodeStringImpl(
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
-      string.writeInto(js, buf, options);
-      return decodeHexTruncated(js, buf, strict);
+      auto written = string.writeInto(js, buf, options).written;
+      return decodeHexTruncated(js, buf.first(written), strict);
     }
     default:
       KJ_UNREACHABLE;

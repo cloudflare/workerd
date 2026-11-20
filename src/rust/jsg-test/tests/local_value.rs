@@ -167,3 +167,34 @@ fn to_detail_string_describes_a_value_without_running_javascript() {
         Ok(())
     });
 }
+
+/// An error implemented in the per-isolate bootstrap, whose `name` and `message` are accessors, is
+/// described by the name and message it holds, not by its properties or a Proxy's traps.
+#[test]
+fn to_detail_string_describes_an_error_by_the_name_and_message_it_holds() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let cases = [
+            ("({})", "AbortError", "boom", "AbortError: boom"),
+            ("({})", "AbortError", "", "AbortError"),
+            ("({})", "", "boom", "boom"),
+            (
+                "Object.assign(new Error('other'), { name: 'Other' })",
+                "AbortError",
+                "boom",
+                "AbortError: boom",
+            ),
+            (
+                "new Proxy({}, { get() { throw new Error('ran'); } })",
+                "AbortError",
+                "boom",
+                "AbortError: boom",
+            ),
+        ];
+        for (code, name, message, expected) in cases {
+            let value = ctx.eval_raw(lock, code).unwrap();
+            crate::Harness::set_error_slots(lock, value, name, message);
+            assert_eq!(value.to_detail_string(lock)?, expected, "{code}");
+        }
+        Ok(())
+    });
+}

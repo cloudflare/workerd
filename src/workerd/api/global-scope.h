@@ -8,7 +8,6 @@
 #include "bench.h"
 #include "filesystem.h"
 #include "http.h"
-#include "messagechannel.h"
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
@@ -23,6 +22,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 class DOMException;
@@ -43,7 +43,6 @@ class JsRpcProperty;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
-class EventSource;
 class FixedLengthStream;
 class SubtleCrypto;
 class TextDecoder;
@@ -849,7 +848,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
     JSG_STRUCT(transfer);
-    JSG_STRUCT_TS_OVERRIDE(StructuredSerializeOptions);
+    // Declared in types/defines/structured-clone.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type StructuredSerializeOptions = never);
   };
 
   jsg::JsValue structuredClone(
@@ -941,7 +941,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    JSG_NESTED_TYPE(DOMException);
+    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+      JSG_NESTED_TYPE(DOMException);
+    }
     JSG_NESTED_TYPE(WorkerGlobalScope);
     if (flags.getSpecCompliantPropertyAttributes()) {
       // EventTarget is also declared on WorkerGlobalScope, but V8's
@@ -958,7 +962,13 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(setInterval);
     JSG_METHOD(clearInterval);
     JSG_METHOD(queueMicrotask);
-    JSG_METHOD(structuredClone);
+    // Under the TS_STRUCTURED_CLONE autogate, the per-isolate bootstrap installs the TypeScript
+    // structuredClone() instead. Its types come from types/defines/structured-clone.d.ts, not from
+    // this method (the JSG_TS_OVERRIDE below omits it), so they do not depend on whether this
+    // method is registered.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_STRUCTURED_CLONE)) {
+      JSG_METHOD(structuredClone);
+    }
     JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);
@@ -1025,12 +1035,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    // Under the TS_MESSAGE_CHANNEL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript MessageChannel and MessagePort instead.
-    if (flags.getExposeGlobalMessageChannel() && !useTypeScriptMessageChannel()) {
-      JSG_NESTED_TYPE(MessageChannel);
-      JSG_NESTED_TYPE(MessagePort);
-    }
+    // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
+    // declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);
@@ -1040,11 +1047,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(StorageManager);
     }
 
-    // Under the TS_EVENT_SOURCE autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript EventSource instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_EVENT_SOURCE)) {
-      JSG_NESTED_TYPE(EventSource);
-    }
+    // The per-isolate bootstrap (src/per_isolate/main.ts) defines EventSource; the TypeScript
+    // override below declares it.
 
     // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
     if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
@@ -1264,6 +1268,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
+    // structuredClone() is declared in types/defines/structured-clone.d.ts.
     JSG_TS_OVERRIDE({
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
@@ -1271,10 +1276,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval(callback: (...args: any[]) => void, msDelay?: number): number;
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
-      structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      structuredClone: never;
       queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
+
+      MessageChannel: typeof MessageChannel;
+      MessagePort: typeof MessagePort;
+      EventSource: typeof EventSource;
     });
   }
 

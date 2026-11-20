@@ -143,6 +143,22 @@ export const testInboundOnDeclaredPort = {
   },
 };
 
+// A 'connection' listener that destroys the socket still lets the server close.
+export const testDestroyInConnectionListener = {
+  async test() {
+    const server = net.createServer((socket) => socket.destroy());
+    server.listen(0);
+    await once(server, 'listening');
+    const { port } = server.address();
+
+    const socket = connect(`127.0.0.1:${port}`);
+    await readAll(socket);
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  },
+};
+
 // The isolate is the port namespace: Durable Object instances in it share the
 // table with each other and with the entrypoint, as processes on one host do.
 export class PortHost extends DurableObject {

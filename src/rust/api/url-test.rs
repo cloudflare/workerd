@@ -156,4 +156,24 @@ fn test_canonicalize_ip() {
     // IpAddr parser rejects) yields an empty string.
     assert_eq!(util.canonicalize_ip("192.168.000.001".to_owned()), "");
     assert_eq!(util.canonicalize_ip("not-an-ip".to_owned()), "");
+    // An IPv6 zone id is dropped, as `uv_inet_pton` does.
+    assert_eq!(util.canonicalize_ip("fe80::1%eth0".to_owned()), "fe80::1");
+    assert_eq!(
+        util.canonicalize_ip("FE80:0:0:0:0:0:0:1%25".to_owned()),
+        "fe80::1"
+    );
+    assert_eq!(util.canonicalize_ip("fe80::1%".to_owned()), "fe80::1");
+    assert_eq!(util.canonicalize_ip("1.2.3.4%eth0".to_owned()), "");
+    assert_eq!(util.canonicalize_ip("%eth0".to_owned()), "");
+    // IPv4-compatible and IPv4-mapped addresses keep the dotted form.
+    assert_eq!(
+        util.canonicalize_ip("0:0:0:0:0:0:102:304".to_owned()),
+        "::1.2.3.4"
+    );
+    assert_eq!(
+        util.canonicalize_ip("::ffff:7f00:1".to_owned()),
+        "::ffff:127.0.0.1"
+    );
+    assert_eq!(util.canonicalize_ip("::0.0.0.1".to_owned()), "::1");
+    assert_eq!(util.canonicalize_ip("::".to_owned()), "::");
 }

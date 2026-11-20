@@ -302,7 +302,7 @@ class PrimitiveWrapper {
 
   v8::Local<v8::BigInt> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
-    return v8::BigInt::New(isolate, value);
+    return v8::BigInt::NewFromUnsigned(isolate, value);
   }
 
   kj::Maybe<uint64_t> tryUnwrap(Lock& js,
@@ -328,7 +328,8 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive bigint.");
 
-    JSG_REQUIRE(value <= static_cast<uint64_t>(kj::maxValue), TypeError,
+    // UINT64_MAX is not a double: it rounds up to 2^64, which a uint64_t can't hold.
+    JSG_REQUIRE(value < 0x1p64, TypeError,
         kj::str("Value out of range. Must be less than or equal to ",
             static_cast<uint64_t>(kj::maxValue), "."));
 
@@ -369,9 +370,8 @@ class PrimitiveWrapper {
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
-    JSG_REQUIRE(
-        value <= static_cast<int64_t>(kj::maxValue) && value >= static_cast<int64_t>(kj::minValue),
-        TypeError,
+    // INT64_MAX is not a double: it rounds up to 2^63, which an int64_t can't hold.
+    JSG_REQUIRE(value < 0x1p63 && value >= -0x1p63, TypeError,
         kj::str("Value out of range. Must be between ", static_cast<int64_t>(kj::minValue), " and ",
             static_cast<int64_t>(kj::maxValue), " (inclusive)."));
 
@@ -1415,18 +1415,10 @@ class ExceptionWrapper {
       kj::Exception*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
 
-    // If handle is a DOMException, then createTunneledException will not work
-    // here. We have to manually handle the DOMException case.
-    //
-    // Note that this is a general issue with any JSG_RESOURCE_TYPE that we
-    // happen to use as Errors. The createTunneledException() method uses V8's
-    // ToDetailString() to extract the detail about the error in a manner that
-    // is safe and side-effect free. Unfortunately, that mechanism does not
-    // work for JSG_RESOURCE_TYPE objects that are used as errors. For those,
-    // we need to drop down to the C++ interface and generate the kj::Exception
-    // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
-    // introduced, they'll need to be handled explicitly here also.
-    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    // A DOMException tunnels by the name and message it holds, which
+    // Lock::tryGetDomExceptionInfo() reads without running JavaScript. Other
+    // values tunnel by what kj::str() describes them as, which runs no
+    // JavaScript either.
     kj::Exception result = [&]() {
       kj::Exception::Type excType = [&]() {
         // Use .retryable and .overloaded properties as hints for what kj exception type to use.
@@ -1443,11 +1435,8 @@ class ExceptionWrapper {
         return kj::Exception::Type::FAILED;
       }();
 
-      KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(
-              js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
-        return KJ_EXCEPTION(FAILED,
-            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+      KJ_IF_SOME(info, js.tryGetDomExceptionInfo(JsValue(handle))) {
+        return KJ_EXCEPTION(FAILED, kj::str("jsg.DOMException(", info.name, "): ", info.message));
       } else {
 
         kj::String reason;

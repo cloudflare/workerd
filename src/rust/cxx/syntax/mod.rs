@@ -180,6 +180,8 @@ pub struct ExternFn {
     pub sig: Signature,
     pub semi_token: Token![;],
     pub trusted: bool,
+    // `#[nothrow]` on an extern C++ function: the bridge calls it without catching exceptions.
+    pub nothrow: bool,
 }
 
 pub struct TypeAlias {
@@ -278,6 +280,7 @@ pub enum Type {
     Void(Span),
     KjMaybe(Box<Ty1>),
     KjDate(Span),
+    KjException(Span),
     SliceRef(Box<SliceRef>),
     Array(Box<Array>),
     Future(Box<Future>),

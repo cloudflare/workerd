@@ -246,8 +246,22 @@ enum Fault {
     Stall(Lands),
     /// Answers this status and does nothing.
     Refuse(u16),
-    /// Serves the request at once and answers it this late.
-    Slow(std::time::Duration),
+    /// Serves the request at once and answers it once the fake has
+    /// received the next request: its copy, if it is sent again.
+    HeldForNext,
+    /// Serves the request at once and answers it once the fake has
+    /// answered the next request.
+    HeldPastNext,
+}
+
+/// When the fake bucket answers a request it served.
+#[derive(Clone, Copy, Debug)]
+enum Delivery {
+    Late(std::time::Duration),
+    /// `Fault::HeldForNext`.
+    WithNext,
+    /// `Fault::HeldPastNext`.
+    AfterNextAnswered,
 }
 
 /// One request as the fake bucket reads it.
@@ -290,8 +304,8 @@ impl Call {
 /// A status, an `ETag` and a body.
 type Answer = (u16, String, Vec<u8>);
 
-/// `answer` as the HTTP server sends it, `late`.
-fn sent((status, etag, body): Answer, late: std::time::Duration) -> crate::fake_http::Answer {
+/// `answer` as the HTTP server sends it, when `delivery` says.
+fn sent((status, etag, body): Answer, delivery: Delivery) -> crate::fake_http::Answer {
     let headers = if etag.is_empty() {
         Vec::new()
     } else {
@@ -303,7 +317,12 @@ fn sent((status, etag, body): Answer, late: std::time::Duration) -> crate::fake_
         headers,
         body,
     };
-    crate::fake_http::Answer::After(late, Box::new(reply))
+    let reply = Box::new(reply);
+    match delivery {
+        Delivery::Late(late) => crate::fake_http::Answer::After(late, reply),
+        Delivery::WithNext => crate::fake_http::Answer::WithNext(reply),
+        Delivery::AfterNextAnswered => crate::fake_http::Answer::AfterNextAnswered(reply),
+    }
 }
 
 #[derive(Default)]
@@ -358,19 +377,20 @@ impl FakeState {
         }
     }
 
-    /// What to answer `request`, and how late, or `None` to stall it.
-    fn serve(&mut self, request: Call) -> Option<(Answer, std::time::Duration)> {
+    /// What to answer `request`, and when, or `None` to stall it.
+    fn serve(&mut self, request: Call) -> Option<(Answer, Delivery)> {
         let what = request.what();
         self.log.push(what.clone());
         let fault = self.faults.iter().position(|(w, _)| *w == what);
-        let (mut refused, mut late) = (None, self.slow);
+        let (mut refused, mut delivery) = (None, Delivery::Late(self.slow));
         match fault.map(|i| self.faults.remove(i).1) {
             Some(Fault::Stall(lands)) => {
                 self.stalled = Some((request, lands));
                 return None;
             }
             Some(Fault::Refuse(status)) => refused = Some(status),
-            Some(Fault::Slow(after)) => late = after,
+            Some(Fault::HeldForNext) => delivery = Delivery::WithNext,
+            Some(Fault::HeldPastNext) => delivery = Delivery::AfterNextAnswered,
             None => {}
         }
         let next = matches!(&self.stalled, Some((s, _)) if s.key == request.key);
@@ -386,7 +406,7 @@ impl FakeState {
             None => self.apply(&request),
         };
         lands(|l| matches!(l, Lands::AfterNext), self);
-        Some((answer, late))
+        Some((answer, delivery))
     }
 }
 
@@ -403,8 +423,8 @@ impl FakeS3 {
         let state = fake.0.clone();
         let server = crate::fake_http::Server::serving(move |request, _| {
             let served = state.lock().unwrap().serve(Call::of(request));
-            served.map_or(crate::fake_http::Answer::Stall, |(answer, late)| {
-                sent(answer, late)
+            served.map_or(crate::fake_http::Answer::Stall, |(answer, delivery)| {
+                sent(answer, delivery)
             })
         })
         .await;
@@ -416,7 +436,7 @@ impl FakeS3 {
         ]
         .map(|(name, value)| (name.to_owned(), value));
         let (s3, prefix) = crate::s3::S3::new("s3://b/", &options).unwrap();
-        (fake, Bucket::new(s3, &prefix))
+        (fake, Bucket::new(s3.backoff(BACKOFF), &prefix))
     }
 
     fn arm(&self, what: &str, fault: Fault) {
@@ -458,10 +478,18 @@ fn block_on_io<F: std::future::Future>(f: F) -> F::Output {
 /// is sent again long before it, and well short of a request's own 20 s.
 const ROUND: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// The bound on each request of a round (`http::prompt`): far longer than
-/// a request the fake answers takes, however slow the machine, so that only
-/// the requests it stalls are sent again.
-const ATTEMPT: std::time::Duration = std::time::Duration::from_secs(1);
+/// The bound on each request of a round (`http::prompt`) that the fake
+/// answers at once: longer than a stall of a busy machine, so that none of
+/// them is sent again. Only a test of a stalled request waits it out.
+const ATTEMPT: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// The bound in a round whose only requests are a stalled one and its
+/// copy, which is not sent again however late it answers.
+const STALLED_ATTEMPT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The first pause of the bucket client's 429/503 backoff, against
+/// `ATTEMPT` as 250 ms is against a 1 s bound.
+const BACKOFF: std::time::Duration = ATTEMPT.checked_div(4).unwrap();
 
 /// What a renewal sends twice (`Cluster::renew_round`).
 const RENEWAL: &[Repeat] = &[Repeat::Read, Repeat::GuardedWrite];
@@ -487,7 +515,7 @@ async fn bounded_renew_round(
 
 /// How long the renewals here wait before they write again to a record a
 /// write of theirs is in progress on.
-const CONTENDED_PAUSE: std::time::Duration = std::time::Duration::from_millis(200);
+const CONTENDED_PAUSE: std::time::Duration = std::time::Duration::from_millis(10);
 
 const PUT: &str = "PUT nodes/a.json";
 
@@ -522,7 +550,15 @@ fn a_renewal_outlasts_a_stalled_write_whether_or_not_it_lands() {
             if let Some(status) = refused {
                 fake.arm(PUT, Fault::Refuse(status));
             }
-            assert_eq!(renew_round(&a, 1_000, ROUND).await, Some(11_000));
+            // A reread goes under the bound too, so only a round without
+            // one can take the stalled request's.
+            let attempt = if expected.len() > 2 {
+                ATTEMPT
+            } else {
+                STALLED_ATTEMPT
+            };
+            let renewed = bounded_renew_round(&a, 1_000, attempt, ROUND).await;
+            assert_eq!(renewed, Some(11_000));
             assert_eq!(fake.log(), expected, "{lands:?} {refused:?}");
             let record = fake.record("nodes/a.json");
             assert_eq!((record.expires_ms, record.instance), (11_000, a.instance));
@@ -542,7 +578,8 @@ fn a_stalled_write_never_lands_on_a_record_its_clock_wrote_again() {
         // The clock steps back: this renewal writes an earlier expiry, and
         // its first copy stalls.
         fake.arm(PUT, Fault::Stall(Lands::OnRelease));
-        assert_eq!(renew_round(&a, 5_000, ROUND).await, Some(15_000));
+        let renewed = bounded_renew_round(&a, 5_000, STALLED_ATTEMPT, ROUND).await;
+        assert_eq!(renewed, Some(15_000));
         // Back where it was, the clock writes the expiry it wrote before.
         assert_eq!(renew_round(&a, 10_000, ROUND).await, Some(20_000));
         // The stalled copy names the version of the record at 10_000; the
@@ -558,8 +595,11 @@ fn a_renewal_whose_write_stalls_twice_times_out() {
         let (fake, a) = registered().await;
         fake.arm(PUT, Fault::Stall(Lands::Never));
         fake.arm(PUT, Fault::Stall(Lands::Never));
-        let round = 4 * ATTEMPT;
-        assert_eq!(renew_round(&a, 1_000, round).await, None);
+        // Long enough past the copy's bound that the copy goes out however
+        // busy the machine, and many times that bound.
+        let round = 15 * STALLED_ATTEMPT;
+        let renewed = bounded_renew_round(&a, 1_000, STALLED_ATTEMPT, round).await;
+        assert_eq!(renewed, None);
         // Sent again once, not once per attempt's bound.
         assert_eq!(fake.log(), [PUT, PUT]);
     });
@@ -594,8 +634,11 @@ fn a_listing_outlasts_a_stalled_list_or_read() {
         for stalled in ["LIST nodes/", "GET nodes/a.json"] {
             fake.log();
             fake.arm(stalled, Fault::Stall(Lands::Never));
+            // The other requests go under the short bound too, and one the
+            // fake answered late may go again: only the stalled one's
+            // copies are counted.
             let listing = &[Repeat::Read, Repeat::Delete];
-            let peers = crate::http::prompt(ATTEMPT, listing, b.peers(1));
+            let peers = crate::http::prompt(STALLED_ATTEMPT, listing, b.peers(1));
             let peers = tokio::time::timeout(ROUND, peers).await.unwrap().unwrap();
             let mut nodes: Vec<_> = peers.into_iter().map(|p| p.node).collect();
             nodes.sort();
@@ -610,15 +653,16 @@ fn a_listing_outlasts_a_stalled_list_or_read() {
 fn a_refused_write_backs_off_without_being_sent_again() {
     block_on_io(async {
         let (fake, a) = registered().await;
-        // Refused three times: sent at 0, 0.25 and 0.75 s, then answered at
-        // 1.75 s. Were the pauses part of a request's wait, the 1 s one
-        // would be cut short at 1 s, the write sent again then.
+        // Refused three times: sent at 0, 1 and 3 times `BACKOFF`, then
+        // answered at 7 times it. Were the pauses part of a request's
+        // wait, the third, as long as `ATTEMPT`, would be cut short at
+        // `ATTEMPT`, the write sent again then.
         for _ in 0..3 {
             fake.arm(PUT, Fault::Refuse(503));
         }
         let started = std::time::Instant::now();
         assert_eq!(renew_round(&a, 1_000, ROUND).await, Some(11_000));
-        assert!(started.elapsed() >= std::time::Duration::from_millis(1_750));
+        assert!(started.elapsed() >= 7 * BACKOFF);
         assert_eq!(fake.log(), [PUT; 4]);
     });
 }
@@ -628,12 +672,14 @@ fn a_renewal_outlasts_a_bucket_slow_to_answer_everything() {
     block_on_io(async {
         let (fake, a) = registered().await;
         // The default's proportions: every answer comes later than a
-        // request's bound, and well within the round.
-        let t = cluster_logic::lease::Timing::divided(4).unwrap();
-        let (attempt, round) = (t.renew_attempt_ms, t.renew_timeout_ms);
-        fake.slow(std::time::Duration::from_millis(attempt + attempt / 3));
+        // request's bound. The first copy's comes as soon as its copy
+        // arrives, the copy's a third of a bound after that.
+        let t = cluster_logic::lease::Timing::divided(20).unwrap();
+        let attempt = t.renew_attempt_ms;
+        fake.slow(std::time::Duration::from_millis(attempt / 3));
+        fake.arm(PUT, Fault::HeldForNext);
         let ms = std::time::Duration::from_millis;
-        let renewed = bounded_renew_round(&a, 1_000, ms(attempt), ms(round)).await;
+        let renewed = bounded_renew_round(&a, 1_000, ms(attempt), ROUND).await;
         assert_eq!(renewed, Some(11_000));
         // The first copy landed and answered first; the second, refused,
         // is dropped.
@@ -645,9 +691,9 @@ fn a_renewal_outlasts_a_bucket_slow_to_answer_everything() {
 fn a_write_whose_copy_is_refused_waits_for_its_own_answer() {
     block_on_io(async {
         let (fake, a) = registered().await;
-        // The first copy lands at once and answers after the second, which
-        // its write fails.
-        fake.arm(PUT, Fault::Slow(ATTEMPT + ATTEMPT / 2));
+        // The first copy lands at once and answers once the second, which
+        // its write fails, has been refused.
+        fake.arm(PUT, Fault::HeldPastNext);
         assert_eq!(renew_round(&a, 1_000, ROUND).await, Some(11_000));
         // No reread: the first copy's answer is the renewal's.
         assert_eq!(fake.log(), [PUT, PUT]);

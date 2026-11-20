@@ -37,7 +37,6 @@ sha1 = { version = "0", default-features = false }
 bytes = { version = "1", default-features = false }
 capnp = "0.27"
 capnpc = "0.27"
-capnp-rpc = "0.27"
 clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"
@@ -52,6 +51,8 @@ http-body = "1"
 httpdate = "1"
 percent-encoding = "2"
 url = "2"
+# The server's assets service: the `_headers`, `_redirects` and `.assetsignore` rules.
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
 # The server's CryptoKey bindings: hex key material.
 data-encoding = "2"
 # `workerd test`: the service and entrypoint filters.
@@ -71,6 +72,9 @@ hashlink = "0"
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
 pico-args = "0"
+# The OTLP span exporter (src/rust/otlp) encodes its requests with prost. Its messages are written
+# out as structs, so neither prost-build nor protoc is involved.
+prost = "0.14"
 # kj-hyper: WebSocket keys and frame masks. Every Cargo.toml merged into the crate_universe
 # workspace (downstream repos include this one alongside their own) must request the same
 # major version, or crate_universe stops emitting the bare `rand` alias.
@@ -123,5 +127,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Network
 # changes by re-stamping the watched files, so it needs nothing backend-specific.
 notify = "8"
 tracing = { version = "0", default-features = false, features = ["std"] }
-swc_common = "26"
-swc_ts_fast_strip = "59"
+swc_common = "27"
+swc_ts_fast_strip = "60"

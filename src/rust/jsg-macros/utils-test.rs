@@ -50,10 +50,10 @@ fn required_argument_count_uses_from_js_for_js_parameters() {
             vec![parse_quote!(OptionalString)],
         ),
         (
-            parse_quote!(fn f(a: String, b: jsg::Lenient<u32>, c: u32)),
+            parse_quote!(fn f(a: String, b: jsg::LenientOption<u32>, c: u32)),
             vec![
                 parse_quote!(String),
-                parse_quote!(jsg::Lenient<u32>),
+                parse_quote!(jsg::LenientOption<u32>),
                 parse_quote!(u32),
             ],
         ),
@@ -159,6 +159,10 @@ fn is_null_or_undefined_type_cases() {
 fn is_option_type_cases() {
     assert!(is_option_type(&parse_quote!(Option<String>)));
     assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
+    assert!(!is_option_type(&parse_quote!(jsg::LenientOption<u32>)));
+    assert!(is_lenient_option_type(&parse_quote!(
+        jsg::LenientOption<u32>
+    )));
     assert!(!is_option_type(&parse_quote!(String)));
     assert!(!is_option_type(&parse_quote!(&Option<String>)));
 }
@@ -339,4 +343,42 @@ fn invalid_typescript_options_still_evaluate_to_customizations() {
     let expression = typescript_options(quote! { ts_override = 1 }).to_string();
     assert!(expression.contains("compile_error"));
     assert!(expression.contains("TypeScript :: default ()"));
+}
+
+#[test]
+fn primitive_returns_are_set_directly() {
+    for (sig, kind) in [
+        (parse_quote!(fn f()), PrimitiveReturn::Void),
+        (parse_quote!(fn f() -> ()), PrimitiveReturn::Void),
+        (parse_quote!(fn f() -> bool), PrimitiveReturn::Boolean),
+        (parse_quote!(fn f() -> u32), PrimitiveReturn::Number),
+        (parse_quote!(fn f() -> f64), PrimitiveReturn::Number),
+        (
+            parse_quote!(fn f() -> Result<(), Error>),
+            PrimitiveReturn::Void,
+        ),
+        (
+            parse_quote!(fn f() -> jsg::Result<u32>),
+            PrimitiveReturn::Number,
+        ),
+        (
+            parse_quote!(fn f() -> std::result::Result<bool, Error>),
+            PrimitiveReturn::Boolean,
+        ),
+    ] {
+        let sig: syn::Signature = sig;
+        assert_eq!(primitive_return(&sig), Some(kind), "{sig:?}");
+    }
+    for sig in [
+        parse_quote!(fn f() -> jsg::Promise<u32>),
+        parse_quote!(fn f() -> Option<jsg::Promise<u32>>),
+        parse_quote!(fn f() -> Result<jsg::Promise<u32>, Error>),
+        parse_quote!(fn f() -> Option<u32>),
+        parse_quote!(fn f() -> MyReturnType),
+        parse_quote!(async fn f()),
+        parse_quote!(async fn f() -> u32),
+    ] {
+        let sig: syn::Signature = sig;
+        assert_eq!(primitive_return(&sig), None, "{sig:?}");
+    }
 }

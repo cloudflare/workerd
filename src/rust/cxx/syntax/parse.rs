@@ -595,6 +595,7 @@ fn parse_extern_fn(
     let mut namespace = namespace.clone();
     let mut cxx_name = None;
     let mut rust_name = None;
+    let mut nothrow = false;
     let mut attrs = attrs.clone();
     attrs.extend(attrs::parse(
         cx,
@@ -605,6 +606,10 @@ fn parse_extern_fn(
             namespace: Some(&mut namespace),
             cxx_name: Some(&mut cxx_name),
             rust_name: Some(&mut rust_name),
+            nothrow: match lang {
+                Lang::Cxx => Some(&mut nothrow),
+                Lang::Rust => None,
+            },
             ..Default::default()
         },
     ));
@@ -765,6 +770,7 @@ fn parse_extern_fn(
         },
         semi_token,
         trusted: trusted.get(),
+        nothrow,
     }))
 }
 
@@ -1144,6 +1150,7 @@ fn parse_impl(cx: &mut Errors, imp: ItemImpl) -> Result<Api> {
         | Type::Fn(_)
         | Type::Void(_)
         | Type::KjDate(_)
+        | Type::KjException(_)
         | Type::SliceRef(_)
         | Type::Array(_) => Lifetimes::default(),
         Type::Future(_) => todo!("file a workerd-cxx ticket"),
@@ -1291,6 +1298,9 @@ fn parse_type_path(ty: &TypePath) -> Result<Type> {
             PathArguments::None => {
                 if ident == "KjDate" {
                     return Ok(Type::KjDate(ident.span()));
+                }
+                if ident == "KjException" {
+                    return Ok(Type::KjException(ident.span()));
                 }
                 return Ok(Type::Ident(NamedType::new(ident)));
             }
@@ -1591,7 +1601,12 @@ fn parse_return_type(
 }
 fn has_references_without_lifetime(ty: &Type) -> bool {
     match ty {
-        Type::Fn(_) | Type::Ident(_) | Type::Str(_) | Type::Void(_) | Type::KjDate(_) => false,
+        Type::Fn(_)
+        | Type::Ident(_)
+        | Type::Str(_)
+        | Type::Void(_)
+        | Type::KjDate(_)
+        | Type::KjException(_) => false,
         Type::RustBox(t)
         | Type::RustVec(t)
         | Type::UniquePtr(t)

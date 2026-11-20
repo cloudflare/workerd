@@ -271,6 +271,13 @@ class WebSocket: public EventTarget {
 
   int getReadyState();
 
+  // Returns the number of bytes of application data (UTF-8 text and binary data) passed to send()
+  // that have not yet been written to the connection, per the WHATWG WebSockets standard. It
+  // doesn't include framing overhead, or data that has been written but is still buffered further
+  // along, such as by the operating system. Applications can poll it to avoid queuing more
+  // outgoing data than the connection can carry.
+  double getBufferedAmount();
+
   bool isAccepted();
   bool isReleased();
 
@@ -325,12 +332,14 @@ class WebSocket: public EventTarget {
     // prototype.
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(readyState, getReadyState);
+      JSG_READONLY_PROTOTYPE_PROPERTY(bufferedAmount, getBufferedAmount);
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
       JSG_PROTOTYPE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
+      JSG_READONLY_INSTANCE_PROPERTY(bufferedAmount, getBufferedAmount);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
@@ -362,14 +371,11 @@ class WebSocket: public EventTarget {
   // in each `WebSocket` constructor below); a follow-up commit introduces a
   // `HibernatableWebSocketAdapter` swapped in at `acceptAsHibernatable()` and on revival.
   //
-  // WARNING — DO NOT replace this `kj::Own` after `visitForGc()` has traced through it. V8 marks
-  // the traced children (Refs/V8Refs held by the adapter) weak on the trace pass; moving them via
-  // the kj::Own swap would leave them weak without anyone tracing them again, and GC can then
-  // collect them out from under the new adapter. Today this is moot because the adapter is never
-  // swapped; the hibernatable rewrite that does swap it must either (a) defer the swap until after
-  // migrating any traced state, (b) wait for the upcoming jsg::Own<T> which integrates with
-  // cppgc to handle this correctly, or (c) re-trigger tracing post-swap.
-  kj::Own<WebSocketAdapter> impl;
+  // With the gc-complete-tracing autogate enabled, the adapter's handles become strong when it is
+  // moved out or released, so swapping it is safe after a trace; see `jsg::TracedOwn`. With the
+  // gate disabled, swapping it after a trace leaves the old adapter's handles traced with nothing
+  // visiting them, so don't swap it until the gate is removed.
+  jsg::TracedOwn<WebSocketAdapter> impl;
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
@@ -420,6 +426,7 @@ class WebSocketAdapter {
   virtual void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) = 0;
   virtual kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) = 0;
   virtual int getReadyState() = 0;
+  virtual double getBufferedAmount() = 0;
   virtual kj::Maybe<kj::StringPtr> getUrl() = 0;
   virtual kj::Maybe<kj::StringPtr> getProtocol() = 0;
   virtual kj::Maybe<kj::StringPtr> getExtensions() = 0;
@@ -551,6 +558,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) override;
   kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) override;
   int getReadyState() override;
+  double getBufferedAmount() override;
   kj::Maybe<kj::StringPtr> getUrl() override;
   kj::Maybe<kj::StringPtr> getProtocol() override;
   kj::Maybe<kj::StringPtr> getExtensions() override;
@@ -720,6 +728,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
     // Have we detected that the peer has stopped accepting messages?
     bool outgoingAborted = false;
+
+    // Payload bytes passed to send() and not yet written. See WebSocket::getBufferedAmount(). As
+    // the standard requires, this never goes down for messages that are dropped rather than
+    // written, such as when the connection fails, so it keeps growing if the application keeps
+    // sending to a dead connection.
+    uint64_t bufferedAmount = 0;
 
     // Did dispatching a received message into JavaScript fail? See getDispatchFailed().
     //

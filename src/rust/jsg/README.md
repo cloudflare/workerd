@@ -16,8 +16,9 @@ through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
   which honors `name = "..."`. Explicit names must be unique among emitted Rust
   and C++ declarations; inactive compatibility variants may reuse a name.
 - `Option<T>` describes `T | undefined` and `Nullable<T>` describes `T | null`,
-  so a `Nullable<T>` parameter is required, as at runtime. `NullOrUndefined<T>`,
-  `Option<Nullable<T>>` and `Lenient<T>` describe an optional `T | null | undefined`.
+  so a `Nullable<T>` parameter is required, as at runtime. `LenientOption<T>` describes
+  `T | undefined`, as `Option<T>` does. `NullOrUndefined<T>` and `Option<Nullable<T>>`
+  describe an optional `T | null | undefined`.
 - `Dict<V>` describes `Record<string, V>`, as C++ describes `jsg::Dict`.
 - Vectors and slices describe JavaScript arrays, numbers included; a typed array
   is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
@@ -92,6 +93,12 @@ Prefer it to `Option<Nullable<T>>`. Both wrappers trace their contained value.
 | `Nullable<T>` | `null` or `undefined` → `Null` | `TypeError` |
 | `NullOrUndefined<T>` | `null` → `Null`; `undefined` → `Undefined` | `Undefined` |
 
+As for C++ `kj::Maybe<T>`, a value that `T` does not take, such as a number for a
+`Nullable<NonCoercible<String>>` or a plain object for a `Nullable<jsg::Rc<R>>`, is `Null`
+for a worker without the `dont_substitute_null_on_type_error` compatibility flag (dated
+before 2022-06-01), and a `TypeError` with it. Only the top-level type counts: a
+`Nullable<Vec<T>>` whose element `T` does not take is an error either way.
+
 `NullOrUndefined::default()` is `Undefined`, without requiring `T: Default`.
 `as_ref()`, `as_mut()`, and `map()` preserve `Null` and `Undefined`.
 Conversions to and from `Option<Nullable<T>>` preserve all three states;
@@ -102,11 +109,9 @@ When converting back to JavaScript, `Null` produces a `null` property; `Undefine
 is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
 that flag, just as `None` does for an `Option<T>` field.
 
-`Lenient<T>` additionally preserves shallow conversion mismatches as `Unconvertable`.
-Converting it to `NullOrUndefined<T>` maps those mismatches to `Undefined`;
-`Lenient::to_parts()` returns `(NullOrUndefined<T>, Option<TracedGlobal<Value>>)`,
-with the original mismatched JavaScript value in the second element when present.
-Errors from nested conversions or JavaScript execution still propagate.
+`LenientOption<T>` is C++ `jsg::LenientOptional<T>`: an optional `T` for which a top-level
+type mismatch is absent rather than an error, while `null` goes through `T`. See its rustdoc
+in `lenient.rs`.
 
 ## Safety rules
 
@@ -210,9 +215,18 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is a resource's `Drop` impl, which has
-  `&mut self`: a reference it moves out of a field and keeps must be cloned or dropped there.
-  See [#7976](https://github.com/cloudflare/workerd/issues/7976).
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before a
+  `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
+  (`Traced::needs_drop_detach`), every `jsg::Rc`, `jsg_cpp::Ref` and `TracedGlobal` it traces is
+  made strong, and every `jsg::Rc` forgets its parent, so that a `Drop` impl may move one out and
+  keep it. A `TracedGlobal` whose value died with the resource is empty by then. A hand-written
+  `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
+  does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
+  Wrappers such as `Option` and `Vec` pass it on, and a `#[jsg_resource]` says so when it
+  implements `Drop` itself. A `#[jsg_struct]`, a `#[jsg_oneof]` or a `#[jsg_resource]` held
+  inline in another resource doesn't look at its fields, which a recursive type would make loop
+  forever, so a `Drop` impl of a type it holds must not move a reference out there. See
+  [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
   is ever collected. Use a `TracedGlobal`. The compiler rejects a `Global` field in a resource,
@@ -228,10 +242,11 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell. No test checks a
-hand-written `impl Traced` that shares traced state some other way or reaches it through
-another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
-whose `trace` visits something; reviewers check those.
+std cell, `tests/drop_moved_rc.rs`, for a `jsg::Rc` that the `Drop` of a resource or of a
+field's type moves out, and `tests/drop_moved_traced_global.rs`, for a `TracedGlobal` that a
+resource's `Drop` moves out. No test checks a hand-written `impl Traced` that shares traced state
+some other way or reaches it through another kind of cell, a std cell included, or a hand-written
+`impl HoldsNoGcReferences` on a type whose `trace` visits something; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
@@ -241,9 +256,7 @@ leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are 
 allowlist described below, and are to be removed. The one exception is in
 `src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
 `JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way, and `io_context_add_wait_until()` calls the C++ function that
-`ctx.waitUntil()` calls, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
-explains why that is sound. Don't extend it.
+learns of exceptions no other way. Don't extend it.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),
@@ -251,12 +264,17 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
-`GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG, and
-`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
-through which Rust creates and reads DOMExceptions without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
+`GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
+`ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
+fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
+`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
+`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+their serializers are written against C++ JSG, and the deserializer finds classes implemented in
+JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
+in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
+depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
+which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
+JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -302,11 +320,14 @@ and `.h` file in `src/rust/jsg`. To check a shim file in another package, export
   `'static`, because they run after the current callback has returned.
 - Use a `Global` for a handle that Rust holds outside a resource, and a `TracedGlobal` for a
   resource field. Both can be dropped without the lock, and after the isolate is gone.
+- A method's `&self` lasts for the call: the wrapper the method was called on keeps the resource
+  alive only until the method returns. A method that keeps its resource takes
+  `this: jsg::Rc<Self>`.
 
 Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
-`global-*`, `traced-global-*`) and `src/workerd/io/io-context/compile-tests`
-(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
-`traced_global_lifetime.rs` and `gc.rs`.
+`global-*`, `traced-global-*`, `method-receiver-cannot-escape`) and
+`src/workerd/io/io-context/compile-tests` (`await-io-and-run-*`), and the drop tests in
+`src/rust/jsg-test/tests/global.rs`, `traced_global_lifetime.rs` and `gc.rs`.
 
 ### 5. State guarded by the isolate lock is `Send`
 
@@ -573,7 +594,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
-| `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
+| `jsg::LenientOption<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | Use `jsg::Cell` when the field is set after construction; `take` and `replace` make the `Rc` strong |
 | `jsg::Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `jsg::Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
@@ -599,21 +620,23 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
 | `std::sync::Arc<T>`, `std::sync::Mutex<T>` | No | Only for `T: HoldsNoGcReferences`, and `Sync` for `Arc` |
+| `jsg::ExternalMemoryAdjustment`, `jsg::ExternalMemoryTarget` | No | Hold no GC reference; see [External memory](#external-memory) |
 | `std::rc::Rc<T>` | Compile error — not `Send`, so not `Traced` | Share a resource through a `jsg::Rc` or `jsg::Weak`, and plain data with a future through an `Arc` (Safety rules, rules 2 and 5) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct or enum whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
+- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. It generates a `jsg::SnapshotTransfer` impl with an empty snapshot; a type with state implements `SnapshotTransfer` itself. See [Startup snapshots](#startup-snapshots).
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
 ### Dropping references
 
-An `Rc` holds the resource in an `std::rc::Rc` and its C++ `Wrappable` in a `kj::Rc`, and a `Weak`
-holds an `std::rc::Weak`. None of their reference counts is atomic: the isolate lock is what keeps
+An `Rc` holds its C++ `Wrappable`, whose allocation holds the resource, in a `kj::Rc`, and a `Weak`
+holds a `kj::WeakRc` of it. None of their reference counts is atomic: the isolate lock is what keeps
 two threads from updating them at once. Releasing a strong reference may also touch the resource's
 wrapper. Yet an `Rc` or a `Weak` can be dropped without the lock, for example by C++ code that
 owns the Rust object holding it. So each one keeps the state of the isolate its resource was
@@ -633,6 +656,42 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
   left to update. No lock serializes them, so they go through the queue, which one thread at a
   time drains. Nothing else touches the counts by then: every other operation takes a lock of
   the isolate, and panics once its `Realm` is dropped.
+
+### External memory
+
+A resource reports memory it owns outside the V8 heap through `jsg::ExternalMemoryAdjustment`,
+using the same accounting as C++ JSG. Create an adjustment under the isolate lock, keep it in a
+field, and use `set(total)` as the allocation size changes:
+
+```rust
+#[jsg_resource]
+struct ExternalBuffer {
+    data: RefCell<Vec<u8>>,
+    external_memory: RefCell<jsg::ExternalMemoryAdjustment>,
+}
+
+let external_memory = lock.external_memory_adjustment(data.len());
+// ... and when the buffer grows:
+self.external_memory.borrow_mut().set(data.len());
+```
+
+Keep one adjustment per resource for its significant native allocations, updated at construction,
+growth, and release. Each adjustment allocates an FFI wrapper and holds an atomic reference to the
+target; avoid creating one per string or small allocation, or updating it on every small change.
+
+Adjustments are `Send` and `Sync` and can be updated or dropped on any thread. Dropping one removes
+its charge, including when V8 collects the resource. To create adjustments without the lock, first
+obtain an `ExternalMemoryTarget` with `lock.external_memory_target()`, then call
+`target.adjustment(amount)` on any thread. Both types can outlive the isolate; after its destruction,
+updates no longer reach V8.
+
+Use `adjust(delta)` when tracking changes rather than a total. Lowering an adjustment below zero
+returns an internal error and leaves the amount unchanged, matching C++. An amount or change of
+32 GiB or more aborts the process, including after isolate destruction.
+
+External memory accounting is separate from heap snapshots: a resource reports its allocations
+through `visit_for_memory_info`. See [`external_memory.rs`](external_memory.rs) for reporting and
+deferral details.
 
 ### Creating resources from C++
 
@@ -707,6 +766,40 @@ unsafe fn is_my_resource(isolate: *mut ffi::Isolate, value: ffi::Local) -> KjMay
 Tested by `src/rust/jsg-test/tests/resource_from_cpp.rs`, through a C++ helper that holds the
 wrapper only in a `v8::Global` across a full GC.
 
+### Startup snapshots
+
+A Worker whose top level leaves a resource reachable can start from a V8 startup snapshot
+([`docs/startup-snapshot.md`](../../../docs/startup-snapshot.md)) only if the resource's type
+implements `jsg::SnapshotTransfer`, the counterpart of C++ `Wrappable::snapshotClone()`. The
+zygote calls `snapshot()` on the live instance and stores the `Snapshot` it returns, which holds
+no GC reference and is `Send` and `Sync`, as the threads of the Workers started from it read it.
+Each Worker started from the snapshot calls `restore()` on it, with no lock, and attaches the
+result to the restored wrapper. A type without the impl makes the Worker start without the
+snapshot. `#[jsg_resource(snapshot_stateless)]` implements it for a `Default` type with no state,
+such as `UrlUtil`; a type with state copies it into its `Snapshot`:
+
+```rust
+impl jsg::SnapshotTransfer for Point {
+    type Snapshot = (f64, f64);
+
+    fn snapshot(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
+
+    fn restore(&(x, y): &(f64, f64)) -> Self {
+        Self { x, y }
+    }
+}
+```
+
+A restored instance is new, so a `jsg::Rc` it holds would not be to the resource behind the
+restored wrapper that JavaScript sees. `snapshot_references()` lists the references whose identity
+JavaScript can observe, and `snapshot_relink()` takes the restored resources in the same order,
+with a lock, as C++ `snapshotReferences()` and `snapshotRelink()` do. `RestoredReferences::next`
+returns `None` for a resource the snapshot did not carry, such as one the context reaches only
+through Rust, which the instance then rebuilds from its own `Snapshot`; see
+`jsg-test/tests/startup_snapshot.rs`.
+
 ## V8 Handle Types
 
 ### `Lock<'s>` and handle scopes
@@ -780,9 +873,15 @@ assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 A method parameter can be a handle of the types that C++ JSG's `v8::Local<T>` parameters
 take: `Local<Value>` takes any value, and `Local<String>`, `Local<Object>`,
 `Local<Function>`, `Local<BigInt>`, `Local<TypedArray>`, `Local<ArrayBuffer>`,
-`Local<ArrayBufferView>` and the typed arrays take a value of exactly that type, with no
-coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any value, as a
-promise resolved with it.
+`Local<ArrayBufferView>`, `Local<WasmModuleObject>` and the typed arrays take a value of exactly
+that type, with no coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any
+value, as a promise resolved with it.
+
+A `Local<WasmModuleObject>` is a `WebAssembly.Module`. Its `compiled_module()` returns a
+`v8::CompiledWasmModule`, which owns the module's compiled code and its `wire_bytes()`, needs no
+lock, and can be handed to C++ with `into_ffi()` as a `kj::Own<v8::CompiledWasmModule>`, from
+which C++ makes another module object without recompiling. As in C++, RTTI describes the module
+as `unknown`; a TypeScript override names it `WebAssembly.Module`.
 
 ### `Global<T>`
 
@@ -1039,9 +1138,9 @@ error, as C++ JSG fails with a `KJ_ASSERT`.
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the object is created from a `v8::DictionaryTemplate` cached for the struct type, as C++ JSG creates it, so the fields are data properties, an absent optional field is `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
-A `#[jsg_method]`, property getter or wildcard property converts its return value with `ToJS::to_js_with_creator`, passing the resource's wrapper for an instance member and `None` for a static one, as C++ JSG's `wrap()` takes a `creator`. Only a value that stays pending, a `jsg::Promise`, uses it, and a container passes it on; a `ToJS` impl that holds such values should forward it too.
+A `#[jsg_method]`, property getter or wildcard property that returns `()`, `bool` or one of the numeric types a Fast API callback returns, directly or as the `Ok` type of a `Result`, sets its result directly in V8: a `bool` with `set_return_boolean`, a number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return value converts with `ToJS::to_js_with_creator`. Instance members pass the resource's wrapper as the creator, and static members pass `None`. As in C++ JSG's `wrap()`, a `jsg::Promise` keeps its creator resource alive until it settles. Containers pass the creator on; a `ToJS` impl that holds such values should forward it too.
 
 Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or an exception or a termination is already pending, and a container passes on the error from converting an element, whichever kind it is. A `&str` or `String` longer than `v8::String::MAX_LENGTH` fails with a `RangeError` ("Invalid string length", as V8 reports it), which is not pending; every other conversion of a single value in this crate fails only with a pending error. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
@@ -1083,13 +1182,18 @@ callback never throws a `DOMException`, since only a method that returns no `Res
 `jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
 of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default options: the bytes are
 the same, and each reads what the other writes, so the two can share stored data. Native errors
-are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
-objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
-serialized, and neither can instances of the runtime's classes implemented in JavaScript, which
-C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
-throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
-bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
-resolve, so data containing one can't be read back. Deserialization runs no JavaScript.
+are written as host objects when the `enhanced_error_serialization` flag is on, workerd API
+objects such as `Blob` and `Headers` through their C++ serializers, and a `DOMException`,
+whichever implementation made it, as C++ JSG writes it. Rust resources can't be serialized.
+Instances of the runtime's classes implemented in JavaScript, such as `QuotaExceededError`, are
+written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
+that the class's `clone` function returns follows the value. Reading one makes the copy from the
+class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
+with the class's `deserialize` function once the whole value is read. That function is the only
+JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
+such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
+given only the bytes can resolve, so data containing one can't be read back.
 
 Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
 `SerializeOptions::version`, the version of V8's format to write rather than the latest, as
@@ -1125,7 +1229,10 @@ how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be 
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
 that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
-`String` converts from any value with `ToString`, copying it out of the V8 heap. A
+`String` converts from any value with `ToString`, copying it out of the V8 heap. It is a Web IDL
+`USVString`: each lone UTF-16 surrogate becomes one U+FFFD. C++ JSG's `kj::String` differs here: it
+keeps a lone surrogate as its three WTF-8 bytes, which read back in JavaScript as three U+FFFD, so
+`'\ud800x'` returns from C++ as `'\ufffd\ufffd\ufffdx'` and from Rust as `'\ufffdx'`. A
 `jsg::JsString<'s>` parameter performs the same coercion without copying or decoding the string,
 like C++ JSG's `jsg::JsString`. It preserves lone UTF-16 surrogates and returns to JavaScript
 unchanged. It dereferences to `v8::Local<'s, v8::String>` for string operations, and converts to
@@ -1179,6 +1286,13 @@ pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor {
   `...name: any[]`; give a precise type with a TypeScript override.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
+
+From JavaScript, a `Vec<T>` takes an `Array`, and a hole reads as `undefined`. An element that is
+not a `T` is a `TypeError` naming its index, and a `#[jsg_struct]` field that is not of its type is
+one naming the field, with the messages C++ JSG gives. Script that runs during the conversion,
+such as an element's getter or `valueOf`, can change the array's length. C++ JSG reads the length
+once, and Rust JSG follows the current length: when script shortens the array, C++ JSG pads the
+result with `undefined` and Rust JSG stops at the new length.
 
 A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
 `vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
@@ -1276,8 +1390,8 @@ So a value is coerced only when no variant takes it as it is, and coerced to a s
 in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
 `null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
 cannot become a string, or an exception thrown by `toString()`, is thrown rather than
-trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
-`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`
+or `f64`, takes part in `T`'s passes but converts only a value of
 exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 
@@ -1290,9 +1404,8 @@ behave as they do in C++ rather than as their position suggests:
 - `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
   also takes a number of milliseconds, before any numeric variant does.
 - `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
-  and `undefined`, and converts any other value as `T` would, coercion included. A value
-  that `T` does not take is not taken as `null`, as in C++ JSG with the
-  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+  and `undefined`, and converts any other value as `T` would, coercion included, including
+  a [type mismatch](#nullablet-and-nullorundefinedt).
 - A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
   `v8::Local<'s, v8::String>` is a string type, but never coerces, and
   `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
@@ -1315,7 +1428,7 @@ variants of nested unions and the inner types of nullable types: at most one boo
 numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
 nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
 without resources, dictionary-like or sequence-like types; no `Option<T>` or
-`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`LenientOption<T>`, which mark optional parameters and fields; and no type twice, counting a
 `Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
 have several resource types, as Web IDL allows, but not the same one in both a union and
 a union nested in it.

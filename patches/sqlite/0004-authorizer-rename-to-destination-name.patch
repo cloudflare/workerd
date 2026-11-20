@@ -1,3 +1,4 @@
+diff -u5 -r sqlite-src-pristine/src/alter.c sqlite-src-modified/src/alter.c
 --- sqlite-src-pristine/src/alter.c	2026-08-20 19:56:12
 +++ sqlite-src-modified/src/alter.c	2026-08-20 19:57:57
 @@ -177,12 +177,13 @@
@@ -16,6 +17,7 @@
  #endif
  
  #ifndef SQLITE_OMIT_VIRTUALTABLE
+diff -u5 -r sqlite-src-pristine/test/auth.test sqlite-src-modified/test/auth.test
 --- sqlite-src-pristine/test/auth.test	2026-08-20 19:56:10
 +++ sqlite-src-modified/test/auth.test	2026-08-20 20:00:21
 @@ -1780,11 +1780,11 @@
@@ -96,6 +98,7 @@
  
  } ;# ifcapable altertable
  
+diff -u5 -r sqlite-src-pristine/test/alterauth.test sqlite-src-modified/test/alterauth.test
 --- sqlite-src-pristine/test/alterauth.test	2026-08-20 19:56:10
 +++ sqlite-src-modified/test/alterauth.test	2026-08-20 19:57:57
 @@ -34,11 +34,11 @@
@@ -111,6 +114,7 @@
    set ::auth [list]
    execsql { ALTER TABLE t2 RENAME c TO ccc }
    set ::auth
+diff -u5 -r sqlite-src-pristine/test/alterauth2.test sqlite-src-modified/test/alterauth2.test
 --- sqlite-src-pristine/test/alterauth2.test	2026-08-20 19:56:11
 +++ sqlite-src-modified/test/alterauth2.test	2026-08-20 20:00:31
 @@ -53,11 +53,11 @@

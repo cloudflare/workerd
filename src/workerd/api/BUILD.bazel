@@ -20,7 +20,6 @@ filegroup(
         "container.c++",
         "event-target-bootstrap.c++",
         "events.c++",
-        "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
         "filesystem-bootstrap.c++",
@@ -83,7 +82,6 @@ filegroup(
         "container.h",
         "event-target-bootstrap.h",
         "events.h",
-        "eventsource.h",
         "export-loopback.h",
         "exported-handler-ctx.h",
         "filesystem.h",
@@ -724,6 +722,7 @@ kj_test(
         "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:thread-scopes",
     ],
 )
@@ -749,14 +748,6 @@ kj_test(
 
 kj_test(
     src = "streams/internal-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "eventsource-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -799,6 +790,22 @@ kj_test(
 
 kj_test(
     src = "serialization-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "dom-exception-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "messagechannel-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -906,6 +913,14 @@ kj_test(
 )
 
 kj_test(
+    src = "string-sandbox-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "sockets-test.c++",
     deps = [
         "//src/workerd/io",
@@ -953,6 +968,14 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "binding-snapshot-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(

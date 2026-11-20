@@ -8,12 +8,12 @@
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
+#[jsg_traced]
 pub struct Carried {
     pub count: usize,
 }
-
-jsg::jsg_traced!(Carried);
 
 #[jsg_resource]
 pub struct Waiter {

@@ -527,6 +527,10 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
         [&](BaseTracer& tracer) { tracer.addSpanUpdate(spanId, kj::mv(update)); });
   }
 
+  void submitSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanLinks(spanId, kj::mv(links)); });
+  }
+
   void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
@@ -1057,12 +1061,13 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
 };
 
-// The tracer of one event on `worker`, or none if the event has no tails. A dynamic worker's tails
-// are its source's; the server passes it none in `tails`.
+// The tracer of one event on `worker`, or none if the event has neither tails nor an OTLP
+// exporter. A dynamic worker's tails are its source's; the server passes it none in `tails`.
 kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     kj::Maybe<Worker::Actor&> actor,
-    ::rust::Box<WorkerInterfaceList> tails) {
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter) {
   kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
   kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
   for (size_t i = 0; i < tails->len(); i++) {
@@ -1072,7 +1077,9 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
     for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
   }
-  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty()) return kj::none;
+  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty() && otlpExporter == kj::none) {
+    return kj::none;
+  }
 
   auto executionModel =
       actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
@@ -1090,7 +1097,8 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
   auto tailStreamWriter = tracing::initializeTailStreamWriter(
       streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
-      entrypointName.clone(), executionModel, kj::mv(durableObjectId));
+      entrypointName.clone(), executionModel,
+      durableObjectId.map([](kj::String& id) { return kj::str(id); }));
   kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
       kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
@@ -1115,6 +1123,34 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
         kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
         kj::mv(traceId), traceFlags));
   });
+
+  // The invocation's span, under which its user spans are exported, takes the invocation's ids.
+  KJ_IF_SOME(exporter, otlpExporter) {
+    OtlpServiceInfo service{
+      .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
+      .entrypoint = entrypointName,
+      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
+    };
+    tracer->setStartInvocationSpanFunc(
+        [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
+            serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
+            identityTags = makeOtlpIdentityTags(service)](
+            tracing::InvocationSpanContext& invocation) mutable {
+      // Standalone export samples traces without an upstream decision. Set the invocation's
+      // context so user spans and subrequests inherit the same flags.
+      invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
+      auto parent = invocation.getParent().map(
+          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
+      return startExportedUserSpan(entropySource, exporter.addRef(),
+          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
+          OtlpSpanSubmitter::Options{
+            .serviceName = serviceName,
+            .resource = resource,
+            .defaultTags = identityTags,
+          },
+          "invocation"_kjc, invocation.getSpanId());
+    });
+  }
   return kj::mv(tracer);
 }
 
@@ -1131,7 +1167,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   // The test event is not traced.
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
   if (entrypointName.orDefault("") != "test"_kj) {
-    workerTracer = makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails));
+    workerTracer =
+        makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails), worker.otlpExporter.clone());
   }
 
   kj::Own<RequestObserver> observer =
@@ -1203,7 +1240,8 @@ kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
   auto& impl = worker.getImpl();
   auto& actorRef = actor.getActor();
   auto entrypointName = kj::str(className);
-  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails));
+  // The handler's user spans are not exported over OTLP.
+  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails), kj::none);
   auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
   auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
   return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
@@ -1331,11 +1369,8 @@ void exception_throw(const kj::Exception& exception) {
   kj::throwException(exception.clone());
 }
 
-::rust::String exception_text(const AbortReason& error) {
-  // Raising the error across the bridge is the bridge's own KjError -> kj::Exception conversion.
-  return kj::str(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
-    error.raise();
-  }))).as<kj_rs::RustCopyUncheckedUtf8>();
+::rust::String exception_text(kj::Exception error) {
+  return kj::str(error).as<kj_rs::RustCopyUncheckedUtf8>();
 }
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json) {
@@ -1457,9 +1492,15 @@ MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
   return conf.getModules()[0].isPythonModule() ? MainModuleIsPython::YES : MainModuleIsPython::NO;
 }
 
-// Compiles a config worker's compatibility flags into `arena`, as the worker's errors.
+MainModuleIsPython isPythonMainModule(config::AssetsService::Reader) {
+  return MainModuleIsPython::NO;
+}
+
+// Compiles the compatibility flags of a config worker, or of an assets service with no user
+// worker, into `arena`, as the worker's errors.
+template <typename Conf>
 CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
-    config::Worker::Reader conf,
+    Conf conf,
     capnp::MallocMessageBuilder& arena,
     ErrorReporter& errorReporter) {
   auto flags = arena.initRoot<CompatibilityFlags>();
@@ -1571,12 +1612,11 @@ bool hasWasmModules(const WorkerSource& source) {
 }
 
 // Whether a Worker's top level can be evaluated in a zygote isolate and baked into a startup
-// snapshot. Only the TypeScript streams implementation qualifies: with the C++ implementation a
-// stream whose pull() or start() is still pending when top-level evaluation ends leaves a C++
-// promise continuation reachable from the context (a v8::Function whose callback is an
-// unregistered template instantiation and whose FunctionTemplateInfo data is a JS object), which
-// CreateBlob() cannot serialize. The TypeScript implementation keeps those continuations in
-// JavaScript, so a pending pull transfers with the context.
+// snapshot. The streams implementation is not a condition: a C++ stream whose pull() or start()
+// is still pending when top-level evaluation ends leaves a C++ promise continuation reachable
+// from the context, whose opaque callback data has no snapshot transfer, so that Worker fails its
+// zygote and starts without a snapshot (see jsg::Promise::thenImpl()); the TypeScript implementation
+// keeps such continuations in JavaScript and a pending pull transfers with the context.
 //
 // Every binding must be of a kind that transfers through the snapshot
 // (WorkerdApi::isBindingTransferableThroughSnapshot()): the zygote compiles the real bindings
@@ -1587,8 +1627,7 @@ bool supportsStartupSnapshot(kj::StringPtr name,
     CompatibilityFlags::Reader featureFlags,
     const WorkerSource& source,
     kj::Maybe<kj::ArrayPtr<const uint64_t>> globals) {
-  if (!featureFlags.getTypeScriptImplementedStreams() || featureFlags.getPythonWorkers() ||
-      featureFlags.getNewModuleRegistry() || source.variant.is<WorkerSource::ScriptSource>() ||
+  if (featureFlags.getPythonWorkers() || source.variant.is<WorkerSource::ScriptSource>() ||
       hasWasmModules(source)) {
     return false;
   }
@@ -1678,7 +1717,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
-    using ArtifactBundler = api::pyodide::ArtifactBundler;
+    using api::pyodide::ArtifactBundler;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           workerSource.variant.tryGet<Worker::Script::ModulesSource>(), featureFlags,
@@ -1756,7 +1795,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
       auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
           IsolateObserver::StartType::COLD, SpanParent(nullptr),
           newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
-          api::pyodide::ArtifactBundler::makeDisabledBundler());
+          api::pyodide::ArtifactBundler::makeDisabledBundler(),
+          // The registry only holds the bundle's definitions; each isolate attaches its own
+          // instances (jsg::modules::ModuleRegistry::attachToIsolate()).
+          newModuleRegistry.map(
+              [](kj::Arc<jsg::modules::ModuleRegistry>& registry) { return registry.addRef(); }));
       // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
       // zygote isolate breaks snapshot creation.
       zygote =
@@ -1921,6 +1964,31 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
       .as<kj_rs::RustCopy>();
 }
 
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& constFactory, uint32_t configService) {
+  auto& factory = constFactory.getImpl();
+  auto services = factory.config.getServices();
+  auto assets = services[configService].getAssets();
+  capnp::MallocMessageBuilder arena;
+  ErrorReporter errorReporter;
+  if (assets.hasUserWorker()) {
+    // The user worker reports errors in its flags itself.
+    auto name = assets.getUserWorker().getName();
+    for (auto service: services) {
+      if (service.getName() == name && service.isWorker()) {
+        return compileFlags(*factory.options, service.getWorker(), arena, errorReporter)
+            .getAssetsSecFetchModeNavigateHeaderPrefersAssetServing();
+      }
+    }
+    return false;
+  }
+  auto flags = compileFlags(*factory.options, assets, arena, errorReporter);
+  if (!errorReporter.errors.empty()) {
+    kj::throwFatalException(KJ_EXCEPTION(FAILED, kj::strArray(errorReporter.errors, "; ")));
+  }
+  return flags.getAssetsSecFetchModeNavigateHeaderPrefersAssetServing();
+}
+
 WorkerInfo worker_info(const CompiledWorker& worker) {
   return worker.getImpl().info;
 }
@@ -1940,6 +2008,12 @@ void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const ui
   });
 }
 
+void worker_set_otlp_exporter(
+    const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
+  worker.getImpl().otlpExporter =
+      exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
+}
+
 void worker_unlink(const CompiledWorker& worker) {
   auto& impl = worker.getImpl();
   impl.waitUntilTasks.clear();
@@ -1950,6 +2024,7 @@ void worker_unlink(const CompiledWorker& worker) {
     dynamic.tails = nullptr;
     dynamic.streamingTails = nullptr;
   }
+  impl.otlpExporter = kj::none;
 }
 
 }  // namespace workerd::server

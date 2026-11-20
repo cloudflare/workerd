@@ -25,5 +25,11 @@ exports_files([
     "media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm",
     "tools/certs/cacert.pem",
     "wasm/incrementer.wasm",
+    "xhr/resources/header-content-length.asis",
+    "xhr/resources/header-content-length-twice.asis",
+    "xhr/resources/headers-basic.asis",
+    "xhr/resources/headers-double-empty.asis",
+    "xhr/resources/headers-some-are-empty.asis",
+    "xhr/resources/headers-www-authenticate.asis",
     "xhr/resources/utf16-bom.json",
 ])

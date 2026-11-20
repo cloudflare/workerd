@@ -14,6 +14,7 @@ use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
+use jsg_macros::jsg_traced;
 
 // =============================================================================
 // Shared leaf resource
@@ -176,10 +177,10 @@ struct PlainStruct {
     pub label: String,
 }
 
+#[jsg_traced]
 struct PlainData;
-jsg::jsg_traced!(PlainData);
 
-/// `jsg::Weak`, `jsg_traced!` types and a `#[jsg_struct]` of plain data hold no GC references.
+/// `jsg::Weak`, `#[jsg_traced]` types and a `#[jsg_struct]` of plain data hold no GC references.
 /// (That a `#[jsg_struct]` with a `jsg::Rc` field does is checked by the
 /// `gc-reference-in-std-cell-is-not-traced` compile test.)
 #[test]

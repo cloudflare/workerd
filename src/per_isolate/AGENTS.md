@@ -30,8 +30,25 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
+  TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
+  the native `utils.structuredClone()`), which replaces the C++ method; its
+  parity suite and divergence ledger are in `src/tests/structured-clone/`, and
+  its types in `types/defines/structured-clone.d.ts`.
+- `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
+  under `expose_global_message_channel`, as lazy data properties
+  (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads
+  on first use, through them or through `cloudflare-internal:messagechannel`
+  (`requireBootstrapExport()` in `per-isolate-bootstrap.h`), which
+  `node:worker_threads` uses. Use the same for any other global few Workers
+  need. A module loaded on first use runs after user code, so its top level
+  must not read what user code can change, such as a constructor's
+  `prototype`, which `extends` reads; see `EventTargetHeritage` in
+  `messagechannel/messagechannel.ts`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
+- Modules get `DOMException` from `require('dom-exception')`, which
+  `main.ts` loads first, not from the global or `primordials`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
@@ -86,6 +103,14 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   The properties are neither reflected nor inherited, and the keys must stay
   in module scope. Ordinary symbols, including `getApiSymbol` results, are
   reflection-visible and are not secrets.
+- An error class whose `name` and `message` are accessors, as WebIDL
+  attributes are, keeps them as strings under the private keys
+  `workerd:errorName` and `workerd:errorMessage` (`ERROR_NAME_KEY` and
+  `ERROR_MESSAGE_KEY`, `jsg/jsg.h`). `kj::str()` and Rust JSG's
+  `to_detail_string()`, which run no JavaScript, then describe an instance
+  as `name: message`; V8's description reads only data properties. Any such
+  class may use the keys, so they are no brand: brand-check with a key of
+  the class's own, as `dom-exception.ts` does.
 - **Structured serialization** (`structuredClone()`, `postMessage()`, RPC,
   Durable Object storage) goes through `serialization.ts`, a leaf module
   modelled on Node.js's js_transferable, which `main.ts` loads whatever the
@@ -111,9 +136,10 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
     `per_isolate@eslint` test rejects TypeScript value exports, which
     compile to getters the deserializer can't call.
   - The deserializer makes an instance from `Export.prototype` without
-    calling the constructor (a native error if the prototype inherits from
-    `Error.prototype`), then calls `deserialize()` once the whole value has
-    been read. So the state `deserialize()` restores lives under V8-private
+    calling the constructor (a DOMException with neither brand, name nor
+    message if the prototype inherits from `DOMException.prototype`, and
+    otherwise a native error if it inherits from `Error.prototype`), then
+    calls `deserialize()` once the whole value has been read. So the state `deserialize()` restores lives under V8-private
     properties, not `#private` fields, which such an instance lacks, and is
     brand-checked the same way.
   - `deserialize()` validates its data completely, with primordials only:

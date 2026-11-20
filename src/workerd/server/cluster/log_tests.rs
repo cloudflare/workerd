@@ -16,6 +16,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use crate::Bucket;
 use crate::Error;
@@ -241,9 +243,13 @@ unsafe extern "C" fn write(file: *mut File, data: *const c_void, n: c_int, offse
     }
 }
 
+/// A new directory for `name`: numbered, as tests that run at once may ask
+/// for the same name.
 fn scratch(name: &str) -> PathBuf {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let root = std::env::var_os("TEST_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
-    let dir = root.join(format!("capture-{name}-{}", std::process::id()));
+    let dir = root.join(format!("capture-{name}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

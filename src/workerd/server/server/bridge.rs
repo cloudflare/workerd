@@ -12,11 +12,12 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers`, `rewriting_response` and `image_filter_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
 )]
 
+pub use assets_router::mitigations::should_block_image_response;
+
 pub use crate::actor::MovedHook;
-pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
@@ -27,6 +28,7 @@ pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
+pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
@@ -50,9 +52,21 @@ pub use crate::tasks::task_run;
 )]
 #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
 pub mod ffi {
+    // A JS value that can cross the RPC boundary: the props of an entrypoint, an actor class or
+    // a dynamic worker's env. The frankenvalue crate's bridge declares it, and so defines the
+    // one `KjOwn<Frankenvalue>` drop a binary may link.
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/frankenvalue/ffi.h");
+        type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
+        type AsyncInputStream = kj::io::ffi::AsyncInputStream;
         type AsyncIoStream = kj::io::ffi::AsyncIoStream;
+        type AsyncOutputStream = kj::io::ffi::AsyncOutputStream;
+        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
@@ -146,6 +160,14 @@ pub mod ffi {
         actor_class: Box<ActorClassChannel>,
     }
 
+    /// A response to an `HttpCall`: its status, the value of the header asked for (empty if it
+    /// has none), and its body.
+    struct HttpAnswer {
+        status: u32,
+        header: String,
+        body: KjOwn<AsyncInputStream>,
+    }
+
     /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
     struct ConfigReport {
         error: bool,
@@ -203,7 +225,6 @@ pub mod ffi {
         async_trace_stacks: KjMaybe<u32>,
         async_trace_promises: bool,
         experimental: bool,
-        pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,
         python_save_snapshot: bool,
         python_save_baseline_snapshot: bool,
@@ -355,6 +376,16 @@ pub mod ffi {
         /// The header table every `kj::HttpHeaders` handed to a worker is built against.
         fn factory_header_table<'a>(factory: &'a WorkerFactory) -> &'a HttpHeaderTable;
 
+        /// The server's owner of its shared OTLP exporter. Dropping it cancels outstanding
+        /// exports and releases the collector, even if spans still hold exporter references.
+        type OtlpExporter;
+        fn factory_new_otlp_exporter(
+            factory: &WorkerFactory,
+            collector: Box<SubrequestChannel>,
+        ) -> Result<KjOwn<OtlpExporter>>;
+        /// Disables export before the server starts tearing down its workers.
+        fn otlp_exporter_unlink(exporter: &OtlpExporter);
+
         /// Compiles a worker: its script, bindings and exports. Any config error is reported in
         /// the returned info rather than thrown; a worker with errors still exists so that the
         /// server can keep reporting the config's other errors.
@@ -380,6 +411,14 @@ pub mod ffi {
             params: &[u64],
         ) -> Result<Vec<u64>>;
 
+        /// Whether the config's assets service `services[config_service]` prefers serving an
+        /// asset to a navigation (`assetsSecFetchModeNavigateHeaderPrefersAssetServing`), under
+        /// its user worker's compatibility flags, or, with none, its own.
+        fn factory_assets_navigation_prefers_asset_serving(
+            factory: &WorkerFactory,
+            config_service: u32,
+        ) -> Result<bool>;
+
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.
         type CompiledWorker;
@@ -387,10 +426,14 @@ pub mod ffi {
         /// Compiles `ctx.exports` from an encoded `Globals` message. Called once, after the
         /// server has numbered the worker's loopback channels.
         fn worker_set_ctx_exports(worker: &CompiledWorker, globals: &[u64]) -> Result<()>;
+        /// Installs the exporter for this worker's invocation spans; none disables export.
+        /// The server selects eligible workers when it links their services.
+        fn worker_set_otlp_exporter(worker: &CompiledWorker, exporter: KjMaybe<&OtlpExporter>);
         /// Cancels the worker's requests still in flight (background work past the response: a
         /// `waitUntil()`, a tail worker's event), each of which holds the worker and its I/O
         /// channels; and drops a dynamic worker's env channel tables and tails, which may refer
-        /// back to the worker that loaded it. Called when the server unlinks the worker.
+        /// back to the worker that loaded it. Releases the worker's OTLP exporter reference too.
+        /// Called when the server unlinks the worker.
         fn worker_unlink(worker: &CompiledWorker);
         /// Starts a request on the worker. `channels` is the worker's I/O channel table for this
         /// request; `tails` receive the request's trace once it completes (the server passes none
@@ -453,9 +496,11 @@ pub mod ffi {
         /// Resolves when the actor breaks (an uncaught error, an eviction request, a storage
         /// failure); the error is the reason.
         async fn actor_broken(broken: KjOwn<ActorBroken>) -> Result<()>;
-        /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
-        /// actor is shut down instead: its background work stops, and nothing is failed.
-        fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        /// Aborts the actor with `reason`; every in-flight request fails.
+        fn actor_abort(actor: &ActorHandle, reason: KjException);
+        /// Shuts the actor down without a reason: its background work stops, and nothing is
+        /// failed.
+        fn actor_stop(actor: &ActorHandle);
         fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
         fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
@@ -608,15 +653,10 @@ pub mod ffi {
         #[namespace = "kj"]
         type Exception;
         fn exception_throw(exception: &Exception) -> Result<()>;
-        /// The error `error` holds, the way KJ prints an exception (`kj::str`): `file:line: type:
-        /// description`, the location being the bridge's if the error was made in Rust. Without
-        /// a stack trace, which a `KjError` does not carry.
-        fn exception_text(error: &AbortReason) -> String;
+        /// `error` the way KJ prints an exception (`kj::str`): `file:line: type: description`.
+        /// Without a stack trace, which a `KjError` does not carry.
+        fn exception_text(error: KjException) -> String;
 
-        /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
-        /// class or a dynamic worker's env.
-        #[namespace = "workerd"]
-        type Frankenvalue;
         fn frankenvalue_from_json(json: &str) -> KjOwn<Frankenvalue>;
         fn frankenvalue_clone(value: &Frankenvalue) -> KjOwn<Frankenvalue>;
         fn frankenvalue_is_empty(value: &Frankenvalue) -> bool;
@@ -642,6 +682,17 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
+        /// Serves a cluster peer's session: the debug port's interface, its `getActor` for
+        /// clustered namespaces (`resolve_peer_actor`) and its `getEntrypoint` for the cluster's
+        /// caches (`resolve_peer_cache`). Once `closing` fails, the session disconnects with its
+        /// error, which fails every call the peer still has out on it; it resolves once the peer
+        /// shut its side of the connection too.
+        async fn factory_accept_cluster_peer(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            session: Box<PeerSession>,
+            closing: Box<ResultTask>,
+        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
@@ -656,7 +707,14 @@ pub mod ffi {
             service: &str,
             class_name: &str,
             actor_id: &str,
-        ) -> KjOwn<RpcClient>;
+        ) -> Result<KjOwn<RpcClient>>;
+        /// A service on a cluster peer, by `WorkerdDebugPort.getEntrypoint` over `session`: a
+        /// worker's default entrypoint, or a service that is not a worker. Pipelined, and it
+        /// keeps the session alive, as `rpc_client_debug_actor`.
+        fn rpc_client_debug_entrypoint(
+            session: &RpcClient,
+            service: &str,
+        ) -> Result<KjOwn<RpcClient>>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -684,6 +742,21 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             hook: Box<MovedHook>,
         ) -> KjOwn<WorkerInterface>;
+        /// An HTTP request made from Rust: its body is written, then its response awaited.
+        type HttpCall;
+        /// Starts `method url` with `headers` and a body of `length` bytes on `interface`.
+        fn http_call(
+            interface: KjOwn<WorkerInterface>,
+            method: HttpMethod,
+            url: &str,
+            headers: &HttpHeaders,
+            length: u64,
+        ) -> KjOwn<HttpCall>;
+        /// The request's body, to write all `length` bytes to.
+        fn http_call_body<'a>(call: Pin<&'a mut HttpCall>) -> Pin<&'a mut AsyncOutputStream>;
+        /// Ends the request's body and awaits the response, with the value of `header`, a
+        /// name as sent (in lowercase, as `http::HeaderMap` sends it).
+        async fn http_call_response(call: KjOwn<HttpCall>, header: &str) -> Result<HttpAnswer>;
 
         /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
         /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
@@ -697,7 +770,12 @@ pub mod ffi {
         // The listeners' shims (worker-factory-listen.c++).
 
         /// A copy of `headers` with `edits` and then `injected` applied in order.
-        fn edit_headers(
+        ///
+        /// # Safety
+        ///
+        /// The copy keeps a reference to the header table of `headers`, which the `KjOwn` does
+        /// not carry: the caller keeps that table alive for as long as the copy exists.
+        unsafe fn edit_headers(
             table: &HttpHeaderTable,
             headers: &HttpHeaders,
             edits: &[HeaderEdit],
@@ -710,6 +788,15 @@ pub mod ffi {
             table: &HttpHeaderTable,
             edits: &[HeaderEdit],
         ) -> Result<KjOwn<HttpServiceResponse>>;
+        /// A response that sends the user Worker's answer to a request for a remote image only
+        /// if `should_block_image_response` lets it through, else a 403 whose body
+        /// `image_filter_finish` writes. Borrows `inner` for its life.
+        unsafe fn new_image_filter_response<'a>(
+            inner: Pin<&'a mut HttpServiceResponse>,
+        ) -> KjOwn<HttpServiceResponse>;
+        async unsafe fn image_filter_finish<'a>(
+            response: Pin<&'a mut HttpServiceResponse>,
+        ) -> Result<()>;
         /// The `ConnectResponse` of a raw TCP socket's `connect()`: accepting does nothing,
         /// rejecting discards the body.
         fn new_null_connect_response() -> KjOwn<ConnectResponse>;
@@ -863,6 +950,24 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
+        /// requests `session` counts.
+        fn resolve_peer_actor(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getEntrypoint`: a clustered `cache` service, whose requests
+        /// `session` counts.
+        fn resolve_peer_cache(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A session a cluster peer has open here (`ClusterNode`).
+        type PeerSession;
 
         /// A worker's I/O channel table for one request: what its bindings reach.
         type ChannelFactory;
@@ -1020,11 +1125,6 @@ pub mod ffi {
         type ResultTask;
         async fn result_task_run(task: Box<ResultTask>) -> Result<()>;
 
-        /// The reason of an `actor_abort`. `raise` returns it as the `Err`, which C++ catches as
-        /// the equivalent `kj::Exception`; `Ok` when there is none.
-        type AbortReason;
-        fn raise(self: &AbortReason) -> Result<()>;
-
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
 
@@ -1037,6 +1137,9 @@ pub mod ffi {
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.
         type UdpFlow;
+        /// Whether the user Worker's answer to a request for a remote image is blocked.
+        fn should_block_image_response(status: u16, content_type: &[u8]) -> bool;
+
         /// The next datagram, or `ended`. One call at a time.
         async unsafe fn receive<'a>(self: &'a UdpFlow) -> Result<UdpDatagram>;
         async unsafe fn send<'a>(self: &'a UdpFlow, datagram: &'a [u8]) -> Result<()>;
@@ -1072,6 +1175,63 @@ pub fn rewriting_response<'a>(
     // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
     let response = unsafe { ffi::new_rewriting_response(inner, table, edits) }?;
     Ok(RewritingResponse {
+        response,
+        _inner: std::marker::PhantomData,
+    })
+}
+
+/// The headers `edit_headers` returns. Borrows the headers they were copied from, whose header
+/// table they share.
+pub struct EditedHeaders<'a> {
+    headers: kj_rs::KjOwn<ffi::HttpHeaders>,
+    _source: std::marker::PhantomData<&'a ffi::HttpHeaders>,
+}
+
+impl std::ops::Deref for EditedHeaders<'_> {
+    type Target = ffi::HttpHeaders;
+
+    fn deref(&self) -> &ffi::HttpHeaders {
+        &self.headers
+    }
+}
+
+/// See `ffi::edit_headers`.
+pub fn edit_headers<'a>(
+    table: &ffi::HttpHeaderTable,
+    headers: &'a ffi::HttpHeaders,
+    edits: &[ffi::HeaderEdit],
+    injected: &[ffi::HeaderEdit],
+) -> crate::Result<EditedHeaders<'a>> {
+    // SAFETY: the wrapper returned borrows `headers`, and their table outlives them.
+    let headers = unsafe { ffi::edit_headers(table, headers, edits, injected) }?;
+    Ok(EditedHeaders {
+        headers,
+        _source: std::marker::PhantomData,
+    })
+}
+
+/// See `ffi::new_image_filter_response`.
+pub struct ImageFilterResponse<'a>(RewritingResponse<'a>);
+
+impl ImageFilterResponse<'_> {
+    pub fn as_mut(&mut self) -> std::pin::Pin<&mut ffi::HttpServiceResponse> {
+        self.0.as_mut()
+    }
+
+    /// Writes the body of the 403, if the response was blocked.
+    pub async fn finish(&mut self) -> crate::Result<()> {
+        // SAFETY: the response outlives the future, which borrows it.
+        Ok(unsafe { ffi::image_filter_finish(self.as_mut()) }.await?)
+    }
+}
+
+/// See `ffi::new_image_filter_response`.
+pub fn image_filter_response(
+    inner: std::pin::Pin<&mut ffi::HttpServiceResponse>,
+) -> ImageFilterResponse<'_> {
+    // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    let response = unsafe { ffi::new_image_filter_response(inner) };
+    ImageFilterResponse(RewritingResponse {
         response,
         _inner: std::marker::PhantomData,
     })

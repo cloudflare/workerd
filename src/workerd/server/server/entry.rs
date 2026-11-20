@@ -33,7 +33,6 @@ use kj_rs::KjOwn;
 use crate::Result;
 use crate::bench;
 use crate::bridge::ffi;
-use crate::channels::AbortReason;
 use crate::config::DeploymentLog;
 use crate::config::Deployments;
 use crate::config::Factory;
@@ -141,7 +140,7 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
         // complete, `block_on` drops it, and the factory with it, before returning.
         let result = runtime.block_on(command(factory, structured));
         if let Err(failure) = result.and_then(|result| result) {
-            let failure = ffi::exception_text(&AbortReason(Some(failure)));
+            let failure = ffi::exception_text(cxx::KjException::from(failure));
             let message = format!("*** Uncaught exception ***\n{failure}");
             error(structured, &message);
         }
@@ -245,6 +244,9 @@ async fn server_serve(
 ) -> Result<()> {
     crate::log::install();
     let deployments = std::mem::take(&mut options.deployments);
+    options.announce = Some(Box::new(move |line| {
+        report(structured, Severity::Info, line);
+    }));
     let report = reporter(watch.is_some(), structured, deployments);
     let factory = Rc::new(Factory::new(factory));
     let result = with_watch(

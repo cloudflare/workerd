@@ -28,7 +28,15 @@ namespace workerd {
 
 namespace {
 
+// :test-fixture-expose-gc passes --expose-gc, which lets tests request a GC that skips
+// conservative stack scanning (`RequestGarbageCollectionForTesting()` with a `StackState`). The
+// default fixture has no flags: V8 rejects code caches built under other flags, and
+// per-isolate-compile-cache-test checks that the embedded ones are consumed.
+#ifdef WORKERD_TEST_FIXTURE_EXPOSE_GC
+jsg::V8System testV8System({"--expose-gc"_kj});
+#else
 jsg::V8System testV8System;
+#endif
 
 class MockCacheClient final: public CacheClient {
   kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
@@ -357,8 +365,7 @@ kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
 
 using api::pyodide::PythonConfig;
 
-const PythonConfig defaultPythonConfig{
-  .packageDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false};
+const PythonConfig defaultPythonConfig{.createSnapshot = false, .createBaselineSnapshot = false};
 
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),
@@ -471,7 +478,7 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
-          [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
+          [](kj::Rc<Worker::Actor::HibernationManager>& m) { return m.addRef(); }),
       /*hibernationEventType=*/kj::none, /*container=*/kj::none,
       /*containerImages=*/jsg::Dict<kj::String>{}, /*facetManager=*/kj::none,
       /*version=*/kj::none, savedHolderToken,

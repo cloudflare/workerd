@@ -11,12 +11,14 @@
 //! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
+use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Counter to track how many `SimpleResource` instances have been dropped.
 static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -243,6 +245,91 @@ fn weak_ref_upgrade() {
     });
 }
 
+/// Tests that a `Weak` has expired when the resource's `Drop` runs, so that it can't be upgraded
+/// to an `Rc` of a resource being dropped.
+#[test]
+fn weak_ref_expired_during_drop() {
+    static UPGRADED_DURING_DROP: AtomicUsize = AtomicUsize::new(0);
+    static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    thread_local! {
+        /// The lock that the resource is dropped under, for its `Drop` to use.
+        static DROP_LOCK: Cell<*mut jsg::Lock<'static>> = const { Cell::new(std::ptr::null_mut()) };
+    }
+
+    #[jsg_resource]
+    struct SelfObserver {
+        this: Cell<jsg::Weak<Self>>,
+    }
+
+    impl Drop for SelfObserver {
+        fn drop(&mut self) {
+            #[expect(
+                unsafe_code,
+                reason = "borrows the lock of the code dropping the resource"
+            )]
+            // SAFETY: the test sets `DROP_LOCK` to its lock just before dropping the resource,
+            // and doesn't use the lock until the drop returns.
+            let lock = unsafe { &*DROP_LOCK.get() };
+            let this = self.this.take();
+            if this.is_alive(lock) || this.upgrade(lock).is_some() {
+                UPGRADED_DURING_DROP.fetch_add(1, Ordering::SeqCst);
+            }
+            DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl SelfObserver {}
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SelfObserver {
+                this: Cell::default(),
+            },
+        );
+        strong.get(lock).this.set(strong.downgrade(lock));
+        DROP_LOCK.set(std::ptr::from_mut(lock).cast());
+        std::mem::drop(strong);
+        DROP_LOCK.set(std::ptr::null_mut());
+        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(UPGRADED_DURING_DROP.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+}
+
+/// A resource aligned to 16 bytes, the most a resource may be.
+#[jsg_resource(custom_trace)]
+#[repr(align(16))]
+struct Aligned {
+    pub value: u64,
+}
+
+impl jsg::Traced for Aligned {
+    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl Aligned {}
+
+/// Tests that a resource aligned to 16 bytes is aligned in its Wrappable's allocation, and that a
+/// weak reference to it outlives it.
+#[test]
+fn resource_aligned_to_16_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(lock, Aligned { value: 7 });
+        assert_eq!(std::ptr::from_ref(strong.get(lock)).addr() % 16, 0);
+        let weak = strong.downgrade(lock);
+        assert_eq!(weak.upgrade(lock).map(|rc| rc.get(lock).value), Some(7));
+        drop(strong);
+        assert!(weak.upgrade(lock).is_none());
+        Ok(())
+    });
+}
+
 /// Tests that a wrapped resource stays alive as long as JS wrapper exists.
 #[test]
 fn wrapped_resource_kept_alive_by_js() {
@@ -393,8 +480,8 @@ fn weak_ref_get_returns_none_after_drop() {
 
 /// Tests that `WeakRef::default()` creates a dead weak reference.
 ///
-/// A default `WeakRef` has `wrappable: None` and an expired `Weak<R>`.
-/// All operations must be safe: `get()` -> `None`, `upgrade()` -> `None`, `is_alive()` -> `false`.
+/// A default `Weak` refers to no resource, so `upgrade()` returns `None` and `is_alive()` returns
+/// `false`.
 #[test]
 fn weak_ref_default_is_dead() {
     let harness = crate::Harness::new();
@@ -997,6 +1084,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
 
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
+#[jsg_traced]
 struct NativeState {
     value: u32,
 }
@@ -1007,9 +1095,8 @@ impl Drop for NativeState {
     }
 }
 
+#[jsg_traced]
 struct SharedNativeState(std::sync::Arc<NativeState>);
-
-jsg::jsg_traced!(SharedNativeState);
 
 #[jsg_resource]
 struct NativeOwnerResource {

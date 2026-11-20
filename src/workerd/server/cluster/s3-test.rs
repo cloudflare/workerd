@@ -56,3 +56,35 @@ fn a_missing_credential_names_its_variable() {
         "set aws_secret_access_key or AWS_SECRET_ACCESS_KEY"
     );
 }
+
+#[test]
+fn every_amz_header_is_signed() {
+    // The signature botocore's S3SigV4Auth makes of the same request,
+    // with payload signing off.
+    let mut request = Request {
+        method: "PUT",
+        host: "s3.us-east-1.amazonaws.com",
+        path: "/b/k",
+        query: "partNumber=1&uploadId=u",
+        headers: vec![
+            ("x-amz-meta-m".into(), "  a  b ".into()),
+            ("x-amz-meta-workerd-r2".into(), "{\"x\":1}".into()),
+        ],
+    };
+    let credentials = Credentials {
+        key_id: "AKIDEXAMPLE".into(),
+        secret: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".into(),
+        token: None,
+        modified: None,
+    };
+    let now = UNIX_EPOCH + Duration::from_secs(1_794_832_496);
+    sign(&mut request, &credentials, "us-east-1", now);
+    let authorization = request.headers.iter().find(|(n, _)| n == "authorization");
+    assert_eq!(
+        authorization.unwrap().1,
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261116/us-east-1/s3/aws4_request, \
+         SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-m;\
+         x-amz-meta-workerd-r2, \
+         Signature=5ecc9bb05cd026951412503c39fc434ea74a9d952f1b5f7973c8fd625ddfa7a7"
+    );
+}
