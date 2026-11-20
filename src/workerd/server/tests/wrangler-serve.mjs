@@ -12,8 +12,8 @@ import { env } from 'node:process';
 const CONTROL_FD = 3;
 
 // Runs workerd on `dir`'s wrangler.jsonc, with `vars` added to its
-// environment, until it listens or until it exits. Answers {port, stop} or
-// {code, stderr}.
+// environment, until it listens or until it exits. Answers {port, stop,
+// stderr}, whose stderr() is complete once stop() resolves, or {code, stderr}.
 export function serve(dir, args, vars = {}) {
   const child = spawn(
     env.WORKERD_BINARY,
@@ -40,7 +40,7 @@ export function serve(dir, args, vars = {}) {
         const m = JSON.parse(line);
         if (m.event === 'listen') {
           const stop = () => (child.kill(), exited);
-          resolve({ port: m.port, stop });
+          resolve({ port: m.port, stop, stderr: () => stderr });
         }
       }
       buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);

@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // `workerd serve` of a wrangler.jsonc with secrets_store_secrets: a secret's
-// WORKERD_SECRET_ variable is its value and is never stored, and without
-// --experimental the server refuses to start.
+// WORKERD_SECRET_ variable is its value and is never stored, an unset one is
+// a warning, and without --experimental the server refuses to start.
 
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -60,6 +60,8 @@ test('secrets_store_secrets in a wrangler.jsonc', async () => {
     'Secret "other" not found',
   ]);
   await server.stop();
+  assert.match(server.stderr(), /WORKERD_SECRET_OTHER is not set/);
+  assert.doesNotMatch(server.stderr(), /WORKERD_SECRET_API_KEY/);
 
   server = await serve(dir, ['--experimental']);
   assert.deepStrictEqual(await call(server, '/KEY'), [

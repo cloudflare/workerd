@@ -8,8 +8,10 @@ wd_test(
 )
 
 # `workerd serve` of a wrangler.jsonc's ratelimits.
+# Large: it may wait up to 5 s for a minute's last seconds to pass.
 js_test(
     name = "ratelimit-wrangler-test",
+    size = "large",
     data = [
         "//src/workerd/server:workerd",
         "//src/workerd/server/tests:wrangler-serve_js_lib",

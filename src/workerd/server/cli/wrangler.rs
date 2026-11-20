@@ -41,16 +41,15 @@
 //! `secrets_store_secrets`, also `--experimental`, are the entrypoint `SecretsStoreSecret` of the
 //! Worker `<name>-secrets-store` (the bundled module `/workerd/secrets-store.js`), the store and
 //! secret name in its props. A secret's value is the variable [`secret_variable`] names after its
-//! `secret_name`, read when the server starts and never stored; a Worker can only `get()` it, as
-//! on Cloudflare. `ratelimits`,
-//! also `--experimental`, are the entrypoint `RateLimit` of the Worker `<name>-ratelimit` (the
-//! bundled module `/workerd/ratelimit.js`), its settings in its props, so they are called over JS
-//! RPC; it keeps its counts in memory. `assets`, also
-//! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
-//! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
-//! `AssetWorker` entrypoint. Without `main` it serves only the files. The server listens on
-//! `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if there are assets, else to the
-//! worker; `--socket-addr http=<addr>` overrides the address.
+//! `secret_name`, read when the server starts and never stored; a Worker can only `get()` it, as on
+//! Cloudflare. `ratelimits`, also `--experimental`, are the entrypoint `RateLimit` of the Worker
+//! `<name>-ratelimit` (the bundled module `/workerd/ratelimit.js`), its settings in its props, so
+//! they are called over JS RPC; it keeps its counts in memory. `assets`, also `--experimental`, are
+//! the files in `directory`, served by the assets service `<name>-assets`, which routes each
+//! request to this Worker or to a file as Cloudflare does; `binding` is its `AssetWorker`
+//! entrypoint. Without `main` it serves only the files. The server listens on `localhost:8787`, as
+//! `wrangler dev` does, to `<name>-assets` if there are assets, else to the worker;
+//! `--socket-addr http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
@@ -670,7 +669,7 @@ fn secret_variable(secret_name: &str) -> String {
 }
 
 /// A rate limit's period is 10 or 60 seconds, as on Cloudflare. Two secrets of different names
-/// cannot read the same variable.
+/// cannot read the same variable, and a variable that is not set is a warning.
 fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
     let periods = [10, 60];
     if let Some(r) = (wrangler.ratelimits.iter()).find(|r| !periods.contains(&r.simple.period)) {
@@ -682,6 +681,12 @@ fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
     let mut names = BTreeMap::new();
     for s in &wrangler.secrets_store_secrets {
         let variable = secret_variable(&s.secret_name);
+        if std::env::var_os(&variable).is_none() {
+            eprintln!(
+                "secrets_store_secrets: {variable} is not set; \"{}\" is not found",
+                s.secret_name
+            );
+        }
         match names.insert(variable.clone(), &s.secret_name) {
             Some(other) if *other != s.secret_name => {
                 return Err(format!(
