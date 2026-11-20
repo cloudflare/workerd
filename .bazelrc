@@ -544,6 +544,8 @@ build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-in
 build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
 # Work around Windows test failures in rpc-related tests
 build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
+# Work around clang-cl crashes with LLVM 22
+build:windows --per_file_copt=src/workerd/io/worker@/clang:-fno-inline
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
