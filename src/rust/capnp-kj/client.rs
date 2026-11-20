@@ -245,8 +245,8 @@ impl RequestHook for KjRequest {
 
 /// The response to a call from Rust, read in place.
 enum KjResponse {
-    /// Results a Rust server built.
-    Rust(Box<RustMessage>),
+    /// Results a Rust server built, which stay in the call's context.
+    Rust(KjOwn<bridge::CallContextHook>),
     /// Results a C++ server built.
     Cxx(CxxMessageReader),
     /// The server wrote no results: a message whose root is null.
@@ -261,12 +261,11 @@ static NULL_ROOT_SEGMENTS: [&[u8]; 1] = [&NULL_ROOT.0];
 
 impl KjResponse {
     fn new(mut context: KjOwn<bridge::CallContextHook>) -> capnp::Result<Self> {
-        if bridge::context_has_rust_results(&context) {
-            let results =
-                bridge::context_take_rust_results(context.pin_mut()).map_err(|e| from_kj(&e))?;
-            return Ok(Self::Rust(results));
+        if bridge::context_has_rust_results(&context).map_err(|e| from_kj(&e))? {
+            return Ok(Self::Rust(context));
         }
-        let message = bridge::context_into_message(context);
+        let message =
+            bridge::context_results_message(context.pin_mut()).map_err(|e| from_kj(&e))?;
         if bridge::message_segment_count(&message) == 0 {
             return Ok(Self::Empty(capnp::message::Reader::new(
                 capnp::message::SegmentArray::new(&NULL_ROOT_SEGMENTS),
@@ -280,7 +279,9 @@ impl KjResponse {
 impl ResponseHook for KjResponse {
     fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
         match self {
-            Self::Rust(message) => message.root_as_reader(),
+            Self::Rust(context) => bridge::context_rust_results(context)
+                .map_err(|e| from_kj(&e))?
+                .root_as_reader(),
             Self::Cxx(message) => message.root(),
             Self::Empty(message) => message.get_root(),
         }

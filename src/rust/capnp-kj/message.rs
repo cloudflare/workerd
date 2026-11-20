@@ -71,7 +71,9 @@ impl PooledAllocator {
     fn new() -> Self {
         Self {
             first: None,
-            heap: message::HeapAllocator::new(),
+            // Segments after the first, from the heap, grow from twice the first's size, as
+            // they would if the first had come from the heap too.
+            heap: message::HeapAllocator::new().first_segment_words(2 * FIRST_SEGMENT_WORDS),
         }
     }
 }
@@ -187,15 +189,12 @@ impl RustMessage {
         self.caps.len()
     }
 
-    /// Takes capability `index` out of the table, as a C++ capability. Every capability in a
+    /// Returns a new reference to capability `index`, as a C++ capability. Every capability in a
     /// Rust message came from C++ (see [`KjClient`]), so this unwraps it rather than wrapping it.
-    pub fn take_cap(&mut self, index: usize) -> KjMaybe<KjOwn<bridge::ClientHook>> {
-        let Some(slot) = self.caps.get_mut(index) else {
-            return KjMaybe::None;
-        };
-        match slot.take() {
-            Some(hook) => KjMaybe::Some(KjClient::into_kj(hook)),
-            None => KjMaybe::None,
+    pub fn get_cap(&self, index: usize) -> KjMaybe<KjOwn<bridge::ClientHook>> {
+        match self.caps.get(index) {
+            Some(Some(hook)) => KjMaybe::Some(KjClient::into_kj(hook.add_ref())),
+            _ => KjMaybe::None,
         }
     }
 }
@@ -277,7 +276,8 @@ impl CxxMessageReader {
             })
             .collect();
         let mut options = message::ReaderOptions::new();
-        // The message was already a valid message on the C++ side, whose own limits applied.
+        // The message needs no limits: it is a copy of a message C++ already read under its own,
+        // or one built in this process.
         options.traversal_limit_in_words(None);
         Self {
             reader: message::Reader::new(CxxSegments::new(message), options),

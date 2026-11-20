@@ -54,23 +54,79 @@ class CxxMessage {
 
  private:
   class Copy;
-  friend class RustCallContext;
 };
 
-// A call from Rust, as the capability it is sent to sees it.
-//
-// The params are a Rust message. A C++ server reads them in place; a Rust server takes them. The
-// results are a C++ message the context owns, which Rust reads in place once the call completes,
-// or a Rust message from a Rust server, which Rust takes back. Either way neither side copies
-// the other's message, except to forward the call elsewhere, or to give C++ a Rust server's
-// results, as KJ's pipelining does when the results can contain capabilities.
-class RustCallContext final: public capnp::CallContextHook,
-                             public CxxMessage,
-                             public kj::Refcounted {
+// A Rust message, read in place by C++.
+class RustMessageReader {
  public:
-  explicit RustCallContext(::rust::Box<RustMessage> params);
-  ~RustCallContext() noexcept(false);
+  explicit RustMessageReader(const RustMessage& message);
+  capnp::AnyPointer::Reader getRoot();
 
+ private:
+  kj::ArrayPtr<const capnp::word> firstSegment;
+  // Every segment, when there are more than one.
+  kj::Array<kj::ArrayPtr<const capnp::word>> allSegments;
+  capnp::SegmentArrayMessageReader reader;
+  capnp::ReaderCapabilityTable caps;
+};
+
+// A message built in C++, with its capability table.
+struct CxxMessageBuilder {
+  explicit CxxMessageBuilder(kj::Maybe<capnp::MessageSize> sizeHint);
+  capnp::MallocMessageBuilder message;
+  capnp::BuilderCapabilityTable caps;
+  capnp::AnyPointer::Builder root;
+};
+
+// A view of a message a BridgeContext owns, which Rust holds as a kj::Own<CxxMessage> that keeps
+// the context alive.
+class ContextMessage final: public CxxMessage {
+ public:
+  ContextMessage() = default;
+  // Points the view at `segments` and `caps`, and returns it, holding `owner`. Rust holds at most
+  // one at a time.
+  kj::Own<CxxMessage> share(kj::ArrayPtr<const kj::ArrayPtr<const capnp::word>> segments,
+      kj::ArrayPtr<kj::Maybe<kj::Own<capnp::ClientHook>>> caps,
+      kj::Own<capnp::CallContextHook> owner);
+  bool isShared() const {
+    return owner.get() != nullptr;
+  }
+
+ private:
+  class Disposer;
+  kj::Own<capnp::CallContextHook> owner;
+};
+
+// A call that crosses the bridge, as KJ sees it: its request, its context and its response.
+//
+// A call from Rust has Rust params; a call from C++ to a Rust server's client (see RustClient in
+// ffi.c++) has params C++ builds in the context. A Rust server's results are a Rust message, and
+// any other server's a C++ message it builds in the context. Each side reads the other's message
+// in place. A message is copied only to forward the call through a context the bridge doesn't
+// know, for a tail call's response, which Rust can't read in place, and when C++ asks for a Rust
+// server's results, as KJ's pipelining does when the results can contain capabilities. Messages
+// are never moved out of the context once set, so readers on both sides can take them in any
+// order.
+class BridgeContext final: public capnp::CallContextHook,
+                           public capnp::ResponseHook,
+                           public capnp::RequestHook,
+                           public kj::Refcounted {
+ public:
+  using CallHints = capnp::ClientHook::CallHints;
+
+  // A call from Rust.
+  BridgeContext(::rust::Box<RustMessage> params, CallHints hints);
+  // A request to `target`, whose params C++ builds in `paramsRoot()`.
+  BridgeContext(kj::Own<capnp::ClientHook> target,
+      uint64_t interfaceId,
+      uint16_t methodId,
+      kj::Maybe<capnp::MessageSize> sizeHint,
+      CallHints hints);
+  ~BridgeContext() noexcept(false);
+
+  capnp::AnyPointer::Builder paramsRoot();
+
+  // CallContextHook
   capnp::AnyPointer::Reader getParams() override;
   void releaseParams() override;
   capnp::AnyPointer::Builder getResults(kj::Maybe<capnp::MessageSize> sizeHint) override;
@@ -81,55 +137,54 @@ class RustCallContext final: public capnp::CallContextHook,
       kj::Own<capnp::RequestHook>&& request) override;
   kj::Own<capnp::CallContextHook> addRef() override;
 
-  // For a Rust server: takes the params, unless C++ has already read them.
+  // RequestHook
+  capnp::RemotePromise<capnp::AnyPointer> send() override;
+  kj::Promise<void> sendStreaming() override;
+  capnp::AnyPointer::Pipeline sendForPipeline() override;
+
+  // For a Rust server: takes Rust params, or shares C++ params, unless C++ has already read them.
   kj::Maybe<::rust::Box<RustMessage>> takeRustParams();
+  kj::Maybe<kj::Own<CxxMessage>> shareCxxParams();
   // For a Rust server, before the call completes.
   void setRustResults(::rust::Box<RustMessage> results);
 
-  // Once the call completes: whether the results are a Rust message, to take with
-  // takeRustResults(); if not, the context reads as the results' C++ message, which is empty if
-  // the server wrote none.
-  void finish();
-  bool hasRustResults() const {
-    return rustResults != kj::none;
-  }
-  ::rust::Box<RustMessage> takeRustResults();
+  // For a Rust caller, once the call completes. Without Rust results, shareResults() is the C++
+  // results, which have no segments if the server wrote none.
+  kj::Maybe<const RustMessage&> getRustResults() const;
+  kj::Own<CxxMessage> shareResults();
 
  private:
-  // The params, read in place from C++.
-  struct ParamsReader {
-    explicit ParamsReader(RustMessage& message);
-    kj::ArrayPtr<const capnp::word> firstSegment;
-    // Every segment, when there are more than one.
-    kj::Array<kj::ArrayPtr<const capnp::word>> allSegments;
-    capnp::SegmentArrayMessageReader reader;
-    capnp::ReaderCapabilityTable caps;
-  };
+  capnp::Response<capnp::AnyPointer> response();
 
-  // Results built in C++.
-  struct CxxResults {
-    explicit CxxResults(kj::Maybe<capnp::MessageSize> sizeHint);
-    capnp::MallocMessageBuilder message;
-    capnp::BuilderCapabilityTable caps;
-    capnp::AnyPointer::Builder root;
-  };
+  // Where send() sends the call, until it does.
+  kj::Maybe<kj::Own<capnp::ClientHook>> target;
+  uint64_t interfaceId = 0;
+  uint16_t methodId = 0;
+  CallHints hints;
+  bool isStreaming = false;
 
-  kj::Maybe<::rust::Box<RustMessage>> params;
-  kj::Maybe<ParamsReader> paramsReader;
+  // The params, until released: Rust's, which C++ reads through `rustParamsReader`, or C++'s.
+  kj::Maybe<::rust::Box<RustMessage>> rustParams;
+  kj::Maybe<RustMessageReader> rustParamsReader;
+  kj::Maybe<CxxMessageBuilder> cxxParams;
 
-  // At most one of these holds the results.
+  // The results: Rust's, which C++ reads through `rustResultsReader` or copies into `cxxResults`;
+  // C++'s, in `cxxResults`; or a tail call's, which Rust reads from a copy.
   kj::Maybe<::rust::Box<RustMessage>> rustResults;
-  kj::Maybe<CxxResults> cxxResults;
+  kj::Maybe<RustMessageReader> rustResultsReader;
+  kj::Maybe<CxxMessageBuilder> cxxResults;
   kj::Maybe<capnp::Response<capnp::AnyPointer>> tailCallResults;
 
-  // A copy of `tailCallResults`, which Rust can't read in place.
-  kj::Maybe<kj::Own<CxxMessage>> resultsCopy;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<capnp::AnyPointer::Pipeline>>> tailCallPipelineFulfiller;
+
+  // Declared after what they view, so that they are destroyed first.
+  ContextMessage paramsView;
+  ContextMessage resultsView;
 };
 
 // A call sent from Rust.
 struct CxxCall {
-  kj::Own<RustCallContext> context;
+  kj::Own<BridgeContext> context;
   kj::Promise<void> completion;
   kj::Own<capnp::PipelineHook> pipeline;
   // False if the call was sent with `noPromisePipelining`, so `pipeline` is KJ's disabled one.
@@ -167,12 +222,12 @@ size_t message_cap_count(const CxxMessage& message);
 kj::Maybe<kj::Own<capnp::ClientHook>> message_get_cap(CxxMessage& message, size_t index);
 
 kj::Own<capnp::ClientHook> new_rust_server_client(::rust::Box<RustServer> server);
-void context_set_results(capnp::CallContextHook& context, RustMessage& results);
-// `context` is a RustCallContext; see ffi.rs.
+void context_set_results(capnp::CallContextHook& context, const RustMessage& results);
+// `context` is a BridgeContext; see ffi.rs. Each throws if it isn't.
 void context_set_rust_results(capnp::CallContextHook& context, ::rust::Box<RustMessage> results);
 bool context_has_rust_results(const capnp::CallContextHook& context);
-::rust::Box<RustMessage> context_take_rust_results(capnp::CallContextHook& context);
-kj::Own<CxxMessage> context_into_message(kj::Own<capnp::CallContextHook> context);
+const RustMessage& context_rust_results(const capnp::CallContextHook& context);
+kj::Own<CxxMessage> context_results_message(capnp::CallContextHook& context);
 
 // Promise pipelining hints for calls from Rust.
 //
