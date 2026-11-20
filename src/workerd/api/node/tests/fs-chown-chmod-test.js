@@ -100,6 +100,7 @@ export const chownSyncTest = {
     // A non-existent path should throw ENOENT
     throws(() => chownSync('/non-existent-path', 1000, 1000), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'chown',
     });
@@ -143,6 +144,7 @@ export const chownCallbackTest = {
     });
     await rejects(promise, {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'chown',
     });
@@ -172,6 +174,7 @@ export const chownPromiseTest = {
     // A non-existent path should throw ENOENT
     await rejects(promises.chown('/non-existent-path', 1000, 1000), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'chown',
     });
@@ -203,6 +206,7 @@ export const lchownSyncTest = {
     // A non-existent path should throw ENOENT
     throws(() => lchownSync('/non-existent-path', 1000, 1000), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'lchown',
     });
@@ -246,6 +250,7 @@ export const lchownCallbackTest = {
     });
     await rejects(promise, {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'lchown',
     });
@@ -275,6 +280,7 @@ export const lchownPromiseTest = {
     // A non-existent path should throw ENOENT
     await rejects(promises.lchown('/non-existent-path', 1000, 1000), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       syscall: 'lchown',
     });
   },
@@ -370,6 +376,7 @@ export const chmodSyncTest = {
 
     throws(() => chmodSync('/non-existent-path', 0o777), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'chmod',
     });
@@ -409,6 +416,7 @@ export const chmodCallbackTest = {
     });
     await rejects(promise, {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'chmod',
     });
@@ -435,6 +443,7 @@ export const chmodPromiseTest = {
 
     await rejects(promises.chmod('/non-existent-path', 0o777), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       syscall: 'chmod',
     });
   },
@@ -460,6 +469,7 @@ export const lchmodSyncTest = {
 
     throws(() => lchmodSync('/non-existent-path', 0o777), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'lchmod',
     });
@@ -499,6 +509,7 @@ export const lchmodCallbackTest = {
     });
     await rejects(promise, {
       code: 'ENOENT',
+      path: '/non-existent-path',
       // Access because it is an access check under the covers.
       syscall: 'lchmod',
     });
@@ -525,6 +536,7 @@ export const lchmodPromiseTest = {
 
     await rejects(promises.lchmod('/non-existent-path', 0o777), {
       code: 'ENOENT',
+      path: '/non-existent-path',
       syscall: 'lchmod',
     });
   },
