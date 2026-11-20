@@ -17,7 +17,6 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/form-data.h>
@@ -118,7 +117,6 @@ namespace workerd::server {
   EW_NODE_ISOLATE_TYPES,                                \
   EW_RTTI_ISOLATE_TYPES,                                \
   EW_HYPERDRIVE_ISOLATE_TYPES,                          \
-  EW_EVENTSOURCE_ISOLATE_TYPES,                         \
   EW_WORKER_LOADER_ISOLATE_TYPES,                       \
   EW_MESSAGECHANNEL_ISOLATE_TYPES,                      \
   EW_WORKERS_MODULE_ISOLATE_TYPES,                      \

@@ -4,9 +4,9 @@ Test suites for EventTarget subclasses implemented in the per-isolate
 bootstrap (`src/per_isolate/`), one subdirectory per API
 (`messagechannel/`, `eventsource/`). While an API's TypeScript
 implementation is behind an autogate, its suite runs against **both**
-implementations, the C++ one and the TypeScript one, to prove parity
-(`eventsource/`). Once the gate and the C++ implementation are removed, the
-suite runs against the TypeScript one alone (`messagechannel/`).
+implementations, the C++ one and the TypeScript one, to prove parity.
+Once the gate and the C++ implementation are removed, the suite runs
+against the TypeScript one alone, as both suites here do.
 
 The suite rules are those of `src/tests/streams/AGENTS.md`; read that file
 first. Every suite here follows the ones that hold for any suite: one file
@@ -37,12 +37,13 @@ While a suite covers both implementations:
   unflagged behaviors are asserted for each, in `<name>-cpp-legacy` and
   `<name>-ts-legacy`.
 
-Retiring the gate collapses the suite to one set of cells,
-`<name>.wd-test`, `<name>-opt-in.wd-test` and `<name>-legacy.wd-test`, with
-neither the autogate nor the binding. `which-impl.js` becomes `flags.js`,
-each `usingTsImpl` branch keeps its TypeScript side, and the divergence
-ledger folds into the suite's specification, since what it records is now
-simply how the API behaves.
+Retiring the gate collapses the suite to one set of cells, `<name>.wd-test`,
+`<name>-opt-in.wd-test` and `<name>-legacy.wd-test` (and, for
+`eventsource/`, `eventsource-ts-streams.wd-test`), with neither the
+autogate nor the binding. `which-impl.js` becomes `flags.js`, each
+`usingTsImpl` branch keeps its TypeScript side, and the divergence ledger
+folds into the suite's specification, since what it records is now simply
+how the API behaves.
 
 The seam the TypeScript subclasses share is
 `src/per_isolate/events/event-target-internals.ts`; its C++ half is unit
@@ -57,8 +58,6 @@ tested in `src/workerd/api/event-target-bootstrap-test.c++`.
 - `messagePortLegacyRedispatch` and `eventSourceLegacyError` in
   `src/workerd/api/tests/legacy-dispatch-exceptions-test.js`, which pins
   the legacy dispatch policy across several APIs at once.
-- `src/workerd/api/eventsource-test.c++`: a unit test of the C++
-  EventSource's native pump.
 
 ## Running
 

@@ -1,8 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 using EventSourceModules = import "eventsource-modules.capnp";
 
-# Opt-in cell, TypeScript implementation (src/per_isolate/eventsource/,
-# under the TS_EVENT_SOURCE autogate), reading the C++ streams.
+# Opt-in cell, reading the C++ streams.
 # Adds the dateless flags that change the surface:
 # spec_compliant_property_attributes and immutable_api_prototypes.
 #
@@ -17,7 +16,7 @@ using EventSourceModules = import "eventsource-modules.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "events-eventsource-ts-opt-in",
+    ( name = "events-eventsource-opt-in",
       worker = (
         modules = EventSourceModules.modules,
         compatibilityFlags = [
@@ -31,8 +30,7 @@ const unitTests :Workerd.Config = (
           "immutable_api_prototypes",
         ],
         bindings = [
-          (name = "USING_TS_IMPL", json = "true"),
-          (name = "subrequest", service = "events-eventsource-ts-opt-in"),
+          (name = "subrequest", service = "events-eventsource-opt-in"),
           (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
           (name = "current", service = "context-current"),
           (name = "legacy", service = "context-legacy"),
@@ -47,6 +45,5 @@ const unitTests :Workerd.Config = (
     EventSourceModules.contextLegacy,
     EventSourceModules.contextHelper,
   ],
-  autogates = ["workerd-autogate-ts-event-source"],
   v8Flags = ["--expose-gc"],
 );

@@ -1,9 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
 using EventSourceModules = import "eventsource-modules.capnp";
 
-# Main cell, TypeScript implementation (src/per_isolate/eventsource/,
-# under the TS_EVENT_SOURCE autogate), reading the TypeScript streams
-# (typescript_implemented_streams, which needs --experimental).
+# Main cell, reading the TypeScript streams (typescript_implemented_streams,
+# which needs --experimental).
 #
 # No compatibilityDate: the wd_test variants supply the date axis and the
 # tests must hold at both extremes. Date-gated semantics are pinned by flag:
@@ -16,7 +15,7 @@ using EventSourceModules = import "eventsource-modules.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "events-eventsource-ts-ts-streams",
+    ( name = "events-eventsource-ts-streams",
       worker = (
         modules = EventSourceModules.modules,
         compatibilityFlags = [
@@ -29,8 +28,7 @@ const unitTests :Workerd.Config = (
           "typescript_implemented_streams",
         ],
         bindings = [
-          (name = "USING_TS_IMPL", json = "true"),
-          (name = "subrequest", service = "events-eventsource-ts-ts-streams"),
+          (name = "subrequest", service = "events-eventsource-ts-streams"),
           (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
           (name = "current", service = "context-current"),
           (name = "legacy", service = "context-legacy"),
@@ -45,6 +43,5 @@ const unitTests :Workerd.Config = (
     EventSourceModules.contextLegacy,
     EventSourceModules.contextHelper,
   ],
-  autogates = ["workerd-autogate-ts-event-source"],
   v8Flags = ["--expose-gc"],
 );

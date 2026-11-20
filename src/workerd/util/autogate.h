@@ -93,9 +93,6 @@ namespace workerd::util {
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
   V(TS_STDIO)                                                                                      \
-  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
-     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
-  V(TS_EVENT_SOURCE)                                                                               \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
