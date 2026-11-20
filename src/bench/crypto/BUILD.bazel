@@ -15,3 +15,14 @@ wd_bench(
     src = "subtle-ts.wd-bench",
     data = ["subtle.js"],
 )
+
+wd_bench(
+    src = "global-cpp.wd-bench",
+    data = ["global.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "global-ts.wd-bench",
+    data = ["global.js"],
+)
