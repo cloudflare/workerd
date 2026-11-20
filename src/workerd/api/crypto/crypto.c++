@@ -1492,7 +1492,7 @@ kj::String SubtleCrypto::backendStructTypeName(kj::String name) {
   STRUCT_TYPE_NAME(DeriveKeyAlgorithm)
   STRUCT_TYPE_NAME(JsonWebKey)
 #undef STRUCT_TYPE_NAME
-  KJ_FAIL_REQUIRE("not a SubtleCrypto struct", name);
+  JSG_FAIL_REQUIRE(TypeError, "Not a SubtleCrypto struct: ", name);
 }
 
 jsg::JsArrayBuffer SubtleCrypto::backendEncrypt(jsg::Lock& js,
@@ -1647,13 +1647,13 @@ bool SubtleCrypto::backendSupports(jsg::Lock& js,
       generateKeyAlgorithmHandler, deriveKeyAlgorithmHandler, importKeyAlgorithmHandler);
 }
 
-kj::Maybe<jsg::JsValue> tryCallTsWebCrypto(
-    jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name) {
+kj::Maybe<jsg::JsValue> tryCallCryptoCppExport(jsg::Lock& js, kj::StringPtr name) {
   if (!util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO) ||
       jsg::tryGetBootstrapModules(js) == kj::none) {
     return kj::none;
   }
-  auto function = KJ_UNWRAP_OR(tryGetBootstrapFunction(js, specifier, name), return kj::none);
+  auto function = KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "crypto/cpp_exports"_kj, name),
+      "missing crypto/cpp_exports function", name);
   return function.call(js, js.undefined());
 }
 

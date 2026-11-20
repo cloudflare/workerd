@@ -27,6 +27,7 @@ constructor — so that method is replaced on the prototype as well.
 | `subtle.ts`             | `SubtleCrypto` — the interface over the native operations     |
 | `subtle-conversions.ts` | JSG's conversions of SubtleCrypto's dictionaries and members  |
 | `crypto.ts`             | `Crypto` — the `crypto` global's class                        |
+| `cpp_exports.ts`        | The functions the C++ bridge calls                            |
 
 ## THE C++ CONTRACT
 
@@ -127,7 +128,7 @@ building the string in JavaScript costs about as much as the whole C++ call.
   argument at the top level reports the bad argument.
 - **`crypto` stays a lazy global.** `ServiceWorkerGlobalScope::getCrypto()`
   (`src/workerd/api/global-scope.h`) returns `crypto.ts`'s `getCrypto()`,
-  through `tryCallTsWebCrypto()`, so the property keeps its place, its
+  through `crypto/cpp_exports` and `tryCallCryptoCppExport()`, so the property keeps its place, its
   attributes, and user code can still replace it before first use.
 - **The global `Crypto` is redefined in place**, not deleted and added, so it
   keeps its place among the global's properties. The C++ class is still

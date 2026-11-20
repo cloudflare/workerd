@@ -116,7 +116,7 @@ const bufferSource = checked('BufferSource', utils.isBufferSource);
 // As JSG unwraps kj::Array<const kj::byte>.
 const bytes = checked(
   'Array',
-  (v) => utils.isArrayBufferView(v) || utils.isAnyArrayBuffer(v)
+  (v) => utils.isBufferSource(v) || utils.isAnyArrayBuffer(v)
 );
 
 // `string or <dictionary>` parameters.
@@ -472,7 +472,7 @@ if (kModernAlgorithms) {
 markAsRuntimeClass(proto, 'SubtleCrypto');
 
 // The context's one instance, which `crypto.subtle` returns, created on first
-// use. Crypto::getSubtleForJs() (api/crypto/crypto.h) calls this.
+// use. crypto.ts's getCrypto() calls this.
 let instance: object | undefined;
 function getSubtleCrypto(): object {
   if (instance === undefined) {

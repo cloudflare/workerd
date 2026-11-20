@@ -1208,11 +1208,10 @@ class DigestStream: public WritableStream {
 // =======================================================================================
 // Crypto
 
-// Calls the function `name` that the TypeScript WebCrypto module `specifier` (src/per_isolate/
-// crypto/) exports, with no arguments, and returns its result. kj::none when the TS_WEBCRYPTO
-// autogate is off, or the bootstrap did not load the module, as in a context a C++ test creates.
-kj::Maybe<jsg::JsValue> tryCallTsWebCrypto(
-    jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name);
+// Calls the named function of the crypto/cpp_exports bootstrap module (src/per_isolate/crypto/)
+// with no arguments, and returns its result. kj::none when the TS_WEBCRYPTO autogate is off, or in
+// a context without the bootstrap, as a C++ test creates.
+kj::Maybe<jsg::JsValue> tryCallCryptoCppExport(jsg::Lock& js, kj::StringPtr name);
 
 // Implements the Crypto interface as prescribed by:
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
@@ -1240,8 +1239,8 @@ class Crypto final: public jsg::Object {
 
   kj::String randomUUID();
 
-  // The C++ SubtleCrypto. Under the TS_WEBCRYPTO autogate, JavaScript sees the TypeScript Crypto
-  // (src/per_isolate/crypto/crypto.ts) and its SubtleCrypto instead; C++ callers keep this one.
+  // Under the TS_WEBCRYPTO autogate, JavaScript sees the TypeScript Crypto
+  // (src/per_isolate/crypto/crypto.ts) and its SubtleCrypto instead.
   jsg::Ref<SubtleCrypto> getSubtle() {
     return subtle.addRef();
   }
@@ -1258,7 +1257,6 @@ class Crypto final: public jsg::Object {
     JSG_NESTED_TYPE(DigestStream);
 
     JSG_TS_OVERRIDE({
-      get subtle(): SubtleCrypto;
       getRandomValues<
         T extends
           | Int8Array

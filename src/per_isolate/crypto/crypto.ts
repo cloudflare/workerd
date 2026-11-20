@@ -128,8 +128,8 @@ const proto = ObjectCreate(ObjectPrototype) as object;
 
 // Finishes the class, in JSG's order: `subtle` (on the prototype, unless it is
 // an instance property), the methods, `DigestStream`, the constructor. The
-// DigestStream is the one `crypto.DigestStream` was before the class was
-// replaced: C++, or the TypeScript one under typescript_implemented_streams.
+// DigestStream is the C++ class, or the TypeScript one under
+// typescript_implemented_streams.
 function defineCrypto(DigestStream: unknown): typeof Crypto {
   if (!kInstanceProperties) {
     if (kSpecCompliantPropertyAttributes) {
@@ -198,7 +198,8 @@ function defineCrypto(DigestStream: unknown): typeof Crypto {
 
 // The context's one instance, the `crypto` global, created on first use, once
 // defineCrypto() has finished the class.
-// ServiceWorkerGlobalScope::getCrypto() (api/global-scope.h) calls this.
+// ServiceWorkerGlobalScope::getCrypto() (api/global-scope.h) calls this,
+// through crypto/cpp_exports.
 let instance: object | undefined;
 function getCrypto(): object {
   instance ??= newCrypto(getSubtleCrypto());

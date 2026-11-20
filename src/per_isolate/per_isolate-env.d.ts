@@ -105,8 +105,9 @@ declare const primordials: {
   readonly [key: string]: any;
 };
 
-// The context's SubtleCryptoBackend, created with the context under the
-// ts-webcrypto autogate; undefined when the autogate is off.
+// The context's C++ SubtleCrypto, whose resource type exports the backend
+// members under the ts-webcrypto autogate (see SubtleCryptoBackend), created
+// with the context; undefined when the autogate is off.
 declare const cryptoBackend: SubtleCryptoBackend;
 
 declare const utils: {

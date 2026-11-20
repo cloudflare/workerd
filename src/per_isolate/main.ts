@@ -467,6 +467,8 @@ if (autogates['ts-webcrypto']) {
   // module's getCrypto(). Its DigestStream is the TypeScript one under
   // typescript_implemented_streams, and otherwise the C++ class's.
   const { defineCrypto } = require('crypto/crypto');
+  // The C++ bridge's functions, which it finds already loaded.
+  require('crypto/cpp_exports');
   const DigestStream: unknown = compatFlags['typescript_implemented_streams']
     ? require('crypto/digest-stream').DigestStream
     : (

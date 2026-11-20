@@ -1298,7 +1298,7 @@ void ServiceWorkerGlobalScope::clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNum
 }
 
 kj::OneOf<jsg::Ref<Crypto>, jsg::JsValue> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
-  KJ_IF_SOME(ts, tryCallTsWebCrypto(js, "crypto/crypto"_kj, "getCrypto"_kj)) {
+  KJ_IF_SOME(ts, tryCallCryptoCppExport(js, "getCrypto"_kj)) {
     return ts;
   }
   return js.alloc<Crypto>(js);
