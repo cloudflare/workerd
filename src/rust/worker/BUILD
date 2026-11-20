@@ -46,8 +46,10 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi.rs@cxx",
+        "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj/compat:kj-http",
+        "@workerd//src/workerd/io:bench_capnp",
         "@workerd//src/workerd/io:worker-interface",
         "@workerd//src/workerd/util",
     ],
