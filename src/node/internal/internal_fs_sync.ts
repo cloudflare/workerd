@@ -87,6 +87,7 @@ import {
 } from 'node-internal:internal_fs_constants';
 import { Dir, Dirent, direntName } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
+import { getPathFromURLPosix } from 'node-internal:internal_url';
 import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 
 import { Buffer } from 'node-internal:internal_buffer';
@@ -125,7 +126,7 @@ export function accessSyncImpl(
   // If the X_OK flag is set we will always throw because we don't
   // support executable files.
   if (mode & X_OK) {
-    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
+    throw new ERR_ENOENT(getPathFromURLPosix(path), { syscall: 'access' });
   }
 
   const stat = cffs.stat(path, { followSymlinks });
@@ -134,7 +135,7 @@ export function accessSyncImpl(
   // not existing and the file existing but not being accessible.
   if (stat == null || (mode & W_OK && !stat.writable)) {
     // Not found... or not writable
-    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
+    throw new ERR_ENOENT(getPathFromURLPosix(path), { syscall: 'access' });
   }
 
   // We always assume that files are readable, so if we get here the
@@ -167,7 +168,9 @@ export function appendFileSync(
 export function chmodSync(path: FilePath, mode: string | number): void {
   const { pathOrFd } = validateChmodArgs(path, mode);
   if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chmod' });
+    throw new ERR_ENOENT(getPathFromURLPosix(pathOrFd as URL), {
+      syscall: 'chmod',
+    });
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -179,7 +182,9 @@ export function chmodSync(path: FilePath, mode: string | number): void {
 export function chownSync(path: FilePath, uid: number, gid: number): void {
   const { pathOrFd } = validateChownArgs(path, uid, gid);
   if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chown' });
+    throw new ERR_ENOENT(getPathFromURLPosix(pathOrFd as URL), {
+      syscall: 'chown',
+    });
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of ownership. Once we validate the inputs we just
@@ -209,8 +214,8 @@ export function copyFileSync(
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizePath(src).pathname,
-      dest: normalizePath(dest).pathname,
+      path: getPathFromURLPosix(normalizePath(src)),
+      dest: getPathFromURLPosix(normalizePath(dest)),
     });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
@@ -385,7 +390,9 @@ export function futimesSync(
 export function lchmodSync(path: FilePath, mode: string | number): void {
   const { pathOrFd } = validateChmodArgs(path, mode);
   if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchmod' });
+    throw new ERR_ENOENT(getPathFromURLPosix(pathOrFd as URL), {
+      syscall: 'lchmod',
+    });
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -397,7 +404,9 @@ export function lchmodSync(path: FilePath, mode: string | number): void {
 export function lchownSync(path: FilePath, uid: number, gid: number): void {
   const { pathOrFd } = validateChownArgs(path, uid, gid);
   if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchown' });
+    throw new ERR_ENOENT(getPathFromURLPosix(pathOrFd as URL), {
+      syscall: 'lchown',
+    });
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -443,7 +452,7 @@ export function lstatSync(
   const stat = cffs.stat(validatedPath as URL, { followSymlinks: false });
   if (stat == null) {
     if (throwIfNoEntry) {
-      throw new ERR_ENOENT((validatedPath as URL).pathname, {
+      throw new ERR_ENOENT(getPathFromURLPosix(validatedPath as URL), {
         syscall: 'lstat',
       });
     }
@@ -735,7 +744,7 @@ export function statSync(
   const stat = cffs.stat(validatedPath as URL, { followSymlinks: true });
   if (stat == null) {
     if (throwIfNoEntry) {
-      throw new ERR_ENOENT((validatedPath as URL).pathname, {
+      throw new ERR_ENOENT(getPathFromURLPosix(validatedPath as URL), {
         syscall: 'stat',
       });
     }
@@ -884,7 +893,7 @@ export function globSync(
   const cwdOption = (options as GlobOptions).cwd;
   const cwd: string =
     cwdOption instanceof URL
-      ? cwdOption.pathname
+      ? getPathFromURLPosix(cwdOption)
       : ((cwdOption as string | undefined) ?? processImpl.getCwd());
   validateString(cwd, 'options.cwd');
 

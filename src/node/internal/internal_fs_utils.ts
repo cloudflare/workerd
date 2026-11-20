@@ -70,6 +70,7 @@ import { strictEqual } from 'node-internal:internal_assert';
 
 import { Buffer } from 'node-internal:internal_buffer';
 import processImpl from 'node-internal:process';
+import { getPathFromURLPosix } from 'node-internal:internal_url';
 export type FilePath = string | URL | Buffer;
 
 import type {
@@ -148,6 +149,16 @@ export function normalizePath(
   if (typeof path === 'string') {
     // fallthrough for typical case
   } else if (path instanceof URL) {
+    // The file system percent-decodes the pathname. getPathFromURLPosix()
+    // throws Node's errors for a host, an encoded / and invalid UTF-8. Other
+    // schemes are rejected by the file system.
+    if (path.protocol === 'file:' && getPathFromURLPosix(path).includes('\0')) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'path',
+        path,
+        'must not contain null bytes'
+      );
+    }
     return path;
   } else if (Buffer.isBuffer(path)) {
     path = path.toString(encoding);
@@ -163,10 +174,7 @@ export function normalizePath(
     );
   }
 
-  // In this case, we have a string path. Any ? or # characters in the
-  // path should be percent-encoded to ensure they are not treated as
-  // special characters in the URL.
-  path = path.replace(/[#?]/g, encodeURIComponent);
+  path = encodePathChars(path);
 
   // Node.js will also ignore empty path segments (e.g. `//` in the path).
   // Let's normalize those out here as well.
@@ -176,8 +184,16 @@ export function normalizePath(
     path,
     path.startsWith('/')
       ? 'file://'
-      : (base ?? `file://${processImpl.getCwd()}/`)
+      : (base ?? `file://${encodePathChars(processImpl.getCwd())}/`)
   );
+}
+
+// Percent-encodes the characters the URL parser would otherwise decode, strip
+// or treat as a delimiter (including leading and trailing C0 controls and
+// spaces), so the file system sees the name as written.
+function encodePathChars(path: string): string {
+  // eslint-disable-next-line no-control-regex
+  return path.replace(/[%#?\\\x00-\x20]/g, encodeURIComponent);
 }
 
 export const kMaxUserId = 2 ** 32 - 1;
