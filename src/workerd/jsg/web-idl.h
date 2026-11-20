@@ -101,10 +101,27 @@ constexpr bool isRefToResource_() {
   }
 }
 
-// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE).
-// Handles both T and Ref<T> cases.
+// Helper to check if T is a type that converts itself (see SelfConvertible in type-wrapper.h) and
+// declares `static constexpr bool jsgUnwrapsAsResource = true`: it stands in for its
+// JsgRttiDelegate, Ref<U> of a resource type U, and so is tried first in a OneOf as Ref<U> is,
+// such as a C++ view of a class implemented in either C++ or JavaScript.
 template <typename T>
-concept NonCallbackInterfaceType = NonCallbackInterfaceType_<T> || isRefToResource_<T>();
+constexpr bool isStandInForResource_() {
+  if constexpr (requires {
+                  typename T::JsgRttiDelegate;
+                  requires T::jsgUnwrapsAsResource;
+                }) {
+    return isRefToResource_<typename T::JsgRttiDelegate>();
+  } else {
+    return false;
+  }
+}
+
+// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE).
+// Handles T, Ref<T>, and types that stand in for Ref<T>.
+template <typename T>
+concept NonCallbackInterfaceType =
+    NonCallbackInterfaceType_<T> || isRefToResource_<T>() || isStandInForResource_<T>();
 
 template <typename T>
 concept BufferSourceType = kj::isSameType<T, kj::Array<kj::byte>>() ||

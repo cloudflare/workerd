@@ -236,6 +236,12 @@ class UnimplementedWrapper {
 // types, JSG_STRUCT fields, etc.), it also needs an RTTI representation for TypeScript type
 // generation. Declare `using JsgRttiDelegate = ...;` to describe the type to RTTI as some
 // existing type; see the delegated-RTTI support in rtti.h.
+//
+// Two more declarations let such a type stand in for a resource type U whose JavaScript class may
+// be implemented in C++ or in the per-isolate bootstrap, with JsgRttiDelegate = Ref<U>:
+//
+//     static constexpr const char* jsgTypeName = "U";   // its name in error messages
+//     static constexpr bool jsgUnwrapsAsResource = true; // tried first in a OneOf, as Ref<U> is
 template <typename T>
 concept SelfConvertible = requires(Lock& js,
     v8::Local<v8::Context> ctx,
@@ -258,9 +264,15 @@ concept SelfConvertible = requires(Lock& js,
 template <typename TypeWrapper>
 class SelfUnwrap {
  public:
+  // The type's name in error messages: its `jsgTypeName`, if it declares one, such as the name of
+  // the JavaScript class it stands for, and otherwise its C++ name.
   template <SelfConvertible T>
-  static constexpr const std::type_info& getName(T*) {
-    return typeid(T);
+  static constexpr decltype(auto) getName(T*) {
+    if constexpr (requires { T::jsgTypeName; }) {
+      return static_cast<const char*>(T::jsgTypeName);
+    } else {
+      return (typeid(T));
+    }
   }
 
   template <SelfConvertible T>
