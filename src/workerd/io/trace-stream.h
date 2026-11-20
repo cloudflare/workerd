@@ -104,7 +104,10 @@ class TailStreamWriter final {
       kj::Maybe<kj::Rc<TailStreamBudget>> budget = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context,
+  // Reports `event` under `context` for invocation `invocationId`. A spanId of SpanId::nullId is
+  // treated as absent.
+  void report(const SpanContext& context,
+      TraceId invocationId,
       TailEvent::Event&& event,
       kj::Date time,
       size_t sizeHint);
