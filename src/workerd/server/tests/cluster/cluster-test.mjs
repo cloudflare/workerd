@@ -706,17 +706,16 @@ test('cluster: killing the owner allows another node to take over', async () => 
     // Hit the survivor repeatedly. Requests fail until the dead owner's lease
     // expires; then the survivor takes ownership. The persisted count must be
     // preserved. Each request is bounded: one that hung once held this test
-    // for nine minutes.
+    // for nine minutes. The probe only reads, as a request that timed out
+    // here may still run on the new owner.
     let response = null;
     let lastErr = null;
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       try {
-        response = await fetchJson(
-          survivor.httpPort,
-          '/increment?name=takeover',
-          { timeoutMs: 10_000 }
-        );
+        response = await fetchJson(survivor.httpPort, '/get?name=takeover', {
+          timeoutMs: 10_000,
+        });
         if (response.status === 200) break;
       } catch (err) {
         lastErr = err;
@@ -734,18 +733,20 @@ test('cluster: killing the owner allows another node to take over', async () => 
     );
     assert.strictEqual(
       response.body.count,
-      2,
+      1,
       `persisted state must be preserved across takeover`
     );
 
-    // Further requests to the survivor continue to work and increment.
-    const followup = await fetchJson(
-      survivor.httpPort,
-      '/increment?name=takeover'
-    );
-    assert.strictEqual(followup.status, 200);
-    assert.strictEqual(followup.body.count, 3);
-    assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    // Requests to the survivor continue to work and increment.
+    for (const count of [2, 3]) {
+      const followup = await fetchJson(
+        survivor.httpPort,
+        '/increment?name=takeover'
+      );
+      assert.strictEqual(followup.status, 200);
+      assert.strictEqual(followup.body.count, count);
+      assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    }
 
     const p = survivor.httpPort;
     assert.strictEqual(await facetAdd(p, 'takeover', 'a'), 3);
