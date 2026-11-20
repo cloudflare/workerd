@@ -579,6 +579,8 @@ IsolateBase::IsolateBase(V8System& system,
       domExceptionBrandKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_BRAND_KEY)));
 
+      nativeHandleKey.Reset(ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, NATIVE_HANDLE_KEY)));
+
       auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
       errorPrototypeTemplate->SetIntrinsicDataProperty(
           v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
@@ -764,6 +766,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
   domExceptionBrandKey.Reset();
+  nativeHandleKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -1236,6 +1239,11 @@ v8::Local<v8::Private> IsolateBase::getDomExceptionBrandKey(v8::Isolate* isolate
       ->domExceptionBrandKey.Get(isolate);
 }
 
+v8::Local<v8::Private> IsolateBase::getNativeHandleKey(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->nativeHandleKey.Get(isolate);
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -1266,6 +1274,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(domExceptionBrandKey.Reset());
+    KJ_DEFER(nativeHandleKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
     KJ_DEFER(zygoteRestoreTimeHolders = kj::none);

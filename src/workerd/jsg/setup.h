@@ -212,6 +212,11 @@ struct RestoreTimeHolderHandles {
   v8::Global<v8::Object> iteratorPrototype;
 };
 
+// The V8 private symbol under which an instance of a class implemented in the per-isolate bootstrap
+// keeps the JSG object that holds its native state, so that C++ can find that object without
+// running JavaScript.
+constexpr kj::StringPtr NATIVE_HANDLE_KEY = "workerd:nativeHandle"_kj;
+
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
 class IsolateBase {
@@ -229,6 +234,9 @@ class IsolateBase {
   // The V8 private symbol named DOM_EXCEPTION_BRAND_KEY, the brand of the bootstrap's
   // DOMException, looked up once per isolate.
   static v8::Local<v8::Private> getDomExceptionBrandKey(v8::Isolate* isolate);
+
+  // The V8 private symbol named NATIVE_HANDLE_KEY, looked up once per isolate.
+  static v8::Local<v8::Private> getNativeHandleKey(v8::Isolate* isolate);
 
   // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
   static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
@@ -974,6 +982,9 @@ class IsolateBase {
 
   // The private symbol that getDomExceptionBrandKey() returns.
   v8::Global<v8::Private> domExceptionBrandKey;
+
+  // The private symbol that getNativeHandleKey() returns.
+  v8::Global<v8::Private> nativeHandleKey;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
