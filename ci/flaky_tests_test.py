@@ -60,6 +60,10 @@ def failed_test_log(label, *output, artifact=None):
     return job_log(*lines)
 
 
+def numbers(analyses):
+    return [analysis["number"] for analysis in analyses]
+
+
 def results_zip(tests, version=flaky_tests.RESULTS_VERSION):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -88,19 +92,25 @@ class FakeGitHub:
         self.jobs = {}
         self.job_logs = {}
         self.log_downloads = []
+        # The comments on each issue or pull request.
         self.comments = {}
+        # The files that each pull request changes, and whether it is open. A pull request that a
+        # test doesn't add is open and changes nothing.
+        self.pulls = {}
 
     def add_run(
-        self, run_id, event="pull_request", pull_request=8700, attempts=2, fork=False
+        self, run_id, event="pull_request", pull_request=8700, fork=False, **fields
     ):
+        """Adds a run; `fields` override its fields, such as `head_sha`."""
         self.runs[run_id] = {
             "id": run_id,
             "path": flaky_tests.TESTS_WORKFLOW,
-            "run_attempt": attempts,
+            "run_attempt": 2,
             "head_sha": "0123456789abcdef0123456789abcdef01234567",
             "head_repository": {"full_name": "fork/repo" if fork else REPO},
             "event": event,
             "pull_requests": [{"number": pull_request}] if pull_request else [],
+            **fields,
         }
         self.artifacts.setdefault(run_id, [])
         return self.runs[run_id]
@@ -133,9 +143,42 @@ class FakeGitHub:
         }
         return number
 
+    def add_pull(self, number, files, state="open", body="What it does."):
+        """Adds a pull request; `files` maps each file it changes to its status and patch."""
+        self.pulls[number] = {
+            "state": state,
+            "files": [
+                {"filename": name, "status": status, "patch": patch}
+                for name, (status, patch) in files.items()
+            ],
+        }
+        # The issues API's view of the pull request.
+        self.issues[number] = {
+            "number": number,
+            "title": "Add a test",
+            "body": body,
+            "state": state,
+            "pull_request": {},
+        }
+
+    def add_comment(
+        self, number, body, login=flaky_tests.WORKFLOW_BOT, association="NONE"
+    ):
+        comment = {
+            "id": 5000 + sum(map(len, self.comments.values())),
+            "user": {"login": login},
+            "author_association": association,
+            "created_at": "2026-11-19T12:00:00Z",
+            "body": body,
+        }
+        self.comments.setdefault(number, []).append(comment)
+        return comment
+
     def get(self, path):
         if match := re.fullmatch(rf"repos/{REPO}/issues/(\d+)", path):
             return self.issues[int(match[1])]
+        if match := re.fullmatch(rf"repos/{REPO}/pulls/(\d+)", path):
+            return {"state": self.pulls.get(int(match[1]), {"state": "open"})["state"]}
         match = re.fullmatch(rf"repos/{REPO}/actions/runs/(\d+)", path)
         assert match, path
         return self.runs[int(match[1])]
@@ -149,7 +192,9 @@ class FakeGitHub:
             assert key == "jobs"
             return iter(self.jobs[(int(match[1]), int(match[2]))])
         if match := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments\?.*", path):
-            return iter(self.comments.get(int(match[1]), []))
+            return iter(list(self.comments.get(int(match[1]), [])))
+        if match := re.fullmatch(rf"repos/{REPO}/pulls/(\d+)/files\?.*", path):
+            return iter(self.pulls.get(int(match[1]), {"files": []})["files"])
         if match := re.fullmatch(
             rf"repos/{REPO}/actions/runs/(\d+)/artifacts\?.*", path
         ):
@@ -196,10 +241,17 @@ class FakeGitHub:
             return self.issues[number]
         if path == f"repos/{REPO}/labels":
             self.labels.append(body)
+        if match := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments", path):
+            return self.add_comment(int(match[1]), body["body"])
         return {}
 
     def patch(self, path, body):
         self.writes.append(("PATCH", path, body))
+        if match := re.fullmatch(rf"repos/{REPO}/issues/comments/(\d+)", path):
+            comments = [c for cs in self.comments.values() for c in cs]
+            comment = next(c for c in comments if c["id"] == int(match[1]))
+            comment.update(body)
+            return comment
         number = int(path.rsplit("/", 1)[1])
         self.issues[number].update(body)
         if body.get("state") == "open":
@@ -603,16 +655,27 @@ class RecordTest(RepoRootTestCase):
         self.assertIn(
             "Opening an issue for //src/workerd/api:streams-test.", self.logged
         )
-        self.assertIn("Analysing //src/workerd/api:streams-test.", self.logged)
+        self.assertIn(
+            "Analysing //src/workerd/api:streams-test@ at 0123456789.", self.logged
+        )
 
     def test_asks_for_one_analysis_of_a_flaky_test(self):
         gh = FakeGitHub()
         self.flaky_run(gh, 1)
         analyses = self.record(gh, [1])
         flaky = self.issues_by_target(gh)["//src/workerd/api:streams-test"]
-        self.assertEqual(analyses, [flaky.number])
-        self.assertTrue(flaky.analysis_requested)
-        self.flaky_run(gh, 2, event="push", pull_request=None)
+        self.assertEqual(
+            analyses,
+            [
+                {
+                    "key": f"{flaky.number}-0",
+                    "number": flaky.number,
+                    "target": "//src/workerd/api:streams-test",
+                }
+            ],
+        )
+        self.assertEqual(flaky.analysed_commits, [gh.runs[1]["head_sha"]])
+        self.flaky_run(gh, 2, event="push", pull_request=None, head_sha="1" * 40)
         self.assertEqual(self.record(gh, [2]), [])
 
     def test_waits_for_a_failure_in_a_run_of_this_repositorys_code(self):
@@ -620,21 +683,21 @@ class RecordTest(RepoRootTestCase):
         self.flaky_run(gh, 1, pull_request=None, fork=True)
         self.assertEqual(self.record(gh, [1]), [])
         flaky = self.issues_by_target(gh)["//src/workerd/api:streams-test"]
-        self.assertFalse(flaky.analysis_requested)
+        self.assertEqual(flaky.analysed_commits, [])
         self.flaky_run(gh, 2, event="push", pull_request=None)
-        self.assertEqual(self.record(gh, [2]), [flaky.number])
+        self.assertEqual(numbers(self.record(gh, [2])), [flaky.number])
 
     def test_asks_again_when_the_issue_reopens(self):
         gh = FakeGitHub()
         self.flaky_run(gh, 1)
-        [number] = self.record(gh, [1])
+        [number] = numbers(self.record(gh, [1]))
         gh.issues[number].update(state="closed", closed_at="2026-11-19T10:30:00Z")
         # A failure from before the issue was closed doesn't reopen it.
         self.flaky_run(gh, 2)
         self.assertEqual(self.record(gh, [2]), [])
         self.flaky_run(gh, 3)
         gh.artifacts[3][0]["created_at"] = "2026-11-19T11:30:00Z"
-        self.assertEqual(self.record(gh, [3]), [number])
+        self.assertEqual(numbers(self.record(gh, [3])), [number])
 
     def test_limits_the_analyses_one_run_asks_for(self):
         gh = FakeGitHub()
@@ -644,15 +707,149 @@ class RecordTest(RepoRootTestCase):
         gh.add_results(1, "linux-X64", 2, {label: "PASSED" for label in labels})
         analyses = self.record(gh, [1])
         self.assertEqual(len(analyses), flaky_tests.MAX_ANALYSES_PER_RECORD)
+        self.assertEqual(len({a["key"] for a in analyses}), len(analyses))
         waiting = [
             flaky
             for flaky in self.issues_by_target(gh).values()
-            if not flaky.analysis_requested
+            if not flaky.analysed_commits
         ]
         self.assertEqual(len(waiting), 5 - flaky_tests.MAX_ANALYSES_PER_RECORD)
 
+    def pull_request_comments(self, gh, number=8700):
+        return [
+            flaky
+            for flaky in (
+                flaky_tests.parse_comment(c, number)
+                for c in gh.comments.get(number, [])
+            )
+            if flaky is not None
+        ]
+
+    def test_tracks_a_test_that_a_pull_request_adds_on_the_pull_request(self):
+        gh = FakeGitHub()
+        gh.add_pull(8700, {"src/workerd/api/streams-test.wd-test": ("added", "")})
+        self.flaky_run(gh, 1)
+        analyses = self.record(gh, [1])
+        self.assertEqual(self.issues_by_target(gh), {})
+        [flaky] = self.pull_request_comments(gh)
+        self.assertEqual(
+            (flaky.target, flaky.pull_request, flaky.total),
+            ("//src/workerd/api:streams-test", 8700, 1),
+        )
+        body = gh.comments[8700][0]["body"]
+        self.assertIn(
+            "`//src/workerd/api:streams-test`, which this pull request adds or changes, failed",
+            body,
+        )
+        self.assertEqual(
+            analyses,
+            [
+                {
+                    "key": "8700-0",
+                    "number": 8700,
+                    "target": "//src/workerd/api:streams-test",
+                }
+            ],
+        )
+        # The comment is updated, not posted again.
+        self.flaky_run(gh, 2)
+        self.record(gh, [2])
+        [flaky] = self.pull_request_comments(gh)
+        self.assertEqual(flaky.total, 2)
+        self.assertEqual(len(gh.comments[8700]), 1)
+        self.assertEqual(
+            gh.writes[-1][:2], ("PATCH", f"repos/{REPO}/issues/comments/5000")
+        )
+
+    def test_tracks_a_test_in_a_package_that_a_pull_request_adds(self):
+        gh = FakeGitHub()
+        gh.add_pull(
+            8700,
+            {
+                "src/new/BUILD.bazel": (
+                    "added",
+                    '@@ -0,0 +1,3 @@\n+wd_test(\n+    src = "a-test.wd-test",\n+)',
+                ),
+                "src/new/a-test.wd-test": ("added", ""),
+            },
+        )
+        self.flaky_run(gh, 1, "//src/new:a-test@")
+        self.record(gh, [1])
+        self.assertEqual(
+            [f.target for f in self.pull_request_comments(gh)], ["//src/new:a-test"]
+        )
+
+    def test_a_fork_or_closed_pull_request_gets_an_issue(self):
+        # GitHub doesn't link a fork's runs to its pull request, but if it did, a fork's would
+        # still be tracked in an issue.
+        for run in [{"pull_request": 8700, "fork": True}, {"pull_request": 8700}]:
+            with self.subTest(run=run):
+                gh = FakeGitHub()
+                gh.add_pull(
+                    8700,
+                    {"src/workerd/api/streams-test.wd-test": ("added", "")},
+                    state="open" if run.get("fork") else "closed",
+                )
+                self.flaky_run(gh, 1, **run)
+                self.record(gh, [1])
+                self.assertEqual(
+                    list(self.issues_by_target(gh)), ["//src/workerd/api:streams-test"]
+                )
+                self.assertEqual(self.pull_request_comments(gh), [])
+
+    def test_analyses_a_pull_requests_test_at_each_new_commit_up_to_a_limit(self):
+        gh = FakeGitHub()
+        gh.add_pull(8700, {"src/workerd/api/streams-test.js": ("modified", "")})
+        requested = []
+        for run_id in range(1, flaky_tests.MAX_ANALYSES_PER_PULL_REQUEST_TEST + 2):
+            # Each commit flakes twice, in two re-runs.
+            for attempt_run in (run_id * 10, run_id * 10 + 1):
+                self.flaky_run(gh, attempt_run, head_sha=f"{run_id:040}")
+                requested += [a["target"] for a in self.record(gh, [attempt_run])]
+        self.assertEqual(
+            requested,
+            ["//src/workerd/api:streams-test"]
+            * flaky_tests.MAX_ANALYSES_PER_PULL_REQUEST_TEST,
+        )
+        [flaky] = self.pull_request_comments(gh)
+        self.assertEqual(
+            flaky.analysed_commits,
+            [
+                f"{n:040}"
+                for n in range(1, flaky_tests.MAX_ANALYSES_PER_PULL_REQUEST_TEST + 1)
+            ],
+        )
+
+    def test_ignores_comments_that_this_workflow_didnt_write(self):
+        gh = FakeGitHub()
+        gh.add_pull(8700, {"src/workerd/api/streams-test.wd-test": ("added", "")})
+        forged = flaky_tests.FlakyTest(
+            "//src/workerd/api:streams-test", pull_request=8700
+        )
+        forged.add(
+            flaky_tests.Occurrence(
+                label="//src/workerd/api:streams-test@",
+                job="linux-X64",
+                status="FAILED",
+                run_id=1,
+                attempt=1,
+                sha="0" * 40,
+                time="2026-11-19T10:00:00Z",
+                event="pull_request",
+                pull_request=8700,
+            )
+        )
+        gh.add_comment(8700, flaky_tests.render_body(forged, REPO), login="someone")
+        self.flaky_run(gh, 1)
+        self.record(gh, [1])
+        self.assertEqual(
+            gh.comments[8700][0]["body"], flaky_tests.render_body(forged, REPO)
+        )
+        self.assertEqual(len(self.pull_request_comments(gh)), 1)
+        self.assertEqual(len(gh.comments[8700]), 2)
+
     def test_issue_data_cant_end_its_comment(self):
-        flaky = flaky_tests.FlakyIssue("//src/workerd/api:streams-test")
+        flaky = flaky_tests.FlakyTest("//src/workerd/api:streams-test")
         flaky.add(
             flaky_tests.Occurrence(
                 label="//src/workerd/api:streams-test@",
@@ -666,17 +863,17 @@ class RecordTest(RepoRootTestCase):
                 pull_request=None,
             )
         )
-        flaky.analysis_requested = True
+        flaky.analysed_commits = ["0" * 40]
         self.assertEqual(flaky_tests.data_block(flaky).count("-->"), 1)
-        body = flaky_tests.render_issue(flaky, REPO)
+        body = flaky_tests.render_body(flaky, REPO)
         parsed = flaky_tests.parse_issue({"number": 1, "state": "open", "body": body})
         self.assertEqual(parsed.occurrences, flaky.occurrences)
-        self.assertTrue(parsed.analysis_requested)
+        self.assertEqual(parsed.analysed_commits, ["0" * 40])
 
     def test_runs_to_record(self):
         gh = FakeGitHub()
-        gh.add_run(1, attempts=1)
-        gh.add_run(2, attempts=2)
+        gh.add_run(1, run_attempt=1)
+        gh.add_run(2, run_attempt=2)
         self.assertEqual(
             [r["id"] for r in flaky_tests.runs_to_record(gh, None, 2, NOW)], [2]
         )
@@ -702,9 +899,9 @@ class DashboardTest(unittest.TestCase):
         )
 
     def test_ranks_open_issues_by_recent_failures(self):
-        rare = flaky_tests.FlakyIssue("//a:rare", number=1)
+        rare = flaky_tests.FlakyTest("//a:rare", number=1)
         rare.add(self.occurrence("//a:rare@", "linux-X64", 19))
-        common = flaky_tests.FlakyIssue("//a:common", number=2)
+        common = flaky_tests.FlakyTest("//a:common", number=2)
         for day, job in [(19, "windows-X64"), (18, "windows-X64"), (10, "macOS-ARM64")]:
             common.add(self.occurrence("//a:common@", job, day))
         # Failures more than 30 days old don't count.
@@ -714,7 +911,7 @@ class DashboardTest(unittest.TestCase):
                 time="2026-10-01T00:00:00Z",
             )
         )
-        closed = flaky_tests.FlakyIssue(
+        closed = flaky_tests.FlakyTest(
             "//a:closed", number=3, closed_at="2026-11-19T12:00:00Z"
         )
         closed.add(self.occurrence("//a:closed@", "linux-X64", 18))
@@ -791,6 +988,57 @@ class SummarizeTest(RepoRootTestCase):
         self.assertEqual((summary, log), ("", ""))
 
 
+class ChangesTestTest(unittest.TestCase):
+    def test_a_pull_requests_changes_to_a_tests_files(self):
+        target = "//src/workerd/api:streams-test"
+        cases = [
+            ({"src/workerd/api/streams-test.wd-test": ""}, True),
+            ({"src/workerd/api/streams-test.js": ""}, True),
+            ({"src/workerd/api/streams-test.c++": ""}, True),
+            # The test is named in its BUILD file.
+            (
+                {
+                    "src/workerd/api/BUILD.bazel": '@@ -1 +1 @@\n-    size = "small",\n+    name = "streams-test",'
+                },
+                True,
+            ),
+            (
+                {
+                    "src/workerd/api/BUILD.bazel": '@@ -1 +1 @@\n+    src = "streams-test.wd-test",'
+                },
+                True,
+            ),
+            # Unchanged lines don't count, nor do other tests' lines.
+            (
+                {
+                    "src/workerd/api/BUILD.bazel": '@@ -1,2 +1,2 @@\n     src = "streams-test.wd-test",\n+    src = "streams-test-2.wd-test",'
+                },
+                False,
+            ),
+            ({"src/workerd/api/streams-test-2.wd-test": ""}, False),
+            ({"src/workerd/io/streams-test.wd-test": ""}, False),
+            ({"src/workerd/api/streams.c++": ""}, False),
+            ({}, False),
+        ]
+        for changes, expected in cases:
+            with self.subTest(changes=changes):
+                self.assertEqual(flaky_tests.changes_test(changes, target), expected)
+
+    def test_a_nested_or_top_level_name(self):
+        self.assertTrue(
+            flaky_tests.changes_test(
+                {"src/workerd/api/pyodide/pyodide-test.wd-test": ""},
+                "//src/workerd/api:pyodide/pyodide-test",
+            )
+        )
+        self.assertTrue(flaky_tests.changes_test({"top-test.c++": ""}, "//:top-test"))
+        self.assertTrue(
+            flaky_tests.changes_test(
+                {"BUILD.bazel": '+kj_test(src = "top-test.c++")'}, "//:top-test"
+            )
+        )
+
+
 class TestOutputTest(unittest.TestCase):
     def test_reads_each_run_of_the_test(self):
         lines = flaky_tests.job_log_lines(
@@ -857,17 +1105,17 @@ class PrepareAnalysisTest(unittest.TestCase):
         )
 
     def add_issue(self, *occurrences):
-        flaky = flaky_tests.FlakyIssue("//src/workerd/api:streams-test")
+        flaky = flaky_tests.FlakyTest("//src/workerd/api:streams-test")
         for occurrence in occurrences:
             flaky.add(occurrence)
         return self.gh.add_issue(
-            flaky_tests.render_issue(flaky, REPO),
+            flaky_tests.render_body(flaky, REPO),
             title="Flaky test: //src/workerd/api:streams-test",
         )
 
-    def prepare(self, number):
+    def prepare(self, number, target=None):
         return flaky_tests.prepare_analysis(
-            self.gh, number, self.output, self.logged.append
+            self.gh, number, target, self.output, self.logged.append
         )
 
     def read(self, name):
@@ -902,18 +1150,19 @@ class PrepareAnalysisTest(unittest.TestCase):
                 "body": "A stranger's comment.",
             },
         ]
-        self.assertTrue(self.prepare(number))
+        self.assertEqual(self.prepare(number), "")
 
         failure = json.loads(self.read(flaky_tests.ANALYSIS_FAILURE_FILE))
         self.assertEqual(
-            (failure["issue"], failure["run_id"], failure["label"]),
-            (number, 1, self.LABEL),
+            (failure["number"], failure["on_pull_request"], failure["run_id"]),
+            (number, False, 1),
         )
+        self.assertEqual(failure["label"], self.LABEL)
         self.assertEqual(
             self.read(flaky_tests.ANALYSIS_OUTPUT_FILE),
             f"==================== Test output for {self.LABEL}:\ntimed out\n{'=' * 80}\n",
         )
-        issue = self.read(flaky_tests.ANALYSIS_ISSUE_FILE)
+        issue = self.read(flaky_tests.ANALYSIS_SUBJECT_FILE)
         self.assertTrue(
             issue.startswith("# Flaky test: //src/workerd/api:streams-test\n")
         )
@@ -943,7 +1192,7 @@ class PrepareAnalysisTest(unittest.TestCase):
                 ],
             )
         )
-        self.assertTrue(self.prepare(number))
+        self.assertEqual(self.prepare(number), "")
         self.assertIn("\nits output\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
 
     def test_falls_back_to_another_job_that_failed_the_test(self):
@@ -954,7 +1203,7 @@ class PrepareAnalysisTest(unittest.TestCase):
                 [job_log("no tests"), failed_test_log(self.LABEL, "the output")],
             )
         )
-        self.assertTrue(self.prepare(number))
+        self.assertEqual(self.prepare(number), "")
         self.assertIn("\nthe output\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
 
     def test_skips_a_failure_whose_log_cant_be_read(self):
@@ -965,7 +1214,7 @@ class PrepareAnalysisTest(unittest.TestCase):
             ),
             self.add_failure(2, "2026-11-19T10:00:00Z", [gone]),
         )
-        self.assertTrue(self.prepare(number))
+        self.assertEqual(self.prepare(number), "")
         self.assertIn("\nolder\n", self.read(flaky_tests.ANALYSIS_OUTPUT_FILE))
         self.assertTrue(any("410" in message for message in self.logged))
 
@@ -979,12 +1228,48 @@ class PrepareAnalysisTest(unittest.TestCase):
                 fork=True,
             ),
         )
-        self.assertFalse(self.prepare(number))
+        self.assertIsNone(self.prepare(number))
         self.assertFalse(self.output.exists())
 
     def test_requires_a_flaky_test_issue(self):
         number = self.gh.add_issue("An unrelated issue.")
         self.assertRaises(SystemExit, self.prepare, number)
+
+    def test_analyses_a_pull_requests_test_at_its_commit(self):
+        occurrence = self.add_failure(
+            1, "2026-11-19T10:00:00Z", [failed_test_log(self.LABEL, "flaked")]
+        )
+        self.gh.add_pull(8700, {}, body="Adds streams-test.")
+        tracking = flaky_tests.FlakyTest(
+            "//src/workerd/api:streams-test", pull_request=8700
+        )
+        tracking.add(occurrence)
+        marker = flaky_tests.ANALYSIS_MARKER
+        self.gh.add_comment(8700, "Looks good.", login="reviewer", association="MEMBER")
+        self.gh.add_comment(8700, flaky_tests.render_body(tracking, REPO))
+        self.gh.add_comment(
+            8700,
+            marker.format(target="//src/workerd/api:streams-test") + "\nAn analysis.",
+        )
+        self.gh.add_comment(
+            8700,
+            marker.format(target="//src/workerd/api:other-test") + "\nAnother test's.",
+        )
+        self.assertEqual(
+            self.prepare(8700, "//src/workerd/api:streams-test"), occurrence.sha
+        )
+        failure = json.loads(self.read(flaky_tests.ANALYSIS_FAILURE_FILE))
+        self.assertEqual((failure["number"], failure["on_pull_request"]), (8700, True))
+        subject = self.read(flaky_tests.ANALYSIS_SUBJECT_FILE)
+        self.assertTrue(subject.startswith("# Add a test\n\nAdds streams-test.\n"))
+        self.assertIn("which this pull request adds or changes", subject)
+        self.assertIn("An analysis.", subject)
+        self.assertNotIn("Another test's.", subject)
+        self.assertNotIn("Looks good.", subject)
+        self.assertNotIn("flaky-test-data", subject)
+        self.assertRaises(
+            SystemExit, self.prepare, 8700, "//src/workerd/api:other-test"
+        )
 
 
 class PostAnalysesTest(unittest.TestCase):
@@ -997,7 +1282,7 @@ class PostAnalysesTest(unittest.TestCase):
         self.gh = FakeGitHub()
         self.logged = []
 
-    def write_analysis(self, number, report):
+    def write_analysis(self, key, report, on_pull_request=False):
         occurrence = flaky_tests.Occurrence(
             label="//src/workerd/api:streams-test@all-autogates",
             job="linux-X64",
@@ -1009,42 +1294,59 @@ class PostAnalysesTest(unittest.TestCase):
             event="push",
             pull_request=None,
         )
-        inputs = self.directory / f"flaky-analysis-input-{number}"
+        inputs = self.directory / f"flaky-analysis-input-{key}"
         inputs.mkdir()
         (inputs / flaky_tests.ANALYSIS_FAILURE_FILE).write_text(
-            json.dumps({"issue": number, **dataclasses.asdict(occurrence)})
+            json.dumps(
+                {
+                    "number": int(key.split("-")[0]),
+                    "on_pull_request": on_pull_request,
+                    **dataclasses.asdict(occurrence),
+                }
+            )
         )
         if report is not None:
-            reports = self.directory / f"flaky-analysis-{number}"
+            reports = self.directory / f"flaky-analysis-{key}"
             reports.mkdir()
             (reports / flaky_tests.ANALYSIS_REPORT_FILE).write_text(report)
 
-    def post(self, numbers):
+    def post(self, keys):
+        analyses = [{"key": key, "number": int(key.split("-")[0])} for key in keys]
         flaky_tests.post_analyses(
-            self.gh, numbers, self.directory, self.RUN_URL, self.logged.append
+            self.gh, analyses, self.directory, self.RUN_URL, self.logged.append
         )
         return [(path, body["body"]) for _, path, body in self.gh.writes]
 
     def test_posts_each_report_on_its_issue(self):
-        self.write_analysis(101, "**Likely cause** (high): a race.")
-        self.write_analysis(102, None)
-        self.write_analysis(103, "  \n")
-        posted = self.post([101, 102, 103, 104])
+        self.write_analysis("101-0", "**Likely cause** (high): a race.")
+        self.write_analysis("8700-1", "A pull request's.", on_pull_request=True)
+        self.write_analysis("102-2", None)
+        self.write_analysis("103-3", "  \n")
+        posted = self.post(["101-0", "8700-1", "102-2", "103-3", "104-4"])
         self.assertEqual(
-            [path for path, _ in posted], [f"repos/{REPO}/issues/101/comments"]
+            [path for path, _ in posted],
+            [f"repos/{REPO}/issues/101/comments", f"repos/{REPO}/issues/8700/comments"],
         )
         body = posted[0][1]
-        self.assertTrue(body.startswith(flaky_tests.ANALYSIS_MARKER + "\n"))
+        self.assertTrue(
+            body.startswith(
+                "<!-- flaky-test-analysis: //src/workerd/api:streams-test -->\n"
+            )
+        )
         self.assertIn(
             f"An agent [analysed]({self.RUN_URL}) the failure of "
             "`//src/workerd/api:streams-test@all-autogates` in "
             f"[attempt 1](https://github.com/{REPO}/actions/runs/7/attempts/1) of "
-            "`linux-X64`, at commit 0123456789.",
+            "`linux-X64`, at commit 0123456789. It read the test's output, this issue "
+            "and the repository's code,",
             body,
         )
         self.assertTrue(body.endswith("\n**Likely cause** (high): a race.\n"))
+        self.assertIn(
+            "It read the test's output, this pull request and its code,", posted[1][1]
+        )
         self.assertEqual(
-            sum(m.startswith("Not posting an analysis") for m in self.logged), 3
+            sum(m.startswith("Not posting analysis") for m in self.logged), 3
         )
 
     def test_report_cant_notify_or_refer_to_issues(self):
@@ -1081,11 +1383,25 @@ class PostAnalysesTest(unittest.TestCase):
         self.assertLess(len(sanitized), flaky_tests.MAX_REPORT_CHARS + 100)
         self.assertTrue(sanitized.endswith("\n~~~\n\n*The report was cut short.*"))
 
-    def test_issue_numbers(self):
-        self.assertEqual(flaky_tests.issue_numbers("[1, 23]"), [1, 23])
-        for text in ['["1"]', "[true]", '{"1": 2}', "7"]:
-            with self.subTest(text=text):
-                self.assertRaises(ValueError, flaky_tests.issue_numbers, text)
+    def test_analysis_list(self):
+        analyses = [
+            {"key": "12-0", "number": 12, "target": "//a:b"},
+            # A dispatch's, of an issue.
+            {"key": "34", "number": 34},
+        ]
+        self.assertEqual(flaky_tests.analysis_list(json.dumps(analyses)), analyses)
+        for analysis in [
+            {"key": "../x", "number": 1},
+            {"key": "1", "number": "1"},
+            {"key": "1", "number": True},
+            {"key": "1", "number": 1, "target": 2},
+            [1],
+        ]:
+            with self.subTest(analysis=analysis):
+                self.assertRaises(
+                    ValueError, flaky_tests.analysis_list, json.dumps([analysis])
+                )
+        self.assertRaises(ValueError, flaky_tests.analysis_list, '{"key": "1"}')
 
 
 class NextPageTest(unittest.TestCase):

@@ -8,17 +8,19 @@ which GitHub runs on the same commit. The workflows run these commands:
   test, which the job uploads as its `test-results-<job>-attempt<N>` artifact.
 - `summarize`, in a test job whose tests failed: notes which of the failures are known to be flaky.
 - `record`, in flaky-tests.yml: compares the attempts of each re-run test job, and keeps one issue
-  per flaky test, labelled `flaky-test`, and a dashboard issue that ranks them. It also lists the
-  issues for an agent to analyse.
+  per flaky test, labelled `flaky-test`, and a dashboard issue that ranks them. When an open pull
+  request of this repository adds or changes a test, a comment on the pull request tracks the
+  test's failures there instead. `record` also lists the failures for an agent to analyse.
 - `prepare-analysis` and `post-analyses`, in flaky-tests.yml: write the inputs of an agent's
-  analysis of a flaky test, from its issue and the log of a job that failed it, and post the
-  agent's report on the issue.
+  analysis of a failure, from the issue or pull request that tracks the test and the log of a job
+  that failed it, and post the agent's report there.
 
 The artifacts come from pull requests, including ones from forks, so `record` treats their contents
-as untrusted data: it accepts only well-formed labels in packages that exist on the default branch,
-and limits how many issues one run can open. A pull request from a fork also controls its tests'
-output, so an agent analyses only failures in runs of this repository's code. Its report is still
-untrusted: `post-analyses` keeps it from notifying anyone or referring to other issues.
+as untrusted data: it accepts only well-formed labels, in packages that exist on the default branch
+or of tests that the run's pull request adds or changes, and limits how many issues and comments
+one run can open. A pull request from a fork also controls its tests' output, so an agent
+analyses only failures in runs of this repository's code. Its report is still untrusted:
+`post-analyses` keeps it from notifying anyone or referring to other issues.
 """
 
 from __future__ import annotations
@@ -87,11 +89,15 @@ MAX_DOWNLOAD_BYTES = 32 << 20
 MAX_STORED_OCCURRENCES = 100
 MAX_TABLE_ROWS = 30
 MAX_SUMMARY_ROWS = 100
-# The most issues that one run's artifacts can open. A pull request controls its run's artifacts.
+# The most issues and pull request comments that one run's artifacts can open. A pull request
+# controls its run's artifacts.
 MAX_NEW_ISSUES_PER_RUN = 10
 
-# The most issues that one `record` asks an agent to analyse (see flaky-tests.yml).
+# The most failures that one `record` asks an agent to analyse (see flaky-tests.yml).
 MAX_ANALYSES_PER_RECORD = 3
+# The most commits of a pull request at which an agent analyses a failure of a test that the pull
+# request adds or changes.
+MAX_ANALYSES_PER_PULL_REQUEST_TEST = 3
 # How many of an issue's latest failures `prepare-analysis` tries, for one that it can analyse.
 MAX_ANALYSIS_CANDIDATES = 10
 # How much of a test's output, and of an issue's comments, an analysis reads.
@@ -102,14 +108,15 @@ MAX_REPORT_CHARS = 30_000
 # The authors of the comments that an analysis reads: the maintainers, and this workflow.
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 WORKFLOW_BOT = "github-actions[bot]"
-ANALYSIS_MARKER = "<!-- flaky-test-analysis -->"
-# The artifacts of the analysis of an issue (see flaky-tests.yml). The inputs are uploaded before
-# the agent runs.
-ANALYSIS_INPUT_ARTIFACT = "flaky-analysis-input-{issue}"
-ANALYSIS_REPORT_ARTIFACT = "flaky-analysis-{issue}"
+ANALYSIS_MARKER = "<!-- flaky-test-analysis: {target} -->"
+# The artifacts of an analysis (see flaky-tests.yml), named after its key. The inputs are uploaded
+# before the agent runs.
+ANALYSIS_INPUT_ARTIFACT = "flaky-analysis-input-{key}"
+ANALYSIS_REPORT_ARTIFACT = "flaky-analysis-{key}"
+ANALYSIS_KEY_RE = re.compile(r"\A[0-9]+(?:-[0-9]+)?\Z")
 ANALYSIS_FAILURE_FILE = "failure.json"
 ANALYSIS_OUTPUT_FILE = "failure.log"
-ANALYSIS_ISSUE_FILE = "issue.md"
+ANALYSIS_SUBJECT_FILE = "subject.md"
 ANALYSIS_REPORT_FILE = "report.md"
 
 # The errors of an artifact that can't be downloaded or read, which `record` skips. OSError
@@ -275,21 +282,32 @@ class Occurrence:
 
 
 @dataclasses.dataclass
-class FlakyIssue:
-    """The issue that tracks one flaky test, across all of its variants."""
+class FlakyTest:
+    """A flaky test, across all of its variants, and what tracks it: an issue, or a comment on an
+    open pull request that adds or changes the test, whose failures there are the pull request's.
+    """
 
     target: str
+    # The pull request whose comment tracks the test; None for an issue.
+    pull_request: int | None = None
+    # The issue's number, or the comment's ID. None until the workflow opens or posts it.
     number: int | None = None
-    # None while the issue is open.
+    # None while the issue is open. A comment is never closed.
     closed_at: str | None = None
     # Latest first.
     occurrences: list[Occurrence] = dataclasses.field(default_factory=list)
-    # How many failures the issue has recorded, including those it no longer keeps.
+    # How many failures it has recorded, including those it no longer keeps.
     total: int = 0
-    # Whether an agent was asked to analyse the test since the issue was opened or last reopened.
-    analysis_requested: bool = False
+    # The commits whose failures an agent was asked to analyse, since the issue was opened or last
+    # reopened.
+    analysed_commits: list[str] = dataclasses.field(default_factory=list)
     changed: bool = False
     reopened: bool = False
+
+    @property
+    def max_analyses(self) -> int:
+        # A pull request's author may change the test after each analysis.
+        return 1 if self.pull_request is None else MAX_ANALYSES_PER_PULL_REQUEST_TEST
 
     def add(self, occurrence: Occurrence) -> bool:
         if any(existing.key == occurrence.key for existing in self.occurrences):
@@ -302,40 +320,55 @@ class FlakyIssue:
         if self.closed_at is not None and occurrence.time > self.closed_at:
             self.closed_at = None
             self.reopened = True
-            self.analysis_requested = False
+            self.analysed_commits = []
         return True
 
 
-def parse_issue(issue: dict[str, Any]) -> FlakyIssue | None:
-    body = issue.get("body") or ""
+def parse_body(body: str, description: str) -> FlakyTest | None:
+    """Reads the test that an issue's description or a comment tracks, if any."""
     marker = ISSUE_MARKER_RE.search(body)
     if marker is None:
         return None
-    flaky = FlakyIssue(
-        target=marker[1],
-        number=issue["number"],
-        closed_at=issue.get("closed_at") if issue.get("state") == "closed" else None,
-    )
+    flaky = FlakyTest(target=marker[1])
     data = DATA_RE.search(body)
     if data is not None:
         try:
             stored = json.loads(data[1])
             flaky.occurrences = [Occurrence(**o) for o in stored["occurrences"]]
             flaky.total = max(int(stored["total"]), len(flaky.occurrences))
-            flaky.analysis_requested = stored.get("analysis_requested") is True
+            commits = stored.get("analysed_commits", [])
+            flaky.analysed_commits = [c for c in commits if isinstance(c, str)]
         except (ValueError, KeyError, TypeError) as error:
-            print(
-                f"Issue #{flaky.number} has unreadable failure data, which it drops: {error}"
-            )
+            print(f"{description} has unreadable failure data, which it drops: {error}")
             flaky.occurrences = []
     return flaky
 
 
-def data_block(flaky: FlakyIssue) -> str:
+def parse_issue(issue: dict[str, Any]) -> FlakyTest | None:
+    flaky = parse_body(issue.get("body") or "", f"Issue #{issue['number']}")
+    if flaky is not None:
+        flaky.number = issue["number"]
+        if issue.get("state") == "closed":
+            flaky.closed_at = issue.get("closed_at")
+    return flaky
+
+
+def parse_comment(comment: dict[str, Any], pull_request: int) -> FlakyTest | None:
+    # Anyone can comment on a pull request.
+    if (comment.get("user") or {}).get("login") != WORKFLOW_BOT:
+        return None
+    flaky = parse_body(comment.get("body") or "", f"Comment {comment['id']}")
+    if flaky is not None:
+        flaky.pull_request = pull_request
+        flaky.number = comment["id"]
+    return flaky
+
+
+def data_block(flaky: FlakyTest) -> str:
     data = {
         "total": flaky.total,
         "occurrences": [dataclasses.asdict(o) for o in flaky.occurrences],
-        "analysis_requested": flaky.analysis_requested,
+        "analysed_commits": flaky.analysed_commits,
     }
     # `>` occurs only inside JSON strings, where a Unicode escape can stand for it. Escaping it keeps
     # the data from ending the comment that holds it.
@@ -352,7 +385,8 @@ def describe_trigger(occurrence: Occurrence) -> str:
     return "pull request"
 
 
-def render_issue(flaky: FlakyIssue, repo: str) -> str:
+def render_body(flaky: FlakyTest, repo: str) -> str:
+    """Renders an issue's description, or a pull request's comment."""
     latest = flaky.occurrences[0]
     rows = [
         "| {when} | `{job}` | {variant} | {status} | [attempt {attempt}]({run_url}) | {sha} | "
@@ -369,11 +403,12 @@ def render_issue(flaky: FlakyIssue, repo: str) -> str:
         for o in flaky.occurrences[:MAX_TABLE_ROWS]
     ]
     times = "once" if flaky.total == 1 else f"{flaky.total} times"
+    on_pull_request = flaky.pull_request is not None
     lines = [
         ISSUE_MARKER.format(target=flaky.target),
-        f"`{flaky.target}` failed in a CI job and passed in another attempt of the job, on the "
-        f"same commit. It has failed this way {times}, most recently on {latest.time[:10]} in "
-        f"`{latest.job}`.",
+        f"`{flaky.target}`{', which this pull request adds or changes,' if on_pull_request else ''} "
+        "failed in a CI job and passed in another attempt of the job, on the same commit. It has "
+        f"failed this way {times}, most recently on {latest.time[:10]} in `{latest.job}`.",
         "",
         "| Failed (UTC) | Job | Variant | Result | Run | Commit | Tested |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -384,19 +419,25 @@ def render_issue(flaky: FlakyIssue, repo: str) -> str:
             "",
             f"The table shows the latest {len(rows)} of {flaky.total} failures.",
         ]
-    lines += [
-        "",
-        f"The [flaky-tests workflow]({WORKFLOW_URL.format(repo=repo)}) maintains this description "
-        "and rewrites it after each new failure, so please comment instead of editing it. If the "
-        "test fails this way after the issue is closed, the workflow reopens the issue.",
-        "",
-        data_block(flaky),
-        "",
-    ]
+    workflow = f"[flaky-tests workflow]({WORKFLOW_URL.format(repo=repo)})"
+    if on_pull_request:
+        footer = (
+            "Once a flaky test merges, it fails the CI of other pull requests, so please make it "
+            f"reliable first. The {workflow} maintains this comment and rewrites it after each new "
+            "failure. When the test fails this way at a new commit, an agent analyses the "
+            f"failure, up to {MAX_ANALYSES_PER_PULL_REQUEST_TEST} times."
+        )
+    else:
+        footer = (
+            f"The {workflow} maintains this description and rewrites it after each new failure, "
+            "so please comment instead of editing it. If the test fails this way after the issue "
+            "is closed, the workflow reopens the issue."
+        )
+    lines += ["", footer, "", data_block(flaky), ""]
     return "\n".join(lines)
 
 
-def render_dashboard(issues: Iterable[FlakyIssue], repo: str, now: datetime) -> str:
+def render_dashboard(issues: Iterable[FlakyTest], repo: str, now: datetime) -> str:
     month = utc_iso(now - timedelta(days=DASHBOARD_DAYS))
     week = utc_iso(now - timedelta(days=7))
     rows = []
@@ -648,6 +689,33 @@ def tests_repository_code(run: dict[str, Any], repo: str) -> bool:
     return (run.get("head_repository") or {}).get("full_name") == repo
 
 
+def changes_test(changes: dict[str, str], target: str) -> bool:
+    """Whether a pull request's changes add or change a test.
+
+    `changes` maps each file that the pull request adds, changes or removes to its patch, which GitHub omits
+    for a large file. The test's files are those its name comes from, such as `foo-test.wd-test` and
+    `foo-test.js` for `//package:foo-test`, and the lines of its package's BUILD file that name it.
+    """
+    match = LABEL_RE.match(target)
+    if match is None:
+        return False
+    package = match["package"] or ""
+    name = target.split(":", 1)[1]
+    stem = f"{package}/{name}" if package else name
+    build_files = {f"{package}/{b}" if package else b for b in ("BUILD.bazel", "BUILD")}
+    for filename, patch in changes.items():
+        directory, _, base = filename.rpartition("/")
+        prefix = f"{directory}/" if directory else ""
+        if stem in (prefix + base.split(".", 1)[0], prefix + base.rsplit(".", 1)[0]):
+            return True
+        if filename in build_files and any(
+            line[:1] in ("+", "-") and (f'"{name}"' in line or f'"{name}.' in line)
+            for line in patch.splitlines()
+        ):
+            return True
+    return False
+
+
 @dataclasses.dataclass
 class Recorder:
     """Records the flaky failures of Tests runs in issues."""
@@ -660,9 +728,15 @@ class Recorder:
     # Only logs the changes to issues.
     dry_run: bool = False
 
-    def record(self, runs: Iterable[dict[str, Any]]) -> list[int]:
-        """Records the runs' flaky failures, and returns the issues to analyse."""
-        issues: dict[str, FlakyIssue] = {}
+    def record(self, runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Records the runs' flaky failures, and returns the analyses to run.
+
+        Each analysis is of a test and the issue or pull request whose number it has, and has a key
+        that names its artifacts.
+        """
+        # Keyed by the pull request whose comment tracks the test, or None for an issue, and the
+        # test's target.
+        trackers: dict[tuple[int | None, str], FlakyTest] = {}
         dashboard = None
         for issue in list_issues(self.gh, "all"):
             if DASHBOARD_MARKER in (issue.get("body") or ""):
@@ -670,13 +744,16 @@ class Recorder:
                 continue
             flaky = parse_issue(issue)
             if flaky is not None:
-                issues.setdefault(flaky.target, flaky)
+                trackers.setdefault((None, flaky.target), flaky)
 
-        # The tests that failed in a run of this repository's code, which an agent may analyse.
-        analysable: set[str] = set()
+        # The latest failure of each test in a run of this repository's code, which an agent may
+        # analyse.
+        analysable: dict[tuple[int | None, str], Occurrence] = {}
+        changes: dict[int, dict[str, str] | None] = {}
         for run in runs:
             try:
                 occurrences = self.find_flaky_failures(run)
+                pull_request_changes = self.pull_request_changes(run, changes, trackers)
             except OSError as error:
                 # The sweeps try the run again until two days after it was created.
                 self.log(f"Skipping run {run['id']}: {error}")
@@ -684,7 +761,19 @@ class Recorder:
             from_repository = tests_repository_code(run, self.gh.repo)
             opened = 0
             for occurrence in occurrences:
-                flaky = issues.get(occurrence.target)
+                if pull_request_changes is not None and changes_test(
+                    pull_request_changes, occurrence.target
+                ):
+                    key = (occurrence.pull_request, occurrence.target)
+                elif package_exists(self.repo_root, occurrence.label):
+                    key = (None, occurrence.target)
+                else:
+                    self.log(
+                        f"Skipping {occurrence.label} from run {run['id']}: its package "
+                        "doesn't exist."
+                    )
+                    continue
+                flaky = trackers.get(key)
                 if flaky is None:
                     if opened == MAX_NEW_ISSUES_PER_RUN:
                         self.log(
@@ -693,45 +782,109 @@ class Recorder:
                         )
                         continue
                     opened += 1
-                    flaky = issues[occurrence.target] = FlakyIssue(occurrence.target)
+                    flaky = trackers[key] = FlakyTest(
+                        occurrence.target, pull_request=key[0]
+                    )
                 if flaky.add(occurrence):
                     self.log(
                         f"{occurrence.label} failed ({occurrence.status}) in attempt "
                         f"{occurrence.attempt} of {occurrence.job} in run "
                         f"{occurrence.run_id}, and passed in another attempt."
                     )
-                    if from_repository:
-                        analysable.add(occurrence.target)
+                    latest = analysable.get(key)
+                    if from_repository and (
+                        latest is None or occurrence.time > latest.time
+                    ):
+                        analysable[key] = occurrence
 
         requested = self.request_analyses(
-            issues[target] for target in sorted(analysable)
+            (trackers[key], analysable[key])
+            for key in sorted(analysable, key=lambda k: (k[0] or 0, k[1]))
         )
-        if not self.dry_run and any(flaky.number is None for flaky in issues.values()):
+        issues = [flaky for flaky in trackers.values() if flaky.pull_request is None]
+        if not self.dry_run and any(flaky.number is None for flaky in issues):
             self.ensure_label()
-        self.save_issues(issues.values())
-        self.save_dashboard(dashboard, issues.values())
+        self.save_trackers(trackers.values())
+        self.save_dashboard(dashboard, issues)
         if self.dry_run:
             return []
-        return [flaky.number for flaky in requested if flaky.number is not None]
+        analyses = []
+        for flaky in requested:
+            number = (
+                flaky.pull_request if flaky.pull_request is not None else flaky.number
+            )
+            analyses.append(
+                {
+                    "key": f"{number}-{len(analyses)}",
+                    "number": number,
+                    "target": flaky.target,
+                }
+            )
+        return analyses
 
-    def request_analyses(self, candidates: Iterable[FlakyIssue]) -> list[FlakyIssue]:
-        """Asks for an analysis of each open issue that has had none since it was (re)opened.
+    def pull_request_changes(
+        self,
+        run: dict[str, Any],
+        changes: dict[int, dict[str, str] | None],
+        trackers: dict[tuple[int | None, str], FlakyTest],
+    ) -> dict[str, str] | None:
+        """Returns the files that the open pull request a run tested adds or changes, with their
+        patches, or None for a run of main, a fork's or a closed pull request.
 
-        An issue that a run doesn't ask about, because it asks about others, gets its analysis when
-        the test next fails in a run of this repository's code.
+        `changes` caches each pull request's. Its comments that track tests go in `trackers`.
         """
-        requested: list[FlakyIssue] = []
-        for flaky in candidates:
-            if flaky.analysis_requested or flaky.closed_at is not None:
+        gh = self.gh
+        pull_requests = run.get("pull_requests") or []
+        if (
+            run.get("event") != "pull_request"
+            or not pull_requests
+            or not tests_repository_code(run, gh.repo)
+        ):
+            return None
+        number = int(pull_requests[0]["number"])
+        if number not in changes:
+            changes[number] = None
+            if gh.get(f"repos/{gh.repo}/pulls/{number}").get("state") == "open":
+                files = gh.paginate(
+                    f"repos/{gh.repo}/pulls/{number}/files?per_page=100"
+                )
+                comments = gh.paginate(
+                    f"repos/{gh.repo}/issues/{number}/comments?per_page=100"
+                )
+                changes[number] = {
+                    file["filename"]: file.get("patch") or "" for file in files
+                }
+                for comment in comments:
+                    flaky = parse_comment(comment, number)
+                    if flaky is not None:
+                        trackers.setdefault((number, flaky.target), flaky)
+        return changes[number]
+
+    def request_analyses(
+        self, candidates: Iterable[tuple[FlakyTest, Occurrence]]
+    ) -> list[FlakyTest]:
+        """Asks for an analysis of each test's latest failure in a run of this repository's code,
+        unless one was asked for at its commit, or it has had as many as it can get.
+
+        A test that a run doesn't ask about, because it asks about others, gets its analysis when it
+        next fails in a run of this repository's code.
+        """
+        requested: list[FlakyTest] = []
+        for flaky, occurrence in candidates:
+            if (
+                flaky.closed_at is not None
+                or occurrence.sha in flaky.analysed_commits
+                or len(flaky.analysed_commits) >= flaky.max_analyses
+            ):
                 continue
             if len(requested) == MAX_ANALYSES_PER_RECORD:
                 self.log(
-                    f"Not analysing {flaky.target}: this run analyses "
-                    f"{MAX_ANALYSES_PER_RECORD} tests already."
+                    f"Not analysing {occurrence.label} at {occurrence.sha[:10]}: this run "
+                    f"analyses {MAX_ANALYSES_PER_RECORD} failures already."
                 )
                 continue
-            self.log(f"Analysing {flaky.target}.")
-            flaky.analysis_requested = True
+            self.log(f"Analysing {occurrence.label} at {occurrence.sha[:10]}.")
+            flaky.analysed_commits.append(occurrence.sha)
             requested.append(flaky)
         return requested
 
@@ -762,12 +915,6 @@ class Recorder:
                         f"Skipping {artifact.get('name')} of run {run['id']}: {error}"
                     )
             for label, status, attempt in flaky_failures(results):
-                if not package_exists(self.repo_root, label):
-                    self.log(
-                        f"Skipping {label} from run {run['id']}: its package doesn't "
-                        "exist."
-                    )
-                    continue
                 found.append(
                     Occurrence(
                         label=label,
@@ -799,12 +946,15 @@ class Recorder:
                 },
             )
 
-    def save_issues(self, issues: Iterable[FlakyIssue]) -> None:
+    def save_trackers(self, trackers: Iterable[FlakyTest]) -> None:
         gh = self.gh
-        for flaky in sorted(issues, key=lambda f: f.target):
+        for flaky in sorted(trackers, key=lambda f: (f.pull_request or 0, f.target)):
             if not flaky.changed:
                 continue
-            body = render_issue(flaky, gh.repo)
+            body = render_body(flaky, gh.repo)
+            if flaky.pull_request is not None:
+                self.save_comment(flaky, body)
+                continue
             if flaky.number is None:
                 self.log(f"Opening an issue for {flaky.target}.")
                 if not self.dry_run:
@@ -839,8 +989,25 @@ class Recorder:
                     },
                 )
 
+    def save_comment(self, flaky: FlakyTest, body: str) -> None:
+        gh = self.gh
+        if flaky.number is None:
+            self.log(f"Commenting on PR {flaky.pull_request} about {flaky.target}.")
+            if not self.dry_run:
+                created = gh.post(
+                    f"repos/{gh.repo}/issues/{flaky.pull_request}/comments",
+                    {"body": body},
+                )
+                flaky.number = created["id"]
+            return
+        self.log(
+            f"Updating the comment about {flaky.target} on PR {flaky.pull_request}."
+        )
+        if not self.dry_run:
+            gh.patch(f"repos/{gh.repo}/issues/comments/{flaky.number}", {"body": body})
+
     def save_dashboard(
-        self, dashboard: dict[str, Any] | None, issues: Iterable[FlakyIssue]
+        self, dashboard: dict[str, Any] | None, issues: Iterable[FlakyTest]
     ) -> None:
         gh = self.gh
         issues = list(issues)
@@ -943,47 +1110,93 @@ def failure_output(gh: Any, occurrence: Occurrence) -> str | None:
     return fallback
 
 
-def render_analysis_issue(
-    issue: dict[str, Any], comments: Iterable[dict[str, Any]]
+def login(comment: dict[str, Any]) -> str:
+    return (comment.get("user") or {}).get("login", "")
+
+
+def analysis_comments(
+    flaky: FlakyTest, comments: Iterable[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Chooses the comments that an analysis reads.
+
+    On an issue, they are those of maintainers and of this workflow, which may include an earlier
+    analysis. On a pull request, they are this workflow's comment that tracks the test, and its
+    analyses of the test.
+    """
+    if flaky.pull_request is None:
+        return [
+            c
+            for c in comments
+            if c.get("author_association") in TRUSTED_ASSOCIATIONS
+            or login(c) == WORKFLOW_BOT
+        ]
+    marker = ANALYSIS_MARKER.format(target=flaky.target)
+    return [
+        c
+        for c in comments
+        if login(c) == WORKFLOW_BOT
+        and (c.get("id") == flaky.number or marker in (c.get("body") or ""))
+    ]
+
+
+def render_analysis_subject(
+    subject: dict[str, Any], comments: Iterable[dict[str, Any]]
 ) -> str:
-    """Renders an issue for an agent: its description, and the latest comments of maintainers and
-    of this workflow, which may include an earlier analysis."""
+    """Renders an issue or a pull request for an agent: its title, its description, and as many of
+    the latest of `comments` as fit."""
     kept: list[str] = []
     size = 0
     for comment in reversed(list(comments)):
-        author = (comment.get("user") or {}).get("login", "")
-        if (
-            comment.get("author_association") not in TRUSTED_ASSOCIATIONS
-            and author != WORKFLOW_BOT
-        ):
-            continue
-        body = (comment.get("body") or "").replace("\r\n", "\n").strip()
+        # The failures' data repeats the table of a comment that tracks a test.
+        body = DATA_RE.sub("", comment.get("body") or "").replace("\r\n", "\n").strip()
         size += len(body)
         if size > MAX_COMMENTS_CHARS:
             break
         kept.append(
-            f"---\n\nComment by {author}, {comment.get('created_at')}:\n\n{body}\n"
+            f"---\n\nComment by {login(comment)}, {comment.get('created_at')}:\n\n{body}\n"
         )
-    # The failures' data repeats the description's table.
-    description = DATA_RE.sub("", issue.get("body") or "").replace("\r\n", "\n").strip()
-    return "\n".join([f"# {issue.get('title')}", "", description, "", *reversed(kept)])
+    description = (
+        DATA_RE.sub("", subject.get("body") or "").replace("\r\n", "\n").strip()
+    )
+    return "\n".join(
+        [
+            f"# {subject.get('title')}",
+            "",
+            shorten(description, MAX_COMMENTS_CHARS),
+            "",
+            *reversed(kept),
+        ]
+    )
 
 
 def prepare_analysis(
-    gh: Any, number: int, directory: Path, log: Callable[[str], None]
-) -> bool:
-    """Writes the inputs of an analysis of a flaky-test issue to `directory`.
+    gh: Any,
+    number: int,
+    target: str | None,
+    directory: Path,
+    log: Callable[[str], None],
+) -> str | None:
+    """Writes the inputs of an analysis of a flaky test to `directory`.
 
-    The analysis is of the latest of the test's failures in a run of this repository's code that
-    has a failed job whose log holds the test's output. Returns False when there is none.
+    `number` is the issue that tracks the test, or the pull request whose comment tracks `target`.
+    The analysis is of the latest of the test's failures in a run of this repository's code that has
+    a failed job whose log holds the test's output. Returns the commit for the agent to read: the
+    failure's, for a pull request's test, which the default branch may not have, and otherwise "".
+    Returns None when no failure can be analysed.
     """
-    issue = gh.get(f"repos/{gh.repo}/issues/{number}")
-    flaky = parse_issue(issue) if "pull_request" not in issue else None
-    if flaky is None:
-        raise SystemExit(f"#{number} is not a flaky-test issue.")
+    subject = gh.get(f"repos/{gh.repo}/issues/{number}")
     comments = list(
         gh.paginate(f"repos/{gh.repo}/issues/{number}/comments?per_page=100")
     )
+    if "pull_request" in subject:
+        tracked = (parse_comment(comment, number) for comment in comments)
+        flaky = next((f for f in tracked if f is not None and f.target == target), None)
+    else:
+        flaky = parse_issue(subject)
+        if flaky is not None and target not in (None, flaky.target):
+            flaky = None
+    if flaky is None:
+        raise SystemExit(f"#{number} doesn't track {target or 'a flaky test'}.")
     for occurrence in flaky.occurrences[:MAX_ANALYSIS_CANDIDATES]:
         failure = (
             f"the failure of {occurrence.label} in attempt {occurrence.attempt} of "
@@ -1001,10 +1214,15 @@ def prepare_analysis(
         if output is None:
             log(f"Skipping {failure}: no failed job's log holds the test's output.")
             continue
+        on_pull_request = flaky.pull_request is not None
         directory.mkdir(parents=True, exist_ok=True)
         (directory / ANALYSIS_FAILURE_FILE).write_text(
             json.dumps(
-                {"issue": number, **dataclasses.asdict(occurrence)},
+                {
+                    "number": number,
+                    "on_pull_request": on_pull_request,
+                    **dataclasses.asdict(occurrence),
+                },
                 indent=2,
                 sort_keys=True,
             ),
@@ -1013,13 +1231,14 @@ def prepare_analysis(
         (directory / ANALYSIS_OUTPUT_FILE).write_text(
             shorten(output, MAX_TEST_OUTPUT_CHARS) + "\n", encoding="utf-8"
         )
-        (directory / ANALYSIS_ISSUE_FILE).write_text(
-            render_analysis_issue(issue, comments), encoding="utf-8"
+        (directory / ANALYSIS_SUBJECT_FILE).write_text(
+            render_analysis_subject(subject, analysis_comments(flaky, comments)),
+            encoding="utf-8",
         )
         log(f"Analysing {failure}.")
-        return True
+        return occurrence.sha if on_pull_request else ""
     log(f"No failure of {flaky.target} can be analysed.")
-    return False
+    return None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1068,22 +1287,26 @@ def sanitize_report(report: str) -> str:
 
 
 def render_analysis(
-    occurrence: Occurrence, report: str, repo: str, run_url: str
+    occurrence: Occurrence, on_pull_request: bool, report: str, repo: str, run_url: str
 ) -> str:
     attempt_url = (
         f"https://github.com/{repo}/actions/runs/{occurrence.run_id}/attempts/"
         f"{occurrence.attempt}"
     )
+    read = (
+        "this pull request and its code"
+        if on_pull_request
+        else "this issue and the repository's code"
+    )
     return "\n".join(
         [
-            ANALYSIS_MARKER,
+            ANALYSIS_MARKER.format(target=split_label(occurrence.label)[0]),
             "### Automated analysis",
             "",
             f"An agent [analysed]({run_url}) the failure of `{occurrence.label}` in "
             f"[attempt {occurrence.attempt}]({attempt_url}) of `{occurrence.job}`, at "
-            f"commit {occurrence.sha[:10]}. It read the test's output, this issue and the "
-            "repository's code, but could not run the test, so check its reasoning before "
-            "acting on it.",
+            f"commit {occurrence.sha[:10]}. It read the test's output, {read}, but could not "
+            "run the test, so check its reasoning before acting on it.",
             "",
             "---",
             "",
@@ -1095,22 +1318,21 @@ def render_analysis(
 
 def post_analyses(
     gh: Any,
-    numbers: list[int],
+    analyses: list[dict[str, Any]],
     directory: Path,
     run_url: str,
     log: Callable[[str], None],
 ) -> None:
-    """Posts each agent's report on the issue it analysed.
+    """Posts each agent's report on the issue or pull request it analysed a failure for.
 
     `directory` holds each analysis's artifacts, each in a directory named after the artifact. The
     failure comes from the input artifact, which was uploaded before the agent ran.
     """
-    for number in numbers:
-        inputs = directory / ANALYSIS_INPUT_ARTIFACT.format(issue=number)
+    for analysis in analyses:
+        key, number = analysis["key"], analysis["number"]
+        inputs = directory / ANALYSIS_INPUT_ARTIFACT.format(key=key)
         report_path = (
-            directory
-            / ANALYSIS_REPORT_ARTIFACT.format(issue=number)
-            / ANALYSIS_REPORT_FILE
+            directory / ANALYSIS_REPORT_ARTIFACT.format(key=key) / ANALYSIS_REPORT_FILE
         )
         try:
             failure = json.loads(
@@ -1122,29 +1344,42 @@ def post_analyses(
                     for field in dataclasses.fields(Occurrence)
                 }
             )
+            on_pull_request = failure["on_pull_request"] is True
             with report_path.open("rb") as file:
                 # Characters take at most 4 bytes in UTF-8.
                 report = file.read(MAX_REPORT_CHARS * 4 + 4).decode(
                     "utf-8", errors="replace"
                 )
         except (OSError, ValueError, KeyError, TypeError) as error:
-            log(f"Not posting an analysis of #{number}: {error}")
+            log(f"Not posting analysis {key} on #{number}: {error}")
             continue
         if not report.strip():
-            log(f"Not posting an analysis of #{number}: the report is empty.")
+            log(f"Not posting analysis {key} on #{number}: the report is empty.")
             continue
         gh.post(
             f"repos/{gh.repo}/issues/{number}/comments",
-            {"body": render_analysis(occurrence, report, gh.repo, run_url)},
+            {
+                "body": render_analysis(
+                    occurrence, on_pull_request, report, gh.repo, run_url
+                )
+            },
         )
-        log(f"Posted the analysis of #{number}.")
+        log(f"Posted analysis {key} on #{number}.")
 
 
-def issue_numbers(text: str) -> list[int]:
-    numbers = json.loads(text)
-    if not isinstance(numbers, list) or not all(type(n) is int for n in numbers):
-        raise ValueError(f"not a JSON array of issue numbers: {text!r}")
-    return numbers
+def analysis_list(text: str) -> list[dict[str, Any]]:
+    """Parses the analyses that `record` lists, or that a dispatch asks for."""
+    analyses = json.loads(text)
+    if not isinstance(analyses, list) or not all(
+        isinstance(a, dict)
+        and isinstance(a.get("key"), str)
+        and ANALYSIS_KEY_RE.match(a["key"])
+        and type(a.get("number")) is int
+        and isinstance(a.get("target", ""), str)
+        for a in analyses
+    ):
+        raise ValueError(f"not a JSON array of analyses: {text!r}")
+    return analyses
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1187,22 +1422,30 @@ def main(argv: list[str] | None = None) -> None:
     record_parser.add_argument(
         "--analyses",
         type=Path,
-        help="write the numbers of the issues to analyse to this file, as a JSON array",
+        help="write the analyses to run to this file, as a JSON array",
     )
 
     prepare_parser = commands.add_parser(
-        "prepare-analysis", help="write the inputs of an analysis of an issue"
+        "prepare-analysis", help="write the inputs of an analysis of a flaky test"
     )
     prepare_parser.add_argument("--repo", required=True)
-    prepare_parser.add_argument("--issue", type=int, required=True)
+    prepare_parser.add_argument(
+        "--number", type=int, required=True, help="the issue or pull request"
+    )
+    prepare_parser.add_argument(
+        "--target", help="the test, which a pull request's analysis needs"
+    )
     prepare_parser.add_argument("--directory", type=Path, required=True)
 
     post_parser = commands.add_parser(
-        "post-analyses", help="post agents' reports on the issues they analysed"
+        "post-analyses", help="post agents' reports on what they analysed"
     )
     post_parser.add_argument("--repo", required=True)
     post_parser.add_argument(
-        "--issues", type=issue_numbers, required=True, help="a JSON array"
+        "--analyses",
+        type=analysis_list,
+        required=True,
+        help="a JSON array, as record writes",
     )
     post_parser.add_argument("--directory", type=Path, required=True)
     post_parser.add_argument("--run-url", required=True)
@@ -1219,16 +1462,25 @@ def main(argv: list[str] | None = None) -> None:
         else:
             summarize(args.results, gh, sys.stdout, sys.stdout)
     elif args.command == "prepare-analysis":
-        ready = prepare_analysis(
-            github_from_env(args.repo), args.issue, args.directory, print
+        commit = prepare_analysis(
+            github_from_env(args.repo),
+            args.number,
+            args.target or None,
+            args.directory,
+            print,
         )
         output_path = os.environ.get("GITHUB_OUTPUT")
         if output_path:
             with open(output_path, "a", encoding="utf-8") as output:
-                output.write(f"ready={'true' if ready else 'false'}\n")
+                output.write(f"ready={'false' if commit is None else 'true'}\n")
+                output.write(f"commit={commit or ''}\n")
     elif args.command == "post-analyses":
         post_analyses(
-            github_from_env(args.repo), args.issues, args.directory, args.run_url, print
+            github_from_env(args.repo),
+            args.analyses,
+            args.directory,
+            args.run_url,
+            print,
         )
     else:
         gh = github_from_env(args.repo)
