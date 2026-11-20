@@ -402,7 +402,7 @@ struct TracerTest {
         FetchEventInfo(
             kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr));
     t->setUserSpanSubmitter(kj::refcounted<TestSpanSubmitter>(t->getWeakRef(), parentSpanIds));
-    root = t->makeUserRequestSpan(writer.context);
+    root = t->makeUserRequestSpan(writer.context.toSpanContext());
   }
 
   // Ends the invocation and returns the SpanOpen events the tail worker received.
@@ -440,9 +440,30 @@ KJ_TEST("The root user span stands for the onset span") {
   KJ_EXPECT(test.parentSpanIds[0] == invocation.getSpanId());
   KJ_ASSERT(spanOpens.size() == 2, spanOpens.size());
   KJ_EXPECT(spanOpens[0].traceId == invocation.getTraceId());
+  KJ_EXPECT(spanOpens[0].invocationId == invocation.getInvocationId());
   KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[0].spanId) == invocation.getSpanId().getId());
   KJ_EXPECT(test.parentSpanIds[1] == SpanId(spanOpens[0].openedSpanId));
+  KJ_EXPECT(spanOpens[1].invocationId == invocation.getInvocationId());
   KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[1].spanId) == spanOpens[0].openedSpanId);
+}
+
+KJ_TEST("WorkerTracer stamps logs and exceptions with the onset's invocationId") {
+  TracerTest test;
+  auto& invocation = test.writer.context;
+  auto logContext = SpanContext(invocation.getTraceId(), SpanId(77), invocation.getTraceFlags());
+  KJ_ASSERT_NONNULL(test.tracer)
+      ->addLog(logContext, kj::UNIX_EPOCH, LogLevel::INFO, kj::str("[\"hello\"]"));
+  KJ_ASSERT_NONNULL(test.tracer)
+      ->addException(logContext, kj::UNIX_EPOCH, kj::str("Error"), kj::str("boom"), kj::none);
+
+  test.finish();
+  // Onset, Log, Exception, Outcome.
+  KJ_ASSERT(test.writer.target->events.size() == 4, test.writer.target->events.size());
+  for (const auto& event: test.writer.target->events) {
+    KJ_EXPECT(event.invocationId == invocation.getInvocationId());
+  }
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.writer.target->events[1].spanId) == 77u);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.writer.target->events[2].spanId) == 77u);
 }
 
 KJ_TEST("WorkerTracer falls back to the onset span when a span has no parent") {

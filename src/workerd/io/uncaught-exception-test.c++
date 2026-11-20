@@ -37,7 +37,7 @@ class ExceptionTracer final: public BaseTracer {
  public:
   kj::Vector<TracedException> exceptions;
 
-  void addException(const tracing::InvocationSpanContext& context,
+  void addException(const tracing::SpanContext& context,
       kj::Date timestamp,
       kj::String name,
       kj::String message,
@@ -53,16 +53,14 @@ class ExceptionTracer final: public BaseTracer {
 
   void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&&) override {}
   void setReturn(kj::Maybe<kj::Date>, kj::Maybe<tracing::FetchResponseInfo>) override {}
-  void addLog(const tracing::InvocationSpanContext&,
-      kj::Date,
-      LogLevel,
-      kj::String,
-      tracing::LogErrorInfo) override {}
+  void addLog(
+      const tracing::SpanContext&, kj::Date, LogLevel, kj::String, tracing::LogErrorInfo) override {
+  }
   void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
   void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
   void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
   void addSpanAttribute(
-      const tracing::InvocationSpanContext&, kj::ConstString, tracing::Attribute::Value) override {}
+      const tracing::SpanContext&, kj::ConstString, tracing::Attribute::Value) override {}
   void addSpanException(tracing::SpanId,
       kj::Date,
       kj::Maybe<tracing::Exception::Code>,
@@ -70,11 +68,10 @@ class ExceptionTracer final: public BaseTracer {
       kj::String,
       kj::Maybe<kj::String>) override {}
   void addDiagnosticChannelEvent(
-      const tracing::InvocationSpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
+      const tracing::SpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
   void setOutcome(EventOutcome, kj::Duration, kj::Duration) override {}
   void recordTimestamp(kj::Date) override {}
-  void setJsRpcInfo(
-      const tracing::InvocationSpanContext&, kj::Date, const kj::ConstString&) override {}
+  void setJsRpcInfo(const tracing::SpanContext&, kj::Date, const kj::ConstString&) override {}
   void markUnused() override {}
 };
 
@@ -796,13 +793,17 @@ KJ_TEST("logUncaughtExceptionAsync() traces under the given request, or the curr
   context->logUncaughtExceptionAsync(
       UncaughtExceptionSource::INTERNAL_ASYNC, failure("jsg.Error: intermediate"), *newer);
 
+  auto olderSpanContext = kj::str(older->getInvocationSpanContext().toSpanContext());
+  auto newerSpanContext = kj::str(newer->getInvocationSpanContext().toSpanContext());
+  KJ_EXPECT(olderSpanContext != newerSpanContext);
+
   KJ_ASSERT(olderTracer->exceptions.size() == 1);
   KJ_EXPECT(olderTracer->exceptions[0].message == "for the older");
-  KJ_EXPECT(olderTracer->exceptions[0].spanContext == kj::str(older->getInvocationSpanContext()));
+  KJ_EXPECT(olderTracer->exceptions[0].spanContext == olderSpanContext);
   KJ_EXPECT(olderTracer->exceptions[0].timestamp == olderTimer.actual);
   KJ_ASSERT(newerTracer->exceptions.size() == 1);
   KJ_EXPECT(newerTracer->exceptions[0].message == "for the current");
-  KJ_EXPECT(newerTracer->exceptions[0].spanContext == kj::str(newer->getInvocationSpanContext()));
+  KJ_EXPECT(newerTracer->exceptions[0].spanContext == newerSpanContext);
   KJ_EXPECT(newerTracer->exceptions[0].timestamp == newerTimer.actual);
 
   fixture.drainAndDestroy(kj::mv(newer));

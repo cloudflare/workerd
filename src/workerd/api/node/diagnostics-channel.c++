@@ -33,7 +33,7 @@ void DiagnosticsChannelModule::publishToTracer(
           "Diagnostic events cannot be published with SharedArrayBuffer or "
           "transferred ArrayBuffer instances");
       tracer.addDiagnosticChannelEvent(
-          context.getInvocationSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
+          context.getCurrentSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
     } JSG_CATCH(exception KJ_UNUSED) {
       // There was an error serializing the message. This is most likely due to
       // the message containing a non-serializable value. That's ok, we'll just
@@ -47,12 +47,12 @@ void DiagnosticsChannelModule::publishToTracer(
         ser.write(js, js.str("[[ Diagnostic event was not serializable ]]"_kj));
         auto tmp = ser.release();
         tracer.addDiagnosticChannelEvent(
-            context.getInvocationSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
+            context.getCurrentSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
       } JSG_CATCH(exception) {
         // This should not happen, but if it does, we don't want to crash. We'll
         // log the error and continue.
         LOG_PERIODICALLY(WARNING, "Diagnostic event fallback serialization failed: ", exception.getHandle(js));
-        tracer.addException(context.getInvocationSpanContext(), context.now(), kj::str("Error"),
+        tracer.addException(context.getCurrentSpanContext(), context.now(), kj::str("Error"),
             kj::str("Failed to publish diagnostics channel message"), kj::none);
       }
     }

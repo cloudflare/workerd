@@ -91,7 +91,7 @@ class BaseTracer: public kj::Refcounted {
   // none of the arguments was a native Error; otherwise the inner array's length matches
   // the argument count, with kj::none in slots whose argument was not an Error. Pass
   // `kj::none` for non-console internal warning paths.
-  virtual void addLog(const tracing::InvocationSpanContext& context,
+  virtual void addLog(const tracing::SpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message,
@@ -105,11 +105,11 @@ class BaseTracer: public kj::Refcounted {
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
   virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
   virtual void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
-  virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
+  virtual void addSpanAttribute(const tracing::SpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) = 0;
 
-  virtual void addException(const tracing::InvocationSpanContext& context,
+  virtual void addException(const tracing::SpanContext& context,
       kj::Date timestamp,
       kj::String name,
       kj::String message,
@@ -123,7 +123,7 @@ class BaseTracer: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
 
-  virtual void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
+  virtual void addDiagnosticChannelEvent(const tracing::SpanContext& context,
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) = 0;
@@ -149,7 +149,7 @@ class BaseTracer: public kj::Refcounted {
 
   // Returns the invocation's root user span, adopting the invocation's onset span identified by
   // `context`.
-  SpanParent makeUserRequestSpan(const tracing::InvocationSpanContext& context);
+  SpanParent makeUserRequestSpan(const tracing::SpanContext& context);
 
   // Installs the submitter for user spans reported under this tracer. May only be called once.
   // Submitter implementations should hold a BaseTracer::WeakRef rather than a strong reference so
@@ -174,7 +174,7 @@ class BaseTracer: public kj::Refcounted {
       kj::Function<StartedInvocationSpan(tracing::InvocationSpanContext&)>;
   void setStartInvocationSpanFunc(StartInvocationSpanFunc func);
 
-  virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+  virtual void setJsRpcInfo(const tracing::SpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
 
@@ -209,7 +209,7 @@ class BaseTracer: public kj::Refcounted {
   // Records an exception reported at the invocation level (an uncaught exception, for example),
   // unless `context` names a user span other than the invocation's: such an exception belongs to
   // that span.
-  void recordInvocationLevelException(const tracing::InvocationSpanContext& context,
+  void recordInvocationLevelException(const tracing::SpanContext& context,
       kj::StringPtr name,
       kj::StringPtr message,
       kj::Maybe<kj::StringPtr> stack);
@@ -217,7 +217,7 @@ class BaseTracer: public kj::Refcounted {
   // For implementations: hand a log, or an exception reported for `spanId`, to the invocation's
   // log submitter if the hook returned one. A message too big on its own is truncated as the
   // streaming tail truncates it.
-  void exportInvocationLog(const tracing::InvocationSpanContext& context,
+  void exportInvocationLog(const tracing::SpanContext& context,
       kj::Date timestamp,
       LogLevel level,
       kj::StringPtr message,
@@ -262,7 +262,7 @@ class WorkerTracer final: public BaseTracer {
   // exist at a time. Used in workerd, where we don't have to worry about pipelines.
   kj::Promise<kj::Own<Trace>> onComplete();
 
-  void addLog(const tracing::InvocationSpanContext& context,
+  void addLog(const tracing::SpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message,
@@ -278,15 +278,15 @@ class WorkerTracer final: public BaseTracer {
   void addSpanUpdateInternal(
       tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp);
   void addSpanLinksInternal(tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp);
-  void addSpanAttribute(const tracing::InvocationSpanContext& context,
+  void addSpanAttribute(const tracing::SpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
   // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
-  void addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+  void addSpanAttributeInternal(const tracing::SpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value,
       kj::Date timestamp);
-  void addException(const tracing::InvocationSpanContext& context,
+  void addException(const tracing::SpanContext& context,
       kj::Date timestamp,
       kj::String name,
       kj::String message,
@@ -297,7 +297,7 @@ class WorkerTracer final: public BaseTracer {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
-  void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
+  void addDiagnosticChannelEvent(const tracing::SpanContext& context,
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
@@ -322,7 +322,7 @@ class WorkerTracer final: public BaseTracer {
   void setReturn(kj::Maybe<kj::Date> time = kj::none,
       kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
 
-  void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+  void setJsRpcInfo(const tracing::SpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
 
@@ -339,10 +339,12 @@ class WorkerTracer final: public BaseTracer {
   // span attributes to be added to the onset event.
   kj::Vector<tracing::Attribute> attributes;
 
-  // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
-  // for trace events. This should no longer be needed after merging the existing span ID and
-  // InvocationSpanContext interfaces.
-  kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
+  // Trace ID, trace flags, and span ID of the span opened by the Onset event (the parent of
+  // subsequent tail events), paired with the invocation ID. Note: this is not the Onset
+  // TailEvent's own span context, which carries the trigger's span ID. Populated by
+  // setEventInfoInternal().
+  kj::Maybe<tracing::SpanContext> onsetSpanContext;
+  tracing::TraceId invocationId = tracing::TraceId::nullId;
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
   bool markedUnused = false;
