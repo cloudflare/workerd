@@ -6916,6 +6916,97 @@ KJ_TEST("Server: cache name is passed through to service") {
   }
 }
 
+KJ_TEST("Server: test command failures") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export let getterThrows = {
+                `  get test() { throw new Error("getter boom"); },
+                `}
+                `export let notFunction = {
+                `  test: 42,
+                `}
+                `export let rejects = {
+                `  test() { return Promise.reject(new Error("async boom")); }
+                `}
+                `export let throws = {
+                `  test() { throw new TypeError("sync boom"); }
+                `}
+                `export let waitUntil = {
+                `  test(controller, env, ctx) {
+                `    ctx.waitUntil(Promise.reject(new Error("later boom")));
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "sw",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          serviceWorkerScript = `addEventListener("test", () => {});
+        )
+      ),
+    ]
+  ))"_kj;
+
+  // `test` is read only when the test runs, so a getter that throws fails the test, not the
+  // Worker's startup.
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:getterThrows");
+    KJ_EXPECT_LOG(INFO, "Error: getter boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:getterThrows");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "getterThrows").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:notFunction");
+    KJ_EXPECT_LOG(INFO, "jsg.Error: Entrypoint does not export a test() function.");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:notFunction");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "notFunction").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:rejects");
+    KJ_EXPECT_LOG(INFO, "Error: async boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:rejects");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "rejects").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:throws");
+    KJ_EXPECT_LOG(INFO, "TypeError: sync boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:throws");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "throws").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:waitUntil");
+    KJ_EXPECT_LOG(INFO, "Error: later boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:waitUntil");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "waitUntil").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(DBG, "[ TEST ] sw");
+    KJ_EXPECT_LOG(
+        INFO, "jsg.Error: Tests are not currently supported with Service Workers syntax.");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] sw");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "sw", "default").wait(test.ws));
+  }
+}
+
 // =======================================================================================
 // Test the bench command
 

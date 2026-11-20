@@ -190,7 +190,6 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
     .tailStream{cloneFunction(js, tailStream)},
     .scheduled{cloneFunction(js, scheduled)},
     .alarm{cloneFunction(js, alarm)},
-    .test{cloneFunction(js, test)},
     .webSocketMessage{cloneFunction(js, webSocketMessage)},
     .webSocketClose{cloneFunction(js, webSocketClose)},
     .webSocketError{cloneFunction(js, webSocketError)},
@@ -922,20 +921,6 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
     }
   }
   KJ_UNREACHABLE;
-}
-
-jsg::Promise<void> ServiceWorkerGlobalScope::test(
-    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
-  // TODO(someday): For Service Workers syntax, do we want addEventListener("test")? Not supporting
-  //   it for now.
-  ExportedHandler& eh = JSG_REQUIRE_NONNULL(
-      exportedHandler, Error, "Tests are not currently supported with Service Workers syntax.");
-
-  auto& testHandler =
-      JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
-
-  jsg::Lock& js = lock;
-  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
 jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,

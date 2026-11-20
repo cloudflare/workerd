@@ -170,10 +170,6 @@ void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future)
   currentWithId(id).addWaitUntil(wait_until_future_wait(kj::mv(future)));
 }
 
-// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This
-// function is the reviewed exception: it throws JsExceptionThrown, which is how IoContext::run()
-// learns of an exception the callback left pending in V8. That use is counted in
-// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function.
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
@@ -181,22 +177,30 @@ void io_context_await_io_and_run(
   context.awaitIoAndRun(io_future_wait(kj::mv(future)),
       [callback = kj::mv(callback)](Worker::Lock& lock, ::rust::Box<IoOutput>&& output) mutable {
     auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
-    switch (io_callback_run(isolate, kj::mv(callback), kj::mv(output))) {
-      case IoCallbackOutcome::Succeeded:
-        return;
-      case IoCallbackOutcome::Failed:
-        // The exception, or termination, is pending in V8. JsExceptionThrown is how
-        // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
-        // stack, and fails the task with it, as for C++ code it runs.
-        throw jsg::JsExceptionThrown();
-      case IoCallbackOutcome::Panicked:
-        // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
-        // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
-        // convert it, running JavaScript, so the task fails with a KJ exception instead.
-        KJ_FAIL_ASSERT("the callback of IoContext::await_io_and_run() panicked");
-    }
-    KJ_UNREACHABLE;
+    endRunOfIoCallback(io_callback_run(isolate, kj::mv(callback), kj::mv(output)),
+        "the callback of IoContext::await_io_and_run()");
   });
+}
+
+// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This
+// function is the reviewed exception: it throws JsExceptionThrown, which is how IoContext::run()
+// learns of an exception a Rust callback left pending in V8. That use is counted in
+// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function, which every shim that
+// runs a Rust callback in IoContext::run() calls.
+void endRunOfIoCallback(IoCallbackOutcome outcome, kj::StringPtr callback) {
+  switch (outcome) {
+    case IoCallbackOutcome::Succeeded:
+      return;
+    case IoCallbackOutcome::Failed:
+      throw jsg::JsExceptionThrown();
+    case IoCallbackOutcome::Panicked:
+      // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
+      // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
+      // convert it, running JavaScript, so the run fails with a KJ exception instead.
+      kj::throwFatalException(kj::Exception(
+          kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(callback, " panicked")));
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {

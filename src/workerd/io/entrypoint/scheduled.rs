@@ -31,5 +31,5 @@ pub fn start(
     invocation.set_scheduled_event_info(scheduled_time, cron)?;
     let delivered = invocation.deliver(c"scheduled")?;
     let running = delivered.start_scheduled_in_wait_until(scheduled_time, cron)?;
-    Ok(running.finish_scheduled())
+    Ok(running.finish_scheduled(c"WorkerEntrypoint::runScheduled() waitForFinished()"))
 }

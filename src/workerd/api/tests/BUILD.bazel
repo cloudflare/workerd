@@ -326,6 +326,16 @@ wd_test(
 )
 
 wd_test(
+    src = "test-controller-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
+    src = "test-controller-immutable-prototypes-test.wd-test",
+    data = ["test-controller-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
