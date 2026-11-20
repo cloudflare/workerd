@@ -1,5 +1,17 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+# Not small: under load, starting Python alone can exceed the 3 s that .bazelrc gives small tests.
+py_test(
+    name = "flaky_tests_test",
+    srcs = [
+        "flaky_tests.py",
+        "flaky_tests_test.py",
+    ],
+    # The test imports flaky_tests.py as a top-level module.
+    imports = ["."],
+    main = "flaky_tests_test.py",
+)
+
 py_test(
     name = "v8_update_test",
     size = "small",

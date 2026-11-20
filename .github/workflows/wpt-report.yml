@@ -11,6 +11,9 @@ permissions:
   # Read/write artifacts
   actions: write
 
+  # Look up the known flaky tests (see _bazel.yml)
+  issues: read
+
 jobs:
   test:
     uses: ./.github/workflows/_bazel.yml

@@ -96,70 +96,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Claude Code
+        id: claude
         if: steps.update.outputs.updated == 'true'
-        env:
-          # The gateway token reaches Claude Code through this settings file rather than the triage
-          # step's environment, which commands the agent runs can read through /proc. Neither those
-          # commands nor Claude's own file tools may read the file. Every Bash command runs in the
-          # sandbox, without the gateway token, and sees only a placeholder GH_TOKEN that the sandbox
-          # proxy replaces with the token on requests to api.github.com. Listing api.github.com in
-          # allowedDomains scopes that replacement; it does not restrict other hosts. tlsTerminate
-          # uses the CA that Bazel was told to trust.
-          CLAUDE_SETTINGS: |
-            {
-              "env": {
-                "ANTHROPIC_CUSTOM_HEADERS": "cf-aig-authorization: Bearer ${{ secrets.CF_AI_GATEWAY_TOKEN }}"
-              },
-              "sandbox": {
-                "enabled": true,
-                "failIfUnavailable": true,
-                "allowUnsandboxedCommands": false,
-                "filesystem": {
-                  "allowWrite": ["/tmp", "~/.cache", "~/bazel-disk-cache", "${{ runner.temp }}"],
-                  "denyRead": ["~/.config/wpt-triage"]
-                },
-                "network": {
-                  "tlsTerminate": {
-                    "caCertPath": "/home/runner/.config/wpt-triage/ca.crt",
-                    "caKeyPath": "/home/runner/.config/wpt-triage/ca.key"
-                  },
-                  "allowedDomains": ["api.github.com"]
-                },
-                "credentials": {
-                  "envVars": [
-                    { "name": "ANTHROPIC_CUSTOM_HEADERS", "mode": "deny" },
-                    { "name": "ANTHROPIC_AUTH_TOKEN", "mode": "deny" },
-                    { "name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"] }
-                  ]
-                }
-              },
-              "permissions": {
-                "deny": [
-                  "Read(~/.config/wpt-triage/**)",
-                  "Edit(~/.config/wpt-triage/**)",
-                  "Edit(~/.claude/**)"
-                ]
-              }
-            }
-        run: |
-          npm install --global @anthropic-ai/claude-code
-          # Claude Code's Bash sandbox needs these on Linux.
-          sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
-          # Ubuntu 24.04 lets only programs with an AppArmor profile granting userns create user
-          # namespaces, which bubblewrap needs. This profile grants it to bubblewrap alone, rather
-          # than lifting the restriction for the whole runner with a sysctl.
-          sudo tee /etc/apparmor.d/bwrap > /dev/null <<'EOF'
-          abi <abi/4.0>,
-          include <tunables/global>
-
-          profile bwrap /usr/bin/bwrap flags=(unconfined) {
-            userns,
-            include if exists <local/bwrap>
-          }
-          EOF
-          sudo apparmor_parser -r /etc/apparmor.d/bwrap
-          printf '%s' "$CLAUDE_SETTINGS" > ~/.config/wpt-triage/settings.json
-          chmod 600 ~/.config/wpt-triage/settings.json
+        uses: ./.github/actions/setup-claude-code
+        with:
+          # Holds the CA that Bazel was told to trust above.
+          config_dir: ~/.config/wpt-triage
+          gateway_token: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
+          allow_write: '["~/bazel-disk-cache"]'
       - name: Triage WPT update
         id: triage
         if: steps.update.outputs.updated == 'true'
@@ -174,6 +118,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_EFFORT_LEVEL: medium
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+          CLAUDE_SETTINGS: ${{ steps.claude.outputs.settings }}
           # Commands time out after the default 2 minutes unless the agent asks for longer, which
           # the initial build and complete WPT runs need.
           BASH_MAX_TIMEOUT_MS: 3600000
@@ -212,7 +157,7 @@ jobs:
           claude -p "$PROMPT" \
             --model claude-opus-5-5 \
             --permission-mode bypassPermissions \
-            --settings ~/.config/wpt-triage/settings.json \
+            --settings "$CLAUDE_SETTINGS" \
             --output-format stream-json \
             --verbose
       - name: Export commits
