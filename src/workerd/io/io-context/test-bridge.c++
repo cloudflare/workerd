@@ -20,6 +20,11 @@ kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY =
 kj::Maybe<uint64_t> awaitContextId;
 kj::Maybe<kj::Maybe<uint64_t>> reactionDataDropContextId;
 kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
+kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> keptChannel;
+
+void keep_channel(kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
+  keptChannel = kj::mv(channel);
+}
 
 void record_await_context() {
   awaitContextId = IoContext::tryGetCurrentId().map(

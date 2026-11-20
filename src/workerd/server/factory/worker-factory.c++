@@ -5,6 +5,7 @@
 #include "worker-factory-impl.h"
 
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/bench.h>
 #include <workerd/api/trace.h>
 #include <workerd/io/access-info.h>
 #include <workerd/io/bundle-fs.h>
@@ -1702,6 +1703,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   co_await preloadPython(factory, featureFlags);
   auto& timing = impl->startupTiming;
   auto startTime = api::BenchTiming::now();
+  // How long it has been since `start`.
+  auto since = [](api::BenchTiming start) {
+    auto elapsed = api::BenchTiming::now() - start;
+    return StartupPhaseTiming{.wall_ns = elapsed.wallNs, .cpu_ns = elapsed.cpuNs};
+  };
 
   // The file system roots use their defaults; the config does not expose mount points.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource));
@@ -1830,7 +1836,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   auto isolateStart = api::BenchTiming::now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
-  timing.isolate = api::BenchTiming::now() - isolateStart;
+  timing.isolate = since(isolateStart);
   KJ_IF_SOME(r, registrar) {
     r.registerIsolate(impl->name, *isolate);
   }
@@ -1878,7 +1884,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
-  timing.script = api::BenchTiming::now() - scriptStart;
+  timing.script = since(scriptStart);
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the
   // Worker constructed first; the handle is held until then.
@@ -1895,11 +1901,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   },
       IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
-  timing.worker = api::BenchTiming::now() - workerStart;
+  timing.worker = since(workerStart);
 
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
       [&](Worker::Lock& lock) { lock.validateHandlers(errorReporter); });
-  timing.total = api::BenchTiming::now() - startTime;
+  timing.total = since(startTime);
 
   impl->info = WorkerInfo{
     .entrypoints = ErrorReporter::toRust(errorReporter.entrypoints),
@@ -1918,24 +1924,6 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   co_return kj::heap<CompiledWorker>(kj::mv(impl));
 }
 
-// Compiles a throwaway copy of the config's worker `services[configService]`, destroys it, and
-// returns how long the phases of compiling it took.
-//
-// The copy has no inspector, even when the inspector is enabled. It couldn't be registered: it
-// shares the worker's name, which the inspector's registry holds only once. And an inspector that
-// nothing can connect to would only add to the time measured.
-kj::Promise<api::WorkerStartupTiming> startThrowawayWorker(
-    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService) {
-  auto compiled = co_await compileWorker(factory, spec, configService, kj::none, kj::none);
-  auto& impl = compiled->getImpl();
-  // `worker_set_ctx_exports()` would drop the handle under the lock; nothing calls it for a copy.
-  impl.getWorker().runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
-      [&](Worker::Lock&) { impl.ctxExportsHandle = kj::none; });
-  KJ_REQUIRE(
-      impl.info.errors.empty(), "the worker failed to start", kj::strArray(impl.info.errors, "\n"));
-  co_return impl.startupTiming;
-}
-
 }  // namespace
 
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
@@ -1949,19 +1937,19 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
   return compileWorker(factory, spec, configService, kj::mv(dynamicSource), registrar);
 }
 
-kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
-    const WorkerSpec& spec,
-    uint32_t configService,
-    ::rust::Slice<const uint64_t> params) {
-  capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));
-  capnp::MallocMessageBuilder groupMessage;
-  co_await api::benchWorkerStartup(
-      paramsMessage.getRoot<bench::BenchParams>(), [&factory, &spec, configService]() {
-    return startThrowawayWorker(factory, spec, configService);
-  }, groupMessage.initRoot<bench::BenchReport::Group>());
-  auto words = capnp::messageToFlatArray(groupMessage);
-  co_return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
-      .as<kj_rs::RustCopy>();
+// The copy has no inspector, even when the inspector is enabled. It couldn't be registered: it
+// shares the worker's name, which the inspector's registry holds only once. And an inspector that
+// nothing can connect to would only add to the time measured.
+kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService) {
+  auto compiled = co_await compileWorker(factory, spec, configService, kj::none, kj::none);
+  auto& impl = compiled->getImpl();
+  // `worker_set_ctx_exports()` would drop the handle under the lock; nothing calls it for a copy.
+  impl.getWorker().runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
+      [&](Worker::Lock&) { impl.ctxExportsHandle = kj::none; });
+  KJ_REQUIRE(
+      impl.info.errors.empty(), "the worker failed to start", kj::strArray(impl.info.errors, "\n"));
+  co_return impl.startupTiming;
 }
 
 bool factory_assets_navigation_prefers_asset_serving(
