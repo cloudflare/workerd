@@ -275,7 +275,7 @@ class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
         return T{};
       }
       jsg::throwTypeError(js.v8Isolate,
-          kj::str("Cannot initialize ", typeid(T).name(),
+          kj::str("Cannot initialize ", typeName(typeid(T)),
               " with required members from an "
               "undefined or null value."));
     }
