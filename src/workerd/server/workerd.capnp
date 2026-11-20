@@ -385,6 +385,13 @@ struct ClusterConfig {
 }
 
 struct TracingOptions {
+  # Without `tracing` in the config, the environment variable `WORKERD_OTEL` fills it: `0` or
+  # unset exports nothing; `1` is `bucket`, with `WORKERD_OTEL_FLUSH_MS`, `WORKERD_OTEL_FLUSH_BYTES`
+  # and `WORKERD_OTEL_RETENTION` (`<days>d` or `none`, default `30d`); an http(s) URL is a
+  # collector that gets spans at `<url>/v1/traces` and the invocations' logs at `<url>/v1/logs`,
+  # with `OTEL_EXPORTER_OTLP_HEADERS` (comma-separated `name=value`, values percent-encoded) on
+  # each request. With `tracing` set, the variable is ignored with a warning.
+
   otlp @0 :ServiceDesignator;
   # Export spans to an OpenTelemetry collector. Every Worker invocation produces a trace: a span
   # for the invocation itself, one for each subrequest and binding operation it performs, and any
@@ -408,6 +415,26 @@ struct TracingOptions {
   # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
   # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
   # no retries.
+
+  bucket @1 :TracingBucket;
+  # Write the same spans, and the invocations' logs, as Parquet files in the cluster's bucket,
+  # which DuckDB queries in place with no collector to run. Requires `cluster`; not with `otlp`.
+  # Files go under `<prefix>telemetry/traces/` and `<prefix>telemetry/logs/`, partitioned by node
+  # and hour: `<node>/<yyyy>/<mm>/<dd>/<hh>/<unix_us>-<rand>.parquet`. The schema is
+  # `v0-unstable`, named in each file's `workerd-schema` metadata. Rows still buffered when the
+  # instance stops are lost, as are files whose upload fails.
+}
+
+struct TracingBucket {
+  flushMs @0 :UInt32 = 300000;
+  # Write a file at least this often while there are rows to write. Must be positive.
+
+  flushBytes @1 :UInt32 = 5242880;
+  # Write a file early once about this many bytes of rows are buffered. Must be positive.
+
+  retentionDays @2 :UInt32 = 30;
+  # Delete files older than this, at startup and every six hours. 0 keeps them, for the bucket's
+  # own lifecycle rules to delete.
 }
 
 struct LoggingOptions {

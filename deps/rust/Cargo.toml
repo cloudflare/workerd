@@ -72,6 +72,10 @@ hashlink = "0"
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
 pico-args = "0"
+# Cluster telemetry (src/rust/otlp-parquet) writes spans and logs as Parquet. The column-writer
+# API only: without `arrow` the arrow crates stay out of the binary. GZIP through flate2's zlib-rs
+# backend, already in the tree, so no C compression library is linked.
+parquet = { version = "59", default-features = false, features = ["flate2-zlib-rs"] }
 # The OTLP span exporter (src/rust/otlp) encodes its requests with prost. Its messages are written
 # out as structs, so neither prost-build nor protoc is involved.
 prost = "0.14"
