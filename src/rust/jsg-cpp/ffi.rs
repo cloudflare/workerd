@@ -270,10 +270,6 @@ impl<T: CppResource> jsg::Type for Ref<T> {
     fn class_name() -> &'static str {
         T::class_name()
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_object()
-    }
 }
 
 impl<T: CppResource> jsg::TypeInfo for Ref<T> {

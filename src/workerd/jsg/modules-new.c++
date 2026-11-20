@@ -1359,7 +1359,7 @@ class IsolateModuleRegistry final {
 v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
-  KJ_TRY {
+  return liftKj<v8::MaybeLocal<v8::Promise>>(js.v8Isolate, [&]() -> v8::MaybeLocal<v8::Promise> {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
     KJ_IF_SOME(found, registry.lookup(js, module)) {
       auto result = found.module.actuallyEvaluate(js, module, registry.getObserver());
@@ -1370,12 +1370,7 @@ v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
     return {};
-  }
-  KJ_CATCH(exception) {
-    auto ex = js.exceptionToJsValue(kj::mv(exception));
-    js.v8Isolate->ThrowException(ex.getHandle(js));
-    return {};
-  }
+  });
 }
 
 // The import.meta.resolve(...) function is effectively a shortcut for

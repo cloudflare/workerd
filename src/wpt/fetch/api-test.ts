@@ -93,10 +93,7 @@ export default {
       'terminates it. fetch() rejects a truncated header block before headers are combined.',
     expectedFailures: true,
   },
-  'basic/header-value-null-byte.any.js': {
-    comment: 'We should return a nicer TypeError instead of "internal error"',
-    expectedFailures: ['Ensure fetch() rejects null bytes in headers'],
-  },
+  'basic/header-value-null-byte.any.js': {},
   'basic/historical.any.js': {
     comment: 'This test expects us not to implement getAll',
     expectedFailures: ['Headers object no longer has a getAll() method'],
@@ -132,7 +129,10 @@ export default {
   },
   'basic/request-head.any.js': {},
   'basic/request-headers-case.any.js': {
-    comment: 'To be investigated',
+    comment:
+      'The casing of the first name is kept, but each value is sent on its own header line ' +
+      'rather than combined into one, which RFC 9110 section 5.3 allows. The test expects ' +
+      'one combined line.',
     expectedFailures: [
       'Multiple headers with the same name, different case (THIS-IS-A-TEST first)',
       'Multiple headers with the same name, different case (THIS-is-A-test first)',
@@ -229,6 +229,7 @@ export default {
     ],
   },
   'basic/scheme-others.sub.any.js': {},
+  'basic/split-byte-order-mark.any.js': {},
   'basic/status.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
@@ -313,6 +314,10 @@ export default {
     omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
+  'cors/cors-preflight-safelist-value-size.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
@@ -525,7 +530,11 @@ export default {
       'Fix our handling of empty Location header. Even when fixed, tests will still fail due to CORS stuff',
     expectedFailures: [
       'redirect response with empty Location, manual mode',
-      'redirect response with empty Location, follow mode',
+      '301 redirect response with empty Location, follow mode',
+      '302 redirect response with empty Location, follow mode',
+      '303 redirect response with empty Location, follow mode',
+      '307 redirect response with empty Location, follow mode',
+      '308 redirect response with empty Location, follow mode',
     ],
   },
   'redirect/redirect-keepalive.any.js': {
@@ -739,11 +748,7 @@ export default {
     ],
   },
   'request/request-cache.js': {},
-  'request/request-clone-readable-stream-body.any.js': {
-    comment:
-      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
-    expectedFailures: true,
-  },
+  'request/request-clone-readable-stream-body.any.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

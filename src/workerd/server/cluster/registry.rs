@@ -56,6 +56,9 @@ pub struct Registry {
     instance: u64,
     /// Live peers' records, as of the last listing.
     listed: RefCell<HashMap<String, NodeRecord>>,
+    /// When the latest listing that succeeded started, and the nodes it
+    /// found live, sorted: unlike `listed`, nothing else changes it.
+    listing: RefCell<Option<(u64, Vec<String>)>>,
     /// Dead peers whose records remain, as of the last listing.
     dead: RefCell<Vec<String>>,
     /// This instance left the cluster: it renews its record no more.
@@ -86,6 +89,7 @@ impl Registry {
                 std::time::SystemTime::now(),
             ),
             listed: RefCell::new(HashMap::new()),
+            listing: RefCell::new(None),
             dead: RefCell::new(Vec::new()),
             left: Cell::new(false),
             draining: Cell::new(false),
@@ -329,7 +333,21 @@ impl Registry {
             .filter(|n| !self.listed.borrow().contains_key(*n))
             .map(str::to_owned)
             .collect();
+        // Listings overlap (`Ownership::successor` lists too): the latest
+        // started is kept. `now_ms` is when this one started, or earlier.
+        let mut live: Vec<_> = peers.iter().map(|p| p.node.clone()).collect();
+        live.sort();
+        let mut listing = self.listing.borrow_mut();
+        if listing.as_ref().is_none_or(|(at, _)| *at <= now_ms) {
+            *listing = Some((now_ms, live));
+        }
         Ok(peers)
+    }
+
+    /// When the latest listing that succeeded started, and the live nodes it
+    /// found, this one included, sorted.
+    pub fn listing(&self) -> Option<(u64, Vec<String>)> {
+        self.listing.borrow().clone()
     }
 
     /// The live nodes, this one included, as of the last listing.

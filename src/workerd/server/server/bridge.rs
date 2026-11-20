@@ -28,6 +28,7 @@ pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
+pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
@@ -51,9 +52,21 @@ pub use crate::tasks::task_run;
 )]
 #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
 pub mod ffi {
+    // A JS value that can cross the RPC boundary: the props of an entrypoint, an actor class or
+    // a dynamic worker's env. The frankenvalue crate's bridge declares it, and so defines the
+    // one `KjOwn<Frankenvalue>` drop a binary may link.
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/frankenvalue/ffi.h");
+        type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
+        type AsyncInputStream = kj::io::ffi::AsyncInputStream;
         type AsyncIoStream = kj::io::ffi::AsyncIoStream;
+        type AsyncOutputStream = kj::io::ffi::AsyncOutputStream;
+        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
@@ -145,6 +158,14 @@ pub mod ffi {
     struct FacetStartInfo {
         id: KjOwn<ActorIdHandle>,
         actor_class: Box<ActorClassChannel>,
+    }
+
+    /// A response to an `HttpCall`: its status, the value of the header asked for (empty if it
+    /// has none), and its body.
+    struct HttpAnswer {
+        status: u32,
+        header: String,
+        body: KjOwn<AsyncInputStream>,
     }
 
     /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
@@ -355,6 +376,16 @@ pub mod ffi {
         /// The header table every `kj::HttpHeaders` handed to a worker is built against.
         fn factory_header_table<'a>(factory: &'a WorkerFactory) -> &'a HttpHeaderTable;
 
+        /// The server's owner of its shared OTLP exporter. Dropping it cancels outstanding
+        /// exports and releases the collector, even if spans still hold exporter references.
+        type OtlpExporter;
+        fn factory_new_otlp_exporter(
+            factory: &WorkerFactory,
+            collector: Box<SubrequestChannel>,
+        ) -> Result<KjOwn<OtlpExporter>>;
+        /// Disables export before the server starts tearing down its workers.
+        fn otlp_exporter_unlink(exporter: &OtlpExporter);
+
         /// Compiles a worker: its script, bindings and exports. Any config error is reported in
         /// the returned info rather than thrown; a worker with errors still exists so that the
         /// server can keep reporting the config's other errors.
@@ -395,10 +426,14 @@ pub mod ffi {
         /// Compiles `ctx.exports` from an encoded `Globals` message. Called once, after the
         /// server has numbered the worker's loopback channels.
         fn worker_set_ctx_exports(worker: &CompiledWorker, globals: &[u64]) -> Result<()>;
+        /// Installs the exporter for this worker's invocation spans; none disables export.
+        /// The server selects eligible workers when it links their services.
+        fn worker_set_otlp_exporter(worker: &CompiledWorker, exporter: KjMaybe<&OtlpExporter>);
         /// Cancels the worker's requests still in flight (background work past the response: a
         /// `waitUntil()`, a tail worker's event), each of which holds the worker and its I/O
         /// channels; and drops a dynamic worker's env channel tables and tails, which may refer
-        /// back to the worker that loaded it. Called when the server unlinks the worker.
+        /// back to the worker that loaded it. Releases the worker's OTLP exporter reference too.
+        /// Called when the server unlinks the worker.
         fn worker_unlink(worker: &CompiledWorker);
         /// Starts a request on the worker. `channels` is the worker's I/O channel table for this
         /// request; `tails` receive the request's trace once it completes (the server passes none
@@ -622,10 +657,6 @@ pub mod ffi {
         /// Without a stack trace, which a `KjError` does not carry.
         fn exception_text(error: KjException) -> String;
 
-        /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
-        /// class or a dynamic worker's env.
-        #[namespace = "workerd"]
-        type Frankenvalue;
         fn frankenvalue_from_json(json: &str) -> KjOwn<Frankenvalue>;
         fn frankenvalue_clone(value: &Frankenvalue) -> KjOwn<Frankenvalue>;
         fn frankenvalue_is_empty(value: &Frankenvalue) -> bool;
@@ -651,6 +682,17 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
+        /// Serves a cluster peer's session: the debug port's interface, its `getActor` for
+        /// clustered namespaces (`resolve_peer_actor`) and its `getEntrypoint` for the cluster's
+        /// caches (`resolve_peer_cache`). Once `closing` fails, the session disconnects with its
+        /// error, which fails every call the peer still has out on it; it resolves once the peer
+        /// shut its side of the connection too.
+        async fn factory_accept_cluster_peer(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            session: Box<PeerSession>,
+            closing: Box<ResultTask>,
+        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
@@ -665,7 +707,14 @@ pub mod ffi {
             service: &str,
             class_name: &str,
             actor_id: &str,
-        ) -> KjOwn<RpcClient>;
+        ) -> Result<KjOwn<RpcClient>>;
+        /// A service on a cluster peer, by `WorkerdDebugPort.getEntrypoint` over `session`: a
+        /// worker's default entrypoint, or a service that is not a worker. Pipelined, and it
+        /// keeps the session alive, as `rpc_client_debug_actor`.
+        fn rpc_client_debug_entrypoint(
+            session: &RpcClient,
+            service: &str,
+        ) -> Result<KjOwn<RpcClient>>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -693,6 +742,21 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             hook: Box<MovedHook>,
         ) -> KjOwn<WorkerInterface>;
+        /// An HTTP request made from Rust: its body is written, then its response awaited.
+        type HttpCall;
+        /// Starts `method url` with `headers` and a body of `length` bytes on `interface`.
+        fn http_call(
+            interface: KjOwn<WorkerInterface>,
+            method: HttpMethod,
+            url: &str,
+            headers: &HttpHeaders,
+            length: u64,
+        ) -> KjOwn<HttpCall>;
+        /// The request's body, to write all `length` bytes to.
+        fn http_call_body<'a>(call: Pin<&'a mut HttpCall>) -> Pin<&'a mut AsyncOutputStream>;
+        /// Ends the request's body and awaits the response, with the value of `header`, a
+        /// name as sent (in lowercase, as `http::HeaderMap` sends it).
+        async fn http_call_response(call: KjOwn<HttpCall>, header: &str) -> Result<HttpAnswer>;
 
         /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
         /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
@@ -886,6 +950,24 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
+        /// requests `session` counts.
+        fn resolve_peer_actor(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getEntrypoint`: a clustered `cache` service, whose requests
+        /// `session` counts.
+        fn resolve_peer_cache(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A session a cluster peer has open here (`ClusterNode`).
+        type PeerSession;
 
         /// A worker's I/O channel table for one request: what its bindings reach.
         type ChannelFactory;

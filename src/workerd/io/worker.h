@@ -1249,6 +1249,9 @@ class Worker::Actor final: public kj::Refcounted {
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
   kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> getAlarm(kj::Date scheduledTime);
 
+  // If an alarm is running, return the time it was scheduled for.
+  kj::Maybe<kj::Date> getRunningAlarmTime();
+
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or
   // `cancel()`. Otherwise, the scheduled alarm was overridden by another call to `scheduleAlarm()`

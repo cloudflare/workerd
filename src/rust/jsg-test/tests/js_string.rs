@@ -76,9 +76,6 @@ fn preserves_utf16_and_exposes_string_operations() {
         assert_eq!(v8::Local::<v8::Value>::from(JsString::from(handle)), value);
         assert_eq!(JsString::class_name(), "string");
         assert_eq!(JsString::type_name(), "string");
-        assert!(JsString::is_exact(value));
-        let number = 42_u32.to_js(lock)?;
-        assert!(!JsString::is_exact(number));
 
         let strings = jsg::Rc::new(lock, Strings);
 

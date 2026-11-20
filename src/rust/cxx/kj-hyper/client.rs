@@ -114,14 +114,24 @@ fn disconnected(what: impl Display) -> KjError {
     KjError::new(KjExceptionType::Disconnected, what.to_string())
 }
 
-/// A request's failure: the I/O error behind it when there is one, else DISCONNECTED (hyper
-/// reports a connection that went away in several shapes). A DISCONNECTED message names every
-/// cause: on its own, `hyper-util`'s error says only `client error (SendRequest)`.
+/// What kj's `HttpClient` fails with when a response head doesn't parse. `fetch()` in
+/// `workerd/api/http.c++` matches this text to report an invalid response.
+const INVALID_RESPONSE: &str = "The headers sent by the server are not valid.";
+
+/// A request's failure: FAILED with kj's message for a response head that doesn't parse, the
+/// I/O error behind it when there is one, else DISCONNECTED (hyper reports a connection that
+/// went away in several shapes). A DISCONNECTED message names every cause: on its own,
+/// `hyper-util`'s error says only `client error (SendRequest)`.
 fn client_error(error: &(dyn Error + 'static)) -> KjError {
     let mut source = Some(error);
     while let Some(e) = source {
         if let Some(io) = e.downcast_ref::<io::Error>() {
             return io_kj_error(io);
+        }
+        if e.downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_parse)
+        {
+            return failed(format_args!("{INVALID_RESPONSE} ({})", causes(error)));
         }
         source = e.source();
     }

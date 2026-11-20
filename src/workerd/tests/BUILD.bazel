@@ -3,6 +3,17 @@ load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
+TEST_FIXTURE_DEPS = [
+    "//src/workerd/io",
+    "//src/workerd/io:worker-entrypoint",
+    "//src/workerd/jsg",
+    "//src/workerd/server:workerd-api",
+    "//src/workerd/util:autogate",
+    "//src/workerd/util:setup-async-io",
+    "@capnp-cpp//src/kj:kj-async-core",
+    "@capnp-cpp//src/kj:kj-async-io",
+]
+
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
@@ -21,6 +32,18 @@ wd_cc_library(
         "//src/workerd/server:really_use_tcmalloc": ["@tcmalloc//tcmalloc:malloc_extension"],
         "//conditions:default": [],
     }),
+)
+
+# The main() of wd_cc_benchmark() executables.
+wd_cc_library(
+    name = "bench-main",
+    srcs = ["bench-main.c++"],
+    tags = ["workerd-benchmark"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@google_benchmark//:benchmark",
+    ],
 )
 
 kj_test(
@@ -46,16 +69,18 @@ wd_cc_library(
     srcs = ["test-fixture.c++"],
     hdrs = ["test-fixture.h"],
     visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/io:worker-entrypoint",
-        "//src/workerd/jsg",
-        "//src/workerd/server:workerd-api",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:setup-async-io",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj:kj-async-io",
-    ],
+    deps = TEST_FIXTURE_DEPS,
+)
+
+# The fixture with V8's --expose-gc, for tests that need RequestGarbageCollectionForTesting(). A
+# binary must link only one of the two.
+wd_cc_library(
+    name = "test-fixture-expose-gc",
+    srcs = ["test-fixture.c++"],
+    hdrs = ["test-fixture.h"],
+    local_defines = ["WORKERD_TEST_FIXTURE_EXPOSE_GC"],
+    visibility = ["//visibility:public"],
+    deps = TEST_FIXTURE_DEPS,
 )
 
 kj_test(

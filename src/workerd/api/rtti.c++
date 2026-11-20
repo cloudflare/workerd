@@ -12,7 +12,6 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
@@ -86,7 +85,6 @@
   F("base64", EW_BASE64_ISOLATE_TYPES)                                                             \
   F("node", EW_NODE_ISOLATE_TYPES)                                                                 \
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                                                 \
-  F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
   F("container", EW_CONTAINER_ISOLATE_TYPES)                                                       \
   F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
   F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \

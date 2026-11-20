@@ -43,7 +43,8 @@ wd_cc_library(
     ],
 )
 
-# Snippets that must compile against channel-interop. See build/wd_rust_compile_test.bzl.
+# Snippets that must, or must not, compile against channel-interop. See
+# build/wd_rust_compile_test.bzl.
 wd_rust_compile_test(
     name = "compile-tests",
     srcs = glob(["compile-tests/*.rs"]),
@@ -52,6 +53,7 @@ wd_rust_compile_test(
         "//src/rust/cxx/kj-rs",
         "//src/rust/jsg",
         "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-context",
         "@crates_vendor//static_assertions",
     ],
 )

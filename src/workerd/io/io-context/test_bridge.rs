@@ -182,6 +182,7 @@ mod ffi {
     extern "Rust" {
         unsafe fn await_and_record_async_context(isolate: usize) -> Result<()>;
         fn register_probe_module(registry: Pin<&mut ModuleRegistry>);
+        fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn release_await(value: i32);
@@ -371,6 +372,18 @@ fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
             };
             PROBE_OBSERVATION.with(|cell| cell.set(observation));
             Ok(jsg::Rc::new(lock, probe::Probe))
+        },
+        jsg::modules::ModuleType::Internal,
+    );
+}
+
+/// Registers the internal module `test:io-context-failing`, whose callback returns an error.
+fn register_failing_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "test:io-context-failing",
+        |_lock| -> jsg::Result<jsg::Rc<probe::Probe>> {
+            Err(jsg::Error::new_type_error("the module failed"))
         },
         jsg::modules::ModuleType::Internal,
     );
@@ -1301,8 +1314,8 @@ static CHANNEL_CONVERSION_CONTEXT: AtomicU64 = AtomicU64::new(0);
 
 /// In a request, makes a reentry callback whose function calls `function`, a JavaScript function
 /// in the caller's scope, and converts the value of the promise it returns with
-/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, recording the `IoContext` the
-/// conversion runs in.
+/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, taken to keep past the
+/// request, recording the `IoContext` the conversion runs in.
 unsafe fn make_channel_reentry_callback(
     isolate: usize,
     function: v8::ffi::Local,
@@ -1323,7 +1336,9 @@ unsafe fn make_channel_reentry_callback(
                     CHANNEL_CONVERSION_CONTEXT.store(context.as_ffi(), Ordering::SeqCst);
                     CHANNEL_CONVERSION_RUNS.fetch_add(1, Ordering::SeqCst);
                     let fetcher = jsg_cpp::Ref::<Fetcher>::from_js(lock, value)?;
-                    fetcher.get(lock).subrequest_channel(lock, context)
+                    let channel = fetcher.get(lock).subrequest_channel(lock, context)?;
+                    // Kept past the request, as Worker Loader keeps a dynamic Worker's outbound.
+                    channel.require_allows_transfer(lock)
                 })
             })
         })

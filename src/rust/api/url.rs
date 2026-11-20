@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::str::FromStr;
 
 use ada_url::Idna;
@@ -47,6 +48,20 @@ fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
         Ok(()) => Ok(Some(out.hostname().to_owned())),
         Err(()) => Ok(None),
     }
+}
+
+fn canonicalize_ip(input: &str) -> Option<String> {
+    if let Ok(ip) = Ipv4Addr::from_str(input) {
+        return Some(ip.to_string());
+    }
+    let addr = input.split_once('%').map_or(input, |(addr, _zone)| addr);
+    let ip = Ipv6Addr::from_str(addr).ok()?;
+    let segments = ip.segments();
+    if segments[..6].iter().all(|&s| s == 0) && segments[6] != 0 {
+        let [.., a, b, c, d] = ip.octets();
+        return Some(format!("::{}", Ipv4Addr::new(a, b, c, d)));
+    }
+    Some(ip.to_string())
 }
 
 #[jsg_resource(snapshot_stateless)]
@@ -148,10 +163,13 @@ impl UrlUtil {
         Ok(out.href().to_owned())
     }
 
-    // We return an empty string if the input is not a valid IP address.
+    /// Canonicalizes an IP address the way Node's `canonicalizeIP` does with
+    /// `uv_inet_pton` and `uv_inet_ntop`: an IPv6 zone id (`%eth0`) is dropped,
+    /// and an IPv4-compatible IPv6 address is written as `::a.b.c.d`. Returns
+    /// an empty string if the input is not a valid IP address.
     #[jsg_method(name = "canonicalizeIp")]
     pub fn canonicalize_ip(&self, input: String) -> String {
-        IpAddr::from_str(&input).map_or(String::new(), |ip| ip.to_string())
+        canonicalize_ip(&input).unwrap_or_default()
     }
 }
 

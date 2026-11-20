@@ -324,7 +324,9 @@ impl Service for AssetsRequest {
                         let mut out =
                             assets.send(response, served.status, &served.headers, length)?;
                         if served.body {
-                            copy_file(&path, 0, length, &mut out).await?;
+                            let mut file =
+                                std::fs::File::open(&path).map_err(|e| io_kj_error(&e))?;
+                            copy_file(&mut file, 0, length, &mut out).await?;
                         }
                         return Ok(());
                     }

@@ -9,16 +9,19 @@
 //! Rust takes and returns them as `jsg_cpp::Ref<Fetcher>` and `jsg_cpp::Ref<DurableObjectClass>`:
 //! method parameters, `#[jsg_struct]` fields, `Option`, `Nullable` and `Vec`s of them accept an
 //! instance of the class or of a subclass, such as `ExtendedFetcher`, and reject anything else,
-//! as C++ JSG's `jsg::Ref` parameters do (see `jsg_cpp::Ref`). It holds the channels as
-//! `kj_rs::KjRc`s.
+//! as C++ JSG's `jsg::Ref` parameters do (see `jsg_cpp::Ref`). It holds a channel for the current
+//! request as a [`ScopedChannel`], and one it keeps past its request, once C++ has allowed its
+//! transfer, as a `kj_rs::KjRc`.
 //!
 //! The C++ side, `ffi.h` and `ffi.c++`, is the per-type and per-method shims of
 //! `src/rust/jsg-cpp`: C++ API code, which lives here with the API rather than in Rust JSG.
 
 mod ffi;
 
+pub use ffi::Channel;
 pub use ffi::InHouse;
 pub use ffi::RequiresHostAndProtocol;
+pub use ffi::ScopedChannel;
 pub use ffi::bridge::ActorClassChannel;
 pub use ffi::bridge::DurableObjectClass;
 pub use ffi::bridge::Fetcher;

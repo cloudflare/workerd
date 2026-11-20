@@ -201,8 +201,6 @@ export class JSStreamSocket extends Socket {
   doClose(): void {
     this[kPendingClose] = true;
 
-    const handle = this._handle;
-
     // When sockets of the "net" module destroyed, they will call
     // `this._handle.close()` which will also emit EOF if not emitted before.
     // This feature makes sockets on the other side emit "end" and "close"
@@ -212,7 +210,6 @@ export class JSStreamSocket extends Socket {
     this.stream.destroy();
 
     queueMicrotask(() => {
-      notStrictEqual(handle, null);
       this[kPendingClose] = false;
     });
   }

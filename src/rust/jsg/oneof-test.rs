@@ -104,7 +104,7 @@ fn each_web_idl_rule_rejects_a_union() {
         ),
         (
             vec![UnionTypes::STRING.optional()],
-            "may not contain Option<T> or Lenient<T>",
+            "may not contain Option<T> or LenientOption<T>",
         ),
     ];
     for (members, rule) in cases {
@@ -168,6 +168,7 @@ fn each_type_has_the_kind_of_its_cpp_counterpart() {
     assert_kind::<v8::Local<'static, v8::Uint8ClampedArray>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::TypedArray>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::ArrayBuffer>>(Fallible, UnionTypes::OTHER);
+    assert_kind::<v8::Local<'static, v8::WasmModuleObject>>(Fallible, UnionTypes::OTHER);
 }
 
 #[test]

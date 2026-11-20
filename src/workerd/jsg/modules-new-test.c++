@@ -1203,6 +1203,58 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
 
 // ======================================================================================
 
+KJ_TEST("Importing a jsg::Object module throws the error its factory threw") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addSyntheticModule("factory",
+        Module::newJsgObjectModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            [](Lock& js) -> Ref<TestType> {
+      js.throwException(js.typeError("the factory failed"));
+    }));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "file:///factory");
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      auto thrown = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(thrown == "TypeError: the factory failed", thrown);
+    });
+  });
+}
+
+KJ_TEST("A termination in a jsg::Object module's factory stays a termination") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addSyntheticModule("factory",
+        Module::newJsgObjectModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            [](Lock& js) -> Ref<TestType> { js.terminateExecutionNow(); }));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+    v8::TryCatch tryCatch(js.v8Isolate);
+    bool threw = false;
+    try {
+      ModuleRegistry::resolve(js, "file:///factory");
+    } catch (JsExceptionThrown&) {
+      threw = true;
+    }
+    KJ_ASSERT(threw);
+    KJ_ASSERT(tryCatch.HasTerminated());
+    js.v8Isolate->CancelTerminateExecution();
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("import.meta works as expected") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;

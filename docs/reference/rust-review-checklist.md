@@ -108,9 +108,9 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   input, but a method argument is still required. Prefer `NullOrUndefined<T>` to
   `Option<Nullable<T>>` for an optional `T | null | undefined`, with distinct `Some(T)`,
   `Null`, and `Undefined` states. Omitted method arguments become `Undefined`. Use
-  `Lenient<T>` only when shallow type mismatches should also be accepted; converting it to
-  `NullOrUndefined<T>` maps `Unconvertable` to `Undefined`, while nested conversion errors
-  still propagate.
+  `LenientOption<T>`, like C++ `LenientOptional<T>`, only when a shallow type mismatch should
+  be absent rather than an error; `null` goes through `T`, and nested conversion errors still
+  propagate.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
@@ -124,8 +124,8 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
   keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
 - **GC tracing**: `jsg::Rc<T>` fields on `#[jsg_resource]` structs are automatically traced
-  during GC, including through `Option`, `Nullable`, and `NullOrUndefined` wrappers when
-  `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
+  during GC, including through `Option`, `LenientOption`, `Nullable`, and `NullOrUndefined` wrappers
+  when `Some`. `jsg::Weak<T>` fields are not
   traced (no-op). Verify that every resource reference is properly traced — missing traces
   cause use-after-free when the child is collected prematurely. `Traced::trace` has no
   default; a struct with nothing to trace uses `#[jsg_traced]`, which checks that each field

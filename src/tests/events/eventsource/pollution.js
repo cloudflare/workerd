@@ -4,13 +4,10 @@
 
 // An EventSource works with the built-ins it relies on patched: every
 // method or accessor of theirs it reaches is captured before user code
-// runs. The C++ implementation calls none of them, but when it reads the
-// TypeScript streams, the native pump resolves a promise with another, which
-// looks up Promise.prototype.then, so that combination leaves it unpatched.
+// runs.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { connect, nextEvent, streamOf } from 'helpers';
-import { usingTsImpl, usingTsStreams } from 'which-impl';
 
 // Replaces each of `names` on `object` with a function that throws, and
 // returns a function that restores them. Index loops and no array
@@ -77,7 +74,7 @@ function recordMessages(source) {
 export const fromStreamUnderPollution = {
   async test() {
     const stream = streamOf(['id: 1\ndata: a\n', 'data: b\n\n', 'data: c\n\n']);
-    const restore = patchAll({ promises: usingTsImpl || !usingTsStreams });
+    const restore = patchAll();
     let source;
     let messages;
     let ended;

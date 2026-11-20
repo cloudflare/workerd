@@ -19,10 +19,11 @@ namespace workerd::api::channel_interop::test {
 namespace {
 
 // A numbered channel that may be passed to another worker, one that may not, and a numbered
-// Durable Object class.
+// Durable Object class of each kind.
 constexpr uint SERVICE_CHANNEL = 3;
 constexpr uint LOCAL_CHANNEL = 4;
 constexpr uint CLASS_CHANNEL = 5;
+constexpr uint LOCAL_CLASS_CHANNEL = 6;
 constexpr uint16_t PORT = 5432;
 
 // The service a test channel reaches, which answers every request with "<name>: <url>".
@@ -98,15 +99,22 @@ class ServiceChannel final: public IoChannelFactory::SubrequestChannel {
 
 class TestActorClassChannel final: public IoChannelFactory::ActorClassChannel {
  public:
-  void requireAllowsTransfer() override {}
+  explicit TestActorClassChannel(bool transferable): transferable(transferable) {}
+
+  void requireAllowsTransfer() override {
+    JSG_REQUIRE(transferable, DOMDataCloneError, "This test class is not transferrable.");
+  }
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
       IoChannelFactory::ChannelTokenUsage usage) override {
     KJ_UNIMPLEMENTED("not used by these tests");
   }
+
+ private:
+  bool transferable;
 };
 
-// The worker's channels: SERVICE_CHANNEL and LOCAL_CHANNEL reach a Service, and CLASS_CHANNEL is
-// always `classChannel`.
+// The worker's channels: SERVICE_CHANNEL and LOCAL_CHANNEL reach a Service, CLASS_CHANNEL is
+// always `classChannel`, and LOCAL_CLASS_CHANNEL is a class that can't be transferred.
 struct ChannelFactory final: public TestFixture::DummyIoChannelFactory {
   ChannelFactory(TimerChannel& timer, kj::Rc<IoChannelFactory::ActorClassChannel> classChannel)
       : DummyIoChannelFactory(timer),
@@ -129,8 +137,12 @@ struct ChannelFactory final: public TestFixture::DummyIoChannelFactory {
   }
   kj::Rc<ActorClassChannel> getActorClassResolved(
       uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
-    KJ_REQUIRE(channel == CLASS_CHANNEL, channel);
-    return classChannel.addRef();
+    KJ_REQUIRE(channel == CLASS_CHANNEL || channel == LOCAL_CLASS_CHANNEL, channel);
+    if (channel == CLASS_CHANNEL) {
+      return classChannel.addRef();
+    } else {
+      return kj::rc<TestActorClassChannel>(false);
+    }
   }
 
   kj::Rc<IoChannelFactory::ActorClassChannel> classChannel;
@@ -154,7 +166,7 @@ class CountingRequestObserver final: public RequestObserver {
 class Harness {
  public:
   Harness()
-      : classChannel(kj::rc<TestActorClassChannel>()),
+      : classChannel(kj::rc<TestActorClassChannel>(true)),
         fixture(TestFixture::SetupParams{
           .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
               [this](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
@@ -168,7 +180,8 @@ class Harness {
 
   // Sets the globals the scripts use: `probe` (a Rust `Probe`); `service` and `local`, Fetchers
   // on SERVICE_CHANNEL and LOCAL_CHANNEL; `extended`, an ExtendedFetcher on SERVICE_CHANNEL;
-  // `cls`, a DurableObjectClass on CLASS_CHANNEL; and `serviceChannel`, SERVICE_CHANNEL.
+  // `cls` and `localCls`, DurableObjectClasses on CLASS_CHANNEL and LOCAL_CLASS_CHANNEL; and
+  // `serviceChannel`, SERVICE_CHANNEL.
   static void setGlobals(const TestFixture::Environment& env) {
     auto& js = env.js;
     auto global = jsg::JsObject(js.v8Context()->Global());
@@ -184,6 +197,7 @@ class Harness {
             js.alloc<ExtendedFetcher>(
                 SERVICE_CHANNEL, Fetcher::RequiresHostAndProtocol::YES, PORT)));
     global.set(js, "cls"_kj, wrap(js, js.alloc<DurableObjectClass>(CLASS_CHANNEL)));
+    global.set(js, "localCls"_kj, wrap(js, js.alloc<DurableObjectClass>(LOCAL_CLASS_CHANNEL)));
     global.set(js, "serviceChannel"_kj, js.num(SERVICE_CHANNEL));
   }
 
@@ -397,6 +411,12 @@ KJ_TEST("a channel that can't be transferred is refused with the error C++ throw
     Harness::setGlobals(env);
     KJ_EXPECT(thrownBy(env, "probe.rewrapTransferable(local)") ==
         "DataCloneError: This test channel is not transferrable.");
+    KJ_EXPECT(thrownBy(env, "probe.rewrapClass(localCls)") ==
+        "DataCloneError: This test class is not transferrable.");
+    // Nor can one be kept past its request.
+    KJ_EXPECT(thrownBy(env, "probe.stash(local)") ==
+        "DataCloneError: This test channel is not transferrable.");
+    KJ_EXPECT(stashed_count() == 0);
   });
 }
 

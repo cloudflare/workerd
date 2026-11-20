@@ -251,7 +251,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ): number;
   clearInterval(timeoutId: number | null): void;
   queueMicrotask(task: Function): void;
-  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
   reportError(error: any): void;
   fetch(
     input: RequestInfo | URL,
@@ -283,9 +282,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
-  EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
   ReadableByteStreamController: typeof ReadableByteStreamController;
@@ -337,6 +333,9 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   PerformanceResourceTiming: typeof PerformanceResourceTiming;
   PerformanceObserver: typeof PerformanceObserver;
   PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
+  EventSource: typeof EventSource;
 }
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
   type: Type,
@@ -390,11 +389,6 @@ declare function setInterval<Args extends any[]>(
 declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-declare function structuredClone<T>(
-  value: T,
-  options?: StructuredSerializeOptions,
-): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
@@ -516,9 +510,6 @@ interface ExportedHandler<
   test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env, Props>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-}
-interface StructuredSerializeOptions {
-  transfer?: any[];
 }
 declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
@@ -3507,58 +3498,6 @@ interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
 }
-/**
- * The **`EventSource`** interface is web content's interface to server-sent events.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
- */
-declare class EventSource extends EventTarget {
-  constructor(url: string, init?: EventSourceEventSourceInit);
-  /**
-   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
-   */
-  close(): void;
-  /**
-   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
-   */
-  get url(): string;
-  /**
-   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
-   */
-  get withCredentials(): boolean;
-  /**
-   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
-   */
-  get readyState(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  get onopen(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  set onopen(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  get onmessage(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  set onmessage(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  get onerror(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  set onerror(value: any | null);
-  static readonly CONNECTING: number;
-  static readonly OPEN: number;
-  static readonly CLOSED: number;
-  static from(stream: ReadableStream): EventSource;
-}
-interface EventSourceEventSourceInit {
-  withCredentials?: boolean;
-  fetcher?: Fetcher;
-}
 interface ExecOutput {
   readonly stdout: ArrayBuffer;
   readonly stderr: ArrayBuffer;
@@ -3665,59 +3604,6 @@ interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
   diskMb: number;
-}
-/**
- * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
- */
-declare abstract class MessagePort extends EventTarget {
-  /**
-   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
-   */
-  postMessage(
-    data?: any,
-    options?: any[] | MessagePortPostMessageOptions,
-  ): void;
-  /**
-   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
-   */
-  close(): void;
-  /**
-   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
-   */
-  start(): void;
-  get onmessage(): any | null;
-  set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
-}
-interface MessagePortPostMessageOptions {
-  transfer?: any[];
 }
 type LoopbackForExport<
   T extends
@@ -13187,21 +13073,31 @@ type BrowserRunScriptOptions = {
   lab?: boolean;
   /** Record the browser session. @default false */
   recording?: boolean;
+  /** Run the script on an alternate browser backend. Only the raw CDP client is
+   * supported, and no session is kept open afterwards. Setting `library`,
+   * `keepAlive`, `lab` or `recording` with it returns an HTTP 400 error
+   * response.
+   */
+  browser?: "kitesurf";
 };
-/** Options for `scriptInSession()`. */
+/** Options for `script()` in an existing browser session. */
 type BrowserRunScriptSessionOptions = {
+  /** Session to run in, such as the `cf-browser-session-id` header returned by
+   * `script()`. The session keeps the launch options it was acquired with.
+   */
+  sessionId: string;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
   /** Library whose objects are passed to the script. Omit it for raw CDP. */
   library?: BrowserRunScriptLibrary;
   /** Maximum run time of the script in milliseconds. Between 1 and 120000.
    * @default 60000
    */
   timeout?: number;
-  /** Page target the script attaches to, such as the `cf-browser-target-id`
-   * header returned by `script()`. Defaults to the session's first page.
-   */
-  targetId?: string;
 };
-/** JSON success body of `script()` and `scriptInSession()`. */
+/** JSON success body of `script()`. */
 type BrowserRunScriptSuccessResponse = {
   success: true;
   /** The script's return value, or `null` when it returned nothing. */
@@ -13426,7 +13322,7 @@ declare abstract class BrowserRun {
    * @param code - Source of an async function. It receives the selected
    * library's objects (Playwright `{ page, context, browser }`, Puppeteer
    * `{ page, browser }`) or, without `library`, a CDP client.
-   * @param options - Library, timeout and session launch options.
+   * @param options - Library, timeout, session launch and backend options.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13436,26 +13332,28 @@ declare abstract class BrowserRun {
    * non-JSON output
    *
    * **Error:**
-   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 502, 503)
    * - HTTP 408 when the script exceeds `timeout`
    * - HTTP 422 when the script fails to compile or throws
+   * - HTTP 502 when the script fails on the `browser: 'kitesurf'` backend
    * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
    * throw before any request is made.
    *
-   * **Headers:**
-   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * **Headers** (not returned with `browser: 'kitesurf'`):
+   * - `cf-browser-session-id`: Session kept open for a later `script()` call
+   * with `sessionId`
    * - `cf-browser-target-id`: Page target the script ran on
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
   script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
   /**
    * Run a script against an existing browser session, such as one kept open by
-   * `script()`.
-   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
-   * header returned by `script()`.
-   * @param code - Source of an async function, as for `script()`.
-   * @param options - Library, timeout and page target options.
-   * @returns A `Response` with the same success bodies as `script()`.
+   * an earlier `script()` call.
+   * @param code - Source of an async function, as for a new session.
+   * @param options - The session to run in, plus page target, library and
+   * timeout options. Launch options such as `keepAlive` cannot be set, because
+   * the session keeps the ones it was acquired with.
+   * @returns A `Response` with the same success bodies as a new-session run.
    *
    * **Error:**
    * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
@@ -13467,10 +13365,9 @@ declare abstract class BrowserRun {
    * **Headers:**
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
-  scriptInSession(
-    sessionId: string,
+  script(
     code: string,
-    options?: BrowserRunScriptSessionOptions,
+    options: BrowserRunScriptSessionOptions,
   ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
@@ -15021,6 +14918,59 @@ declare module "cloudflare:email" {
   };
   export { _EmailMessage as EmailMessage };
 }
+// EventSource, a global at every compatibility date.
+/**
+ * The **`EventSource`** interface is web content's interface to server-sent events.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
+ */
+declare class EventSource extends EventTarget {
+  constructor(url: string, init?: EventSourceEventSourceInit);
+  /**
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
+   */
+  close(): void;
+  /**
+   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
+   */
+  get url(): string;
+  /**
+   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
+   */
+  get withCredentials(): boolean;
+  /**
+   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
+   */
+  get readyState(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  get onopen(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  set onopen(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  get onmessage(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  set onmessage(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  get onerror(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  set onerror(value: any | null);
+  static readonly CONNECTING: number;
+  static readonly OPEN: number;
+  static readonly CLOSED: number;
+  static from(stream: ReadableStream): EventSource;
+}
+interface EventSourceEventSourceInit {
+  withCredentials?: boolean;
+  fetcher?: Fetcher;
+}
 /**
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
@@ -15799,6 +15749,62 @@ interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
+}
+// MessageChannel and MessagePort, declared at every compatibility date. They
+// are globals under the expose_global_message_channel compatibility flag (the
+// default from 2025-08-15); node:worker_threads exports them at any date.
+/**
+ * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+declare abstract class MessagePort extends EventTarget {
+  /**
+   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+declare class MessageChannel {
+  constructor();
+  /**
+   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+interface MessagePortPostMessageOptions {
+  transfer?: any[];
 }
 declare module "cloudflare:node" {
   interface NodeStyleServer {
@@ -17220,6 +17226,17 @@ interface AlreadyUploadedError extends StreamError {
 interface TooManyWatermarksError extends StreamError {
   name: "TooManyWatermarksError";
 }
+interface StructuredSerializeOptions {
+  transfer?: any[];
+}
+interface ServiceWorkerGlobalScope {
+  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+declare function structuredClone<T>(
+  value: T,
+  options?: StructuredSerializeOptions,
+): T;
 type MarkdownDocument = {
   name: string;
   blob: Blob;

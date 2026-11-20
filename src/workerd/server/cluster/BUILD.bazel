@@ -8,12 +8,12 @@ wd_rust_crate(
     proc_macro_deps = ["@crates_vendor//async-trait"],
     # A throwaway service account key, for the Cloud Storage client's tests.
     test_compile_data = ["google_auth-test.pem"],
-    # The capture's tests drive a real SQLite; the bucket client's tests
-    # talk to a hyper server.
-    test_deps = [
-        "@crates_vendor//hyper",
-        "@sqlite3",
-    ],
+    # The capture's tests drive a real SQLite.
+    test_deps = ["@sqlite3"],
+    # Four tests at a time: many of them mostly wait out bounds on bucket
+    # requests, and none shares state with another but through its own
+    # thread or its own files.
+    test_env = {"RUST_TEST_THREADS": "4"},
     # The alarm simulation and the log tests outrun a medium test's 15 s
     # under ASan.
     test_size = "large",
@@ -33,6 +33,7 @@ wd_rust_crate(
         "@crates_vendor//http",
         "@crates_vendor//http-body",
         "@crates_vendor//httpdate",
+        "@crates_vendor//hyper",
         "@crates_vendor//hyper-util",
         "@crates_vendor//nix",
         "@crates_vendor//ring",

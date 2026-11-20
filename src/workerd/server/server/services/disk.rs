@@ -255,18 +255,15 @@ fn len_u64(len: usize) -> u64 {
     u64::try_from(len).unwrap_or(u64::MAX)
 }
 
-/// Copies `length` bytes of the file from `start` into `out`.
+/// Copies `length` bytes of `file` from `start` into `out`.
 pub(crate) async fn copy_file(
-    path: &Path,
+    file: &mut std::fs::File,
     start: u64,
     length: u64,
     out: &mut kj::io::AsyncOutputStream<'_>,
 ) -> Result<()> {
-    let mut file = std::fs::File::open(path).map_err(|e| io_kj_error(&e))?;
-    if start > 0 {
-        file.seek(std::io::SeekFrom::Start(start))
-            .map_err(|e| io_kj_error(&e))?;
-    }
+    file.seek(std::io::SeekFrom::Start(start))
+        .map_err(|e| io_kj_error(&e))?;
     let mut buffer = vec![0; 64 * 1024];
     let mut remaining = length;
     while remaining > 0 {
@@ -286,7 +283,38 @@ pub(crate) async fn copy_file(
 }
 
 /// A file that is removed when dropped, unless it was renamed away first.
-struct Temporary(PathBuf);
+pub struct Temporary(PathBuf);
+
+impl Temporary {
+    /// A new file beside `path`, to be renamed into place once written, so that a reader never
+    /// sees a partial file. A write that fails or is abandoned leaves nothing behind.
+    pub fn beside(path: &Path) -> Result<(Self, std::fs::File)> {
+        static NONCE: AtomicU64 = AtomicU64::new(0);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io_kj_error(&e))?;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let temp = Self(path.with_file_name(format!(
+            ".{}.{}.{}.tmp",
+            name.unwrap_or_default(),
+            std::process::id(),
+            NONCE.fetch_add(1, Ordering::Relaxed)
+        )));
+        let file = std::fs::File::create(&temp.0).map_err(|e| io_kj_error(&e))?;
+        Ok((temp, file))
+    }
+
+    /// This file, opened to read.
+    pub fn open(&self) -> Result<std::fs::File> {
+        std::fs::File::open(&self.0).map_err(|e| io_kj_error(&e))
+    }
+
+    /// Closes `file`, this file's handle, and renames this file to `path`.
+    pub fn rename(self, file: std::fs::File, path: &Path) -> Result<()> {
+        drop(file);
+        std::fs::rename(&self.0, path).map_err(|e| io_kj_error(&e))
+    }
+}
 
 impl Drop for Temporary {
     fn drop(&mut self) {
@@ -294,21 +322,9 @@ impl Drop for Temporary {
     }
 }
 
-/// Writes the body to a temporary file beside `path`, then renames it into place, so that a
-/// reader never sees a partial file. A write that fails or is abandoned leaves nothing behind.
+/// Writes the body to a temporary file beside `path`, then renames it into place.
 async fn write_replacing(path: &Path, mut body: Pin<&mut AsyncInputStream>) -> Result<()> {
-    static NONCE: AtomicU64 = AtomicU64::new(0);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| io_kj_error(&e))?;
-    }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-    let temp = Temporary(path.with_file_name(format!(
-        ".{}.{}.{}.tmp",
-        name.unwrap_or_default(),
-        std::process::id(),
-        NONCE.fetch_add(1, Ordering::Relaxed)
-    )));
-    let mut file = std::fs::File::create(&temp.0).map_err(|e| io_kj_error(&e))?;
+    let (temp, mut file) = Temporary::beside(path)?;
     let mut buffer = vec![0; 64 * 1024];
     loop {
         let read = body.as_mut().try_read(&mut buffer, 1).await?;
@@ -318,8 +334,7 @@ async fn write_replacing(path: &Path, mut body: Pin<&mut AsyncInputStream>) -> R
         file.write_all(&buffer[..read])
             .map_err(|e| io_kj_error(&e))?;
     }
-    drop(file);
-    std::fs::rename(&temp.0, path).map_err(|e| io_kj_error(&e))
+    temp.rename(file, path)
 }
 
 /// Removes a file, or a directory and everything in it; false when there was nothing there.
@@ -403,7 +418,8 @@ impl DiskRequest {
         if method == Method::HEAD {
             return Ok(());
         }
-        copy_file(path, start, length, &mut out).await
+        let mut file = std::fs::File::open(path).map_err(|e| io_kj_error(&e))?;
+        copy_file(&mut file, start, length, &mut out).await
     }
 
     async fn directory(

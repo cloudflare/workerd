@@ -30,6 +30,7 @@ const unitTests :Workerd.Config = (
           (name = "async-resource", service = "async-resource"),
           (name = "async-resource-frame", service = "async-resource-frame"),
           (name = "diagnostics-channel", service = "diagnostics-channel"),
+          (name = "rust-modules", service = "rust-modules"),
         ],
       )
     ),
@@ -76,6 +77,14 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "MODE", json = "\"diagnostics-channel\""),
         ],
+      )
+    ),
+    ( name = "rust-modules",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-node-rust-case-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
       )
     ),
   ],
