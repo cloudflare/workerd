@@ -50,10 +50,10 @@ fn required_argument_count_uses_from_js_for_js_parameters() {
             vec![parse_quote!(OptionalString)],
         ),
         (
-            parse_quote!(fn f(a: String, b: jsg::Lenient<u32>, c: u32)),
+            parse_quote!(fn f(a: String, b: jsg::LenientOption<u32>, c: u32)),
             vec![
                 parse_quote!(String),
-                parse_quote!(jsg::Lenient<u32>),
+                parse_quote!(jsg::LenientOption<u32>),
                 parse_quote!(u32),
             ],
         ),
@@ -159,6 +159,10 @@ fn is_null_or_undefined_type_cases() {
 fn is_option_type_cases() {
     assert!(is_option_type(&parse_quote!(Option<String>)));
     assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
+    assert!(!is_option_type(&parse_quote!(jsg::LenientOption<u32>)));
+    assert!(is_lenient_option_type(&parse_quote!(
+        jsg::LenientOption<u32>
+    )));
     assert!(!is_option_type(&parse_quote!(String)));
     assert!(!is_option_type(&parse_quote!(&Option<String>)));
 }

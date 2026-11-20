@@ -93,14 +93,6 @@ namespace workerd::util {
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
   V(TS_STDIO)                                                                                      \
-  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
-     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
-     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
-     cloudflare-internal:messagechannel. */                                                        \
-  V(TS_MESSAGE_CHANNEL)                                                                            \
-  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
-     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
-  V(TS_EVENT_SOURCE)                                                                               \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
@@ -118,6 +110,10 @@ namespace workerd::util {
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
      class in jsg/dom-exception.h. */                                                              \
   V(TS_DOM_EXCEPTION)                                                                              \
+  /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
+     bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
+     serializer, rather than the C++ method in api/global-scope.h. */                              \
+  V(TS_STRUCTURED_CLONE)                                                                           \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

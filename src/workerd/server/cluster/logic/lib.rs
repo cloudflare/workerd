@@ -13,5 +13,19 @@
     clippy::unwrap_used
 )]
 
+pub mod cache;
 pub mod handoff;
 pub mod lease;
+
+/// What a node knows of the cluster's membership, for what routes by it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Membership {
+    /// When the latest listing started, and its nodes.
+    pub listing: Option<(u64, Vec<String>)>,
+    /// When this node's registration answered.
+    pub registered: Option<u64>,
+    /// [`lease::Lease::holds_until`].
+    pub lease_until: u64,
+    /// Whether this node drains.
+    pub draining: bool,
+}

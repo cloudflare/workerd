@@ -229,6 +229,7 @@ export default {
     ],
   },
   'basic/scheme-others.sub.any.js': {},
+  'basic/split-byte-order-mark.any.js': {},
   'basic/status.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
@@ -313,6 +314,10 @@ export default {
     omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
+  'cors/cors-preflight-safelist-value-size.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
@@ -525,7 +530,11 @@ export default {
       'Fix our handling of empty Location header. Even when fixed, tests will still fail due to CORS stuff',
     expectedFailures: [
       'redirect response with empty Location, manual mode',
-      'redirect response with empty Location, follow mode',
+      '301 redirect response with empty Location, follow mode',
+      '302 redirect response with empty Location, follow mode',
+      '303 redirect response with empty Location, follow mode',
+      '307 redirect response with empty Location, follow mode',
+      '308 redirect response with empty Location, follow mode',
     ],
   },
   'redirect/redirect-keepalive.any.js': {
@@ -739,11 +748,7 @@ export default {
     ],
   },
   'request/request-cache.js': {},
-  'request/request-clone-readable-stream-body.any.js': {
-    comment:
-      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
-    expectedFailures: true,
-  },
+  'request/request-clone-readable-stream-body.any.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

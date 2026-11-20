@@ -1,8 +1,24 @@
 load("//:build/wd_bench.bzl", "wd_bench")
 
+# The structuredClone() benchmarks, against the C++ implementation and the
+# TypeScript one (TS_STRUCTURED_CLONE). Enabling every autogate enables
+# TS_STRUCTURED_CLONE, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables TS_STRUCTURED_CLONE itself.
+
+structured_clone_srcs = [
+    "structured-clone.js",
+    "structured-clone-cold.js",
+]
+
 wd_bench(
-    src = "structured-clone.wd-bench",
-    data = ["structured-clone.js"],
+    src = "structured-clone-cpp.wd-bench",
+    data = structured_clone_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "structured-clone-ts.wd-bench",
+    data = structured_clone_srcs,
 )
 
 wd_bench(

@@ -9,7 +9,6 @@
 
 use jsg::ExceptionType;
 use jsg::FromJS;
-use jsg::NonCoercible;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -307,37 +306,6 @@ fn vec_of_integers_converts_to_an_array() {
     });
 }
 
-/// A `NonCoercible` integer of up to 32 bits accepts only a number, and a `NonCoercible<i64>` or
-/// `NonCoercible<u64>` only a `BigInt`. (C++ JSG has no `NonCoercible` integers.)
-#[test]
-fn non_coercible_integers_require_a_number() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        assert_eq!(*convert::<NonCoercible<u32>>(lock, ctx, "7").unwrap(), 7);
-        assert_type_error::<NonCoercible<u32>>(
-            lock,
-            ctx,
-            "'7'",
-            "Expected a number value but got string",
-        );
-        assert_eq!(*convert::<NonCoercible<i64>>(lock, ctx, "7n").unwrap(), 7);
-        assert_type_error::<NonCoercible<i64>>(
-            lock,
-            ctx,
-            "7",
-            "Expected a bigint value but got number",
-        );
-        assert_eq!(*convert::<NonCoercible<u64>>(lock, ctx, "7n").unwrap(), 7);
-        assert_type_error::<NonCoercible<u64>>(
-            lock,
-            ctx,
-            "7",
-            "Expected a bigint value but got number",
-        );
-        Ok(())
-    });
-}
-
 #[jsg_struct]
 struct Bounds {
     pub min: i32,
@@ -505,11 +473,11 @@ fn integer_handle_parameters_do_not_coerce() {
             assert!(err.message.contains(expected), "{expr}: {}", err.message);
         }
 
-        // `Lenient` applies the same check through `try_from_js`.
-        let lenient: jsg::Lenient<v8::Local<v8::Uint32>> = ctx.eval(lock, "7").unwrap();
-        assert!(matches!(lenient, jsg::Lenient::Some(n) if n.value() == 7));
-        let lenient: jsg::Lenient<v8::Local<v8::Uint32>> = ctx.eval(lock, "-1").unwrap();
-        assert!(matches!(lenient, jsg::Lenient::Unconvertable(_)));
+        // `LenientOption` applies the same check through `try_from_js`.
+        let lenient: jsg::LenientOption<v8::Local<v8::Uint32>> = ctx.eval(lock, "7").unwrap();
+        assert!(matches!(lenient.0, Some(n) if n.value() == 7));
+        let lenient: jsg::LenientOption<v8::Local<v8::Uint32>> = ctx.eval(lock, "-1").unwrap();
+        assert!(lenient.is_none());
         Ok(())
     });
 }
