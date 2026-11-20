@@ -798,6 +798,11 @@ bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception);
 void isolate_try_catch(
     Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception);
 
+// HandleScope
+// Calls `callback(data)` in a new v8::HandleScope, which frees the handles it creates when it
+// returns.
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
+
 // Isolate
 // The isolate_throw_*() functions throw nothing while execution is terminating, so that they
 // never replace the termination with a catchable exception.

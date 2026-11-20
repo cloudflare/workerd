@@ -103,6 +103,32 @@ fn call_with_args() {
     });
 }
 
+/// `Local<Function>::call` passes every argument, in order, and only those.
+#[test]
+fn call_passes_the_arguments_in_order() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(lock, "(function() { return [...arguments].join(); })")
+            .unwrap();
+        let func = v8::Local::<v8::Function>::try_from(value).unwrap();
+
+        let result = func.call(lock, None, &[])?;
+        assert_eq!(String::from_js(lock, result)?, "");
+        let args = [
+            1_i32.to_js(lock)?,
+            2_i32.to_js(lock)?,
+            3_i32.to_js(lock)?,
+            4_i32.to_js(lock)?,
+        ];
+        let result = func.call(lock, None, &args)?;
+        assert_eq!(String::from_js(lock, result)?, "1,2,3,4");
+        let result = func.call(lock, None, &args[1..3])?;
+        assert_eq!(String::from_js(lock, result)?, "2,3");
+        Ok(())
+    });
+}
+
 /// `Local<Function>::call` returning a string via `FromJS`.
 #[test]
 fn call_returns_string() {

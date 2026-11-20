@@ -141,6 +141,85 @@ impl Isolate {
     }
 }
 
+/// Proof that the scope `'s` encloses the scope `'t`.
+///
+/// [`Lock::with_handle_scope`] passes one to its closure. Its type tells the compiler that `'s`
+/// outlives `'t`, as `std::thread::scope`'s `Scope` does, so that a `Local<'s, _>` can be used as
+/// a `Local<'t, _>`.
+#[derive(Clone, Copy)]
+pub struct NestedScope<'t, 's>(PhantomData<&'t &'s ()>);
+
+impl<'s> Lock<'s> {
+    /// Runs `f` in a new `v8::HandleScope`, which closes when `f` returns.
+    ///
+    /// As a C++ `v8::HandleScope` closes at the end of its block, the handles that `f` creates
+    /// are freed when it returns, rather than when the scope of this lock closes. A loop that
+    /// creates handles on every iteration, and may iterate many times, runs its body in one, as
+    /// in C++.
+    ///
+    /// `f` gets the lock of the new scope. The handles of this lock's scope can be used with it,
+    /// since [`NestedScope`] tells the compiler that this scope outlives the new one. What `f`
+    /// returns can't hold a handle of the new scope, whose lifetime it can't name.
+    ///
+    /// A panic in `f` closes the scope and resumes once it is closed.
+    #[expect(
+        unsafe_code,
+        reason = "runs `f` in a C++ v8::HandleScope through the FFI"
+    )]
+    pub fn with_handle_scope<R, F>(&mut self, f: F) -> R
+    where
+        F: for<'t> FnOnce(&'t mut Lock<'t>, NestedScope<'t, 's>) -> R,
+    {
+        struct Call<F, R> {
+            isolate: v8::IsolatePtr,
+            f: Option<F>,
+            result: Option<std::thread::Result<R>>,
+        }
+
+        /// Runs the closure with the lock of the scope that `isolate_handle_scope` opened. Only
+        /// `with_handle_scope` passes it, with the address of its `Call`, to C++, so it is not
+        /// an `unsafe fn` (which the bridge does not accept for callbacks).
+        fn trampoline<'s, F, R>(data: usize)
+        where
+            F: for<'t> FnOnce(&'t mut Lock<'t>, NestedScope<'t, 's>) -> R,
+        {
+            // SAFETY: `data` was cast from `&raw mut Call` in `with_handle_scope`, which
+            // outlives the call.
+            let call = unsafe { &mut *(data as *mut Call<F, R>) };
+            let Some(f) = call.f.take() else {
+                unreachable!()
+            };
+            let mut lock = Lock::new(call.isolate);
+            // A panic must not unwind into C++; it is resumed once the scope is closed.
+            call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || f(&mut lock, NestedScope(PhantomData)),
+            )));
+        }
+
+        let isolate = self.isolate;
+        let mut call = Call {
+            isolate,
+            f: Some(f),
+            result: None,
+        };
+        // SAFETY: the lock keeps the isolate locked, with a context entered, for the call, and
+        // is borrowed for it, so the new scope is the innermost one while `f` runs; `call`
+        // outlives the call; `trampoline` matches its type.
+        unsafe {
+            v8::ffi::isolate_handle_scope(
+                isolate.as_ffi(),
+                &raw mut call as usize,
+                trampoline::<F, R>,
+            );
+        }
+        match call.result {
+            Some(Ok(result)) => result,
+            Some(Err(payload)) => std::panic::resume_unwind(payload),
+            None => unreachable!(),
+        }
+    }
+}
+
 impl std::ops::Deref for Lock<'_> {
     type Target = Isolate;
 

@@ -1033,6 +1033,13 @@ pub mod ffi {
             exception: &mut MaybeLocal,
         );
 
+        // HandleScope
+        pub unsafe fn isolate_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize),
+        );
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_internal_error(
@@ -2448,6 +2455,39 @@ impl Function {
     {
         let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
         Ok(function)
+    }
+
+    /// Creates a JavaScript function that V8 calls `callback` for, with no data, like C++
+    /// `v8::Function::New()` with a plain callback.
+    ///
+    /// Unlike [`Function::new`], a call doesn't reach data through a Wrappable, so it costs no
+    /// more than V8's call of `callback`. The function carries no state: its data is
+    /// `undefined`. It has no signature, so `this` can be any value, it can be called with `new`,
+    /// and, as with [`Function::new`], its name is empty and its `length` is 0.
+    ///
+    /// [`crate::function_callback`] turns a Rust closure that captures nothing into a callback,
+    /// which opens a [`crate::CallbackScope`] and turns a panic into an internal error that
+    /// terminates execution. A callback can also be an `extern "C"` function that V8 calls
+    /// directly. It gets no lock and no panic handling of its own, so a panic in it aborts the
+    /// process.
+    ///
+    /// Fails as [`Function::new`] does.
+    pub fn from_callback<'s>(
+        lock: &mut Lock<'s>,
+        callback: crate::RawFunctionCallback,
+    ) -> crate::Result<Local<'s, Self>> {
+        let undefined = lock.undefined();
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock); `callback` is a V8 function callback and `undefined` a handle in
+        // the lock's scope, in which the function is created.
+        unsafe {
+            Local::from_ffi_maybe(ffi::function_new(
+                lock.isolate().as_ffi(),
+                callback as usize,
+                undefined.raw(),
+            ))
+        }
+        .ok_or_else(Error::pending)
     }
 
     /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
