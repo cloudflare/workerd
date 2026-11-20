@@ -28,6 +28,7 @@ pub fn start(
     cron: &[u8],
 ) -> Result<impl Future<Output = Result<worker::ScheduledResult, KjException>> + 'static, KjException>
 {
+    invocation.assert_no_actor()?;
     invocation.set_scheduled_event_info(scheduled_time, cron)?;
     let delivered = invocation.deliver(c"scheduled")?;
     let running = delivered.start_scheduled_in_wait_until(scheduled_time, cron)?;

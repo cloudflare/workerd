@@ -41,7 +41,7 @@ kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
 // - Catching exceptions and converting them to HTTP error responses.
 //   - Or, falling back to proxying if passThroughOnException() was used.
 // - Finish waitUntil() tasks.
-class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
+class WorkerEntrypoint final: public entrypoint::CxxEntrypoint, public kj::PtrTarget {
  public:
   // Call this instead of the constructor. It actually adds a wrapper object around the
   // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
@@ -94,6 +94,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
   kj::Promise<void> bench(
       bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
+  kj::Own<entrypoint::Invocation> takeInvocation() override;
 
  private:
   class ResponseSentTracker;
@@ -282,8 +283,14 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
       kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
-  auto& wrapper = metrics->wrapWorkerInterface(*obj);
-  return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
+  // With the gate, the Rust WorkerEntrypoint takes the place of this one, in the observer's
+  // wrapper too, and owns it.
+  kj::Own<WorkerInterface> entrypoint =
+      util::Autogate::isEnabled(util::AutogateKey::RUST_WORKER_ENTRYPOINT)
+      ? entrypoint::newWorkerEntrypoint(kj::mv(obj))
+      : kj::Own<WorkerInterface>(kj::mv(obj));
+  auto& wrapper = metrics->wrapWorkerInterface(*entrypoint);
+  return kj::attachRef(wrapper, kj::mv(entrypoint), kj::mv(metrics));
 }
 
 WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
@@ -945,6 +952,19 @@ kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
   return kj::READY_NOW;
 }
 
+kj::Own<entrypoint::Invocation> WorkerEntrypoint::takeInvocation() {
+  auto request =
+      kj::mv(KJ_REQUIRE_NONNULL(incomingRequest, "a WorkerEntrypoint delivers only one event"));
+  incomingRequest = kj::none;
+  return kj::heap(entrypoint::Invocation{
+    .request = kj::mv(request),
+    .waitUntilTasks = waitUntilTasks,
+    .entrypointName = kj::mv(entrypointName),
+    .versionInfo = kj::mv(versionInfo),
+    .props = kj::mv(props),
+  });
+}
+
 kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     kj::Date scheduledTime, kj::StringPtr cron) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled()");
@@ -957,21 +977,6 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // This code currently doesn't work with actors because cancellations occur immediately, without
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
-
-  if (util::Autogate::isEnabled(util::AutogateKey::RUST_ENTRYPOINT_SCHEDULED)) {
-    // Not wrapped with the canceler, which is set only for an actor's events. The event is
-    // cancelled by dropping the promise: that drops the Rust future, then the promise of
-    // finishScheduled(), which owns the IncomingRequest.
-    return entrypoint::runScheduled(
-        kj::heap(entrypoint::Invocation{
-          .request = kj::mv(incomingRequest),
-          .waitUntilTasks = waitUntilTasks,
-          .entrypointName = entrypointName.map([](kj::String& name) { return kj::str(name); }),
-          .versionInfo = kj::mv(versionInfo),
-          .props = kj::mv(props),
-        }),
-        scheduledTime, cron);
-  }
 
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 

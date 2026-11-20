@@ -7,7 +7,7 @@ set -euo pipefail
 WORKERD_BINARY=$1
 CONFIG=$2
 
-# Runs the config with and without the autogates, among them RUST_ENTRYPOINT_SCHEDULED, and
+# Runs the config with and without the autogates, among them RUST_WORKER_ENTRYPOINT, and
 # checks the Perfetto spans of each run: both have the spans of WorkerEntrypoint::runScheduled(),
 # and only the run with the autogates has the span of the Rust path, which shows that the gate took
 # effect. Perfetto interns names, so each appears in the file as plain bytes. Decoding the

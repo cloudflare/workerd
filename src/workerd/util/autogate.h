@@ -134,11 +134,10 @@ namespace workerd::util {
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
   V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
-  /* WorkerEntrypoint::runScheduled() hands the scheduled event to Rust (io/entrypoint), which     \
-     reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
-     the request to finish, rather than doing all of that in C++. The handler is still started by  \
-     C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
-  V(RUST_ENTRYPOINT_SCHEDULED)
+  /* WorkerEntrypoint::construct() returns a Rust WorkerEntrypoint (io/entrypoint) that owns the \
+     C++ one. It delivers the scheduled event in Rust and every other event by calling the C++    \
+     WorkerEntrypoint. */                                                                         \
+  V(RUST_WORKER_ENTRYPOINT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
