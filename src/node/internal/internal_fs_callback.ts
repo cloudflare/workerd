@@ -238,7 +238,7 @@ export function chown(
   const { pathOrFd } = validateChownArgs(path, uid, gid);
   callWithErrorOnlyCallback(() => {
     if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
-      throw new ERR_ENOENT((path as URL).pathname, { syscall: 'chown' });
+      throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chown' });
     }
   }, callback);
 }
@@ -486,7 +486,7 @@ export function lchown(
   const { pathOrFd } = validateChownArgs(path, uid, gid);
   callWithErrorOnlyCallback(() => {
     if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-      throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' });
+      throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchown' });
     }
   }, callback);
 }

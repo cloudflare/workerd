@@ -397,7 +397,7 @@ export function lchmodSync(path: FilePath, mode: string | number): void {
 export function lchownSync(path: FilePath, uid: number, gid: number): void {
   const { pathOrFd } = validateChownArgs(path, uid, gid);
   if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' });
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchown' });
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
