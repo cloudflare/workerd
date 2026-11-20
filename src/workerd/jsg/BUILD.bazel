@@ -100,6 +100,7 @@ wd_cc_library(
         "jsvalue.c++",
         "modules.c++",
         "modules-new.c++",
+        "perf-map.c++",
         "promise.c++",
         "resource.c++",
         "ser.c++",
@@ -119,6 +120,7 @@ wd_cc_library(
         "jsvalue-defs.h",
         "module-source.h",
         "modules-new.h",
+        "perf-map.h",
         "resource.h",
         "ser.h",
         "setup.h",
@@ -376,6 +378,7 @@ wd_cc_library(
         "tracing-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
+        "perf-map-test.c++",
     ],
 )]
 
@@ -390,6 +393,17 @@ kj_test(
     size = "large",
     src = "jsg-test.c++",
     local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [":jsg"],
+)
+
+# Perf maps are a POSIX feature; the implementation throws on Windows.
+kj_test(
+    src = "perf-map-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     deps = [":jsg"],
 )
 
