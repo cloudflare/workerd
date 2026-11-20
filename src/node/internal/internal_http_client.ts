@@ -59,6 +59,12 @@ const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 // (colon before the first separator).
 const AUTHORITY_OVERRIDE_REGEX = /^(?:[/\\]{2}|[^/\\]*:)/;
 
+// Matches hosts that `new URL(`http://${host}`)` would not read as a host
+// alone: a delimiter that ends the authority (/ \ ? #) or makes what comes
+// before it userinfo (@), and the control characters and space, which the
+// parser strips or removes.
+const INVALID_HOST_REGEX = /[^\u0021-\uffff]|[/\\?#@]/;
+
 type WriteCallback = (err?: Error) => void;
 
 // Throws unless `new URL(path, base)` keeps the authority of `base`. Runs in
@@ -97,7 +103,26 @@ function validateHost(host: unknown, name: string): string {
       host
     );
   }
+  if (host) {
+    validateHostSyntax(host, name);
+  }
   return host as string;
+}
+
+// Throws unless `new URL(`http://${host}`)` takes its authority from all of
+// `host`. Node passes the host to DNS as it is, where such a host fails;
+// the URL parser would instead send to only part of it, reading the rest
+// as userinfo, path, query or fragment.
+// Runs in the constructor and again when the request is sent, since `host`
+// is a public field that callers may reassign in between.
+function validateHostSyntax(host: string, name: string): void {
+  if (INVALID_HOST_REGEX.test(host)) {
+    throw new ERR_INVALID_ARG_VALUE(
+      `options.${name}`,
+      host,
+      'must be a host name or address'
+    );
+  }
 }
 
 // @ts-expect-error TS2720 Complaining due to "override req" being undefined.
@@ -399,7 +424,11 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       return;
     }
 
-    let url = new URL(`http://${this.host}`);
+    const host = this.host;
+    // The caller may have reassigned `host` since the constructor checked
+    // it. A failure here fails the request through #onFinish().
+    validateHostSyntax(host, 'host');
+    let url = new URL(`http://${host}`);
     url.protocol = this.protocol;
     url.port = this.port;
 

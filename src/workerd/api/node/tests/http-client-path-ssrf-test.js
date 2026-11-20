@@ -2,9 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-16:
-// Verify that node:http ClientRequest rejects absolute-form and network-path
-// request targets in options.path, preventing SSRF via URL authority override.
+// Regression tests for AUTOVULN-CLOUDFLARE-WORKERD-16, VULN-146188 and
+// VULN-157700: node:http ClientRequest must not let options.path,
+// options.host or options.hostname, or the path and host fields after
+// construction, override the authority of the URL it sends to.
 
 import http from 'node:http';
 import { deepStrictEqual, strictEqual, throws } from 'node:assert';
@@ -158,15 +159,11 @@ async function recordFetches(fn) {
   return urls;
 }
 
-// Sends a request to api.example.test whose path is reassigned after
-// construction. Resolves with the request's error, or its response status.
-function sendWithPathChangedTo(path) {
-  const req = http.request({
-    hostname: 'api.example.test',
-    port: 80,
-    path: '/safe',
-  });
-  req.path = path;
+// Sends a request for `options`, passing it to `change` first. Resolves
+// with the request's error, or its response status.
+function send(options, change) {
+  const req = http.request({ port: 80, ...options });
+  change?.(req);
   return new Promise((resolve) => {
     req.on('error', (error) => resolve({ error }));
     req.on('response', (res) => {
@@ -174,6 +171,14 @@ function sendWithPathChangedTo(path) {
       resolve({ status: res.statusCode });
     });
     req.end();
+  });
+}
+
+// Sends a request to api.example.test whose path is reassigned after
+// construction.
+function sendWithPathChangedTo(path) {
+  return send({ hostname: 'api.example.test', path: '/safe' }, (req) => {
+    req.path = path;
   });
 }
 
@@ -226,6 +231,76 @@ export const testSendsValidPathSetAfterConstruction = {
     });
     deepStrictEqual(urls, ['http://api.example.test/changed?q=1']);
     strictEqual(result.status, 200);
+  },
+};
+
+// VULN-157700: node:http builds the request URL as `http://${host}`.
+// Node passes options.host and options.hostname to DNS as they are, so a
+// value that ends in ".api.example.test" but contains a URL delimiter fails
+// there. The URL parser instead ends the host at the delimiter, so an
+// allowlist that checks the suffix would let these send to evil.test.
+const AUTHORITY_SPLITTING_HOSTS = [
+  'evil.test/.api.example.test',
+  'evil.test\\.api.example.test',
+  'evil.test?.api.example.test',
+  'evil.test#.api.example.test',
+  'api.example.test@evil.test',
+  'evil.test\t/.api.example.test',
+];
+
+export const testRejectsAuthoritySplittingHost = {
+  async test() {
+    for (const host of AUTHORITY_SPLITTING_HOSTS) {
+      // Each case must be one that would reach evil.test if it got through.
+      strictEqual(
+        new URL(`http://${host}`).hostname,
+        'evil.test',
+        JSON.stringify(host)
+      );
+
+      for (const field of ['host', 'hostname']) {
+        throws(
+          () => http.request({ [field]: host, port: 80, path: '/' }),
+          { code: 'ERR_INVALID_ARG_VALUE' },
+          `${field}: ${JSON.stringify(host)}`
+        );
+      }
+
+      // `host` is also a public field, which a caller may reassign after
+      // construction.
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await send({ hostname: 'api.example.test' }, (req) => {
+          req.host = host;
+        });
+      });
+      deepStrictEqual(urls, [], JSON.stringify(host));
+      strictEqual(
+        result.error?.code,
+        'ERR_INVALID_ARG_VALUE',
+        JSON.stringify(host)
+      );
+    }
+  },
+};
+
+// Host names and addresses, IPv6 in brackets included, are still sent to.
+export const testSendsToValidHosts = {
+  async test() {
+    const cases = [
+      [{ hostname: 'api.example.test' }, 'http://api.example.test/'],
+      [{ host: 'sub.api.example.test' }, 'http://sub.api.example.test/'],
+      [{ hostname: '127.0.0.1' }, 'http://127.0.0.1/'],
+      [{ hostname: '[::1]' }, 'http://[::1]/'],
+    ];
+    for (const [options, expected] of cases) {
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await send(options);
+      });
+      deepStrictEqual(urls, [expected]);
+      strictEqual(result.status, 200);
+    }
   },
 };
 
