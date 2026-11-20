@@ -1484,7 +1484,8 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
   return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks, kj::mv(budget));
 }
 
-void TailStreamWriter::report(const InvocationSpanContext& context,
+void TailStreamWriter::report(const SpanContext& context,
+    TraceId invocationId,
     TailEvent::Event&& event,
     kj::Date timestamp,
     size_t sizeHint) {
@@ -1511,12 +1512,17 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
     }
   }
 
-  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
-  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
-  // chance (see SpanId::fromEntropy()), so this should be safe.
-  TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
-      sequence++, kj::mv(event), context.getTraceFlags());
+  // A zero spanId is treated as absent so no spanId is provided to the tail worker (e.g. for
+  // top-level Onset events). SpanId::fromEntropy() makes an all-zero ID vanishingly unlikely for
+  // real spans.
+  kj::Maybe<SpanId> spanId;
+  KJ_IF_SOME(sid, context.getSpanId()) {
+    if (sid != SpanId::nullId) {
+      spanId = sid;
+    }
+  }
+  TailEvent tailEvent(SpanContext(context.getTraceId(), spanId, context.getTraceFlags()),
+      invocationId, timestamp, sequence++, kj::mv(event));
 
   KJ_SWITCH_ONEOF(inner) {
     KJ_CASE_ONEOF(closed, Closed) {
