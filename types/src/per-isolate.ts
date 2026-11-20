@@ -366,16 +366,20 @@ function variableStatement(
 // The class's declaration as a declaration file would write it with the
 // interfaces' members: an interface merged with a class declares what the
 // implementation installs on the prototype itself. An interface's `extends`
-// becomes the class's, which must have none of its own.
+// becomes the class's, which must have none of its own, and its type
+// parameters' constraints and defaults become the class's.
 function foldInterfaces(
   name: string,
   declaration: ts.ClassDeclaration,
   interfaces: ts.InterfaceDeclaration[]
 ): ts.ClassDeclaration {
+  checkMembersDeclaredOnce(name, declaration, interfaces);
   const members: ts.ClassElement[] = declaration.members.filter(
     (member) =>
       !(ts.isPropertyDeclaration(member) && ts.isPrivateIdentifier(member.name))
   );
+  let typeParameters: readonly ts.TypeParameterDeclaration[] | undefined =
+    declaration.typeParameters;
   let heritageClauses: readonly ts.HeritageClause[] =
     declaration.heritageClauses ?? [];
   for (const merged of interfaces) {
@@ -384,6 +388,7 @@ function foldInterfaces(
         `${name}: a merged interface must declare its class's type parameters`
       );
     }
+    typeParameters = withConstraintsAndDefaults(typeParameters, merged);
     for (const clause of merged.heritageClauses ?? []) {
       const extendsClass = heritageClauses.some(
         (existing) => existing.token === ts.SyntaxKind.ExtendsKeyword
@@ -406,10 +411,66 @@ function foldInterfaces(
     declaration,
     withoutExport(declaration.modifiers),
     declaration.name,
-    declaration.typeParameters,
+    typeParameters,
     heritageClauses.length === 0 ? undefined : heritageClauses,
     members
   );
+}
+
+// TypeScript orders the overloads of a member that more than one of the
+// declarations declares with the later declarations' first, which the
+// folded class would not keep, so each member is declared in one place.
+function checkMembersDeclaredOnce(
+  name: string,
+  declaration: ts.ClassDeclaration,
+  interfaces: ts.InterfaceDeclaration[]
+): void {
+  const declaredBy = new Map<string, ts.Node>();
+  for (const owner of [declaration, ...interfaces]) {
+    for (const member of owner.members) {
+      const memberName = instanceMemberName(member);
+      if (memberName === undefined) continue;
+      if ((declaredBy.get(memberName) ?? owner) !== owner) {
+        throw new Error(
+          `${name}: ${memberName} is declared by more than one of the class and the interfaces merged with it; declare it, with all its overloads, in one of them`
+        );
+      }
+      declaredBy.set(memberName, owner);
+    }
+  }
+}
+
+// The name of an instance member, or undefined for a static member or one
+// without a name, such as a constructor or an index signature.
+function instanceMemberName(
+  member: ts.ClassElement | ts.TypeElement
+): string | undefined {
+  if (member.name === undefined) return undefined;
+  if (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Static) {
+    return undefined;
+  }
+  return ts.isComputedPropertyName(member.name)
+    ? `[${member.name.expression.getText()}]`
+    : member.name.text;
+}
+
+// `parameters` with the constraints and defaults that `merged` gives
+// parameters that have none: TypeScript applies one that any of the merged
+// declarations gives.
+function withConstraintsAndDefaults(
+  parameters: readonly ts.TypeParameterDeclaration[] | undefined,
+  merged: ts.InterfaceDeclaration
+): ts.TypeParameterDeclaration[] | undefined {
+  return parameters?.map((parameter, i) => {
+    const other = merged.typeParameters?.[i];
+    return f.updateTypeParameterDeclaration(
+      parameter,
+      parameter.modifiers,
+      parameter.name,
+      parameter.constraint ?? other?.constraint,
+      parameter.default ?? other?.default
+    );
+  });
 }
 
 function typeParameterNames(

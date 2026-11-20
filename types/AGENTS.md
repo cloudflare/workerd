@@ -77,8 +77,12 @@ emits is what users get:
   `declare static readonly NAME: type;` field. A prototype member, or a
   prototype parent, set up outside the class body goes in an interface
   merged with the class, which the generator folds into the class's
-  declaration: its members join the class's, and its one `extends` becomes
-  the class's, if the class has none.
+  declaration: its members join the class's, its type parameters'
+  constraints and defaults become the class's, and its one `extends`
+  becomes the class's, if the class has none. A member is declared in the
+  class or in one interface, not in more than one of them: TypeScript tries
+  the overloads of the later declaration first, which the folded class
+  could not keep, so the generator rejects such a member.
 - **Member form is API.** A getter and a property are not interchangeable:
   a subclass overriding one as the other fails to compile (TS2610, TS2611),
   so changing a member's form is a breaking type change.
