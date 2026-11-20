@@ -354,6 +354,24 @@ class IsolateBase {
     evalAllowed = true;
   }
 
+  // Lets the embedder allow WebAssembly compilation where eval() stays disallowed. V8 asks for each
+  // compilation it starts; with no hook, or when the hook returns false, WebAssembly compiles only
+  // where eval() is allowed.
+  using AllowWasmCodeGenerationHook = bool (*)(v8::Isolate* isolate);
+  void setAllowWasmCodeGenerationHook(AllowWasmCodeGenerationHook hook) {
+    allowWasmCodeGenerationHook = hook;
+  }
+
+  // The signal that V8PlatformWrapper notifies whenever V8 posts a foreground task for this
+  // isolate.
+  kj::Arc<const ForegroundTaskSignal> getForegroundTaskSignal() const {
+    return foregroundTaskSignal.addRef();
+  }
+
+  // The runner that V8PlatformWrapper hands out for this isolate's foreground tasks at `priority`.
+  // Null if `priority` is out of range. Safe to call from any thread.
+  std::shared_ptr<v8::TaskRunner> getForegroundTaskRunner(v8::TaskPriority priority) const;
+
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
@@ -963,6 +981,14 @@ class IsolateBase {
   // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
   // outlive the isolate.
   kj::Arc<const ExternalMemoryTarget> externalMemoryTarget;
+
+  kj::Arc<const ForegroundTaskSignal> foregroundTaskSignal;
+  AllowWasmCodeGenerationHook allowWasmCodeGenerationHook = nullptr;
+
+  // One NotifyingTaskRunner per v8::TaskPriority, created once the isolate exists and never
+  // changed after, so other threads may read them.
+  std::shared_ptr<v8::TaskRunner>
+      foregroundTaskRunners[static_cast<int>(v8::TaskPriority::kMaxPriority) + 1];
 
   // A shared async context key for accessing env
   kj::Arc<AsyncContextFrame::StorageKey> envAsyncContextKey;
