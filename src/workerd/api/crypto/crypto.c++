@@ -18,6 +18,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/uuid.h>
 
@@ -665,15 +666,71 @@ jsg::JsValue CryptoKey::getUsagesProperty(jsg::Lock& js) {
   KJ_IF_SOME(cached, usagesProperty) {
     return cached.getHandle(js);
   }
+  auto usages = newUsagesArray(js);
+  usagesProperty = usages.addRef(js);
+  return usages;
+}
+
+jsg::JsValue CryptoKey::newUsagesArray(jsg::Lock& js) const {
   auto usageSet = getUsageSet();
   v8::LocalVector<v8::Value> names(js.v8Isolate);
   names.reserve(usageSet.size());
   for (auto singleton: CryptoKeyUsageSet::singletons()) {
     if (singleton <= usageSet) names.push_back(js.strIntern(singleton.name()));
   }
-  jsg::JsValue usages = jsg::JsArray(v8::Array::New(js.v8Isolate, names.data(), names.size()));
-  usagesProperty = usages.addRef(js);
-  return usages;
+  return jsg::JsArray(v8::Array::New(js.v8Isolate, names.data(), names.size()));
+}
+
+bool JsCryptoKey::isTsImplementation() {
+  return util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO);
+}
+
+kj::Maybe<jsg::JsObject> JsCryptoKey::tryGetTsTemplate(jsg::Lock& js) {
+  if (!isTsImplementation()) return kj::none;
+  KJ_IF_SOME(exports, tryGetBootstrapExport(js, "crypto/key"_kj)) {
+    KJ_IF_SOME(object, exports.tryCast<jsg::JsObject>()) {
+      return object.get(js, "CryptoKeyTemplate"_kj).tryCast<jsg::JsObject>();
+    }
+  }
+  return kj::none;
+}
+
+v8::Local<v8::Object> JsCryptoKey::newTsInstance(jsg::Lock& js,
+    jsg::JsObject keyTemplate,
+    v8::Local<v8::Object> native,
+    const CryptoKey& key,
+    v8::Local<v8::Value> algorithm) {
+  auto isolate = js.v8Isolate;
+  auto context = js.v8Context();
+  // A copy of the template has its prototype, uncloneable mark and properties, so setting them
+  // only replaces values.
+  v8::Local<v8::Object> instance = v8::Local<v8::Object>(keyTemplate)->Clone(isolate);
+  jsg::check(instance->SetPrivate(context, jsg::IsolateBase::getNativeHandleKey(isolate), native));
+  auto define = [&](kj::StringPtr name, v8::Local<v8::Value> value) {
+    jsg::check(instance->DefineOwnProperty(
+        context, v8::Local<v8::String>(js.strIntern(name)), value, v8::ReadOnly));
+  };
+  define("usages"_kj, key.newUsagesArray(js));
+  define("algorithm"_kj, algorithm);
+  define("extractable"_kj, v8::Boolean::New(isolate, key.getExtractable()));
+  define("type"_kj, js.strIntern(key.getType()));
+  return instance;
+}
+
+kj::Maybe<JsCryptoKey::NativeHandle> JsCryptoKey::tryGetNativeHandle(
+    jsg::Lock& js, v8::Local<v8::Value> handle) {
+  auto context = js.v8Context();
+  auto key = jsg::IsolateBase::getNativeHandleKey(js.v8Isolate);
+  // Up the prototype chain, as JSG finds a C++ object's wrapper, stopping at a proxy, whose
+  // prototype only a trap could tell.
+  while (handle->IsObject() && !handle->IsProxy()) {
+    auto object = handle.As<v8::Object>();
+    v8::Local<v8::Value> native;
+    if (!object->GetPrivate(context, key).ToLocal(&native)) return kj::none;
+    if (native->IsObject()) return NativeHandle{object, native};
+    handle = object->GetPrototype();
+  }
+  return kj::none;
 }
 
 bool CryptoKey::operator==(const CryptoKey& other) const {

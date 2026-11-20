@@ -2,7 +2,7 @@
 
 TypeScript reimplementations of crypto APIs: `DigestStream`, which must be
 replaced when the `typescript_implemented_streams` compat flag is on, and
-`SubtleCrypto` and `Crypto`, under the `TS_WEBCRYPTO` autogate. Parent directory
+`SubtleCrypto`, `Crypto` and `CryptoKey`, under the `TS_WEBCRYPTO` autogate. Parent directory
 conventions (primordials discipline, private-brand dispatch, no `instanceof`)
 apply — see `src/per_isolate/AGENTS.md`.
 
@@ -27,6 +27,7 @@ constructor — so that method is replaced on the prototype as well.
 | `subtle.ts`             | `SubtleCrypto` — the interface over the native operations     |
 | `subtle-conversions.ts` | JSG's conversions of SubtleCrypto's dictionaries and members  |
 | `crypto.ts`             | `Crypto` — the `crypto` global's class                        |
+| `key.ts`                | `CryptoKey` — the class and prototype; instances come from C++ |
 
 ## THE C++ CONTRACT
 
@@ -72,7 +73,7 @@ Two parts of that contract are easy to break:
 
 `subtle.ts` owns the WebCrypto interface: the class, the receiver check,
 argument conversion order and messages, and whether a failure throws or
-rejects. The operations, and `CryptoKey`, stay native: the `cryptoBackend`
+rejects. The operations stay native: the `cryptoBackend`
 pseudo-global is a C++ `SubtleCrypto` (`src/workerd/api/crypto/crypto.h`)
 whose resource type, under the autogate, exports its backend members in place
 of its methods. They run the same `SubtleCrypto::*Sync()` bodies the methods
@@ -141,6 +142,68 @@ building the string in JavaScript costs about as much as the whole C++ call.
 behaviour at the oldest date and with every flag, for three flag sets
 (`crypto-global-parity-expected.js`), and runs against both implementations
 (`crypto-global-parity-test.wd-test`, `crypto-global-parity-ts-test.wd-test`).
+
+## CRYPTOKEY
+
+`key.ts` owns the class: the constructor, which always throws `Illegal
+constructor`, and the prototype with its `constructor` and `toStringTag`.
+`CryptoKey` is a function, not a class, because a class's `prototype` is
+non-writable and JSG's is writable unless `immutable_api_prototypes` is on.
+
+Instances are made in C++, never in TypeScript: the key material stays a
+native `CryptoKey` (`src/workerd/api/crypto/crypto.h`), and C++ reaches it
+through `JsCryptoKey`, the bridge every C++ consumer takes and returns
+(SubtleCrypto's backend, `node:crypto`, `X509Certificate`, the `CRYPTO_KEY`
+binding).
+
+- **Wrapping builds the instance.** `JsCryptoKey`'s `jsgWrap` copies
+  `CryptoKeyTemplate`, the `crypto/key` bootstrap export: an object with the
+  prototype, the uncloneable mark, the isolate's V8-private
+  `workerd:nativeHandle` (`jsg::NATIVE_HANDLE_KEY`) and `usages`,
+  `algorithm`, `extractable` and `type` as read-only own data properties, in
+  the order the C++ class defines them. The copy shares the template's shape,
+  so C++ only replaces values: the native wrapper and the four properties.
+  `algorithm` and `usages` are made with the key, where the C++ class makes
+  them when first read; V8's lazy data properties cost more per key than they
+  save.
+- **Unwrapping reads the private up the prototype chain**, as JSG unwraps a
+  resource through `Object.create(key)`, and stops at a proxy, as JSG does.
+- **`JsCryptoKey` unwraps as a resource** (`jsgUnwrapsAsResource`), so a
+  `kj::OneOf` tries it before its dictionary alternatives, as it tries
+  `jsg::Ref<CryptoKey>`. Without it, `KeyObject.from`'s and `createPublicKey`'s
+  `OneOf<..., JsonWebKey, CryptoKey>` read a key as a JWK.
+- **Nothing references the TypeScript object from C++**, so the change adds no
+  edge for the garbage collector: the instance holds the native wrapper, which
+  holds nothing back.
+
+`src/tests/crypto/crypto-key-parity-test.js` records the C++ class's
+shape and every key's properties, through SubtleCrypto, `node:crypto`,
+`X509Certificate` and the binding, at the oldest date and with every flag
+(`crypto-key-parity-expected.js`), and runs against both implementations
+(`crypto-key-parity-test.wd-test`, `crypto-key-parity-ts-test.wd-test`).
+
+### Divergences
+
+Each is pinned for both implementations by `crypto-key-divergence-test.js`.
+
+- **`Function.prototype.toString` shows `CryptoKey`'s TypeScript source**, not
+  `[native code]`, as for every class the bootstrap implements.
+- **The `Illegal constructor` error's stack begins in the bootstrap**, as
+  `SubtleCrypto`'s errors' do.
+
+The rest need user code to replace a key's prototype with `Object.prototype`
+or `null`; a key keeps working as a key either way.
+
+- **Serializing such a key copies it** instead of throwing `DataCloneError`,
+  wherever V8 serialization runs: `structuredClone`, RPC, Durable Object
+  storage, `postMessage`. `jsg::Serializer::IsHostObject` treats an object
+  whose prototype is `Object.prototype` or `null` as plain data, so it never
+  reads the uncloneable mark. The copy is a plain object with the four public
+  properties; the key material is not reachable from them.
+- **`util.inspect` names a `null`-prototype key `[Object: null prototype]`**,
+  not `[CryptoKey: null prototype]`, because V8 names it after its
+  constructor, which for an object made in C++ is `Object`. It shows in
+  `node:crypto`'s argument errors.
 
 ## DIGESTSTREAM PARITY
 

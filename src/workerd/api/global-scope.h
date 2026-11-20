@@ -1124,11 +1124,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_NESTED_TYPE(Crypto);
     // Under the TS_WEBCRYPTO autogate, the per-isolate bootstrap installs the TypeScript
-    // SubtleCrypto instead.
+    // SubtleCrypto and CryptoKey instead.
     if (!util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
       JSG_NESTED_TYPE(SubtleCrypto);
+      JSG_NESTED_TYPE(CryptoKey);
     }
-    JSG_NESTED_TYPE(CryptoKey);
 
     JSG_NESTED_TYPE(CacheStorage);
     JSG_NESTED_TYPE(Cache);

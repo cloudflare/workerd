@@ -438,8 +438,13 @@ if (autogates['ts-structured-clone']) {
 // leaves out. Installed as EventSource is, matching JSG_NESTED_TYPE.
 // `crypto.subtle` is the module's getSubtleCrypto(), which the TypeScript
 // Crypto below returns.
+//
+// The TypeScript CryptoKey replaces the C++ one in the same way. C++ makes its
+// instances by copying the template crypto/key exports, so the module is
+// loaded here.
 if (autogates['ts-webcrypto']) {
   const { SubtleCrypto } = require('crypto/subtle');
+  const { CryptoKey } = require('crypto/key');
   ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
     SubtleCrypto: {
       __proto__: null,
@@ -447,6 +452,13 @@ if (autogates['ts-webcrypto']) {
       enumerable: true,
       writable: true,
       value: SubtleCrypto,
+    },
+    CryptoKey: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: CryptoKey,
     },
   });
   if (compatFlags['spec_compliant_property_attributes']) {
@@ -457,6 +469,13 @@ if (autogates['ts-webcrypto']) {
         enumerable: false,
         writable: true,
         value: SubtleCrypto,
+      },
+      CryptoKey: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: CryptoKey,
       },
     });
   }

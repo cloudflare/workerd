@@ -308,6 +308,8 @@ class CryptoKey: public jsg::Object {
   // modify these objects, so C++ callers should use getAlgorithm() and getUsages() instead.
   jsg::MemoizedIdentity<AlgorithmVariant>& getAlgorithmProperty(jsg::Lock& js);
   jsg::JsValue getUsagesProperty(jsg::Lock& js);
+  // A new array of the usages' names, in the order `usages` lists them.
+  jsg::JsValue newUsagesArray(jsg::Lock& js) const;
 
   JSG_RESOURCE_TYPE(CryptoKey) {
     JSG_READONLY_INSTANCE_PROPERTY(type, getType);
@@ -351,9 +353,16 @@ class CryptoKey: public jsg::Object {
   friend class node::CryptoImpl;
 };
 
-// A CryptoKey as C++ takes it from and gives it to JavaScript: a stand-in for jsg::Ref<CryptoKey>
-// that its consumers (SubtleCrypto, node:crypto, X509Certificate, the CRYPTO_KEY binding) use, so
-// that how a key is wrapped is decided in one place.
+// A CryptoKey as JavaScript sees it. The key is always the C++ CryptoKey; under the TS_WEBCRYPTO
+// autogate, JavaScript sees the TypeScript CryptoKey (src/per_isolate/crypto/key.ts) instead, whose
+// instances keep the C++ one's wrapper under the jsg::NATIVE_HANDLE_KEY private, which C++ reads
+// without running JavaScript. C++ takes CryptoKeys from and gives them to JavaScript as this type,
+// so that it need not know which class the global CryptoKey is.
+//
+// A TypeScript instance is made in C++, not by running its class: from the class's prototype, with
+// the four read-only own properties the C++ class's instance template gives, in its order, and an
+// uncloneable mark. Its `algorithm` and `usages` are made when it is, so each is one object, as the
+// C++ class's cache makes them.
 class JsCryptoKey {
  public:
   JsCryptoKey(jsg::Ref<CryptoKey> key): key(kj::mv(key)) {}
@@ -377,6 +386,10 @@ class JsCryptoKey {
     return key.addRef();
   }
 
+  // Whether the TypeScript CryptoKey is the global CryptoKey: whether the TS_WEBCRYPTO autogate is
+  // enabled.
+  static bool isTsImplementation();
+
   // Described to RTTI, and so to the generated types, as the C++ CryptoKey, named as it is in
   // error messages, and tried first in a OneOf, as it is.
   using JsgRttiDelegate = jsg::Ref<CryptoKey>;
@@ -388,6 +401,12 @@ class JsCryptoKey {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       JsCryptoKey value) {
+    KJ_IF_SOME(keyTemplate, tryGetTsTemplate(js)) {
+      auto algorithm = typeWrapper.wrap(js, context, creator, value.key->getAlgorithm(js));
+      auto& key = *value.key;
+      auto native = typeWrapper.wrap(js, context, creator, kj::mv(value.key));
+      return newTsInstance(js, keyTemplate, native.template As<v8::Object>(), key, algorithm);
+    }
     return typeWrapper.wrap(js, context, creator, kj::mv(value.key));
   }
 
@@ -396,6 +415,24 @@ class JsCryptoKey {
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // Under the gate, a TypeScript key is far likelier than a C++ wrapper, which JavaScript sees
+    // only in a context the bootstrap never ran in, so its private is read first.
+    if (isTsImplementation()) {
+      auto current = handle;
+      while (true) {
+        KJ_IF_SOME(found, tryGetNativeHandle(js, current)) {
+          KJ_IF_SOME(key,
+              typeWrapper.tryUnwrap(js, context, found.native,
+                  static_cast<jsg::Ref<CryptoKey>*>(nullptr), parentObject)) {
+            return JsCryptoKey(kj::mv(key));
+          }
+          // Another class's native handle: keep looking further up, as JSG does.
+          current = found.holder->GetPrototype();
+        } else {
+          break;
+        }
+      }
+    }
     KJ_IF_SOME(key,
         typeWrapper.tryUnwrap(
             js, context, handle, static_cast<jsg::Ref<CryptoKey>*>(nullptr), parentObject)) {
@@ -414,6 +451,26 @@ class JsCryptoKey {
 
  private:
   jsg::Ref<CryptoKey> key;
+
+  // The `crypto/key` module's CryptoKeyTemplate, under the gate and if the bootstrap ran in this
+  // context. Without it, keys are wrapped as C++ CryptoKeys, as in a context a C++ test makes.
+  static kj::Maybe<jsg::JsObject> tryGetTsTemplate(jsg::Lock& js);
+
+  // A TypeScript CryptoKey over `key`, whose wrapper is `native`: a copy of `keyTemplate`.
+  static v8::Local<v8::Object> newTsInstance(jsg::Lock& js,
+      jsg::JsObject keyTemplate,
+      v8::Local<v8::Object> native,
+      const CryptoKey& key,
+      v8::Local<v8::Value> algorithm);
+
+  // The first object up `handle`'s prototype chain that keeps a native handle (`holder`), and
+  // that handle (`native`), which may be another class's. Reads only private properties, so runs
+  // no JavaScript, and stops at a proxy.
+  struct NativeHandle {
+    v8::Local<v8::Object> holder;
+    v8::Local<v8::Value> native;
+  };
+  static kj::Maybe<NativeHandle> tryGetNativeHandle(jsg::Lock& js, v8::Local<v8::Value> handle);
 };
 
 struct CryptoKeyPair {

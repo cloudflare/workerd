@@ -38,5 +38,11 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
+    ( name = "crypto-key-divergence",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-key-divergence-test.js")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
   ],
 );

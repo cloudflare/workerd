@@ -1,0 +1,50 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# crypto-key-parity-test against the TypeScript CryptoKey.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-key-parity-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-key-parity-test.js"),
+          (name = "crypto-key-parity-expected.js",
+           esModule = embed "crypto-key-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "variant", text = "classic"),
+          (name = "key", cryptoKey = (
+            raw = "0123456789abcdef0123456789abcdef",
+            algorithm = (json = "{\"name\": \"HMAC\", \"hash\": \"SHA-256\"}"),
+            usages = [sign, verify],
+          )),
+        ],
+      )
+    ),
+    ( name = "crypto-key-parity-ts-test-spec",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-key-parity-test.js"),
+          (name = "crypto-key-parity-expected.js",
+           esModule = embed "crypto-key-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "spec_compliant_property_attributes", "immutable_api_prototypes", "experimental"],
+        bindings = [
+          (name = "variant", text = "spec"),
+          (name = "key", cryptoKey = (
+            raw = "0123456789abcdef0123456789abcdef",
+            algorithm = (json = "{\"name\": \"HMAC\", \"hash\": \"SHA-256\"}"),
+            usages = [sign, verify],
+          )),
+        ],
+      )
+    ),
+    ( name = "crypto-key-divergence-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-key-divergence-test.js")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

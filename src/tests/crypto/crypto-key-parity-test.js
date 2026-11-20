@@ -4,10 +4,10 @@
 
 // Pins what JavaScript sees of CryptoKey: the class, the shape and values of its instances from
 // every place that makes them (SubtleCrypto, node:crypto, X509Certificate, a CRYPTO_KEY binding),
-// and how keys pass back into SubtleCrypto and node:crypto. The lines it records must match
-// crypto-key-parity-expected.js exactly, at the oldest date and with every flag. Errors in them
-// carry this file's line numbers, so moving code here means regenerating the expectations from
-// the C++ implementation's output.
+// and how keys of either kind pass back into SubtleCrypto and node:crypto. The C++ CryptoKey and
+// the TypeScript one (src/per_isolate/crypto/key.ts, under the ts-webcrypto autogate) must both
+// produce exactly the lines in crypto-key-parity-expected.js. The @all-autogates variant and
+// crypto-key-parity-ts-test.wd-test run the TypeScript one.
 
 import { strictEqual } from 'node:assert';
 import { Buffer } from 'node:buffer';
@@ -518,8 +518,8 @@ async function run(env) {
   lines.push(
     `setPrototypeOf frozen ${await settle(() => Object.setPrototypeOf(changed, null))}`
   );
-  // A key given another prototype stays a key: instanceof follows the new prototype, and the key
-  // still signs.
+  // A key given another prototype stays a key (the reprototyped instances that clone or inspect
+  // differently are pinned by crypto-key-divergence-test.js).
   const unfrozen = await subtle.importKey(
     'raw',
     new Uint8Array(32),
