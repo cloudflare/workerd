@@ -2,11 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A trace span belongs to its request's thread: it holds KJ objects whose reference counts are
-// not atomic. It is not `Send`, so no `Traced` type, and so no resource, can hold one.
-pub struct Spanned(io_context::SpanBuilder);
+// A trace span belongs to its request's event loop, and the garbage collector may drop a resource
+// off it, which would abort the process, so a span is not `Traced`: a resource holds one only
+// through `IoContext::add_span()`.
+use io_context::SpanBuilder;
+use jsg_macros::jsg_resource;
 
-impl jsg::Traced for Spanned {
-    //~^ ERROR E0277
-    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+#[jsg_macros::jsg_traced]
+pub struct Spanned(SpanBuilder); //~ ERROR E0277
+
+#[jsg_resource] //~ ERROR E0277
+pub struct SpanResource {
+    span: SpanBuilder,
 }
+
+#[jsg_resource]
+impl SpanResource {}

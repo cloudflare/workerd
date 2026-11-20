@@ -356,7 +356,7 @@ pub struct IoOutput(Box<dyn Any + Send>);
 
 /// What [`IoCallback`] calls.
 pub type IoCallbackFn =
-    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()>>;
+    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()> + Send>;
 
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);

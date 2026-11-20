@@ -182,8 +182,7 @@ fn read_with_fallback<'s>(
             let waiter = decision.take_waiter().map_err(cache_error)?;
             let (pending, promise) = PendingRead::new(lock, fallback, key, spans)?;
             io_context.await_io_and_run(waiter.wait(), move |lock, mut outcome| {
-                // The span of the wait ends with it. It cannot go in the future, which is `Send`,
-                // so it ends when the callback runs, just after the wait completes.
+                // The span of the wait ends when the callback runs, just after the wait completes.
                 drop(wait_span);
                 match outcome.kind() {
                     // The read it waited for cached a value, or failed to but produced one.
