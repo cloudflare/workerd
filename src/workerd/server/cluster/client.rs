@@ -34,7 +34,9 @@ use crate::bucket::Store;
 use crate::bucket::Version;
 use crate::bucket::Written;
 use crate::http::Call;
+use crate::http::Failure;
 use crate::http::Http;
+use crate::http::HttpError;
 use crate::http::HttpResponse;
 use crate::http::Payload;
 
@@ -194,10 +196,10 @@ impl<D: Dialect> Store for Client<D> {
     // twice at once only if guarded, with a small body. The multipart calls
     // are never sent twice at once, being neither GETs nor guarded PUTs, nor
     // `Repeat::Delete`s but for `abort`; each is sent again after a refusal
-    // under load (`exchange`), which is safe: a part uploaded again replaces
-    // itself, an upload begun again leaves the first one unused, and a
-    // completion or an abort sent again after one that landed finds the
-    // upload gone (404 `NoSuchUpload`).
+    // under load or a failed connection (`exchange`), which is safe: a part
+    // uploaded again replaces itself, an upload begun again leaves the first
+    // one unused, and a completion or an abort sent again after one that
+    // landed finds the upload gone (404 `NoSuchUpload`).
 
     async fn head(&self, key: &str) -> Result<Option<Object>> {
         let empty = none();
@@ -468,8 +470,14 @@ impl<D: Dialect> Client<D> {
     /// R2 answers 429 to more than about one write a second to one key, and
     /// an owner record is written twice in a row when an object reclaims:
     /// under a 10,000-object kill, four reclaims failed that way and dropped
-    /// their objects. So is a request refused as unauthenticated, once, when
-    /// the dialect has another credential for it. Each authorized request is
+    /// their objects. So is one whose connection failed before it answered
+    /// (`http::Failure::Lost`, `http::Failure::Unsent`), which hyper does
+    /// not send again itself once its dispatcher has taken it, nor on a new
+    /// connection: a bucket closing an idle pooled connection as a request
+    /// goes out on it fails the request that way, most often when this
+    /// node's loop is too busy to have seen the close in time. So is a
+    /// request refused as unauthenticated, once, when the dialect has
+    /// another credential for it. Each authorized request is
     /// sent once more if `http::prompt` bounds it and it has not answered in
     /// time (`http::attempt`), both copies with one authorization, their
     /// answers judged by `settles`.
@@ -517,11 +525,26 @@ impl<D: Dialect> Client<D> {
                 headers: headers.clone(),
             };
             let credential = self.dialect.authorize(&mut request).await?;
-            let once = || self.send_once(call, key, &url, request.headers.clone());
+            let once = || self.send_once(call, &url, request.headers.clone());
             let settled = |response: &HttpResponse| settles(call.guarded, response);
             let attempt = crate::http::attempt(call, what, settled, once).await;
             maybe_applied |= attempt.sent_twice;
-            let response = attempt.answer?;
+            let response = match attempt.answer {
+                Ok(response) => response,
+                Err(error)
+                    if error.failure != Failure::Other && pause <= self.backoff * MAX_BACKOFF =>
+                {
+                    tracing::warn!(
+                        "cluster: {} got no answer: {error}; sending it again",
+                        what()
+                    );
+                    maybe_applied |= error.failure == Failure::Lost;
+                    tokio::time::sleep(pause).await;
+                    pause *= 2;
+                    continue;
+                }
+                Err(error) => return Err(request_error(method, key, &error.message)),
+            };
             // A refused credential is dropped even when the request is not
             // sent again, so that no later request carries it.
             if response.status == 401
@@ -546,10 +569,9 @@ impl<D: Dialect> Client<D> {
     async fn send_once(
         &self,
         call: &Call<'_>,
-        key: &str,
         url: &str,
         headers: Vec<(String, String)>,
-    ) -> Result<HttpResponse> {
+    ) -> std::result::Result<HttpResponse, HttpError> {
         let (method, body) = (call.method, call.body.clone());
         let headers = headers.into_iter().flat_map(<[String; 2]>::from).collect();
         // A hung request would stall whatever waits on it: a tiering pass
@@ -572,7 +594,7 @@ impl<D: Dialect> Client<D> {
                 .send(method.into(), url, headers, body, to, bounds)
                 .await
         };
-        let response = response.map_err(|error| request_error(method, key, &error))?;
+        let response = response?;
         if let Some(skew) = skew_ms(sent, SystemTime::now(), &response.date) {
             self.skew_ms.set(Some(skew));
         }
@@ -588,13 +610,15 @@ struct Sent {
     /// 429 or 503 may have been: a 503 may come from anywhere on the way,
     /// after the bucket applied the request, and that a store's 429 refuses
     /// before anything applies is that store's to promise, which not every
-    /// S3-compatible one does. Taking a refusal for a possible write costs a
-    /// read; the reverse misreports the write. One answered 401 was refused
-    /// first: the credential is checked before the request is processed.
-    /// So may a copy `http::attempt` sent beside the one answered
-    /// (`http::Attempt::sent_twice`), before that one's guard was checked or
-    /// after: its own answer is dropped when the other's comes first, a 401
-    /// among them.
+    /// S3-compatible one does. So may one whose connection failed after
+    /// hyper took it (`http::Failure::Lost`): the bucket may have received
+    /// all of it. Taking a refusal for a possible write costs a read; the
+    /// reverse misreports the write. One answered 401 was refused first:
+    /// the credential is checked before the request is processed. So may a
+    /// copy `http::attempt` sent beside the one answered
+    /// (`http::Attempt::sent_twice`), before that one's guard was checked
+    /// or after: its own answer is dropped when the other's comes first, a
+    /// 401 among them.
     maybe_applied: bool,
 }
 
@@ -635,9 +659,10 @@ const fn settles(guarded: bool, response: &HttpResponse) -> bool {
     }
 }
 
-/// The pause before a request the bucket refused with a 429 or 503 is sent
-/// again, doubled for each refusal after it, up to `MAX_BACKOFF` times
-/// this: 250 ms, 0.5, 1 and 2 s, after which a refusal is the answer.
+/// The pause before a request the bucket refused with a 429 or 503, or whose
+/// connection failed before it answered, is sent again, doubled for each
+/// such failure after it, up to `MAX_BACKOFF` times this: 250 ms, 0.5, 1 and
+/// 2 s, after which the failure is the answer.
 const BACKOFF: Duration = Duration::from_millis(250);
 const MAX_BACKOFF: u32 = 8;
 

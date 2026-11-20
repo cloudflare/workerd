@@ -363,17 +363,17 @@ impl Bucket {
     /// read, if the object holds `body`, and as refused if it holds another
     /// version than the guarded one. If it still holds the guarded version,
     /// or is still absent, the refusal was of a copy of this write that the
-    /// bucket had not yet applied, and may yet: one sent before a 503
-    /// (`Client::exchange`), or beside it (`http::prompt`), which R2
-    /// answers with a conflict (409) while it is in progress. The write is
-    /// then sent again under the same guard after `pause`, of which at most
-    /// one copy lands, and a refusal of it is settled the same way, up to
-    /// `SETTLE_WRITES` writes in all; after those, the outcome stays
-    /// unknown. For writes whose bytes no other writer puts at `key`, or
-    /// where it means the same if one does, and whose body differs from what
-    /// the guarded version holds: on a store whose versions do not follow
-    /// content, a refused write of those same bytes would read back as
-    /// landed.
+    /// bucket had not yet applied, and may yet: one sent before a lost
+    /// connection or a 503 (`Client::exchange`), or beside it
+    /// (`http::prompt`), which R2 answers with a conflict (409) while it is
+    /// in progress. The write is then sent again under the same guard after
+    /// `pause`, of which at most one copy lands, and a refusal of it is
+    /// settled the same way, up to `SETTLE_WRITES` writes in all; after
+    /// those, the outcome stays unknown. For writes whose bytes no other
+    /// writer puts at `key`, or where it means the same if one does, and
+    /// whose body differs from what the guarded version holds: on a store
+    /// whose versions do not follow content, a refused write of those same
+    /// bytes would read back as landed.
     pub async fn put_if_settled(
         &self,
         key: &str,
