@@ -188,12 +188,18 @@ impl RequestHook for KjRequest {
             client,
             interface_id,
             method_id,
-            params,
+            mut params,
         } = *self;
-        match bridge::client_send(&client, interface_id, method_id, Box::new(params)) {
+        match bridge::client_send(&client, interface_id, method_id, &mut params) {
             Ok(call) => {
-                let pipeline = KjPipeline {
-                    hook: bridge::call_pipeline(&call),
+                // A call whose results can't hold a capability has nothing to pipeline on; its
+                // pipeline needs no allocation.
+                let pipeline: Box<dyn PipelineHook> = if bridge::call_can_pipeline(&call) {
+                    Box::new(KjPipeline {
+                        hook: bridge::call_pipeline(&call),
+                    })
+                } else {
+                    Box::new(NoPipeline)
                 };
                 RemotePromise {
                     promise: Promise::from_future(async move {
@@ -203,7 +209,7 @@ impl RequestHook for KjRequest {
                             Box::new(KjResponse::new(response)) as Box<dyn ResponseHook>
                         ))
                     }),
-                    pipeline: any_pointer::Pipeline::new(Box::new(pipeline)),
+                    pipeline: any_pointer::Pipeline::new(pipeline),
                 }
             }
             Err(e) => {
@@ -279,6 +285,22 @@ impl PipelineHook for KjPipeline {
         Box::new(KjClient::new(bridge::pipeline_get_cap(
             &self.hook,
             &pointer_indices,
+        )))
+    }
+}
+
+/// The pipeline of a call whose results can't contain a capability.
+struct NoPipeline;
+
+impl PipelineHook for NoPipeline {
+    fn add_ref(&self) -> Box<dyn PipelineHook> {
+        Box::new(Self)
+    }
+
+    fn get_pipelined_cap(&self, _ops: &[PipelineOp]) -> Box<dyn ClientHook> {
+        // The results have no capabilities, so generated code has no pipelined field to ask for.
+        Box::new(KjClient::new(bridge::new_broken_cap(
+            "the method's results contain no capabilities to pipeline on",
         )))
     }
 }

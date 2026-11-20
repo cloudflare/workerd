@@ -21,15 +21,133 @@ use crate::ffi::bridge;
 /// capnp-rust's capability table: the capabilities a message refers to, by index.
 pub type CapTable = Vec<Option<Box<dyn ClientHook>>>;
 
+/// The size of a message's first segment, in words: capnp-rust's and KJ's default. A smaller one
+/// makes messages of a few KiB need a second segment.
+const FIRST_SEGMENT_WORDS: u32 = 1024;
+
+/// How many free first segments a thread keeps. A call needs one for its params or its results,
+/// so this covers that many calls being built at once on a thread before segments come from the
+/// heap again.
+const MAX_POOLED_SEGMENTS: usize = 16;
+
+/// Zeroed first segments, `FIRST_SEGMENT_WORDS` long, ready for the next message. Frees them when
+/// its thread exits.
+struct SegmentPool(Vec<std::ptr::NonNull<u8>>);
+
+impl Drop for SegmentPool {
+    fn drop(&mut self) {
+        for segment in self.0.drain(..) {
+            // Safety: every pooled segment came from `alloc_zeroed` with this layout.
+            #[expect(unsafe_code, reason = "frees a pooled segment")]
+            unsafe {
+                std::alloc::dealloc(segment.as_ptr(), first_segment_layout());
+            }
+        }
+    }
+}
+
+thread_local! {
+    static SEGMENT_POOL: std::cell::RefCell<SegmentPool> =
+        const { std::cell::RefCell::new(SegmentPool(Vec::new())) };
+}
+
+fn first_segment_layout() -> std::alloc::Layout {
+    match std::alloc::Layout::from_size_align(FIRST_SEGMENT_WORDS as usize * 8, 8) {
+        Ok(layout) => layout,
+        Err(_) => unreachable!(),
+    }
+}
+
+/// capnp-rust's `HeapAllocator`, except that a message's first segment comes from, and returns
+/// to, a per-thread pool. capnp-rust needs its segments zeroed; a pooled segment is re-zeroed when
+/// it returns, but only for the words the message used, rather than allocating and zeroing all of
+/// it for every message.
+pub struct PooledAllocator {
+    first: Option<std::ptr::NonNull<u8>>,
+    heap: message::HeapAllocator,
+}
+
+impl PooledAllocator {
+    fn new() -> Self {
+        Self {
+            first: None,
+            heap: message::HeapAllocator::new(),
+        }
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "implements capnp-rust's Allocator, an unsafe trait"
+)]
+// Safety: every segment is zeroed when it is handed out: a fresh one by `alloc_zeroed`, and a
+// pooled one because the message that last used it re-zeroed all the words it could have written.
+unsafe impl message::Allocator for PooledAllocator {
+    fn allocate_segment(&mut self, minimum_size: u32) -> (std::ptr::NonNull<u8>, u32) {
+        if self.first.is_some() || minimum_size > FIRST_SEGMENT_WORDS {
+            return self.heap.allocate_segment(minimum_size);
+        }
+        // While its thread exits, after the pool is gone, segments come from and go to the heap.
+        let segment = SEGMENT_POOL
+            .try_with(|pool| pool.borrow_mut().0.pop())
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                let layout = first_segment_layout();
+                // Safety: the layout is not zero-sized.
+                #[expect(unsafe_code, reason = "allocates a segment")]
+                let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+                std::ptr::NonNull::new(ptr)
+                    .unwrap_or_else(|| std::alloc::handle_alloc_error(layout))
+            });
+        self.first = Some(segment);
+        (segment, FIRST_SEGMENT_WORDS)
+    }
+
+    #[expect(unsafe_code, reason = "frees or re-zeroes a segment")]
+    unsafe fn deallocate_segment(
+        &mut self,
+        ptr: std::ptr::NonNull<u8>,
+        word_size: u32,
+        words_used: u32,
+    ) {
+        if self.first != Some(ptr) {
+            // Safety: the caller passes a segment `allocate_segment` returned, and this one came
+            // from `heap`.
+            unsafe { self.heap.deallocate_segment(ptr, word_size, words_used) };
+            return;
+        }
+        self.first = None;
+        // Safety: `ptr` is this allocator's first segment, `FIRST_SEGMENT_WORDS` long, and
+        // `words_used <= word_size`. Only the first `words_used` words can have been written.
+        unsafe { std::ptr::write_bytes(ptr.as_ptr(), 0, words_used as usize * 8) };
+        let returned = SEGMENT_POOL
+            .try_with(|pool| {
+                let mut pool = pool.borrow_mut();
+                if pool.0.len() < MAX_POOLED_SEGMENTS {
+                    pool.0.push(ptr);
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if !returned {
+            // Safety: the segment came from `alloc_zeroed` with this layout.
+            unsafe { std::alloc::dealloc(ptr.as_ptr(), first_segment_layout()) };
+        }
+    }
+}
+
 /// A message built in Rust, with its capability table.
 pub struct RustMessage {
-    builder: message::Builder<message::HeapAllocator>,
+    builder: message::Builder<PooledAllocator>,
     caps: CapTable,
 }
 
 impl RustMessage {
     pub fn new() -> Self {
-        let mut builder = message::Builder::new_default();
+        let mut builder = message::Builder::new(PooledAllocator::new());
         // Allocates the root pointer, so that the message has a segment for C++ to read even
         // when nothing is written to it.
         builder.init_root::<any_pointer::Builder<'_>>();

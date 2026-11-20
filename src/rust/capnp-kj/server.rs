@@ -7,6 +7,8 @@
 //! [`RustServer`] holds a server's generated dispatch; C++ wraps it in a
 //! `capnp::Capability::Server` and calls [`RustServer::dispatch`] for each call.
 
+use std::cell::Cell;
+
 use capnp::Error;
 use capnp::any_pointer;
 use capnp::capability::DispatchCallResult;
@@ -18,7 +20,6 @@ use capnp::private::capability::ParamsHook;
 use capnp::private::capability::PipelineHook;
 use capnp::private::capability::RequestHook;
 use capnp::private::capability::ResultsHook;
-use futures::channel::oneshot;
 use kj_rs::KjOwn;
 
 use crate::error::to_kj;
@@ -84,6 +85,10 @@ impl Cancellation {
 pub struct RustServer {
     server: Box<dyn ErasedServer>,
     cancellation: Cancellation,
+    /// Whether the call that [`dispatch_call`] last dispatched is a `-> stream` call, for C++ to
+    /// read once `dispatch_call` returns. Dispatching only creates the server's future, so no
+    /// other call is dispatched in between.
+    last_is_streaming: Cell<bool>,
 }
 
 impl RustServer {
@@ -91,6 +96,7 @@ impl RustServer {
         Self {
             server: Box::new(dispatch),
             cancellation,
+            last_is_streaming: Cell::new(false),
         }
     }
 
@@ -98,63 +104,38 @@ impl RustServer {
         self.cancellation.allows(interface_id, method_id)
     }
 
-    #[expect(
-        clippy::unnecessary_box_returns,
-        reason = "C++ holds the call as a rust::Box"
-    )]
-    pub fn dispatch(
-        &self,
-        interface_id: u64,
-        method_id: u16,
-        params: KjOwn<bridge::CxxMessage>,
-    ) -> Box<RustCall> {
-        let (sender, results) = oneshot::channel();
-        let dispatched = self.server.dispatch_call(
-            interface_id,
-            method_id,
-            Params::new(Box::new(KjParams {
-                message: CxxMessageReader::new(params),
-            })),
-            Results::new(Box::new(KjResults {
-                message: Some(RustMessage::new()),
-                sender: Some(sender),
-            })),
-        );
-        Box::new(RustCall {
-            is_streaming: dispatched.is_streaming,
-            promise: dispatched.promise,
-            results,
-        })
+    pub fn last_is_streaming(&self) -> bool {
+        self.last_is_streaming.get()
     }
 }
 
-/// A call C++ made to a Rust server.
-pub struct RustCall {
-    is_streaming: bool,
-    promise: Promise<(), Error>,
-    results: oneshot::Receiver<RustMessage>,
-}
-
-impl RustCall {
-    pub fn is_streaming(&self) -> bool {
-        self.is_streaming
-    }
-}
-
-/// Runs a call to completion and returns its results for C++ to copy.
-pub async fn run_call(call: Box<RustCall>) -> Result<Box<RustMessage>, cxx::KjError> {
-    let RustCall {
-        promise, results, ..
-    } = *call;
-    promise.await.map_err(to_kj)?;
-    // The results are sent when the server drops them, which it has done by the time a
-    // well-behaved server's future completes.
-    let results = results.await.map_err(|_| {
-        to_kj(Error::failed(
-            "server completed the call without its results".to_owned(),
-        ))
-    })?;
-    Ok(Box::new(results))
+/// Dispatches a call that C++ made to `server`, and returns the call's future. The dispatch
+/// happens now, when C++ calls this, rather than when the future is first polled, so that C++
+/// can read [`RustServer::last_is_streaming`] right away; the call needs no state on the heap
+/// besides the future.
+///
+/// The call's results are in the C++ call by the time the future completes; see [`KjResults`].
+pub fn dispatch_call(
+    server: &RustServer,
+    interface_id: u64,
+    method_id: u16,
+    params: KjOwn<bridge::CxxMessage>,
+    context: KjOwn<bridge::CallContextHook>,
+) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    let dispatched = server.server.dispatch_call(
+        interface_id,
+        method_id,
+        Params::new(Box::new(KjParams {
+            message: CxxMessageReader::new(params),
+        })),
+        Results::new(Box::new(KjResults {
+            message: None,
+            context,
+        })),
+    );
+    server.last_is_streaming.set(dispatched.is_streaming);
+    let promise = dispatched.promise;
+    async move { promise.await.map_err(to_kj) }
 }
 
 /// A call's params, read in place from the C++ message.
@@ -168,27 +149,27 @@ impl ParamsHook for KjParams {
     }
 }
 
-/// A call's results, built in Rust and sent back to C++ when the server drops them.
+/// A call's results, built in Rust and copied into the C++ call's results when the server drops
+/// them, which generated code does before the server's future completes. The message is created
+/// on the server's first `get()`, so a call whose server writes no results builds none, and its
+/// caller reads empty results, as from a C++ server that writes none.
 struct KjResults {
     message: Option<RustMessage>,
-    sender: Option<oneshot::Sender<RustMessage>>,
+    context: KjOwn<bridge::CallContextHook>,
 }
 
 impl Drop for KjResults {
     fn drop(&mut self) {
-        if let (Some(message), Some(sender)) = (self.message.take(), self.sender.take()) {
-            // Fails only if C++ canceled the call, in which case nobody wants the results.
-            let _ = sender.send(message);
+        if let Some(mut message) = self.message.take() {
+            // Fails only on a malformed segment, which capnp-rust does not produce.
+            let _ = bridge::context_set_results(self.context.pin_mut(), &mut message);
         }
     }
 }
 
 impl ResultsHook for KjResults {
     fn get(&mut self) -> capnp::Result<any_pointer::Builder<'_>> {
-        match self.message.as_mut() {
-            Some(message) => message.root(),
-            None => Err(Error::failed("results already sent".to_owned())),
-        }
+        self.message.get_or_insert_with(RustMessage::new).root()
     }
 
     fn set_pipeline(&mut self) -> capnp::Result<()> {

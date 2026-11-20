@@ -14,15 +14,13 @@
 )]
 
 use crate::message::RustMessage;
-use crate::server::RustCall;
 use crate::server::RustServer;
-use crate::server::run_call;
+use crate::server::dispatch_call;
 
 #[cxx::bridge(namespace = "workerd::rust::capnp_kj")]
 #[expect(
     clippy::needless_lifetimes,
-    clippy::unnecessary_box_returns,
-    reason = "cxx needs explicit lifetimes on unsafe fns, and C++ holds Rust types by Box"
+    reason = "cxx needs explicit lifetimes on unsafe fns"
 )]
 pub mod bridge {
     unsafe extern "C++" {
@@ -55,7 +53,7 @@ pub mod bridge {
             hook: &ClientHook,
             interface_id: u64,
             method_id: u16,
-            params: Box<RustMessage>,
+            params: &mut RustMessage,
         ) -> Result<KjOwn<CxxCall>>;
 
         /// Sends a `-> stream` call to `hook`, copying `params` into the request.
@@ -67,6 +65,9 @@ pub mod bridge {
         ) -> Result<()>;
 
         fn call_pipeline(call: &CxxCall) -> KjOwn<PipelineHook>;
+        /// False if the call was sent with `noPromisePipelining`; see `noPromisePipelining()` in
+        /// ffi.h.
+        fn call_can_pipeline(call: &CxxCall) -> bool;
         async fn call_response(call: KjOwn<CxxCall>) -> Result<KjOwn<CxxMessage>>;
 
         fn pipeline_add_ref(pipeline: &PipelineHook) -> KjOwn<PipelineHook>;
@@ -84,6 +85,16 @@ pub mod bridge {
 
         /// Wraps a Rust server in a C++ `capnp::Capability::Server`.
         fn new_rust_server_client(server: Box<RustServer>) -> KjOwn<ClientHook>;
+
+        /// A C++ `capnp::CallContextHook`: a call that C++ made to a Rust server.
+        #[namespace = "capnp"]
+        type CallContextHook;
+
+        /// Copies `results` into the results of the call `context`.
+        fn context_set_results(
+            context: Pin<&mut CallContextHook>,
+            results: &mut RustMessage,
+        ) -> Result<()>;
     }
 
     extern "Rust" {
@@ -94,20 +105,20 @@ pub mod bridge {
         fn take_cap(self: &mut RustMessage, index: usize) -> KjMaybe<KjOwn<ClientHook>>;
 
         type RustServer;
-        type RustCall;
-        fn dispatch(
-            self: &RustServer,
+        fn allows_cancellation(self: &RustServer, interface_id: u64, method_id: u16) -> bool;
+        fn last_is_streaming(self: &RustServer) -> bool;
+        async fn dispatch_call(
+            server: &RustServer,
             interface_id: u64,
             method_id: u16,
             params: KjOwn<CxxMessage>,
-        ) -> Box<RustCall>;
-        fn allows_cancellation(self: &RustServer, interface_id: u64, method_id: u16) -> bool;
-        fn is_streaming(self: &RustCall) -> bool;
-        async fn run_call(call: Box<RustCall>) -> Result<Box<RustMessage>>;
+            context: KjOwn<CallContextHook>,
+        ) -> Result<()>;
     }
 
     impl KjOwn<ClientHook> {}
     impl KjOwn<PipelineHook> {}
     impl KjOwn<CxxMessage> {}
     impl KjOwn<CxxCall> {}
+    impl KjOwn<CallContextHook> {}
 }

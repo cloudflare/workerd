@@ -106,8 +106,8 @@ void benchCopy(benchmark::State& state) {
   auto root = source.getRoot<capnp::AnyPointer>().asReader();
 
   for (auto _: state) {
-    CxxMessage copy(root);
-    benchmark::DoNotOptimize(copy.getSegments().begin());
+    auto copy = CxxMessage::copy(root);
+    benchmark::DoNotOptimize(copy->getSegments().begin());
   }
 }
 
@@ -214,8 +214,8 @@ void benchCxxMessageEvent(benchmark::State& state, BuildEvent build) {
   build(message.initRoot<rpc::Trace::TailEvent>());
   auto root = message.getRoot<capnp::AnyPointer>().asReader();
   for (auto _: state) {
-    CxxMessage copy(root);
-    benchmark::DoNotOptimize(copy.getSegments().begin());
+    auto copy = CxxMessage::copy(root);
+    benchmark::DoNotOptimize(copy->getSegments().begin());
   }
 }
 
