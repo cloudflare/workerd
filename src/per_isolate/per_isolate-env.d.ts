@@ -241,7 +241,31 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The native half of the TypeScript Navigator (NavigatorNative in
+  // api/global-scope.h).
+  createNavigatorNative(): NavigatorNative;
+  // Defines `name` as an own property of `object` that is to JavaScript a
+  // read-only, enumerable, configurable data property, whose value is what
+  // `getter()` returns each time it is read, as a property that
+  // JSG_READONLY_INSTANCE_PROPERTY defines is. For an attribute that returns
+  // a new object on every read; a constant needs only a data property.
+  defineComputedProperty(
+    object: object,
+    name: string,
+    getter: () => unknown
+  ): void;
 };
+
+// The native half of the TypeScript Navigator (api/global-scope.h:
+// NavigatorNative). Obtained only from utils.createNavigatorNative(); it has
+// no JS-reachable constructor.
+declare interface NavigatorNative {
+  // Navigator's sendBeacon() for a URL already converted to a string: JSG
+  // converts `body` as it does a request body. False outside of a request.
+  sendBeacon(url: string, body: unknown): boolean;
+  // A new StorageManager.
+  createStorage(): object;
+}
 
 // The I/O of a bootstrap API, bound to the request that created it
 // (api/request-io.h: RequestIo). Every method but isCurrent() throws, as the

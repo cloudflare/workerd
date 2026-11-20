@@ -1,0 +1,61 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The navigator suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. The storage and opt-in
+# cells need --experimental for enable_web_file_system and
+# spec_compliant_property_attributes.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_NAVIGATOR, which swaps in the TypeScript implementation under a
+# cell whose USING_TS_IMPL binding says C++. The TypeScript cells enable
+# TS_NAVIGATOR themselves.
+
+navigator_suite_srcs = glob(["*.js"]) + ["navigator-modules.capnp"]
+
+wd_test(
+    src = "navigator-cpp.wd-test",
+    data = navigator_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "navigator-storage-cpp.wd-test",
+    args = ["--experimental"],
+    data = navigator_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "navigator-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = navigator_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "navigator-absent-cpp.wd-test",
+    data = navigator_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "navigator-ts.wd-test",
+    data = navigator_suite_srcs,
+)
+
+wd_test(
+    src = "navigator-storage-ts.wd-test",
+    args = ["--experimental"],
+    data = navigator_suite_srcs,
+)
+
+wd_test(
+    src = "navigator-opt-in-ts.wd-test",
+    args = ["--experimental"],
+    data = navigator_suite_srcs,
+)
+
+wd_test(
+    src = "navigator-absent-ts.wd-test",
+    data = navigator_suite_srcs,
+)

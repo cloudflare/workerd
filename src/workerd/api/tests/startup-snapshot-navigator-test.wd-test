@@ -1,0 +1,70 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The `navigator` global across a startup snapshot; see startup-snapshot-navigator-test.js. The
+# runner's test() fetches the case services and asserts their reports. The @all-autogates variant
+# turns the startup-snapshot autogate on, so every service goes through the zygote, and the
+# TS_NAVIGATOR autogate, so the navigator is the TypeScript one; the @ variant runs plain Workers
+# with the C++ one.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "global_navigator",
+  "enable_navigator_language",
+  "enable_web_file_system",
+  "experimental",
+  "unsafe_module",
+];
+
+const caseModules :List(Workerd.Worker.Module) = [
+  (name = "worker.js", esModule = embed "startup-snapshot-navigator-case-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-navigator-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "kept", service = "kept"),
+          (name = "unread", service = "unread"),
+        ],
+      )
+    ),
+    # The top level keeps the navigator and what it reads from it.
+    ( name = "kept",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"kept\""),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    # The top level leaves `navigator` unread: a request reads it first.
+    ( name = "unread",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"unread\""),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    # Where the cases' beacons go.
+    ( name = "sink",
+      worker = (
+        modules = [
+          ( name = "worker.js",
+            esModule = "export default { fetch() { return new Response(null, { status: 204 }); } };"
+          ),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+  ],
+);

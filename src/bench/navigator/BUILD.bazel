@@ -1,0 +1,20 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The navigator benchmarks, against the C++ implementation and the
+# TypeScript one (TS_NAVIGATOR). Enabling every autogate enables
+# TS_NAVIGATOR, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables it itself. --experimental is for
+# enable_web_file_system.
+
+wd_bench(
+    src = "navigator-cpp.wd-bench",
+    args = ["--experimental"],
+    data = ["navigator.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "navigator-ts.wd-bench",
+    args = ["--experimental"],
+    data = ["navigator.js"],
+)

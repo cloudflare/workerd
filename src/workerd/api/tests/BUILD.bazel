@@ -1402,6 +1402,18 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# The `navigator` global across a startup snapshot, kept by the top level or first read by a
+# request. Only the @all-autogates variant runs the pipeline, and with it the TypeScript
+# Navigator (TS_NAVIGATOR).
+wd_test(
+    src = "startup-snapshot-navigator-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-navigator-case-test.js",
+        "startup-snapshot-navigator-test.js",
+    ],
+)
+
 # Module identity and import.meta across a startup snapshot with the new module registry. Only
 # the @all-autogates variant runs the pipeline.
 wd_test(

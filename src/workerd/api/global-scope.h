@@ -145,6 +145,28 @@ class Navigator final: public jsg::Object {
   }
 };
 
+// The native half of the TypeScript Navigator (src/per_isolate/navigator.ts, under the
+// TS_NAVIGATOR autogate): what needs an IoContext, JSG's conversion of a request body, or a C++
+// object. Obtained only from the bootstrap's utils.createNavigatorNative(); the bootstrap never
+// lets one reach user code.
+class NavigatorNative final: public jsg::Object {
+ public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
+  // Navigator::sendBeacon() for a URL already converted to a string.
+  bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
+
+  // A new StorageManager, as each Navigator's `storage` is.
+  jsg::Ref<StorageManager> createStorage(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(NavigatorNative) {
+    JSG_METHOD(sendBeacon);
+    JSG_METHOD(createStorage);
+    JSG_TS_OVERRIDE(type NavigatorNative = never);
+  }
+};
+
 // Exposed as a global to provide access to certain Cloudflare-specific
 // configuration details. This is not a standard API and great care should
 // be taken when deciding to expose new properties or methods here.
@@ -891,6 +913,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     return js.alloc<Navigator>();
   }
 
+  // The `navigator` global under the TS_NAVIGATOR autogate: a new instance of the TypeScript
+  // Navigator (src/per_isolate/navigator.ts).
+  jsg::JsValue getTypeScriptNavigator(jsg::Lock& js);
+
   jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
     return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
   }
@@ -1090,8 +1116,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(TextEncoder);
 
     if (flags.getGlobalNavigator()) {
-      JSG_LAZY_INSTANCE_PROPERTY(navigator, getNavigator);
-      JSG_NESTED_TYPE(Navigator);
+      // Under the TS_NAVIGATOR autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+      // installs the TypeScript Navigator instead, and the global is an instance of it.
+      if (util::Autogate::isEnabled(util::AutogateKey::TS_NAVIGATOR)) {
+        JSG_LAZY_INSTANCE_PROPERTY(navigator, getTypeScriptNavigator);
+      } else {
+        JSG_LAZY_INSTANCE_PROPERTY(navigator, getNavigator);
+        JSG_NESTED_TYPE(Navigator);
+      }
     }
 
     // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
@@ -1315,8 +1347,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
       api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+      api::Navigator, api::NavigatorNative, api::AlarmInvocationInfo, api::Immediate,              \
+      api::Cloudflare, api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions,        \
+      api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

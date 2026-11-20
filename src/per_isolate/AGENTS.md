@@ -30,6 +30,11 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_NAVIGATOR` autogate, `main.ts` installs the TypeScript
+  `Navigator` (`navigator.ts`), which replaces the C++ one. The `navigator`
+  global stays the lazy property `global-scope.h` registers, whose getter
+  calls the module's `createNavigator()`. `src/tests/navigator/AGENTS.md`
+  describes the behavior and keeps the ledger of differences.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which
@@ -75,6 +80,12 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   (an own data property read never consults the patchable prototype chain).
   The bootstrap runs for every worker regardless of compat date — both layouts
   must work. JSG *methods* are always on the prototype.
+- **Attributes that are instance properties**: an attribute that C++
+  registers with `JSG_READONLY_INSTANCE_PROPERTY` (or the lazy variants) is
+  an own data property of each instance whatever the flags, so a bootstrap
+  class defines it as one (`navigator.ts`). Where the C++ getter returns a
+  new object on each read, `utils.defineComputedProperty()` defines the
+  same kind of property, whose value a function computes on each read.
 - Internal cross-module surfaces are exported as a single namespace
   object (`internalsForPipe`, `nativeStreamInternals`), never
   re-exported to users.

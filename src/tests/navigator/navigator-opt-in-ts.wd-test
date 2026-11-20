@@ -1,0 +1,56 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NavigatorModules = import "navigator-modules.capnp";
+
+# Runs the navigator suite against the TypeScript implementation
+# (src/per_isolate/navigator.ts, under TS_NAVIGATOR), with
+# enable_web_file_system and the
+# dateless opt-ins spec_compliant_property_attributes and
+# immutable_api_prototypes; the first two are experimental, hence
+# --experimental in BUILD.bazel.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so global_navigator is named.
+# nodejs_compat is for node:assert and node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-opt-in-ts",
+      worker = (
+        modules = NavigatorModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "enable_web_file_system",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    ( name = "navigator-opt-in-ts-first-read",
+      worker = (
+        modules = NavigatorModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "enable_web_file_system",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    ( name = "sink",
+      worker = (
+        modules = NavigatorModules.sinkModules,
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-navigator"],
+);

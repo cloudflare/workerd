@@ -1,0 +1,49 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NavigatorModules = import "navigator-modules.capnp";
+
+# Runs the navigator suite against the C++ implementation
+# (api/global-scope.h), with
+# enable_web_file_system, which is
+# experimental, hence --experimental in BUILD.bazel.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so global_navigator is named.
+# nodejs_compat is for node:assert and node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-storage-cpp",
+      worker = (
+        modules = NavigatorModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "enable_web_file_system",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    ( name = "navigator-storage-cpp-first-read",
+      worker = (
+        modules = NavigatorModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "enable_web_file_system",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+        globalOutbound = "sink",
+      )
+    ),
+    ( name = "sink",
+      worker = (
+        modules = NavigatorModules.sinkModules,
+      )
+    ),
+  ],
+);

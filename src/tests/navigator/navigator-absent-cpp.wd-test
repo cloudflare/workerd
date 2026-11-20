@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NavigatorModules = import "navigator-modules.capnp";
+
+# Runs the check that no_global_navigator leaves out both the `navigator`
+# global and its constructor against the C++ implementation
+# (api/global-scope.h).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-absent-cpp",
+      worker = (
+        modules = NavigatorModules.absentModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "no_global_navigator",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+      )
+    ),
+  ],
+);

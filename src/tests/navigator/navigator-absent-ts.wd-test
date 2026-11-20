@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NavigatorModules = import "navigator-modules.capnp";
+
+# Runs the check that no_global_navigator leaves out both the `navigator`
+# global and its constructor against the TypeScript implementation
+# (src/per_isolate/navigator.ts, under TS_NAVIGATOR).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-absent-ts",
+      worker = (
+        modules = NavigatorModules.absentModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "no_global_navigator",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-navigator"],
+);

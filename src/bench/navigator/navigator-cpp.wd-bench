@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the navigator benchmarks against the C++ implementation
+# (api/global-scope.h). No compatibilityDate, so
+# that the variants supply it. enable_web_file_system, which is experimental,
+# gives the navigator its `storage`.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "navigator.js")],
+        compatibilityFlags = ["enable_web_file_system"],
+        globalOutbound = "sink",
+      )
+    ),
+    # Where the beacons go.
+    ( name = "sink",
+      worker = (
+        modules = [
+          ( name = "worker",
+            esModule = "export default { fetch() { return new Response(null, { status: 204 }); } };"
+          ),
+        ],
+      )
+    ),
+  ],
+);

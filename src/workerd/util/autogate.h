@@ -133,7 +133,11 @@ namespace workerd::util {
   V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
-  V(WRAPPABLE_EXTERNAL_MEMORY)
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* The `navigator` global and its Navigator class are the TypeScript implementation from the     \
+     per-isolate bootstrap (src/per_isolate/navigator.ts) rather than the C++ class in             \
+     api/global-scope.h. */                                                                        \
+  V(TS_NAVIGATOR)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

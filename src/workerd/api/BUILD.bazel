@@ -97,6 +97,7 @@ filegroup(
         "js-streams-bridge.h",
         "js-writable-stream.h",
         "messagechannel.h",
+        "navigator-bootstrap.h",
         "per-isolate-bootstrap.h",
         "performance.h",
         "queue.h",

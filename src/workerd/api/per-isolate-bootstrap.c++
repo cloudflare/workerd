@@ -11,6 +11,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/navigator-bootstrap.h>
 #include <workerd/api/request-io.h>
 #include <workerd/api/url-bootstrap.h>
 #include <workerd/api/urlpattern-bootstrap.h>
@@ -444,6 +445,51 @@ static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The native half of the TypeScript Navigator (see navigator-bootstrap.h).
+static void CreateNavigatorNative(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::createNavigatorNative(js));
+  });
+}
+
+// The getter of a property that DefineComputedProperty() defines: calls the function the
+// property was defined with, which the property carries as its data. What the function throws
+// propagates to the code reading the property.
+static void ComputedPropertyGetter(
+    v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  auto isolate = info.GetIsolate();
+  auto getter = info.Data().As<v8::Function>();
+  v8::Local<v8::Value> value;
+  if (getter->Call(isolate->GetCurrentContext(), v8::Undefined(isolate), 0, nullptr)
+          .ToLocal(&value)) {
+    info.GetReturnValue().Set(value);
+  }
+}
+
+// Defines an own property of the object argument, named by the string argument, that is to
+// JavaScript a read-only, enumerable and configurable data property, but whose value is what
+// the function argument returns each time the property is read. JSG_READONLY_INSTANCE_PROPERTY
+// defines the same kind of property (v8::ObjectTemplate::SetNativeDataProperty()), so that a
+// bootstrap class can keep an attribute that returns a new object on every read exactly as its
+// C++ predecessor had it; a property whose value never changes needs only an ordinary data
+// property.
+static void DefineComputedProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto object = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>(), TypeError,
+        "defineComputedProperty() expects an object");
+    auto name = JSG_REQUIRE_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>(), TypeError,
+        "defineComputedProperty() expects a string name");
+    auto getter = JSG_REQUIRE_NONNULL(jsg::JsValue(args[2]).tryCast<jsg::JsFunction>(), TypeError,
+        "defineComputedProperty() expects a function");
+    jsg::check(v8::Local<v8::Object>(object)->SetNativeDataProperty(js.v8Context(),
+        v8::Local<v8::String>(name), ComputedPropertyGetter, nullptr,
+        v8::Local<v8::Function>(getter), v8::PropertyAttribute::ReadOnly));
+    return v8::Local<v8::Value>(js.undefined());
+  });
+}
+
 static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -607,6 +653,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "readableStreamState",
+    "createNavigatorNative",
+    "defineComputedProperty",
     "DOMExceptionBase",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
@@ -650,10 +698,17 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
+    getMethod(js, CreateNavigatorNative),
+    getMethod(js, DefineComputedProperty),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
+
+  // V8 stores the getter's address in each property that defineComputedProperty() defines, which
+  // a startup snapshot can hold.
+  jsg::isolateRegisterExternalReference(
+      js.v8Isolate, reinterpret_cast<intptr_t>(ComputedPropertyGetter));
 
   return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
 }

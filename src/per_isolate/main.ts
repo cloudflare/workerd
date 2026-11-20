@@ -447,6 +447,35 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
+// The TypeScript Navigator replaces the C++ one, which global-scope.h then
+// leaves out. Installed as the MessageChannel classes above are, matching
+// JSG_NESTED_TYPE. The `navigator` global stays the lazy property that
+// global-scope.h registers, which makes its value with this module's
+// createNavigator().
+if (autogates['ts-navigator'] && compatFlags['global_navigator']) {
+  const { Navigator } = require('navigator');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    Navigator: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: Navigator,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      Navigator: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: Navigator,
+      },
+    });
+  }
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

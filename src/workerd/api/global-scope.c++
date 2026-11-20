@@ -15,6 +15,8 @@
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/http.h>
+#include <workerd/api/navigator-bootstrap.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -1427,7 +1429,11 @@ jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
   return js.alloc<StorageManager>();
 }
 
-bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
+namespace {
+
+// Schedules a POST of `body` to `url` that the current request waits for, and returns whether it
+// did: there is no request to schedule it on outside of one.
+bool sendBeaconImpl(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
     auto v8Context = js.v8Context();
     auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
@@ -1444,6 +1450,34 @@ bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::In
 
   // We cannot schedule a beacon to be sent outside of a request context.
   return false;
+}
+
+}  // namespace
+
+bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
+  return sendBeaconImpl(js, kj::mv(url), kj::mv(body));
+}
+
+bool NavigatorNative::sendBeacon(
+    jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
+  return sendBeaconImpl(js, kj::mv(url), kj::mv(body));
+}
+
+jsg::Ref<StorageManager> NavigatorNative::createStorage(jsg::Lock& js) {
+  return js.alloc<StorageManager>();
+}
+
+jsg::JsValue createNavigatorNative(jsg::Lock& js) {
+  // NavigatorNative is registered in EW_GLOBAL_SCOPE_ISOLATE_TYPES.
+  auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<NavigatorNative>>(),
+      "NavigatorNative is missing from the isolate type list");
+  return jsg::JsValue(handler.wrap(js, js.alloc<NavigatorNative>()));
+}
+
+jsg::JsValue ServiceWorkerGlobalScope::getTypeScriptNavigator(jsg::Lock& js) {
+  auto create = KJ_ASSERT_NONNULL(tryGetBootstrapFunction(js, "navigator"_kj, "createNavigator"_kj),
+      "the per-isolate bootstrap did not load the TypeScript Navigator");
+  return create.call(js, js.undefined());
 }
 
 // ======================================================================================
