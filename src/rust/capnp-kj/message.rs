@@ -82,22 +82,54 @@ impl Default for RustMessage {
 }
 
 /// The segments of a C++ message, read in place.
+///
+/// capnp-rust asks for a segment on every pointer it follows, so the segments are looked up once,
+/// when the message arrives, rather than over FFI each time.
 pub struct CxxSegments {
+    /// The first segment, which is usually the only one; kept inline so that a one-segment
+    /// message costs no allocation.
+    first: *const [u8],
+    rest: Vec<*const [u8]>,
+    // Declared last, so that it is dropped after the views into it. Never read: it is held only
+    // to keep the segments alive.
+    #[expect(dead_code, reason = "owns the memory `first` and `rest` point into")]
     message: KjOwn<bridge::CxxMessage>,
+}
+
+impl CxxSegments {
+    fn new(message: KjOwn<bridge::CxxMessage>) -> Self {
+        let count = bridge::message_segment_count(&message);
+        // The root pointer is in the first segment, so a message always has one.
+        debug_assert!(count > 0, "a C++ message has no segments");
+        let segment = |index| std::ptr::from_ref(bridge::message_segment(&message, index));
+        let first = segment(0);
+        let rest = (1..count).map(segment).collect();
+        Self {
+            first,
+            rest,
+            message,
+        }
+    }
 }
 
 impl message::ReaderSegments for CxxSegments {
     fn get_segment(&self, index: u32) -> Option<&[u8]> {
-        let index = usize::try_from(index).ok()?;
-        if index < bridge::message_segment_count(&self.message) {
-            Some(bridge::message_segment(&self.message, index))
-        } else {
-            None
-        }
+        let segment = match usize::try_from(index).ok()? {
+            0 => self.first,
+            index => *self.rest.get(index - 1)?,
+        };
+        #[expect(
+            unsafe_code,
+            reason = "reads a segment of the C++ message that `self` owns"
+        )]
+        // Safety: the segments belong to `self.message`, which lives as long as `self`, on the
+        // heap, and whose segments never change once it is built (taking its capabilities
+        // changes only its capability table).
+        Some(unsafe { &*segment })
     }
 
     fn len(&self) -> usize {
-        bridge::message_segment_count(&self.message)
+        1 + self.rest.len()
     }
 }
 
@@ -123,7 +155,7 @@ impl CxxMessageReader {
         // The message was already a valid message on the C++ side, whose own limits applied.
         options.traversal_limit_in_words(None);
         Self {
-            reader: message::Reader::new(CxxSegments { message }, options),
+            reader: message::Reader::new(CxxSegments::new(message), options),
             caps,
         }
     }

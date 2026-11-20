@@ -19,17 +19,25 @@ capnp::ReaderOptions unlimitedReaderOptions() {
   return options;
 }
 
-// Copies a message Rust built into `dest`, moving its capabilities into `dest`'s message.
-void copyFromRust(capnp::AnyPointer::Builder dest, RustMessage& message) {
+// Copies a message Rust built into the builder `getDest(size)` returns, moving its capabilities
+// into that builder's message. `size` is the copy's exact size, for `getDest` to pass as a size
+// hint: without one, KJ allocates and zeroes 1024 words for the message, which costs more than the
+// copy for a small one.
+template <typename GetDest>
+void copyFromRust(RustMessage& message, GetDest&& getDest) {
   auto segmentCount = message.segment_count();
   // Usually one segment, so kept off the heap.
   KJ_STACK_ARRAY(kj::ArrayPtr<const capnp::word>, segments, segmentCount, 4, 32);
+  // The segments include the root pointer, so their total is the size of a message holding
+  // the copy.
+  uint64_t wordCount = 0;
   for (auto i: kj::zeroTo(segmentCount)) {
     auto bytes = message.segment(i);
     KJ_REQUIRE(bytes.size() % sizeof(capnp::word) == 0);
     KJ_REQUIRE(reinterpret_cast<uintptr_t>(bytes.data()) % alignof(capnp::word) == 0);
     segments[i] = kj::arrayPtr(
         reinterpret_cast<const capnp::word*>(bytes.data()), bytes.size() / sizeof(capnp::word));
+    wordCount += segments[i].size();
   }
   capnp::SegmentArrayMessageReader reader(segments, unlimitedReaderOptions());
 
@@ -39,6 +47,8 @@ void copyFromRust(capnp::AnyPointer::Builder dest, RustMessage& message) {
     caps.add(message.take_cap(i));
   }
   capnp::ReaderCapabilityTable capTable(caps.finish());
+  capnp::AnyPointer::Builder dest =
+      getDest(capnp::MessageSize{.wordCount = wordCount, .capCount = static_cast<uint>(capCount)});
   dest.set(capTable.imbue(reader.getRoot<capnp::AnyPointer>()));
 }
 
@@ -63,7 +73,7 @@ class RustServerAdapter final: public capnp::Capability::Server {
     auto promise = run_call(kj::mv(call))
                        .then([context, isStreaming](::rust::Box<RustMessage> results) mutable {
       if (!isStreaming) {
-        copyFromRust(context.getResults(), *results);
+        copyFromRust(*results, [&](capnp::MessageSize size) { return context.getResults(size); });
       }
     });
     // capnpc-rust does not see `$Cxx.allowCancellation`; the Rust server stated it instead.
@@ -131,9 +141,11 @@ namespace {
 capnp::Request<capnp::AnyPointer, capnp::AnyPointer> newRequest(
     capnp::ClientHook& hook, uint64_t interfaceId, uint16_t methodId, RustMessage& params) {
   capnp::Capability::Client client(hook.addRef());
-  auto request = client.typelessRequest(interfaceId, methodId, kj::none, {});
-  copyFromRust(request, params);
-  return request;
+  kj::Maybe<capnp::Request<capnp::AnyPointer, capnp::AnyPointer>> request;
+  copyFromRust(params, [&](capnp::MessageSize size) -> capnp::AnyPointer::Builder {
+    return request.emplace(client.typelessRequest(interfaceId, methodId, size, {}));
+  });
+  return KJ_ASSERT_NONNULL(kj::mv(request));
 }
 
 }  // namespace
