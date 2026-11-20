@@ -16163,6 +16163,19 @@ export declare class MessageChannel {
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+/**
+ * An `oidc_tokens` binding: issues OpenID Connect tokens for the Worker's own
+ * identity, to exchange for cloud credentials or send to an API as a bearer
+ * token. Each binding has one audience, set in its config.
+ */
+export interface OidcTokenBinding {
+  /**
+   * Returns a newly signed JWT for the configured audience, valid for 5
+   * minutes. Each call gets a new `jti`. Call it when you need a token; don't
+   * store the token across requests.
+   */
+  getToken(): Promise<string>;
+}
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
