@@ -211,31 +211,23 @@ class Wrappable: public kj::Refcounted {
     }
   }
 
-  enum InternalFields : int {
-    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`, or to `WORKERD_RUST_WRAPPABLE_TAG`
-    // for the wrapper of a Rust JSG resource. This is a workerd-specific tag that helps us to
-    // identify a v8 API object as one of our own.
-    WRAPPABLE_TAG_FIELD_INDEX,
-
-    // Number of internal fields in a wrapper object.
-    //
-    // The pointer back to the C++ Wrappable is NOT stored in an internal field: it lives only in
-    // V8's CppHeap pointer table, reached via the CppgcShim (see attachWrapper / unwrapFromShim).
-    // Keeping a single tagged handle, rather than a second internal field, keeps dispatch and GC
-    // lifetime tied to the same pointer.
-    INTERNAL_FIELD_COUNT,
-  };
+  // Number of internal fields in a wrapper object. Nothing is ever stored in the one field; what
+  // a wrapper wraps is in its CppHeap pointer (see attachWrapper() and tryGetWrapperTag()). The
+  // field is there because V8 treats an object that has internal fields differently in two places:
+  // - The context serializer of a startup snapshot may write an object later than it reaches it
+  //   (it defers objects deep in the object graph), unless the object has internal fields. For a
+  //   wrapper the API-wrapper serializer runs as soon as the wrapper is reached and needs the
+  //   wrapper's place in the blob, without which V8 crashes.
+  // - v8::ValueSerializer takes an object for a host object if it has internal fields, unless
+  //   its delegate decides that itself.
+  // V8 serializes an empty internal field by itself, so a snapshot needs no internal-field
+  // serializer for it.
+  static constexpr int INTERNAL_FIELD_COUNT = 1;
 
   // kFirstObjectWrappableTag is the first embedder-assignable wrappable tag. It is valid in both
   // sandbox configurations (workerd uses a single tag consistently for all of its objects).
   static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG =
       v8::CppHeapPointerTag::kFirstObjectWrappableTag;
-
-  // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
-  //
-  // This value was chosen randomly.
-  static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
-  static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
   // The CppHeap pointer tag attachWrapper() gave `object`, or kj::none if `object` is not the
   // wrapper of a Wrappable. Accepts any object and runs no JavaScript: it reads the tag of the
@@ -325,10 +317,9 @@ class Wrappable: public kj::Refcounted {
   // Attach to a JavaScript object. This increments the Wrappable's refcount until `object`
   // is garbage-collected (or unlink() is called).
   //
-  // The object MUST have exactly INTERNAL_FIELD_COUNT internal field slots. Internal field 0 holds
-  // the workerd-API marker (see isWorkerdApiObject), or WORKERD_RUST_WRAPPABLE_TAG if `tag` is
-  // kRustResourceWrappableTag; the C++ object pointer itself is stored in V8's CppHeap pointer
-  // table rather than an internal field.
+  // The object MUST have exactly INTERNAL_FIELD_COUNT internal field slots, in which nothing is
+  // stored; the C++ object pointer itself is stored in V8's CppHeap pointer table rather than an
+  // internal field.
   //
   // If `needsGcTracing` is true, then the virtual method jsgVisitForGc() will be called to
   // perform GC tracing. If false, the method is never called (may be more efficient, if the
@@ -337,7 +328,8 @@ class Wrappable: public kj::Refcounted {
   // `tag` is the per-type CppHeapPointerTag identifying the wrapped object's type. It is stored
   // in V8's CppHeap pointer table (via Object::Wrap) and range-checked at unwrap time to reject
   // type-confused handles. Resource types pass their own tag (TypeWrapper::wrappableTag<T>());
-  // non-resource wrappables (functions, opaque wrappers) pass kNonResourceWrappableTag.
+  // non-resource wrappables (functions, opaque wrappers) pass kNonResourceWrappableTag, and Rust
+  // JSG resources kRustResourceWrappableTag. See tryGetWrapperTag() for reading it back.
   //
   // If `isContextGlobal` is IsContextGlobal::YES, `object` must be a context's JSGlobalProxy
   // (context->Global()) and `tag` must be kContextGlobalWrappableTag; the cppgc wrappable is then
@@ -825,7 +817,7 @@ bool sharesCppgcShimForTest(
 template <typename T>
 T& downcastObject(Object& object);
 
-// Cast a `Wrappable` taken from a wrapper's internal field to the type the
+// Cast a `Wrappable` taken from a wrapper's CppHeap pointer to the type the
 // callsite expects, aborting if the object is not of that type.
 template <typename T>
 T& downcastWrappable(Wrappable& wrappable) {

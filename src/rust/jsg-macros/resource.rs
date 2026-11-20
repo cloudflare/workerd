@@ -1367,9 +1367,9 @@ fn generate_constructor_registration(
     let member = quote! {
         jsg::Member::Constructor {
             callback: jsg::function_callback(|lock, args| {
-                // Without `new`, `this` is an arbitrary receiver with no
-                // internal fields to attach the resource to. The message
-                // matches C++ `throwIfConstructorCalledAsFunction`.
+                // Without `new`, `this` is an arbitrary receiver, which the
+                // resource cannot be attached to. The message matches C++
+                // `throwIfConstructorCalledAsFunction`.
                 if !args.is_construct_call() {
                     lock.throw_exception(&jsg::Error::new_type_error(format!(
                         "Failed to construct '{}': Please use the 'new' operator, \

@@ -275,7 +275,6 @@ void TestHarness::run_in_context(
       zygote->runInLockScope([&](TestIsolate::Lock& lock) {
         auto realm = ::workerd::rust::jsg::realm_create(lock.v8Isolate, flags);
         ::workerd::jsg::WrappablesSerializeMetadata metadata;
-        uint32_t badTagFieldsCount = 0;
         auto& isolateBase = IsolateBase::from(lock.v8Isolate);
         failure = kj::runCatchingExceptions([&] {
           v8::Global<v8::Context> contextHandle;
@@ -283,7 +282,7 @@ void TestHarness::run_in_context(
             auto jsContext = lock.newContext<TestContext>();
             auto context = jsContext.getHandle(lock);
             v8::Context::Scope contextScope(context);
-            isolateBase.setSnapshotDefaultContext(context, &badTagFieldsCount, &metadata);
+            isolateBase.setSnapshotDefaultContext(context, &metadata);
             {
               EvalContext evalContext(lock.v8Isolate, context);
               topLevel(topLevelData, lock.v8Isolate, evalContext);
@@ -294,8 +293,7 @@ void TestHarness::run_in_context(
           });
           auto rustTemplates =
               ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
-          isolateBase.createSnapshotBlob(
-              kj::mv(contextHandle), kj::mv(rustTemplates), &badTagFieldsCount, &metadata);
+          isolateBase.createSnapshotBlob(kj::mv(contextHandle), kj::mv(rustTemplates), &metadata);
         });
       });
       KJ_IF_SOME(e, failure) {

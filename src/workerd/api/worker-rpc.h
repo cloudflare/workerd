@@ -252,7 +252,7 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   // not of the claimed type, the message is malformed (the V8 tag stream disagrees with the
   // external table) and this throws. The socket slot holds the WRAPPED socket (Socket is
   // incomplete here); Socket::deserialize() unwraps it through its TypeHandler, which reads
-  // internal fields only -- no JS.
+  // the wrapper's CppHeap pointer only -- no JS.
   JsReadableStream claimPrebuiltReadable();
   JsWritableStream claimPrebuiltWritable();
   jsg::JsRef<jsg::JsObject> claimPrebuiltSocket();

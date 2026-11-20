@@ -550,7 +550,6 @@ kj::Own<SnapshotArtifact> bakeSnapshot(kj::StringPtr topLevel) {
   auto zygote = kj::heap<SnapshotTransferIsolate>(v8System, newIsolateGroup(), nullptr,
       kj::heap<IsolateObserver>(), defaultExternalStringAllocator(), v8::Isolate::CreateParams{},
       true, SnapshotConfig(MutableSnapshot{.artifact = kj::atomicRefcounted<SnapshotArtifact>()}));
-  uint32_t badTagFieldsCount = 0;
   zygote->runInLockScope([&](SnapshotTransferIsolate::Lock& lock) {
     // Inside the lock, as in Worker::Worker: its entries root cppgc shims, and a cppgc::Persistent
     // must be released by the thread holding the isolate lock.
@@ -563,14 +562,14 @@ kj::Own<SnapshotArtifact> bakeSnapshot(kj::StringPtr topLevel) {
           lock.newContext<SnapshotTransferContext>(NewContextOptions{.enableWeakRef = true});
       auto context = jsContext.getHandle(lock);
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](Lock& js) {
-        isolateBase.setSnapshotDefaultContext(context, &badTagFieldsCount, &metadata);
+        isolateBase.setSnapshotDefaultContext(context, &metadata);
         eval(js, topLevel);
         isolateBase.settleFinalizationRegistriesForSnapshot(js);
         isolateBase.removeRestoreTimeGlobalsBeforeSnapshot(js, context);
       });
       contextHandle = jsContext.extractContextGlobalForSnapshot();
     });
-    isolateBase.createSnapshotBlob(kj::mv(contextHandle), {}, &badTagFieldsCount, &metadata);
+    isolateBase.createSnapshotBlob(kj::mv(contextHandle), {}, &metadata);
   });
   return zygote->extractSnapshotArtifact();
 }
@@ -626,6 +625,51 @@ KJ_TEST("a stateful object's state and a stateless object survive a snapshot rou
     // The restored context can still build new instances of the baked types.
     KJ_EXPECT(
         eval(js, "new StatefulThing(3).getValue() + new StatelessThing().kind()"_kj) == "4"_kj);
+  });
+}
+
+KJ_TEST("ArrayBuffers and their views survive a snapshot round trip beside a wrapper") {
+  // Nothing is stored in the internal fields V8 gives ArrayBuffers and their views, nor in a
+  // wrapper's: the context is serialized without an internal-field serializer and restored
+  // without a deserializer.
+  auto artifact = bakeSnapshot("globalThis.buffer = new ArrayBuffer(8);"
+                               "globalThis.bytes = new Uint8Array(buffer);"
+                               "bytes.set([1, 2, 3]);"
+                               "globalThis.view = new DataView(buffer);"
+                               "globalThis.small = new Uint8Array([4, 5]);"
+                               "globalThis.stateful = new StatefulThing(7);"_kj);
+
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "[...bytes].join()"_kj) == "1,2,3,0,0,0,0,0"_kj);
+    KJ_EXPECT(eval(js, "view.getUint8(2)"_kj) == "3"_kj);
+    KJ_EXPECT(eval(js, "bytes.buffer === buffer && view.buffer === buffer"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "[...small].join()"_kj) == "4,5"_kj);
+    KJ_EXPECT(eval(js, "stateful.getValue()"_kj) == "7"_kj);
+  });
+}
+
+KJ_TEST("wrappers at every depth of the object graph survive a snapshot round trip") {
+  // V8's serializer defers an object it reaches too deep in the graph and writes it later. A
+  // wrapper must not be deferred: the API-wrapper serializer names it by its place in the blob
+  // as soon as it is reached. Its internal field keeps V8 from deferring it (see
+  // Wrappable::INTERNAL_FIELD_COUNT). With a chain of every length, a wrapper is reached at every
+  // depth.
+  auto artifact = bakeSnapshot("globalThis.chains = [];"
+                               "for (let length = 0; length < 100; ++length) {"
+                               "  let chain = new StatefulThing(length);"
+                               "  for (let i = 0; i < length; ++i) chain = {next: chain};"
+                               "  chains.push(chain);"
+                               "}"_kj);
+  KJ_EXPECT(countTransfers(*artifact) == 100, countTransfers(*artifact));
+
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js,
+                  "chains.every((chain, length) => {"
+                  "  for (let i = 0; i < length; ++i) chain = chain.next;"
+                  "  return chain instanceof StatefulThing && chain.getValue() === length;"
+                  "})"_kj) == "true"_kj);
   });
 }
 

@@ -2401,20 +2401,23 @@ connection between a C++ object and its JavaScript "wrapper" object.
 3. **Identity Preservation** — The same C++ object always returns the same JS wrapper,
    preserving object identity and monkey-patches.
 
-#### Internal Fields
+#### Wrapper Tags
 
-JavaScript wrapper objects have one internal marker field:
+The native `Wrappable` of a JavaScript wrapper object is owned by a cppgc shim reached through V8's
+tagged CppHeap pointer table (`v8::Object::Wrap()`), and the tag says what the wrapper wraps
+(`wrappable-tag.h`): a resource type's own tag, `kNonResourceWrappableTag` for functions and opaque
+wrappers, `kContextGlobalWrappableTag` for a context's global, or `kRustResourceWrappableTag` for a
+Rust JSG resource.
 
-```cpp
-enum InternalFields : int {
-  WRAPPABLE_TAG_FIELD_INDEX = 0,  // Contains WORKERD_WRAPPABLE_TAG
-  INTERNAL_FIELD_COUNT = 1,
-};
-```
+A wrapper also has one internal field (`Wrappable::INTERNAL_FIELD_COUNT`), in which nothing is
+stored. It is there for V8, which treats an object that has internal fields differently: a startup
+snapshot's context serializer writes such an object as soon as it reaches it, which the
+API-wrapper serializer relies on, and `v8::ValueSerializer` takes it for a host object.
 
-Check if an object is a workerd API object: `jsg::Wrappable::isWorkerdApiObject(object)`
+`jsg::Wrappable::tryGetWrapperTag(isolate, object)` returns the tag of any object, or `kj::none`
+for one that is not a wrapper. Check if an object is the wrapper of a C++ object:
+`jsg::Wrappable::isWorkerdApiObject(isolate, object)`
 
-The native `Wrappable` is owned by a cppgc shim reached through V8's tagged CppHeap pointer table.
 Unwrapping validates the resource tag range, exact JavaScript wrapper identity, and native RTTI
 before dispatch.
 
