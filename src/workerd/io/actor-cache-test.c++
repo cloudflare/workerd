@@ -5951,7 +5951,7 @@ KJ_TEST("ActorCache abandonAlarm is a no-op when a newer alarm has replaced the 
 
   // abandonAlarm() for the original oneMs alarm must be a no-op: storedTime (twoMs) !=
   // scheduledTime (oneMs), so the time check prevents clearing the new alarm.
-  // Returns twoMs so AlarmManager can re-register the actor's real alarm.
+  // Returns twoMs, the alarm the actor still has.
   auto result = test.cache.abandonAlarm(oneMs).wait(ws);
 
   KJ_ASSERT(KJ_ASSERT_NONNULL(result) == twoMs);

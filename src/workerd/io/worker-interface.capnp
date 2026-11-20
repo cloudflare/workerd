@@ -1064,13 +1064,19 @@ interface EventDispatcher @0xf20697475ec1752d {
   # Deleted methods, do not reuse these numbers.
 
   abandonAlarm @11 (scheduledTimeMs :Int64) -> (storedAlarmTimeMs :Int64) $Cxx.allowCancellation;
-  # Called by AlarmManager when it has given up retrying an alarm after too many counted failures.
-  # The actor should clear its alarm state (ActorCache / SQLite) so that getAlarm() correctly
-  # reflects that no alarm will ever fire for this scheduled time again.
+  # Called by the alarm scheduler when it has given up on an alarm, e.g. after too many counted
+  # failures or an abort that doesn't retry. The actor should clear its alarm state (ActorCache /
+  # SQLite) so that getAlarm() correctly reflects that no alarm will ever fire for this scheduled
+  # time again.
   #
   # Returns the actor's current alarm time (in ms since epoch) if it differs from scheduledTimeMs,
-  # indicating the user set a new alarm that should still fire. Returns 0 if the alarm was cleared
-  # or no alarm was stored.
+  # indicating the user set a new alarm that should still fire. The actor makes sure that the
+  # scheduler has that alarm before it returns, since the request that gave the scheduler the alarm
+  # may have failed. It requests the alarm in place of the abandoned one, so that the scheduler
+  # doesn't replace an alarm it has been given since, and the scheduler may call again, e.g. if it
+  # lost the reply. Returns 0 otherwise, which doesn't rule out a different alarm the actor doesn't
+  # know about, so the scheduler deletes only the abandoned alarm. Fails if the actor shuts down
+  # first, in which case its next instance should be told. See ActorCacheInterface::abandonAlarm().
 
   restoreService @12 (params :Frankenvalue) -> (service :WorkerdBootstrap);
   restoreRpcStub @13 (params :Frankenvalue) -> (target :JsRpcTarget, session :JsRpcSession);

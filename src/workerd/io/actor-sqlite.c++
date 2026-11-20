@@ -422,8 +422,9 @@ void ActorSqlite::onWrite(bool allowUnconfirmed) {
   }
 }
 
-kj::Promise<void> ActorSqlite::requestScheduledAlarm(
-    kj::Maybe<kj::Date> requestedTime, kj::Promise<void> priorTask) {
+kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime,
+    kj::Promise<void> priorTask,
+    kj::Maybe<kj::Date> abandonedTime) {
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
 
@@ -437,12 +438,26 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
     // needing to wait for them to complete.
     alarmScheduledNoLaterThan = requestedTime;
   }
+  auto requestNumber = ++alarmRequestCount;
 
-  return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
-      .then([weakThis = addWeakToThis(), movingAlarmLater, requestedTime]() {
+  auto request = [&]() {
+    KJ_IF_SOME(abandoned, abandonedTime) {
+      return hooks.scheduleRunInPlaceOfAbandoned(
+          KJ_REQUIRE_NONNULL(requestedTime), abandoned, kj::mv(priorTask));
+    }
+    return hooks.scheduleRun(requestedTime, kj::mv(priorTask));
+  }();
+  return request.then(
+      [weakThis = addWeakToThis(), movingAlarmLater, requestedTime, requestNumber]() {
     if (!movingAlarmLater) {
-      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled")
-          .alarmScheduledNoLaterThan = requestedTime;
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled");
+      // A request issued after this one may schedule a later alarm, which lowering the value
+      // would hide.
+      if (requestNumber == self.alarmRequestCount ||
+          willFireEarlier(self.alarmScheduledNoLaterThan, requestedTime)) {
+        self.alarmScheduledNoLaterThan = requestedTime;
+      }
     }
   });
 }
@@ -479,6 +494,28 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
     // breaking the output gate.
     LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm drain failed", e);
   }));
+}
+
+kj::Promise<void> ActorSqlite::rescheduleStoredAlarm(
+    kj::Maybe<kj::Date> storedTime, kj::Maybe<kj::Date> abandonedTime) {
+  // We need to update the alarmLaterInFlight promise, so that later requests wait for this one, as
+  // they do for one that moves the alarm later. We issue a single requestScheduledAlarm call, fork
+  // it, and use one branch for alarmLaterInFlight (with error catching so the fork remains usable)
+  // and the other for the caller (which propagates errors to it). We directly update
+  // alarmLaterInFlight here rather than using scheduleLaterAlarm(), because we need that separate
+  // un-caught branch.
+  auto schedulingPromise =
+      requestScheduledAlarm(storedTime, alarmLaterInFlight.addBranch(), abandonedTime).fork();
+  // Clear any stale pending time so that when the existing completion handler fires it does not
+  // start a redundant scheduleLaterAlarm for the same time that this is already scheduling.
+  pendingLaterAlarmTime = kj::none;
+  alarmLaterInFlight = schedulingPromise.addBranch()
+                           .catch_([](kj::Exception&& e) {
+    // The caller's branch reports the failure. We catch here to prevent the chain from breaking
+    // on errors.
+    LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
+  }).fork();
+  return schedulingPromise.addBranch();
 }
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
@@ -1024,9 +1061,9 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
   auto localAlarmState = metadata.getAlarm();
   if (localAlarmState != scheduledTime) {
     if (localAlarmState == lastConfirmedAlarmDbState) {
-      // If the local alarm time is already in the past, just run the handler now. This avoids
-      // blocking alarm execution on the AlarmManager sync when storage is overloaded. The alarm
-      // will either delete itself on success or reschedule on failure.
+      // If the local alarm time is already in the past, just run the handler now, for the local
+      // alarm. This avoids blocking alarm execution on the AlarmManager sync when storage is
+      // overloaded. The alarm will either delete itself on success or reschedule on failure.
       if ((willFireEarlier(localAlarmState, currentTime))) {
         auto localAlarmTime = KJ_ASSERT_NONNULL(localAlarmState);
         LOG_WARNING_PERIODICALLY(
@@ -1036,7 +1073,8 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         inAlarmHandler = true;
         deferredAlarmSpan = kj::mv(parentSpan);
         static const DeferredAlarmDeleter disposer;
-        return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+        return RunAlarmHandler{
+          .deferredDelete = kj::Own<void>(this, disposer), .scheduledTime = localAlarmTime};
       }
 
       // If there's a clean db time that differs from the requested handler's scheduled time, this
@@ -1052,27 +1090,7 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         LOG_WARNING_PERIODICALLY(
             "NOSENTRY SQLite alarm handler canceled with requestScheduledAlarm.", scheduledTime,
             localAlarmState.orDefault(kj::UNIX_EPOCH), actorId);
-
-        // Since we're requesting to move the alarm time to later, we need to update the
-        // alarmLaterInFlight promise. We issue a single requestScheduledAlarm call, fork it,
-        // and use one branch for alarmLaterInFlight (with error catching so the fork remains
-        // usable) and the other for the CancelAlarmHandler return value (which propagates
-        // errors to the caller). We directly update alarmLaterInFlight here rather than using
-        // scheduleLaterAlarm(), because we need that separate un-caught branch.
-        auto schedulingPromise =
-            requestScheduledAlarm(localAlarmState, alarmLaterInFlight.addBranch()).fork();
-        // Clear any stale pending time so that when the existing completion handler
-        // fires it does not start a redundant scheduleLaterAlarm for the same time that
-        // armAlarmHandler is already scheduling.
-        pendingLaterAlarmTime = kj::none;
-        alarmLaterInFlight = schedulingPromise.addBranch()
-                                 .catch_([](kj::Exception&& e) {
-          // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
-          // eventually fire at the earlier time, and the rescheduling will be retried.
-          // We catch here to prevent the chain from breaking on errors.
-          LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
-        }).fork();
-        return CancelAlarmHandler{.waitBeforeCancel = schedulingPromise.addBranch()};
+        return CancelAlarmHandler{.waitBeforeCancel = rescheduleStoredAlarm(localAlarmState)};
       } else {
         // We have a clean local alarm time that is earlier than the handler's scheduled time,
         // which suggests that either the alarm manager is working with stale data or that local
@@ -1109,7 +1127,8 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
   inAlarmHandler = true;
 
   static const DeferredAlarmDeleter disposer;
-  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+  return RunAlarmHandler{
+    .deferredDelete = kj::Own<void>(this, disposer), .scheduledTime = scheduledTime};
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
@@ -1121,26 +1140,47 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 }
 
 kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTime) {
-  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
-  // Clear the alarm from SQLite so getAlarm() returns null instead of a stale time.
-  // Only clear if SQLite currently has the exact alarm being abandoned and we're not mid-handler.
-  // The time check guards against the race where the user set a new alarm (which always has a
-  // time >= now() > scheduledTime due to past-time clamping in setAlarm) before this call arrived.
+  // Called when the alarm scheduler has given up on an alarm, e.g. after too many counted failures
+  // or an abort that doesn't retry. Clear the alarm from SQLite so getAlarm() returns null instead
+  // of a stale time.
+  KJ_REQUIRE(!currentTxn.is<ExplicitTxn*>(), "abandonAlarm() called inside a transaction");
+
+  // Wait for the stored alarm to be committed, so that we don't schedule and report an alarm that a
+  // failed commit then rolls back, maybe to the abandoned one. The stored alarm can match the last
+  // one committed while commits that change it and change it back are still in flight, so we wait
+  // for the latest commit, which covers every write made before it started, and again if a write
+  // changes the alarm meanwhile. A failed commit breaks the output gate, which rejects the wait.
+  for (;;) {
+    auto version = alarmVersion;
+    co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
+    if (alarmVersion == version) break;
+  }
+  // Shutdown doesn't break the output gate. A newer instance may have written its own alarm since,
+  // so this one must not request its stored alarm from the scheduler.
+  requireNotBroken();
+
   if (inAlarmHandler) {
-    // Shouldn't happen -- AlarmManager shouldn't call abandonAlarm while a handler is running.
+    // The abandoned alarm's run has finished, so the running handler is another alarm's, e.g. one
+    // the user set before the abandonment arrived. That handler settles the alarm state.
     LOG_WARNING_ONCE("abandonAlarm called while alarm handler is still running");
-    return kj::Maybe<kj::Date>(kj::none);
+    co_return kj::none;
   }
   KJ_IF_SOME(storedTime, metadata.getAlarm()) {
+    // Only clear if SQLite has the exact alarm being abandoned. The time check guards against the
+    // race where the user set a new alarm (which always has a time >= now() > scheduledTime due to
+    // past-time clamping in setAlarm) before this call arrived.
     if (storedTime == scheduledTime) {
       setAlarm(kj::none, {}, nullptr);
-      return kj::Maybe<kj::Date>(kj::none);
-    } else {
-      // The user set a different alarm. Return it so AlarmManager can re-register.
-      return kj::Maybe<kj::Date>(storedTime);
+      co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
+      co_return kj::none;
     }
+    // The user set a different alarm. The request that gave it to the scheduler may have failed or
+    // been canceled, e.g. because the instance that set it was aborted, so request it again, in
+    // place of the abandoned one.
+    co_await rescheduleStoredAlarm(storedTime, scheduledTime);
+    co_return storedTime;
   }
-  return kj::Maybe<kj::Date>(kj::none);
+  co_return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush(SpanParent parentSpan) {
@@ -1223,6 +1263,11 @@ const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 kj::Promise<void> ActorSqlite::Hooks::scheduleRun(
     kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) {
   JSG_FAIL_REQUIRE(Error, "Alarms have not been configured for this Durable Object.");
+}
+
+kj::Promise<void> ActorSqlite::Hooks::scheduleRunInPlaceOfAbandoned(
+    kj::Date newAlarmTime, kj::Date abandonedTime, kj::Promise<void> priorTask) {
+  return scheduleRun(newAlarmTime, kj::mv(priorTask));
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>

@@ -74,10 +74,11 @@ pub trait Interface: kj::http::Service {
         retry_count: u32,
     ) -> Result<AlarmResult>;
 
-    /// Called when the alarm manager has given up retrying an alarm after too many counted
-    /// failures. The actor should clear its alarm state so `getAlarm()` reflects the deletion.
-    /// Returns the actor's stored alarm time if it differs from `scheduled_time` (the user set a
-    /// new alarm), or `None` if the alarm was cleared or no alarm was stored.
+    /// Called when the alarm scheduler has given up on an alarm, e.g. after too many counted
+    /// failures or an abort that doesn't retry. The actor should clear its alarm state so
+    /// `getAlarm()` reflects the deletion. Returns the actor's stored alarm time if it differs
+    /// from `scheduled_time` (the user set a new alarm), once the scheduler has it, or else
+    /// `None`. See the C++ `ActorCacheInterface::abandonAlarm()`.
     ///
     /// The default does nothing, so implementors that do not host actors need not override it.
     async fn abandon_alarm(&mut self, _scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {

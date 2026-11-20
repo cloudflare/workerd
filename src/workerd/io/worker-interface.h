@@ -121,10 +121,11 @@ class WorkerInterface: public kj::HttpService {
   [[nodiscard]] virtual kj::Promise<AlarmResult> runAlarm(
       kj::Date scheduledTime, uint32_t retryCount) = 0;
 
-  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
-  // The actor should clear its alarm state so getAlarm() reflects the deletion.
-  // Returns the actor's stored alarm time if it differs from scheduledTime (i.e. the user set a
-  // new alarm), or kj::none if the alarm was cleared or no alarm was stored.
+  // Called when the alarm scheduler has given up on an alarm, e.g. after too many counted failures
+  // or an abort that doesn't retry. The actor should clear its alarm state so getAlarm() reflects
+  // the deletion. Returns the actor's stored alarm time if it differs from scheduledTime (i.e. the
+  // user set a new alarm), once the scheduler has it, or else kj::none. See
+  // ActorCacheInterface::abandonAlarm().
   // Default is a no-op so subclasses that don't host actors need not override it.
   virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
     return kj::Maybe<kj::Date>(kj::none);

@@ -273,6 +273,10 @@ class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
     // cancelDeferredAlarmDeletion() are called.  Caller should attach it to a promise
     // representing the alarm handler's execution.
     kj::Own<void> deferredDelete;
+    // The scheduled time of the alarm that the handler runs for, which the caller passes to the
+    // handler. It is the local alarm time, rather than the requested one, when the local alarm is
+    // overdue and runs in the requested alarm's place.
+    kj::Date scheduledTime;
   };
 
   // Call when entering the alarm handler.
@@ -287,10 +291,15 @@ class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
-  // Called by AlarmManager when it has given up retrying an alarm after too many counted failures.
-  // Implementations should clear the alarm from their local state so getAlarm() reflects the
-  // deletion. Returns the stored alarm time if it differs from scheduledTime (the user set a new
-  // alarm), or kj::none if the alarm was cleared or no alarm was stored.
+  // Called by the alarm scheduler when it has given up on the alarm at scheduledTime, e.g. after
+  // too many counted failures or an abort that doesn't retry. The caller holds the actor's input
+  // lock, so no transaction is open. Implementations should clear that alarm from their local
+  // state so getAlarm() reflects the deletion. If a different alarm is stored durably (the user set
+  // a new alarm), it stays set, and the implementation makes sure that the scheduler has it before
+  // returning its time, since the request that gave the scheduler that alarm may have failed. It
+  // requests the alarm in place of the abandoned one, so that the scheduler doesn't replace an
+  // alarm it has been given since. Otherwise this returns kj::none, which doesn't rule out a different alarm the implementation
+  // doesn't know about, so the scheduler must delete only the alarm at scheduledTime.
   virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
     return kj::Maybe<kj::Date>(kj::none);
   }
