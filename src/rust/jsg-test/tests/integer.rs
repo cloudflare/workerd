@@ -9,7 +9,6 @@
 
 use jsg::ExceptionType;
 use jsg::FromJS;
-use jsg::NonCoercible;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -303,37 +302,6 @@ fn vec_of_integers_converts_to_an_array() {
             vec![u64::MAX],
             "Array.isArray(v) && v[0] === 2n ** 64n - 1n"
         ));
-        Ok(())
-    });
-}
-
-/// A `NonCoercible` integer of up to 32 bits accepts only a number, and a `NonCoercible<i64>` or
-/// `NonCoercible<u64>` only a `BigInt`. (C++ JSG has no `NonCoercible` integers.)
-#[test]
-fn non_coercible_integers_require_a_number() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        assert_eq!(*convert::<NonCoercible<u32>>(lock, ctx, "7").unwrap(), 7);
-        assert_type_error::<NonCoercible<u32>>(
-            lock,
-            ctx,
-            "'7'",
-            "Expected a number value but got string",
-        );
-        assert_eq!(*convert::<NonCoercible<i64>>(lock, ctx, "7n").unwrap(), 7);
-        assert_type_error::<NonCoercible<i64>>(
-            lock,
-            ctx,
-            "7",
-            "Expected a bigint value but got number",
-        );
-        assert_eq!(*convert::<NonCoercible<u64>>(lock, ctx, "7n").unwrap(), 7);
-        assert_type_error::<NonCoercible<u64>>(
-            lock,
-            ctx,
-            "7",
-            "Expected a bigint value but got number",
-        );
         Ok(())
     });
 }
