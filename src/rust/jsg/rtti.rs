@@ -574,10 +574,10 @@ impl<T: TypeInfo> TypeInfo for crate::Nullable<T> {
     }
 }
 
-/// `T | null | undefined`, like `Option<Nullable<T>>`.
-impl<T: TypeInfo> TypeInfo for crate::Lenient<T> {
+/// `T | undefined`, like `Option<T>` and C++ `jsg::LenientOptional<T>`.
+impl<T: TypeInfo> TypeInfo for crate::LenientOption<T> {
     fn describe(cx: &mut Context) -> Type {
-        Option::<crate::Nullable<T>>::describe(cx)
+        Option::<T>::describe(cx)
     }
 }
 

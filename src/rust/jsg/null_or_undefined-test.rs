@@ -48,21 +48,6 @@ fn optional_nullable_conversions_preserve_all_states() {
 }
 
 #[test]
-fn lenient_conversions_preserve_convertible_states() {
-    for value in [
-        NullOrUndefined::Some(1),
-        NullOrUndefined::Null,
-        NullOrUndefined::Undefined,
-    ] {
-        let lenient = crate::Lenient::from(value);
-        assert_eq!(NullOrUndefined::from(lenient), value);
-        let (parts, original) = crate::Lenient::from(value).to_parts();
-        assert_eq!(parts, value);
-        assert!(original.is_none());
-    }
-}
-
-#[test]
 fn tracing_visits_only_some() {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;

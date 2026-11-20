@@ -282,8 +282,11 @@ struct ClusterConfig {
   # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
   # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
   # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
-  # stops its containers' Docker containers.
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, its
+  # peers' last, and then stops its containers' Docker containers. Once its other connections have
+  # finished, it starts none of its peers' requests, and closes each peer's connection once the
+  # requests it started on that connection have ended, so that the peer sends those it did not
+  # start where their Durable Objects run next.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
@@ -294,6 +297,11 @@ struct ClusterConfig {
   # than from a Durable Object, waits like any other request, so a call from the object back to
   # itself that way ends only with the requests in flight. Stopping an object's Docker container
   # takes one of the few handoffs that run at once.
+  #
+  # A request to a Durable Object stays in flight until the body of its response is read, so a
+  # caller that checks `res.ok` and drops the response keeps the object busy, and its handoff waits
+  # for half of this timeout before it cancels the request. Read or cancel a body you don't use
+  # (`await res.body?.cancel()`).
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
@@ -486,6 +494,9 @@ struct Service {
 
     assets @7 :AssetsService;
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
+    cache @8 :CacheDirectory;
+    # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
+    # directory on disk.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -555,6 +566,23 @@ struct AssetsService {
   compatibilityFlags @4 :List(Text);
   # Without a user Worker, the compatibility date and flags that select assets behavior, compiled
   # as a Worker's are.
+}
+
+struct CacheDirectory {
+  # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
+  # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
+  # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
+  # file, so entries survive a restart, in a directory per cache: `default/` for `caches.default`,
+  # and for `caches.open(name)` the SHA-256 of `name` in lowercase hex, so that one cache can be
+  # removed by itself. With `Config.cluster`, the instances share one cache instead, which every
+  # instance must name the same: an entry lives on one instance, and the directory holds this
+  # instance's in `cluster-<instance>/`, emptied as it starts. While an instance drains, the keys
+  # it is home to, about 1/N, miss, and puts to them are not stored. Experimental: requires
+  # `--experimental`.
+
+  path @0 :Text;
+  # The directory, as in `DiskDirectory`: relative to the current directory, and if not
+  # specified, given on the command line with `--directory-path <service-name>=<path>`.
 }
 
 struct ServiceDesignator {
@@ -703,10 +731,11 @@ struct Worker {
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
-      # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine, or
-      # `/workerd/d1.js`, D1 databases (see each one's header for the config it takes). Unlike
-      # built-in modules such as `node:` ones, user code cannot import it; it is a Worker's
-      # source. Experimental.
+      # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine,
+      # `/workerd/d1.js`, D1 databases, `/workerd/ratelimit.js`, rate limiting, or
+      # `/workerd/secrets-store.js`, Secrets Store secrets (see each one's header for the config
+      # it takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is
+      # a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

@@ -43,6 +43,25 @@ const shortStop :Workerd.Config = (
   ),
 );
 
+# As `config`, with a Worker whose Cache API is `cache`, whose entries the nodes share
+# (services/cache-cluster.rs), each spooling them to a directory of its own.
+const cache :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-cache-worker.js", esModule = embed "cluster-cache-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        cacheApiOutbound = "cache",
+      )
+    ),
+    ( name = "cache", cache = () ),
+  ],
+  sockets = .sockets,
+  cluster = .cluster,
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (

@@ -58,6 +58,7 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
+struct PeerSession;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -97,6 +98,8 @@ struct WorkerSpec;
 struct WorkerInfo;
 struct ContainerRef;
 struct FacetStartInfo;
+struct HttpAnswer;
+struct WorkerStartupTiming;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
@@ -217,10 +220,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
-kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
-    const WorkerSpec& spec,
-    uint32_t configService,
-    ::rust::Slice<const uint64_t> params);
+kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 
 // =======================================================================================
 
@@ -433,6 +434,10 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> target);
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Promise<void> factory_accept_cluster_peer(const WorkerFactory& factory,
+    kj::Own<kj::AsyncIoStream> stream,
+    ::rust::Box<PeerSession> session,
+    ::rust::Box<ResultTask> closing);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {
@@ -453,12 +458,26 @@ void actor_close_storage(const ActorHandle& actor);
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 kj::Own<RpcClient> rpc_client_debug_actor(
     const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+struct HttpCall {
+  kj::Own<kj::HttpClient> client;
+  kj::HttpClient::Request request;
+};
+kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
+    kj::HttpMethod method,
+    ::rust::Str url,
+    const kj::HttpHeaders& headers,
+    uint64_t length);
+inline kj::AsyncOutputStream& http_call_body(HttpCall& call) {
+  return *call.request.body;
+}
+kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str header);
 kj::Own<WorkerInterface> worker_interface_watch_moved(
     kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 kj::Own<WorkerInterface> worker_interface_watch_peer(

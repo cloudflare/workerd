@@ -138,3 +138,18 @@ wd_cc_library(
     # of libc++'s std::regex parser aborts where workerd's throws.
     alwayslink = True,
 )
+
+# Links the Rust server, whose bridge the factory calls, as server-test does.
+kj_test(
+    src = "worker-factory-rpc-test.c++",
+    deps = [
+        ":worker-factory",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/workerd/jsg",
+        "//src/workerd/server:workerd_capnp",
+        "//src/workerd/server/server:workerd-server",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+)

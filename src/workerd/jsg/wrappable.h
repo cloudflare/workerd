@@ -212,8 +212,9 @@ class Wrappable: public kj::Refcounted {
   }
 
   enum InternalFields : int {
-    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
-    // tag that helps us to identify a v8 API object as one of our own.
+    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`, or to `WORKERD_RUST_WRAPPABLE_TAG`
+    // for the wrapper of a Rust JSG resource. This is a workerd-specific tag that helps us to
+    // identify a v8 API object as one of our own.
     WRAPPABLE_TAG_FIELD_INDEX,
 
     // Number of internal fields in a wrapper object.
@@ -315,8 +316,9 @@ class Wrappable: public kj::Refcounted {
   // is garbage-collected (or unlink() is called).
   //
   // The object MUST have exactly INTERNAL_FIELD_COUNT internal field slots. Internal field 0 holds
-  // the workerd-API marker (see isWorkerdApiObject); the C++ object pointer itself is stored in
-  // V8's CppHeap pointer table rather than an internal field.
+  // the workerd-API marker (see isWorkerdApiObject), or WORKERD_RUST_WRAPPABLE_TAG if `tag` is
+  // kRustResourceWrappableTag; the C++ object pointer itself is stored in V8's CppHeap pointer
+  // table rather than an internal field.
   //
   // If `needsGcTracing` is true, then the virtual method jsgVisitForGc() will be called to
   // perform GC tracing. If false, the method is never called (may be more efficient, if the

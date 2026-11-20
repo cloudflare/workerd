@@ -22,7 +22,8 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO. One whose
 //      owner drains follows the DO to its next owner, also once that owner
 //      exited, and a request that may have run on the drained owner is not
-//      replayed there.
+//      replayed there, while one that reached it as it stopped, not started,
+//      is sent again.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
 //  11. A fresh cluster serves its bucket's deployment, Durable Objects
@@ -33,7 +34,8 @@
 //      services or conflicts with another.
 //  12. A node stopping under load hands its DOs to its peers, two at once
 //      too: requests that arrive meanwhile wait for a DO's handoff and follow
-//      it, JS RPC calls and other DOs' calls included, the calls of a
+//      it, JS RPC calls and other DOs' calls included, a peer's request
+//      released late is answered moved rather than sent on, the calls of a
 //      handoff's work are not held, and a DO whose handoff outlasts its
 //      deadline moves once the node left. A rolling restart of the cluster,
 //      paced by the nodes' readiness, fails, loses and replays no request.
@@ -51,6 +53,10 @@
 //      large value in the bucket, and tokens come from the metadata server,
 //      replaced before they expire, or from a service account key's signed
 //      JWT.
+//  16. The Cache API is one cache across the nodes (services/cache-cluster.rs,
+//      over `ClusterNode::peer_service`): a write is seen at once on the
+//      other node, named caches are apart, a large value crosses, and a
+//      killed node's entries miss at once.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -63,7 +69,7 @@
 //     orphan scan finds them. alarms-test.rs.
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import {
@@ -704,17 +710,16 @@ test('cluster: killing the owner allows another node to take over', async () => 
     // Hit the survivor repeatedly. Requests fail until the dead owner's lease
     // expires; then the survivor takes ownership. The persisted count must be
     // preserved. Each request is bounded: one that hung once held this test
-    // for nine minutes.
+    // for nine minutes. The probe only reads, as a request that timed out
+    // here may still run on the new owner.
     let response = null;
     let lastErr = null;
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       try {
-        response = await fetchJson(
-          survivor.httpPort,
-          '/increment?name=takeover',
-          { timeoutMs: 10_000 }
-        );
+        response = await fetchJson(survivor.httpPort, '/get?name=takeover', {
+          timeoutMs: 10_000,
+        });
         if (response.status === 200) break;
       } catch (err) {
         lastErr = err;
@@ -732,18 +737,20 @@ test('cluster: killing the owner allows another node to take over', async () => 
     );
     assert.strictEqual(
       response.body.count,
-      2,
+      1,
       `persisted state must be preserved across takeover`
     );
 
-    // Further requests to the survivor continue to work and increment.
-    const followup = await fetchJson(
-      survivor.httpPort,
-      '/increment?name=takeover'
-    );
-    assert.strictEqual(followup.status, 200);
-    assert.strictEqual(followup.body.count, 3);
-    assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    // Requests to the survivor continue to work and increment.
+    for (const count of [2, 3]) {
+      const followup = await fetchJson(
+        survivor.httpPort,
+        '/increment?name=takeover'
+      );
+      assert.strictEqual(followup.status, 200);
+      assert.strictEqual(followup.body.count, count);
+      assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    }
 
     const p = survivor.httpPort;
     assert.strictEqual(await facetAdd(p, 'takeover', 'a'), 3);
@@ -1372,6 +1379,117 @@ test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigne
     assert.match(await clusterConnect(port, other), / 403 /, 'instance');
     assert.match(await clusterConnect(port), / 403 /, 'unsigned');
   });
+});
+
+// The Cache API through the Worker of cluster-test.wd-test's `cache` on
+// `node`: `method` on the entry of `key`, in the cache named `ns` if given,
+// for `ttl` seconds if given.
+async function cacheCall(node, method, key, { body, ns, ttl } = {}) {
+  const query = new URLSearchParams({ ...(ns && { ns }), ...(ttl && { ttl }) });
+  const res = await fetch(`http://127.0.0.1:${node.httpPort}/${key}?${query}`, {
+    method,
+    body,
+    signal: AbortSignal.timeout(10_000),
+  });
+  const data = Buffer.from(await res.arrayBuffer());
+  return res.status === 404 ? null : data;
+}
+const cachePut = (node, key, value, ns) =>
+  cacheCall(node, 'PUT', key, { body: value, ns });
+const cacheMatch = async (node, key, ns) =>
+  (await cacheCall(node, 'GET', key, { ns }))?.toString() ?? null;
+const cacheDelete = async (node, key) =>
+  JSON.parse(await cacheCall(node, 'DELETE', key));
+
+test('cluster: the nodes share one Cache API cache', async () => {
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      const [a, b] = nodes;
+      // Sixteen keys, so that each node is almost surely home to some.
+      const keys = Array.from({ length: 16 }, (_, i) => `k${i}`);
+      const each = (f) => Promise.all(keys.map(f));
+      // A node serves once it has been registered for `join_ms`.
+      await until(
+        async () => {
+          await each((key) => cachePut(a, key, `a-${key}`));
+          const got = await each((key) => cacheMatch(b, key));
+          return got.every((value, i) => value === `a-${keys[i]}`);
+        },
+        20_000,
+        "b never saw a's puts"
+      );
+      for (const key of keys) {
+        // A copy a just read is gone once b's overwrite is done.
+        assert.strictEqual(await cacheMatch(a, key), `a-${key}`);
+        await cachePut(b, key, `b-${key}`);
+        assert.strictEqual(await cacheMatch(a, key), `b-${key}`);
+        // And once a's delete is done.
+        assert.strictEqual(await cacheMatch(b, key), `b-${key}`);
+        assert.strictEqual(await cacheDelete(a, key), true);
+        assert.strictEqual(await cacheMatch(b, key), null);
+        assert.strictEqual(await cacheDelete(b, key), false);
+      }
+
+      // An expired entry is none, at its home too: deleting it finds nothing.
+      await each((key) => cacheCall(a, 'PUT', key, { body: 'e', ttl: 1 }));
+      await sleep(1_500);
+      assert.deepStrictEqual(
+        await each((key) => cacheDelete(b, key)),
+        keys.map(() => false)
+      );
+
+      await cachePut(a, 'named', 'one', 'one');
+      assert.strictEqual(await cacheMatch(b, 'named'), null);
+      assert.strictEqual(await cacheMatch(b, 'named', 'two'), null);
+      assert.strictEqual(await cacheMatch(b, 'named', 'one'), 'one');
+
+      const big = randomBytes(10 << 20);
+      await cachePut(a, 'big', big);
+      for (const node of [b, a]) {
+        const got = await cacheCall(node, 'GET', 'big');
+        assert(got?.equals(big), `${node.nodeId} got ${got?.length} bytes`);
+      }
+      // Dropped, its files leave both nodes' disks.
+      assert.strictEqual(await cacheDelete(a, 'big'), true);
+      for (const node of [a, b]) {
+        assert.strictEqual(await cacheMatch(node, 'big'), null);
+        const [dir] = (await readdir(node.localPath)).filter((name) =>
+          name.startsWith('cluster-')
+        );
+        const sizes = await Promise.all(
+          (await readdir(join(node.localPath, dir))).map(
+            async (name) => (await stat(join(node.localPath, dir, name))).size
+          )
+        );
+        assert(
+          sizes.every((size) => size < 1 << 20),
+          `${sizes}`
+        );
+      }
+
+      // Killed, b's record stays live for its lease, but its entries miss at
+      // once on a: the session to it is refused. Windows retries a refused
+      // connect for 2 s, so there a match's 2 s answer deadline bounds it.
+      await each((key) => cachePut(a, key, `c-${key}`));
+      await b.stop({ signal: 'SIGKILL' });
+      await sleep(200);
+      const bound = process.platform === 'win32' ? 4_000 : 1_000;
+      const got = await each(async (key) => {
+        const start = Date.now();
+        const value = await cacheMatch(a, key);
+        assert(Date.now() - start < bound, `${Date.now() - start} ms`);
+        return value;
+      });
+      const hits = got.filter((value, i) => value === `c-${keys[i]}`);
+      assert.strictEqual(
+        hits.length + got.filter((v) => v === null).length,
+        16
+      );
+      assert(0 < hits.length && hits.length < 16, `${hits.length} hits`);
+    },
+    { configName: 'cache', disk: 'cache' }
+  );
 });
 
 test('cluster: a public cluster address is refused', async () => {
@@ -2011,6 +2129,108 @@ test(
   }
 );
 
+test(
+  'cluster: calls a peer has on the way to a node that stops are sent again',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes, nodeKeys }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=late');
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      assert.strictEqual(first.body.count, 1);
+      const n = 256;
+      const held = await fetchJson(
+        nodes[1].httpPort,
+        `/hold-stubs?name=holder&target=late&n=${n}`
+      );
+      assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+      assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
+      assert.deepStrictEqual(held.body.reached, Array(n).fill(nodes[0].nodeId));
+
+      // A session node 0 holds nothing of: a peer's CONNECT that sends
+      // nothing. As node 0 closes it, it still tells the peer why, and waits
+      // for the peer to close its side.
+      const idle = connect(nodes[0].clusterPort, '127.0.0.1');
+      await new Promise((resolve) => idle.once('connect', resolve));
+      const auth = clusterAuth(
+        nodeKeys.get(nodes[0].nodeId),
+        `127.0.0.1:${nodes[0].clusterPort}`
+      );
+      idle.write(
+        `CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\ncf-cluster-auth: ${auth}\r\n\r\n`
+      );
+      let told = '';
+      let answered;
+      const answer = new Promise((resolve) => (answered = resolve));
+      const closed = new Promise((resolve) => {
+        idle.on('data', (data) => {
+          told += data.toString('latin1');
+          if (told.includes('\r\n\r\n')) answered();
+          if (told.includes('this instance stopped')) idle.end();
+        });
+        idle.on('end', () => idle.end());
+        idle.on('close', resolve);
+        idle.on('error', resolve);
+      }).finally(() => answered());
+      await answer;
+      assert.match(told, /^HTTP\/1\.1 200 /);
+
+      // From shortly before node 0's grace period ends until it has exited,
+      // two lanes of increments, a call at a time in each, each on a stub that
+      // reached node 0, so that each goes to node 0 whatever node 0 is doing.
+      // Node 0 stops once no call is in flight there, and the next call lands
+      // as it stops. Node 0 finishes the calls it started, and each it did not
+      // is sent again, and finds the DO on node 1: each call applies once.
+      let exited = false;
+      const exit = nodes[0]
+        .stop({ signal: 'SIGTERM', timeoutMs: 10_000 })
+        .finally(() => (exited = true));
+      await sleep(GRACE_MS - 250);
+      const call = (i) =>
+        fetchJson(
+          nodes[1].httpPort,
+          `/call-stub-n?name=holder&i=${i}&path=/increment`,
+          { timeoutMs: HANG_TIMEOUT_MS }
+        );
+      const lanes = [[], []];
+      let next = 0;
+      const lane = async (calls) => {
+        // Until it made two calls since node 0 exited.
+        for (let since = 0; next < n && since < 2;) {
+          if (exited) since++;
+          calls.push(await call(next++));
+        }
+      };
+      await Promise.all([lane(lanes[0]), sleep(5).then(() => lane(lanes[1]))]);
+      assert(exited, `node 0 still ran after ${n} calls`);
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      await closed;
+      assert(told.includes('this instance stopped'), JSON.stringify(told));
+
+      const counts = [];
+      for (const calls of lanes) {
+        for (const { status, body } of calls) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.target.count);
+        }
+        const own = calls.map(({ body }) => body.target.count);
+        assert.deepStrictEqual(
+          own,
+          [...own].sort((x, y) => x - y)
+        );
+      }
+      const all = counts.length;
+      assert.deepStrictEqual(
+        [...counts].sort((x, y) => x - y),
+        Array.from({ length: all }, (_, i) => i + 2)
+      );
+      const state = await fetchJson(nodes[1].httpPort, '/get?name=late', {
+        timeoutMs: HANG_TIMEOUT_MS,
+      });
+      assert.strictEqual(state.body.count, all + 1);
+    });
+  }
+);
+
 // Load on the DOs `names`: for each, one `/increment` at a time, each sent to
 // the next of the nodes `serving()` lists (indices into `nodes`), until
 // `finish()`. It resolves to the counts each DO's responses carried, in order,
@@ -2155,6 +2375,64 @@ test(
       );
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
+  }
+);
+
+test(
+  "cluster: a peer's request a DO's late handoff releases is answered moved",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes }) => {
+        await fetchJson(nodes[0].httpPort, '/increment?name=late');
+        // Through the peer, and cancelled when the handoff's time for
+        // requests in flight runs out, 2 s into the 4 s stop.
+        const held = fetchJson(
+          nodes[1].httpPort,
+          '/hold-increment?name=late&ms=15000',
+          { timeoutMs: 30_000 }
+        );
+        await until(
+          async () => {
+            const { body } = await fetchJson(
+              nodes[0].httpPort,
+              '/holding?name=late'
+            );
+            return body.nodeId === nodes[0].nodeId && body.holding === 1;
+          },
+          10_000,
+          'the held request never ran on node 0'
+        );
+        const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        // Logged once node 0 marks its objects as being handed off: from then
+        // on a request for one waits for its handoff.
+        await nodes[0].waitForStderr(/cluster: stopping: handing off/, 10_000);
+        // Through the peer too: it waits for the handoff, which ends past that.
+        // Sent on from there, it would still run when the stopping node's
+        // connections deadline cuts it off; answered moved, the peer runs it
+        // where the DO went.
+        const peer = await fetchJson(
+          nodes[1].httpPort,
+          '/hold-increment?name=late&ms=2000',
+          { timeoutMs: 30_000 }
+        );
+        // It went to node 0, waited there, and was answered moved.
+        assert.match(
+          nodes[0].stderr,
+          /a peer's request that waited for its handoff is answered moved/
+        );
+        assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
+        assert.deepStrictEqual(
+          [peer.body.nodeId, peer.body.count],
+          [nodes[1].nodeId, 2]
+        );
+        const cut = await held;
+        assert.strictEqual(cut.status, 500, JSON.stringify(cut.body));
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      },
+      { configName: 'shortStop' }
+    );
   }
 );
 

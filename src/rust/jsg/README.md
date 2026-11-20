@@ -16,8 +16,9 @@ through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
   which honors `name = "..."`. Explicit names must be unique among emitted Rust
   and C++ declarations; inactive compatibility variants may reuse a name.
 - `Option<T>` describes `T | undefined` and `Nullable<T>` describes `T | null`,
-  so a `Nullable<T>` parameter is required, as at runtime. `NullOrUndefined<T>`,
-  `Option<Nullable<T>>` and `Lenient<T>` describe an optional `T | null | undefined`.
+  so a `Nullable<T>` parameter is required, as at runtime. `LenientOption<T>` describes
+  `T | undefined`, as `Option<T>` does. `NullOrUndefined<T>` and `Option<Nullable<T>>`
+  describe an optional `T | null | undefined`.
 - `Dict<V>` describes `Record<string, V>`, as C++ describes `jsg::Dict`.
 - Vectors and slices describe JavaScript arrays, numbers included; a typed array
   is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
@@ -108,11 +109,9 @@ When converting back to JavaScript, `Null` produces a `null` property; `Undefine
 is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
 that flag, just as `None` does for an `Option<T>` field.
 
-`Lenient<T>` additionally preserves shallow conversion mismatches as `Unconvertable`.
-Converting it to `NullOrUndefined<T>` maps those mismatches to `Undefined`;
-`Lenient::to_parts()` returns `(NullOrUndefined<T>, Option<TracedGlobal<Value>>)`,
-with the original mismatched JavaScript value in the second element when present.
-Errors from nested conversions or JavaScript execution still propagate.
+`LenientOption<T>` is C++ `jsg::LenientOptional<T>`: an optional `T` for which a top-level
+type mismatch is absent rather than an error, while `null` goes through `T`. See its rustdoc
+in `lenient.rs`.
 
 ## Safety rules
 
@@ -254,10 +253,12 @@ some other way or reaches it through another kind of cell, a std cell included, 
 C++ JSG will be removed, so Rust JSG must not depend on it. New code in the C++ shims in
 `src/rust/jsg` calls V8 directly (`v8::TryCatch`, `v8::MaybeLocal`, `isolate->ThrowException`) and
 leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are listed in the
-allowlist described below, and are to be removed. The one exception is in
-`src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
-`JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+allowlist described below, and are to be removed. The one exception is `throwPendingToRun()` in
+`src/workerd/io/io-context/ffi.c++`, which throws `JsExceptionThrown` to pass an exception or a
+termination that Rust left pending to `IoContext::run()`, which learns of them no other way. Only
+Rust code that `run()` itself runs reaches it: the callback of `io_context_await_io_and_run()` and
+the function of a `ReentryCallback`. Don't add another throw, or another caller that `run()`
+doesn't run.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),
@@ -595,7 +596,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
-| `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
+| `jsg::LenientOption<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | Use `jsg::Cell` when the field is set after construction; `take` and `replace` make the `Rc` strong |
 | `jsg::Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `jsg::Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
@@ -636,8 +637,8 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 
 ### Dropping references
 
-An `Rc` holds the resource in an `std::rc::Rc` and its C++ `Wrappable` in a `kj::Rc`, and a `Weak`
-holds an `std::rc::Weak`. None of their reference counts is atomic: the isolate lock is what keeps
+An `Rc` holds its C++ `Wrappable`, whose allocation holds the resource, in a `kj::Rc`, and a `Weak`
+holds a `kj::WeakRc` of it. None of their reference counts is atomic: the isolate lock is what keeps
 two threads from updating them at once. Releasing a strong reference may also touch the resource's
 wrapper. Yet an `Rc` or a `Weak` can be dropped without the lock, for example by C++ code that
 owns the Rust object holding it. So each one keeps the state of the isolate its resource was
@@ -1391,8 +1392,8 @@ So a value is coerced only when no variant takes it as it is, and coerced to a s
 in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
 `null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
 cannot become a string, or an exception thrown by `toString()`, is thrown rather than
-trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
-`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`
+or `f64`, takes part in `T`'s passes but converts only a value of
 exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 
@@ -1429,7 +1430,7 @@ variants of nested unions and the inner types of nullable types: at most one boo
 numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
 nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
 without resources, dictionary-like or sequence-like types; no `Option<T>` or
-`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`LenientOption<T>`, which mark optional parameters and fields; and no type twice, counting a
 `Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
 have several resource types, as Web IDL allows, but not the same one in both a union and
 a union nested in it.

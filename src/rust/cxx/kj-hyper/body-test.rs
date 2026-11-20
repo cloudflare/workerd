@@ -40,3 +40,15 @@ fn a_dropped_abort_handle_lets_the_body_end() {
         assert!(frame.is_none());
     });
 }
+
+#[test]
+fn a_sink_aborted_before_its_drop_fails_the_body() {
+    block_on(async {
+        let (sink, _abort, mut body) = channel(None);
+        sink.write(b"hello").await.unwrap();
+        sink.abort();
+        drop(sink);
+        let frame = poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await;
+        assert!(matches!(frame, Some(Err(Aborted))));
+    });
+}

@@ -20,7 +20,6 @@ filegroup(
         "container.c++",
         "event-target-bootstrap.c++",
         "events.c++",
-        "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
         "filesystem-bootstrap.c++",
@@ -83,7 +82,6 @@ filegroup(
         "container.h",
         "event-target-bootstrap.h",
         "events.h",
-        "eventsource.h",
         "export-loopback.h",
         "filesystem.h",
         "filesystem-bootstrap.h",
@@ -756,14 +754,6 @@ kj_test(
 )
 
 kj_test(
-    src = "eventsource-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
     src = "event-target-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
@@ -807,6 +797,14 @@ kj_test(
 
 kj_test(
     src = "dom-exception-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "messagechannel-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

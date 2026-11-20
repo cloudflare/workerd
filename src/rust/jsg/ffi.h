@@ -62,8 +62,8 @@ struct RttiContext;
 // Describes a module's exports in an RTTI context, given the module's specifier.
 using ModuleDescribeCallback = ::rust::Fn<void(RttiContext&, ::rust::Str)>;
 
-// Mirrors the CXX shared struct defined in v8.rs. Must be kept in sync.
-// The CXX-generated v8.rs.h provides the canonical definition; this is
+// Mirror CXX shared structs defined in v8.rs. Must be kept in sync.
+// The CXX-generated v8.rs.h provides the canonical definitions; these are
 // only used when ffi.h is included before v8.rs.h (e.g. from ffi.c++
 // before the CXX bridge is compiled).
 #ifndef CXXBRIDGE1_STRUCT_workerd$rust$jsg$TraitObjectPtr
@@ -76,16 +76,30 @@ struct TraitObjectPtr {
 };
 #endif
 
+#ifndef CXXBRIDGE1_STRUCT_workerd$rust$jsg$WrappableWeakRc
+#define CXXBRIDGE1_STRUCT_workerd$rust$jsg$WrappableWeakRc
+struct WrappableWeakRc {
+  uintptr_t cell;
+  uintptr_t ptr;
+};
+#endif
+
 // A Wrappable subclass for Rust objects.
 //
 // Lives on the KJ heap (via kj::Refcounted through Wrappable) and integrates
 // with cppgc via the CppgcShim bridge pattern that Wrappable provides.
 //
-// The data[] field stores a Rust fat pointer (data + vtable) to `dyn GarbageCollected`
-// from a leaked Rc<dyn GarbageCollected>. This lets us call back into Rust for tracing
-// and destruction without knowing the concrete type at compile time.
+// The Rust object that a Wrappable owns lives in the same allocation, after the Wrappable (see
+// allocate()). `trait_object` stores a Rust fat pointer (data + vtable) to it as
+// `dyn GarbageCollected`, which lets us call back into Rust for tracing and destruction without
+// knowing the concrete type at compile time.
 class Wrappable: public ::workerd::jsg::Wrappable {
  public:
+  // Allocates a Wrappable followed by `size` bytes of storage aligned to `align`, for the Rust
+  // object it will own, and sets `storage` to the storage's address. The Wrappable owns no object
+  // until Rust moves one into the storage and sets `trait_object`.
+  static kj::Rc<Wrappable> allocate(size_t size, size_t align, uintptr_t& storage);
+
   ~Wrappable();
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
@@ -102,10 +116,37 @@ class Wrappable: public ::workerd::jsg::Wrappable {
     return addRefToThis();
   }
 
-  // Rust trait object pointer + TypeId, stored by Ref::new().
+  // Returns a new kj::WeakRc reference to this Wrappable, which expires when the last kj::Rc
+  // reference is dropped, before the Wrappable and its Rust object are destroyed.
+  kj::WeakRc<Wrappable> toWeakRc() {
+    return addWeakToThis();
+  }
+
+  // Frees the allocation of allocate(). Being the only usual deallocation function of the class,
+  // it is what `delete` calls, without a size, which would not cover the storage.
+  static void operator delete(void* pointer) {
+    ::operator delete(pointer);
+  }
+
+  // Rust trait object pointer + TypeId of the object in the storage, set by wrappable_init().
   // Defined as a CXX shared struct in v8.rs; contains data_ptr, vtable_ptr,
   // type_id_lo, type_id_hi.
   TraitObjectPtr trait_object = {0, 0, 0, 0};
+
+ private:
+  // The bytes allocated after the Wrappable.
+  struct Extra {
+    size_t bytes;
+  };
+
+  Wrappable() = default;
+
+  static void* operator new(size_t size, Extra extra) {
+    return ::operator new(size + extra.bytes);
+  }
+  static void operator delete(void* pointer, Extra) {
+    ::operator delete(pointer);
+  }
 };
 
 struct ResourceDescriptor;
@@ -114,12 +155,27 @@ struct ResourceDescriptor;
 // Rc::clone calls wrappable_add_strong_ref. A dropped strong Rc calls
 // wrappable_remove_strong_ref under the isolate lock (Rust's IsolateState defers it until the
 // lock otherwise), then drops its KjRc<Wrappable>, which decrements the kj::Rc refcount.
-kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
+//
+// wrappable_new() allocates a Wrappable with storage for a Rust object (Wrappable::allocate()).
+// Once Rust has moved the object into the storage, wrappable_init() records it in `trait_object`
+// and adds the first strong reference. wrappable_init_unreferenced() adds none, for an object no
+// Rust Rc refers to (a startup snapshot's copy of a resource).
+kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage);
+void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr);
+void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
+
+// A jsg::Weak holds a kj::WeakRc<Wrappable> as a WrappableWeakRc, which has its layout. Like the
+// kj::Rc of a jsg::Rc, its count is not atomic, and Rust's IsolateState serializes its release.
+WrappableWeakRc wrappable_downgrade(Wrappable& wrappable);
+WrappableWeakRc wrappable_weak_clone(const WrappableWeakRc& weak);
+bool wrappable_weak_is_alive(const WrappableWeakRc& weak);
+kj::Maybe<kj::Rc<Wrappable>> wrappable_weak_upgrade(const WrappableWeakRc& weak);
+void wrappable_weak_drop(WrappableWeakRc& weak);
 void wrappable_add_strong_ref(Wrappable& wrappable);
 // Whether a collection found the Wrappable unreachable and is sweeping it (see
-// jsg::Wrappable::isCondemned()). Weak::is_alive and Weak::upgrade refuse such a Wrappable;
-// wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
+// jsg::Wrappable::isCondemned()). wrappable_weak_is_alive() and Weak::upgrade refuse such a
+// Wrappable; wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
 bool wrappable_is_condemned(const Wrappable& wrappable);
 bool wrappable_try_condemn(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);
@@ -536,6 +592,10 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 //   then either, so that wrapping fails the same way whether or not the wrapper exists.
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
+// The Wrappable's existing wrapper in `isolate`, as wrap_resource() returns it, without creating
+// one: empty also when the Wrappable has no wrapper yet, and `wrappedElsewhere` and a pending
+// exception or termination are as for wrap_resource().
+MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,

@@ -636,9 +636,8 @@ startup --experimental_remote_repo_contents_cache
 # define, are build's. Bazel expands a config's common lines before its build lines, which none of
 # them override.
 # TODO(soon): move with the deployment to a production account.
-common:bazelflare --remote_executor=grpcs://bazelflare.workers-runtime-playground.cloudflareworkers.com:8980
-common:bazelflare --tls_certificate=build/bazelflare/ca.pem
-common:bazelflare --credential_helper=bazelflare.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
+common:bazelflare --remote_executor=grpcs://remote.workers-runtime-playground.cloudflareworkers.com:8980
+common:bazelflare --credential_helper=remote.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
 # Long enough to approve a login in the browser, which the helper opens without a saved token.
 common:bazelflare --credential_helper_timeout=2m
 common:bazelflare --noremote_upload_local_results
