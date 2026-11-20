@@ -862,13 +862,7 @@ export default {
     expectedFailures: ['Consume empty FormData response body as text'],
   },
   'response/response-consume-stream.any.js': {},
-  'response/response-error-from-stream.any.js': {
-    comment: 'We have TypeError, they want pull Error',
-    expectedFailures: [
-      'ReadableStream start() Error propagates to Response.formData() Promise',
-      'ReadableStream pull() Error propagates to Response.formData() Promise',
-    ],
-  },
+  'response/response-error-from-stream.any.js': {},
   'response/response-error.any.js': {},
   'response/response-from-stream.any.js': {},
   'response/response-headers-guard.any.js': {},

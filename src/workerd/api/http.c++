@@ -254,28 +254,23 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto contentType =
-        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
-            TypeError, "Parsing a Body as FormData requires a Content-Type header.");
+    KJ_ASSERT(!bodyStream.isDisturbed(js));
+    auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
 
-    if (!bodyStream.isNull()) {
-      KJ_ASSERT(!bodyStream.isDisturbed(js));
-      return bodyStream.text(js, bufferingLimit())
-          .then(js,
-              [contentType = kj::mv(contentType), formData = kj::mv(formData)](
-                  auto& js, kj::String rawText) mutable {
-        formData->parse(js, kj::mv(rawText), contentType,
-            !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-        return kj::mv(formData);
-      });
-    }
-
-    // Theoretically, we already know if this will throw: the empty string is a valid
-    // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
-    // FormData::parse() make the decision, to keep the logic in one place.
-    formData->parse(
-        js, kj::String(), contentType, !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-    return js.resolvedPromise(kj::mv(formData));
+    // The body is read before the Content-Type is checked, so that an error from the body stream
+    // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
+    // application/x-www-form-urlencoded but not as multipart/form-data.
+    // See https://fetch.spec.whatwg.org/#concept-body-consume-body
+    auto limit = bodyStream.isNull() ? 0 : bufferingLimit();
+    return bodyStream.text(js, limit).then(js,
+        [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
+            auto& js, kj::String rawText) mutable {
+      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
+          "Parsing a Body as FormData requires a Content-Type header.");
+      formData->parse(js, kj::mv(rawText), contentType,
+          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
+      return kj::mv(formData);
+    });
   });
 }
 
