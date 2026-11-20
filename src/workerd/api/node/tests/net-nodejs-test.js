@@ -234,6 +234,32 @@ export const testNetRejectedIpLiteralIsNotLookup = {
   },
 };
 
+// Node converts a host name to ASCII (punycode) before resolving it. The
+// sidecar listens on a loopback IPv4 address, so its full-width form is a
+// non-ASCII name that converts back to that address.
+export const testNetConnectIdnHost = {
+  async test(ctrl, env) {
+    const host = env.SIDECAR_HOSTNAME.replace(/[0-9.]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) + 0xfee0)
+    );
+    ok(/[\u0080-\uffff]/.test(host));
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const c = net.connect(env.SERVER_PORT, host);
+    c.on('connect', resolve);
+    c.on('error', reject);
+    await promise;
+    strictEqual(c.remoteAddress, host);
+    strictEqual(c._host, host);
+    c.destroy();
+
+    // A name that does not convert keeps the error connect() reports.
+    await assertHostNotFound(
+      '\u00e9xample\u3000test',
+      'Specified address is empty string, contains unsupported characters or is too long.'
+    );
+  },
+};
+
 // test/parallel/test-net-can-reset-timeout.js
 export const testNetCanResetTimeout = {
   async test(ctrl, env, ctx) {

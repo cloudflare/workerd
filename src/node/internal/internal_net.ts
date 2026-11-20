@@ -96,6 +96,7 @@ import type {
 import type { InspectOptions } from 'node:util';
 import type { Writable } from 'node:stream';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
+import { default as urlUtil } from 'node-internal:url';
 
 import { inspect } from 'node-internal:internal_inspect';
 import type { FixedLengthArray } from 'node-internal:internal_utils';
@@ -331,6 +332,14 @@ export class BoundSocket {
 export type LocalAddressInfo = Omit<AddressInfo, 'family'> & {
   family?: string;
 };
+
+// Node's lookup converts a host name to ASCII (punycode); connect() accepts
+// only ASCII. A name with URL delimiters or '%', which the URL host parser
+// would cut or decode, or one that fails to convert, is left for connect().
+function toASCIIHost(host: string): string {
+  if (!/[\u0080-\uffff]/.test(host) || /[/?#\\:%]/.test(host)) return host;
+  return urlUtil.domainToASCII(host) || host;
+}
 
 function familyOf(address: string): string | undefined {
   switch (isIP(address)) {
@@ -1883,7 +1892,7 @@ function initializeConnection(
       // would replace the synthetic host address here, from handle.opened.
       socket[kBoundSource] = concreteLocal(socket[kBoundSource]);
 
-      const handle = inner.connect(`${host}:${port}`, {
+      const handle = inner.connect(`${toASCIIHost(`${host}`)}:${port}`, {
         // The Duplex owns the half-open policy: with allowHalfOpen false,
         // Readable's endReadableNT schedules endWritableNT, which calls end()
         // a tick after 'end' and so flushes whatever was queued (the socket's
