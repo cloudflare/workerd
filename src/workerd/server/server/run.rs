@@ -467,7 +467,8 @@ pub async fn run(
             // `preventEviction` or not, while it serves on: a request for one waits for it and
             // then goes where it runs next. Then it leaves the cluster, so peers take over what
             // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
+            // balancers may still send some, and lets its connections finish, its peers' sessions
+            // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
@@ -520,7 +521,7 @@ pub async fn run(
                     if !serving.is_terminated() {
                         serving.as_mut().await?;
                     }
-                    node.peer_requests_done().await;
+                    node.stop_peer_sessions().await;
                     Ok::<_, crate::Error>(())
                 };
                 let finished = tokio::time::timeout_at(deadlines.connections, finished);

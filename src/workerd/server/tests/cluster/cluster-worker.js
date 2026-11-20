@@ -32,9 +32,16 @@
 //                    `path`, or with `rpc` set its identity() method. Returns
 //                    the target's response. A failure is reported with the
 //                    error's `retryable`.
+//   /hold-stubs      Like /hold-stub, `n` stubs at once, each to the DO named
+//                    by `target`, kept for /call-stub-n. Returns the node each
+//                    reached.
+//   /call-stub-n     Calls /identity, or the path given by `path`, on the stub
+//                    /hold-stubs keeps at index `i`. Returns the target's
+//                    response, or `{ error }` with status 500.
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /hold-increment  Waits `ms` (default 1000), then increments.
+//   /holding         Returns how many /hold-increment requests are waiting.
 //   /chain?targets=T Waits `ms` (default 0), sends /chain with the rest of the
 //                    DO names `targets` lists, separated by commas, to the
 //                    first, then increments: a call through other DOs, or
@@ -349,6 +356,8 @@ export class Counter extends DurableObject {
     this.env = env;
     // See /hold-stub. Maps target DO name -> stub.
     this.heldStubs = new Map();
+    // See /holding.
+    this.holding = 0;
 
     state.blockConcurrencyWhile(async () => {
       if (await state.storage.get(BREAK_ON_CONSTRUCT)) {
@@ -443,6 +452,34 @@ export class Counter extends DurableObject {
           { status: 500 }
         );
       }
+    } else if (url.pathname === '/hold-stubs') {
+      const target = url.searchParams.get('target');
+      const n = Number(url.searchParams.get('n'));
+      this.heldStubList = Array.from({ length: n }, () =>
+        this.env.COUNTER.get(this.env.COUNTER.idFromName(target))
+      );
+      const reached = await Promise.all(
+        this.heldStubList.map(
+          async (stub) =>
+            (await (await stub.fetch('http://do/identity')).json()).nodeId
+        )
+      );
+      return Response.json({ nodeId, id: idHex, reached });
+    } else if (url.pathname === '/call-stub-n') {
+      const stub = this.heldStubList[Number(url.searchParams.get('i'))];
+      try {
+        const response = await stub.fetch(
+          'http://do' + (url.searchParams.get('path') ?? '/identity')
+        );
+        if (!response.ok) return response;
+        return Response.json({
+          nodeId,
+          id: idHex,
+          target: await response.json(),
+        });
+      } catch (err) {
+        return Response.json({ error: String(err) }, { status: 500 });
+      }
     } else if (url.pathname === '/vend-stub') {
       const kind = url.searchParams.get('kind');
       const target = url.searchParams.get('target');
@@ -481,10 +518,17 @@ export class Counter extends DurableObject {
       await scheduler.wait(1000);
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/hold-increment') {
-      await scheduler.wait(Number(url.searchParams.get('ms') ?? '1000'));
+      this.holding++;
+      try {
+        await scheduler.wait(Number(url.searchParams.get('ms') ?? '1000'));
+      } finally {
+        this.holding--;
+      }
       const count = ((await this.state.storage.get('count')) ?? 0) + 1;
       await this.state.storage.put('count', count);
       return Response.json({ count, nodeId, id: idHex });
+    } else if (url.pathname === '/holding') {
+      return Response.json({ holding: this.holding, nodeId, id: idHex });
     } else if (url.pathname === '/chain') {
       await scheduler.wait(Number(url.searchParams.get('ms') ?? '0'));
       const [next, ...rest] = (url.searchParams.get('targets') ?? '')

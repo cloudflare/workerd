@@ -56,6 +56,7 @@ use crate::channels::SubrequestChannel;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
+use crate::cluster::PeerSession;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
@@ -2020,9 +2021,37 @@ impl ServerHandle {
             )
         })?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
+            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?, None),
             None => namespace.channel_by_name(actor_id, false),
         }))
+    }
+}
+
+impl ServerHandle {
+    pub(crate) fn resolve_peer_actor(
+        &self,
+        session: &PeerSession,
+        service_name: &str,
+        class_name: &str,
+        actor_id: &str,
+    ) -> Result<Box<SubrequestChannel>> {
+        let server = self.server()?;
+        let namespace = server
+            .debug_service(service_name)?
+            .as_worker()
+            .and_then(|worker| worker.namespace(class_name))
+            .filter(|namespace| namespace.cluster().is_some())
+            .ok_or_else(|| {
+                kj::failed!(
+                    "jsg.Error: no clustered Durable Object class \"{class_name}\" in \
+                     \"{service_name}\""
+                )
+            })?;
+        let id = ffi::actor_id_from_hex(actor_id)?;
+        let session = Rc::clone(&session.requests);
+        Ok(SubrequestChannel::new(
+            namespace.peer_channel(id, Some(session)),
+        ))
     }
 }
 

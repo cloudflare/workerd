@@ -22,7 +22,8 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO. One whose
 //      owner drains follows the DO to its next owner, also once that owner
 //      exited, and a request that may have run on the drained owner is not
-//      replayed there.
+//      replayed there, while one that reached it as it stopped, not started,
+//      is sent again.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
 //  11. A fresh cluster serves its bucket's deployment, Durable Objects
@@ -33,7 +34,8 @@
 //      services or conflicts with another.
 //  12. A node stopping under load hands its DOs to its peers, two at once
 //      too: requests that arrive meanwhile wait for a DO's handoff and follow
-//      it, JS RPC calls and other DOs' calls included, the calls of a
+//      it, JS RPC calls and other DOs' calls included, a peer's request
+//      released late is answered moved rather than sent on, the calls of a
 //      handoff's work are not held, and a DO whose handoff outlasts its
 //      deadline moves once the node left. A rolling restart of the cluster,
 //      paced by the nodes' readiness, fails, loses and replays no request.
@@ -2011,6 +2013,108 @@ test(
   }
 );
 
+test(
+  'cluster: calls a peer has on the way to a node that stops are sent again',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes, nodeKeys }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=late');
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      assert.strictEqual(first.body.count, 1);
+      const n = 256;
+      const held = await fetchJson(
+        nodes[1].httpPort,
+        `/hold-stubs?name=holder&target=late&n=${n}`
+      );
+      assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+      assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
+      assert.deepStrictEqual(held.body.reached, Array(n).fill(nodes[0].nodeId));
+
+      // A session node 0 holds nothing of: a peer's CONNECT that sends
+      // nothing. As node 0 closes it, it still tells the peer why, and waits
+      // for the peer to close its side.
+      const idle = connect(nodes[0].clusterPort, '127.0.0.1');
+      await new Promise((resolve) => idle.once('connect', resolve));
+      const auth = clusterAuth(
+        nodeKeys.get(nodes[0].nodeId),
+        `127.0.0.1:${nodes[0].clusterPort}`
+      );
+      idle.write(
+        `CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\ncf-cluster-auth: ${auth}\r\n\r\n`
+      );
+      let told = '';
+      let answered;
+      const answer = new Promise((resolve) => (answered = resolve));
+      const closed = new Promise((resolve) => {
+        idle.on('data', (data) => {
+          told += data.toString('latin1');
+          if (told.includes('\r\n\r\n')) answered();
+          if (told.includes('this instance stopped')) idle.end();
+        });
+        idle.on('end', () => idle.end());
+        idle.on('close', resolve);
+        idle.on('error', resolve);
+      }).finally(() => answered());
+      await answer;
+      assert.match(told, /^HTTP\/1\.1 200 /);
+
+      // From shortly before node 0's grace period ends until it has exited,
+      // two lanes of increments, a call at a time in each, each on a stub that
+      // reached node 0, so that each goes to node 0 whatever node 0 is doing.
+      // Node 0 stops once no call is in flight there, and the next call lands
+      // as it stops. Node 0 finishes the calls it started, and each it did not
+      // is sent again, and finds the DO on node 1: each call applies once.
+      let exited = false;
+      const exit = nodes[0]
+        .stop({ signal: 'SIGTERM', timeoutMs: 10_000 })
+        .finally(() => (exited = true));
+      await sleep(GRACE_MS - 250);
+      const call = (i) =>
+        fetchJson(
+          nodes[1].httpPort,
+          `/call-stub-n?name=holder&i=${i}&path=/increment`,
+          { timeoutMs: HANG_TIMEOUT_MS }
+        );
+      const lanes = [[], []];
+      let next = 0;
+      const lane = async (calls) => {
+        // Until it made two calls since node 0 exited.
+        for (let since = 0; next < n && since < 2;) {
+          if (exited) since++;
+          calls.push(await call(next++));
+        }
+      };
+      await Promise.all([lane(lanes[0]), sleep(5).then(() => lane(lanes[1]))]);
+      assert(exited, `node 0 still ran after ${n} calls`);
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      await closed;
+      assert(told.includes('this instance stopped'), JSON.stringify(told));
+
+      const counts = [];
+      for (const calls of lanes) {
+        for (const { status, body } of calls) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.target.count);
+        }
+        const own = calls.map(({ body }) => body.target.count);
+        assert.deepStrictEqual(
+          own,
+          [...own].sort((x, y) => x - y)
+        );
+      }
+      const all = counts.length;
+      assert.deepStrictEqual(
+        [...counts].sort((x, y) => x - y),
+        Array.from({ length: all }, (_, i) => i + 2)
+      );
+      const state = await fetchJson(nodes[1].httpPort, '/get?name=late', {
+        timeoutMs: HANG_TIMEOUT_MS,
+      });
+      assert.strictEqual(state.body.count, all + 1);
+    });
+  }
+);
+
 // Load on the DOs `names`: for each, one `/increment` at a time, each sent to
 // the next of the nodes `serving()` lists (indices into `nodes`), until
 // `finish()`. It resolves to the counts each DO's responses carried, in order,
@@ -2155,6 +2259,64 @@ test(
       );
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
+  }
+);
+
+test(
+  "cluster: a peer's request a DO's late handoff releases is answered moved",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes }) => {
+        await fetchJson(nodes[0].httpPort, '/increment?name=late');
+        // Through the peer, and cancelled when the handoff's time for
+        // requests in flight runs out, 2 s into the 4 s stop.
+        const held = fetchJson(
+          nodes[1].httpPort,
+          '/hold-increment?name=late&ms=15000',
+          { timeoutMs: 30_000 }
+        );
+        await until(
+          async () => {
+            const { body } = await fetchJson(
+              nodes[0].httpPort,
+              '/holding?name=late'
+            );
+            return body.nodeId === nodes[0].nodeId && body.holding === 1;
+          },
+          10_000,
+          'the held request never ran on node 0'
+        );
+        const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        // Logged once node 0 marks its objects as being handed off: from then
+        // on a request for one waits for its handoff.
+        await nodes[0].waitForStderr(/cluster: stopping: handing off/, 10_000);
+        // Through the peer too: it waits for the handoff, which ends past that.
+        // Sent on from there, it would still run when the stopping node's
+        // connections deadline cuts it off; answered moved, the peer runs it
+        // where the DO went.
+        const peer = await fetchJson(
+          nodes[1].httpPort,
+          '/hold-increment?name=late&ms=2000',
+          { timeoutMs: 30_000 }
+        );
+        // It went to node 0, waited there, and was answered moved.
+        assert.match(
+          nodes[0].stderr,
+          /a peer's request that waited for its handoff is answered moved/
+        );
+        assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
+        assert.deepStrictEqual(
+          [peer.body.nodeId, peer.body.count],
+          [nodes[1].nodeId, 2]
+        );
+        const cut = await held;
+        assert.strictEqual(cut.status, 500, JSON.stringify(cut.body));
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      },
+      { configName: 'shortStop' }
+    );
   }
 );
 

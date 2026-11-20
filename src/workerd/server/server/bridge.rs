@@ -28,6 +28,7 @@ pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
+pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
@@ -665,6 +666,16 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
+        /// Serves a cluster peer's session: the debug port's interface with only `getActor`,
+        /// for clustered namespaces (`resolve_peer_actor`). Once `closing` fails, the session
+        /// disconnects with its error, which fails every call the peer still has out on it; it
+        /// resolves once the peer shut its side of the connection too.
+        async fn factory_accept_cluster_peer(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            session: Box<PeerSession>,
+            closing: Box<ResultTask>,
+        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
@@ -900,6 +911,17 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
+        /// requests `session` counts.
+        fn resolve_peer_actor(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A session a cluster peer has open here (`ClusterNode`).
+        type PeerSession;
 
         /// A worker's I/O channel table for one request: what its bindings reach.
         type ChannelFactory;

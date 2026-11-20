@@ -282,8 +282,11 @@ struct ClusterConfig {
   # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
   # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
   # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
-  # stops its containers' Docker containers.
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, its
+  # peers' last, and then stops its containers' Docker containers. Once its other connections have
+  # finished, it starts none of its peers' requests, and closes each peer's connection once the
+  # requests it started on that connection have ended, so that the peer sends those it did not
+  # start where their Durable Objects run next.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent

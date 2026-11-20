@@ -82,8 +82,13 @@ pub struct ClusterNode {
     alarms_interval: Duration,
     /// Set once this instance drains.
     deadlines: Cell<Option<Deadlines>>,
-    /// The requests peers have in flight here.
-    peer_requests: Rc<PeerRequests>,
+    /// The requests the debug port has in flight here; a peer's are its session's.
+    peer_requests: Rc<Count>,
+    /// The sessions peers have open here (`PeerConnection::connect`).
+    peer_sessions: Rc<Count>,
+    /// Set once this instance stops its peers' sessions (`stop_peer_sessions`): from then on it
+    /// starts none of their requests, and accepts no session.
+    refusing_peers: Rc<Signal>,
     /// Whether the application's listeners are being served (`Serving`).
     serving: Cell<bool>,
 }
@@ -99,9 +104,9 @@ pub struct Deadlines {
     pub stop: Instant,
 }
 
-/// A count of requests, and its waiters for it to reach zero.
+/// A count, and its waiters for it to reach zero.
 #[derive(Default)]
-struct PeerRequests {
+pub struct Count {
     count: Cell<usize>,
     none: Notify,
 }
@@ -115,15 +120,62 @@ impl Drop for Serving {
     }
 }
 
-/// A request a peer has in flight here, from its start until its interface is dropped.
-pub struct PeerRequest(Rc<PeerRequests>);
+/// One of a `Count`, until it is dropped.
+pub struct Counted(Rc<Count>);
 
-impl Drop for PeerRequest {
+impl Drop for Counted {
     fn drop(&mut self) {
         let count = self.0.count.get() - 1;
         self.0.count.set(count);
         if count == 0 {
             self.0.none.notify_waiters();
+        }
+    }
+}
+
+impl Count {
+    /// Counts one until the guard is dropped.
+    fn add(self: &Rc<Self>) -> Counted {
+        self.count.set(self.count.get() + 1);
+        Counted(Rc::clone(self))
+    }
+
+    /// Resolves once the count is zero.
+    async fn none(&self) {
+        loop {
+            let none = self.none.notified();
+            if self.count.get() == 0 {
+                return;
+            }
+            none.await;
+        }
+    }
+}
+
+/// A flag that is set once, and its waiters for it.
+#[derive(Default)]
+struct Signal {
+    set: Cell<bool>,
+    notify: Notify,
+}
+
+impl Signal {
+    fn is_set(&self) -> bool {
+        self.set.get()
+    }
+
+    fn set(&self) {
+        self.set.set(true);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            let set = self.notify.notified();
+            if self.set.get() {
+                return;
+            }
+            set.await;
         }
     }
 }
@@ -435,6 +487,8 @@ impl ClusterNode {
             alarms_interval: ALARMS_INTERVAL / divisor,
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
+            peer_sessions: Rc::default(),
+            refusing_peers: Rc::default(),
             serving: Cell::new(false),
         }))
     }
@@ -487,22 +541,37 @@ impl ClusterNode {
         released
     }
 
-    /// Counts a request a peer makes here until the guard is dropped.
-    pub fn peer_request(&self) -> PeerRequest {
-        let requests = Rc::clone(&self.peer_requests);
-        requests.count.set(requests.count.get() + 1);
-        PeerRequest(requests)
+    /// When a relay of a peer's request that waited here for its object's handoff must start by,
+    /// once this instance stops; none before. Sent on, the request does not outlast its caller's
+    /// retries; but a call this instance relays when its connections deadline comes is cut off as
+    /// one that may have run, which the peer cannot send again. So it relays only while the call
+    /// has the time work in flight on an object being handed off has had, until the `in_flight`
+    /// deadline; from then on it answers `moved`, and the peer sends the request where the object
+    /// went itself.
+    pub fn handed_off_relay_deadline(&self) -> Option<Instant> {
+        self.deadlines.get().map(|deadlines| deadlines.in_flight)
     }
 
-    /// Resolves once no peer has a request in flight here.
-    pub async fn peer_requests_done(&self) {
-        loop {
-            let none = self.peer_requests.none.notified();
-            if self.peer_requests.count.get() == 0 {
-                return;
-            }
-            none.await;
+    /// Starts a request a peer makes here, or the debug port: counted on the peer's `session`,
+    /// or else on this instance, until the guard is dropped. Once this instance stops its peers'
+    /// sessions it answers a peer's `moved` instead, before anything runs, and the peer sends the
+    /// request where the object runs now. The debug port's requests are served as before.
+    pub fn peer_request(&self, session: Option<&Rc<Count>>) -> Result<Counted> {
+        match session {
+            Some(_) if self.refusing_peers.is_set() => Err(moved("this instance is stopping")),
+            Some(session) => Ok(session.add()),
+            None => Ok(self.peer_requests.add()),
         }
+    }
+
+    /// Ends its peers' sessions, once it serves nothing else. It starts none of their requests
+    /// from now on, and closes each session once the requests it started on it have ended: the
+    /// peer reads `moved` as its reason, which fails every call it still has out on the session,
+    /// none of which started here, as `moved` too, so it sends them again where the objects run
+    /// now. Resolves once every session has closed, and the debug port's requests have ended.
+    pub async fn stop_peer_sessions(&self) {
+        self.refusing_peers.set();
+        futures::join!(self.peer_requests.none(), self.peer_sessions.none());
     }
 
     pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
@@ -804,9 +873,34 @@ impl Handler for PeerConnection {
             connect.reject(403, "Forbidden", HeadersRef::from(&empty), Some(0))?;
             return Ok(());
         }
+        let node = &self.node;
+        // A stopping instance's sessions close (`ClusterNode::stop_peer_sessions`). Refused, the
+        // peer sends its requests elsewhere: none were sent.
+        if node.refusing_peers.is_set() {
+            let headers = HeadersRef::from(&empty);
+            connect.reject(503, "Service Unavailable", headers, Some(0))?;
+            return Ok(());
+        }
+        let _open = node.peer_sessions.add();
         let tunnel = connect.accept(200, "OK", HeadersRef::from(&empty))?;
-        // A peer holds the cluster key, so it gets the debug port's interface.
-        Ok(ffi::factory_accept_debug_port(self.node.factory.raw(), tunnel.into_kj()).await?)
+        let requests = Rc::<Count>::default();
+        let session = Box::new(PeerSession {
+            requests: Rc::clone(&requests),
+        });
+        // Closes once the instance stops its peers' sessions and no request started on this one
+        // is in flight.
+        let refusing = Rc::clone(&node.refusing_peers);
+        let closing = Box::new(ResultTask(
+            async move {
+                refusing.wait().await;
+                requests.none().await;
+                Err(moved("this instance stopped"))
+            }
+            .boxed_local(),
+        ));
+        // A peer holds the cluster key, so it reaches the clustered objects here.
+        let factory = node.factory.raw();
+        Ok(ffi::factory_accept_cluster_peer(factory, tunnel.into_kj(), session, closing).await?)
     }
 }
 
@@ -823,6 +917,11 @@ fn text(reader: capnp::Result<capnp::text::Reader<'_>>) -> Result<String> {
 
 fn capnp(e: &capnp::Error) -> crate::Error {
     kj::failed!("{e}")
+}
+
+/// A session a peer has open here: the requests started on it, each counted until it ends.
+pub struct PeerSession {
+    pub(crate) requests: Rc<Count>,
 }
 
 /// A Rust future C++ awaits (`result_task_run`).
