@@ -36,7 +36,10 @@ use workerd_server::entry;
 use workerd_server::run::RunOptions;
 
 use crate::bridge::ffi;
+use crate::config::ClusterError;
+use crate::config::ClusterFlags;
 use crate::config::Config;
+use crate::config::Env;
 use crate::process::Executable;
 use crate::process::Process;
 use crate::socket_fd::InheritedSocket;
@@ -105,19 +108,8 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    // `compile` translates a wrangler config for a server that joins no cluster, so a compiled
-    // config without `cluster` cannot become a node of one.
-    let has_cluster = config.has_cluster().unwrap_or_else(|error| {
-        usage_error::<T>(format!("the config compiled into this executable: {error}"))
-    });
-    if options.cluster_address.is_some() && !has_cluster {
-        usage_error::<T>(
-            "--cluster-addr: the config compiled into this executable has no cluster, so it \
-             cannot join one. Serve the config with `workerd serve --cluster-addr` instead, or \
-             compile a config that has `cluster`.",
-        );
-    }
-    let (config, options) = with_cluster::<T>(config, &args.serve_or_test, options, &process);
+    let (config, options) =
+        with_cluster::<T>(config, &args.serve_or_test, options, &process, false);
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -151,7 +143,8 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 serve_or_test.data_dir.as_deref(),
                 serve_or_test.experimental,
             );
-            let (config, options) = with_cluster::<T>(config, &serve_or_test, options, &process);
+            let (config, options) =
+                with_cluster::<T>(config, &serve_or_test, options, &process, true);
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -517,8 +510,9 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Joins `config` to a cluster with `--cluster-addr` if it has none, fills its cluster key and
-/// bucket from the environment, then adds cluster deployments to `config` and records their
+/// Joins `config` to a cluster with `--cluster-addr` if it has none and `can_join` (not for a
+/// compiled config), fills its cluster key and bucket from the environment
+/// ([`Config::with_cluster`]), then adds cluster deployments to `config` and records their
 /// service sources in `options`.
 ///
 /// Only joining happens without `--experimental`, so that the server refuses the cluster as it
@@ -532,23 +526,26 @@ fn with_cluster<T: CommandFactory>(
     serve_or_test: &args::ServeOrTestArgs,
     mut options: RunOptions,
     process: &Process,
+    can_join: bool,
 ) -> (Config, RunOptions) {
-    let config = config
-        .joining_cluster(
-            options.cluster_address.as_deref(),
-            options.cluster_advertise.as_deref(),
-        )
-        .unwrap_or_else(|error| usage_error::<T>(error));
+    let flags = ClusterFlags {
+        address: options.cluster_address.as_deref(),
+        advertise: options.cluster_advertise.as_deref(),
+        can_join,
+    };
+    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let environment = serve_or_test.experimental.then_some(&var as Env<'_>);
+    let config = match config.with_cluster(&flags, environment) {
+        Ok(config) => config,
+        Err(ClusterError::Usage(error)) => usage_error::<T>(error),
+        Err(ClusterError::Environment(error)) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
     if !serve_or_test.experimental {
         return (config, options);
     }
-    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    let config = config
-        .with_cluster_environment(var)
-        .unwrap_or_else(|error| {
-            eprintln!("{error}");
-            std::process::exit(1);
-        });
     let address = options.cluster_address.as_deref();
     let advertise = options.cluster_advertise.as_deref();
     match deployments::add(config, address, advertise) {
