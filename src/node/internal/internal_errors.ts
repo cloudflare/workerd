@@ -630,22 +630,26 @@ export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
   }
 }
 
-export class ERR_INVALID_URL extends NodeError {
+export class ERR_INVALID_URL extends NodeTypeError {
   input: string;
+  base?: string;
 
-  constructor(url: string) {
+  constructor(url: string, base?: string) {
     super('ERR_INVALID_URL', 'Invalid URL');
     this.input = url;
+    if (base != null) {
+      this.base = base;
+    }
   }
 }
 
-export class ERR_INVALID_URL_SCHEME extends NodeError {
+export class ERR_INVALID_URL_SCHEME extends NodeTypeError {
   constructor(scheme: string) {
     super('ERR_INVALID_URL_SCHEME', `The URL must be of scheme ${scheme}`);
   }
 }
 
-export class ERR_INVALID_FILE_URL_HOST extends NodeError {
+export class ERR_INVALID_FILE_URL_HOST extends NodeTypeError {
   constructor(input: string) {
     super(
       'ERR_INVALID_FILE_URL_HOST',
@@ -654,7 +658,7 @@ export class ERR_INVALID_FILE_URL_HOST extends NodeError {
   }
 }
 
-export class ERR_INVALID_FILE_URL_PATH extends NodeError {
+export class ERR_INVALID_FILE_URL_PATH extends NodeTypeError {
   constructor(input: string) {
     super('ERR_INVALID_FILE_URL_PATH', `File URL path ${input}`);
   }
