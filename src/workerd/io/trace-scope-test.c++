@@ -163,7 +163,7 @@ KJ_TEST(
       auto targetContext = fixture.newIoContext();
       auto target = fixture.newUndeliveredIncomingRequest(*targetContext, makeObservedTracer());
       target->delivered();
-      auto targetUserSpanId = target->getInvocationSpanContext().getSpanId().getId();
+      auto targetUserSpanId = KJ_ASSERT_NONNULL(target->getSpanContext().getSpanId()).getId();
       fixture.enterContext(*target, [&](const TestFixture::Environment& env) {
         jsg::AsyncContextFrame::Scope scope(env.js, captured);
         KJ_EXPECT(spanId(targetContext->getCurrentTraceSpan()) == 1);
@@ -203,7 +203,7 @@ KJ_TEST("an unobserved actor continuation masks a newer request's observed spans
   });
   auto second = fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer());
   second->delivered();
-  auto secondUserSpanId = second->getInvocationSpanContext().getSpanId().getId();
+  auto secondUserSpanId = KJ_ASSERT_NONNULL(second->getSpanContext().getSpanId()).getId();
   fixture.drainAndDestroy(kj::mv(first));
   fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
     KJ_EXPECT(spanId(context->getCurrentTraceSpan()) == 1);

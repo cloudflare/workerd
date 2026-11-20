@@ -436,12 +436,12 @@ void WorkerTracer::setEventInfo(
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
   startInvocationSpan(incomingRequest, info);
-  auto& context = incomingRequest.getInvocationSpanContext();
-  setEventInfoInternal(
-      context, context.getParentSpanId(), incomingRequest.nowForTraceOnset(), kj::mv(info));
+  setEventInfoInternal(incomingRequest.getSpanContext(), incomingRequest.getInvocationId(),
+      incomingRequest.getTriggerSpanId(), incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
-void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& context,
+void WorkerTracer::setEventInfoInternal(const tracing::SpanContext& context,
+    tracing::TraceId invocationIdParam,
     kj::Maybe<tracing::SpanId> parentSpanId,
     kj::Date timestamp,
     tracing::EventInfo&& info) {
@@ -457,8 +457,8 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
   }
 
   trace->eventTimestamp = timestamp;
-  this->onsetSpanContext = context.toSpanContext();
-  this->invocationId = context.getInvocationId();
+  this->onsetSpanContext = tracing::SpanContext::clone(context);
+  this->invocationId = invocationIdParam;
 
   size_t eventSize = 0;
   KJ_SWITCH_ONEOF(info) {
@@ -503,10 +503,11 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
         tracing::SpanContext(context.getTraceId(), parentSpanId, context.getTraceFlags());
 
     // The tail event owns the onset on the heap.
+    auto onsetSpanId = KJ_REQUIRE_NONNULL(context.getSpanId(), "onset context must have a span ID");
     auto onset = kj::heap<tracing::Onset>(
-        context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray());
+        onsetSpanId, cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray());
     auto onsetSize = sizeof(tracing::Onset) + onset->size();
-    writer->report(onsetContext, context.getInvocationId(), kj::mv(onset), timestamp, onsetSize);
+    writer->report(onsetContext, invocationIdParam, kj::mv(onset), timestamp, onsetSize);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
@@ -707,7 +708,7 @@ void BaseTracer::setStartInvocationSpanFunc(StartInvocationSpanFunc func) {
 void BaseTracer::startInvocationSpan(
     IoContext::IncomingRequest& incomingRequest, const tracing::EventInfo& info) {
   KJ_IF_SOME(func, startInvocationSpanFunc) {
-    auto started = func(incomingRequest.getInvocationSpanContext());
+    auto started = func(incomingRequest.getSpanContext(), incomingRequest.getTriggerSpanId());
     invocationSpan = kj::mv(started.span);
     invocationLogs = kj::mv(started.logs);
     invocationExportsSpans = started.exportSpans;

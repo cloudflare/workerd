@@ -187,7 +187,8 @@ struct WriterTest {
   // Keeps `target` alive after the session ends.
   kj::Maybe<rpc::TailStreamTarget::Client> targetClient;
   kj::Own<TailStreamWriter> writer;
-  InvocationSpanContext context = InvocationSpanContext::newForInvocation();
+  SpanContext context = SpanContext(TraceId::fromEntropy(), SpanId::fromEntropy());
+  TraceId invocationId = TraceId::fromEntropy();
 
   explicit WriterTest(kj::Maybe<kj::Rc<TailStreamBudget>> budget = kj::none) {
     auto ownTarget = kj::heap<FakeTailStreamTarget>();
@@ -202,7 +203,7 @@ struct WriterTest {
   }
 
   void reportOnset() {
-    writer->report(context.toSpanContext(), context.getInvocationId(),
+    writer->report(context, invocationId,
         kj::heap<Onset>(SpanId(1),
             Onset::Info(FetchEventInfo(
                 kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr)),
@@ -212,12 +213,12 @@ struct WriterTest {
 
   // Reports a log whose message is reported to own `size` bytes.
   void reportLog(size_t size) {
-    writer->report(context.toSpanContext(), context.getInvocationId(),
-        Log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("x")), kj::UNIX_EPOCH, size);
+    writer->report(context, invocationId, Log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("x")),
+        kj::UNIX_EPOCH, size);
   }
 
   void reportOutcome() {
-    writer->report(context.toSpanContext(), context.getInvocationId(),
+    writer->report(context, invocationId,
         Outcome(EventOutcome::OK, 0 * kj::SECONDS, 0 * kj::SECONDS), kj::UNIX_EPOCH, 0);
   }
 
@@ -398,11 +399,11 @@ struct TracerTest {
         kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
     auto& t = tracer.emplace(kj::rc<WorkerTracer>(
         kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(writer.writer)));
-    t->setEventInfoInternal(writer.context, kj::none, kj::UNIX_EPOCH,
+    t->setEventInfoInternal(writer.context, writer.invocationId, kj::none, kj::UNIX_EPOCH,
         FetchEventInfo(
             kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr));
     t->setUserSpanSubmitter(kj::refcounted<TestSpanSubmitter>(t->getWeakRef(), parentSpanIds));
-    root = t->makeUserRequestSpan(writer.context.toSpanContext());
+    root = t->makeUserRequestSpan(writer.context);
   }
 
   // Ends the invocation and returns the SpanOpen events the tail worker received.
@@ -423,9 +424,10 @@ struct TracerTest {
 KJ_TEST("The root user span stands for the onset span") {
   TracerTest test;
   auto& invocation = test.writer.context;
+  auto onsetSpanId = KJ_ASSERT_NONNULL(invocation.getSpanId());
   auto rootContext = KJ_ASSERT_NONNULL(test.root.toSpanContext());
   KJ_EXPECT(rootContext.getTraceId() == invocation.getTraceId());
-  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getSpanId()) == invocation.getSpanId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getSpanId()) == onsetSpanId);
 
   {
     auto child = test.root.newChild("child"_kjc, kj::UNIX_EPOCH);
@@ -437,13 +439,13 @@ KJ_TEST("The root user span stands for the onset span") {
   // Spans at the top of the invocation are opened as children of the onset span, rather than with
   // no parent for the tracer to fill in.
   KJ_ASSERT(test.parentSpanIds.size() == 2, test.parentSpanIds.size());
-  KJ_EXPECT(test.parentSpanIds[0] == invocation.getSpanId());
+  KJ_EXPECT(test.parentSpanIds[0] == onsetSpanId);
   KJ_ASSERT(spanOpens.size() == 2, spanOpens.size());
   KJ_EXPECT(spanOpens[0].traceId == invocation.getTraceId());
-  KJ_EXPECT(spanOpens[0].invocationId == invocation.getInvocationId());
-  KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[0].spanId) == invocation.getSpanId().getId());
+  KJ_EXPECT(spanOpens[0].invocationId == test.writer.invocationId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[0].spanId) == onsetSpanId.getId());
   KJ_EXPECT(test.parentSpanIds[1] == SpanId(spanOpens[0].openedSpanId));
-  KJ_EXPECT(spanOpens[1].invocationId == invocation.getInvocationId());
+  KJ_EXPECT(spanOpens[1].invocationId == test.writer.invocationId);
   KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[1].spanId) == spanOpens[0].openedSpanId);
 }
 
@@ -460,7 +462,7 @@ KJ_TEST("WorkerTracer stamps logs and exceptions with the onset's invocationId")
   // Onset, Log, Exception, Outcome.
   KJ_ASSERT(test.writer.target->events.size() == 4, test.writer.target->events.size());
   for (const auto& event: test.writer.target->events) {
-    KJ_EXPECT(event.invocationId == invocation.getInvocationId());
+    KJ_EXPECT(event.invocationId == test.writer.invocationId);
   }
   KJ_EXPECT(KJ_ASSERT_NONNULL(test.writer.target->events[1].spanId) == 77u);
   KJ_EXPECT(KJ_ASSERT_NONNULL(test.writer.target->events[2].spanId) == 77u);
@@ -469,6 +471,7 @@ KJ_TEST("WorkerTracer stamps logs and exceptions with the onset's invocationId")
 KJ_TEST("WorkerTracer falls back to the onset span when a span has no parent") {
   TracerTest test;
   auto& invocation = test.writer.context;
+  auto onsetSpanId = KJ_ASSERT_NONNULL(invocation.getSpanId());
   {
     KJ_EXPECT_LOG(WARNING, "reported span without a parent span");
     KJ_ASSERT_NONNULL(test.tracer)
@@ -478,7 +481,7 @@ KJ_TEST("WorkerTracer falls back to the onset span when a span has no parent") {
 
   KJ_ASSERT(spanOpens.size() == 1, spanOpens.size());
   KJ_EXPECT(spanOpens[0].traceId == invocation.getTraceId());
-  KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[0].spanId) == invocation.getSpanId().getId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(spanOpens[0].spanId) == onsetSpanId.getId());
   KJ_EXPECT(spanOpens[0].openedSpanId == 5);
 }
 

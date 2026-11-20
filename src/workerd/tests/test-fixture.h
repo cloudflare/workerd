@@ -192,8 +192,9 @@ struct TestFixture {
 
   // Like newIncomingRequest(IoContext&), but leaves delivery to the caller. This models code paths
   // that report trace onset immediately before delivered().
-  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(
-      IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer = kj::none);
+  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(IoContext& context,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer = kj::none,
+      kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext = kj::none);
 
   // Enter an IoContext. Callback receives Environment& and must return void (NOT a
   // Promise — the Worker::Lock is only valid for the synchronous duration of the

@@ -164,14 +164,15 @@ class BaseTracer: public kj::Refcounted {
 
   // Has the tracer record the invocation's own span, opened by `func` when the event is set, and
   // makes it the root that makeUserRequestSpan() returns. `func` is given the invocation's span
-  // context, whose ids the span takes. The tracer names and tags the span from the invocation's
-  // events (see invocation-span.h), including those the worker reports for its active span, and
-  // ends it with the outcome. The hook can supply a default sampling decision on the context
-  // before user spans and subrequests inherit it. When it also returns a log submitter, the
-  // tracer gives it the invocation's logs and exceptions until the tracer is destroyed, as the
-  // streaming tail gets them.
+  // context (which always carries the invocation's onset span ID) and optional parent span ID from
+  // a triggering request. The tracer names and tags the span from the invocation's events (see
+  // invocation-span.h), including those the worker reports for its active span, and ends it with
+  // the outcome. The hook can supply a default sampling decision on the context before user spans
+  // and subrequests inherit it. When it also returns a log submitter, the tracer gives it the
+  // invocation's logs and exceptions until the tracer is destroyed, as the streaming tail gets
+  // them.
   using StartInvocationSpanFunc =
-      kj::Function<StartedInvocationSpan(tracing::InvocationSpanContext&)>;
+      kj::Function<StartedInvocationSpan(tracing::SpanContext&, kj::Maybe<tracing::SpanId>)>;
   void setStartInvocationSpanFunc(StartInvocationSpanFunc func);
 
   virtual void setJsRpcInfo(const tracing::SpanContext& context,
@@ -307,8 +308,10 @@ class WorkerTracer final: public BaseTracer {
   // span context from it.
   void setEventInfo(
       IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
-  // RPC variant; deserialized invocation contexts do not retain their parent.
-  void setEventInfoInternal(const tracing::InvocationSpanContext& context,
+  // Variant used for RPC-based tracing and tests where the onset context and invocation ID are
+  // supplied directly.
+  void setEventInfoInternal(const tracing::SpanContext& context,
+      tracing::TraceId invocationId,
       kj::Maybe<tracing::SpanId> parentSpanId,
       kj::Date timestamp,
       tracing::EventInfo&& info);

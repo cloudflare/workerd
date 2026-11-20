@@ -36,7 +36,8 @@ struct TraceFlags {
   }
 }
 
-# InvocationSpanContext used to identify the current tracing context. Only used internally so far.
+# Deprecated: retained for embedders migrating internal RPC schemas to SpanContext plus a separate
+# invocationId.
 struct InvocationSpanContext {
   # The 128-bit ID uniquely identifying a trace.
   traceId @0 :TraceId;
@@ -386,8 +387,8 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   struct TailEvent {
-    # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
-    # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
+    # A streaming tail worker receives a series of Tail Events. Each event carries a SpanContext
+    # and invocationId. The first TailEvent delivered to a streaming tail session is always an
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
     # SpanOpen, SpanUpdate, SpanClose, and Mark events. Every SpanOpen *must* be associated with a
     # SpanClose unless the stream was abruptly terminated.

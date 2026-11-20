@@ -311,26 +311,52 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
       selfTokenFactory(kj::mv(selfTokenFactory)),
       maybeTriggerSpanContext(kj::mv(maybeTriggerSpanContext)) {}
 
-tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
-  // Creating a new InvocationSpanContext can be a bit expensive since it needs to
-  // generate random IDs, so we only create it lazily when requested, which should
-  // only be when tracing is enabled and we need to record spans.
-  KJ_IF_SOME(ctx, invocationSpanContext) {
-    return ctx;
+IoContext::IncomingRequest::InvocationTraceIds& IoContext::IncomingRequest::
+    ensureInvocationTraceIds() {
+  // Generating random trace/invocation/span IDs can be expensive, so initialize lazily when
+  // requested (typically only when tracing is enabled).
+  KJ_IF_SOME(ids, invocationTraceIds) {
+    return ids;
   }
 
-  invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerSpanContext, context->getEntropySource());
-  return KJ_ASSERT_NONNULL(invocationSpanContext);
+  auto& entropy = context->getEntropySource();
+  kj::Maybe<tracing::TraceFlags> flags;
+  auto traceId = maybeTriggerSpanContext
+                     .map([&](const tracing::SpanContext& trigger) {
+    flags = trigger.getTraceFlags();
+    return trigger.getTraceId();
+  }).orDefault([&] { return tracing::TraceId::fromEntropy(entropy); });
+  auto invocationId = tracing::TraceId::fromEntropy(entropy);
+  auto spanId = tracing::SpanId::fromEntropy(entropy);
+
+  return invocationTraceIds.emplace(InvocationTraceIds{
+    .spanContext = tracing::SpanContext(traceId, spanId, flags),
+    .invocationId = invocationId,
+  });
+}
+
+tracing::SpanContext& IoContext::IncomingRequest::getSpanContext() {
+  return ensureInvocationTraceIds().spanContext;
+}
+
+tracing::TraceId IoContext::IncomingRequest::getInvocationId() {
+  return ensureInvocationTraceIds().invocationId;
+}
+
+kj::Maybe<tracing::SpanId> IoContext::IncomingRequest::getTriggerSpanId() const {
+  KJ_IF_SOME(trigger, maybeTriggerSpanContext) {
+    return trigger.getSpanId();
+  }
+  return kj::none;
 }
 
 tracing::SpanContext IoContext::IncomingRequest::getSpanContextForUserSpan(SpanParent& userSpan) {
-  auto& base = getInvocationSpanContext();
+  auto& base = getSpanContext();
   tracing::SpanId sid = userSpan.getSpanId();
   if (sid != tracing::SpanId::nullId) {
     return tracing::SpanContext(base.getTraceId(), sid, base.getTraceFlags());
   }
-  return base.toSpanContext();
+  return tracing::SpanContext::clone(base);
 }
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
@@ -375,8 +401,7 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
-    rootUserTraceSpan =
-        workerTracer->makeUserRequestSpan(getInvocationSpanContext().toSpanContext());
+    rootUserTraceSpan = workerTracer->makeUserRequestSpan(getSpanContext());
   }
 
   KJ_IF_SOME(a, context->actor) {
