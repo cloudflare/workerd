@@ -96,6 +96,29 @@ test('collectPerIsolateDeclarations: rejects references to unpublished declarati
   );
 });
 
+test('collectPerIsolateDeclarations: rejects a published declaration imported under another name', () => {
+  // Printed as written, the parameter's type would be the global Date.
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Thing } from './thing';
+export type { PublicOptions } from './options';
+`,
+        'options.d.ts': `export interface PublicOptions {\n    mode: string;\n}\n`,
+        'thing.d.ts': `import type { PublicOptions as Date } from './options';
+declare class Thing {
+    constructor(options: Date);
+}
+export type { Thing };
+`,
+      }),
+    {
+      message:
+        'Thing refers to PublicOptions as Date; import it under its own name',
+    }
+  );
+});
+
 test('collectPerIsolateDeclarations: rejects references through an import that does not resolve', () => {
   assert.throws(
     () =>
