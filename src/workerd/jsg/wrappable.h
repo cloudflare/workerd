@@ -212,8 +212,9 @@ class Wrappable: public kj::Refcounted {
   }
 
   enum InternalFields : int {
-    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
-    // tag that helps us to identify a v8 API object as one of our own.
+    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`, or to `WORKERD_RUST_WRAPPABLE_TAG`
+    // for the wrapper of a Rust JSG resource. This is a workerd-specific tag that helps us to
+    // identify a v8 API object as one of our own.
     WRAPPABLE_TAG_FIELD_INDEX,
 
     // Number of internal fields in a wrapper object.
