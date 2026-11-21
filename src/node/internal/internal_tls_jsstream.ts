@@ -128,6 +128,9 @@ export class JSStreamSocket extends Socket {
     });
     // Some `Stream` don't pass `hasError` parameters when closed.
     stream.once('close', () => {
+      // A close before the end errors the handle's readable: the connection
+      // is closing, the read loop's rejected read is not a failure.
+      handle.readRejectionExpected = true;
       // Errors emitted from `stream` have also been emitted to this instance
       // so that we don't pass errors to `destroy()` again.
       this.destroy();

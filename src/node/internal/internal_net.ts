@@ -751,10 +751,11 @@ export declare class Socket extends _Socket {
     // upgrade) never run two loops - and thus two BYOB reads - against the
     // same reader at once.
     readLoopActive?: boolean;
-    // Set by a TLS upgrade before it releases this handle's reader and
-    // writer and carries the connection over to a new handle: the read
-    // loop's pending read then rejects, which is not a failure.
-    handedOver?: boolean;
+    // Set when the read loop's pending read is about to reject and that is
+    // not a failure: a TLS upgrade releases this handle's reader and carries
+    // the connection over to a new handle, or a JSStreamSocket's Duplex
+    // closes before its end, which errors the handle's readable.
+    readRejectionExpected?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -2188,12 +2189,16 @@ async function startRead(socket: Socket): Promise<void> {
     }
   } catch (err) {
     // A pending read rejects when the socket is destroyed (its stream is
-    // closing) or when a TLS upgrade releases this loop's reader (the
-    // handle is handed over; the parent socket keeps pointing at it):
-    // neither is news. Anything else - a failing generator or buffer
-    // (above), a read the runtime refuses - destroys the socket with the
-    // error rather than leaving it open and silent.
-    if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
+    // closing) or when the handle expects it (a TLS upgrade released this
+    // loop's reader, or a JSStreamSocket's Duplex closed): neither is news.
+    // Anything else - a failing generator or buffer (above), a read the
+    // runtime refuses - destroys the socket with the error rather than
+    // leaving it open and silent.
+    if (
+      socket._handle === handle &&
+      !handle.readRejectionExpected &&
+      !socket.destroyed
+    ) {
       socket.destroy(streamFailureError(handle.socket, 'read', err as Error));
     }
   } finally {
