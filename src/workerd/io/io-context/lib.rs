@@ -427,7 +427,9 @@ impl<'s> IoContext<'s> {
     /// has run, in whatever `IoContext` is current then: by a rejection that passes through, or a
     /// reaction that fails, it may be dropped in another request's `IoContext`, or in none.
     /// Otherwise it is dropped when the garbage collector collects the reactions, rather than when
-    /// the `IoContext` is destroyed.
+    /// the `IoContext` is destroyed. So an I/O object, which a functor of `addFunctor()` would
+    /// capture, goes in `data` inside an [`IoOwned`] (see [`IoContext::add_object`]), which drops
+    /// it in its `IoContext` wherever the handle is dropped.
     ///
     /// # Errors
     /// Fails unless this `IoContext` is the current one, as `addFunctor()` does, or, leaving an
