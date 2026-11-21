@@ -427,6 +427,17 @@ kj_test(
     ],
 )
 
+# The C++ handler and the Rust codec against each other.
+kj_test(
+    src = "channel-token-codec-test.c++",
+    deps = [
+        ":channel-token",
+        "//src/rust/cxx/kj-rs",
+        "//src/workerd/server/channel-token-codec",
+        "//src/workerd/server/channel-token-codec:ffi.rs@cxx",
+    ],
+)
+
 kj_test(
     src = "alarm-scheduler-test.c++",
     deps = [
