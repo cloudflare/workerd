@@ -33,18 +33,13 @@ impl Drop for GlobalCounted {
 #[jsg_resource]
 struct TracedHolder {
     handle: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
 impl TracedHolder {}
 
 static TRACED_HOLDER_DROPS: AtomicUsize = AtomicUsize::new(0);
-
-impl Drop for TracedHolder {
-    fn drop(&mut self) {
-        TRACED_HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
-}
 
 /// A strong handle to the wrapper of a new `GlobalCounted`. Once the lock's scope closes, only
 /// the handle keeps the wrapper, and with it the resource, alive.
@@ -264,6 +259,7 @@ fn global_into_traced_global_is_traced() {
         let resource = jsg::Rc::new(
             lock,
             TracedHolder {
+                drops: crate::DropCounter(&TRACED_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );

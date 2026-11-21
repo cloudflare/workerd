@@ -64,6 +64,10 @@ class HkdfKey final: public CryptoKey::Impl {
         DOMOperationError, "HKDF deriveBits failed.");
   }
 
+  bool supportsExport() const override {
+    return false;
+  }
+
   kj::StringPtr getAlgorithmName() const override {
     return "HKDF";
   }

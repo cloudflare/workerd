@@ -4,7 +4,6 @@
 
 #include "worker-interface.h"
 
-#include <workerd/util/http-util.h>
 #include <workerd/util/stream-utils.h>
 
 #include <kj/debug.h>

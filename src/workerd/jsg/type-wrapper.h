@@ -7,6 +7,7 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/iterator.h>

@@ -106,6 +106,10 @@ pub struct ClusterNode {
     pub leave_wait_ms: Cell<u64>,
     /// The `cache` services a peer's session reaches here (`ServerHandle::resolve_peer_cache`).
     pub caches: RefCell<HashSet<String>>,
+    /// Whether the lease thread watches this thread's event loop (`serving`).
+    watched: Cell<bool>,
+    /// How often the event loop counts its progress while it sleeps: once a lease round.
+    beat: Duration,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -471,6 +475,21 @@ fn check_connect_auth(
     Ok(())
 }
 
+/// How long a fenced instance waits for the line that says why before it exits, at most. A lease
+/// fences seconds before a peer may take over (a quarter of that with a test's
+/// `unsafeTimeDivisor` of 4).
+const FENCE_LOG_WAIT: Duration = Duration::from_millis(200);
+/// What a fenced instance keeps of the time its lease still holds, for its exit to be late by.
+const FENCE_SLACK: Duration = Duration::from_millis(20);
+
+/// How long a fenced instance whose lease holds for `remaining` more may wait for the line that
+/// says why before it exits: `None` if it must exit at once, with no more of that line than
+/// stderr takes without blocking.
+fn fence_log_wait(remaining: Duration) -> Option<Duration> {
+    let wait = remaining.checked_sub(FENCE_SLACK)?.min(FENCE_LOG_WAIT);
+    (!wait.is_zero()).then_some(wait)
+}
+
 impl ClusterNode {
     /// Joins the cluster: the crate's state for `conf`, this instance at `address`.
     pub fn new(
@@ -493,7 +512,34 @@ impl ClusterNode {
             timing,
             key: text(conf.get_key())?.into_bytes(),
         };
-        let cluster = Cluster::new(setup).map_err(|e| kj::failed!("cluster: {e}"))?;
+        // Called on the lease thread, whatever the loop thread is doing. Peers may take this
+        // instance's objects over once its lease lapses, so it stops serving first: at once,
+        // without the destructors that would wait for the loop. The reason's line may block (on
+        // a stalled pipe, or a lock of the logger's), so the exit is armed before it is written,
+        // for while the lease still holds. With no time for that, the line goes to stderr as far
+        // as a write that does not block takes it.
+        let fence = Box::new(|reason: String, remaining: Duration| {
+            let message = format!("leaving the cluster: {reason}");
+            let Some(wait) = fence_log_wait(remaining) else {
+                crate::log::fatal_nonblocking(&message);
+                ffi::cli_exit(1);
+                return;
+            };
+            let armed = std::thread::Builder::new()
+                .name("cluster-fence".into())
+                .spawn(move || {
+                    std::thread::sleep(wait);
+                    ffi::cli_exit(1);
+                });
+            if armed.is_ok() {
+                crate::log::fatal(&message);
+            } else {
+                crate::log::fatal_nonblocking(&message);
+            }
+            ffi::cli_exit(1);
+        });
+        let cluster = Cluster::new(setup, fence, crate::log::within_thread())
+            .map_err(|e| kj::failed!("cluster: {e}"))?;
         Ok(Rc::new(Self {
             cluster,
             time_divisor: divisor.into(),
@@ -514,11 +560,28 @@ impl ClusterNode {
             serving: Cell::new(false),
             leave_wait_ms: Cell::new(0),
             caches: RefCell::default(),
+            watched: Cell::new(false),
+            beat: Duration::from_millis(timing.interval_ms),
         }))
     }
 
     /// Marks the application's listeners as served until the guard is dropped.
+    ///
+    /// The first time, the lease thread starts watching this thread's event loop
+    /// (`Cluster::watch`). Not before: linking runs in turns as long as itself.
     pub fn serving(self: &Rc<Self>) -> Serving {
+        if !self.watched.replace(true) {
+            // The loop beats once a round while it sleeps. A loop that cannot be watched serves
+            // on, and says that it does; what stops it from being watched lasts, so it is not
+            // tried again.
+            match kj_rs_tokio::watch_progress(self.beat) {
+                Ok(progress) => self.cluster.watch(Box::new(move || progress.count())),
+                Err(e) => tracing::warn!(
+                    "cluster: the lease thread cannot watch the event loop, so a loop that makes \
+                     no progress will not fence this node: {e}"
+                ),
+            }
+        }
         self.serving.set(true);
         Serving(Rc::clone(self))
     }

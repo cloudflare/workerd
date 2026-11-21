@@ -633,3 +633,31 @@ export const ed25519JwkImportAlg = {
     );
   },
 };
+
+// Key operations reject an unregistered algorithm name with NotSupportedError.
+export const keyOperationAlgorithmNormalization = {
+  async test() {
+    const data = new Uint8Array([1, 2, 3]);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign', 'verify']
+    );
+
+    const signature = await crypto.subtle.sign('hmac', key, data);
+    strictEqual(await crypto.subtle.verify('hMaC', key, signature, data), true);
+    await rejects(crypto.subtle.sign('FOO', key, data), {
+      name: 'NotSupportedError',
+    });
+    await rejects(
+      crypto.subtle.sign(
+        { name: 'AES-GCM', iv: new Uint8Array(12) },
+        key,
+        data
+      ),
+      { name: 'InvalidAccessError' }
+    );
+  },
+};

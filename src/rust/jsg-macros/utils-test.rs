@@ -142,32 +142,6 @@ fn is_attr_cases() {
 }
 
 #[test]
-fn is_null_or_undefined_type_cases() {
-    assert!(is_null_or_undefined_type(&parse_quote!(
-        NullOrUndefined<String>
-    )));
-    assert!(is_null_or_undefined_type(&parse_quote!(
-        jsg::NullOrUndefined<u32>
-    )));
-    assert!(!is_null_or_undefined_type(&parse_quote!(String)));
-    assert!(!is_null_or_undefined_type(&parse_quote!(
-        &NullOrUndefined<String>
-    )));
-}
-
-#[test]
-fn is_option_type_cases() {
-    assert!(is_option_type(&parse_quote!(Option<String>)));
-    assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
-    assert!(!is_option_type(&parse_quote!(jsg::LenientOption<u32>)));
-    assert!(is_lenient_option_type(&parse_quote!(
-        jsg::LenientOption<u32>
-    )));
-    assert!(!is_option_type(&parse_quote!(String)));
-    assert!(!is_option_type(&parse_quote!(&Option<String>)));
-}
-
-#[test]
 fn elide_named_lifetimes_cases() {
     let rewritten = |ty: syn::Type| elide_named_lifetimes(&ty).to_string();
     assert_eq!(

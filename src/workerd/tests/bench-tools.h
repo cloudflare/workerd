@@ -6,6 +6,9 @@
 // Used to provide support tools for benchmarking. Many use cases will already be covered by the
 // microbenchmark API.
 
+// Google Benchmark's public header. Newer releases declare the API in headers that this one
+// includes, and include-cleaner wants those instead.
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <benchmark/benchmark.h>
 
 #include <kj/test.h>

@@ -4,23 +4,15 @@
 
 //! The FFI island of the crate, and the only module that needs `unsafe`. It
 //! holds the `#[cxx::bridge]`; the entry point that turns C++'s raw
-//! `v8::Isolate*` into a [`jsg::Lock`]; and safe wrappers around the ICU
-//! converter API, through `rust_icu_sys`, and simdutf, through `ffi.h`. Both
-//! call into the ICU and simdutf that workerd links.
+//! `v8::Isolate*` into a [`jsg::Lock`]; and safe wrappers around simdutf,
+//! through `ffi.h`.
 #![allow(
     unsafe_code,
-    reason = "the crate's FFI island: the cxx bridge, the raw-isolate entry point, and the ICU and simdutf calls"
+    reason = "the crate's FFI island: the cxx bridge, the raw-isolate entry point, and the simdutf calls"
 )]
-
-use std::ffi::CStr;
-use std::ffi::c_char;
 
 pub use bridge::Encoding;
 use jsg::v8;
-use rust_icu_sys as sys;
-use rust_icu_sys::versioned_function;
-
-use crate::error::TranscodeError;
 
 #[cxx::bridge(namespace = "workerd::rust::i18n")]
 mod bridge {
@@ -55,6 +47,15 @@ mod bridge {
             input: *const u8,
             length: usize,
             utf16_output: *mut u16,
+        ) -> usize;
+        unsafe fn simdutf_ascii_prefix_len(input: *const u8, length: usize) -> usize;
+        unsafe fn simdutf_utf8_valid_prefix_len(input: *const u8, length: usize) -> usize;
+        unsafe fn simdutf_utf16le_valid_prefix_len(input: *const u16, length: usize) -> usize;
+        unsafe fn simdutf_utf8_length_from_latin1(input: *const u8, length: usize) -> usize;
+        unsafe fn simdutf_convert_latin1_to_utf8(
+            input: *const u8,
+            length: usize,
+            utf8_output: *mut u8,
         ) -> usize;
         unsafe fn simdutf_utf16_length_from_utf8(input: *const u8, length: usize) -> usize;
         unsafe fn simdutf_convert_utf8_to_utf16le(
@@ -107,124 +108,6 @@ unsafe fn transcode(
     }
 }
 
-// ICU
-//
-// Everything unsafe about calling ICU: deriving pointers and lengths from
-// slices, owning the `UConverter`, and turning ICU's out-parameter
-// `UErrorCode` into `Option` and `Result`.
-
-/// ICU treats positive codes as failures and negative codes as warnings,
-/// matching the `U_FAILURE` macro.
-fn is_failure(error: sys::UErrorCode) -> bool {
-    error > sys::UErrorCode::U_ZERO_ERROR
-}
-
-/// The ICU converter name for `encoding`.
-///
-/// Only UTF-8 and UTF-16LE have one. Chromium's ICU data makes `us-ascii` and
-/// `iso8859-1` aliases of windows-1252, so `dispatch` converts ASCII and
-/// Latin-1 through [`crate::single_byte`] instead.
-///
-/// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
-/// than a real Rust enum, which needs a catch-all arm. Any other encoding is
-/// unreachable there: `dispatch` opens converters only for UTF-8 and UTF-16LE,
-/// the C++ `fromImpl` conversion rejects anything but the four transcodable
-/// encodings before Rust is entered, and a panic in Rust reaches C++ as a
-/// `kj::Exception`.
-fn icu_name(encoding: Encoding) -> &'static CStr {
-    match encoding {
-        Encoding::Utf8 => c"utf-8",
-        Encoding::Utf16Le => c"utf16le",
-        _ => unreachable!("invalid encoding {encoding:?}"),
-    }
-}
-
-/// An open ICU converter.
-///
-/// Owns its `UConverter` and closes it on drop, including while unwinding.
-/// Holding a raw pointer makes the type neither `Send` nor `Sync`, which is
-/// what we want: ICU converters carry conversion state and are not safe to
-/// share between threads.
-pub struct Converter {
-    cnv: *mut sys::UConverter,
-}
-
-impl Converter {
-    /// Opens an ICU converter for `encoding`.
-    pub fn open(encoding: Encoding) -> Result<Self, TranscodeError> {
-        let mut err = sys::UErrorCode::U_ZERO_ERROR;
-        // SAFETY: the name is a NUL-terminated static string, and `err` is a
-        // live local for the duration of the call.
-        let cnv =
-            unsafe { versioned_function!(ucnv_open)(icu_name(encoding).as_ptr(), &raw mut err) };
-        if is_failure(err) || cnv.is_null() {
-            return Err(TranscodeError::ConverterOpenFailed);
-        }
-        Ok(Self { cnv })
-    }
-
-    /// The most bytes one UTF-16 code unit can occupy in this converter's
-    /// encoding, from `ucnv_getMaxCharSize`.
-    pub fn max_char_size(&self) -> usize {
-        // SAFETY: `self.cnv` is a live converter returned by `ucnv_open`.
-        let size = unsafe { versioned_function!(ucnv_getMaxCharSize)(self.cnv) };
-        // ICU reports a small positive `int8_t`.
-        usize::from(size.unsigned_abs())
-    }
-}
-
-impl Drop for Converter {
-    fn drop(&mut self) {
-        // SAFETY: `self.cnv` was returned non-null by `ucnv_open` and is closed
-        // exactly once, here.
-        unsafe { versioned_function!(ucnv_close)(self.cnv) }
-    }
-}
-
-/// Converts `source` from `from`'s encoding to `to`'s via ICU's
-/// `ucnv_convertEx`. Returns the number of bytes written to `target`, or
-/// `None` if ICU reports failure.
-#[must_use]
-pub fn convert_ex(
-    to: &Converter,
-    from: &Converter,
-    source: &[u8],
-    target: &mut [u8],
-) -> Option<usize> {
-    let target_start: *mut c_char = target.as_mut_ptr().cast();
-    let mut target_cursor = target_start;
-    let mut source_cursor: *const c_char = source.as_ptr().cast();
-    let mut err = sys::UErrorCode::U_ZERO_ERROR;
-
-    // SAFETY: both cursors start at the base of a live slice and are bounded
-    // by a limit one past that slice's end, which is what ICU advances them
-    // against. Passing a null pivot asks ICU to use an internal one.
-    unsafe {
-        versioned_function!(ucnv_convertEx)(
-            to.cnv,
-            from.cnv,
-            &raw mut target_cursor,
-            target_start.add(target.len()),
-            &raw mut source_cursor,
-            source_cursor.add(source.len()),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            1, // reset
-            1, // flush
-            &raw mut err,
-        );
-    }
-    if is_failure(err) {
-        return None;
-    }
-    // SAFETY: ICU advanced `target_cursor` within `target`, so both pointers
-    // are into the same allocation.
-    let written = unsafe { target_cursor.offset_from(target_start) };
-    usize::try_from(written).ok()
-}
-
 // simdutf
 //
 // simdutf's C++ functions, called through the inline forwarders in `ffi.h`,
@@ -262,6 +145,78 @@ pub fn convert_latin1_to_utf16(source: &[u8], target: &mut [u8]) -> Option<usize
             target.as_mut_ptr().cast(),
         )
     })
+}
+
+/// The number of leading ASCII bytes in `source`: the position of its first
+/// non-ASCII byte, or its length if it has none. Via
+/// `simdutf::validate_ascii_with_errors`, which stops scanning at the first
+/// 64-byte block that holds a non-ASCII byte and finds the exact position in
+/// that block.
+pub fn ascii_prefix_len(source: &[u8]) -> usize {
+    // SAFETY: pointer and length describe a live slice.
+    unsafe { bridge::simdutf_ascii_prefix_len(source.as_ptr(), source.len()) }
+}
+
+/// The length of the longest well-formed UTF-8 prefix of `source`, via
+/// `simdutf::validate_utf8_with_errors`. It ends before the lead byte of the
+/// first ill-formed sequence, so it holds only whole characters.
+pub fn utf8_valid_prefix_len(source: &[u8]) -> usize {
+    // SAFETY: pointer and length describe a live slice.
+    unsafe { bridge::simdutf_utf8_valid_prefix_len(source.as_ptr(), source.len()) }
+}
+
+/// The length, in bytes, of the longest well-formed UTF-16LE prefix of the
+/// whole code units of `source`, via `simdutf::validate_utf16le_with_errors`.
+/// It ends before the first unpaired surrogate, so it holds only whole
+/// characters, and a trailing odd byte is never part of it.
+pub fn utf16le_valid_prefix_len(source: &[u8]) -> usize {
+    // SAFETY: pointer and length describe the whole code units of a live
+    // slice.
+    let units = unsafe {
+        bridge::simdutf_utf16le_valid_prefix_len(
+            source.as_ptr().cast(),
+            source.len() / size_of::<u16>(),
+        )
+    };
+    units * size_of::<u16>()
+}
+
+/// Latin-1 bytes measured by `simdutf::utf8_length_from_latin1`.
+pub struct Latin1Source<'a> {
+    bytes: &'a [u8],
+    utf8_len: usize,
+}
+
+impl<'a> Latin1Source<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        // SAFETY: pointer and length describe a live slice.
+        let utf8_len =
+            unsafe { bridge::simdutf_utf8_length_from_latin1(bytes.as_ptr(), bytes.len()) };
+        Self { bytes, utf8_len }
+    }
+
+    /// The exact UTF-8 length, in bytes: one per ASCII byte, two per other
+    /// byte. Every byte sequence is valid Latin-1.
+    pub const fn utf8_len(&self) -> usize {
+        self.utf8_len
+    }
+
+    /// Converts to UTF-8 via `simdutf::convert_latin1_to_utf8`. Returns the
+    /// number of bytes written, or `None` if `target` cannot hold
+    /// [`Latin1Source::utf8_len`] bytes.
+    pub fn convert_to_utf8(&self, target: &mut [u8]) -> Option<usize> {
+        if target.len() < self.utf8_len {
+            return None;
+        }
+        // SAFETY: `target` holds the exact UTF-8 length of these bytes.
+        Some(unsafe {
+            bridge::simdutf_convert_latin1_to_utf8(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                target.as_mut_ptr(),
+            )
+        })
+    }
 }
 
 /// UTF-8 bytes measured by `simdutf::utf16_length_from_utf8`.

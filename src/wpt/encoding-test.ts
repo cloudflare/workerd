@@ -142,11 +142,7 @@ export default {
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},
   'textdecoder-labels.any.js': {},
-  'textdecoder-mistakes.any.js': {
-    comment:
-      'Fatal streaming decoders drop the ASCII byte that ends an incomplete EUC-JP JIS0212 sequence instead of decoding it',
-    expectedFailures: ['EUC-JP JIS0212 state after a fatal streaming error'],
-  },
+  'textdecoder-mistakes.any.js': {},
   'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {},
   'textencoder-constructor-non-utf.any.js': {},

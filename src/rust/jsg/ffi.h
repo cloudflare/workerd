@@ -706,6 +706,7 @@ void function_template_set_nested_type(
     Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested);
 
 // Realm
+// Null if no Realm is attached.
 Realm* realm_from_isolate(Isolate* isolate);
 bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);

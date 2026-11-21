@@ -4,6 +4,12 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+const typeReflection = {
+  comment:
+    'V8 does not ship the WebAssembly type reflection proposal (WebAssembly.Function, type() and the minimum descriptor field)',
+  expectedFailures: true,
+} as const;
+
 export default {
   'assertions.js': {
     comment: 'Helper script loaded by other tests',
@@ -50,12 +56,34 @@ export default {
   'constructor/toStringTag.any.js': {},
   'constructor/validate.any.js': {},
   'error-interfaces-no-symbol-tostringtag.js': {},
+  'exception/basic.tentative.any.js': {
+    comment:
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
+    disabledTests: true,
+  },
+  'exception/constructor.tentative.any.js': {},
+  'exception/getArg.tentative.any.js': {
+    comment:
+      'V8 throws a TypeError, not a RangeError, for an index that is not a valid unsigned long',
+    expectedFailures: ['Getting out-of-range argument'],
+  },
+  'exception/identity.tentative.any.js': {},
+  'exception/is.tentative.any.js': {},
+  'exception/toString.tentative.any.js': {},
+  'function/call.tentative.any.js': typeReflection,
+  'function/constructor.tentative.any.js': typeReflection,
+  'function/table.tentative.any.js': typeReflection,
+  'function/type.tentative.any.js': typeReflection,
   'functions/helper.js': {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
+  'gc/casts.tentative.any.js': {},
+  'gc/exported-object.tentative.any.js': {},
+  'gc/i31.tentative.any.js': {},
   'global/constructor.any.js': {},
   'global/toString.any.js': {},
+  'global/type.tentative.any.js': typeReflection,
   'global/value-get-set.any.js': {},
   'global/valueOf.any.js': {},
   'idlharness.any.js': {
@@ -101,6 +129,8 @@ export default {
     omittedTests: true,
   },
   'memory/buffer.any.js': {},
+  'memory/constructor-shared.tentative.any.js': {},
+  'memory/constructor-types.tentative.any.js': typeReflection,
   'memory/constructor.any.js': {},
   'memory/grow.any.js': {},
   'memory/to-fixed-length-buffer-shared.any.js': {},
@@ -108,21 +138,28 @@ export default {
   'memory/to-resizable-buffer-shared.any.js': {},
   'memory/to-resizable-buffer.any.js': {},
   'memory/toString.any.js': {},
+  'memory/type.tentative.any.js': typeReflection,
   'module/constructor.any.js': {},
   'module/customSections.any.js': {},
   'module/exports.any.js': {},
   'module/imports.any.js': {},
+  'module/moduleSource.tentative.any.js': {},
   'module/toString.any.js': {},
   'prototypes.any.js': {},
   'table/assertions.js': {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
+  'table/constructor-types.tentative.any.js': typeReflection,
   'table/constructor.any.js': {},
   'table/get-set.any.js': {},
   'table/grow.any.js': {},
   'table/length.any.js': {},
   'table/toString.any.js': {},
+  'table/type.tentative.any.js': typeReflection,
+  'tag/constructor.tentative.any.js': {},
+  'tag/toString.tentative.any.js': {},
+  'tag/type.tentative.any.js': typeReflection,
   'wasm-module-builder.js': {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,

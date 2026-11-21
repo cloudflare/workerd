@@ -493,7 +493,7 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
   // The connection moves to a new handle: the read loop's pending read on
   // this one is about to reject, which it must not take for a failure.
-  this._handle.handedOver = true;
+  this._handle.readRejectionExpected = true;
   this._handle.writer.releaseLock();
   this._handle.reader.releaseLock();
 

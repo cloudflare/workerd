@@ -103,8 +103,9 @@ namespace workerd::util {
   /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
-     settles can be collected. When disabled, they stay strong roots and keep such a stream alive  \
-     until its isolate is torn down, and jsg::TracedOwn behaves like kj::Own. */                   \
+     settles can be collected, and the Cursor held by a SQL cursor's iterators. When disabled,     \
+     they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
+     down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
   /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
