@@ -87,6 +87,7 @@ pub use resource::undescribed;
 pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::EscapableScope;
 pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Tests for `Lock::with_handle_scope()`.
+//! Tests for `Lock::with_handle_scope()` and `Lock::with_escapable_handle_scope()`.
 
 use jsg::FromJS;
 use jsg::v8;
@@ -110,6 +110,81 @@ fn panic_resumes_after_the_scope_closes() {
         assert!(result.is_err());
         let value = v8::Number::new(lock, 1.0).into();
         outer.set(lock, "value", value).unwrap();
+        Ok(())
+    });
+}
+
+/// The handle the closure escapes stays valid after the scope closes, and the others it creates
+/// are freed: the enclosing scope grows by the one escaped handle.
+#[test]
+fn escaped_handle_outlives_the_scope() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let before = crate::Harness::number_of_handles(lock);
+        let object = lock.with_escapable_handle_scope(|lock, scope| {
+            let object = lock.new_object();
+            for i in 0..100 {
+                let value = v8::Number::new(lock, f64::from(i)).into();
+                object.set(lock, "value", value).unwrap();
+            }
+            scope.escape(object)
+        });
+        assert_eq!(crate::Harness::number_of_handles(lock), before + 1);
+        let value = object.get(lock, "value").unwrap();
+        assert!((f64::from_js(lock, value).unwrap() - 99.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// The closure can return the escaped handle in a `Result`, and an error without escaping any.
+#[test]
+fn escaped_handle_in_a_result() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let thrower = ctx
+            .eval_raw(lock, "(() => { throw new TypeError('boom'); })")
+            .unwrap();
+        let thrower = v8::Local::<v8::Function>::try_from(thrower).unwrap();
+        let ok = lock.with_escapable_handle_scope(|lock, scope| -> jsg::Result<_> {
+            let value = v8::Number::new(lock, 2.0).into();
+            Ok(scope.escape(value))
+        });
+        let ok: v8::Local<'_, v8::Value> = ok.unwrap();
+        assert!((f64::from_js(lock, ok).unwrap() - 2.0).abs() < f64::EPSILON);
+        let caught = lock
+            .try_catch(|lock| {
+                lock.with_escapable_handle_scope(|lock, scope| {
+                    let result = thrower.call(lock, None, &[])?;
+                    Ok(scope.escape(result))
+                })
+            })
+            .unwrap();
+        let Err(exception) = caught else {
+            panic!("the call should have thrown");
+        };
+        let message = String::from_js(lock, exception).unwrap();
+        assert_eq!(message, "TypeError: boom");
+        Ok(())
+    });
+}
+
+/// A handle escaped from a scope nested in another escapable scope reaches the outermost one
+/// through both.
+#[test]
+fn escapable_scopes_nest() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let object = lock.with_escapable_handle_scope(|lock, outer| {
+            let object = lock.with_escapable_handle_scope(|lock, inner| {
+                let object = lock.new_object();
+                let value = v8::Number::new(lock, 3.0).into();
+                object.set(lock, "value", value).unwrap();
+                inner.escape(object)
+            });
+            outer.escape(object)
+        });
+        let value = object.get(lock, "value").unwrap();
+        assert!((f64::from_js(lock, value).unwrap() - 3.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

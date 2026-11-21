@@ -26,6 +26,7 @@ class ExternalMemoryTarget;
 
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
+using EscapableHandleScope = v8::EscapableHandleScope;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 using PropertyCallbackInfo = v8::PropertyCallbackInfo<v8::Value>;
 using PropertySetterCallbackInfo = v8::PropertyCallbackInfo<v8::Boolean>;
@@ -803,6 +804,13 @@ void isolate_try_catch(
 // Calls `callback(data)` in a new v8::HandleScope, which frees the handles it creates when it
 // returns.
 void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
+// Calls `callback(data, scope)` in a new v8::EscapableHandleScope, `scope`, which frees the
+// handles it creates when it returns, except the one passed to escapable_handle_scope_escape().
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback);
+// v8::EscapableHandleScope::Escape(): returns a handle to `value` in the scope enclosing `scope`.
+// Can be called once per scope.
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value);
 
 // Isolate
 // The isolate_throw_*() functions throw nothing while execution is terminating, so that they

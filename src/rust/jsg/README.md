@@ -851,6 +851,22 @@ for _ in 0..calls {
 }
 ```
 
+To return a handle of the new scope, as a C++ `js.runInHandleScope()` callback that returns a
+`v8::Local` does, `lock.with_escapable_handle_scope(|lock, scope| ...)` opens a
+`v8::EscapableHandleScope` instead. Its closure gets a `jsg::EscapableScope<'t, 's>`, which is
+proof of the same bound as `NestedScope`, and whose `escape(local)` turns one `Local<'t, T>` into
+a `Local<'s, T>`. `escape` consumes it, since V8 lets a scope escape one handle, and the closure
+can return what it returns in a `Result` or `Option`.
+
+```rust
+let object = lock.with_escapable_handle_scope(|lock, scope| -> jsg::Result<_> {
+    let object = lock.new_object();
+    let value = compute(lock)?;
+    object.set(lock, "value", value)?;
+    Ok(scope.escape(object))
+})?;
+```
+
 ### `Local<'s, T>`
 
 A `Copy` handle to a V8 value, valid for the scope `'s` it was created in. Every API that

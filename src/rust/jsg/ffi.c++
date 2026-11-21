@@ -2317,6 +2317,16 @@ void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)
   callback(data);
 }
 
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback) {
+  v8::EscapableHandleScope scope(isolate);
+  callback(data, scope);
+}
+
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value) {
+  return to_ffi(scope.Escape(local_from_ffi<v8::Value>(kj::mv(value))));
+}
+
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   if (isolate->IsExecutionTerminating()) return;
