@@ -234,6 +234,8 @@ class TraceFlags final {
   uint8_t flags;
 };
 
+struct SpanContext;
+
 // The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
 // The trace id represents a top-level request and should be shared across all
 // invocation spans and events within those spans. The invocation id identifies
@@ -325,6 +327,7 @@ class InvocationSpanContext final {
   static kj::Maybe<InvocationSpanContext> fromCapnp(rpc::InvocationSpanContext::Reader reader);
   void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
   InvocationSpanContext clone() const;
+  SpanContext toSpanContext() const;
 
  private:
   // If there is no entropy source, then child spans cannot be created from
@@ -397,6 +400,10 @@ struct SpanContext {
   kj::Maybe<SpanId> spanId;
   kj::Maybe<TraceFlags> traceFlags;
 };
+
+inline SpanContext InvocationSpanContext::toSpanContext() const {
+  return SpanContext(traceId, spanId, traceFlags);
+}
 
 kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
@@ -1349,7 +1356,7 @@ class SpanBuilder {
   void end();
 
   // Useful to skip unnecessary code when not observed.
-  bool isObserved() {
+  bool isObserved() const {
     return observer != nullptr;
   }
 

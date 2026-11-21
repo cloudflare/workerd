@@ -77,6 +77,12 @@ void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
 }
 }  // namespace
 
+BaseTracer::BaseTracer() = default;
+
+BaseTracer::~BaseTracer() noexcept(false) {
+  selfRef->invalidate();
+}
+
 kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
@@ -222,10 +228,15 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Compose SpanOpen. An all-zero spanId is interpreted as having no spans above this one, thus we
-  // use the Onset spanId instead (taken from topLevelContext). We go to great lengths to rule out
-  // getting an all-zero spanId by chance (see SpanId::fromEntropy()), so this should be safe.
+  // Fallback for old behavior during rollout. If a span is reported with a null parent span id, the
+  // onset span id is used as its parent instead and a warning is logged. Once we see no "reported
+  // span without a parent span" logs in production, we can remove this fallback.
   if (parentSpanId == tracing::SpanId::nullId) {
+    if (isPredictableModeForTest()) {
+      KJ_FAIL_ASSERT("reported span without a parent span", operationName);
+    } else {
+      LOG_WARNING_PERIODICALLY("reported span without a parent span");
+    }
     parentSpanId = topLevelContext.getSpanId();
   }
   size_t spanNameSize = operationName.size();
@@ -642,10 +653,9 @@ void WorkerTracer::setReturn(
   }
 }
 
-void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
-  KJ_ASSERT(
-      makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
-  makeUserRequestSpanFunc = kj::mv(func);
+void BaseTracer::setUserSpanSubmitter(kj::Own<SpanSubmitter> submitter) {
+  KJ_ASSERT(userSpanSubmitter == kj::none, "setUserSpanSubmitter can only be called once");
+  userSpanSubmitter = kj::mv(submitter);
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {
@@ -792,11 +802,10 @@ void BaseTracer::endInvocationSpan(
   invocationSpan.end();
 }
 
-SpanParent BaseTracer::makeUserRequestSpan(
-    tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+SpanParent BaseTracer::makeUserRequestSpan(const tracing::InvocationSpanContext& context) {
   if (invocationSpan.isObserved() && invocationExportsSpans) return SpanParent(invocationSpan);
-  KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(traceId), traceFlags);
+  KJ_IF_SOME(submitter, userSpanSubmitter) {
+    return SpanParent(kj::rc<UserSpanObserver>(kj::addRef(*submitter), context.toSpanContext()));
   } else {
     return SpanParent(nullptr);
   }
@@ -834,6 +843,13 @@ kj::Date SpanSubmitter::getTime() {
   return IoContext::current().now();
 }
 
+kj::Rc<UserSpanObserver> UserSpanObserver::forOpenedRoot(kj::Own<SpanSubmitter> submitter,
+    const tracing::SpanContext& parentContext,
+    tracing::SpanId spanId) {
+  return kj::rc<UserSpanObserver>(
+      kj::Badge<UserSpanObserver>(), kj::mv(submitter), parentContext, spanId);
+}
+
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
   return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
 }
@@ -847,7 +863,8 @@ kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   if (traceId == nullptr) {
     return kj::none;
   }
-  return tracing::SpanContext(traceId, spanId, traceFlags);
+  return tracing::SpanContext(
+      traceId, spanId == tracing::SpanId::nullId ? kj::none : kj::Maybe(spanId), traceFlags);
 }
 
 void UserSpanObserver::onClose(
