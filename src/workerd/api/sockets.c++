@@ -1026,12 +1026,16 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     secureTransport = parseSecureTransport(opts);
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
-  kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
+  // Whoever serves the CONNECT can fill the slot in for as long as its call is pending. The
+  // connection owns that call, so the connection keeps the slot alive along with the Socket: a
+  // request can end, taking its Socket with it, while the connection is still in use, by a
+  // response body for instance.
+  auto tlsStarter = kj::rc<kj::TlsStarterCallback>();
   if (secureTransport == SecureTransportKind::STARTTLS) {
     // Offer the slot only on a socket that can actually act on it: startTls() insists on
     // 'starttls'. Whoever serves the CONNECT reads the slot's presence as a promise that this
     // socket is prepared to upgrade, and may wait to be told that it has.
-    httpConnectSettings.tlsStarter = tlsStarter;
+    httpConnectSettings.tlsStarter = *tlsStarter;
   }
 
   KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
@@ -1043,9 +1047,9 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 
   auto httpClient = asHttpClient(kj::mv(client));
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
-  request.connection = request.connection.attach(kj::mv(httpClient));
+  request.connection = request.connection.attach(kj::mv(httpClient), tlsStarter.addRef());
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr),
-      kj::none /* localAddress */, kj::mv(options), kj::mv(tlsStarter), secureTransport,
+      kj::none /* localAddress */, kj::mv(options), tlsStarter.toOwn(), secureTransport,
       SocketProtocol::TCP, kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
