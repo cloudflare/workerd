@@ -381,8 +381,6 @@ declare interface DigestContext {
 // run synchronously and throw what the C++ methods reject with.
 declare interface SubtleCryptoBackend {
   isCryptoKey(value: unknown): boolean;
-  // typeid(T).name() of the SubtleCrypto struct `name`.
-  structTypeName(name: string): string;
 
   encrypt(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;
   decrypt(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;

@@ -41,13 +41,7 @@ function describe(value) {
 }
 
 function errorText(e) {
-  // JSG quotes a struct by typeid(T).name(), which differs between C++ ABIs (Itanium's
-  // N7workerd3api12SubtleCrypto16EncryptAlgorithmE, MSVC's
-  // struct workerd::api::SubtleCrypto::EncryptAlgorithm), so the struct's name stands in.
-  const text = `${e?.name}: ${e?.message}`.replace(
-    /Cannot initialize (?:N7workerd3api12SubtleCrypto\d+(\w+)E|struct workerd::api::SubtleCrypto::(\w+)) /,
-    (_, itanium, msvc) => `Cannot initialize SubtleCrypto::${itanium ?? msvc} `
-  );
+  const text = `${e?.name}: ${e?.message}`;
   // Messages can quote bytes, such as a JSON parse error over binary data.
   return text.replace(
     /[^\x20-\x7e]/g,

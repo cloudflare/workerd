@@ -783,9 +783,6 @@ class SubtleCrypto final: public jsg::Object {
   // Whether `value` unwraps as `const CryptoKey&`, which the TypeScript side cannot test for.
   bool backendIsCryptoKey(
       jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<jsg::Ref<CryptoKey>>& handler);
-  // typeid(T).name() of the struct `name`, which JSG quotes in conversion errors and which depends
-  // on the C++ ABI.
-  kj::String backendStructTypeName(kj::String name);
 
   jsg::JsArrayBuffer backendEncrypt(jsg::Lock& js,
       EncryptAlgorithm algorithm,
@@ -879,7 +876,6 @@ class SubtleCrypto final: public jsg::Object {
   JSG_RESOURCE_TYPE(SubtleCrypto, CompatibilityFlags::Reader flags) {
     if (util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
       JSG_METHOD_NAMED(isCryptoKey, backendIsCryptoKey);
-      JSG_METHOD_NAMED(structTypeName, backendStructTypeName);
       JSG_METHOD_NAMED(encrypt, backendEncrypt);
       JSG_METHOD_NAMED(decrypt, backendDecrypt);
       JSG_METHOD_NAMED(sign, backendSign);

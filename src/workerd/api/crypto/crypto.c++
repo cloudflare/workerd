@@ -1481,20 +1481,6 @@ bool SubtleCrypto::backendIsCryptoKey(
   return handler.tryUnwrap(js, value) != kj::none;
 }
 
-kj::String SubtleCrypto::backendStructTypeName(kj::String name) {
-#define STRUCT_TYPE_NAME(T)                                                                        \
-  if (name == #T) return kj::str(typeid(SubtleCrypto::T).name());
-  STRUCT_TYPE_NAME(HashAlgorithm)
-  STRUCT_TYPE_NAME(EncryptAlgorithm)
-  STRUCT_TYPE_NAME(SignAlgorithm)
-  STRUCT_TYPE_NAME(GenerateKeyAlgorithm)
-  STRUCT_TYPE_NAME(ImportKeyAlgorithm)
-  STRUCT_TYPE_NAME(DeriveKeyAlgorithm)
-  STRUCT_TYPE_NAME(JsonWebKey)
-#undef STRUCT_TYPE_NAME
-  JSG_FAIL_REQUIRE(TypeError, "Not a SubtleCrypto struct: ", name);
-}
-
 jsg::JsArrayBuffer SubtleCrypto::backendEncrypt(jsg::Lock& js,
     EncryptAlgorithm algorithm,
     const CryptoKey& key,

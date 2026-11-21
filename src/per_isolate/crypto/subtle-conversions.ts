@@ -287,9 +287,6 @@ function absent(): undefined {
 // What only native code knows.
 export interface ConversionNatives {
   isCryptoKey(value: unknown): boolean;
-  // typeid(T).name() of the struct `name`, which JSG quotes and which depends
-  // on the C++ ABI.
-  structTypeName(name: string): string;
 }
 
 function hasRequiredMember(type: DictionaryType): boolean {
@@ -375,7 +372,7 @@ function createConversions(native: ConversionNatives) {
     if (value == null) {
       if (!hasRequiredMember(type)) return type.create(absent);
       throw new TypeError(
-        `Cannot initialize ${native.structTypeName(type.name)} with ` +
+        `Cannot initialize ${type.name} with ` +
           'required members from ' +
           'an undefined or null value.'
       );
