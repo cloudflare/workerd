@@ -451,25 +451,8 @@ export default {
   'sign_verify/ecdsa.js': supportFile,
   'sign_verify/ecdsa_vectors.js': supportFile,
   'sign_verify/eddsa.js': supportFile,
-  'sign_verify/eddsa_curve25519.https.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'EdDSA Ed25519 verification failure due to shortened signature',
-      'EdDSA Ed25519 verification with transferred signature during call',
-    ],
-  },
-  'sign_verify/eddsa_small_order_points.https.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'Ed25519 Verification checks with small-order key of order - Test 0',
-      'Ed25519 Verification checks with small-order key of order - Test 1',
-      'Ed25519 Verification checks with small-order key of order - Test 2',
-      'Ed25519 Verification checks with small-order key of order - Test 7',
-      'Ed25519 Verification checks with small-order key of order - Test 11',
-      'Ed25519 Verification checks with small-order key of order - Test 12',
-      'Ed25519 Verification checks with small-order key of order - Test 13',
-    ],
-  },
+  'sign_verify/eddsa_curve25519.https.any.js': {},
+  'sign_verify/eddsa_small_order_points.https.any.js': {},
   'sign_verify/eddsa_small_order_points.js': supportFile,
   'sign_verify/eddsa_vectors.js': supportFile,
   'sign_verify/hmac.https.any.js': {},

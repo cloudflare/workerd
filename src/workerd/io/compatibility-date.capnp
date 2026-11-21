@@ -1877,4 +1877,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  webCryptoEd25519SpecVerify @210 :Bool
+      $compatEnableFlag("webcrypto_ed25519_spec_verify")
+      $compatDisableFlag("no_webcrypto_ed25519_spec_verify")
+      $compatEnableDate("2026-12-08");
+  # `crypto.subtle.verify()` with an Ed25519 key, including one imported under the legacy
+  # "NODE-ED25519" name, returns false, as the Web Crypto spec requires, when the signature is not
+  # 64 bytes long, or when the public key or the first half of the signature (R) encodes a point of
+  # small order. Without the flag, a wrong-length signature rejects with an `OperationError`, and
+  # small-order points are accepted, so one signature from a small-order public key can verify for
+  # several different messages.
 }
