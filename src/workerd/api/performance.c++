@@ -272,7 +272,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
         KJ_IF_SOME(d, options.detail) {
-          measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
+          measure->detail = kj::mv(d);
         }
         // If options.detail is not provided, detail remains null
       }

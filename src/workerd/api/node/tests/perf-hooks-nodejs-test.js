@@ -461,6 +461,36 @@ export const testPerformanceMeasureNameOnly = {
   },
 };
 
+export const testDetailAcceptsAnyValue = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+
+    for (const detail of [null, 0, 'text', true, { key: 'value' }]) {
+      const mark = perfHooksPerformance.mark('detail-mark', { detail });
+      deepStrictEqual(mark.detail, detail);
+      deepStrictEqual(
+        new PerformanceMark('ctor-mark', { detail }).detail,
+        detail
+      );
+      const measure = perfHooksPerformance.measure('detail-measure', {
+        start: 0,
+        detail,
+      });
+      deepStrictEqual(measure.detail, detail);
+    }
+
+    strictEqual(
+      perfHooksPerformance.mark('undefined-detail', { detail: undefined })
+        .detail,
+      null
+    );
+
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
 export const testGetEntriesByName = {
   test() {
     perfHooksPerformance.clearMarks();
