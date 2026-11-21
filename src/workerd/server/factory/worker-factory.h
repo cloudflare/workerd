@@ -85,6 +85,7 @@ using ActorBroken = kj::Promise<void>;
 class CompiledWorker;
 class ActorHandle;
 class ActorStorage;
+class EgressChannel;
 class SubrequestChannelHandle;
 class ActorClassChannelHandle;
 class RpcClient;
@@ -347,6 +348,25 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
     kj::Maybe<uint32_t> parentFacetId,
     ::rust::Str name);
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
+
+// A channel a Worker gave a container's egress (`interceptOutboundHttp()` and friends), decoded
+// from its token.
+class EgressChannel {
+ public:
+  explicit EgressChannel(kj::Rc<IoChannelFactory::SubrequestChannel> channel)
+      : channel(kj::mv(channel)) {}
+
+  // Rust shares the handle; starting a request does not change what it names.
+  mutable kj::Rc<IoChannelFactory::SubrequestChannel> channel;
+};
+
+kj::Own<EgressChannel> factory_decode_egress_token(
+    const WorkerFactory& factory, ::rust::Slice<const uint8_t> token);
+kj::Own<WorkerInterface> egress_channel_start_request(const EgressChannel& channel);
+kj::Promise<void> egress_channel_connect(const WorkerFactory& factory,
+    const EgressChannel& channel,
+    ::rust::Str host,
+    kj::Own<kj::AsyncIoStream> tunnel);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
 kj::Promise<void> factory_stop_container(

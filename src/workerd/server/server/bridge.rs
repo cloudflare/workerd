@@ -609,6 +609,23 @@ pub mod ffi {
         /// Removes the root actor `root_key`'s databases, its facets', and their index.
         fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
 
+        /// A channel a Worker gave a container's egress, decoded from its token.
+        type EgressChannel;
+        /// The channel an egress channel token names.
+        fn factory_decode_egress_token(
+            factory: &WorkerFactory,
+            token: &[u8],
+        ) -> Result<KjOwn<EgressChannel>>;
+        fn egress_channel_start_request(channel: &EgressChannel) -> Result<KjOwn<WorkerInterface>>;
+        /// Hands `tunnel`, a container's connection to `host` whose CONNECT is accepted, to the
+        /// channel's `connect()`; fails if the Worker rejects it.
+        async fn egress_channel_connect(
+            factory: &WorkerFactory,
+            channel: &EgressChannel,
+            host: &str,
+            tunnel: KjOwn<AsyncIoStream>,
+        ) -> Result<()>;
+
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;

@@ -48,6 +48,7 @@ wd_cc_library(
     srcs = [
         "worker-factory.c++",
         "worker-factory-actor.c++",
+        "worker-factory-container.c++",
         "worker-factory-impl.h",
         "worker-factory-listen.c++",
         "worker-factory-otlp.c++",
