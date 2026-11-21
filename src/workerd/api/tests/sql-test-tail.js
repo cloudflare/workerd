@@ -22,20 +22,20 @@ export const test = {
       return acc;
     }, {});
     assert.deepStrictEqual(reduced, {
-      durable_object_storage_exec: 294,
+      durable_object_storage_exec: 341,
       durable_object_storage_ingest: 1030,
       durable_object_storage_getDatabaseSize: 3,
       durable_object_storage_put: 18,
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
-      durable_object_subrequest: 48,
+      durable_object_subrequest: 52,
       // Inner spans nested under durable_object_subrequest: jsRpcSession for RPC
       // dispatches (one per call, client-side only -- the server's jsrpc-typed
       // onset is its equivalent), fetch for fetch dispatches.
-      jsRpcSession: 36,
+      jsRpcSession: 40,
       fetch: 12,
-      // jsRpcCall: 36 client-side + 36 server-side.
-      jsRpcCall: 72,
+      // jsRpcCall: 40 client-side + 40 server-side.
+      jsRpcCall: 80,
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,
@@ -45,6 +45,10 @@ export const test = {
       testRollbackKvInit: 1,
       testRollbackAlarmInit: 1,
       testCursorUaf: 1,
+      testCursorClose: 1,
+      stashCursor: 1,
+      closeOtherCursor: 1,
+      closeStashedCursor: 1,
       durable_object_storage_setAlarm: 2,
       durable_object_storage_getAlarm: 1,
       testSessionsAPIBookmark: 20,
