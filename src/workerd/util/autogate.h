@@ -133,7 +133,20 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default a new isolate is created in V8's loading mode (v8::Isolate::SetIsLoading()),       \
+     which defers full GCs for up to 7 seconds, and V8 is told that loading has ended the first    \
+     time the isolate is left with no request in flight and its thread is idle. That               \
+     notification is V8's cue to collect garbage if the heap is due for it. Enabling this gate     \
+     leaves isolates out of loading mode. See Worker::Isolate::completedRequest(). */              \
+  V(NO_LOADING_MODE)                                                                               \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default the notification that ends loading mode is repeated each later time the            \
+     isolate is left with no request in flight and its thread is idle, and is sent each such       \
+     time, the first included, to an isolate that was never in loading mode. Enabling this gate    \
+     stops all but the one that ends loading mode. */                                              \
+  V(NO_IDLE_GC)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

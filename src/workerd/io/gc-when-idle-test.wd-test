@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "gc-when-idle-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "gc-when-idle-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",  # for assert
+          "rpc",
+        ],
+        bindings = [
+          (name = "TARGET", service = "target"),
+          # Whether the isolate's first idle point collects garbage, and whether later ones do.
+          (name = "FIRST_IDLE_GC", json = "true"),
+          (name = "LATER_IDLE_GC", json = "true"),
+        ],
+      )
+    ),
+    # In its own service, and so its own isolate: the test itself is a request, which is in flight
+    # in its isolate for as long as the test runs.
+    ( name = "target",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "gc-when-idle-test-target.js")
+        ],
+        compatibilityFlags = [
+          "rpc",
+          "enable_weak_ref",
+        ],
+      )
+    ),
+  ],
+  v8Flags = [
+    # A scavenge for every megabyte allocated, so that objects are promoted quickly.
+    "--max-semi-space-size=1",
+    # The old generation's allocation limit before the first full GC, in megabytes.
+    "--initial-old-space-size=16",
+  ],
+);
