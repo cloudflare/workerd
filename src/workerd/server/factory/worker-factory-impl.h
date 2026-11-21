@@ -8,12 +8,13 @@
 
 #include "worker-factory.h"
 
-#include <workerd/io/actor-sqlite.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/container-client.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/server/bridge.rs.h>
+#include <workerd/server/workerd.capnp.h>
 
 #include <capnp/rpc-twoparty.h>
 #include <capnp/serialize.h>

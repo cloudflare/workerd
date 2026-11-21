@@ -168,11 +168,11 @@ build:unix --cxxopt=-D_LIBCPP_NO_ABI_TAG --host_cxxopt=-D_LIBCPP_NO_ABI_TAG
 # downstream, this reduces the include overhead for <algorithm>.
 build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL
 
-# V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
-# a global define for this, we need to apply it for everything.
-# TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
-build:windows --copt='-Wno-macro-redefined'
-build:windows --host_copt='-Wno-macro-redefined'
+# Set _WIN32_WINNT to request Windows 10-level features. The Windows SDK only declares APIs such
+# as htonll when it is at least 0x0602, Bazel defaults to 0x0601 (Windows 7). V8 already defines
+# this value itself, but we want to have the same value used consistently including for code that
+# doesn't depend on V8, and we want to avoid warnings about redefining _WIN32_WINNT.
+build:windows --repo_env=BAZEL_WIN32_WINNT=/D_WIN32_WINNT=0x0A00
 
 # typescript configuration
 # do more correct type checking
@@ -244,9 +244,14 @@ build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebuginfo=1
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 
-# Adding -C lto=thin here would improve binary size significantly – disable it for now due to
-# compile errors and wrong code generation when bazel and rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
+
+# Cross-language LTO, thin-lto extended to Rust: Rust crates emit LLVM bitcode instead of machine
+# code, so lld's ThinLTO optimizes Rust and C++ together. Linux only, as it needs lld to link and
+# to read rustc's bitcode: rustc's LLVM (`rustc -vV`) must share lld's major version and not be
+# newer. macOS and Windows link with the host's linker, which does not track rustc's LLVM.
+build:cross-lto --config=thin-lto
+build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 # common sanitizers options
 build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
@@ -539,6 +544,8 @@ build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-in
 build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
 # Work around Windows test failures in rpc-related tests
 build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
+# Work around clang-cl crashes with LLVM 22
+build:windows --per_file_copt=src/workerd/io/worker@/clang:-fno-inline
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'

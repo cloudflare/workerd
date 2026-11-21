@@ -16,11 +16,11 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
@@ -254,28 +254,23 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto contentType =
-        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
-            TypeError, "Parsing a Body as FormData requires a Content-Type header.");
+    KJ_ASSERT(!bodyStream.isDisturbed(js));
+    auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
 
-    if (!bodyStream.isNull()) {
-      KJ_ASSERT(!bodyStream.isDisturbed(js));
-      return bodyStream.text(js, bufferingLimit())
-          .then(js,
-              [contentType = kj::mv(contentType), formData = kj::mv(formData)](
-                  auto& js, kj::String rawText) mutable {
-        formData->parse(js, kj::mv(rawText), contentType,
-            !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-        return kj::mv(formData);
-      });
-    }
-
-    // Theoretically, we already know if this will throw: the empty string is a valid
-    // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
-    // FormData::parse() make the decision, to keep the logic in one place.
-    formData->parse(
-        js, kj::String(), contentType, !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-    return js.resolvedPromise(kj::mv(formData));
+    // The body is read before the Content-Type is checked, so that an error from the body stream
+    // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
+    // application/x-www-form-urlencoded but not as multipart/form-data.
+    // See https://fetch.spec.whatwg.org/#concept-body-consume-body
+    auto limit = bodyStream.isNull() ? 0 : bufferingLimit();
+    return bodyStream.text(js, limit).then(js,
+        [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
+            auto& js, kj::String rawText) mutable {
+      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
+          "Parsing a Body as FormData requires a Content-Type header.");
+      formData->parse(js, kj::mv(rawText), contentType,
+          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
+      return kj::mv(formData);
+    });
   });
 }
 
@@ -341,6 +336,8 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
+  // The body of an `input` Request, when `init` doesn't replace it.
+  kj::Maybe<JsReadableStream> inputBody;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
@@ -399,16 +396,7 @@ jsg::Ref<Request> Request::constructor(
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        KJ_IF_SOME(oldJsBody, oldRequest->getBody(js)) {
-          // The stream spec says to "create a proxy" for the passed in readable, which it
-          // defines generically as creating a TransformStream and using pipeThrough to pass
-          // the input stream through, giving the TransformStream's readable to the extracted
-          // body below. We don't need to do that. Instead, we just create a new stream that
-          // takes over ownership of the internals of the given stream (carrying the retransmit
-          // buffer forward, if any). The given stream is left in a locked/disturbed mode so
-          // that it can no longer be used.
-          body = Body::ExtractedBody(js, oldJsBody.detach(js));
-        }
+        inputBody = oldRequest->getBody(js);
       }
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
@@ -515,8 +503,8 @@ jsg::Ref<Request> Request::constructor(
           // of these fields was modified, but the original Request object that we're rewriting
           // already represented a GET/HEAD method with a body, we allow that to pass through.
           // We support proxying such requests and rewriting their URL/headers/etc.)
-          JSG_REQUIRE(
-              (method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) || body == kj::none,
+          JSG_REQUIRE((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+                  (body == kj::none && inputBody == kj::none),
               TypeError, "Request with a GET or HEAD method cannot have a body.");
         }
       }
@@ -541,6 +529,20 @@ jsg::Ref<Request> Request::constructor(
 
   if (headers == kj::none) {
     headers = js.alloc<Headers>();
+  }
+
+  KJ_IF_SOME(oldJsBody, inputBody) {
+    // This runs after every check that can throw, so a failed construction leaves `input`
+    // usable.
+    //
+    // The stream spec says to "create a proxy" for the passed in readable, which it
+    // defines generically as creating a TransformStream and using pipeThrough to pass
+    // the input stream through, giving the TransformStream's readable to the extracted
+    // body below. We don't need to do that. Instead, we just create a new stream that
+    // takes over ownership of the internals of the given stream (carrying the retransmit
+    // buffer forward, if any). The given stream is left in a locked/disturbed mode so
+    // that it can no longer be used.
+    body = Body::ExtractedBody(js, oldJsBody.detach(js));
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
@@ -1525,10 +1527,13 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
-// When the HTTP client failed to parse the response head, the part of the exception's description
-// that says why. kj's HttpClient fails with one of these descriptions, which an embedder's
-// HttpClientErrorHandler may prefix, and kj-hyper (src/rust/cxx/kj-hyper/client.rs) uses the last.
-kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
+// When the HTTP client failed to parse the response head, why. kj-hyper says so in an
+// INVALID_RESPONSE_DETAIL_ID detail. kj's HttpClient, which sets no detail, fails with one of these
+// descriptions, which an embedder's HttpClientErrorHandler may prefix.
+kj::Maybe<kj::ArrayPtr<const char>> invalidResponseReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::INVALID_RESPONSE_DETAIL_ID)) {
+    return reason.asChars();
+  }
   static constexpr kj::StringPtr DESCRIPTIONS[] = {
     "Response headers have no terminal newline."_kj,
     "Invalid response status line"_kj,
@@ -1537,8 +1542,17 @@ kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
   auto description = exception.getDescription();
   for (const auto& text: DESCRIPTIONS) {
     KJ_IF_SOME(start, description.find(text)) {
-      return description.slice(start);
+      return description.slice(start).asArray();
     }
+  }
+  return kj::none;
+}
+
+// When the connection for a request couldn't be made, for example because its host didn't resolve
+// or its TLS handshake failed, the cause, from kj-hyper's CONNECT_FAILED_DETAIL_ID detail.
+kj::Maybe<kj::ArrayPtr<const char>> connectFailureReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::CONNECT_FAILED_DETAIL_ID)) {
+    return reason.asChars();
   }
   return kj::none;
 }
@@ -2038,14 +2052,19 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
-      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
-        // Fetch treats a response that doesn't parse as a network error, which rejects with a
-        // TypeError.
+      // Fetch treats a response that doesn't parse, or a connection that couldn't be made, as a
+      // network error, which rejects with a TypeError.
+      auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
         if (typeError) {
-          return JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "Server returned invalid HTTP response: ", reason);
+          return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
         }
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Server returned invalid HTTP response: ", reason);
+        return JSG_KJ_EXCEPTION(FAILED, Error, what, reason);
+      };
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        return networkError("Server returned invalid HTTP response: "_kj, reason);
+      }
+      KJ_IF_SOME(reason, connectFailureReason(exception)) {
+        return networkError("Network connection failed: "_kj, reason);
       }
       return kj::mv(exception);
     });

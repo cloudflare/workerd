@@ -249,8 +249,9 @@ fn create_uv_exception_impl<'s>(
 ) -> jsg::Result<v8::Local<'s, v8::Object>> {
     debug_assert!(!syscall.is_empty(), "syscall must not be null");
 
-    // Format the message to match Node.js format:
-    // "ENOENT: no such file or directory, open 'path'"
+    // Format the message like Node.js, minus its leading "ENOENT: " code prefix:
+    // "no such file or directory, open 'path'"
+    // with " -> 'dest'" appended when both path and dest are present.
     //
     // `path` may be arbitrary bytes, so the message is assembled as bytes and
     // handed to V8 (which renders invalid UTF-8 lossily) rather than forced
@@ -265,12 +266,19 @@ fn create_uv_exception_impl<'s>(
             msg.extend_from_slice(b" '");
             msg.extend_from_slice(path);
             msg.push(b'\'');
+            if let Some(dest) = dest {
+                msg.extend_from_slice(b" -> '");
+                msg.extend_from_slice(dest);
+                msg.push(b'\'');
+            }
         }
         msg
     };
 
     let obj = lock.error_from_bytes(&formatted_message);
 
+    let errno_value = v8::Number::new(lock, f64::from(errorno)).into();
+    obj.set(lock, "errno", errno_value)?;
     let syscall_value = bytes_to_value(lock, syscall.as_bytes());
     obj.set(lock, "syscall", syscall_value)?;
     let code_value = bytes_to_value(lock, uv_err_name(errorno).as_bytes());

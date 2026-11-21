@@ -52,6 +52,12 @@ KJ_TEST("structs") {
   e.expectEval("readTestStruct({str: 'foo', num: 123, box: 'wrong'})", "throws",
       "TypeError: Incorrect type for the 'box' field on 'TestStruct': the provided "
       "value is not of type 'NumberBox'.");
+  e.expectEval("readTestStruct(null)", "throws",
+      "TypeError: Cannot initialize TestStruct with required members from an undefined or null "
+      "value.");
+  e.expectEval("readTestStruct(undefined)", "throws",
+      "TypeError: Cannot initialize TestStruct with required members from an undefined or null "
+      "value.");
 
   e.expectEval(
       "JSON.stringify(readSelfStruct({i: 123, x: 'foo'}))", "string", "{\"i\":123,\"x\":\"foo\"}");

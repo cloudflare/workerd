@@ -14,6 +14,8 @@ private:
   struct IteratorState {
     kj::Array<T> copy;
     decltype(copy.begin()) cursor = copy.begin();
+
+    JSG_HOLDS_NO_GC_HANDLES;
   };
 
 public:

@@ -11,17 +11,17 @@
 //! how many bytes it actually wrote, which is often fewer because the
 //! destination is sized for the worst case.
 //!
-//! All sizing, validation, and length checking happens here; the ICU and
-//! simdutf wrappers in [`crate::ffi`] and the ASCII and Latin-1 conversions in
-//! [`crate::single_byte`] only provide the conversions themselves.
+//! All sizing, validation, and length checking happens here; the simdutf
+//! wrappers in [`crate::ffi`] and the conversions in [`crate::scalar`] only
+//! provide the conversions themselves.
 
 use crate::error::TranscodeError;
 use crate::ffi;
-use crate::ffi::Converter;
 use crate::ffi::Encoding;
+use crate::ffi::Latin1Source;
 use crate::ffi::Utf8Source;
 use crate::ffi::Utf16LeSource;
-use crate::single_byte;
+use crate::scalar;
 
 /// An isolate has a 128 MiB memory limit, and thus so does any single
 /// destination buffer.
@@ -56,17 +56,21 @@ pub struct Transcoder<'a> {
 }
 
 /// The conversion [`Transcoder::transcode_into`] will perform, along with any
-/// ICU converters or measured simdutf sources [`Transcoder::new`] needed to
-/// size the destination.
+/// measured simdutf source [`Transcoder::new`] needed to size the destination.
 enum Conversion<'a> {
-    /// ICU `ucnv_convertEx` between two converters, for the UTF-8 and
-    /// UTF-16LE identity pairs.
-    ConvertEx { to: Converter, from: Converter },
+    /// A source that is already valid in the target encoding, copied as is.
+    Copy,
     /// Latin-1 to UTF-16LE, via simdutf.
     Latin1ToUtf16,
-    /// Any other pair with ASCII or Latin-1 on either side, via
-    /// [`crate::single_byte`].
-    SingleByte { from: Encoding, to: Encoding },
+    /// Latin-1 to UTF-8, via simdutf.
+    Latin1ToUtf8(Latin1Source<'a>),
+    /// Any other pair, via [`crate::scalar`], after copying the first
+    /// `valid_prefix` bytes, which are already valid in the target encoding.
+    Scalar {
+        from: Encoding,
+        to: Encoding,
+        valid_prefix: usize,
+    },
     /// UTF-8 to UTF-16LE, via simdutf.
     Utf16FromUtf8(Utf8Source<'a>),
     /// UTF-16LE to UTF-8, via simdutf.
@@ -85,17 +89,42 @@ impl<'a> Transcoder<'a> {
             (Encoding::Ascii | Encoding::Latin1, Encoding::Utf16Le) => {
                 Self::transcode_latin1_to_utf16(source)
             }
+            // Ahead of the prefix arm below, which also matches it: every
+            // byte is valid Latin-1.
+            (Encoding::Latin1, Encoding::Latin1) => Ok(Self::copy(source)),
+            (Encoding::Latin1, Encoding::Utf8) => Self::transcode_latin1_to_utf8(source),
             (Encoding::Utf8, Encoding::Utf16Le) => Self::transcode_utf16_from_utf8(source),
             (Encoding::Utf16Le, Encoding::Utf8) => Self::transcode_utf8_from_utf16(source),
-            (Encoding::Utf8, Encoding::Utf8) | (Encoding::Utf16Le, Encoding::Utf16Le) => {
-                Self::transcode_default(source, from, to)
+            // A trailing odd byte is ignored, as in `transcode_utf8_from_utf16`.
+            (Encoding::Utf16Le, Encoding::Ascii | Encoding::Latin1) => {
+                let source = &source[..source.len() & !1];
+                Self::transcode_scalar(source, from, to, 0, TranscodeError::BufferTooLarge)
             }
+            // The leading bytes that are already valid in the target are
+            // copied: ASCII, a subset of every other encoding here, or for
+            // an identity pair, well-formed text.
             (
-                Encoding::Ascii | Encoding::Latin1 | Encoding::Utf8 | Encoding::Utf16Le,
+                Encoding::Ascii | Encoding::Latin1 | Encoding::Utf8,
                 Encoding::Ascii | Encoding::Latin1,
             )
-            | (Encoding::Ascii | Encoding::Latin1, Encoding::Utf8) => {
-                Self::transcode_single_byte(source, from, to)
+            | (Encoding::Ascii | Encoding::Utf8, Encoding::Utf8)
+            | (Encoding::Utf16Le, Encoding::Utf16Le) => {
+                let valid_prefix = match from {
+                    Encoding::Utf16Le => ffi::utf16le_valid_prefix_len(source),
+                    Encoding::Utf8 if to == Encoding::Utf8 => ffi::utf8_valid_prefix_len(source),
+                    _ => ffi::ascii_prefix_len(source),
+                };
+                if valid_prefix == source.len() {
+                    Ok(Self::copy(source))
+                } else {
+                    Self::transcode_scalar(
+                        source,
+                        from,
+                        to,
+                        valid_prefix,
+                        TranscodeError::SourceBufferTooLarge,
+                    )
+                }
             }
             _ => Err(TranscodeError::InvalidEncoding),
         }
@@ -125,9 +154,13 @@ impl<'a> Transcoder<'a> {
 
         let source = self.source;
         match &self.conversion {
-            Conversion::ConvertEx { to, from } => {
-                ffi::convert_ex(to, from, source, dest).ok_or(TranscodeError::UnableToTranscode)
+            Conversion::Copy => {
+                dest.copy_from_slice(source);
+                Ok(dest.len())
             }
+            Conversion::Latin1ToUtf8(latin1) => latin1
+                .convert_to_utf8(dest)
+                .ok_or(TranscodeError::DestinationSizeMismatch),
             Conversion::Latin1ToUtf16 => {
                 // Every byte is valid Latin-1 and widens to exactly one UTF-16
                 // code unit, and `dest` was sized as two bytes per source byte.
@@ -137,8 +170,15 @@ impl<'a> Transcoder<'a> {
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
                 Ok(units * size_of::<u16>())
             }
-            Conversion::SingleByte { from, to } => {
-                Ok(single_byte::transcode_into(source, *from, *to, dest))
+            Conversion::Scalar {
+                from,
+                to,
+                valid_prefix,
+            } => {
+                let (valid, rest) = source.split_at(*valid_prefix);
+                dest[..valid.len()].copy_from_slice(valid);
+                let written = scalar::transcode_into(rest, *from, *to, &mut dest[valid.len()..]);
+                Ok(valid.len() + written)
             }
             Conversion::Utf16FromUtf8(utf8) => {
                 // `dest` was sized as two bytes per estimated code unit.
@@ -148,7 +188,7 @@ impl<'a> Transcoder<'a> {
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
                 // 0 means invalid UTF-8 input.
                 if units == 0 {
-                    return Err(TranscodeError::UnableToTranscode);
+                    return Err(TranscodeError::InvalidChar);
                 }
                 if units != expected_units {
                     return Err(TranscodeError::Utf16LengthMismatch);
@@ -160,10 +200,10 @@ impl<'a> Transcoder<'a> {
                 let written = utf16
                     .convert_to_utf8(dest)
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
-                // Invalid input writes 0 bytes, which fails this check because
-                // `expected_bytes` is nonzero here. Invalid input therefore
-                // surfaces as a length mismatch rather than "Unable to
-                // transcode buffer", unlike every other pair.
+                // 0 means invalid UTF-16 input, such as an unpaired surrogate.
+                if written == 0 {
+                    return Err(TranscodeError::InvalidChar);
+                }
                 if written != expected_bytes {
                     return Err(TranscodeError::Utf8LengthMismatch);
                 }
@@ -172,27 +212,26 @@ impl<'a> Transcoder<'a> {
         }
     }
 
-    /// ICU `ucnv_convertEx` between two converters, for the UTF-8 and UTF-16LE
-    /// identity pairs, which re-encode ill-formed input as U+FFFD. Sized at
-    /// `to`'s maximum bytes per character for every source byte.
-    fn transcode_default(
-        source: &'a [u8],
-        from: Encoding,
-        to: Encoding,
-    ) -> Result<Self, TranscodeError> {
-        let to_conv = Converter::open(to)?;
-        let from_conv = Converter::open(from)?;
+    /// A source that is already valid in the target encoding. No larger than
+    /// the source, so within [`ISOLATE_LIMIT`].
+    fn copy(source: &'a [u8]) -> Self {
+        Self {
+            source,
+            conversion: Conversion::Copy,
+            dest_len: source.len(),
+        }
+    }
 
-        let limit = source.len().saturating_mul(to_conv.max_char_size());
-        require_within_isolate_limit(limit, TranscodeError::SourceBufferTooLarge)?;
+    /// Latin-1 to UTF-8, sized from [`Latin1Source::utf8_len`].
+    fn transcode_latin1_to_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
+        let latin1 = Latin1Source::new(source);
+        let dest_len = latin1.utf8_len();
+        require_within_isolate_limit(dest_len, TranscodeError::SourceBufferTooLarge)?;
 
         Ok(Self {
             source,
-            conversion: Conversion::ConvertEx {
-                to: to_conv,
-                from: from_conv,
-            },
-            dest_len: limit,
+            conversion: Conversion::Latin1ToUtf8(latin1),
+            dest_len,
         })
     }
 
@@ -211,39 +250,42 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// A conversion with ASCII or Latin-1 on either side, via
-    /// [`crate::single_byte`], sized at [`single_byte::dest_len`].
-    fn transcode_single_byte(
+    /// A conversion simdutf does not cover, via [`crate::scalar`] after
+    /// copying the `valid_prefix` leading bytes, sized at [`scalar::dest_len`]
+    /// of the rest. Fails with `too_large` if that exceeds [`ISOLATE_LIMIT`].
+    fn transcode_scalar(
         source: &'a [u8],
         from: Encoding,
         to: Encoding,
+        valid_prefix: usize,
+        too_large: TranscodeError,
     ) -> Result<Self, TranscodeError> {
-        let error = if from == Encoding::Utf16Le {
-            if !source.len().is_multiple_of(2) {
-                return Err(TranscodeError::OddUtf16leInput);
-            }
-            TranscodeError::BufferTooLarge
-        } else {
-            TranscodeError::SourceBufferTooLarge
-        };
-        let limit = single_byte::dest_len(source, from, to);
-        require_within_isolate_limit(limit, error)?;
+        let limit =
+            valid_prefix.saturating_add(scalar::dest_len(&source[valid_prefix..], from, to));
+        require_within_isolate_limit(limit, too_large)?;
 
         Ok(Self {
             source,
-            conversion: Conversion::SingleByte { from, to },
+            conversion: Conversion::Scalar {
+                from,
+                to,
+                valid_prefix,
+            },
             dest_len: limit,
         })
     }
 
     /// UTF-8 to UTF-16LE, sized from [`Utf8Source::utf16_len`].
     ///
-    /// That estimate is zero for some non-empty inputs -- a source of nothing
-    /// but UTF-8 continuation bytes, for instance -- which yields an empty
-    /// result rather than an error.
+    /// That estimate is zero for some invalid non-empty inputs -- a source of
+    /// nothing but UTF-8 continuation bytes, for instance -- which fail here,
+    /// as any other invalid UTF-8 fails in [`Transcoder::transcode_into`].
     fn transcode_utf16_from_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
         let utf8 = Utf8Source::new(source);
         let expected_utf16_length = utf8.utf16_len();
+        if expected_utf16_length == 0 && !source.is_empty() {
+            return Err(TranscodeError::InvalidChar);
+        }
         require_within_isolate_limit(
             expected_utf16_length,
             TranscodeError::ExpectedUtf16LengthTooLarge,
@@ -258,11 +300,14 @@ impl<'a> Transcoder<'a> {
     }
 
     /// UTF-16LE to UTF-8, sized from [`Utf16LeSource::utf8_len`].
+    ///
+    /// Like Node, a trailing odd byte is ignored, and so a lone byte fails, as
+    /// simdutf converts nothing for it.
     fn transcode_utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
-        if !source.len().is_multiple_of(2) {
-            return Err(TranscodeError::OddUtf16leInput);
+        if source.len() == 1 {
+            return Err(TranscodeError::InvalidChar);
         }
-
+        let source = &source[..source.len() & !1];
         let utf16 = Utf16LeSource::new(source);
         let expected_utf8_length = utf16.utf8_len();
         require_within_isolate_limit(

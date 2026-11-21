@@ -6,6 +6,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/server/factory/worker-factory.h>
 #include <workerd/server/server/bridge.rs.h>
+#include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/thread-scopes.h>
@@ -40,10 +41,10 @@ namespace {
 
 #ifndef KJ_EXPECT_AT
 #define KJ_EXPECT_AT(cond, location, ...)                                                          \
-  if (auto _kjCondition = ::kj::_::MAGIC_ASSERT << cond)                                           \
-    ;                                                                                              \
-  else                                                                                             \
-    KJ_FAIL_EXPECT_AT(location, "failed: expected " #cond, _kjCondition, ##__VA_ARGS__)
+  if (auto _kjCondition = ::kj::_::MAGIC_ASSERT << cond) {                                         \
+  } else {                                                                                         \
+    KJ_FAIL_EXPECT_AT(location, "failed: expected " #cond, _kjCondition, ##__VA_ARGS__)            \
+  }
 #endif
 
 jsg::V8System v8System({"--expose-gc"_kj});

@@ -266,7 +266,7 @@ impl NumberBox {
         lock: &mut jsg::Lock,
         num: jsg::LenientOption<jsg::Rc<NumberBox>>,
     ) -> String {
-        num.0
+        num.as_ref()
             .map_or_else(|| "absent".to_owned(), |b| b.get(lock).value.to_string())
     }
 
@@ -346,6 +346,17 @@ fn lenient_coercing_integer_errors_are_not_absent() {
         }
         Ok(())
     });
+}
+
+/// `LenientOption<T>` derefs to its `Option<T>`, as C++ `LenientOptional<T>` is a `kj::Maybe<T>`.
+#[test]
+fn lenient_option_derefs_to_option() {
+    let mut value = jsg::LenientOption(Some(3_u32));
+    assert_eq!(value.as_ref(), Some(&3));
+    assert_eq!(value.take(), Some(3));
+    assert!(value.is_none());
+    value.replace(4);
+    assert_eq!(value.into_inner(), Some(4));
 }
 
 #[test]

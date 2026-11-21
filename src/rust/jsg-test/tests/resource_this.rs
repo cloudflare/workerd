@@ -28,12 +28,7 @@ struct Task {
     /// The wrapper of the queue this task is in, which the task keeps as a resource keeps a
     /// callback it registered: through a `TracedGlobal`, so that GC can collect the cycle.
     queue: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        TASK_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -44,6 +39,7 @@ impl Task {
             name,
             label: RefCell::new(String::new()),
             queue: jsg::Cell::new(None),
+            drops: crate::DropCounter(&TASK_DROPS),
         }
     }
 

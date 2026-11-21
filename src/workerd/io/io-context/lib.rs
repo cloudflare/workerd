@@ -1486,10 +1486,6 @@ impl<D: jsg::Traced> jsg::Traced for ReactionData<D> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
         self.data.trace(visitor);
     }
-
-    fn needs_drop_detach() -> bool {
-        D::needs_drop_detach()
-    }
 }
 
 /// A span an `IoContext` owns, from [`IoContext::add_span`].

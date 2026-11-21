@@ -22,26 +22,6 @@ fn outside_a_request_there_is_no_io_context() {
     });
 }
 
-/// Data whose `Drop` may move a GC reference out of a field, as far as its `Traced` impl says.
-struct DetachesForDrop;
-
-impl jsg::Traced for DetachesForDrop {
-    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
-
-    fn needs_drop_detach() -> bool {
-        true
-    }
-}
-
-/// The data of `then()`'s reactions reports its contents' `needs_drop_detach()`, as a wrapper
-/// must, so that the reaction detaches it before dropping it when the contents need that.
-#[test]
-fn reaction_data_needs_drop_detach_as_its_contents_do() {
-    use jsg::Traced;
-    assert!(ReactionData::<DetachesForDrop>::needs_drop_detach());
-    assert!(!ReactionData::<i32>::needs_drop_detach());
-}
-
 /// `then()`, `catch()` and `then_or_catch()` fail unless their `IoContext` is the current one, as
 /// C++ `IoContext::addFunctor()` does.
 #[test]

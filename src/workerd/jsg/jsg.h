@@ -2232,6 +2232,17 @@ consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
+// Opt-out for a type with no public `visitForGc()`, required by templates that would otherwise skip
+// it silently (such as the State of JSG_ITERATOR). Mark a struct by putting JSG_HOLDS_NO_GC_HANDLES
+// in its body. For a type you can't add a member to, specialize the variable in workerd::jsg:
+//
+//     template <>
+//     inline constexpr bool holdsNoGcHandles<IoOwn<Foo>> = true;
+template <typename T>
+inline constexpr bool holdsNoGcHandles = requires { typename T::JsgHoldsNoGcHandles; };
+
+#define JSG_HOLDS_NO_GC_HANDLES using JsgHoldsNoGcHandles = void
+
 // Visitor used during garbage collection. Any resource class that holds `Ref`s should
 // implement GC visitation by declaring a private method like:
 //

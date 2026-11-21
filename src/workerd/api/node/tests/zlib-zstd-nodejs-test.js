@@ -459,19 +459,25 @@ function xorshiftBytes(length) {
   return bytes;
 }
 
-async function zstdCompressStreaming(input, options, writeSize) {
-  const compress = zlib.createZstdCompress(options);
-  const chunks = [];
-  compress.on('data', (chunk) => chunks.push(chunk));
+// Writes each chunk to the stream, ends it and returns everything it outputs.
+async function collectStream(stream, chunks) {
+  const output = [];
+  stream.on('data', (chunk) => output.push(chunk));
   const { promise, resolve, reject } = Promise.withResolvers();
-  compress.on('end', resolve);
-  compress.on('error', reject);
-  for (let offset = 0; offset < input.length; offset += writeSize) {
-    compress.write(input.subarray(offset, offset + writeSize));
-  }
-  compress.end();
+  stream.on('end', resolve);
+  stream.on('error', reject);
+  for (const chunk of chunks) stream.write(chunk);
+  stream.end();
   await promise;
-  return Buffer.concat(chunks);
+  return Buffer.concat(output);
+}
+
+function zstdCompressStreaming(input, options, writeSize) {
+  const chunks = [];
+  for (let offset = 0; offset < input.length; offset += writeSize) {
+    chunks.push(input.subarray(offset, offset + writeSize));
+  }
+  return collectStream(zlib.createZstdCompress(options), chunks);
 }
 
 export const zstdStreamFinalFlushOverflowsChunkTest = {
@@ -552,5 +558,184 @@ export const zstdCompressSyncMaxOutputLengthAtBufferBoundaryTest = {
         }),
       { name: 'RangeError', message: /Memory limit exceeded/ }
     );
+  },
+};
+
+// The sync output buffer starts at 40 KiB and doubles, so 1x, 2x and 4x fill it exactly.
+export const zstdDecompressSyncOutputFillsBufferTest = {
+  async test() {
+    const syncFirstBufferSize = 40 * 1024;
+    for (const multiple of [1, 2, 3, 4]) {
+      for (const delta of [-1, 0, 1]) {
+        const size = multiple * syncFirstBufferSize + delta;
+        const input = xorshiftBytes(size);
+        const compressed = zlib.zstdCompressSync(input);
+        assert(
+          input.equals(zlib.zstdDecompressSync(compressed)),
+          `size ${size}`
+        );
+
+        const { promise, resolve, reject } = Promise.withResolvers();
+        zlib.zstdDecompress(compressed, (err, res) => {
+          if (err) reject(err);
+          else resolve(res);
+        });
+        assert(input.equals(await promise), `size ${size}`);
+      }
+    }
+  },
+};
+
+function zstdDecompressCallback(input, options = {}) {
+  const { promise, resolve, reject } = Promise.withResolvers();
+  zlib.zstdDecompress(input, options, (err, res) => {
+    if (err) reject(err);
+    else resolve(res);
+  });
+  return promise;
+}
+
+function zstdDecompressStreaming(chunks) {
+  return collectStream(zlib.createZstdDecompress(), chunks);
+}
+
+// Decodes the input with zstdDecompressSync, zstdDecompress and a single stream write.
+async function zstdDecompressAllWays(input) {
+  return [
+    zlib.zstdDecompressSync(input),
+    await zstdDecompressCallback(input),
+    await zstdDecompressStreaming([input]),
+  ];
+}
+
+function skippableFrame(contentLength) {
+  const frame = Buffer.alloc(8 + contentLength, 0xab);
+  frame.writeUInt32LE(0x184d2a53, 0);
+  frame.writeUInt32LE(contentLength, 4);
+  return frame;
+}
+
+// Node decodes every frame of concatenated input, skipping skippable frames.
+export const zstdDecompressConcatenatedFramesTest = {
+  async test() {
+    const parts = [
+      xorshiftBytes(1000),
+      xorshiftBytes(50_000),
+      xorshiftBytes(7),
+    ];
+    const frames = parts.map((part) => zlib.zstdCompressSync(part));
+    const cases = [
+      [frames.slice(0, 2), parts.slice(0, 2)],
+      [frames, parts],
+      [[skippableFrame(16), frames[0]], [parts[0]]],
+      [[frames[0], skippableFrame(0), frames[1]], parts.slice(0, 2)],
+      [[frames[0], skippableFrame(16)], [parts[0]]],
+    ];
+    for (const [inputs, outputs] of cases) {
+      const input = Buffer.concat(inputs);
+      const expected = Buffer.concat(outputs);
+      for (const output of await zstdDecompressAllWays(input)) {
+        assert(expected.equals(output));
+      }
+    }
+  },
+};
+
+export const zstdDecompressStreamFrameSplitAcrossWritesTest = {
+  async test() {
+    const parts = [xorshiftBytes(1000), xorshiftBytes(2000)];
+    const first = zlib.zstdCompressSync(parts[0]);
+    const input = Buffer.concat([first, zlib.zstdCompressSync(parts[1])]);
+    const expected = Buffer.concat(parts);
+    for (let offset = 1; offset <= 8; offset++) {
+      const cut = first.length + offset;
+      const output = await zstdDecompressStreaming([
+        input.subarray(0, cut),
+        input.subarray(cut),
+      ]);
+      assert(expected.equals(output), `offset ${offset}`);
+    }
+  },
+};
+
+// Like Node without rejectGarbageAfterEnd, input after the last frame that doesn't start another
+// frame is ignored.
+export const zstdDecompressTrailingJunkTest = {
+  async test() {
+    const part = xorshiftBytes(1000);
+    const frame = zlib.zstdCompressSync(part);
+    for (const junk of ['j', 'junk', 'not a zstd frame']) {
+      const input = Buffer.concat([frame, Buffer.from(junk)]);
+      for (const output of await zstdDecompressAllWays(input)) {
+        assert(part.equals(output), junk);
+      }
+    }
+  },
+};
+
+export const zstdDecompressTruncatedSecondFrameTest = {
+  async test() {
+    const frames = [xorshiftBytes(1000), xorshiftBytes(2000)].map((part) =>
+      zlib.zstdCompressSync(part)
+    );
+    const second = frames[1].subarray(0, frames[1].length - 4);
+    const input = Buffer.concat([frames[0], second]);
+    assert.throws(
+      () => zlib.zstdDecompressSync(input),
+      /unexpected end of file/
+    );
+    await assert.rejects(
+      zstdDecompressCallback(input),
+      /unexpected end of file/
+    );
+    await assert.rejects(
+      zstdDecompressStreaming([input]),
+      /unexpected end of file/
+    );
+  },
+};
+
+export const zstdDecompressMaxOutputLengthAcrossFramesTest = {
+  test() {
+    const parts = [xorshiftBytes(1000), xorshiftBytes(2000)];
+    const input = Buffer.concat(
+      parts.map((part) => zlib.zstdCompressSync(part))
+    );
+    assert.throws(
+      () => zlib.zstdDecompressSync(input, { maxOutputLength: 1000 }),
+      { name: 'RangeError' }
+    );
+    assert(
+      Buffer.concat(parts).equals(
+        zlib.zstdDecompressSync(input, { maxOutputLength: 3000 })
+      )
+    );
+  },
+};
+
+// Ignored input after a frame doesn't count against maxOutputLength, even when the frame fills it.
+export const zstdDecompressMaxOutputLengthFilledBeforeIgnoredInputTest = {
+  test() {
+    const part = xorshiftBytes(1000);
+    const frame = zlib.zstdCompressSync(part);
+    for (const after of [
+      Buffer.from('junk'),
+      Buffer.from([0x28, 0xb5]),
+      skippableFrame(16),
+    ]) {
+      const input = Buffer.concat([frame, after]);
+      assert(
+        part.equals(zlib.zstdDecompressSync(input, { maxOutputLength: 1000 })),
+        after.toString('hex')
+      );
+    }
+  },
+};
+
+// Node throws "unexpected end of file" here. workerd has always returned an empty buffer, and
+// decoding several frames doesn't change that.
+export const zstdDecompressEmptyInputTest = {
+  test() {
+    assert.strictEqual(zlib.zstdDecompressSync(Buffer.alloc(0)).length, 0);
   },
 };

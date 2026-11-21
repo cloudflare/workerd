@@ -405,7 +405,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "xrMQmrStrueR0w0uwmELEMgm68O+gE0GEzsLEEf8Fv8=",
+        "usagesDigest": "KGrz2+yqH893MBBmYqlA3xdy0oDqwYE0GZFt1reKQWk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -433,10 +433,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "487e97008c1f2468c3da20812b19973b40b62e5d9b8132627723367e03d96d63",
-              "strip_prefix": "capnproto-capnproto-be8fbe7/c++",
+              "sha256": "72d7f413abaa4ee7233063033b5d9afe7f76b7754ab04eedaad65b5e8f31ec2b",
+              "strip_prefix": "capnproto-capnproto-7d3db37/c++",
               "type": "tgz",
-              "url": "https://github.com/capnproto/capnproto/tarball/be8fbe7bc7ad6c5cc8106385a1919df7222b1e5e",
+              "url": "https://github.com/capnproto/capnproto/tarball/7d3db3760068ec6a5214a0c3509da398e71dc668",
               "urls": [],
               "workspace_file_content": ""
             }
@@ -929,10 +929,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "13178cd609d76494a3f04a7a6c3ab13d4b9c07b519b70b7b1388e6acf1e58636",
-              "strip_prefix": "wpt-2e4dc257c",
+              "sha256": "6357537fa2c19a3c00b9504810d0b466e991ae4a6b8523e14fae6365fef18fa6",
+              "strip_prefix": "wpt-8ae17e423",
               "type": "tgz",
-              "url": "https://github.com/cloudflare/workerd-tools/releases/download/wpt-2e4dc257c/wpt-2e4dc257c.tar.gz",
+              "url": "https://github.com/cloudflare/workerd-tools/releases/download/wpt-8ae17e423/wpt-8ae17e423.tar.gz",
               "urls": [],
               "workspace_file_content": ""
             }
