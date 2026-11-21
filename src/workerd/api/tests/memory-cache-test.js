@@ -515,10 +515,8 @@ export const fallbackCalledWithGlobalThis = {
 
 export const fallbackProducesNoObject = {
   async test(ctrl, env) {
-    // C++ names the type as typeid() does: mangled, or on Windows as "struct workerd::api::...".
-    // The Rust MemoryCache names it as jsg::typeName() does.
     const noObject =
-      /^Cannot initialize (struct )?\S*CacheValueProduceResult\S* with required members from an undefined or null value\.$/;
+      'Cannot initialize CacheValueProduceResult with required members from an undefined or null value.';
     for (const produce of [
       () => undefined,
       () => null,

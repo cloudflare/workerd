@@ -38,10 +38,7 @@ V8_DEPENDENCIES = {
 
 # rust_icu_sys selects its bindings and versioned ICU symbol names from this
 # pin, which must match the major version of the ICU that V8 links.
-RUST_ICU_VERSION_PINS = (
-    ROOT / "build/deps/rust.MODULE.bazel",
-    ROOT / "src/rust/i18n/BUILD.bazel",
-)
+RUST_ICU_VERSION_PINS = (ROOT / "build/deps/rust.MODULE.bazel",)
 RUST_ICU_VERSION = re.compile(r'(?<="RUST_ICU_MAJOR_VERSION_NUMBER": ")\d+(?=")')
 
 # V8 builds these crates from Chromium's third_party/rust. Every crate in their

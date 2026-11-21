@@ -73,6 +73,7 @@ export default {
   'digest/digest_test_data.js': {},
   'encrypt_decrypt/aes.js': supportFile,
   'encrypt_decrypt/aes_cbc.https.any.js': {},
+  'encrypt_decrypt/aes_cbc_invalid_length.https.any.js': {},
   'encrypt_decrypt/aes_cbc_vectors.js': {},
   'encrypt_decrypt/aes_common_fixtures.js': {},
   'encrypt_decrypt/aes_ctr.https.any.js': {},
@@ -85,16 +86,7 @@ export default {
   'encrypt_decrypt/rsa.js': supportFile,
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
-  'export-key-error-order.https.any.js': {
-    comment:
-      'exportKey() and wrapKey() check extractable before export support, so HKDF and PBKDF2 keys throw InvalidAccessError instead of NotSupportedError',
-    expectedFailures: [
-      'exportKey() with a HKDF key throws NotSupportedError',
-      'wrapKey() with a HKDF key throws NotSupportedError',
-      'exportKey() with a PBKDF2 key throws NotSupportedError',
-      'wrapKey() with a PBKDF2 key throws NotSupportedError',
-    ],
-  },
+  'export-key-error-order.https.any.js': {},
   'generateKey/algorithm_registry.js': {},
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {},
@@ -162,10 +154,9 @@ export default {
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDH, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-256}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-384}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-521}, true, [deriveKey, deriveBits])",
@@ -173,10 +164,9 @@ export default {
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDSA, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-256}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-384}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-521}, true, [sign])",
@@ -215,24 +205,20 @@ export default {
   'import_export/okp_importKey_X25519.https.any.js': {},
   'import_export/okp_importKey_failures_Ed25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign, sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[verify\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_X25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits, deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits, deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_fixtures.js': {},
@@ -377,13 +363,7 @@ export default {
   },
   'modern-algos/util/mldsa_key_fixtures.js': {},
   'modern-algos/util/supports.js': {},
-  'normalize-algorithm-name.https.any.js': {
-    comment: 'Wrong error type - DOMException code mismatch',
-    expectedFailures: [
-      '"H<U+212A>DF" does not match "HKDF"',
-      '"PB<U+212A>DF2" does not match "PBKDF2"',
-    ],
-  },
+  'normalize-algorithm-name.https.any.js': {},
   'randomUUID.https.any.js': {},
   'secure-curves/derive_bits_keys/cfrg_curves_bits_curve448.https.any.js':
     unsupported('X448'),

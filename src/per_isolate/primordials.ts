@@ -655,6 +655,7 @@ const AbortSignalReasonGet = captureJsgGetter<(signal: AbortSignal) => unknown>(
 );
 
 const EventTargetCtor = globalThis.EventTarget;
+const EventTargetPrototype = EventTargetCtor.prototype;
 const EventTargetAddEventListener = uncurryThis(
   EventTargetCtor.prototype.addEventListener
 ) as (target: object, type: string, listener: () => void) => void;
@@ -883,6 +884,7 @@ module.exports = ObjectFreeze({
   JSONStringify,
 
   // EventTarget
+  EventTargetPrototype,
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
 

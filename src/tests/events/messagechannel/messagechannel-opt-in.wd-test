@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+using MessageChannelModules = import "messagechannel-modules.capnp";
+
+# The main cell plus the dateless opt-in flags:
+# spec_compliant_property_attributes, which gives accessors their WebIDL
+# names and lengths and makes the globals own properties, and
+# immutable_api_prototypes, pinned to show it makes no difference, the
+# constructors' prototypes being non-writable regardless.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-messagechannel-opt-in",
+      worker = (
+        modules = MessageChannelModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_worker_threads_module",
+          "expose_global_message_channel",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

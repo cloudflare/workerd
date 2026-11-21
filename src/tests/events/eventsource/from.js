@@ -8,7 +8,7 @@
 
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { nextEvent, parse, streamOf } from 'helpers';
-import { usingTsStreams } from 'which-impl';
+import { usingTsStreams } from 'flags';
 
 export const fromRejectsNonStreams = {
   test() {

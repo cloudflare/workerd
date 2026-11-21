@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <thread>
 #include <type_traits>
 
@@ -772,6 +773,187 @@ KJ_TEST("a detached spawned task (JoinHandle dropped) still runs to completion")
     io.getTimer().afterDelay(2 * kj::MILLISECONDS).wait(ws);
   }
   KJ_EXPECT(completed_task_count() == before + 1);
+}
+
+// =======================================================================================
+// Progress (progress.rs): a count another thread can read, which advances while the loop makes
+// progress, busy or asleep, and stands still while one event keeps the thread, and through the
+// busy stretches progress.rs names.
+
+// The counts before and after a busy stretch.
+struct Counted {
+  uint64_t before;
+  uint64_t after;
+};
+
+// A busy stretch of `turns` short turns back to back, each arming the next breadth-first, so that
+// the queue never empties: the counts as it begins and as it ends.
+kj::Promise<Counted> busyStretch(uint32_t turns) {
+  auto before = progress_count();
+  for (uint32_t i = 0; i < turns; i++) {
+    co_await kj::evalLater([]() {});
+  }
+  co_return Counted{before, progress_count()};
+}
+
+KJ_TEST("the progress count advances through a busy loop that never sleeps") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+  // A beat too slow to count here: only the probe does.
+  KJ_ASSERT(start_progress(60'000));
+  auto before = progress_count();
+
+  // Short turns back to back for 50 ms, so the queue never empties and the port is never
+  // polled: no tokio task, no KJ timer and no cross-thread event runs meanwhile.
+  uint32_t turns = 0;
+  auto busyUntil = sysClock.now() + 50 * kj::MILLISECONDS;
+  [&]() -> kj::Promise<void> {
+    while (sysClock.now() < busyUntil) {
+      co_await kj::evalLater([]() {});
+      turns++;
+    }
+  }().wait(ws);
+
+  // The probe fires once per pass through a queue of the loop's one event and itself.
+  auto counted = progress_count() - before;
+  KJ_EXPECT(counted >= turns / 2, counted, turns);
+  KJ_EXPECT(turns > 100, turns);
+}
+
+KJ_TEST("the progress probe lets the loop sleep, and a sleeping loop counts its beats") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  KJ_ASSERT(start_progress(60'000));
+  auto before = progress_count();
+  auto start = timer.now();
+  timer.afterDelay(100 * kj::MILLISECONDS).wait(ws);
+  // The probe left the queue rather than keep the loop awake: it counted the wakes alone.
+  KJ_EXPECT(progress_count() - before < 5, progress_count() - before);
+  KJ_EXPECT(timer.now() - start < 1 * kj::SECONDS);
+
+  KJ_ASSERT(start_progress(5));
+  before = progress_count();
+  timer.afterDelay(200 * kj::MILLISECONDS).wait(ws);
+  // 40 beats on time; a loaded machine runs fewer.
+  KJ_EXPECT(progress_count() - before >= 5, progress_count() - before);
+}
+
+KJ_TEST("the progress probe holds back neither evalLast() nor WaitScope::poll()") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  KJ_ASSERT(start_progress(60'000));
+
+  // poll() returns once the queue is empty, the probe's last firing included.
+  ws.poll();
+  ws.poll();
+
+  // evalLast() events run once no other event is left, which the probe, armed again here, must not
+  // stay: queued from the start, this one runs once the busy stretch ends, without a sleep.
+  KJ_ASSERT(start_progress(60'000));
+  bool last = false;
+  auto lastRan = kj::evalLast([&]() { last = true; }).eagerlyEvaluate(nullptr);
+  [&]() -> kj::Promise<void> {
+    for (int i = 0; i < 10; i++) {
+      co_await kj::evalLater([]() {});
+      KJ_EXPECT(!last);
+    }
+  }().wait(ws);
+  KJ_EXPECT(lastRan.poll(ws));
+  KJ_EXPECT(last);
+}
+
+KJ_TEST("wakes from another thread do not keep WaitScope::poll() from returning") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  KJ_ASSERT(start_progress(60'000));
+  // As a thread that keeps submitting cross-thread events and cancelling them does: KJ cancels a
+  // queued event without consuming its wake.
+  auto &port = io.getPort();
+  std::atomic<bool> stop{false};
+  kj::Thread waker([&]() {
+    while (!stop.load()) {
+      port.wake();
+    }
+  });
+  KJ_DEFER(stop.store(true));
+  // The probe leaves the queue of a loop with nothing to do; a wake alone does not arm it, and
+  // each poll returns once it leaves the loop with no event.
+  ws.poll();
+  auto before = progress_count();
+  for (int i = 0; i < 1000; i++) {
+    ws.poll();
+  }
+  KJ_EXPECT(progress_count() == before, before, progress_count());
+}
+
+// The three busy stretches the probe does not count (progress.rs): it is out of the queue as they
+// begin, and nothing arms it before the queue next empties. These pin down that gap, which a hook
+// in KJ's EventLoop::turn() would close.
+
+KJ_TEST("the progress count stands still through a busy stretch that a cross-thread event starts") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  KJ_ASSERT(start_progress(60'000));
+  // The probe leaves the queue of a loop with nothing to do.
+  ws.poll();
+
+  const kj::Executor &executor = kj::getCurrentThreadExecutor();
+  Counted counted{};
+  std::atomic<bool> done{false};
+  kj::Thread sender([&]() {
+    counted = executor.executeSync([]() { return busyStretch(1000); });
+    done.store(true);
+  });
+  // The loop polls rather than sleeps, as one with a yieldUntilWouldSleep() waiter does: KJ takes
+  // the event in once a poll() of the port that another thread woke returns.
+  while (!done.load()) {
+    ws.poll();
+  }
+  KJ_EXPECT(counted.after == counted.before, counted.before, counted.after);
+}
+
+KJ_TEST("the progress count stands still through a busy stretch that an evalLast() event starts") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  // The probe is in the queue, and leaves it for the evalLast() event.
+  KJ_ASSERT(start_progress(60'000));
+  auto counted = kj::evalLast([]() { return busyStretch(1000); }).eagerlyEvaluate(nullptr).wait(ws);
+  KJ_EXPECT(counted.after == counted.before, counted.before, counted.after);
+}
+
+KJ_TEST("the progress count stands still through a busy stretch that a would-sleep waiter starts") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  // The probe leaves the queue of a loop with nothing to do, which then polls the port rather
+  // than sleep in it, and turns the waiter.
+  KJ_ASSERT(start_progress(60'000));
+  auto counted = kj::yieldUntilWouldSleep()
+                     .then([]() { return busyStretch(1000); })
+                     .eagerlyEvaluate(nullptr)
+                     .wait(ws);
+  KJ_EXPECT(counted.after == counted.before, counted.before, counted.after);
+}
+
+KJ_TEST("an event that keeps the thread stops the progress count") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  KJ_ASSERT(start_progress(1));
+
+  std::atomic<uint64_t> first{0};
+  std::atomic<uint64_t> second{0};
+  kj::evalLater([&]() {
+    kj::Thread sampler([&]() {
+      delayMillis(50);
+      first.store(progress_count());
+      delayMillis(100);
+      second.store(progress_count());
+    });
+    // The thread stays in this event until the sampler is done.
+  }).wait(ws);
+  KJ_EXPECT(first.load() == second.load(), first.load(), second.load());
 }
 
 // =======================================================================================

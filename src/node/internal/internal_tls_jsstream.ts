@@ -128,6 +128,9 @@ export class JSStreamSocket extends Socket {
     });
     // Some `Stream` don't pass `hasError` parameters when closed.
     stream.once('close', () => {
+      // A close before the end errors the handle's readable: the connection
+      // is closing, the read loop's rejected read is not a failure.
+      handle.readRejectionExpected = true;
       // Errors emitted from `stream` have also been emitted to this instance
       // so that we don't pass errors to `destroy()` again.
       this.destroy();
@@ -201,8 +204,6 @@ export class JSStreamSocket extends Socket {
   doClose(): void {
     this[kPendingClose] = true;
 
-    const handle = this._handle;
-
     // When sockets of the "net" module destroyed, they will call
     // `this._handle.close()` which will also emit EOF if not emitted before.
     // This feature makes sockets on the other side emit "end" and "close"
@@ -212,7 +213,6 @@ export class JSStreamSocket extends Socket {
     this.stream.destroy();
 
     queueMicrotask(() => {
-      notStrictEqual(handle, null);
       this[kPendingClose] = false;
     });
   }

@@ -5,6 +5,7 @@
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod arguments;
@@ -51,7 +52,7 @@ pub use external_memory::ExternalMemoryAdjustment;
 pub use external_memory::ExternalMemoryTarget;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
-pub use lenient::Lenient;
+pub use lenient::LenientOption;
 pub use lock_guarded::LockGuarded;
 pub use memory::MemoryInfo;
 pub use memory::MemoryRetainer;
@@ -120,6 +121,10 @@ pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
+#[doc(hidden)]
+pub use wrappable::DropCheck;
+#[doc(hidden)]
+pub use wrappable::DropCheckFallback;
 pub use wrappable::FromJS;
 pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
@@ -187,6 +192,9 @@ mod ffi {
         type Global = crate::v8::ffi::Global;
 
         // Realm
+        /// Null if no Realm is attached. `#[nothrow]` so that cross-language LTO inlines it:
+        /// a struct conversion reads the Realm on each call.
+        #[nothrow]
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
         /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
         /// none has been detached, which sets the dispose hook.
@@ -330,7 +338,8 @@ pub struct Error {
     /// implementation details (a raw KJ exception description, a C++ source
     /// expression, etc.). `Lock::throw_exception()` redacts it, throwing a
     /// generic `"internal error; reference = <id>"` instead and logging
-    /// `message` (with that ID) via `KJ_LOG(ERROR)`. Mirrors the `isInternal`
+    /// `message` (with that ID) via `KJ_LOG(ERROR)`, or without it via `KJ_LOG(INFO)` if
+    /// `do_not_log` is set. Mirrors the `isInternal`
     /// flag computed by C++ `jsg::tunneledErrorType()` / applied by
     /// `decodeTunneledException()` (`src/workerd/jsg/exception.c++`,
     /// `src/workerd/jsg/util.c++`). Constructors in this module (and the
@@ -340,6 +349,13 @@ pub struct Error {
     /// Whether this error stands for an exception or termination that is pending in V8; see
     /// [`Error::is_pending`].
     pending: bool,
+    /// Whether this error came from a KJ exception marked `worker_do_not_log`, as C++
+    /// `jsg::tunneledErrorType()` finds the marker. `Lock::throw_exception()` then logs the
+    /// message of an internal error at `INFO`, without its reference ID, rather than at `ERROR`,
+    /// as C++ JSG logs such an exception that it throws to JavaScript (`reportInternalException()`
+    /// in `src/workerd/jsg/util.c++`). What JavaScript gets is the same either way. Only
+    /// `from_kj_description()` sets it.
+    do_not_log: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -360,6 +376,7 @@ macro_rules! impl_error_constructors {
                         message: message.into(),
                         is_internal: false,
                         pending: false,
+                        do_not_log: false,
                     }
                 }
             )*
@@ -426,6 +443,7 @@ impl<'s> FromJS<'s> for Error {
                 message,
                 is_internal: false,
                 pending: false,
+                do_not_log: false,
             })
         } else {
             Err(Self::new_type_error("Unknown error"))
@@ -442,6 +460,7 @@ impl Error {
             message: message.to_owned(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -459,6 +478,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -474,6 +494,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -557,6 +578,9 @@ impl Error {
     const ERROR_PREFIX_DELIM: &'static str = "; ";
     /// Repeated when an error is tunneled over RPC (see `annotateBroken()`).
     const ERROR_REMOTE_PREFIX: &'static str = "remote.";
+    /// Marks a KJ exception that is not worth logging as an internal error (C++
+    /// `jsg::isDoNotLogException()`).
+    const DO_NOT_LOG_MARKER: &'static str = "worker_do_not_log";
 
     /// Parses a KJ exception description for a JSG tunneling prefix, mirroring the
     /// prefix-peeling of C++ `jsg::tunneledErrorType()`
@@ -566,9 +590,11 @@ impl Error {
     /// exposing it to guest JS.
     ///
     /// This mirrors only the *prefix-peeling structure* of `tunneledErrorType()`, not
-    /// its full semantics: `isFromRemote` / `isDurableObjectReset` /
-    /// `isDoNotLogException` are peeled off (to keep peeling in sync with C++) but the
-    /// resulting signals are discarded rather than attached to the `Error`.
+    /// its full semantics: `isFromRemote` / `isDurableObjectReset` are peeled off (to keep
+    /// peeling in sync with C++) but the resulting signals are discarded rather than attached
+    /// to the `Error`. `isDoNotLogException` is kept, as the `Error`'s `do_not_log`, and found
+    /// where C++ looks for it: anywhere in the description for a tunneled error, and only in
+    /// what is left after the prefixes for any other.
     ///
     /// A tunneled JSG error is `jsg.<Type>: <message>` or
     /// `jsg.DOMException(<Name>): <message>` (or `jsg-internal.` instead of `jsg.`,
@@ -599,12 +625,12 @@ impl Error {
             while let Some(idx) = rest.find(Self::ERROR_PREFIX_DELIM) {
                 rest = &rest[idx + Self::ERROR_PREFIX_DELIM.len()..];
                 if let Some(err) = Self::try_extract_tunneled(rest) {
-                    return err;
+                    return err.do_not_log_if_marked(description);
                 }
             }
             // No tunneling tag found: matches C++ `makeDefaultError()`, which marks
             // the message `isInternal` and redacts it before it reaches guest JS.
-            return Self::new_internal_error(description.to_owned());
+            return Self::new_internal_error(description.to_owned()).do_not_log_if_marked(rest);
         }
 
         // Trim any number of "broken.<reason>; " prefixes (from `annotateBroken()`).
@@ -615,8 +641,26 @@ impl Error {
             }
         }
 
-        Self::try_extract_tunneled(msg)
-            .unwrap_or_else(|| Self::new_internal_error(description.to_owned()))
+        match Self::try_extract_tunneled(msg) {
+            Some(err) => err.do_not_log_if_marked(description),
+            None => Self::new_internal_error(description.to_owned()).do_not_log_if_marked(msg),
+        }
+    }
+
+    /// Sets `do_not_log` if `text`, part of a KJ exception description, has the
+    /// `worker_do_not_log` marker.
+    fn do_not_log_if_marked(mut self, text: &str) -> Self {
+        self.do_not_log = text.contains(Self::DO_NOT_LOG_MARKER);
+        self
+    }
+
+    /// How throwing this error logs its message if it is internal.
+    fn internal_error_log(&self) -> v8::ffi::InternalErrorLog {
+        if self.do_not_log {
+            v8::ffi::InternalErrorLog::Info
+        } else {
+            v8::ffi::InternalErrorLog::Error
+        }
     }
 
     /// Tries to parse `msg` as a `jsg.<Type>: <message>` or
@@ -641,6 +685,7 @@ impl Error {
                 message: message.to_owned(),
                 is_internal,
                 pending: false,
+                do_not_log: false,
             });
         }
 
@@ -650,6 +695,7 @@ impl Error {
             message: message.to_owned(),
             is_internal,
             pending: false,
+            do_not_log: false,
         })
     }
 
@@ -664,6 +710,7 @@ impl Error {
             message: message.into(),
             is_internal: true,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -739,9 +786,6 @@ pub enum TypeErrorContext<'a> {
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
 /// - `NonCoercible<f64>` - only accepts JavaScript numbers
-/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
-///   numbers, which must be in range
-/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -802,30 +846,36 @@ impl<T> Deref for NonCoercible<T> {
 
 /// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
 ///
-/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
-/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
+/// These are `String`, `bool` and `f64`, as C++ JSG's `CoercibleType` (jsg/jsg.h) is
+/// `kj::String`, `bool` and `double`.
 ///
-/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
-/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
-/// a coarse test. The trait is sealed.
+/// Other types, such as resources and unions, have no coercion of their own to disable. The
+/// trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
+    note = "`NonCoercible<T>` takes only `String`, `bool` or `f64`. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
-pub trait Coercible: Type + coercible::Sealed {}
+pub trait Coercible: Type + coercible::Sealed {
+    /// Whether `value` is of exactly this type, so that converting it coerces nothing.
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+}
 
 mod coercible {
     pub trait Sealed {}
 }
 
 macro_rules! impl_coercible {
-    ($($t:ty),* $(,)?) => {
+    ($($t:ty: $is_exact:ident),* $(,)?) => {
         $(impl coercible::Sealed for $t {}
-        impl Coercible for $t {})*
+        impl Coercible for $t {
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                value.$is_exact()
+            }
+        })*
     };
 }
 
-impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
+impl_coercible!(String: is_string, bool: is_boolean, f64: is_number);
 
 #[expect(
     unsafe_code,
@@ -1020,8 +1070,9 @@ impl<'s> Lock<'s> {
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the Realm stays attached
+        // while the lock is in use, and `self` is borrowed for as long as the result.
+        unsafe { attached_realm(self.isolate().as_ffi()).as_mut() }
     }
 
     /// Returns the current worker's compatibility flags reader.
@@ -1087,7 +1138,7 @@ impl<'s> Lock<'s> {
             return;
         }
         if err.is_internal {
-            self.throw_internal_error(&err.message);
+            self.throw_internal_error_logged(&err.message, err.internal_error_log());
             return;
         }
         if self.is_execution_terminating() {
@@ -1220,7 +1271,7 @@ impl<'s> Lock<'s> {
             // Nothing could be rejected with the exception, so it is not created.
             if err.is_internal {
                 // Logs the message and throws nothing.
-                self.throw_internal_error(&err.message);
+                self.throw_internal_error_logged(&err.message, err.internal_error_log());
             }
             return Err(Error::pending());
         }
@@ -1231,6 +1282,7 @@ impl<'s> Lock<'s> {
                 v8::Local::from_ffi(v8::ffi::exception_create_internal(
                     self.isolate().as_ffi(),
                     &err.message,
+                    err.internal_error_log(),
                 ))
             });
         }
@@ -1245,9 +1297,18 @@ impl<'s> Lock<'s> {
     /// internal message is never exposed to JavaScript. While execution is terminating, it
     /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
+        self.throw_internal_error_logged(internal_message, v8::ffi::InternalErrorLog::Error);
+    }
+
+    /// [`Lock::throw_internal_error`], logging `internal_message` as `log` says.
+    fn throw_internal_error_logged(
+        &mut self,
+        internal_message: &str,
+        log: v8::ffi::InternalErrorLog,
+    ) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message);
+            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message, log);
         }
     }
 
@@ -1464,20 +1525,12 @@ fn up_to_nul(text: &str) -> &str {
 
 /// Provides metadata about Rust types exposed to JavaScript.
 ///
-/// This trait provides type information used for error messages and type validation (for
-/// `NonCoercible<T>`). The actual conversion logic is in `ToJS` (Rust → JS) and `FromJS`
-/// (JS → Rust). What a resource reports to heap snapshots is in [`GarbageCollected`].
+/// This trait provides type information used for error messages. The actual conversion logic is
+/// in `ToJS` (Rust → JS) and `FromJS` (JS → Rust). What a resource reports to heap snapshots is
+/// in [`GarbageCollected`].
 pub trait Type: Sized {
     /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
-
-    /// Returns true if the V8 value is exactly this type (no coercion).
-    /// Used by `NonCoercible<T>` to reject values that would require coercion.
-    ///
-    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
-    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
-    /// object, and a union's any value that one of its variants' accepts.
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
 
     /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
     /// at compile time; see [`UnionTypes`].
@@ -1698,15 +1751,6 @@ pub trait GarbageCollected: Traced {
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
 
-    /// Whether the resource implements `Drop` itself or a field's type needs it (see
-    /// [`Traced::needs_drop_detach`]). If so, its references are made strong and forget their
-    /// parent before it is dropped, so that a `Drop` impl may move them out (see
-    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
-    /// type that needs it must override it to return `true`.
-    fn detach_before_drop(&self) -> bool {
-        false
-    }
-
     /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
     /// which makes a Worker whose top level leaves it reachable start without the snapshot.
     /// `#[jsg_resource]` implements it.
@@ -1843,6 +1887,29 @@ unsafe fn isolate_disposed(state: *const IsolateState) {
     state.isolate_disposed();
 }
 
+/// The Realm attached to `isolate`. The caller chooses whether to borrow it shared or unique.
+///
+/// # Panics
+///
+/// Panics if no Realm is attached.
+///
+/// # Safety
+///
+/// `isolate` must be valid and locked by this thread.
+#[expect(
+    unsafe_code,
+    reason = "reads the Realm pointer from the isolate's data slot"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "a Realm is attached to every isolate that runs Rust JSG code"
+)]
+unsafe fn attached_realm(isolate: *mut v8::ffi::Isolate) -> NonNull<Realm> {
+    // SAFETY: the isolate is valid and locked (guaranteed by the caller).
+    let realm = unsafe { ffi::realm_from_isolate(isolate) };
+    NonNull::new(realm).expect("Rust Realm not set on isolate")
+}
+
 /// See the bridge declaration.
 #[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
 unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
@@ -1860,8 +1927,10 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
     // (guaranteed by the C++ caller, and checked above).
     let isolate = unsafe { Isolate::from_raw(isolate) };
-    // SAFETY: the Realm is attached while the hook that calls this is installed.
-    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    // SAFETY: the isolate is valid and locked, and the Realm is attached while the hook that
+    // calls this is installed. The reference is shared, since releasing a reference can drop a
+    // resource, whose `Drop` may reach the Realm.
+    let realm = unsafe { attached_realm(isolate.as_ffi()).as_ref() };
     realm.state.drain_awaiting_lock(isolate);
 }
 
@@ -1978,7 +2047,11 @@ where
             // context entered and a `HandleScope` open, while `scope` lives. The unwind closed
             // the scopes opened inside `f`.
             unsafe {
-                v8::ffi::isolate_throw_internal_error(isolate.as_ffi(), msg);
+                v8::ffi::isolate_throw_internal_error(
+                    isolate.as_ffi(),
+                    msg,
+                    v8::ffi::InternalErrorLog::Error,
+                );
                 v8::ffi::isolate_terminate_execution(isolate.as_ffi());
             }
             None

@@ -51,11 +51,45 @@ fn fatal_error_on_flush_resets_decoder() {
 }
 
 #[test]
-fn gb18030_drops_held_bytes_after_fatal_streaming_error() {
+fn gb18030_keeps_restored_bytes_after_fatal_streaming_error() {
     let mut d = new_decoder(ffi::Encoding::Gb18030).unwrap();
-    assert_eq!(decode_str(&mut d, &[0x81, 0x30, 0x21], false), None);
+    // 0x30 and 0x21 go back to the queue; 0x21 is left unread.
+    assert_eq!(decode_str(&mut d, &[0x81, 0x30, 0x21, 0x21], false), None);
     assert_eq!(
         decode_str(&mut d, &[0x80], true).as_deref(),
-        Some("\u{20ac}")
+        Some("0!!\u{20ac}")
     );
+}
+
+#[test]
+fn euc_jp_decodes_unread_byte_after_fatal_streaming_error() {
+    let mut d = new_decoder(ffi::Encoding::EucJp).unwrap();
+    assert_eq!(decode_str(&mut d, &[0x8f, 0xa2, 0x20], false), None);
+    assert_eq!(
+        decode_str(&mut d, &[0xa1, 0xa1], true).as_deref(),
+        Some(" \u{3000}")
+    );
+}
+
+#[test]
+fn empty_streaming_chunk_decodes_carried_bytes() {
+    let mut d = new_decoder(ffi::Encoding::EucJp).unwrap();
+    assert_eq!(decode_str(&mut d, &[0x8f, 0xa2, 0x20, 0x41], false), None);
+    assert_eq!(decode_str(&mut d, &[], false).as_deref(), Some(" A"));
+    assert_eq!(decode_str(&mut d, &[], true).as_deref(), Some(""));
+}
+
+#[test]
+fn reset_drops_carried_bytes() {
+    let mut d = new_decoder(ffi::Encoding::EucJp).unwrap();
+    assert_eq!(decode_str(&mut d, &[0x8f, 0xa2, 0x20], false), None);
+    reset(&mut d);
+    assert_eq!(decode_str(&mut d, &[0x41], true).as_deref(), Some("A"));
+}
+
+#[test]
+fn fatal_flush_error_drops_unread_bytes() {
+    let mut d = new_decoder(ffi::Encoding::EucJp).unwrap();
+    assert_eq!(decode_str(&mut d, &[0x8f, 0xa2, 0x20], true), None);
+    assert_eq!(decode_str(&mut d, &[0x41], true).as_deref(), Some("A"));
 }

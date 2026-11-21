@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cache-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "cache-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        cacheApiOutbound = "TEST_TMPDIR",
+        bindings = [ ( name = "CACHE", service = "TEST_TMPDIR" ) ],
+      )
+    ),
+    # The cache, its entries in the directory the runner gives as -dTEST_TMPDIR.
+    ( name = "TEST_TMPDIR", cache = () ),
+  ],
+);

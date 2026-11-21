@@ -158,10 +158,6 @@ impl crate::Type for Flagged {
     fn class_name() -> &'static str {
         "Flagged"
     }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        false
-    }
 }
 
 impl crate::Traced for Flagged {
@@ -282,10 +278,6 @@ struct Outer;
 impl crate::Type for Outer {
     fn class_name() -> &'static str {
         "Outer"
-    }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        false
     }
 }
 

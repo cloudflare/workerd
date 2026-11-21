@@ -53,12 +53,6 @@ void LegacyDecoder::reset() {
 
 kj::Maybe<jsg::JsString> LegacyDecoder::decode(
     jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush) {
-  if (!flush && buffer.size() == 0) {
-    // Avoid encoding_rs empty-chunk streaming bug:
-    // https://github.com/hsivonen/encoding_rs/issues/126#issuecomment-3677642122
-    return js.str();
-  }
-
   ::workerd::rust::encoding::DecodeOptions options{.flush = flush, .fatal = fatal.toBool()};
   // Decode into the Rust-side reusable buffer. The Rust decoder handles
   // lazy reset internally when a previous call used flush=true.

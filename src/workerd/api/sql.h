@@ -8,6 +8,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sqlite.h>
 
 namespace workerd::api {
@@ -226,8 +227,19 @@ class SqlStorage::Cursor final: public jsg::Object {
     }
   }
 
-  JSG_ITERATOR(RowIterator, rows, jsg::JsObject, jsg::Ref<Cursor>, rowIteratorNext);
-  JSG_ITERATOR(RawIterator, raw, jsg::JsArray, jsg::Ref<Cursor>, rawIteratorNext);
+  // The state of RowIterator and RawIterator.
+  struct IteratorState {
+    jsg::Ref<Cursor> cursor;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      if (util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
+        visitor.visit(cursor);
+      }
+    }
+  };
+
+  JSG_ITERATOR(RowIterator, rows, jsg::JsObject, IteratorState, rowIteratorNext);
+  JSG_ITERATOR(RawIterator, raw, jsg::JsArray, IteratorState, rawIteratorNext);
 
   RowIterator::Next next(jsg::Lock& js);
   jsg::JsArray toArray(jsg::Lock& js);
@@ -303,9 +315,10 @@ class SqlStorage::Cursor final: public jsg::Object {
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
 
-  static kj::Maybe<jsg::JsObject> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<jsg::JsArray> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<jsg::JsObject> rowIteratorNext(jsg::Lock& js, IteratorState& state);
+  static kj::Maybe<jsg::JsArray> rawIteratorNext(jsg::Lock& js, IteratorState& state);
+  kj::Maybe<jsg::JsObject> nextRow(jsg::Lock& js);
+  kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js);
 
   friend class Statement;
 

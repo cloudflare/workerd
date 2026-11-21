@@ -8,8 +8,9 @@ export default {
   'basic.any.js': {},
   'idlharness.any.js': {
     comment:
-      'The Performance interface object does not have EventTarget as its [[Prototype]], even though performance instances inherit from EventTarget.prototype. performance is a lazy instance property of the global scope, so it has no getter.',
+      'The Performance interface object does not have EventTarget as its [[Prototype]], even though performance instances inherit from EventTarget.prototype. performance is a lazy instance property of the global scope, so it has no getter. hr-time.idl has a partial AudioWorkletGlobalScope, but the test loads only the html and dom IDL dependencies, so the original interface (from webaudio.idl) is never defined.',
     expectedFailures: [
+      'Partial interface AudioWorkletGlobalScope: original interface defined',
       'Performance interface: existence and properties of interface object',
       'Window interface: attribute performance',
     ],

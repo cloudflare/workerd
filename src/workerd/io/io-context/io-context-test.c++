@@ -5,6 +5,7 @@
 // Tests the io-context crate inside and outside a request of a real worker. The Rust half is
 // test_bridge.rs.
 
+#include <workerd/api/http.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-context/ffi.h>
 #include <workerd/io/io-context/test-bridge-state.h>
@@ -940,11 +941,19 @@ KJ_TEST("an add_object() value can be used in place only while its IoContext is 
   fixture.drainAndDestroy(kj::mv(owner));
 }
 
+// A full garbage collection that doesn't scan the native stack. By default cppgc scans the stack
+// conservatively, so a stale pointer left there can keep an unreachable JSG object alive,
+// depending on how the compiler laid out the frames.
+void collectGarbageIgnoringStack(v8::Isolate* isolate) {
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
+}
+
 // A full garbage collection, in the request that `request` runs. It runs in an enterContext() of
 // its own, so that no handle in the frames of the one that created the objects keeps them alive.
 void collectGarbage(TestFixture& fixture, IoContext::IncomingRequest& request) {
-  fixture.enterContext(
-      request, [&](const TestFixture::Environment& env) { env.isolate->LowMemoryNotification(); });
+  fixture.enterContext(request,
+      [&](const TestFixture::Environment& env) { collectGarbageIgnoringStack(env.isolate); });
 }
 
 // How the wait of the last await_js_start() ended.
@@ -2316,7 +2325,7 @@ AbortedWaitOutcome abortWait(AbortedWait scenario, Implementation implementation
         fixture.pollEventLoop();
         fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
           abort();
-          env.isolate->LowMemoryNotification();
+          collectGarbageIgnoringStack(env.isolate);
           // GC collected the reactions, and with them the sender, which holds the watcher and
           // destroys the unsettled resource as it is dropped.
           if (rust) {
@@ -2647,6 +2656,7 @@ KJ_TEST("an await_js() whose promise GC collects in another request releases its
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
 constexpr kj::StringPtr FAILING_SPECIFIER = "test:io-context-failing"_kj;
+constexpr kj::StringPtr TERMINATING_SPECIFIER = "test:io-context-terminating"_kj;
 
 // Has `registerModules` add Rust modules to a legacy registry, then calls `body` with the
 // registry inside a request.
@@ -2689,6 +2699,20 @@ void withNewRustRegistry(auto&& registerModules, auto&& body) {
   fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env); });
 }
 
+// Whether calling `fn` throws `JsExceptionThrown` with execution terminating. Cancels the
+// termination.
+bool terminates(const TestFixture::Environment& env, auto&& fn) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+  v8::TryCatch tryCatch(env.isolate);
+  KJ_DEFER(env.isolate->CancelTerminateExecution());
+  try {
+    fn();
+    return false;
+  } catch (jsg::JsExceptionThrown&) {
+    return tryCatch.HasTerminated();
+  }
+}
+
 // What calling `fn` throws, as a string.
 kj::String thrownBy(jsg::Lock& js, auto&& fn) {
   return js.tryCatch([&]() -> kj::String {
@@ -2714,6 +2738,338 @@ KJ_TEST("the new registry creates a Rust module's exports outside the request re
   KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
 }
 
+// What the C++ shim of a Rust API does with a reentry callback to hand it to code that takes a
+// kj::Function, as WorkerLoader::get() hands one to IoChannelFactory::loadIsolate(): the function
+// calls the callback through the Rust type that holds it, and converts its output. As for the
+// callback of IoContext::makeReentryCallbackWeak(), the function must outlive each promise it
+// returns, and be called and destroyed on the IoContext's thread.
+kj::Function<kj::Promise<kj::String>()> wrapReentryCallback(
+    ::rust::Box<HeldReentryCallback> callback) {
+  return [callback = kj::mv(callback)]() {
+    return call_reentry_callback(*callback).then(
+        [](::rust::String value) { return kj::str(kj::arrayPtr(value.data(), value.size())); });
+  };
+}
+
+// A reentry callback made in `request` by make_reentry_callback(), with the function that the
+// script `function` evaluates to, wrapped as wrapReentryCallback() wraps it.
+kj::Function<kj::Promise<kj::String>()> makeReentryCallback(TestFixture& fixture,
+    IoContext::IncomingRequest& request,
+    ReentryBehavior behavior,
+    kj::StringPtr function = "(function () {})"_kj) {
+  kj::Maybe<::rust::Box<HeldReentryCallback>> callback;
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    auto handle = runScript(env, function).As<v8::Function>();
+    callback = make_reentry_callback(
+        isolateOf(env), behavior, ::workerd::rust::jsg::to_ffi(kj::mv(handle)));
+  });
+  return wrapReentryCallback(KJ_ASSERT_NONNULL(kj::mv(callback)));
+}
+
+// How a call of a reentry callback settles: "fulfilled: <value>" or "rejected: <description>".
+kj::String callOutcome(TestFixture& fixture, kj::Function<kj::Promise<kj::String>()>& callback) {
+  return callback()
+      .then([](kj::String value) { return kj::str("fulfilled: ", value); }, [](kj::Exception&& e) {
+    return kj::str("rejected: ", e.getDescription());
+  }).wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a reentry callback runs its function from KJ, in the IoContext that created it") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto callback = makeReentryCallback(fixture, *request, ReentryBehavior::CallJs,
+      "(function () { return Promise.resolve('the code'); })");
+  // The call that created it has returned, and the function has not run.
+  KJ_EXPECT(reentry_function_runs() == 0);
+
+  awaitContextId = kj::none;
+  KJ_EXPECT(callOutcome(fixture, callback) == "fulfilled: the code");
+  KJ_EXPECT(reentry_function_runs() == 1);
+  // The function, and the await_js() conversion after it, ran in the IoContext that created it.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  // It can be called again.
+  awaitContextId = kj::none;
+  KJ_EXPECT(callOutcome(fixture, callback) == "fulfilled: the code");
+  KJ_EXPECT(reentry_function_runs() == 2);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+  KJ_EXPECT(!reentry_function_dropped());
+
+  { auto dropped = kj::mv(callback); }
+  KJ_EXPECT(reentry_function_dropped());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a reentry callback can be dropped while a call is in flight, which still completes") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  kj::Maybe<::rust::Box<HeldReentryCallback>> callback;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto handle =
+        runScript(env, "(function () { return Promise.resolve('the code'); })").As<v8::Function>();
+    callback = make_reentry_callback(
+        isolateOf(env), ReentryBehavior::CallJs, ::workerd::rust::jsg::to_ffi(kj::mv(handle)));
+  });
+
+  auto outcome = call_and_drop_reentry_callback(KJ_ASSERT_NONNULL(kj::mv(callback)))
+                     .then([](::rust::String value) {
+    return kj::str("fulfilled: ", kj::arrayPtr(value.data(), value.size()));
+  }, [](kj::Exception&& e) {
+    return kj::str("rejected: ", e.getDescription());
+  }).wait(fixture.getWaitScope());
+  KJ_EXPECT(outcome == "fulfilled: the code", outcome);
+  KJ_EXPECT(reentry_function_runs() == 1);
+  // The call kept the function alive past the callback, and dropped it once it finished.
+  KJ_EXPECT(!reentry_function_dropped_with_callback());
+  KJ_EXPECT(reentry_function_dropped());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a reentry callback holds its IoContext weakly, and fails once the IoContext is gone") {
+  TestFixture fixture;
+  // The request is the only owner of its IoContext.
+  auto request = fixture.newIncomingRequest();
+  auto callback = makeReentryCallback(fixture, *request, ReentryBehavior::Ready);
+
+  // The callback does not keep the IoContext alive: it is destroyed with the request, and the
+  // function with it, though the callback is still held.
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(reentry_function_dropped());
+
+  // As the callback of C++ makeReentryCallbackWeak() fails, with the description of its
+  // JSG_REQUIRE_NONNULL().
+  auto outcome = callOutcome(fixture, callback);
+  KJ_EXPECT(outcome.startsWith("rejected: "), outcome);
+  KJ_EXPECT(
+      outcome.endsWith("; jsg.Error: The execution context which hosts this callback is no longer "
+                       "running."),
+      outcome);
+  KJ_EXPECT(reentry_function_runs() == 0);
+}
+
+KJ_TEST("in a Durable Object, a reentry callback does not keep its request open, and fails once "
+        "the object hibernates") {
+  TestFixture fixture({
+    .actorId = Worker::Actor::Id(kj::str("reentry-callback-actor")),
+    .useRealTimers = false,
+  });
+  auto context = fixture.newIoContext();
+  auto first = fixture.newIncomingRequest(*context);
+  auto tasks = context->taskCount();
+  auto callback = makeReentryCallback(fixture, *first, ReentryBehavior::Ready);
+
+  // In an actor, every task is a waitUntil() task, which an actor's request drains until it is
+  // done. The callback adds none, so the request drains while the callback is held, where the
+  // task of a makeReentryCallback() callback would keep it open. Asserted, so that a task fails
+  // the test here rather than hanging the drain.
+  KJ_ASSERT(context->taskCount() == tasks);
+  fixture.drainAndDestroy(kj::mv(first));
+
+  // The IoContext lives on, and runs the function for a later request.
+  auto second = fixture.newIncomingRequest(*context);
+  KJ_EXPECT(callOutcome(fixture, callback) == "fulfilled: ready");
+  KJ_EXPECT(reentry_function_runs() == 1);
+
+  second->cancelPendingWorkForHibernation();
+  auto outcome = callOutcome(fixture, callback);
+  KJ_EXPECT(outcome.startsWith("rejected: "), outcome);
+  KJ_EXPECT(outcome.endsWith("; jsg.Error: The Durable Object is hibernating."), outcome);
+  KJ_EXPECT(reentry_function_runs() == 1);
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("a reentry callback fails with what its function throws or returns") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  UncaughtExceptionLog log;
+
+  // What JavaScript throws is logged as uncaught, once, as IoContext::run() logs what JavaScript
+  // throws in the C++ code it runs.
+  auto throws = makeReentryCallback(fixture, *request, ReentryBehavior::CallJs,
+      "(function () { const error = new TypeError('boom'); error.stack = 'the stack'; "
+      "throw error; })");
+  KJ_EXPECT(callOutcome(fixture, throws) == "rejected: jsg.TypeError: boom");
+  auto logged = log.take();
+  KJ_EXPECT(logged == "uncaught exception; source = Uncaught; stack = the stack", logged);
+
+  // The rejection is logged by await_js(), as uncaught in a promise.
+  auto rejects = makeReentryCallback(fixture, *request, ReentryBehavior::CallJs,
+      "(function () { return Promise.reject(new RangeError('no code')); })");
+  KJ_EXPECT(callOutcome(fixture, rejects) == "rejected: jsg.RangeError: no code");
+  logged = log.take();
+  KJ_EXPECT(logged.startsWith(kj::str(IN_PROMISE, "stack = RangeError: no code")), logged);
+
+  // An error that Rust returns is not logged, as a KJ exception that C++ throws is not.
+  auto fails = makeReentryCallback(fixture, *request, ReentryBehavior::Fail);
+  KJ_EXPECT(callOutcome(fixture, fails) == "rejected: jsg.RangeError: the function failed");
+  logged = log.take();
+  KJ_EXPECT(logged == "", logged);
+
+  // The request goes on.
+  KJ_EXPECT(evaluate(fixture, "6 * 7") == "42");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+// The function of a reentry callback that queues a microtask, which would record that it ran.
+constexpr kj::StringPtr QUEUES_MICROTASK =
+    "(function () { Promise.resolve().then(() => { globalThis.microtaskRan = true; }); })"_kj;
+
+KJ_TEST("termination in a reentry callback's function fails the call with the exceeded limit, "
+        "and cancels the microtasks it queued") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto callback =
+      makeReentryCallback(fixture, *request, ReentryBehavior::Terminate, QUEUES_MICROTASK);
+  // The limit is recorded only once the function's scope of the limit enforcer ends, which
+  // IoContext::run() ends before it checks the limits.
+  fixture.setLimitsExceededOnLeavingJs(EventOutcome::EXCEEDED_CPU);
+  auto outcome = callOutcome(fixture, callback);
+  KJ_EXPECT(outcome.endsWith("the test exceeded its limits"), outcome);
+  KJ_EXPECT(reentry_function_runs() == 1);
+
+  // The termination ends with the turn that ran the function, whose microtask checkpoint
+  // cancelled the microtask: the isolate runs JavaScript again, and the microtask never runs.
+  KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
+  KJ_EXPECT(evaluate(fixture, "6 * 7") == "42");
+  KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a reentry callback's function that aborts the IoContext fails the call with the abort "
+        "reason, and cancels the microtasks it queued") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto callback = makeReentryCallback(fixture, *request, ReentryBehavior::Abort, QUEUES_MICROTASK);
+  auto outcome = callOutcome(fixture, callback);
+  KJ_EXPECT(outcome == "rejected: jsg.RangeError: the abort reason", outcome);
+  KJ_EXPECT(reentry_function_runs() == 1);
+
+  KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a panic in a reentry callback's function fails the call, terminates execution and "
+        "cancels the microtasks it queued") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto callback = makeReentryCallback(fixture, *request, ReentryBehavior::Panic, QUEUES_MICROTASK);
+  kj::String outcome;
+  {
+    KJ_EXPECT_LOG(ERROR, "internalMessage = the reentry function panicked");
+    outcome = callOutcome(fixture, callback);
+  }
+  KJ_EXPECT(outcome.contains("the function of IoContext::make_reentry_callback_weak() panicked"),
+      outcome);
+
+  KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
+  KJ_EXPECT(evaluate(fixture, "6 * 7") == "42");
+  KJ_EXPECT(evaluate(fixture, "typeof globalThis.microtaskRan") == "undefined");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+// A channel that can be passed to another worker. It is never sent requests.
+class TransferableChannel final: public IoChannelFactory::SubrequestChannel {
+ public:
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    KJ_UNIMPLEMENTED("not used by these tests");
+  }
+  void requireAllowsTransfer() override {}
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_UNIMPLEMENTED("not used by these tests");
+  }
+};
+
+// A reentry callback made in `request` by make_channel_reentry_callback(), with the function that
+// the script `function` evaluates to, wrapped as wrapReentryCallback() wraps a callback. The script
+// can use `service`, a Fetcher on a TransferableChannel, which is stored in `channelOut` if given.
+kj::Function<kj::Promise<void>()> makeChannelReentryCallback(TestFixture& fixture,
+    IoContext::IncomingRequest& request,
+    kj::StringPtr function,
+    kj::Maybe<IoChannelFactory::SubrequestChannel&>* channelOut = nullptr) {
+  kj::Maybe<::rust::Box<HeldChannelReentryCallback>> callback;
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel = kj::rc<TransferableChannel>();
+    if (channelOut != nullptr) *channelOut = *channel;
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<api::Fetcher>>());
+    auto service = handler.wrap(js, js.alloc<api::Fetcher>(env.context.addObject(kj::mv(channel))));
+    jsg::JsObject(js.v8Context()->Global()).set(js, "service"_kj, jsg::JsValue(service));
+    auto handle = runScript(env, function).As<v8::Function>();
+    callback =
+        make_channel_reentry_callback(isolateOf(env), ::workerd::rust::jsg::to_ffi(kj::mv(handle)));
+  });
+  return [callback = KJ_ASSERT_NONNULL(kj::mv(callback))]() {
+    return call_channel_reentry_callback(*callback);
+  };
+}
+
+KJ_TEST("a reentry callback converts with await_js_local(), in its IoContext") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  kj::Maybe<IoChannelFactory::SubrequestChannel&> channel;
+  auto callback = makeChannelReentryCallback(
+      fixture, *request, "(function () { return Promise.resolve(service); })", &channel);
+  KJ_EXPECT(channel_conversion_runs() == 0);
+
+  for (auto expectedRuns: {1, 2}) {
+    awaitContextId = kj::none;
+    keptChannel = kj::none;
+    callback().wait(fixture.getWaitScope());
+    KJ_EXPECT(channel_conversion_runs() == expectedRuns);
+    // The conversion ran in the IoContext that created the callback, and got it.
+    KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+    KJ_EXPECT(channel_conversion_context() == idOf(*context));
+
+    // C++ got the Fetcher's own channel, which Rust can't hold across threads.
+    auto& kept = KJ_ASSERT_NONNULL(keptChannel);
+    KJ_EXPECT(kept.get() == &KJ_ASSERT_NONNULL(channel));
+  }
+  keptChannel = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js_local() fails without converting what another request resolves") {
+  TestFixture fixture;
+  auto owner = fixture.newIncomingRequest();
+  auto other = fixture.newIncomingRequest();
+  auto callback = makeChannelReentryCallback(fixture, *owner,
+      "(function () { return new Promise(resolve => { globalThis.resolveService = resolve; }); })");
+  keptChannel = kj::none;
+  auto call = callback()
+                  .then([]() -> kj::String { return kj::str("fulfilled"); }, [](kj::Exception&& e) {
+    return kj::str("rejected: ", e.getDescription());
+  }).eagerlyEvaluate(nullptr);
+  fixture.pollEventLoop();
+  KJ_EXPECT(!call.poll(fixture.getWaitScope()));
+
+  // A promise resolved in another request runs its reactions there, which fail before the
+  // conversion runs.
+  fixture.enterContext(*other,
+      [&](const TestFixture::Environment& env) { runScript(env, "resolveService(service)"_kj); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(channel_conversion_runs() == 0);
+  KJ_EXPECT(!call.poll(fixture.getWaitScope()));
+
+  // The wait fails as never settled once GC collects the reactions, which drops their sender, as
+  // when C++ awaitJs() waits for such a promise.
+  collectGarbage(fixture, *owner);
+  auto outcome = call.wait(fixture.getWaitScope());
+  KJ_EXPECT(outcome == NEVER_SETTLED_OUTCOME, outcome);
+  KJ_EXPECT(channel_conversion_runs() == 0);
+  KJ_EXPECT(keptChannel == kj::none);
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
 // Each test imports the module twice, so that a failure is not remembered as success.
 KJ_TEST("the legacy registry throws the error of a failing Rust module callback") {
   withLegacyRustRegistry(register_failing_module, [](const auto& env, auto& registry) {
@@ -2733,6 +3089,21 @@ KJ_TEST("the new registry throws the error of a failing Rust module callback") {
       auto thrown = thrownBy(env.js, [&] { env.js.resolveInternalModule(FAILING_SPECIFIER); });
       KJ_EXPECT(thrown == "TypeError: the module failed", thrown);
     }
+  });
+}
+
+KJ_TEST("the legacy registry keeps the termination of a terminating Rust module callback") {
+  withLegacyRustRegistry(register_terminating_module, [](const auto& env, auto& registry) {
+    KJ_EXPECT(terminates(env, [&] {
+      registry.resolve(env.js, kj::Path::parse(TERMINATING_SPECIFIER), kj::none,
+          jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY);
+    }));
+  });
+}
+
+KJ_TEST("the new registry keeps the termination of a terminating Rust module callback") {
+  withNewRustRegistry(register_terminating_module, [](const auto& env) {
+    KJ_EXPECT(terminates(env, [&] { env.js.resolveInternalModule(TERMINATING_SPECIFIER); }));
   });
 }
 

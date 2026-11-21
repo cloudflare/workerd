@@ -12,8 +12,10 @@
 //! status text as the body and `Connection: close`, and the connection closes after it. The text
 //! of an exception never reaches a client, and logging it is the handler's business. A failure
 //! after the response head went out aborts the body, so hyper drops the connection instead of
-//! framing a truncated message as complete; DISCONNECTED gets no answer. A call that returns
-//! without responding gets kj's plain-text 500.
+//! framing a truncated message as complete, as does a body stream the handler aborts
+//! (`abortWrite()`) before it drops it, which would otherwise end the body until the failure
+//! comes; DISCONNECTED gets no answer. A call that returns without responding gets kj's
+//! plain-text 500.
 //!
 //! Responses are written as kj writes them ([`crate::body::Head`]): `Connection: close` and the
 //! body's framing first, then the application's headers in kj's order.

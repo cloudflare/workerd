@@ -159,10 +159,6 @@ impl jsg::Type for FromJsOnly {
     fn class_name() -> &'static str {
         "FromJsOnly"
     }
-
-    fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-        value.is_string()
-    }
 }
 
 impl jsg::TypeInfo for FromJsOnly {
