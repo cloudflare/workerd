@@ -163,10 +163,9 @@ export default {
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDH, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-256}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-384}, true, [deriveKey, deriveBits])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-521}, true, [deriveKey, deriveBits])",
@@ -174,10 +173,9 @@ export default {
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
     comment:
-      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+      'EC JWK import does not check the "crv" field, so a missing or mismatched crv is accepted when the coordinates fit namedCurve',
     expectedFailures: [
-      /^Bad key length:/,
-      /^Missing JWK 'crv' parameter:/,
+      /^Missing JWK 'crv' parameter: importKey\(jwk\(private\), \{name: ECDSA, namedCurve: P-521\}/,
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-256}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-384}, true, [sign])",
       "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-521}, true, [sign])",
@@ -216,24 +214,20 @@ export default {
   'import_export/okp_importKey_X25519.https.any.js': {},
   'import_export/okp_importKey_failures_Ed25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign, sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[verify\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_X25519.https.any.js': {
     comment:
-      'To be investigated - workerd does not reject these invalid key pairs',
+      'Private JWK import ignores "x", so a key pair whose "x" does not match "d" is accepted',
     expectedFailures: [
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits, deriveKey\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits\]\)/,
       /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits, deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits\]\)/,
-      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[\]\)/,
     ],
   },
   'import_export/okp_importKey_failures_fixtures.js': {},
