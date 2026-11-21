@@ -9,12 +9,10 @@
 // struct is translated to/from a native JS object with the same field names.
 
 #include <workerd/jsg/util.h>
-#include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 
 #include <kj/vector.h>
 
-#include <concepts>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -275,7 +273,7 @@ class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
         return T{};
       }
       jsg::throwTypeError(js.v8Isolate,
-          kj::str("Cannot initialize ", typeid(T).name(),
+          kj::str("Cannot initialize ", typeName(typeid(T)),
               " with required members from an "
               "undefined or null value."));
     }

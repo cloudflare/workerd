@@ -24,8 +24,8 @@ export const structuredCloneIdentity = {
       ['FixedLengthStream', new FixedLengthStream(1)],
     ]) {
       throws(() => structuredClone(its, { transfer: [its] }), {
-        name: 'TypeError',
-        message: 'Object is not transferable',
+        name: 'DataCloneError',
+        message: 'Object is not transferable.',
       });
       throws(() => structuredClone(its), notSerializable(type));
       strictEqual(its.readable.locked, false);

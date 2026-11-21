@@ -13,9 +13,7 @@
 #include <v8-profiler.h>
 
 #include <kj/common.h>
-#include <kj/debug.h>
 #include <kj/exception.h>
-#include <kj/hash.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>

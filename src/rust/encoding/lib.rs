@@ -81,6 +81,11 @@ pub struct Decoder {
     /// Set after a flush decode; checked at the start of the next decode
     /// to lazily reconstruct the inner decoder.
     needs_reset: bool,
+    /// Input left unread when a fatal streaming decode hit an error. The
+    /// spec keeps the rest of the I/O queue after the throw, and
+    /// `encoding_rs` pends only the bytes it restores itself, so the next
+    /// call decodes these bytes before its own input.
+    carry: Vec<u8>,
 }
 
 /// Map a CXX-shared `Encoding` variant to the corresponding
@@ -119,6 +124,7 @@ pub fn new_decoder(encoding: ffi::Encoding) -> Result<Box<Decoder>, cxx::KjError
         encoding,
         output: Vec::new(),
         needs_reset: false,
+        carry: Vec::new(),
     }))
 }
 
@@ -135,8 +141,26 @@ pub fn decode<'a>(
         state.needs_reset = false;
     }
 
+    let carried;
+    let input = if state.carry.is_empty() {
+        input
+    } else {
+        carried = [std::mem::take(&mut state.carry).as_slice(), input].concat();
+        &carried[..]
+    };
+
     // Reuse the output buffer — clear length but keep the allocation.
     state.output.clear();
+
+    if !options.flush && input.is_empty() {
+        // Avoid encoding_rs empty-chunk streaming bug:
+        // https://github.com/hsivonen/encoding_rs/issues/126#issuecomment-3677642122
+        return ffi::DecodeResult {
+            output: &state.output,
+            had_error: false,
+        };
+    }
+
     let max_len = state
         .inner
         .max_utf16_buffer_length(input.len())
@@ -162,11 +186,12 @@ pub fn decode<'a>(
                     state.output.resize(state.output.len() * 2, 0);
                 }
                 encoding_rs::DecoderResult::Malformed(_, _) => {
-                    // Reset to drop any bytes held back for reprocessing, except
-                    // mid-stream iso-2022-jp, whose output state survives errors.
-                    // It keeps its held-back bytes too, as the spec does.
-                    if options.flush || state.encoding != encoding_rs::ISO_2022_JP {
+                    // A streaming throw keeps the decoder and the rest of the
+                    // input for the next call; a flush resets both.
+                    if options.flush {
                         state.needs_reset = true;
+                    } else {
+                        state.carry.extend_from_slice(&input[total_read..]);
                     }
                     state.output.truncate(total_written);
                     return ffi::DecodeResult {
@@ -211,6 +236,7 @@ pub fn decode<'a>(
 pub fn reset(state: &mut Decoder) {
     state.inner = state.encoding.new_decoder_without_bom_handling();
     state.needs_reset = false;
+    state.carry.clear();
     // Intentionally keep state.output — preserves the allocation for reuse.
     // The buffer can grow up to ~2× the largest input chunk (due to UTF-16
     // expansion and the doubling strategy in decode()) and stays at that high-

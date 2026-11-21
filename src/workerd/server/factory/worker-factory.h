@@ -16,7 +16,6 @@
 // fallible in the bridge, where a C++ exception becomes a `Result` error on the Rust side; the rest
 // do not throw.
 
-#include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-channels.h>
@@ -25,14 +24,9 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
-#include <workerd/rust/worker/bridge.h>
+#include <workerd/rust/worker/ffi.rs.h>
 #include <workerd/server/channel-token.h>
-#include <workerd/server/workerd.capnp.h>
 
-#include <kj-rs/kj-rs.h>
-
-#include <capnp/compat/byte-stream.h>
-#include <capnp/compat/http-over-capnp.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
@@ -99,6 +93,7 @@ struct WorkerInfo;
 struct ContainerRef;
 struct FacetStartInfo;
 struct HttpAnswer;
+struct WorkerStartupTiming;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
@@ -219,10 +214,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
-kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
-    const WorkerSpec& spec,
-    uint32_t configService,
-    ::rust::Slice<const uint64_t> params);
+kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 
 // =======================================================================================
 

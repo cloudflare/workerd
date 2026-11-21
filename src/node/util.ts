@@ -46,10 +46,15 @@ import {
 
 import {
   callbackify,
+  kCustomPromisifiedSymbol,
+  kCustomPromisifyArgsSymbol,
   kNullProtoObject,
   parseEnv,
 } from 'node-internal:internal_utils';
 import { diff } from 'node-internal:internal_util_diff';
+// Sets promisify.custom on the node:timers functions, which
+// enable_nodejs_global_timers also installs on globalThis.
+import 'node-internal:internal_timers_promises';
 import {
   isReadableStream,
   isWritableStream,
@@ -119,11 +124,6 @@ export { diff };
 export const types = internalTypes;
 
 export { MIMEParams, MIMEType };
-
-const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
-const kCustomPromisifyArgsSymbol = Symbol.for(
-  'nodejs.util.promisify.custom.args'
-);
 
 // TODO(later): Proper type signature for promisify.
 /* eslint-disable */
