@@ -70,6 +70,25 @@ wpt_test(
 )
 
 wpt_test(
+    name = "dom",
+    config = "dom-test.ts",
+    exclude_test_dirs = [
+        # Run as their own targets
+        "abort",
+        "events",
+        # Need a document
+        "collections",
+        "crashtests",
+        "lists",
+        "nodes",
+        "observable",
+        "ranges",
+        "traversal",
+    ],
+    wpt_directory = "@wpt//:dom@module",
+)
+
+wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
     wpt_directory = "@wpt//:dom/abort@module",

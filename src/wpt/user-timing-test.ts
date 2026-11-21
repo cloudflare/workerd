@@ -66,25 +66,18 @@ export default {
   'mark-l3.any.js': {
     before: clearEntries,
     comment:
-      'mark() rejects a detail that is not an object (here null), because the detail option is typed as an object instead of any',
-    expectedFailures: ["mark entries' detail and startTime are customizable."],
+      'The test finishes from a PerformanceObserver callback, but PerformanceObserver.observe() is a no-op in workerd, so the test hangs',
+    disabledTests: ["mark entries' detail and startTime are customizable."],
   },
   'mark-measure-return-objects.any.js': { before: clearEntries },
   'mark.any.js': { before: clearEntries },
-  'measure-l3.any.js': {
-    before: clearEntries,
-    comment:
-      'measure() ignores the end mark when the start mark is undefined, and measures up to now instead',
-    expectedFailures: [
-      "When the end mark is given and the start is unprovided, the end time of the measure entry should be the end mark's time, the start time should be 0.",
-    ],
-  },
+  'measure-l3.any.js': { before: clearEntries },
   'measure-with-dict.any.js': {
     before: clearEntries,
     comment:
-      'measure() rejects a detail that is not an object, and does not throw a TypeError for an options object combined with an end mark or for a negative start or end',
+      'measure() does not throw a TypeError for an options object combined with an end mark or for a negative start or end. The customizable test is disabled because it finishes from a PerformanceObserver callback and PerformanceObserver.observe() is a no-op, so it hangs',
+    disabledTests: ["measure entries' detail and start/end are customizable"],
     expectedFailures: [
-      "measure entries' detail and start/end are customizable",
       'measure should throw a TypeError when passed an invalid argument combination',
     ],
   },
