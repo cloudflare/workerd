@@ -68,11 +68,16 @@ where
 }
 
 fn panic_result(label: &'static str, err: alloc::boxed::Box<dyn core::any::Any + Send>) -> Result {
-    if let Some(err) = err.downcast_ref::<alloc::string::String>() {
+    // `panic!` with format arguments carries a String, and without them a &'static str.
+    let message = err
+        .downcast_ref::<alloc::string::String>()
+        .map(alloc::string::String::as_str)
+        .or_else(|| err.downcast_ref::<&'static str>().copied());
+    if let Some(message) = message {
         return Result::error(
             KjError::new(
                 KjExceptionType::Failed,
-                std::format!("panic in {label}: {err}"),
+                std::format!("panic in {label}: {message}"),
             ),
             file!(),
             line!(),
