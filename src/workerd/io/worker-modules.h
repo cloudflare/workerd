@@ -2,11 +2,13 @@
 
 #include <workerd/api/commonjs.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/util/strong-bool.h>
 
+#include <pyodide/pyodide_static.capnp.h>
 #include <pyodide/python-entrypoint.embed.h>
 
 #include <capnp/blob.h>

@@ -1004,6 +1004,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The original functor may optionally accept `IoContext&` immediately after `jsg::Lock&`. The
   // wrapper injects the current context after the `IoOwn` has verified that it is the context that
   // owns the functor. Callers therefore do not need to capture an IoContext reference themselves.
+  //
+  // Rust code registers such continuations with `IoContext::then()`, `catch()` and
+  // `then_or_catch()` in the `io-context` crate (`io-context/lib.rs`), which check the context and
+  // pass it in the same way.
   template <typename Func>
   auto addFunctor(Func&& func);
 
@@ -1363,6 +1367,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns both an internal and a user tracing span, this ensures that all user spans are
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
+  // Like makeUserTraceSpan(), but opens only the internal span; the current user span is the
+  // user span parent of whatever runs under it.
+  [[nodiscard]] TraceContext makeTraceSpanWithoutUserSpan(kj::ConstString operationName);
 
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on

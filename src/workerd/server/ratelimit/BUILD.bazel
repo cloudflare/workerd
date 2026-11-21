@@ -1,0 +1,8 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# Rate limiting, the bundled module `/workerd/ratelimit.js` (Worker.Module.bundled).
+wd_cc_embed(
+    name = "ratelimit-js",
+    src = "ratelimit.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

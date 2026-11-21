@@ -327,14 +327,11 @@ function onSocketCloseDestroySSL(this: TLSSocket): void {
 }
 
 TLSSocket.prototype._destroySSL = function _destroySSL(this: TLSSocket): void {
-  // We disable floating promises rule because we don't want to change the
-  // function signature and return Promise<void>
-  //
-  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-  this._handle?.socket.close().then(() => {
-    this[kPendingSession] = null;
-    this[kIsVerified] = false;
-  });
+  // Runs on 'close': Socket's _destroy has already closed and dropped the
+  // handle.
+  this.ssl = null;
+  this[kPendingSession] = null;
+  this[kIsVerified] = false;
 };
 
 TLSSocket.prototype._init = function _init(this: TLSSocket): void {
@@ -496,7 +493,7 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
   // The connection moves to a new handle: the read loop's pending read on
   // this one is about to reject, which it must not take for a failure.
-  this._handle.handedOver = true;
+  this._handle.readRejectionExpected = true;
   this._handle.writer.releaseLock();
   this._handle.reader.releaseLock();
 

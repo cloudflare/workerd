@@ -103,6 +103,11 @@ export default {
   'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
+  'queuing-strategies-size-function-navigation.window.js': {
+    comment:
+      'Requires document, iframes, and cross-origin navigation between browsing contexts',
+    omittedTests: true,
+  },
   'queuing-strategies-size-function-per-global.window.js': {
     comment: 'document is not defined',
     disabledTests: true,
@@ -505,15 +510,7 @@ export default {
       'Transferring a MessagePort with multiple streams should set `.ports`',
     ],
   },
-  'transferable/transform-stream-members.any.js': {
-    comment: 'Appears to be about the wrong type of error',
-    expectedFailures: [
-      'Transferring [object TransformStream],[object ReadableStream] should fail',
-      'Transferring [object ReadableStream],[object TransformStream] should fail',
-      'Transferring [object TransformStream],[object WritableStream] should fail',
-      'Transferring [object WritableStream],[object TransformStream] should fail',
-    ],
-  },
+  'transferable/transform-stream-members.any.js': {},
 
   'transform-streams/backpressure.any.js': {
     comment: 'A hanging Promise was canceled.',

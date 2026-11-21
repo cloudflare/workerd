@@ -10,12 +10,13 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use cxx::KjError;
+use cxx::KjException;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 
@@ -41,8 +42,8 @@ pub mod bridge {
 pub struct Worker;
 
 impl Worker {
-    fn not_implemented(name: &str) -> KjError {
-        kj::not_implemented!("{name} not implemented")
+    fn not_implemented(name: &str) -> KjException {
+        kj::not_implemented!("{name} not implemented").into()
     }
 }
 
@@ -55,7 +56,7 @@ impl kj::http::Service for Worker {
         headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> crate::Result<()> {
+    ) -> ServiceResult {
         let headers = headers.clone_shallow();
         let mut body = response.send(200, "OK", &headers, Some(2_u64))?;
         body.write(b"OK").await?;
@@ -69,7 +70,7 @@ impl kj::http::Service for Worker {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> crate::Result<()> {
+    ) -> ServiceResult {
         Err(Self::not_implemented("connect"))
     }
 }

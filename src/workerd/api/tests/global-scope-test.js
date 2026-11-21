@@ -299,6 +299,9 @@ export const structuredClone = {
 
     // Non-transferable objects throw
     throws(() => globalThis.structuredClone({}, { transfer: {} }));
+    throws(() => globalThis.structuredClone({}, { transfer: [{}] }), {
+      name: 'DataCloneError',
+    });
 
     const memory = new WebAssembly.Memory({ initial: 2, maximum: 2 });
     throws(() => globalThis.structuredClone(memory));
@@ -366,6 +369,9 @@ export const SabStructuredCloneTransfer = {
     const view = new Uint8Array(sab);
 
     throws(() => globalThis.structuredClone(view, { transfer: [view] }), {
+      name: 'DataCloneError',
+    });
+    throws(() => globalThis.structuredClone(sab, { transfer: [sab] }), {
       name: 'DataCloneError',
     });
   },

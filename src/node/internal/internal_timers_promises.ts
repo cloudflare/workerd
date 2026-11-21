@@ -25,6 +25,7 @@
 
 import * as timers from 'node-internal:internal_timers';
 import { ERR_INVALID_THIS, AbortError } from 'node-internal:internal_errors';
+import { setCustomPromisified } from 'node-internal:internal_utils';
 import {
   validateNumber,
   validateAbortSignal,
@@ -126,6 +127,9 @@ export async function setImmediate<T = void>(
 
   return promise;
 }
+
+setCustomPromisified(timers.setTimeout, setTimeout);
+setCustomPromisified(timers.setImmediate, setImmediate);
 
 export async function* setInterval<T = void>(
   delay?: number,

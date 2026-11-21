@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -20,6 +21,7 @@
 #include <kj/mutex.h>
 #include <kj/string.h>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -102,7 +104,21 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
       .ToLocalChecked();
 }
 
+// Rust's WrappableRc::new() allows alignments up to 16.
+static_assert(__STDCPP_DEFAULT_NEW_ALIGNMENT__ >= 16);
+
 // Wrappable implementation - calls into Rust via CXX bridge
+kj::Rc<Wrappable> Wrappable::allocate(size_t size, size_t align, uintptr_t& storage) {
+  // Larger alignments would need the aligned forms of operator new and delete.
+  KJ_REQUIRE(align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__ && (align & (align - 1)) == 0,
+      "unsupported alignment of a Rust object", align);
+  size_t offset = (sizeof(Wrappable) + align - 1) & ~(align - 1);
+  auto* wrappable = new (Extra{offset - sizeof(Wrappable) + size}) Wrappable();
+  storage = reinterpret_cast<uintptr_t>(wrappable) + offset;
+  // A Refcounted object starts with one reference.
+  return kj::Rc<Wrappable>::reown(wrappable);
+}
+
 Wrappable::~Wrappable() {
   wrappable_invoke_drop(*this);
 }
@@ -176,12 +192,11 @@ void restoreResourceTemplatesFromSnapshot(v8::Isolate* isolate) {
 }
 
 kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> Wrappable::snapshotClone() const {
-  TraitObjectPtr copy = {0, 0, 0, 0};
+  size_t copy = 0;
   if (!wrappable_invoke_snapshot_clone(*this, copy)) return kj::none;
-  // Unlike wrappable_new(), it adds no strong reference: no Rust Rc refers to the copy.
-  auto clone = kj::refcounted<Wrappable>();
-  clone->trait_object = copy;
-  return kj::Own<::workerd::jsg::Wrappable>(kj::mv(clone));
+  // Rust passes the copy's Wrappable with its only kj::Rc reference, and no strong reference.
+  return kj::Own<::workerd::jsg::Wrappable>(
+      kj::Rc<Wrappable>::reown(reinterpret_cast<Wrappable*>(copy)).toOwn());
 }
 
 kj::Array<const ::workerd::jsg::Wrappable*> Wrappable::snapshotReferences() const {
@@ -373,6 +388,10 @@ bool local_is_big_int(const Local& val) {
 
 bool local_is_date(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
+bool local_is_wasm_module_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsWasmModuleObject();
 }
 
 bool local_is_shared_array_buffer(const Local& val) {
@@ -629,17 +648,17 @@ MaybeLocal local_function_call(
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
-
-  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
-  }
+  // A Local has the layout of a v8::Local (see ffi-inl.h), so the arguments pass as they are,
+  // without a copy. V8 takes them as non-const but only reads them.
+  KJ_REQUIRE(args.size() <= INT_MAX, "too many arguments for a JavaScript call", args.size());
+  auto* v8Args = const_cast<v8::Local<v8::Value>*>(
+      args.empty() ? nullptr : &local_as_ref_from_ffi<v8::Value>(args[0]));
 
   // No TryCatch: what the function throws stays pending and propagates once the Rust caller
   // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
   // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
   // by walking the whole stack.
-  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
+  return maybe_local_to_ffi(fn->Call(context, receiver, static_cast<int>(args.size()), v8Args));
 }
 
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
@@ -898,6 +917,21 @@ size_t local_array_buffer_get_backing_store(const Local& buffer) {
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
+// Local<WasmModuleObject>
+kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
+  return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
+}
+
+// CompiledWasmModule
+const uint8_t* compiled_wasm_module_get_wire_bytes(
+    const CompiledWasmModule& module, size_t& length) {
+  // GetWireBytesRef() is not const, but only reads the bytes, atomically, and V8 never replaces
+  // them once the module object exists.
+  auto bytes = const_cast<CompiledWasmModule&>(module).GetWireBytesRef();
+  length = bytes.size();
+  return bytes.data();
+}
+
 // Local<ArrayBufferView>
 size_t local_array_buffer_view_byte_offset(const Local& view) {
   return local_as_ref_from_ffi<v8::ArrayBufferView>(view)->ByteOffset();
@@ -1005,19 +1039,25 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& wrappedElsewhere) {
   // Checked first, also while an exception is pending: the caller must then leak its reference
   // rather than release it, which would need the other isolate's lock. Reading the wrapper's
   // isolate enters nothing in V8.
-  wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
+  wrappedElsewhere = wrappable.hasWrapper() && wrappable.getIsolate() != isolate;
   if (wrappedElsewhere || exceptionPending(isolate)) {
     return MaybeLocal{.ptr = 0};
   }
-
-  // Check if already wrapped
-  KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
+  KJ_IF_SOME(handle, wrappable.tryGetHandle(isolate)) {
     return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(handle));
+  }
+  return MaybeLocal{.ptr = 0};
+}
+
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+  auto existing = wrappable_get_wrapper(isolate, *wrappable, wrappedElsewhere);
+  if (existing.ptr != 0 || wrappedElsewhere || exceptionPending(isolate)) {
+    return existing;
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -1028,15 +1068,10 @@ MaybeLocal wrap_resource(
     return MaybeLocal{.ptr = 0};
   }
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
@@ -1054,15 +1089,10 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   KJ_REQUIRE(::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, object) == nullptr,
       "`this` already wraps a resource");
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
 MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
@@ -1308,15 +1338,63 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable) {
 }
 
 // Wrappable lifecycle
-kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr) {
-  auto rc = kj::rc<Wrappable>();
-  rc->trait_object = kj::mv(ptr);
-  rc->addStrongRef();
-  return kj::mv(rc);
+kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
+  return Wrappable::allocate(size, align, storage);
+}
+
+void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
+  wrappable.trait_object = kj::mv(ptr);
+  wrappable.addStrongRef();
+}
+
+void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr) {
+  wrappable.trait_object = kj::mv(ptr);
 }
 
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {
   return wrappable.toRc();
+}
+
+namespace {
+
+static_assert(sizeof(WrappableWeakRc) == sizeof(kj::WeakRc<Wrappable>) &&
+    alignof(WrappableWeakRc) == alignof(kj::WeakRc<Wrappable>));
+
+// A kj::WeakRc holds only its cell and referent pointers, so Rust may move its bytes.
+const kj::WeakRc<Wrappable>& weakRcFromFfi(const WrappableWeakRc& weak) {
+  return *reinterpret_cast<const kj::WeakRc<Wrappable>*>(&weak);
+}
+
+WrappableWeakRc weakRcToFfi(kj::WeakRc<Wrappable> weak) {
+  WrappableWeakRc result;
+  new (&result) kj::WeakRc<Wrappable>(kj::mv(weak));
+  return result;
+}
+
+}  // namespace
+
+WrappableWeakRc wrappable_downgrade(Wrappable& wrappable) {
+  return weakRcToFfi(wrappable.toWeakRc());
+}
+
+WrappableWeakRc wrappable_weak_clone(const WrappableWeakRc& weak) {
+  // clone() only adds a reference to the shared cell.
+  return weakRcToFfi(const_cast<kj::WeakRc<Wrappable>&>(weakRcFromFfi(weak)).clone());
+}
+
+bool wrappable_weak_is_alive(const WrappableWeakRc& weak) {
+  KJ_IF_SOME(wrappable, weakRcFromFfi(weak).tryGet()) {
+    return !wrappable.isCondemned();
+  }
+  return false;
+}
+
+kj::Maybe<kj::Rc<Wrappable>> wrappable_weak_upgrade(const WrappableWeakRc& weak) {
+  return weakRcFromFfi(weak).upgrade();
+}
+
+void wrappable_weak_drop(WrappableWeakRc& weak) {
+  reinterpret_cast<kj::WeakRc<Wrappable>*>(&weak)->~WeakRc();
 }
 
 void wrappable_add_strong_ref(Wrappable& wrappable) {
@@ -1444,6 +1522,25 @@ void wrappable_visit_ref(
   }
 }
 
+namespace {
+
+// V8's `ReturnValue::Set(double)` goes through `Number::New`, which allocates a local handle even
+// when the result is a Smi. `Set(int32_t)` stores a Smi in place. For a double that is an int32
+// and not -0, it produces the same value `Number::New` would.
+void setReturnNumber(auto returnValue, double value) {
+  if (value >= std::numeric_limits<int32_t>::min() &&
+      value <= std::numeric_limits<int32_t>::max()) {
+    auto integer = static_cast<int32_t>(value);
+    if (integer == value && (integer != 0 || !std::signbit(value))) {
+      returnValue.Set(integer);
+      return;
+    }
+  }
+  returnValue.Set(value);
+}
+
+}  // namespace
+
 // FunctionCallbackInfo
 Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
@@ -1470,7 +1567,7 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 }
 
 void fci_set_return_number(FunctionCallbackInfo* args, double value) {
-  args->GetReturnValue().Set(value);
+  setReturnNumber(args->GetReturnValue(), value);
 }
 
 void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
@@ -1499,7 +1596,7 @@ void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
 }
 
 void pci_set_return_number(PropertyCallbackInfo* info, double value) {
-  info->GetReturnValue().Set(value);
+  setReturnNumber(info->GetReturnValue(), value);
 }
 
 void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
@@ -1543,7 +1640,7 @@ void fast_api_throw_exception(FastApiCallbackOptions* options,
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
   v8::HandleScope scope(options->isolate);
-  isolate_throw_internal_error(options->isolate, internalMessage);
+  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::Error);
 }
 
 void fast_api_terminate_execution(FastApiCallbackOptions* options) {
@@ -1954,10 +2051,7 @@ void function_template_set_nested_type(
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto* realm =
-      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
-  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
-  return realm;
+  return static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
 }
 
 namespace {
@@ -2125,20 +2219,50 @@ bool dom_exception_try_unwrap(Isolate* isolate,
 }
 
 namespace {
-// Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
-// the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
-// "internal error; reference = <id>" JS Error.
-v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalMessage) {
+// Logs the message of an internal error that is not created, as `log` says. With
+// InternalErrorLog::Error there is no ID to log it with, since no error carries one.
+void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
+  switch (log) {
+    case InternalErrorLog::Error:
+      KJ_LOG(ERROR, message);
+      return;
+    case InternalErrorLog::Info:
+      KJ_LOG(INFO, message);
+      return;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Generates a unique error ID and returns a generic "internal error; reference = <id>" JS Error.
+// With InternalErrorLog::Error, this is makeInternalError() from util.c++, which it calls: the
+// internal message is logged with the ID to KJ_LOG(ERROR) for Sentry. With
+// InternalErrorLog::Info, the message is logged to KJ_LOG(INFO) without the ID, as
+// reportInternalException() in util.c++ logs an exception marked worker_do_not_log.
+v8::Local<v8::Value> createInternalError(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  return ::workerd::jsg::makeInternalError(isolate, message);
+  switch (log) {
+    case InternalErrorLog::Error:
+      return ::workerd::jsg::makeInternalError(isolate, message);
+    case InternalErrorLog::Info: {
+      logInternalMessage(message, log);
+      // The text makeInternalError() gives the error.
+      auto text = kj::str("internal error; reference = ", ::workerd::makeInternalErrorId());
+      return v8::Exception::Error(
+          v8::String::NewFromUtf8(isolate, text.cStr(), v8::NewStringType::kNormal, text.size())
+              .ToLocalChecked());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
-Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
-  return to_ffi(createInternalError(isolate, internalMessage));
+Local exception_create_internal(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
+  return to_ffi(createInternalError(isolate, internalMessage, log));
 }
 
 uint64_t tunneled_exception_detail_id() {
@@ -2187,20 +2311,37 @@ void isolate_try_catch(
   }
 }
 
+// HandleScope
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::HandleScope scope(isolate);
+  callback(data);
+}
+
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback) {
+  v8::EscapableHandleScope scope(isolate);
+  callback(data, scope);
+}
+
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value) {
+  return to_ffi(scope.Escape(local_from_ffi<v8::Value>(kj::mv(value))));
+}
+
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
-void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
+void isolate_throw_internal_error(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   if (isolate->IsExecutionTerminating()) {
     // Logs the message, but creates no error, since it would not be thrown. See
     // createInternalError() for why the message is copied.
-    KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
+    logInternalMessage(kj::heapString(internalMessage.data(), internalMessage.size()), log);
     return;
   }
-  isolate->ThrowException(createInternalError(isolate, internalMessage));
+  isolate->ThrowException(createInternalError(isolate, internalMessage, log));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

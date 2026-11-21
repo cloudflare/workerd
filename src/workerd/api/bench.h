@@ -11,9 +11,6 @@
 // high-resolution clock. For each case, the runner calls the function repeatedly to warm up,
 // calibrates a batch size, then times `samples` batches, reading the monotonic and thread CPU
 // clocks only between batches. Each sample is a batch's time divided by its number of calls.
-//
-// This file also holds the runner of startup groups (`benchWorkerStartup()`), which times
-// starting a Worker in new isolates.
 
 #include <workerd/io/bench.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -31,24 +28,6 @@ struct BenchTiming {
     return {.wallNs = wallNs - other.wallNs, .cpuNs = cpuNs - other.cpuNs};
   }
 };
-
-// How long the phases of starting one Worker took; see `BenchReport.Group.startup` for what each
-// covers.
-struct WorkerStartupTiming {
-  BenchTiming isolate;
-  BenchTiming script;
-  BenchTiming worker;
-  BenchTiming total;
-};
-
-// Runs a startup group: calls `startWorker`, which starts a new copy of a Worker in a new isolate
-// and destroys it, until the samples or the sampling budget in `params` run out (see
-// `BenchReport.Group.startup`), and writes the phases selected by the case filter to `report` as
-// its cases. Doesn't call `startWorker` if the filter selects no phase. A
-// start that throws fails the group. Doesn't set the group's name, which the caller knows.
-kj::Promise<void> benchWorkerStartup(bench::BenchParams::Reader params,
-    kj::Function<kj::Promise<WorkerStartupTiming>()> startWorker,
-    bench::BenchReport::Group::Builder report);
 
 // Results of one case, before they are written to a `BenchReport::Case`.
 struct BenchCaseResult {

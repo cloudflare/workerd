@@ -91,32 +91,172 @@ export const testNetAccessBytesWritten = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-net-buffersize.js
+// extended to check writableLength, bytesWritten and pending at the same
+// points. bufferSize is undefined once the socket's handle is gone.
+export const testNetBufferSize = {
+  async test(ctrl, env) {
+    function state(socket) {
+      return [
+        socket.bufferSize,
+        socket.writableLength,
+        socket.bytesWritten,
+        socket.pending,
+      ];
+    }
+
+    // An assertion that fails in a listener rejects the test's promise.
+    function checkWith(reject) {
+      return (fn) => () => {
+        try {
+          fn();
+        } catch (err) {
+          reject(err);
+        }
+      };
+    }
+
+    {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const check = checkWith(reject);
+      const client = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
+      deepStrictEqual(state(client), [0, 0, 0, true]);
+      for (let i = 1; i < 4; i++) {
+        client.write('a');
+        deepStrictEqual(state(client), [i, i, i, true]);
+      }
+      client.on(
+        'connect',
+        check(() => {
+          // Node flushes the queued writes before 'connect'; here they are
+          // still in flight.
+          strictEqual(client.bufferSize, client.writableLength);
+          strictEqual(client.bytesWritten, 3);
+          strictEqual(client.pending, false);
+        })
+      );
+      client.on(
+        'finish',
+        check(() => {
+          deepStrictEqual(state(client), [0, 0, 3, false]);
+        })
+      );
+      client.on(
+        'close',
+        check(() => {
+          deepStrictEqual(state(client), [undefined, 0, 3, true]);
+          resolve();
+        })
+      );
+      client.resume();
+      client.end();
+      await promise;
+    }
+
+    {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const client = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
+      client.write('abc');
+      deepStrictEqual(state(client), [3, 3, 3, true]);
+      client.destroy();
+      deepStrictEqual(state(client), [undefined, 3, 3, true]);
+      client.on(
+        'close',
+        checkWith(reject)(() => {
+          deepStrictEqual(state(client), [undefined, 0, 3, true]);
+          resolve();
+        })
+      );
+      await promise;
+    }
+  },
+};
+
 // test/parallel/test-net-better-error-messages-port-hostname.js
+async function assertHostNotFound(host, message) {
+  const { promise, resolve, reject } = Promise.withResolvers();
+  const c = net.connect(0, host);
+  c.on('connect', () => {
+    reject(new Error('should not connect'));
+  });
+  const lookupFn = mock.fn();
+  c.on('lookup', lookupFn);
+  c.on('error', resolve);
+  const error = await promise;
+  // Node reports a host that does not resolve as a getaddrinfo ENOTFOUND.
+  // connect() rejects these hosts before any lookup, so its message is kept.
+  strictEqual(error.code, 'ENOTFOUND');
+  strictEqual(error.errno, -3008);
+  strictEqual(error.syscall, 'getaddrinfo');
+  strictEqual(error.hostname, host);
+  strictEqual(error.message, message);
+  strictEqual(lookupFn.mock.callCount(), 1);
+  deepStrictEqual(lookupFn.mock.calls[0].arguments, [
+    error,
+    undefined,
+    undefined,
+    host,
+  ]);
+}
+
 export const testNetBetterErrorMessagesPortHostname = {
   async test() {
     // This is intentionally not a completely faithful reproduction of the
     // original test, as we don't have the ability to mock DNS lookups.
+    await assertHostNotFound(
+      'invalid address',
+      'Specified address could not be parsed.'
+    );
+    await assertHostNotFound(
+      'invalid~address',
+      'Specified address is empty string, contains unsupported characters or is too long.'
+    );
+  },
+};
+
+// An IP literal is never looked up, so one connect() rejects keeps its error.
+export const testNetRejectedIpLiteralIsNotLookup = {
+  async test() {
     const { promise, resolve, reject } = Promise.withResolvers();
-    const c = net.connect(0, 'invalid address');
+    const c = net.connect(80, 'fe80::1%eth0');
     c.on('connect', () => {
       reject(new Error('should not connect'));
     });
-    const errorFn = mock.fn((error) => {
-      // TODO(review): Currently our errors do not match the errors that
-      // Node.js produces. Do we need them to? Specifically, in a case like
-      // this, Node.js' error would have a meaningful `code` property along
-      // with `hostname` and `syscall` properties. We, instead, are passing
-      // along the underlying error returned from the internal Socket API.
-      try {
-        strictEqual(error.message, 'Specified address could not be parsed.');
-      } catch (err) {
-        console.log(err.message);
-      }
-      resolve();
-    });
-    c.on('error', errorFn);
+    const lookupFn = mock.fn();
+    c.on('lookup', lookupFn);
+    c.on('error', resolve);
+    const error = await promise;
+    strictEqual(error.name, 'TypeError');
+    strictEqual(error.message, 'Specified address could not be parsed.');
+    strictEqual(error.code, undefined);
+    strictEqual(lookupFn.mock.callCount(), 0);
+  },
+};
+
+// Node converts a host name to ASCII (punycode) before resolving it. The
+// sidecar listens on a loopback IPv4 address, so its full-width form is a
+// non-ASCII name that converts back to that address.
+export const testNetConnectIdnHost = {
+  async test(ctrl, env) {
+    const host = env.SIDECAR_HOSTNAME.replace(/[0-9.]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) + 0xfee0)
+    );
+    ok(/[\u0080-\uffff]/.test(host));
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const c = net.connect(env.SERVER_PORT, host);
+    c.on('connect', resolve);
+    c.on('error', reject);
     await promise;
-    strictEqual(errorFn.mock.callCount(), 1);
+    strictEqual(c.remoteAddress, host);
+    strictEqual(c._host, host);
+    c.destroy();
+
+    // A name that does not convert keeps the error connect() reports.
+    await assertHostNotFound(
+      '\u00e9xample\u3000test',
+      'Specified address is empty string, contains unsupported characters or is too long.'
+    );
   },
 };
 
@@ -415,8 +555,6 @@ export const testNetDnsCustomLookup = {
 };
 
 // test/parallel/test-net-dns-error.js
-// This test differs from original Node.js test since our error code for isValidHost
-// is different from Node.js.
 export const testNetDnsError = {
   async test() {
     const p1 = Promise.withResolvers();
@@ -426,24 +564,17 @@ export const testNetDnsError = {
       p1.reject(new Error('Should not have called'))
     );
     socket.on('error', function (err) {
-      strictEqual(err.name, 'TypeError');
-      strictEqual(
-        err.message,
-        'Specified address is empty string, contains unsupported characters or is too long.'
-      );
+      strictEqual(err.code, 'ENOTFOUND');
       p1.resolve();
     });
     socket.on('lookup', function (err, ip, type) {
-      strictEqual(err.name, 'TypeError');
-      strictEqual(
-        err.message,
-        'Specified address is empty string, contains unsupported characters or is too long.'
-      );
+      ok(err instanceof Error);
+      strictEqual(err.code, 'ENOTFOUND');
       strictEqual(ip, undefined);
       strictEqual(type, undefined);
       p2.resolve();
     });
-    await Promise.all([p1, p2]);
+    await Promise.all([p1.promise, p2.promise]);
   },
 };
 

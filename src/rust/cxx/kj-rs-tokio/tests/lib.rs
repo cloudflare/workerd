@@ -8,6 +8,7 @@ mod test_helpers;
 use test_helpers::completed_task_count;
 use test_helpers::has_loop_runtime_handle;
 use test_helpers::nested_wait_from_task;
+use test_helpers::progress_count;
 use test_helpers::runtime_context_waits_after_block_on;
 use test_helpers::spawn_detached_completing_task;
 use test_helpers::spawn_panicking_task;
@@ -16,6 +17,7 @@ use test_helpers::spawn_task_awaiting_kj_never_promise;
 use test_helpers::spawn_task_holding_kj_timer;
 use test_helpers::spawn_task_on_runtime;
 use test_helpers::spawn_yield_loop_task;
+use test_helpers::start_progress;
 use test_helpers::stash_waker_future;
 use test_helpers::stashed_future_poll_count;
 use test_helpers::std_thread_wake_future;
@@ -101,6 +103,13 @@ mod ffi {
         /// On a `kj_rs_tokio::Runtime`, after a `block_on`: C++ blocks in `promise.wait()` on the
         /// context's WaitScope until a KJ timer fires (`waitForTimer`). Panics on failure.
         fn runtime_context_waits_after_block_on();
+
+        /// Starts watching this thread's loop's progress (`kj_rs_tokio::watch_progress`), with
+        /// a beat of `beat_ms` while it sleeps, for `progress_count()` to read from any thread.
+        /// False if the thread has no port.
+        fn start_progress(beat_ms: u64) -> bool;
+        /// The count of the progress `start_progress` last started watching.
+        fn progress_count() -> u64;
     }
 
     #[namespace = "kj_rs_tokio"]

@@ -1009,6 +1009,8 @@ export const stickyMultibyteStateIso2022JpLoose = {
   },
 };
 
+// A fatal streaming throw keeps the bytes the decoder restored to the I/O
+// queue and the input it had not read yet; the next call decodes them.
 export const fatalStreamGb18030Gbk = {
   test() {
     for (const encoding of ['gb18030', 'gbk']) {
@@ -1020,7 +1022,7 @@ export const fatalStreamGb18030Gbk = {
             stream: true,
           })
         );
-        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+        strictEqual(d.decode(Uint8Array.of(0x80)), '0!!!\u20AC');
       }
 
       {
@@ -1031,7 +1033,17 @@ export const fatalStreamGb18030Gbk = {
             stream: true,
           })
         );
-        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+        strictEqual(d.decode(Uint8Array.of(0x80)), '0\u4E05B\u20AC');
+      }
+
+      {
+        // An empty streaming chunk still decodes what the throw left queued.
+        const d = new TextDecoder(encoding, { fatal: true });
+        throws(() =>
+          d.decode(Uint8Array.of(0x81, 0x30, 0x21, 0x21), { stream: true })
+        );
+        strictEqual(d.decode(new Uint8Array(0), { stream: true }), '0!!');
+        strictEqual(d.decode(), '');
       }
     }
   },
@@ -1201,6 +1213,32 @@ export const legacyStreamEmptyInput = {
           `${label} (fatal=${fatal}): decode 'A' after empty stream should work`
         );
       }
+    }
+  },
+};
+
+export const decodeBufferKinds = {
+  test() {
+    // Every kind of BufferSource decodes, legacy and ICU decoders alike.
+    for (const label of ['utf-8', 'utf-16le', 'windows-1252']) {
+      const dec = new TextDecoder(label);
+      const bytes = label === 'utf-16le' ? [0x68, 0, 0x69, 0] : [0x68, 0x69];
+      const sab = new SharedArrayBuffer(bytes.length);
+      new Uint8Array(sab).set(bytes);
+      strictEqual(dec.decode(sab), 'hi', `${label}: SharedArrayBuffer`);
+      strictEqual(dec.decode(new Uint8Array(sab)), 'hi', `${label}: SAB view`);
+      const u8 = Uint8Array.from(bytes);
+      strictEqual(dec.decode(u8.buffer), 'hi', `${label}: ArrayBuffer`);
+      strictEqual(
+        dec.decode(new DataView(u8.buffer)),
+        'hi',
+        `${label}: DataView`
+      );
+
+      // A buffer detached before decode() reads as empty.
+      u8.buffer.transfer();
+      strictEqual(dec.decode(u8), '', `${label}: detached view`);
+      strictEqual(dec.decode(u8.buffer), '', `${label}: detached buffer`);
     }
   },
 };

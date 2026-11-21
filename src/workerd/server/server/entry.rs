@@ -128,6 +128,7 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
     let command = move |config, structured| {
+        crate::log::set_structured(structured);
         let mut runtime = kj_rs_tokio::Runtime::new()?;
         let factory = ffi::bootstrap(
             runtime.context(),

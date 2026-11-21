@@ -31,6 +31,12 @@ import {
 import { Buffer } from 'node-internal:internal_buffer';
 const kType = Symbol('type');
 
+// A recursive readdir names each handle by its path relative to the directory
+// being read. A Dirent is named by the last segment only.
+export function direntName(handle: DirEntryHandle): string {
+  return handle.name.slice(handle.name.lastIndexOf('/') + 1);
+}
+
 export class Dirent {
   name: string | Buffer;
   parentPath: string | Buffer;
@@ -140,7 +146,7 @@ export class Dir {
     if (this.#handle === undefined) throw new ERR_DIR_CLOSED();
     const ent = this.#handle.shift();
     if (ent == null) return null;
-    const buf = Buffer.from(ent.name);
+    const buf = Buffer.from(direntName(ent));
     if (this.#encoding === 'buffer') {
       return new Dirent(buf, ent.type, ent.parentPath);
     }

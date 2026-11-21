@@ -13,11 +13,6 @@
 #include <kj/one-of.h>
 #include <kj/string.h>
 
-#include <optional>
-#include <string>
-#include <string_view>
-#include <vector>
-
 namespace workerd::api {
 
 namespace urlpattern {

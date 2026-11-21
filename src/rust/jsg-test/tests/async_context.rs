@@ -349,12 +349,7 @@ static STORED_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct Stored {
     /// The probe whose frame stores this value, which closes a cycle through the frame.
     owner: jsg::Cell<Option<jsg::Rc<Probe>>>,
-}
-
-impl Drop for Stored {
-    fn drop(&mut self) {
-        STORED_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -386,6 +381,7 @@ fn frame_in_resource_is_traced() {
         let stored = jsg::Rc::new(
             lock,
             Stored {
+                drops: crate::DropCounter(&STORED_DROPS),
                 owner: jsg::Cell::new(Some(probe.clone(lock))),
             },
         )

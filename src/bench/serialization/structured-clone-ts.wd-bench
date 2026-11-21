@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the structuredClone() benchmarks against the TypeScript implementation
+# (src/per_isolate/structured-clone.ts), with byte-for-byte the same modules
+# as structured-clone-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "structured-clone",
+      worker = (
+        modules = [(name = "worker", esModule = embed "structured-clone.js")],
+      )
+    ),
+    ( name = "structured-clone-cold",
+      worker = (
+        modules = [(name = "worker", esModule = embed "structured-clone-cold.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-structured-clone"],
+);

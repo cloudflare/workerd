@@ -10,6 +10,8 @@
 //! back whenever a tokio task has queued KJ work.
 //!
 //! [`Runtime`] is that loop for a Rust `main`: it owns the C++ context and blocks on a future.
+//!
+//! [`watch_progress`] counts the loop's progress for a watchdog on another thread ([`Progress`]).
 
 // `unsafe` is quarantined into a single named FFI island: `ffi.rs`, the `#[cxx::bridge]` wire, is
 // the one module that opts in via `#![allow(unsafe_code)]`, so the entire event-port business
@@ -20,8 +22,12 @@ pub use ffi::TokioAsyncIoContext;
 pub use port::TokioPort;
 pub use port::current_handle;
 pub use port::spawn;
+pub use progress::Progress;
+pub use progress::WatchError;
+pub use progress::watch_progress;
 pub use runtime::Runtime;
 
 mod ffi;
 mod port;
+mod progress;
 mod runtime;
