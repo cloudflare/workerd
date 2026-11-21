@@ -76,13 +76,17 @@ class Pbkdf2Key final: public CryptoKey::Impl {
   //   algorithms in exportKey(). Later, the allow list was removed, instead assuming that any
   //   algorithm which implemented this method must be allowed. To maintain exactly the
   //   preexisting behavior, then, this implementation had to be commented out. If disallowing this
-  //   was a mistake, we can un-comment this method, but we would need to make sure to add tests
-  //   when we do.
+  //   was a mistake, we can un-comment this method and remove supportsExport() below, but we
+  //   would need to make sure to add tests when we do.
   //   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override {
   //     JSG_REQUIRE(format == "raw", DOMNotSupportedError,
   //         "Unimplemented key export format \"", format, "\".");
   //     return kj::heapArray(keyData.asPtr());
   //   }
+
+  bool supportsExport() const override {
+    return false;
+  }
 
   kj::StringPtr getAlgorithmName() const override {
     return "PBKDF2";
