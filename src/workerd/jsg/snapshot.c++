@@ -20,8 +20,6 @@ SnapshotArtifact::~SnapshotArtifact() noexcept(false) {
   delete[] blob.data;
 }
 
-constexpr size_t internalFieldTagSizeInBytes = sizeof(Wrappable::WORKERD_WRAPPABLE_TAG);
-
 // The zygote's half of the live-wrappable transfer, under the isolate lock and before
 // destroyLiveWrappableInstances(). A snapshotClone() that throws propagates out of
 // IsolateBase::createSnapshotBlob() and fails the zygote; the Worker then starts without a
@@ -261,56 +259,6 @@ void deserializeApiWrapperCallback(
 
   HeapTracer::getTracer(metadata.isolate).linkRestoredWrapper(*slot.shim, holder);
   slot.linked = true;
-}
-
-v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data) {
-  auto& badTagFieldsCount = *static_cast<uint32_t*>(data);
-  const void* field = holder->GetAlignedPointerFromInternalField(
-      index, static_cast<v8::EmbedderDataTypeTag>(index));
-  if (field == nullptr) return {nullptr, 0};
-
-  if (index != Wrappable::WRAPPABLE_TAG_FIELD_INDEX ||
-      (field != &Wrappable::WORKERD_WRAPPABLE_TAG &&
-          field != &Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
-    ++badTagFieldsCount;
-    return {nullptr, 0};
-  }
-
-  // Encode the type = wrappable tag | rust wrappable tag.
-  auto* payload = new char[internalFieldTagSizeInBytes];
-  memcpy(payload, field, internalFieldTagSizeInBytes);
-  return {payload, internalFieldTagSizeInBytes};
-}
-
-void deserializeInternalFields(
-    v8::Local<v8::Object> holder, int index, v8::StartupData payload, void* data) {
-  auto& metadata = *static_cast<WrappableDeserializeMetadata*>(data);
-  metadata.inCallback = true;
-  KJ_DEFER(metadata.inCallback = false);
-  if (index != Wrappable::WRAPPABLE_TAG_FIELD_INDEX ||
-      payload.raw_size != internalFieldTagSizeInBytes) {
-    ++metadata.badTagFieldsCount;
-    return;
-  }
-
-  using TagType = kj::RemoveConst<decltype(Wrappable::WORKERD_WRAPPABLE_TAG)>;
-  TagType marker = 0;
-  memcpy(&marker, payload.data, internalFieldTagSizeInBytes);
-  TagType* tagPtr = nullptr;
-  switch (marker) {
-    case Wrappable::WORKERD_WRAPPABLE_TAG:
-      tagPtr = const_cast<TagType*>(&Wrappable::WORKERD_WRAPPABLE_TAG);
-      break;
-    case Wrappable::WORKERD_RUST_WRAPPABLE_TAG:
-      tagPtr = const_cast<TagType*>(&Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-      break;
-    default:
-      ++metadata.badTagFieldsCount;
-      return;
-  }
-
-  holder->SetAlignedPointerInInternalField(
-      index, tagPtr, static_cast<v8::EmbedderDataTypeTag>(index));
 }
 
 }  // namespace workerd::jsg

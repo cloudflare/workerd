@@ -591,14 +591,11 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
-    uint32_t* badTagFieldsCount,
-    WrappablesSerializeMetadata* wrappablesMetadata) {
+void IsolateBase::setSnapshotDefaultContext(
+    v8::Local<v8::Context> defaultContext, WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
-  *badTagFieldsCount = 0;
   KJ_ASSERT_NONNULL(snapshotCreator)
-      ->SetDefaultContext(defaultContext,
-          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount),
+      ->SetDefaultContext(defaultContext, v8::SerializeInternalFieldsCallback(),
           v8::SerializeContextDataCallback(),
           v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
 }
@@ -684,7 +681,6 @@ void IsolateBase::settleFinalizationRegistriesForSnapshot(Lock& js) {
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
-    const uint32_t* badTagFieldsCount,
     WrappablesSerializeMetadata* wrappablesMetadata,
     kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords) {
   KJ_REQUIRE(isPreparingSnapshot());
@@ -794,11 +790,6 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   artifact.blob =
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
-
-  KJ_REQUIRE(*badTagFieldsCount == 0,
-      "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
-      "workerd wrapper markers",
-      *badTagFieldsCount);
 
   wrappablesMetadata->checkCallbackFindings();
   wrappablesMetadata->dropUnreachableWrappables(artifact);

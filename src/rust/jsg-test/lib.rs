@@ -166,11 +166,11 @@ mod ffi {
         /// `sizeof` the C++ `Wrappable` of a Rust resource, which its heap snapshot node counts.
         pub fn rust_wrappable_size() -> usize;
 
-        /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
-        /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
+        /// Creates the wrapper of a C++ `Wrappable`, whose `CppHeap` pointer has a C++ tag.
+        /// Used to test that Rust unwrap rejects the wrappers of C++ objects.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn create_cpp_wrapped_object(isolate: *mut Isolate) -> Local;
 
         /// Calls a function that C++ JSG wrapped and returns whether
         /// `jsg::v8::ffi::fci_get_data_wrappable` finds a Rust Wrappable in its data.
@@ -838,13 +838,13 @@ impl Harness {
         ffi::rust_wrappable_size()
     }
 
-    /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
-    /// Used to test that Rust unwrap rejects non-Rust wrappable objects.
-    pub fn create_cpp_tagged_object<'s>(lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Value> {
+    /// Creates the wrapper of a C++ `Wrappable`, whose `CppHeap` pointer has a C++ tag.
+    /// Used to test that Rust unwrap rejects the wrappers of C++ objects.
+    pub fn create_cpp_wrapped_object<'s>(lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Value> {
         let isolate = lock.isolate();
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
         unsafe {
-            let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
+            let local = ffi::create_cpp_wrapped_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
     }

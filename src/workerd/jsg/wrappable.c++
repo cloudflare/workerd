@@ -534,6 +534,19 @@ Wrappable* Wrappable::unwrapFromShim(
   return &shim->resolve(object);
 }
 
+kj::Maybe<v8::CppHeapPointerTag> Wrappable::tryGetWrapperTag(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
+  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
+  if (!object->IsApiWrapper()) return kj::none;
+  // Other API wrappers (ArrayBuffers, module namespaces, objects made from templates that are not
+  // a resource's) have an empty slot. Not shim->resolve(): that aborts for a detached wrapper.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+  if (shim == nullptr) return kj::none;
+  return shim->tag;
+}
+
 Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   return unwrapFromShim(isolate, object, kJsgWrappableTagRange);
 }
@@ -690,22 +703,15 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // A bound Wrappable is in its isolate's HeapTracer lists, so it can't be wrapped in another.
   KJ_ASSERT(this->isolate == nullptr || this->isolate == isolate);
 
-  // Set up internal fields for a newly-allocated object.
+  // The internal field stays empty; see INTERNAL_FIELD_COUNT for why a wrapper must have it.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // Internal field 0 holds a marker identifying this as a workerd API object (see
-  // isWorkerdApiObject()), or as a Rust resource. The marker's address is a small integer
-  // type-tagged by slot index. The field is stored only once, as V8 allocates a new cppgc object
-  // for every store of a non-null pointer.
-  auto tagAddress = const_cast<uint16_t*>(static_cast<uint16_t>(tag) == kRustResourceWrappableTag
-          ? &WORKERD_RUST_WRAPPABLE_TAG
-          : &WORKERD_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
 
   // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
   // with a per-type tag. There is deliberately no second pointer to the object in an internal
   // field: a single tagged handle means dispatch and GC lifetime are always driven by the same
-  // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
+  // pointer, and the tag also says what kind of object the wrapper wraps (see
+  // tryGetWrapperTag()). The shim carries the same tag so it lands in the matching freelist
+  // bucket.
   auto* shim = tracer.allocateShim(*this, tag);
 
   // Nothing below throws, so `this` is always linked, and therefore released, by the end of this
@@ -719,12 +725,11 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // alive. Marking cannot save the node either: constructing a TracedReference is an initializing
   // store, which V8 deliberately does not black-allocate.
   //
-  // Both cppgc allocations above (allocateShim(), and the slot wrapper V8 allocates for
-  // SetAlignedPointerInInternalField()) must stay outside this scope. cppgc reports allocations
-  // to V8 only when GC is allowed, and nothing reports them when the scope closes. If they were
-  // inside it, a loop creating short-lived API objects would never trigger a major GC. Every
-  // wrapper also takes two entries in V8's CppHeap pointer table, and only a major GC frees
-  // them, so the table would fill and the process would abort with "ExternalEntityTable::
+  // The cppgc allocation above (allocateShim()) must stay outside this scope. cppgc reports
+  // allocations to V8 only when GC is allowed, and nothing reports them when the scope closes. If
+  // it were inside the scope, a loop creating short-lived API objects would never trigger a major
+  // GC. Every wrapper also takes an entry in V8's CppHeap pointer table, and only a major GC
+  // frees it, so the table would fill and the process would abort with "ExternalEntityTable::
   // AllocateEntry: allocation failed".
   cppgc::subtle::NoGarbageCollectionScope noGcScope(isolate->GetCppHeap()->GetHeapHandle());
 
@@ -844,7 +849,7 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
 }
 
 void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_info& actual) {
-  // Only reachable if the wrapper's internal field has been made to point at an object of the
+  // Only reachable if the wrapper's CppHeap pointer has been made to point at an object of the
   // wrong type, which means memory outside this process's control has already been corrupted.
   // Abort: edgeworker's crash handler turns this into an abrupt shutdown of the isolate.
   KJ_LOG(FATAL, "JS wrapper's C++ object is not of the expected type", typeName(expected),

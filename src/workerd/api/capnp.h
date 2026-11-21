@@ -241,8 +241,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
           break;
 
         case capnp::schema::Node::INTERFACE: {
-          // As explained in ResourceWrapper, we must have 2 internal fields, where the first one is
-          // the GC visitation callback.
+          // Instances are wrappers, like those of a resource type; see
+          // jsg::Wrappable::INTERNAL_FIELD_COUNT.
           instance->SetInternalFieldCount(jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
           constructor->Inherit(

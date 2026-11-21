@@ -1707,8 +1707,8 @@ jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "Socket can only be deserialized from RPC.");
 
-  // Hydrated before the graph read; unwrapping reads internal fields only, so no JS executes
-  // here (forbidden under the deserializer's no-JS scope).
+  // Hydrated before the graph read; unwrapping reads the wrapper's CppHeap pointer only, so no JS
+  // executes here (forbidden under the deserializer's no-JS scope).
   auto prebuilt = externalHandler->claimPrebuiltSocket();
   return KJ_ASSERT_NONNULL(socketHandler.tryUnwrap(js, prebuilt.getHandle(js)),
       "hydrated socket slot did not hold a Socket");

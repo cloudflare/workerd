@@ -147,7 +147,7 @@ kj::Maybe<OwnDataProperty> tryGetOwnDataProperty(
     Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
   // GetOwnPropertyDescriptor() below calls an API object's interceptors and native accessors,
   // which may run code. Anything this reads is an ordinary object.
-  if (object->InternalFieldCount() > 0) return kj::none;
+  if (Wrappable::tryGetWrapperTag(js.v8Isolate, object) != kj::none) return kj::none;
   auto context = js.v8Context();
   v8::Local<v8::String> key = js.strIntern(name);
   // False for a Proxy, so the descriptor below is not a Proxy trap's.
@@ -270,8 +270,8 @@ bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
 }
 
 v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  // Any object with internal fields is DEFINITELY a host object!
-  if (object->InternalFieldCount() > 0) {
+  // A workerd API object is DEFINITELY a host object!
+  if (Wrappable::tryGetWrapperTag(isolate, object) != kj::none) {
     return v8::Just(true);
   }
 
@@ -309,8 +309,8 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
 
   // If the object's prototype is Object.prototype, then it is a plain object, which we'll allow
   // to be serialized normally. Otherwise, it is a class instance, which we should treat as a host
-  // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not having
-  // internal fields.
+  // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not being a
+  // workerd API object.
   return v8::Just(prototype != prototypeOfObject);
 }
 
@@ -393,8 +393,7 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
     return;
   }
 
-  if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
-      !Wrappable::isWorkerdApiObject(object)) {
+  if (!Wrappable::isWorkerdApiObject(js.v8Isolate, object)) {
     KJ_IF_SOME(eh, externalHandler) {
       if (object->IsProxy()) {
         eh.serializeProxy(js, *this, object.As<v8::Proxy>());
@@ -405,8 +404,9 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
       }
     }
 
-    // v8::ValueSerializer by default will send us anything that has internal fields, but this
-    // object doesn't appear to match the internal fields expected on a JSG object.
+    // v8::ValueSerializer sends us every object that has interceptors or access checks, and
+    // IsHostObject() accepts the wrappers of Rust JSG resources, but this object is not the
+    // wrapper of a C++ JSG object.
     //
     // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
     // application-defined class. We don't currently support serializing class instances. An
@@ -415,14 +415,13 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
     throwDataCloneErrorForObject(js, object);
   }
 
-  // The InternalFieldCount + isWorkerdApiObject() checks above established that this is one of
-  // our wrapped objects; the serializer is then selected by the object's dynamic type, so we
-  // only need the pointer here.
+  // The isWorkerdApiObject() check above established that this is one of our wrapped objects; the
+  // serializer is then selected by the object's dynamic type, so we only need the pointer here.
   Wrappable* wrappable = Wrappable::unwrapFromShimAnyType(js.v8Isolate, object);
   if (wrappable == nullptr) {
-    // The object carries our marker (isWorkerdApiObject() passed) yet its CppHeap handle resolves
-    // to no live wrappable. That should be unreachable.
-    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
+    // isWorkerdApiObject() found a shim in the object's CppHeap pointer, yet it resolves to no
+    // live wrappable. That should be unreachable.
+    KJ_LOG(FATAL, "wrapper type mismatch: wrapper's CppHeap handle resolves to no wrappable");
     abort();
   }
 
@@ -440,8 +439,11 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
 
 kj::Maybe<v8::Local<v8::Value>> Serializer::tryGetJsSerializeMark(
     Lock& js, v8::Local<v8::Object> object) {
-  // Such an instance has no internal fields, unlike a workerd API object.
-  if (jsSerializeModeKey.IsEmpty() || object->InternalFieldCount() > 0) return kj::none;
+  // Such an instance is not a workerd API object.
+  if (jsSerializeModeKey.IsEmpty() ||
+      Wrappable::tryGetWrapperTag(js.v8Isolate, object) != kj::none) {
+    return kj::none;
+  }
   // No mark is undefined (see serialization.ts), so undefined means that there is none.
   auto mark = check(object->GetPrivate(js.v8Context(), jsSerializeModeKey));
   if (mark->IsUndefined()) return kj::none;

@@ -275,7 +275,6 @@ void TestHarness::run_in_context(
       zygote->runInLockScope([&](TestIsolate::Lock& lock) {
         auto realm = ::workerd::rust::jsg::realm_create(lock.v8Isolate, flags);
         ::workerd::jsg::WrappablesSerializeMetadata metadata;
-        uint32_t badTagFieldsCount = 0;
         auto& isolateBase = IsolateBase::from(lock.v8Isolate);
         failure = kj::runCatchingExceptions([&] {
           v8::Global<v8::Context> contextHandle;
@@ -283,7 +282,7 @@ void TestHarness::run_in_context(
             auto jsContext = lock.newContext<TestContext>();
             auto context = jsContext.getHandle(lock);
             v8::Context::Scope contextScope(context);
-            isolateBase.setSnapshotDefaultContext(context, &badTagFieldsCount, &metadata);
+            isolateBase.setSnapshotDefaultContext(context, &metadata);
             {
               EvalContext evalContext(lock.v8Isolate, context);
               topLevel(topLevelData, lock.v8Isolate, evalContext);
@@ -294,8 +293,7 @@ void TestHarness::run_in_context(
           });
           auto rustTemplates =
               ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
-          isolateBase.createSnapshotBlob(
-              kj::mv(contextHandle), kj::mv(rustTemplates), &badTagFieldsCount, &metadata);
+          isolateBase.createSnapshotBlob(kj::mv(contextHandle), kj::mv(rustTemplates), &metadata);
         });
       });
       KJ_IF_SOME(e, failure) {
@@ -460,18 +458,9 @@ size_t rust_wrappable_size() {
   return sizeof(::workerd::rust::jsg::Wrappable);
 }
 
-::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
-  auto tmpl = v8::ObjectTemplate::New(isolate);
-  tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
-  auto obj = ::workerd::jsg::check(tmpl->NewInstance(isolate->GetCurrentContext()));
-
-  // Set the C++ wrappable tag (NOT the Rust tag) to simulate a C++ JSG object
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_WRAPPABLE_TAG);
-  obj->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
-
-  return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
+::workerd::rust::jsg::Local create_cpp_wrapped_object(Isolate* isolate) {
+  return ::workerd::rust::jsg::to_ffi(
+      ::workerd::jsg::wrapOpaque(isolate->GetCurrentContext(), kj::str("a C++ value")));
 }
 
 bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {

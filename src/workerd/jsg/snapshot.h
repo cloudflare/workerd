@@ -156,14 +156,6 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   }
 };
 
-// SerializeInternalFieldsCallback registered with the snapshot's default context
-// (IsolateBase::setSnapshotDefaultContext). V8 runs it inside CreateBlob() for every embedder
-// field that does not hold a heap object (aligned pointers and empty slots alike) the context
-// reaches. `data` is a uint32_t counter of non-null aligned-pointer fields at the wrong index or
-// with an unknown marker. V8 is built without exceptions, so the callback only increments the
-// counter and IsolateBase::createSnapshotBlob() raises it after CreateBlob() returns.
-v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data);
-
 // Metadata needed to serialize live wrappable instances.
 // First, every live Wrappable is recorded in the snapshot artifact: by its tag alone for a
 // stateless type, as a clone otherwise. Then a map from cppgc shim pointer to index within the
@@ -240,13 +232,11 @@ struct WrappableDeserializeMetadata {
   // Each slot's instance, owned by its shim; null for a dropped slot. Valid for a linked slot.
   kj::Array<Wrappable*> instances;
 
-  // Findings the callbacks cannot raise themselves.
-  uint32_t badTagFieldsCount = 0;    // internal-field payload at the wrong index or unknown marker
+  // Findings the callback cannot raise itself.
   uint32_t badPayloadsCount = 0;     // API-wrapper payload with a bad size, index or slot
   uint32_t duplicateLinksCount = 0;  // one slot referenced by more than one holder
 
-  // Set while deserializeInternalFields() or deserializeApiWrapperCallback() runs, for
-  // AbortOnGcInDeserializerCallbacks.
+  // Set while deserializeApiWrapperCallback() runs, for AbortOnGcInDeserializerCallbacks.
   bool inCallback = false;
 
   // Before creating a context: resolves each `artifact.liveWrappables` slot into the object its
@@ -269,11 +259,10 @@ struct WrappableDeserializeMetadata {
   void releaseSlotsWithChecks();
 };
 
-// V8 runs the deserializer callbacks below under DisallowGarbageCollection, which only a debug
-// build of V8 checks. A GC that starts inside one of them, say from an allocation for an aligned
-// pointer with a large buffer's external memory to account for, would run on a half-restored
-// context. While in scope, this aborts the process in every build when a GC starts while
-// `metadata.inCallback` is set.
+// V8 runs the deserializer callback below under DisallowGarbageCollection, which only a debug
+// build of V8 checks. A GC that starts inside it would run on a half-restored context. While in
+// scope, this aborts the process in every build when a GC starts while `metadata.inCallback` is
+// set.
 class AbortOnGcInDeserializerCallbacks {
  public:
   AbortOnGcInDeserializerCallbacks(v8::Isolate* isolate, WrappableDeserializeMetadata& metadata);
@@ -287,14 +276,6 @@ class AbortOnGcInDeserializerCallbacks {
   static void onGcPrologue(
       v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data);
 };
-
-// DeserializeInternalFieldsCallback for Context::New() from a startup snapshot. Restores the
-// workerd marker in WRAPPABLE_TAG_FIELD_INDEX of each deserialized wrapper from the marker value
-// the serializer emitted. `data` is the WrappableDeserializeMetadata, whose badTagFieldsCount
-// counts payloads at the wrong index or with an unknown marker; the caller raises it after
-// Context::New() returns.
-void deserializeInternalFields(
-    v8::Local<v8::Object> holder, int index, v8::StartupData payload, void* data);
 
 // DeserializeAPIWrapperCallback for Context::New() from a startup snapshot. The payload is the
 // liveWrappables index the serializer emitted; links the holder to the shim pre-allocated for

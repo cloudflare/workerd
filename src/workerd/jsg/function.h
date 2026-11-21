@@ -430,13 +430,10 @@ class FunctionWrapper {
         // Unfortunately, it is exceedingly difficult for us to store the function handle for
         // reuse without introducing performance problems.
         // - Ideally, we'd use the v8::Function itself as the object's wrapper, rather than an
-        //   "opaque" wrapper. However, this doesn't work, because we can't attach internal fields
-        //   to it. v8::Function::New() does not let us specify an internal field count. We can
-        //   specify internal fields if we create a FunctionTemplate and then create the Function
-        //   from that, but a FunctionTemplate only instantiates one Function (per Context). We
-        //   need a separate Function instance for object we want to wrap. So... this doesn't work.
-        //   (Note that V8's heap tracing API deeply depends on wrapper objects having two internal
-        //   fields, so using other schemes like v8::External doesn't help either.)
+        //   "opaque" wrapper. However, this doesn't work, because a v8::Function is not an API
+        //   wrapper object: it has no CppHeap pointer to attach the Wrappable to, however the
+        //   function is created. (V8 traces a Wrappable only through the CppHeap pointer of its
+        //   wrapper, so using other schemes like v8::External doesn't help either.)
         // - Another approach might be to store the v8::Function on the WrappableFunction, once
         //   it's created. This is a cyclic reference, but we could rely on GC visitation to
         //   collect it. The problem is, cyclic references can only be collected by tracing, not
