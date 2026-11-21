@@ -1,0 +1,181 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dlapid@cloudflare.com>
+Date: Wed, 18 Nov 2026 12:00:00 +0000
+Subject: Let a PromiseContextScope make its tag on first use
+
+An embedder that enters a PromiseContextScope for each request has
+to make a tag object for every request, even though many requests
+never create a promise. Add a PromiseContextScope constructor that
+takes a factory instead. The scope stores undefined as its tag, and
+the first promise created in the scope calls the factory and stores
+the result. Until then, no promise can carry this scope's tag, so
+treating every tagged promise as coming from another context, as
+comparing its tag with undefined does, is correct.
+
+Promises get their tag in Runtime_PromiseContextInit and in
+Factory::NewJSPromiseWithoutHook. The factory may allocate, so the
+latter makes the tag before it allocates the promise.
+---
+ include/v8-isolate.h           |   11 +++++++++++
+ src/api/api.cc                 |    9 +++++++++
+ src/execution/isolate-inl.h    |    9 +++++++++
+ src/execution/isolate.cc       |   13 +++++++++++++
+ src/execution/isolate.h        |    9 +++++++++
+ src/heap/factory.cc            |    9 +++++++--
+ src/runtime/runtime-promise.cc |    4 ++--
+ 7 files changed, 60 insertions(+), 4 deletions(-)
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index f7caba3..e2cdab1 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -2008,6 +2008,17 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+ class Isolate::PromiseContextScope {
+  public:
+   PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag);
++
++  /**
++   * Makes the tag only when the first promise is created in this scope, by
++   * calling `factory(isolate, data)`, which must return a non-empty object and
++   * must not run JavaScript. That tag then serves every promise created later
++   * in the scope. Until then, a promise from any other scope is treated as
++   * coming from another context. For a scope in which no promise may be
++   * created, this saves making a tag at all.
++   */
++  using TagFactory = Local<Object> (*)(Isolate* isolate, void* data);
++  PromiseContextScope(Isolate* isolate, TagFactory factory, void* data);
+   ~PromiseContextScope();
+   PromiseContextScope(const PromiseContextScope&) = delete;
+   PromiseContextScope(PromiseContextScope&&) = delete;
+diff --git a/src/api/api.cc b/src/api/api.cc
+index b65302a..b43757e 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -12890,6 +12890,15 @@ Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
+   isolate_->set_promise_context_tag(handle);
+ }
+ 
++Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
++                                                  TagFactory factory,
++                                                  void* data)
++    : isolate_(reinterpret_cast<i::Isolate*>(isolate)) {
++  DCHECK(!isolate_->has_promise_context_tag());
++  DCHECK_NOT_NULL(factory);
++  isolate_->set_deferred_promise_context_tag(factory, data);
++}
++
+ Isolate::PromiseContextScope::~PromiseContextScope() {
+   isolate_->clear_promise_context_tag();
+ }
+diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
+index 46bb8d6..7846bd6 100644
+--- a/src/execution/isolate-inl.h
++++ b/src/execution/isolate-inl.h
+@@ -139,6 +139,15 @@ bool Isolate::has_promise_context_tag() {
+ 
+ void Isolate::clear_promise_context_tag() {
+   heap()->set_promise_context_tag(ReadOnlyRoots(this).the_hole_value());
++  promise_context_tag_factory_ = nullptr;
++  promise_context_tag_factory_data_ = nullptr;
++}
++
++void Isolate::set_deferred_promise_context_tag(
++    v8::Isolate::PromiseContextScope::TagFactory factory, void* data) {
++  heap()->set_promise_context_tag(ReadOnlyRoots(this).undefined_value());
++  promise_context_tag_factory_ = factory;
++  promise_context_tag_factory_data_ = data;
+ }
+ 
+ void Isolate::set_promise_context_tag(Handle<Object> tag) {
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 5b8a996..3e2048a 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -8752,6 +8752,19 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
+   return v8::Utils::OpenHandle(*result);
+ }
+ 
++Handle<Object> Isolate::GetOrMakePromiseContextTag() {
++  DCHECK(has_promise_context_tag());
++  if (IsUndefined(heap()->promise_context_tag())) {
++    auto factory = promise_context_tag_factory_;
++    CHECK_NOT_NULL(factory);
++    v8::Local<v8::Object> tag = factory(reinterpret_cast<v8::Isolate*>(this),
++                                        promise_context_tag_factory_data_);
++    CHECK(!tag.IsEmpty());
++    set_promise_context_tag(v8::Utils::OpenHandle(*tag));
++  }
++  return promise_context_tag();
++}
++
+ Maybe<void> Isolate::RunPromiseCrossContextResolveCallback(
+     v8::Isolate* isolate, Handle<JSObject> tag, DirectHandle<Object> promise_or_data,
+     DirectHandle<Object> argument, PromiseReaction::Type type) {
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+index 8a80cac..84ce5d4 100644
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -2495,6 +2495,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+   inline bool has_promise_context_tag();
+   inline void clear_promise_context_tag();
+   inline void set_promise_context_tag(Handle<Object> tag);
++  // Sets the tag to undefined, which stands for one that `factory` makes when
++  // GetOrMakePromiseContextTag() first needs it.
++  inline void set_deferred_promise_context_tag(
++      v8::Isolate::PromiseContextScope::TagFactory factory, void* data);
++  // The current tag, which there must be, made first if it was deferred.
++  Handle<Object> GetOrMakePromiseContextTag();
+   inline void set_promise_cross_context_callback(
+       PromiseCrossContextCallback callback);
+   inline void set_promise_cross_context_resolve_callback(
+@@ -3054,6 +3060,9 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+   friend class HandleScopeImplementer;
+   PromiseCrossContextCallback promise_cross_context_callback_ = nullptr;
++  v8::Isolate::PromiseContextScope::TagFactory promise_context_tag_factory_ =
++      nullptr;
++  void* promise_context_tag_factory_data_ = nullptr;
+   PromiseCrossContextResolveCallback promise_cross_context_resolve_callback_ =
+       nullptr;
+   bool in_promise_cross_context_callback_ = false;
+diff --git a/src/heap/factory.cc b/src/heap/factory.cc
+index a8a72cd..8e77d38 100644
+--- a/src/heap/factory.cc
++++ b/src/heap/factory.cc
+@@ -4986,14 +4986,19 @@ DirectHandle<Map> Factory::CreateClassFunctionMap(
+ }
+ 
+ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
++  // Made before the promise, since making a deferred tag may allocate.
++  DirectHandle<Object> context_tag;
++  if (isolate()->has_promise_context_tag()) {
++    context_tag = isolate()->GetOrMakePromiseContextTag();
++  }
+   Handle<JSPromise> promise =
+       Cast<JSPromise>(NewJSObject(isolate()->promise_function()));
+   DisallowGarbageCollection no_gc;
+   promise->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
+-  if (!isolate()->has_promise_context_tag()) {
++  if (context_tag.is_null()) {
+     promise->set_context_tag(Smi::zero(), SKIP_WRITE_BARRIER);
+   } else {
+-    promise->set_context_tag(*isolate()->promise_context_tag());
++    promise->set_context_tag(*context_tag);
+   }
+ 
+   promise->set_flags(JSPromise::Flags());
+diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
+index 313f842..51ece5a 100644
+--- a/src/runtime/runtime-promise.cc
++++ b/src/runtime/runtime-promise.cc
+@@ -253,8 +253,8 @@ RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
+   if (!isolate->has_promise_context_tag()) {
+     args.at<JSPromise>(0)->set_context_tag(Smi::zero());
+   } else {
+-    CHECK(!IsUndefined(*isolate->promise_context_tag()));
+-    args.at<JSPromise>(0)->set_context_tag(*isolate->promise_context_tag());
++    DirectHandle<Object> tag = isolate->GetOrMakePromiseContextTag();
++    args.at<JSPromise>(0)->set_context_tag(*tag);
+   }
+   return ReadOnlyRoots(isolate).undefined_value();
+ }
