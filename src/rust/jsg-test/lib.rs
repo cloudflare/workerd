@@ -4,6 +4,7 @@
 
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
@@ -1149,6 +1150,17 @@ impl Harness {
     pub fn cpp_sees_root_frame(lock: &mut jsg::Lock<'_>) -> bool {
         // SAFETY: the lock keeps the isolate locked.
         unsafe { ffi::cpp_sees_root_frame(lock.isolate().as_ffi()) }
+    }
+}
+
+/// A field that adds one to its counter when it is dropped, for a test resource that counts its
+/// drops. A resource that holds GC references can't implement `Drop` itself.
+#[jsg_macros::jsg_traced]
+pub struct DropCounter(pub &'static AtomicUsize);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 

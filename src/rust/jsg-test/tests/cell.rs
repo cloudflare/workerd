@@ -30,12 +30,7 @@ static TASK_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct Task {
     /// A value that only this task keeps alive, once GC has put the handle in traced mode.
     payload: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        TASK_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -44,6 +39,7 @@ impl Task {
     fn constructor() -> Self {
         Self {
             payload: jsg::Cell::new(None),
+            drops: crate::DropCounter(&TASK_DROPS),
         }
     }
 

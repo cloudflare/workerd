@@ -2391,10 +2391,6 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
-    fn detach_before_drop(&self) -> bool {
-        T::needs_drop_detach()
-    }
-
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -4638,41 +4634,15 @@ impl<T> TracedGlobal<T> {
     }
 
     /// Materializes this handle as a `Local` in the scope of `lock`.
-    ///
-    /// Panics if the handle is empty; see [`TracedGlobal::is_empty`] and
-    /// [`TracedGlobal::try_as_local`].
     pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
         assert_in_isolate_of(lock, &self.state);
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
 
-    /// Whether the handle is empty, because GC made it weak and its value then died.
-    ///
-    /// A handle that a resource's `Drop` moves out of a field is empty if the resource was its
-    /// value's only holder and a full GC collected the resource's wrapper. It is never empty
-    /// while a resource that GC traces through holds it.
-    pub fn is_empty(&self, lock: &mut Lock<'_>) -> bool {
-        assert_in_isolate_of(lock, &self.state);
-        self.strong_handle().ptr == 0
-    }
-
-    /// Materializes this handle as a `Local` in the scope of `lock`, or returns `None` if it is
-    /// empty; see [`TracedGlobal::is_empty`].
-    pub fn try_as_local<'s>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, T>> {
-        if self.is_empty(lock) {
-            None
-        } else {
-            Some(self.as_local(lock))
-        }
-    }
-
     /// Clears the traced reference, if any, without resetting it, and makes the strong handle
     /// strong; see [`GcVisitor::visit_traced_global`]. The caller must hold the lock of the
     /// handle's isolate, which must not be closed.
-    ///
-    /// V8 resets the weak handles of dead values before cppgc starts sweeping, so a weak handle
-    /// that isn't empty reaches a live value even in a `Drop` that the sweep runs.
     fn let_go_of_traced(&self) {
         // SAFETY: GC writes into the slot only while it runs on the thread holding the lock,
         // which is this thread; see `GlobalSlot`.
@@ -5312,11 +5282,6 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         // Clone before clearing — clear_wrappable zeroes data_ptr.
         let saved = trait_ptr.clone();
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
-        // The resource is alive until `drop_object`.
-        let resource = saved.as_gc_ref();
-        if resource.detach_before_drop() {
-            GcVisitor::detach_for_drop(resource);
-        }
         saved.drop_object();
     }
 }
@@ -5433,16 +5398,13 @@ pub struct GcVisitor {
 }
 
 /// What a [`GcVisitor`] visits for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum VisitMode {
     /// For the C++ `jsg::GcVisitor` of its owner's visit.
     Visit,
     /// To detach the value from its owner, under the lock of the given isolate; see
     /// [`GcVisitor::is_detaching`].
     Detach(*mut ffi::Isolate),
-    /// To detach the references of a resource that is being dropped from it, before its `Drop`
-    /// runs; see [`GcVisitor::detach_for_drop`].
-    DetachForDrop,
 }
 
 impl GcVisitor {
@@ -5477,33 +5439,12 @@ impl GcVisitor {
         value.trace(&mut visitor);
     }
 
-    /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
-    /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
-    /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
-    /// next owner's visit asserts against, while a moved `TracedGlobal` would stay weak and lose
-    /// its value once nothing else holds it. Every `jsg::Rc`, C++ `jsg::Ref` and `TracedGlobal` of
-    /// an isolate whose lock this thread holds becomes strong again, as a moved C++ `jsg::Ref` or
-    /// `jsg::V8Ref` does; the others are left as they are. This can run during the garbage
-    /// collector's sweep, when the value of a weak `TracedGlobal` may be dead; its handle is then
-    /// empty and stays so (see `TracedGlobal::let_go_of_traced`).
-    ///
-    /// A child without a wrapper is visited once here, to make what it holds strong, and again
-    /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
-    /// resources that each implement `Drop` costs time quadratic in its length.
-    pub(crate) fn detach_for_drop(resource: &dyn GarbageCollected) {
-        let mut visitor = Self {
-            handle: ffi::GcVisitor { ptr: 0 },
-            mode: VisitMode::DetachForDrop,
-        };
-        resource.trace(&mut visitor);
-    }
-
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
     /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        matches!(self.mode, VisitMode::Detach(_) | VisitMode::DetachForDrop)
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -5533,8 +5474,6 @@ impl GcVisitor {
     ///
     /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
     ///   another, or of a closed isolate.
-    /// - A drop visit (see [`GcVisitor::detach_for_drop`]) changes the reference only if this
-    ///   thread holds the lock of the reference's isolate, and otherwise leaves it as it is.
     /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
     ///   reference as it is: a strong reference stays strong, so its target leaks rather than
     ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
@@ -5548,9 +5487,6 @@ impl GcVisitor {
                 "attempt to use a {what} in an isolate other than the one it was created in"
             );
             return true;
-        }
-        if self.mode == VisitMode::DetachForDrop {
-            return state.this_thread_holds_lock();
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
@@ -5584,8 +5520,8 @@ impl GcVisitor {
     ///
     /// # Traced nodes
     ///
-    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
+    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource (by a
+    /// hand-written `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -5603,9 +5539,6 @@ impl GcVisitor {
     /// be live, and visits and drops could reuse or reset only the nodes known to be live. A
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
-    ///
-    /// A drop visit only lets go of the traced reference, under its isolate's lock; see
-    /// [`GcVisitor::detach_for_drop`].
     ///
     /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
     /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
@@ -5641,7 +5574,7 @@ impl GcVisitor {
         }
         // A detaching visit panics with the message `assert_in_isolate_of` uses for both kinds
         // of handle; the debug assert of a GC visit names the only kind it visits.
-        let what = if matches!(self.mode, VisitMode::Detach(_)) {
+        let what = if self.is_detaching() {
             "Global or TracedGlobal"
         } else {
             "TracedGlobal"
