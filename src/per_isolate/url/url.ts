@@ -39,6 +39,7 @@ const {
   SymbolIterator,
   SymbolToStringTag,
   TypeError,
+  kIllegalInvocation,
 } = primordials;
 
 const {
@@ -79,10 +80,6 @@ const { getPrivateSymbol } = utils;
 const kUrlBrand = getPrivateSymbol('workerd:URL');
 const kSearchParamsBrand = getPrivateSymbol('workerd:URLSearchParams');
 
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
 const kInvalidHref =
   "Failed to set the 'href' property on 'URL': the provided value is not " +
   "of type 'valid URL string'.";
