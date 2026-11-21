@@ -3,6 +3,7 @@
     reason = "constructs and polls the C++ promise awaiter in place"
 )]
 
+use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::Context;
@@ -17,6 +18,9 @@ use crate::waker::try_into_kj_waker_ptr;
 pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     node: Option<OwnPromiseNode>,
     pub(crate) data: Data,
+    // Once polled, `awaiter` points to `option_waker` and is linked into the event loop, so it
+    // must not move.
+    _pinned: PhantomPinned,
     awaiter: MaybeUninit<GuardedRustPromiseAwaiterRepr>,
     awaiter_initialized: bool,
     // Safety: `option_waker` must be declared after `awaiter`, because `awaiter` contains a reference
@@ -29,6 +33,7 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
         Self {
             node: Some(node),
             data,
+            _pinned: PhantomPinned,
             awaiter: MaybeUninit::uninit(),
             awaiter_initialized: false,
             option_waker: OptionWaker::empty(),
