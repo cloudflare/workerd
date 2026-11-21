@@ -3,6 +3,7 @@
 //! executable. Every source is checked to be a well-formed `Config` message here, and ends up as
 //! a [`Config`] for the C++ driver.
 
+use std::ffi::OsString;
 use std::fmt;
 use std::fs::File;
 use std::io;
@@ -78,6 +79,45 @@ impl Config {
         bytes_from_words(&self.0)
     }
 
+    /// Fills `shutdownDelayMs` from `SHUTDOWN_DELAY_MS` where the config leaves it at 0, then
+    /// checks it. See `Config` in workerd.capnp. `var` reads an environment variable. A variable
+    /// that is unset, or empty once trailing whitespace is trimmed, leaves the config as it is.
+    /// One that is not UTF-8 or not a whole number of milliseconds, and a delay above
+    /// `MAX_SHUTDOWN_DELAY_MS` from either source, is an error.
+    pub fn with_shutdown_delay_environment(
+        self,
+        var: impl Fn(&str) -> Option<OsString>,
+    ) -> Result<Self, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        let configured = root.get_shutdown_delay_ms();
+        if configured > MAX_SHUTDOWN_DELAY_MS {
+            return Err(format!(
+                "Config.shutdownDelayMs = {configured}: more than {MAX_SHUTDOWN_DELAY_MS} (an \
+                 hour)."
+            ));
+        }
+        if configured != 0 {
+            return Ok(self);
+        }
+        let Some(delay) = shutdown_delay(var(SHUTDOWN_DELAY_MS))? else {
+            return Ok(self);
+        };
+        let mut message = capnp::message::Builder::new_default();
+        message.set_root(root).map_err(|error| error.to_string())?;
+        message
+            .get_root::<config::Builder>()
+            .map_err(|error| error.to_string())?
+            .set_shutdown_delay_ms(delay);
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message),
+        )))
+    }
+
     /// Writes the encoded config to stdout (`compile --config-only`).
     pub fn write_to_stdout(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
@@ -86,6 +126,46 @@ impl Config {
         }
         out.flush()
     }
+}
+
+/// The environment variable that holds the shutdown delay when the config leaves it at 0.
+pub const SHUTDOWN_DELAY_MS: &str = "WORKERD_SHUTDOWN_DELAY_MS";
+
+/// The largest shutdown delay, set in the config or in `SHUTDOWN_DELAY_MS`. The delay waits out
+/// load balancers that still send connections, which takes seconds, so a larger value is a
+/// mistake, such as a value in microseconds, that would leave a stopping process serving for days
+/// and a cluster node killed by its supervisor before it hands its Durable Objects off.
+const MAX_SHUTDOWN_DELAY_MS: u32 = 3_600_000;
+
+/// The delay in `value`, the value of `SHUTDOWN_DELAY_MS`, without trailing whitespace such as a
+/// final newline: digits only. `None` when it is unset or blank.
+fn shutdown_delay(value: Option<OsString>) -> Result<Option<u32>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.into_string().map_err(|value| {
+        format!(
+            "{SHUTDOWN_DELAY_MS}={}: not UTF-8 text.",
+            value.to_string_lossy()
+        )
+    })?;
+    let digits = value.trim_end();
+    if digits.is_empty() {
+        return Ok(None);
+    }
+    digits
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| digits.parse::<u32>().ok())
+        .flatten()
+        .filter(|delay| *delay <= MAX_SHUTDOWN_DELAY_MS)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "{SHUTDOWN_DELAY_MS}={value}: not a whole number of milliseconds from 0 to \
+                 {MAX_SHUTDOWN_DELAY_MS} (an hour)."
+            )
+        })
 }
 
 /// Configs can legitimately be very large and are not malicious, so use an effectively-infinite

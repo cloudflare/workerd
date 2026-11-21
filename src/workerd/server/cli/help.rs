@@ -46,9 +46,25 @@ Cluster (experimental):
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
-  SIGTERM an instance hands its objects to its peers and exits within
-  stopTimeoutMs (8 s by default). GET /ready on the cluster address
-  answers OK once serving.
+  SIGTERM, after any shutdown delay, an instance hands its objects to its
+  peers and exits within stopTimeoutMs (8 s by default). GET /ready on
+  the cluster address answers OK once serving, until SIGTERM.
+"
+    };
+}
+
+macro_rules! stopping {
+    () => {
+        "\
+Stopping:
+  On SIGTERM the server drains: it stops accepting connections, lets
+  the open ones finish, and exits. A shutdownDelayMs in the config, or
+  else WORKERD_SHUTDOWN_DELAY_MS, keeps it serving that many
+  milliseconds first, for load balancers that go on sending connections
+  for a while; a second SIGTERM drains at once. The supervisor's grace
+  period must cover the delay and the drain, in a cluster the delay
+  plus stopTimeoutMs. A cluster instance's GET /ready answers 503 from
+  the first SIGTERM on.
 "
     };
 }
@@ -211,6 +227,8 @@ Usage:
     python_options!(),
     "\n",
     capnp_options!(),
+    "\n",
+    stopping!(),
     "\n",
     cluster_setup!(),
 );
@@ -375,6 +393,8 @@ Options:
     trace_options!(),
     "\n",
     python_options!(),
+    "\n",
+    stopping!(),
 );
 
 pub const FUZZILLI: &str = concat!(

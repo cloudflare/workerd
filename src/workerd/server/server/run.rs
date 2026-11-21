@@ -8,10 +8,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use futures::future::Either;
 use futures::future::FusedFuture;
@@ -34,6 +36,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::cluster::Ready;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -424,19 +427,24 @@ async fn serve_listeners(
     Ok(())
 }
 
-/// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
-/// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
-/// error returned.
+/// `workerd serve`: serves until told to drain, then stops accepting connections, lets the open
+/// ones finish, and stops the actors' containers. A listener failing is fatal and is the error
+/// returned.
+///
+/// Each item of `drain`, which never ends, is a drain signal. After the first, the server serves
+/// on for the config's `shutdownDelayMs`, or until the next signal, then drains (`drain_due`).
 ///
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
-/// `stopTimeoutMs` bounds all of it.
+/// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
+#[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
     report: Reporter,
-    drain: impl Future<Output = ()>,
+    drain: impl Stream<Item = ()>,
 ) -> Result<()> {
+    let delay = shutdown_delay(&factory)?;
     let Some(Running {
         server,
         mut listeners,
@@ -446,10 +454,16 @@ pub async fn run(
         return Ok(());
     };
 
-    // From here on the lease thread watches the event loop. Whatever way this returns, the
-    // cluster port answers that this instance is not ready.
-    let _serving = server.cluster().map(ClusterNode::serving);
-    let drain = std::pin::pin!(drain);
+    // A SIGTERM that arrived while the server started reaches `drain` only once the runtime has
+    // polled its drivers, which a start that never had to wait may not have let it do. tokio wakes
+    // a task that yields only after it has polled them, so the check below sees such a signal.
+    tokio::task::yield_now().await;
+    let mut drain = std::pin::pin!(drain);
+    let pending = drain.next().now_or_never().is_some();
+    // From here on the lease thread watches the event loop. The cluster port answers ready
+    // until the instance is told to drain or this returns.
+    let ready = server.cluster().map(ClusterNode::ready);
+    let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
@@ -554,6 +568,44 @@ pub async fn run(
     }
     tracing::warn!("leaving containers behind at the stop deadline");
     Ok(())
+}
+
+/// The config's `shutdownDelayMs`.
+fn shutdown_delay(factory: &Factory) -> Result<Duration> {
+    let message = factory.config()?;
+    let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
+    Ok(Duration::from_millis(config.get_shutdown_delay_ms().into()))
+}
+
+/// Resolves when `run` is to drain. That is at once if a signal was `pending` as the server
+/// started: it was never ready, so nothing sends it traffic to serve through the delay. Otherwise
+/// it is `delay` (`Config.shutdownDelayMs`) after the next item of `drain`, or on the item after
+/// it, whichever comes first. Load balancers go on sending connections for a while, which are
+/// served as before meanwhile, and a cluster node keeps its Durable Objects and its place in the
+/// cluster. Its readiness probe fails from the signal on (`ready` is dropped), so that what routes
+/// by it sends no more.
+async fn drain_due(
+    factory: &Factory,
+    delay: Duration,
+    pending: bool,
+    ready: Option<Ready>,
+    mut drain: Pin<&mut impl Stream<Item = ()>>,
+) {
+    if pending {
+        return;
+    }
+    drain.next().await;
+    drop(ready);
+    if delay.is_zero() {
+        return;
+    }
+    let seconds = delay.as_secs_f64();
+    tracing::warn!(
+        "drain signal received: serving for {seconds:.1} s more (shutdownDelayMs), then \
+         draining; a second signal drains at once"
+    );
+    let delay = std::pin::pin!(factory.sleep(delay));
+    futures::future::select(delay, drain.next()).await;
 }
 
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.
