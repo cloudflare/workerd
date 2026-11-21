@@ -91,12 +91,18 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   `const jsg::TypeHandler<SomeType>&`, which will automatically be filled in with the
 //   corresponding type handler. This is useful if the serializer wants to, say, assemble a
 //   JSG_STRUCT, convert it into an actual JS object, and serialize that.
+// * `deserialize()` runs while V8 reads the value, when no JavaScript can run; the Deserializer
+//   makes an attempt fail the read with DataCloneError, and logs it. So `deserialize()` may read
+//   values, check their types, create objects and define their properties, and unwrap a
+//   JSG_STRUCT, which then reads only own properties. It must do nothing that can run
+//   JavaScript: get a property that the object may lack as an own data property (a getter on its
+//   prototype chain would run), assign one (a setter would run), convert an object to a primitive
+//   or to JSON, call a function, or serialize a value.
 // * A value that `deserialize()` reads with `deserializer.readValue()` may contain instances of
 //   classes implemented in JavaScript (below) that are not yet initialized: their own
-//   `deserialize` runs only once the top-level value has been read, and no JavaScript can run
-//   before then. Keep such a value as it is, as a JsRef. Unwrap it as a particular type, or read
-//   its properties, only if `serialize()` wrote it from state that cannot contain such an
-//   instance.
+//   `deserialize` runs only once the top-level value has been read. Keep such a value as it is,
+//   as a JsRef. Unwrap it as a particular type, or read its properties, only if `serialize()`
+//   wrote it from state that cannot contain such an instance.
 //
 // Classes implemented in JavaScript by the runtime itself (the per-isolate bootstrap's, see
 // src/per_isolate/serialization.ts) take part through a protocol modelled on Node.js's
@@ -500,6 +506,8 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   v8::MaybeLocal<v8::SharedArrayBuffer> GetSharedArrayBufferFromId(
       v8::Isolate* isolate, uint32_t clone_id) override;
   v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override;
+  // Reads the host object whose tag ReadHostObject() has read.
+  v8::MaybeLocal<v8::Object> readTaggedObject(v8::Isolate* isolate, uint32_t tag);
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
@@ -519,7 +527,8 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // in the order they were read.
   kj::Vector<PendingJsSerializable> pendingJsSerializables;
   // How many calls to readValue() are in progress: a type's deserializer calls it for nested
-  // values.
+  // values. A Deserializer that reads for another delegate starts at 1: that delegate reads the
+  // top-level value.
   uint readDepth = 0;
   // Error.prototype of the current context, once findJsSerializableClass() needs it.
   kj::Maybe<V8Ref<v8::Value>> errorPrototype;
@@ -544,9 +553,23 @@ v8::Maybe<bool> writeApiObject(
 
 // Reads the workerd API object that `tag` names, as Deserializer's ReadHostObject() does once it
 // has read a tag other than a native error's or SERIALIZATION_TAG_JS_SERIALIZABLE, which the
-// caller reads itself. JavaScript execution is disallowed meanwhile.
+// caller reads itself. JavaScript execution is disallowed meanwhile: an attempt to run it throws
+// DataCloneError, as it does under Deserializer.
 v8::MaybeLocal<v8::Object> readApiObject(
     v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+
+// Calls `read`, which reads the host object that `tag` names for a v8::ValueDeserializer delegate,
+// so that an attempt to run JavaScript fails the read with DataCloneError, as it does under
+// Deserializer and readApiObject(): for a delegate outside C++ JSG to read its own host objects
+// with. `read` returns none if it fails, with the exception pending, and throws no C++ exception.
+v8::MaybeLocal<v8::Object> readHostObjectWithoutJs(
+    v8::Isolate* isolate, uint32_t tag, kj::FunctionParam<v8::MaybeLocal<v8::Object>()> read);
+
+// Reads a value nested in the host object that readHostObjectWithoutJs() is reading, as its `read`
+// must. V8 fills a Map or a Set by calling builtins, which the scope that readHostObjectWithoutJs()
+// opens refuses, so the value is read under the scope that V8's own read opens instead, which
+// lets V8 call only those builtins.
+v8::MaybeLocal<v8::Value> readValueInHostObject(v8::Isolate* isolate, v8::ValueDeserializer& deser);
 
 // Returns the exports of the bootstrap module named `specifier` in the current context if it has
 // been loaded (see BootstrapModules), or kj::none, as Deserializer finds them to look up a class

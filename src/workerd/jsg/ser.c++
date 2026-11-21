@@ -178,7 +178,52 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
 // bug in the reader.
 constexpr kj::StringPtr MALFORMED_DATA_MESSAGE =
     "Deserialization failed: the data is malformed."_kj;
+
+void throwDataCloneError(v8::Isolate* isolate, kj::StringPtr message) {
+  v8::Local<v8::Value> exception;
+  if (newDataCloneError(isolate, v8Str(isolate, message)).ToLocal(&exception)) {
+    isolate->ThrowException(exception);
+  }
+}
 }  // namespace
+
+// A reader that runs JavaScript has a bug (see Deserializer), but the value it reads can trigger it
+// at will, so the attempt is logged at most periodically, with the tag that names the reader.
+v8::MaybeLocal<v8::Object> readHostObjectWithoutJs(
+    v8::Isolate* isolate, uint32_t tag, kj::FunctionParam<v8::MaybeLocal<v8::Object>()> read) {
+  // V8 checks the scope that its read opens before this one, so that scope is lifted for this one
+  // to take effect.
+  v8::Isolate::AllowJavascriptExecutionScope allowJs(isolate);
+  v8::Isolate::DisallowJavascriptExecutionScope throwOnJs(
+      isolate, v8::Isolate::DisallowJavascriptExecutionScope::THROW_ON_FAILURE);
+  {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only replaces what V8 throws for JavaScript.
+    v8::TryCatch tryCatch(isolate);
+    auto result = read();
+    // The destructor hands a termination back to V8.
+    if (!tryCatch.HasCaught() || tryCatch.HasTerminated()) return result;
+    // What V8 throws in place of running JavaScript (Isolate::ThrowIllegalOperation()).
+    auto illegal = v8::String::NewFromUtf8Literal(isolate, "illegal access");
+    if (!tryCatch.Exception()->StrictEquals(illegal)) {
+      tryCatch.ReThrow();
+      return {};
+    }
+    // The destructor discards it.
+  }
+  LOG_ERROR_PERIODICALLY(
+      "A deserializer tried to run JavaScript, which can't run while a value is read.", tag);
+  throwDataCloneError(
+      isolate, "Deserialization failed: the value can't be read without running JavaScript.");
+  return {};
+}
+
+v8::MaybeLocal<v8::Value> readValueInHostObject(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser) {
+  v8::Isolate::AllowJavascriptExecutionScope allowJs(isolate);
+  v8::Isolate::DisallowJavascriptExecutionScope noJs(
+      isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+  return deser.ReadValue(isolate->GetCurrentContext());
+}
 
 Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
 
@@ -672,7 +717,8 @@ Deserializer::Deserializer(
 
 Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed)
     : totalInputSize(0),
-      deser(deser) {}
+      deser(deser),
+      readDepth(1) {}
 
 void Deserializer::init(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
@@ -721,7 +767,9 @@ JsValue Deserializer::readValue(Lock& js) {
   auto value = [&]() {
     js.setDisallowJavascriptExecution(true);
     KJ_DEFER(js.setDisallowJavascriptExecution(false));
-    return JsValue(check(deser.ReadValue(js.v8Context())));
+    // A nested read is of a value in a host object that readHostObjectWithoutJs() is reading.
+    return JsValue(check(readDepth > 1 ? readValueInHostObject(js.v8Isolate, deser)
+                                       : deser.ReadValue(js.v8Context())));
   }();
   if (readDepth == 1 && !pendingJsSerializables.empty()) {
     finishJsSerializables(js);
@@ -771,9 +819,16 @@ v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
 }
 
 v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
-  try {
-    uint tag = readRawUint32();
+  uint32_t tag;
+  if (!deser.ReadUint32(&tag)) {
+    throwDataCloneError(isolate, MALFORMED_DATA_MESSAGE);
+    return {};
+  }
+  return readHostObjectWithoutJs(isolate, tag, [&]() { return readTaggedObject(isolate, tag); });
+}
 
+v8::MaybeLocal<v8::Object> Deserializer::readTaggedObject(v8::Isolate* isolate, uint32_t tag) {
+  try {
     if (tag == SERIALIZATION_TAG_NATIVE_ERROR) {
       auto& js = Lock::from(isolate);
       auto stack = js.str("stack"_kj);
@@ -1042,18 +1097,20 @@ v8::Maybe<bool> writeApiObject(
 
 v8::MaybeLocal<v8::Object> readApiObject(
     v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag) {
-  try {
-    auto& js = Lock::from(isolate);
-    js.setDisallowJavascriptExecution(true);
-    KJ_DEFER(js.setDisallowJavascriptExecution(false));
-    Deserializer deserializer(js, deser, Deserializer::Borrowed{});
-    return deserializer.readApiObject(js, tag);
-  } catch (JsExceptionThrown&) {
-    return {};
-  } catch (...) {
-    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
-    return {};
-  }
+  return readHostObjectWithoutJs(isolate, tag, [&]() -> v8::MaybeLocal<v8::Object> {
+    try {
+      auto& js = Lock::from(isolate);
+      js.setDisallowJavascriptExecution(true);
+      KJ_DEFER(js.setDisallowJavascriptExecution(false));
+      Deserializer deserializer(js, deser, Deserializer::Borrowed{});
+      return deserializer.readApiObject(js, tag);
+    } catch (JsExceptionThrown&) {
+      return {};
+    } catch (...) {
+      throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+      return {};
+    }
+  });
 }
 
 kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(

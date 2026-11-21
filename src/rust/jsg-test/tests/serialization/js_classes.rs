@@ -431,6 +431,15 @@ fn errors_round_trip() {
             "new Error('outer', { cause: [new Point(1), error] })",
             "v.cause[0] instanceof Point && v.cause[0].x === 2 && v.cause[1].amount === 5",
         );
+        // So can a Map or a Set, which V8 fills by calling builtins, holding objects and instances.
+        assert_round_trip(
+            lock,
+            ctx,
+            "new Error('outer', { cause: new Map([\
+               ['k', { a: 1 }], ['point', new Point(1)], ['set', new Set([{ b: [2] }])]]) })",
+            "v.cause.get('k').a === 1 && v.cause.get('point').x === 2 && \
+             [...v.cause.get('set')][0].b[0] === 2",
+        );
         Ok(())
     });
 }

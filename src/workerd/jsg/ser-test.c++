@@ -22,6 +22,7 @@ struct SerTestContext: public ContextGlobalObject {
     BAZ = 2,
     QUX = 3,
     BOX = 4,
+    PROBER = 5,
     // RawJsSerializable writes this tag, which the Deserializer reads itself.
     JS_SERIALIZABLE = SERIALIZATION_TAG_JS_SERIALIZABLE,
   };
@@ -161,6 +162,37 @@ struct SerTestContext: public ContextGlobalObject {
       return js.alloc<Box>(JsRef<JsValue>(js, deserializer.readValue(js)));
     }
     JSG_SERIALIZABLE(SerializationTag::BOX);
+
+   private:
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(val);
+    }
+  };
+
+  // Holds any value, as Box does, but reads its `probe` property with an ordinary Get() while it is
+  // deserialized, as a deserializer that breaks the rule in ser.h would.
+  struct Prober: public jsg::Object {
+    JsRef<JsValue> val;
+    Prober(JsRef<JsValue> val): val(kj::mv(val)) {}
+
+    static jsg::Ref<Prober> constructor(jsg::Lock& js, JsRef<JsValue> val) {
+      return js.alloc<Prober>(kj::mv(val));
+    }
+
+    JSG_RESOURCE_TYPE(Prober) {}
+
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+      serializer.write(js, val.getHandle(js));
+    }
+    static jsg::Ref<Prober> deserialize(
+        Lock& js, SerializationTag tag, Deserializer& deserializer) {
+      auto val = deserializer.readValue(js);
+      KJ_IF_SOME(object, val.tryCast<JsObject>()) {
+        (void)object.get(js, "probe"_kj);
+      }
+      return js.alloc<Prober>(JsRef<JsValue>(js, val));
+    }
+    JSG_SERIALIZABLE(SerializationTag::PROBER);
 
    private:
     void visitForGc(GcVisitor& visitor) {
@@ -412,6 +444,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Baz);
     JSG_NESTED_TYPE(Qux);
     JSG_NESTED_TYPE(Box);
+    JSG_NESTED_TYPE(Prober);
     JSG_NESTED_TYPE(RawJsSerializable);
     JSG_METHOD(setModule);
     JSG_METHOD(clearModules);
@@ -435,6 +468,7 @@ JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
     SerTestContext::Baz,
     SerTestContext::Qux,
     SerTestContext::Box,
+    SerTestContext::Prober,
     SerTestContext::RawJsSerializable);
 
 KJ_TEST("deserialization header diagnostics expose metadata without payload contents") {
@@ -740,6 +774,41 @@ constexpr kj::StringPtr JS_CLASSES = R"(
   setModule({ Point, Holder, TestError, Strict, Throws, NoDeserialize, NotADescriptor,
       NoDeserializeFunction, notAFunction: 1 });
 )"_kj;
+
+KJ_TEST("a deserializer that tries to run JavaScript fails the read with a DataCloneError") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  // Logged at most once an hour, so only for the first read below, which no earlier test makes.
+  KJ_EXPECT_LOG(ERROR, "A deserializer tried to run JavaScript");
+
+  // A getter that the reader reaches through the prototype chain.
+  // Without the getter, the same read runs no JavaScript.
+  constexpr kj::StringPtr PROBE = "globalThis.calls = 0;\n"
+                                  "const read = (roundTrip) => {\n"
+                                  "  try {\n"
+                                  "    roundTrip(new Prober({}));\n"
+                                  "    return 'read';\n"
+                                  "  } catch (e) {\n"
+                                  "    return e.name;\n"
+                                  "  }\n"
+                                  "};\n"
+                                  "const without = read(ROUND_TRIP);\n"
+                                  "Object.defineProperty(Object.prototype, 'probe', {\n"
+                                  "  get() { calls++; return 1; }, configurable: true });\n"
+                                  "`${without},${read(ROUND_TRIP)},${calls}`"_kj;
+  for (auto roundTrip: {"roundTrip"_kj, "foreignRoundTrip"_kj}) {
+    auto code = kj::str("const ROUND_TRIP = ", roundTrip, ";\n", PROBE);
+    e.expectEval(code, "string", "read,DataCloneError,0");
+  }
+
+  // Nested in a value whose reader runs none, the reader still fails the read, once.
+  e.expectEval("Object.defineProperty(Object.prototype, 'probe', {\n"
+               "  get() { return 1; }, configurable: true });\n"
+               "try { roundTrip({ box: new Box([new Prober({})]) }); 'read' }\n"
+               "catch (e) { `${e.name}: ${e.message}` }",
+      "string",
+      "DataCloneError: Deserialization failed: the value can't be read without running "
+      "JavaScript.");
+}
 
 KJ_TEST("serialization of classes implemented in JavaScript") {
   Evaluator<SerTestContext, SerTestIsolate> e(v8System);

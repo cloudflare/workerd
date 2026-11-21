@@ -9,6 +9,7 @@
 // them, with jsg_cpp::RustResourceWrapper.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
 
 #include <rust/cxx.h>
@@ -25,6 +26,10 @@ struct HostTag {
   static kj::Maybe<bool> isInstance(v8::Isolate* isolate, jsg_cpp::Local value);
 };
 using HostRef = jsg_cpp::RustRef<HostTag>;
+
+// The tags of the serializable resources below. The harness's isolate registers them all, so no two
+// may be the same.
+enum class SerializationTag { GETTER = 0 };
 
 // A C++ resource whose methods Rust calls.
 class TestCppGreeter final: public jsg::Object {
@@ -112,6 +117,19 @@ class TestCppHolder final: public jsg::Object {
       host.trackField(tracker, "held"_kjc);
     }
   }
+};
+
+// A C++ resource whose deserializer returns an object with an own accessor property `probe`, whose
+// getter is the global function `probeGetter`: data that V8 reads can't hold one, so a reader that
+// reads the object's own properties calls JavaScript.
+class TestCppGetter final: public jsg::Object {
+ public:
+  JSG_RESOURCE_TYPE(TestCppGetter) {}
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {}
+  static jsg::JsObject deserialize(
+      jsg::Lock& js, SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(SerializationTag::GETTER);
 };
 
 // How many TestCppHolders have been destroyed.

@@ -73,6 +73,16 @@ kj::StringPtr TestCppHolder::which(kj::OneOf<HostRef, ::workerd::jsg::Ref<TestCp
   KJ_UNREACHABLE;
 }
 
+::workerd::jsg::JsObject TestCppGetter::deserialize(
+    ::workerd::jsg::Lock& js, SerializationTag tag, ::workerd::jsg::Deserializer& deserializer) {
+  v8::Local<v8::Object> object = js.obj();
+  v8::Local<v8::Function> getter = KJ_ASSERT_NONNULL(
+      js.global().get(js, "probeGetter"_kj).tryCast<::workerd::jsg::JsFunction>());
+  v8::Local<v8::String> name = js.strIntern("probe"_kj);
+  object->SetAccessorProperty(name, getter);
+  return ::workerd::jsg::JsObject(object);
+}
+
 uint32_t holdersDestroyedForTest() {
   return holdersDestroyed;
 }
