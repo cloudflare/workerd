@@ -8,6 +8,8 @@
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/crypto/random-bootstrap.h>
+#include <workerd/api/crypto/subtle-bootstrap.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
@@ -142,9 +144,14 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // into every script. Provides prototype-pollution-safe references to built-in
   // methods and constructors.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
+  // The native half of the TypeScript SubtleCrypto (api/crypto/subtle-bootstrap.h), created with
+  // the context under the ts-webcrypto autogate and injected as the `cryptoBackend` pseudo-global.
+  // Undefined when the autogate is off.
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> cryptoBackend;
 };
 
 #define VALUE_METHOD_MAP(V)                                                                        \
+  V(Array)                                                                                         \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
   V(DataView)                                                                                      \
@@ -173,6 +180,18 @@ static bool IsAnyArrayBufferFastApi(v8::Local<v8::Value> unused, v8::Local<v8::V
 }
 
 static const v8::CFunction fast_is_any_array_buffer_ = v8::CFunction::Make(IsAnyArrayBufferFastApi);
+
+// What jsg::JsBufferSource unwraps: an ArrayBuffer or a view, not a SharedArrayBuffer. The view,
+// the more common, is tested first.
+static void IsBufferSource(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  args.GetReturnValue().Set(args[0]->IsArrayBufferView() || args[0]->IsArrayBuffer());
+}
+
+static bool IsBufferSourceFastApi(v8::Local<v8::Value> unused, v8::Local<v8::Value> value) {
+  return value->IsArrayBufferView() || value->IsArrayBuffer();
+}
+
+static const v8::CFunction fast_is_buffer_source_ = v8::CFunction::Make(IsBufferSourceFastApi);
 
 static void MarkPromiseHandled(const v8::FunctionCallbackInfo<v8::Value>& args) {
   if (args[0]->IsPromise()) {
@@ -215,6 +234,28 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
       args.GetReturnValue().Set(
           v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
     });
+  });
+}
+
+// Fills an integer-typed view with random bytes for the TypeScript Crypto, which has checked the
+// view. Throws outside a request, so it needs liftKj.
+static void FillRandomValues(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    JSG_REQUIRE(
+        args[0]->IsArrayBufferView(), TypeError, "fillRandomValues() expects an ArrayBufferView");
+    jsg::JsArrayBufferView view(args[0].As<v8::ArrayBufferView>());
+    JSG_REQUIRE(view.isIntegerType() && view.size() <= 0x10000, TypeError,
+        "fillRandomValues() expects a view getRandomValues() accepts");
+    api::fillRandomValues(js, view);
+  });
+}
+
+// A random UUID for the TypeScript Crypto's randomUUID(). Throws outside a request.
+static void NewRandomUUID(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    args.GetReturnValue().Set(v8::Local<v8::Value>(api::newRandomUUID(js)));
   });
 }
 
@@ -634,10 +675,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     VALUE_METHOD_MAP(V)
 #undef V
         "isAnyArrayBuffer",
+    "isBufferSource",
     "markPromiseHandled",
     "getApiSymbol",
     "newCompressionCodec",
     "createDigestContext",
+    "fillRandomValues",
+    "newRandomUUID",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
@@ -679,10 +723,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     VALUE_METHOD_MAP(V)
 #undef V
         getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
+    getFastMethodNoSideEffect(js, IsBufferSource, &fast_is_buffer_source_),
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
+    getMethod(js, FillRandomValues),
+    getMethod(js, NewRandomUUID),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
@@ -741,6 +788,7 @@ constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
   "exports"_kj,
   "primordials"_kj,
   "utils"_kj,
+  "cryptoBackend"_kj,
 };
 constexpr size_t PSEUDO_GLOBAL_COUNT = kj::size(PSEUDO_GLOBAL_NAMES);
 
@@ -754,11 +802,11 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
       {
         js.v8Undefined(),  // require
         v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
-        v8::Local<v8::Value>(moduleObj),
+        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)), v8::Local<v8::Value>(moduleObj),
         v8::Local<v8::Value>(exportsObj),
         js.v8Undefined(),  // primordials
         v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
+        js.v8Undefined(),  // cryptoBackend
       });
   KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
 
@@ -767,6 +815,9 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
   }
   KJ_IF_SOME(primordials, state.primordials) {
     values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+  }
+  KJ_IF_SOME(cryptoBackend, state.cryptoBackend) {
+    values[7] = v8::Local<v8::Value>(cryptoBackend.getHandle(js));
   }
   return values;
 }
@@ -1017,6 +1068,7 @@ constexpr kj::StringPtr STASH_COMPAT_FLAGS = "compatFlags"_kj;
 constexpr kj::StringPtr STASH_AUTOGATES = "autogates"_kj;
 constexpr kj::StringPtr STASH_UTILS = "utils"_kj;
 constexpr kj::StringPtr STASH_PRIMORDIALS = "primordials"_kj;
+constexpr kj::StringPtr STASH_CRYPTO_BACKEND = "cryptoBackend"_kj;
 // A null-prototype object mapping each normalized specifier in the require() cache to its
 // module.exports.
 constexpr kj::StringPtr STASH_CACHE = "cache"_kj;
@@ -1058,6 +1110,7 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
     state->embedderRequireFn = fn.addRef(js);
   }
   state->primordials = bag.get(js, STASH_PRIMORDIALS).addRef(js);
+  state->cryptoBackend = bag.get(js, STASH_CRYPTO_BACKEND).addRef(js);
 
   auto maybeCache = JSG_TRY_CAST_OBJECT(bag.get(js, STASH_CACHE));
   auto& cache =
@@ -1090,6 +1143,10 @@ void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFla
     auto result =
         state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
     state->primordials = result.addRef(js);
+  }
+
+  if (util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
+    state->cryptoBackend = api::createSubtleCryptoBackend(js).addRef(js);
   }
 
   {
@@ -1209,6 +1266,9 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
       bag.set(js, STASH_PRIMORDIALS,
           KJ_REQUIRE_NONNULL(state.primordials, "bootstrap did not load primordials")
               .getHandle(js));
+      if (state.cryptoBackend != kj::none) {
+        bag.set(js, STASH_CRYPTO_BACKEND, KJ_ASSERT_NONNULL(state.cryptoBackend).getHandle(js));
+      }
       bag.set(js, STASH_CACHE, cache);
       auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
       isolateBase.mutableSnapshotArtifact().bootstrapStateIndex =

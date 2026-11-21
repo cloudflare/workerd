@@ -1,0 +1,41 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The WebCrypto parity suites. Each records what the C++ class shows and runs
+# against both implementations: the C++ config, whose @all-autogates variant
+# enables TS_WEBCRYPTO, and a TypeScript config that enables it itself.
+
+wd_test(
+    src = "crypto-subtle-parity-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-subtle-parity-expected.js",
+        "crypto-subtle-parity-test.js",
+    ],
+)
+
+wd_test(
+    src = "crypto-subtle-parity-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-subtle-parity-expected.js",
+        "crypto-subtle-parity-test.js",
+    ],
+)
+
+wd_test(
+    src = "crypto-global-parity-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-global-parity-expected.js",
+        "crypto-global-parity-test.js",
+    ],
+)
+
+wd_test(
+    src = "crypto-global-parity-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-global-parity-expected.js",
+        "crypto-global-parity-test.js",
+    ],
+)

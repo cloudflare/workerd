@@ -1,0 +1,28 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The WebCrypto benchmarks, against the C++ implementation and the TypeScript
+# one (TS_WEBCRYPTO). Enabling every autogate enables TS_WEBCRYPTO, so the C++
+# configs have no @all-autogates variant; the TypeScript configs enable
+# TS_WEBCRYPTO themselves.
+
+wd_bench(
+    src = "subtle-cpp.wd-bench",
+    data = ["subtle.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "subtle-ts.wd-bench",
+    data = ["subtle.js"],
+)
+
+wd_bench(
+    src = "global-cpp.wd-bench",
+    data = ["global.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "global-ts.wd-bench",
+    data = ["global.js"],
+)

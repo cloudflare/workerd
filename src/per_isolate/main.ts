@@ -434,6 +434,28 @@ if (autogates['ts-structured-clone']) {
   });
 }
 
+// The TypeScript SubtleCrypto and Crypto replace the C++ ones, which
+// global-scope.h then leaves out, as lazy data properties, so a Worker that
+// uses neither loads nothing: defined as JSG_NESTED_TYPE defines a global class
+// (see MessageChannel above). `crypto`, which
+// ServiceWorkerGlobalScope::getCrypto() (api/global-scope.h) takes from
+// crypto/cpp_exports, loads them on first use too.
+if (autogates['ts-webcrypto']) {
+  const { defineLazyDataProperty } = utils;
+  const globalPrototype = ObjectGetPrototypeOf(globalThis) as object;
+  defineLazyDataProperty(
+    globalPrototype,
+    'SubtleCrypto',
+    'crypto/subtle',
+    true
+  );
+  defineLazyDataProperty(globalPrototype, 'Crypto', 'crypto/crypto', true);
+  if (compatFlags['spec_compliant_property_attributes']) {
+    defineLazyDataProperty(globalThis, 'SubtleCrypto', 'crypto/subtle', false);
+    defineLazyDataProperty(globalThis, 'Crypto', 'crypto/crypto', false);
+  }
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the SubtleCrypto benchmarks against the TypeScript implementation
+# (src/per_isolate/crypto/subtle.ts). No compatibilityDate, so
+# that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "subtle-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "subtle.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

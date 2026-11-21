@@ -27,6 +27,7 @@ const {
   StringPrototypeToWellFormed,
   SymbolToStringTag,
   TypeError,
+  kIllegalInvocation,
 } = primordials;
 
 const { PROTOCOL, USERNAME, PASSWORD, HOSTNAME, PORT, PATHNAME, SEARCH, HASH } =
@@ -51,10 +52,6 @@ const processInit = kStandard
   ? utils.urlPatternProcessInit
   : utils.legacyUrlPatternProcessInit;
 
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
 const kExecInitWithBase = kStandard
   ? 'Failed to exec URLPattern'
   : 'A baseURL is not allowed when input is an object.';

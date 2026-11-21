@@ -77,6 +77,7 @@ v8::ScriptCompiler::CachedData* compileAsFunction(jsg::Lock& js,
     "exports"_kj,
     "primordials"_kj,
     "utils"_kj,
+    "cryptoBackend"_kj,
   };
   v8::Local<v8::String> params[kj::size(PSEUDO_GLOBAL_NAMES)];
   for (auto i: kj::indices(params)) {
