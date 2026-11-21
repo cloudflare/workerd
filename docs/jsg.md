@@ -597,8 +597,9 @@ string can be passed (including `null` → `'null'`, `undefined` → `'undefined
 
 `jsg::NonCoercible<T>` declares that you want a type `T` but do _not_ want automatic
 coercion. For example, `jsg::NonCoercible<kj::String>` will _only_ accept string values.
-At the time of this writing, the only supported values of `T` are `kj::String`, `bool`, and
-`double`.
+The supported values of `T` are `kj::String`, `USVString`, `DOMString`, `JsString`, `bool`,
+and `double`. `jsg::NonCoercible<jsg::JsString>` accepts only strings and keeps the
+JavaScript string, for an API that converts it later or not at all.
 
 `jsg::LenientOptional<T>` is like `jsg::Optional<T>` but instead of throwing a type error
 for incorrect values, it ignores them and passes `undefined` instead.

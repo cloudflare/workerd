@@ -842,11 +842,15 @@ class ReadableStreamJsController final: public ReadableStreamController, public 
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
 
-  explicit ReadableStreamJsController();
+  explicit ReadableStreamJsController(
+      SourceIgnoresCancelReason sourceIgnoresCancelReason = SourceIgnoresCancelReason::NO);
   explicit ReadableStreamJsController(StreamStates::Closed closed);
   explicit ReadableStreamJsController(StreamStates::Errored errored);
-  explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
-  explicit ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer);
+  // A tee branch: reads, through a clone of `consumer`, the source `consumer` reads.
+  explicit ReadableStreamJsController(
+      jsg::Lock& js, ValueReadable& consumer, SourceIgnoresCancelReason sourceIgnoresCancelReason);
+  explicit ReadableStreamJsController(
+      jsg::Lock& js, ByteReadable& consumer, SourceIgnoresCancelReason sourceIgnoresCancelReason);
 
   jsg::Ref<ReadableStream> addRef() override;
 
@@ -960,6 +964,7 @@ class ReadableStreamJsController final: public ReadableStreamController, public 
   State state = State::create<Initial>();
 
   kj::Maybe<uint64_t> expectedLength = kj::none;
+  SourceIgnoresCancelReason sourceIgnoresCancelReason = SourceIgnoresCancelReason::NO;
   bool canceling = false;
 
   // The lock state is separate because a closed or errored stream can still be locked.
@@ -1106,8 +1111,9 @@ class WritableStreamJsController final: public WritableStreamController {
   friend WritableLockImpl;
 };
 
-kj::Own<ReadableStreamController> newReadableStreamJsController() {
-  return kj::heap<ReadableStreamJsController>();
+kj::Own<ReadableStreamController> newReadableStreamJsController(
+    SourceIgnoresCancelReason sourceIgnoresCancelReason) {
+  return kj::heap<ReadableStreamJsController>(sourceIgnoresCancelReason);
 }
 
 kj::Own<WritableStreamController> newWritableStreamJsController() {
@@ -2835,7 +2841,9 @@ kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
 
 // ======================================================================================
 
-ReadableStreamJsController::ReadableStreamJsController() {}
+ReadableStreamJsController::ReadableStreamJsController(
+    SourceIgnoresCancelReason sourceIgnoresCancelReason)
+    : sourceIgnoresCancelReason(sourceIgnoresCancelReason) {}
 
 ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed) {
   state.transitionTo<StreamStates::Closed>();
@@ -2845,11 +2853,15 @@ ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored err
   state.transitionTo<StreamStates::Errored>(kj::mv(errored));
 }
 
-ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer) {
+ReadableStreamJsController::ReadableStreamJsController(
+    jsg::Lock& js, ValueReadable& consumer, SourceIgnoresCancelReason sourceIgnoresCancelReason)
+    : sourceIgnoresCancelReason(sourceIgnoresCancelReason) {
   state.transitionTo<jsg::TracedOwn<ValueReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
-ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer) {
+ReadableStreamJsController::ReadableStreamJsController(
+    jsg::Lock& js, ByteReadable& consumer, SourceIgnoresCancelReason sourceIgnoresCancelReason)
+    : sourceIgnoresCancelReason(sourceIgnoresCancelReason) {
   state.transitionTo<jsg::TracedOwn<ByteReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
@@ -3257,8 +3269,10 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{
-        .branch1 = js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
+        .branch1 = js.alloc<ReadableStream>(
+            kj::heap<ReadableStreamJsController>(js, *consumer, sourceIgnoresCancelReason)),
+        .branch2 = js.alloc<ReadableStream>(
+            kj::heap<ReadableStreamJsController>(js, *consumer, sourceIgnoresCancelReason)),
       };
     }
     KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
@@ -3267,8 +3281,10 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{
-        .branch1 = js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
+        .branch1 = js.alloc<ReadableStream>(
+            kj::heap<ReadableStreamJsController>(js, *consumer, sourceIgnoresCancelReason)),
+        .branch2 = js.alloc<ReadableStream>(
+            kj::heap<ReadableStreamJsController>(js, *consumer, sourceIgnoresCancelReason)),
       };
     }
   }
@@ -3698,6 +3714,14 @@ void cancelSourceOfDroppedPump(IoContext::WeakRef& contextWeakRef, kj::Own<Drain
   });
 }
 
+// Starts one of pumpToImpl's draining reads. Each takes at most 256 KiB, so that a fast producer
+// yields to the event loop periodically rather than monopolizing the thread.
+kj::Promise<DrainingReadResult> startPumpRead(
+    jsg::Lock& js, IoContext& ioContext, DrainingReader& reader) {
+  constexpr size_t kMaxReadPerCycle = 256 * 1024;
+  return ioContext.awaitJs(js, reader.read(js, kMaxReadPerCycle));
+}
+
 // pumpToImpl uses a DrainingReader to efficiently pull all synchronously available
 // data from the stream in each iteration, then writes it to the sink using vectored
 // I/O. This minimizes isolate lock acquisitions by batching: each time the lock is
@@ -3712,13 +3736,20 @@ void cancelSourceOfDroppedPump(IoContext::WeakRef& contextWeakRef, kj::Own<Drain
 // jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
 // a reference to the stream internally.
 //
-// Neither isolate-lock round trip below is awaited directly. A draining read runs
-// the stream's pull() callback, and pull() can abort the request, which drops the
-// pump promise from inside the very event that is delivering the read's result.
-// Destroying an event while it is firing trips "Promise callback destroyed itself".
-// Each run() is therefore handed to the IoContext's task set, and the pump awaits an
-// unrelated fulfiller. Dropping the pump then destroys only that await; the firing
-// event stays owned by the task set, which unwinds it once it is safe to.
+// `firstRead` is the first draining read, which the caller starts under the isolate lock it
+// already holds, so that a source that has data ready, or a body that fits in one read, does not
+// wait for the lock to be taken again. Each later read takes the lock through run(), in
+// `criticalSection`, the one that was current when the pump started, as awaitIo() continues in
+// it: a pump started within blockConcurrencyWhile() must be able to read while the callback awaits
+// it, or neither finishes. A failure cancels the source in it too, for the same reason.
+//
+// No read is awaited directly. A draining read runs the stream's pull() callback, and
+// pull() can abort the request, which drops the pump promise from inside the very event
+// that is delivering the read's result. Destroying an event while it is firing trips
+// "Promise callback destroyed itself". Each read is therefore handed to the IoContext's
+// task set, and the pump awaits an unrelated fulfiller. Dropping the pump then destroys
+// only that await; the firing event stays owned by the task set, which unwinds it once it
+// is safe to.
 //
 // The consequence is that those tasks outlive the coroutine frame, so they must not
 // name anything the frame owns. The DrainingReader is reached through a kj::Weak,
@@ -3727,11 +3758,15 @@ void cancelSourceOfDroppedPump(IoContext::WeakRef& contextWeakRef, kj::Own<Drain
 // Dropping the pump before it settles (for example, because the client disconnected and
 // the HTTP layer dropped the response body) cancels the source with an undefined reason,
 // so that its cancel algorithm runs and it stops producing data. See
-// cancelSourceOfDroppedPump().
+// cancelSourceOfDroppedPump(). A failure cancels the source with the failure as the reason,
+// unless `sourceIgnoresCancelReason`.
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
     bool end,
+    kj::Promise<DrainingReadResult> firstRead,
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection,
+    SourceIgnoresCancelReason sourceIgnoresCancelReason,
     kj::CoUnwindAware = {}) {
 
   auto pumpInvocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
@@ -3741,25 +3776,17 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
   });
 
   bool writeFailed = false;
+  auto runInCriticalSection = [&ioContext, &criticalSection](auto func) {
+    return ioContext.run(kj::mv(func),
+        criticalSection.map(
+            [](kj::Rc<InputGate::CriticalSection>& section) { return section.addRef(); }));
+  };
 
   KJ_TRY {
+    auto read = kj::mv(firstRead);
     while (true) {
-      // Perform a draining read to get all synchronously available data if possible
-      // or fall back to a regular read if not.
       auto prp = kj::newPromiseAndFulfiller<DrainingReadResult>();
-      auto promise = ioContext.run([weakReader = reader->getWeak()](
-                                       jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
-        auto& ioContext = IoContext::current();
-        KJ_IF_SOME(reader, weakReader.tryGet()) {
-          // Use a 256KB limit to allow periodic yielding to the event loop,
-          // preventing a fast producer from monopolizing the thread.
-          constexpr size_t kMaxReadPerCycle = 256 * 1024;
-          return ioContext.awaitJs(js, reader.read(js, kMaxReadPerCycle));
-        } else {
-          return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
-        }
-      });
-      ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
+      ioContext.addTask(forwardToFulfiller(kj::mv(read), kj::mv(prp.fulfiller)));
 
       // The read races the sink reporting that its writes can no longer succeed (for example, the
       // peer of an RPC-transferred stream canceled it). A source that is idle would otherwise keep
@@ -3791,6 +3818,15 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         }
         co_return;
       }
+
+      read = runInCriticalSection([weakReader = reader->getWeak()](
+                                      jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
+        KJ_IF_SOME(reader, weakReader.tryGet()) {
+          return startPumpRead(js, IoContext::current(), reader);
+        } else {
+          return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
+        }
+      });
     }
   }
   KJ_CATCH(exception) {
@@ -3799,14 +3835,18 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     }
 
     auto prp = kj::newPromiseAndFulfiller<void>();
-    auto promise = ioContext.run([weakReader = reader->getWeak(), ex = exception.clone()](
-                                     jsg::Lock& js) mutable -> kj::Promise<void> {
+    auto promise = runInCriticalSection(
+        [weakReader = reader->getWeak(), ex = exception.clone(), sourceIgnoresCancelReason](
+            jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
       if (weakReader.tryGet() == kj::none) {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
       }
-      // Reason conversion can run JavaScript that drops the pump. Borrow only afterwards.
-      auto reason = exceptionToCancelReason(js, kj::mv(ex));
+      jsg::Optional<jsg::JsValue> reason;
+      if (!sourceIgnoresCancelReason) {
+        // Reason conversion can run JavaScript that drops the pump. Borrow only afterwards.
+        reason = exceptionToCancelReason(js, kj::mv(ex));
+      }
       KJ_IF_SOME(reader, weakReader.tryGet()) {
         return ioContext.awaitJs(js, reader.cancel(js, reason));
       } else {
@@ -3899,7 +3939,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
   KJ_ASSERT(!isLockedToReader());
   KJ_ASSERT(!isDisturbed());
   KJ_ASSERT(!state.hasOperationInProgress(), "Unable to detach with read pending");
-  auto controller = kj::heap<ReadableStreamJsController>();
+  auto controller = kj::heap<ReadableStreamJsController>(sourceIgnoresCancelReason);
   controller->expectedLength = expectedLength;
   disturbed = true;
 
@@ -3938,6 +3978,11 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
 }
 
 kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding encoding) {
+  // The declared expectedLength is the stream's total, which reading from the stream does not
+  // reduce, and the number of bytes before any Content-Encoding is applied.
+  if (encoding != StreamEncoding::IDENTITY || disturbed) {
+    return kj::none;
+  }
   return expectedLength;
 }
 
@@ -3954,7 +3999,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
         "Failed to create DrainingReader — stream should not be locked");
     auto& ioContext = IoContext::current();
-    return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end));
+    auto firstRead = startPumpRead(js, ioContext, *reader);
+    return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end,
+        kj::mv(firstRead), ioContext.getCriticalSection(), sourceIgnoresCancelReason));
   };
 
   KJ_SWITCH_ONEOF(state) {

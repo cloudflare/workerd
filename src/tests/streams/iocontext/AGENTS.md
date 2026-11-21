@@ -26,6 +26,9 @@ module's evaluation performs them.
 | module-scope start() parked on a promise resolved by a later request | `globalScopeReadablestream8` |
 | module-scope WritableStream (controller AbortSignal allocation needs no IoContext) | `globalScopeWritablestream` |
 | module-scope BYTE stream, BYOB-read inside a request | `globalScopeByteReadable` |
+| module-scope reads of a body over each in-memory source and a stream, by every consumer (`arrayBuffer`, `bytes`, `blob`, `formData`, `text`, `json`) | `globalScopeBodyReads` |
+| module-scope body reads buffer within a fixed cap, with no limit enforcer to ask (1 MiB in predictable mode, which `wd_test()` sets): exactly 1 MiB reads, one byte more rejects, from the source and from a stream, by `arrayBuffer()` and `text()` | `globalScopeBodyLimit` |
+| the same over-limit bodies read inside a request, under the limit enforcer's limit (none in workerd) | `requestBodyLimit` |
 | module-scope TransformStream | `globalScopeTransformStream` — **C++ CRASH BUG**: the mere existence of a module-scope `new TransformStream()` SEGFAULTS the C++ implementation when the first request enters the worker, even if never touched again; construction is which-impl-guarded and the TS side pins construction + a request-time pipe. TODO(bug): unguard once fixed |
 
 Cross-request state (tests 6-8) uses `ctx`-less module globals on

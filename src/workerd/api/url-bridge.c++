@@ -23,20 +23,20 @@ kj::Maybe<jsg::JsObject> tryBranded(jsg::Lock& js, jsg::JsValue value, kj::Strin
   return kj::none;
 }
 
-kj::String callCppExport(jsg::Lock& js, kj::StringPtr name, const jsg::JsRef<jsg::JsObject>& arg) {
+jsg::JsString callCppExport(
+    jsg::Lock& js, kj::StringPtr name, const jsg::JsRef<jsg::JsObject>& arg) {
   KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
       "attempted to call into the TypeScript URL implementation during a no-JS scope", name);
   auto function = KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "url/cpp_exports"_kj, name),
       "missing url/cpp_exports function", name);
   auto result = function.call(js, js.undefined(), arg.getHandle(js));
-  return KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsString>(), "expected a string", name)
-      .toString(js);
+  return KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsString>(), "expected a string", name);
 }
 
 }  // namespace
 
 kj::String JsUrl::getHref(jsg::Lock& js) const {
-  return callCppExport(js, "urlHref"_kj, object);
+  return callCppExport(js, "urlHref"_kj, object).toString(js);
 }
 
 kj::Maybe<JsUrl> JsUrl::tryUnwrap(jsg::Lock& js, jsg::JsValue value) {
@@ -46,6 +46,9 @@ kj::Maybe<JsUrl> JsUrl::tryUnwrap(jsg::Lock& js, jsg::JsValue value) {
 }
 
 kj::String JsUrlSearchParams::serialize(jsg::Lock& js) const {
+  return serializeJs(js).toString(js);
+}
+jsg::JsString JsUrlSearchParams::serializeJs(jsg::Lock& js) const {
   return callCppExport(js, "searchParamsSerialize"_kj, object);
 }
 

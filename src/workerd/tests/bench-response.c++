@@ -31,7 +31,8 @@ BENCHMARK_F(Response, simpleStringBody)(benchmark::State& state) {
   fixture->runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
     for (auto _: state) {
-      auto body = api::Body::Initializer(kj::str("Hello World"));
+      jsg::JsValue val = js.str("Hello World"_kj);
+      auto body = api::Body::Initializer(val.addRef(js));
       benchmark::DoNotOptimize(api::Response::constructor(js, kj::mv(body), kj::none));
     }
   });
@@ -63,7 +64,8 @@ BENCHMARK_F(Response, bodyWithHeaders)(benchmark::State& state) {
       headersDict.fields[0].value = kj::str("text/html");
       init.headers = kj::mv(headersDict);
 
-      auto body = api::Body::Initializer(kj::str("Hello World"));
+      jsg::JsValue val = js.str("Hello World"_kj);
+      auto body = api::Body::Initializer(val.addRef(js));
       benchmark::DoNotOptimize(api::Response::constructor(js, kj::mv(body), kj::mv(init)));
     }
   });

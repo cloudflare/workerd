@@ -3,13 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/blob.h>
+#include <workerd/api/byte-chunker.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/common.h>
 #include <workerd/api/streams/standard.h>
-#include <workerd/api/url-standard.h>
-#include <workerd/api/url.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
@@ -29,6 +28,12 @@ namespace {
 constexpr kj::StringPtr kBodyUsedError =
     "Body has already been used. It can only be used once. Use tee() first if you need to "
     "read it twice."_kj;
+
+// The V8-private property that marks a TypeScript ReadableStream whose underlying source ignores
+// the reason it is canceled with; see SourceIgnoresCancelReason. C++ sets it and reads it. The
+// TypeScript implementation carries it to the streams that take over a stream's source: tee
+// branches and detached streams.
+constexpr kj::StringPtr kSourceIgnoresCancelReason = "kSourceIgnoresCancelReason"_kj;
 
 bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
@@ -567,38 +572,80 @@ kj::Promise<void> queuedWriteStep(
   }
 }
 
+// The pump's last write: queuedWriteStep(), owning the sink, which it aborts should the write
+// fail, as the pump's loop does when an earlier write fails.
+kj::Promise<void> lastQueuedWriteStep(
+    kj::Own<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
+  KJ_TRY {
+    co_await queuedWriteStep(sink->getPtr(), kj::mv(pieces), end);
+  }
+  KJ_CATCH(exception) {
+    sink->abort(exception.clone());
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
 struct QueuedPumpState {
-  QueuedPumpState(jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink)
+  QueuedPumpState(jsg::JsRef<jsg::JsObject> reader,
+      IoOwn<WritableStreamSink> sink,
+      SourceIgnoresCancelReason sourceIgnoresCancelReason)
       : reader(kj::mv(reader)),
-        sink(kj::mv(sink)) {}
+        sink(kj::mv(sink)),
+        sourceIgnoresCancelReason(sourceIgnoresCancelReason) {}
 
   jsg::JsRef<jsg::JsObject> reader;
   IoOwn<WritableStreamSink> sink;
+  SourceIgnoresCancelReason sourceIgnoresCancelReason;
   // Wraps each sink operation so that dropping the pump can cancel the one in flight. Declared
   // after `sink` so that it is destroyed first.
   kj::Canceler writeCanceler;
+  // The last write, which owns the sink from then on. The loop leaves it for awaitQueuedPump()
+  // to await, so that the pump settles when it does, without taking the isolate lock again.
+  // Declared after `writeCanceler`, which wraps it, so that it is destroyed first.
+  kj::Maybe<kj::Promise<void>> lastWrite;
   // Cancels the reader if the sink disconnects while the pump is running; see
   // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
   kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
+  // The exception a write before the last failed with, which ends the loop. awaitQueuedPump()
+  // throws it once the loop is done; see endQueuedPumpAfterFailedWrite().
+  kj::Maybe<kj::Exception> writeFailure;
   // Set once the pump is dropped; see awaitQueuedPump(). The loop then winds down without
   // touching the sink again.
   bool dropped = false;
 };
 
-// Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
-// any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
-// there is nothing left to cancel.
-void cancelReaderFromKj(
-    IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader, kj::Exception exception) {
+// Cancels `reader` (a ReadableStreamDrainingReader) with `reason`. The pump reports its own
+// outcome, so the cancel's is ignored.
+void cancelDrainingReader(jsg::Lock& js, jsg::JsObject reader, jsg::JsValue reason) {
+  auto result = webstreams::invokeMethod(js, reader, "cancel"_kj, reason);
+  KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
+    promise.markAsHandled(js);
+  }
+}
+
+// The reason to cancel a pump's source with when the sink fails with `exception`: none for a
+// source that ignores it.
+jsg::JsValue cancelReasonForSinkFailure(
+    jsg::Lock& js, SourceIgnoresCancelReason sourceIgnoresCancelReason, kj::Exception exception) {
+  if (sourceIgnoresCancelReason) {
+    return js.undefined();
+  }
+  return exceptionToCancelReason(js, kj::mv(exception));
+}
+
+// Cancels `reader` (a ReadableStreamDrainingReader) because the sink failed with `exception`, from
+// outside any JS-lock scope: the work is queued on the IoContext, which may already be gone, in
+// which case there is nothing left to cancel.
+void cancelReaderFromKj(IoContext::WeakRef& weakContext,
+    jsg::JsRef<jsg::JsObject> reader,
+    kj::Exception exception,
+    SourceIgnoresCancelReason sourceIgnoresCancelReason) {
   weakContext.runIfAlive([&](IoContext& context) {
-    context.addTask(context.run(
-        [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
+    context.addTask(context.run([reader = kj::mv(reader), exception = kj::mv(exception),
+                                    sourceIgnoresCancelReason](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
-      auto reason = exceptionToCancelReason(js, kj::mv(exception));
-      auto result = webstreams::invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
-      KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
-        promise.markAsHandled(js);
-      }
+      auto reason = cancelReasonForSinkFailure(js, sourceIgnoresCancelReason, kj::mv(exception));
+      cancelDrainingReader(js, reader.getHandle(js), reason);
     }));
   });
 }
@@ -627,12 +674,13 @@ void cancelReaderOfDroppedPump(IoContext::WeakRef& weakContext, jsg::JsRef<jsg::
   });
 }
 
-// Awaits the queued pump's JS loop. Dropping the returned promise before the loop settles (for
-// example, because the client disconnected and the HTTP layer dropped the response body) cancels
-// the sink operation in flight, stops the loop from writing to or ending the sink, and cancels the
-// reader with an undefined reason, so that the source's cancel algorithm runs and it stops
-// producing data. Dropping the promise alone would do none of this: the JS loop, which owns the
-// pump state, would stay parked on its pending read, or go on writing to a sink nothing consumes.
+// Awaits the queued pump's JS loop, then its last write. Dropping the returned promise before the
+// pump settles (for example, because the client disconnected and the HTTP layer dropped the
+// response body) cancels the sink operation in flight, stops the loop from writing to or ending
+// the sink, and cancels the reader with an undefined reason, so that the source's cancel algorithm
+// runs and it stops producing data. Dropping the promise alone would do none of this: the JS loop,
+// which owns the pump state, would stay parked on its pending read, or go on writing to a sink
+// nothing consumes.
 //
 // `reader` is the state's reader, passed separately because taking a reference to it requires the
 // isolate lock, which the frame teardown does not hold.
@@ -648,12 +696,43 @@ kj::Promise<void> awaitQueuedPump(IoContext& context,
     cancelReaderOfDroppedPump(*weakContext, kj::mv(reader));
   });
   co_await loop;
+  KJ_IF_SOME(exception, state->writeFailure) {
+    kj::throwFatalException(kj::mv(exception));
+  }
+  KJ_IF_SOME(lastWrite, state->lastWrite) {
+    co_await lastWrite;
+  }
+}
+
+// Settles with the exception that `write` fails with, rather than rejecting, so that awaitIo()
+// does not convert the exception to JavaScript. Rejecting the loop with it would have
+// awaitQueuedPump()'s awaitJs() log it as an uncaught exception, as for any JavaScript promise
+// that rejects into C++.
+kj::Promise<kj::Maybe<kj::Exception>> settleQueuedWrite(kj::Promise<void> write) {
+  return write.then([]() -> kj::Maybe<kj::Exception> { return kj::none; },
+      [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> { return kj::mv(exception); });
+}
+
+// Ends the queued pump's loop after a write before the last fails with `exception`: aborts the
+// sink, as the last write does should it fail; cancels the reader (see
+// cancelReasonForSinkFailure()), as the legacy pump cancels its source; and leaves the exception
+// for awaitQueuedPump() to throw.
+void endQueuedPumpAfterFailedWrite(jsg::Lock& js, QueuedPumpState& state, kj::Exception exception) {
+  // The reader is canceled here, so the disconnect watch has nothing left to cancel.
+  state.sinkDisconnectWatch = kj::none;
+  state.sink->abort(exception.clone());
+  state.writeFailure = exception.clone();
+  // Converting the reason can run JavaScript that drops the pump. The cancel the drop queues then
+  // finds the stream closed.
+  auto reason = cancelReasonForSinkFailure(js, state.sourceIgnoresCancelReason, kj::mv(exception));
+  cancelDrainingReader(js, state.reader.getHandle(js), reason);
 }
 
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
-// vectored write, and recurse until done. All JS state (the reader) travels through the
-// jsg promise chain.
+// vectored write, and recurse until done, leaving the last write to awaitQueuedPump(). A write
+// before the last that fails ends the loop; see endQueuedPumpAfterFailedWrite(). All JS state (the
+// reader) travels through the jsg promise chain.
 jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, EndStream end) {
   auto& context = IoContext::current();
   auto readResult = webstreams::invokeMethod(js, state->reader.getHandle(js), "read"_kj);
@@ -691,11 +770,28 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
       }
     }
 
-    auto writeStep = state->writeCanceler.wrap(queuedWriteStep(
-        state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO));
-    return context.awaitIo(js, kj::mv(writeStep),
-        context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
-      return done || state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
+    if (done) {
+      // Nothing is left for JavaScript to do. The last write takes the sink, so that it does not
+      // depend on the IoContext, and the disconnect watch, which has no read left to cancel, ends
+      // before it.
+      state->sinkDisconnectWatch = kj::none;
+      state->lastWrite = state->writeCanceler.wrap(
+          lastQueuedWriteStep(kj::mv(state->sink), pieces.releaseAsArray(), end));
+      return js.resolvedPromise();
+    }
+    auto writeStep = state->writeCanceler.wrap(
+        queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), EndStream::NO));
+    return context.awaitIo(js, settleQueuedWrite(kj::mv(writeStep)),
+        context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext&,
+                               kj::Maybe<kj::Exception> failure) mutable -> jsg::Promise<void> {
+      if (state->dropped) {
+        return js.resolvedPromise();
+      }
+      KJ_IF_SOME(exception, failure) {
+        endQueuedPumpAfterFailedWrite(js, *state, kj::mv(exception));
+        return js.resolvedPromise();
+      }
+      return queuedPumpStep(js, kj::mv(state), end);
     }));
   }));
 }
@@ -708,23 +804,26 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     IoContext& context,
     jsg::JsObject reader,
     kj::Own<WritableStreamSink> sink,
-    EndStream end) {
+    EndStream end,
+    SourceIgnoresCancelReason sourceIgnoresCancelReason) {
 
-  auto state = kj::rc<QueuedPumpState>(reader.addRef(js), context.addObject(kj::mv(sink)));
+  auto state = kj::rc<QueuedPumpState>(
+      reader.addRef(js), context.addObject(kj::mv(sink)), sourceIgnoresCancelReason);
 
   // Should the sink report that its writes can no longer succeed (for example, the peer of an
   // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
   // waiting for the source to produce data whose write would fail. The pending read then settles
   // as done and the loop winds down; its final end() is best-effort against a destination that is
-  // already gone. The watch is owned by the pump state so that it ends with the pump, and it
-  // reaches the IoContext through a weak reference because it fires outside any JS-lock scope.
+  // already gone. The watch is owned by the pump state so that it ends with the pump, if not at
+  // the last write, and it reaches the IoContext through a weak reference because it fires
+  // outside any JS-lock scope.
   state->sinkDisconnectWatch = context.addObject(kj::heap<kj::Promise<void>>(
       state->sink->whenWriteDisconnected()
           .then([](kj::Exception&& exception) { return kj::mv(exception); },
               [](kj::Exception&& exception) { return kj::mv(exception); })
-          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js)](
-                    kj::Exception exception) mutable {
-    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception));
+          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js),
+                    sourceIgnoresCancelReason](kj::Exception exception) mutable {
+    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception), sourceIgnoresCancelReason);
   }).eagerlyEvaluate(nullptr)));
 
   auto loop = queuedPumpStep(js, state.addRef(), end)
@@ -735,15 +834,12 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
       // Nothing awaits the result any more, and the drop cancels the reader itself.
       return;
     }
-    // The pump failed: abort the sink, cancel the reader, then propagate the failure.
+    // Reading failed, or produced something other than bytes: abort the sink, cancel the reader,
+    // then propagate the failure. A failed write does not come here; see
+    // endQueuedPumpAfterFailedWrite().
     auto reason = jsg::JsValue(exception.getHandle(js));
     state->sink->abort(js.exceptionToKj(reason));
-
-    auto cancelResult =
-        webstreams::invokeMethod(js, state->reader.getHandle(js), "cancel"_kj, reason);
-    KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(cancelResult)) {
-      promise.markAsHandled(js);
-    }
+    cancelDrainingReader(js, state->reader.getHandle(js), reason);
     js.throwException(kj::mv(exception));
   }));
   return addNoopDeferredProxy(awaitQueuedPump(
@@ -751,27 +847,10 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 }
 }  // namespace
 
-// The -Wdangling-field warnings below are false positives. view captures the heap buffer pointer
-// managed by data, not the address of the data parameter itself. Moving data into owned transfers
-// ownership of that heap buffer without changing its address, so view remains valid.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
-    : owned(kj::mv(data)),
-      view(owned) {}
-#pragma clang diagnostic pop
-
-// Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
-// kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
-// kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
-// branches alike.
-JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
-    : Buffer(kj::heapArray(data->getData(js))) {}
-
 namespace {
 
 // Constructs the stream backing a JsReadableStream over the given native data source. This
-// is the compatibility-flag dispatch point shared by create() and bufferBackedImpl(): when
+// is the compatibility-flag dispatch point behind create(): when
 // the typescript_implemented_streams compat flag is enabled, the source is wrapped in a
 // ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource marker
 // (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects -- and the
@@ -793,22 +872,9 @@ JsReadableStream::StreamImpl newBackingStream(
 
 }  // namespace
 
-JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
-  // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
-  // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
-  // and tee branches alike -- shares the one allocation.
-  auto view = buffer->view;
-  auto source = newMemorySource(view, buffer.addRef().toOwn());
-  return Impl{
-    .stream = newBackingStream(js, IoContext::current(), kj::mv(source)),
-    .maybeOwnedBuffer = kj::mv(buffer),
-  };
-}
-
 JsReadableStream::JsReadableStream(jsg::Ref<ReadableStream> stream)
     : impl(Impl{
         .stream = StreamImpl(kj::mv(stream)),
-        .maybeOwnedBuffer = kj::none,
       }) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
@@ -816,28 +882,93 @@ JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
         .stream = StreamImpl(kj::mv(obj)),
       }) {}
 
-JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data)))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
-    : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view)
-    : JsReadableStream(js, view.getHandle(js).copy()) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
-    : JsReadableStream(js, urlSearchParams->toString()) {}
-
-JsReadableStream::JsReadableStream(
-    jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams)
-    : JsReadableStream(js, urlSearchParams->toString()) {}
-
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
   return JsReadableStream(Impl{.stream = newBackingStream(js, ioContext, kj::mv(source))});
+}
+
+JsReadableStream JsReadableStream::create(
+    jsg::Lock& js, jsg::JsString str, LoneSurrogates loneSurrogates) {
+  return create(js, kj::rc<ByteChunker>(js, str, loneSurrogates));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsBufferSource source) {
+  return create(js, kj::rc<ByteChunker>(js, source));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::Ref<Blob> blob) {
+  return create(js, kj::rc<ByteChunker>(kj::mv(blob)));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chunker) {
+  // Each pull enqueues the next chunk, and the pull that enqueues the last one also closes the
+  // stream, so a draining read that takes the last chunk sees the end too, and a pump needs no
+  // further read. The first pull of an empty value only closes. The stream pulls only for a
+  // waiting read (highWaterMark 0), so each chunk goes to a read whole.
+  uint64_t length = chunker->getLength();
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSource source;
+    source.type = kj::str("bytes");
+    source.expectedLength = length;
+    // A default read of a byte stream reads into a buffer of this size, so every chunk fits.
+    source.autoAllocateChunkSize = static_cast<int>(kj::max(chunker->getMaxChunkSize(), size_t{1}));
+    source.pull = [chunker = chunker.addRef()](
+                      jsg::Lock& js, UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
+      auto& controller = KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableByteStreamController>>());
+      KJ_IF_SOME(chunk, chunker->next(js)) {
+        controller->enqueue(js, jsg::JsBufferSource(chunk));
+      }
+      // Closing clears the stream's algorithms, this pull among them; jsg::Function holds its own
+      // reference for the duration of a call, so the lambda and its captures outlive the close.
+      // Settling a read can run JavaScript (a `then` getter) that cancels the stream first.
+      if (chunker->isDone() && controller->canCloseOrEnqueue()) {
+        controller->close(js);
+      }
+      return js.resolvedPromise();
+    };
+    source.cancel = [chunker = chunker.addRef()](
+                        jsg::Lock& js, jsg::JsValue) mutable -> jsg::Promise<void> {
+      chunker->cancel();
+      return js.resolvedPromise();
+    };
+    // The cancel algorithm ignores its reason.
+    auto controller = newReadableStreamJsController(SourceIgnoresCancelReason::YES);
+    auto stream = js.allocAccounted<ReadableStream>(
+        sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+    stream->getController().setup(js, kj::mv(source), StreamQueuingStrategy{.highWaterMark = 0});
+    return JsReadableStream(kj::mv(stream));
+  }
+
+  // TypeScript arm: the same source, built as a JS object. The last chunk is enqueued and the
+  // stream closed in one call.
+  auto pull = js.wrapSimpleFunction(js.v8Context(),
+      [chunker = chunker.addRef()](
+          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    auto controller = jsg::JsValue(info[0]);
+    KJ_IF_SOME(chunk, chunker->next(js)) {
+      webstreams::dispatchCall(js, "readableByteControllerEnqueue", controller, jsg::JsValue(chunk),
+          js.boolean(chunker->isDone()));
+    } else {
+      webstreams::dispatchCall(js, "readableByteControllerClose", controller);
+    }
+  });
+  auto cancel = js.wrapSimpleFunction(js.v8Context(),
+      [chunker = chunker.addRef()](
+          jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) mutable { chunker->cancel(); });
+
+  auto sourceObj = js.objNoProto();
+  sourceObj.set(js, "type"_kj, js.str("bytes"_kj));
+  sourceObj.set(js, "expectedLength"_kj, js.bigInt(length));
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
+  sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
+  auto strategyObj = js.objNoProto();
+  strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
+
+  auto constructor = webstreams::getCppExport(js, "ReadableStream");
+  auto stream = constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj));
+  // The cancel algorithm ignores its reason.
+  stream.setPrivate(js, kSourceIgnoresCancelReason, js.boolean(true));
+  return JsReadableStream(js, stream.addRef(js));
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
@@ -911,10 +1042,12 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
       constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
 }
 
-JsReadableStream JsReadableStream::fromPull(
-    jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
+JsReadableStream JsReadableStream::fromPull(jsg::Lock& js,
+    kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull,
+    kj::Maybe<uint64_t> maybeExpectedLength) {
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     UnderlyingSource underlyingSource;
+    underlyingSource.expectedLength = kj::mv(maybeExpectedLength);
     underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
                                 UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
       auto defaultController =
@@ -955,6 +1088,9 @@ JsReadableStream JsReadableStream::fromPull(
   });
 
   auto sourceObj = js.obj();
+  KJ_IF_SOME(length, maybeExpectedLength) {
+    sourceObj.set(js, "expectedLength", js.bigInt(length));
+  }
   sourceObj.set(js, "pull"_kj, jsg::JsValue(tsPull));
   // Demand-driven pulls only, matching from()'s TypeScript arm.
   auto strategyObj = js.obj();
@@ -987,13 +1123,11 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(stream.addRef()),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(obj.addRef(js)),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
         });
       }
     }
@@ -1005,13 +1139,6 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
 
 bool JsReadableStream::isNull() const {
   return impl == kj::none;
-}
-
-bool JsReadableStream::isBufferBacked() const {
-  KJ_IF_SOME(i, impl) {
-    return i.maybeOwnedBuffer != kj::none;
-  }
-  return false;
 }
 
 bool JsReadableStream::isDisturbed(jsg::Lock& js) {
@@ -1357,7 +1484,8 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
       // drive the internal DrainingReader batch by batch under the isolate lock.
       auto reader = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(
           webstreams::dispatchCall(js, "acquireReadableStreamDrainingReader", handle)));
-      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end);
+      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end,
+          SourceIgnoresCancelReason(handle.hasPrivate(js, kSourceIgnoresCancelReason)));
     }
   }
   KJ_UNREACHABLE;
@@ -1436,9 +1564,6 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       auto branches = stream->tee(js);
-      // Both branches share the retransmit buffer (if any) so they remain independently rewindable.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
 
       // tee() consumes `this`: the original stream is now locked/disturbed and unusable, so
       // represent that by nullifying. Everything needed for the result has already been extracted
@@ -1448,11 +1573,9 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       return Tee{
         .branch1 = JsReadableStream(Impl{
           .stream = StreamImpl(kj::mv(branches[0])),
-          .maybeOwnedBuffer = kj::mv(buffer1),
         }),
         .branch2 = JsReadableStream(Impl{
           .stream = StreamImpl(kj::mv(branches[1])),
-          .maybeOwnedBuffer = kj::mv(buffer2),
         }),
       };
     }
@@ -1468,12 +1591,6 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       auto branch1 = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(branches.get(js, 0)));
       auto branch2 = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(branches.get(js, 1)));
 
-      // TS-backed streams cannot currently be buffer-backed (bufferBackedImpl always
-      // constructs the legacy arm; design-doc open question F), but carry the buffer
-      // through anyway so this arm stays correct if F ever changes that.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-
       // Same consumption contract as the legacy arm: the original JS stream object is
       // left locked by the tee (spec behavior); this wrapper drops its handle.
       impl = kj::none;
@@ -1481,11 +1598,9 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       return Tee{
         .branch1 = JsReadableStream(Impl{
           .stream = StreamImpl(branch1.addRef(js)),
-          .maybeOwnedBuffer = kj::mv(buffer1),
         }),
         .branch2 = JsReadableStream(Impl{
           .stream = StreamImpl(branch2.addRef(js)),
-          .maybeOwnedBuffer = kj::mv(buffer2),
         }),
       };
     }
@@ -1493,41 +1608,28 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<JsReadableStream> JsReadableStream::tryClone(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    KJ_IF_SOME(buffer, i.maybeOwnedBuffer) {
-      // Non-mutating: build a fresh stream over the same buffer bytes, carrying the buffer forward
-      // so the clone is itself rewindable. `this` is left untouched.
-      return JsReadableStream(bufferBackedImpl(js, buffer.addRef()));
-    }
-  }
-  // Null or not buffer-backed: nothing to rewind.
-  return kj::none;
-}
-
 JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   auto& i = KJ_ASSERT_NONNULL(impl, "detach() called on a null JsReadableStream");
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       // ReadableStream::detach() takes over the internal state, leaving the original stream (i.e.
-      // `this`) locked and disturbed. `this` retains a reference to the retransmit buffer.
+      // `this`) locked and disturbed.
       auto detached = stream->detach(js, ignoreDisturbed == IgnoreDisturbed::YES);
       return JsReadableStream(Impl{
         .stream = StreamImpl(kj::mv(detached)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
       });
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
       // The TypeScript-side detach performs the whole takeover atomically: precondition
       // checks (legacy-exact error texts), internal-state transfer into a fresh stream,
       // and neutralization of the original (permanently locked + disturbed).
-      auto detached = webstreams::dispatchCall(js, "detachReadableStream", obj.getHandle(js),
-          js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
+      auto handle = obj.getHandle(js);
+      auto detached = webstreams::dispatchCall(
+          js, "detachReadableStream", handle, js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
       auto detachedObj = KJ_REQUIRE_NONNULL(
           JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
       return JsReadableStream(Impl{
         .stream = StreamImpl(detachedObj.addRef(js)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
       });
     }
   }
@@ -1580,8 +1682,6 @@ void JsReadableStream::visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(obj);
       }
     }
-    // Note: the retransmit Buffer's owned Blob reference is intentionally NOT traced here, matching
-    // the pre-refactor Body behavior (it is kept alive as a strong reference, not via GC tracing).
   }
 }
 
@@ -1596,9 +1696,6 @@ void JsReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         // (jsg::JsRef does not satisfy the MemoryRetainer concept, so it can't be passed to
         // trackField() directly.)
       }
-    }
-    KJ_IF_SOME(buffer, i.maybeOwnedBuffer) {
-      tracker.trackFieldWithSize("buffer", buffer->view.size());
     }
   }
 }

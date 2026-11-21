@@ -454,8 +454,9 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
       init.body = kj::Maybe<Body::Initializer>(
           JsReadableStream::create(env.js, env.context, kj::heap<TestStreamSource>()));
     } else KJ_IF_SOME(value, body) {
+      jsg::JsValue val = env.js.str(value);
       init.method = kj::str("POST");
-      init.body = kj::Maybe<Body::Initializer>(kj::str(value));
+      init.body = kj::Maybe<Body::Initializer>(val.addRef(env.js));
     }
     if (kind == ActorFetchKind::WEB_SOCKET) {
       jsg::Dict<kj::String, kj::String> headers;

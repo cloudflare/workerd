@@ -819,6 +819,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-in-memory-body-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-in-memory-body-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],
@@ -1739,6 +1745,12 @@ wd_test(
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
     generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "fetch-iterable-buffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-iterable-buffer-test.js"],
 )
 
 wd_test(

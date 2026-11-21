@@ -67,7 +67,7 @@ that fits, or any other value converted to a number that is finite and in range.
 | `jsg::HashableV8Ref<T>`       | Any V8 type                 | `V8Ref` + `hashCode()`                                      |
 | `jsg::MemoizedIdentity<T>`    | Any                         | Preserves JS object identity across round-trips             |
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
-| `jsg::NonCoercible<T>`        | Exact type                  | No automatic coercion; `T` = `kj::String`, `bool`, `double` |
+| `jsg::NonCoercible<T>`        | Exact type                  | No automatic coercion; `T` = `kj::String`, `USVString`, `DOMString`, `JsString`, `bool`, `double` |
 | `jsg::LenientOptional<T>`     | Optional                    | Silently ignores type errors → `undefined`                  |
 | `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed. Declare `using JsgRttiDelegate = ...` to describe the type to RTTI (TypeScript generation) as an existing type |
 
