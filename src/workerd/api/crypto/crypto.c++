@@ -183,8 +183,8 @@ void requireModernKeyFormat(jsg::Lock& js, kj::StringPtr format) {
 // =======================================================================================
 // Helper functions
 
-// Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
-// or if it doesn't support the given usage.
+// Throws NotSupportedError if the requested algorithm name is not a registered algorithm, and
+// InvalidAccessError if the key is incompatible with it or doesn't support the given usage.
 void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, CryptoKeyUsageSet usage) {
   // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
   //   Web IDL says that's deprecated.
@@ -192,6 +192,8 @@ void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, Crypto
   // TODO(cleanup): Make this function go away. Maybe this can be rolled into the default
   //   implementations of the CryptoKey::Impl::<crypto operation>() functions.
 
+  JSG_REQUIRE(lookupAlgorithm(requestedName) != kj::none, DOMNotSupportedError,
+      "Unrecognized or unimplemented algorithm \"", requestedName, "\" requested.");
   JSG_REQUIRE(strcasecmp(requestedName.cStr(), key.getAlgorithmName().cStr()) == 0,
       DOMInvalidAccessError, "Requested algorithm \"", requestedName,
       "\" does not match this CryptoKey's algorithm \"", key.getAlgorithmName(), "\".");
