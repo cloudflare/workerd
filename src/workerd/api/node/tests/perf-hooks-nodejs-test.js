@@ -109,7 +109,6 @@ export const testPerformanceBasicFunctionality = {
 export const testUnimplementedMethods = {
   test() {
     // These methods throw because they cannot be meaningfully stubbed
-    throws(() => createHistogram(), { message: /is not implemented/ });
     throws(() => monitorEventLoopDelay(), {
       message: /is not implemented/,
     });

@@ -5,10 +5,12 @@
 use std::pin::Pin;
 
 use crate::dns::DnsUtil;
+use crate::histogram::HistogramModule;
 use crate::inspector::InspectorModule;
 use crate::url::UrlUtil;
 
 pub mod dns;
+pub mod histogram;
 pub mod inspector;
 pub mod url;
 
@@ -55,6 +57,12 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
         registry.as_mut(),
         "node-internal:dns",
         |lock| Ok(DnsUtil::new(lock)),
+        jsg::modules::ModuleType::Internal,
+    );
+    jsg::modules::add_builtin(
+        registry.as_mut(),
+        "node-internal:histogram",
+        |lock| Ok(HistogramModule::new(lock)),
         jsg::modules::ModuleType::Internal,
     );
     // `node-internal:inspector` is always registered: it is imported by the `node:inspector`
