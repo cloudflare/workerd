@@ -36,6 +36,45 @@ kj::ArrayPtr<const kj::byte> nonNullBytes(kj::ArrayPtr<kj::byte> ptr) {
   static const kj::byte DUMMY = 0;
   return ptr == nullptr ? kj::arrayPtr(&DUMMY, 0) : ptr;
 }
+
+// None of SubtleCrypto's BufferSource arguments or dictionary members are [AllowShared]. JSG
+// rejects a bare SharedArrayBuffer for them, but not a view onto one.
+void requireNotShared(const jsg::JsBufferSource& source, kj::StringPtr what) {
+  JSG_REQUIRE(!source.isBackedBySharedArrayBuffer(), TypeError, what,
+      " must not be backed by a SharedArrayBuffer.");
+}
+
+void requireNotShared(jsg::Lock& js,
+    const jsg::Optional<jsg::JsRef<jsg::JsBufferSource>>& member,
+    kj::StringPtr what) {
+  KJ_IF_SOME(m, member) {
+    requireNotShared(m.getHandle(js), what);
+  }
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::EncryptAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.iv, "iv");
+  requireNotShared(js, algorithm.additionalData, "additionalData");
+  requireNotShared(js, algorithm.counter, "counter");
+  requireNotShared(js, algorithm.label, "label");
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::SignAlgorithm& algorithm) {
+  KJ_IF_SOME(context, algorithm.context) {
+    KJ_IF_SOME(source, context.getHandle(js).tryCast<jsg::JsBufferSource>()) {
+      requireNotShared(source, "context");
+    }
+  }
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::DeriveKeyAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.salt, "salt");
+  requireNotShared(js, algorithm.info, "info");
+}
+
+void requireNotShared(jsg::Lock& js, const SubtleCrypto::GenerateKeyAlgorithm& algorithm) {
+  requireNotShared(js, algorithm.publicExponent, "publicExponent");
+}
 }  // namespace
 
 kj::StringPtr CryptoKeyUsageSet::name() const {
@@ -706,6 +745,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js
     const CryptoKey& key,
     jsg::JsBufferSource plainText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(plainText, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -721,6 +762,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decrypt(jsg::Lock& js
     const CryptoKey& key,
     jsg::JsBufferSource cipherText) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(cipherText, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -736,6 +779,8 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::sign(jsg::Lock& js,
     const CryptoKey& key,
     jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -751,6 +796,9 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
     jsg::JsBufferSource signature,
     jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
+  requireNotShared(signature, "signature");
+  requireNotShared(data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -764,6 +812,7 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
     jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(data, "data");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -792,6 +841,7 @@ jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> SubtleCrypto::genera
     kj::Array<kj::String> keyUsages) {
 
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -826,6 +876,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
   auto derivedKeyAlgorithm = interpretAlgorithmParam(kj::mv(derivedKeyAlgorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
@@ -850,6 +901,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::deriveBits(jsg::Lock&
     const CryptoKey& baseKey,
     jsg::Optional<kj::Maybe<int>> lengthParam) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  requireNotShared(js, algorithm);
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
@@ -879,6 +931,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
   return js.evalNow([&] {
     requireModernKeyFormat(js, format);
     auto algorithm = interpretAlgorithmParam(kj::mv(wrapAlgorithm));
+    requireNotShared(js, algorithm);
 
     validateOperation(wrappingKey, algorithm.name, CryptoKeyUsageSet::wrapKey());
 
@@ -920,7 +973,9 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
   auto operation = __func__;
   return js.evalNow([&]() -> jsg::Ref<CryptoKey> {
     requireModernKeyFormat(js, format);
+    requireNotShared(wrappedKey, "wrappedKey");
     auto normalizedAlgorithm = interpretAlgorithmParam(kj::mv(unwrapAlgorithm));
+    requireNotShared(js, normalizedAlgorithm);
     auto normalizedUnwrapAlgorithm = interpretAlgorithmParam(kj::mv(unwrappedKeyAlgorithm));
 
     // Need a copy of the algorithm name to live in this scope, because we later kj::mv() it out.
@@ -963,6 +1018,9 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::importKey(jsg::Lock& js,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+  KJ_IF_SOME(bytes, keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>()) {
+    requireNotShared(bytes.getHandle(js), "keyData");
+  }
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm, format.asPtr());
 
@@ -1079,32 +1137,34 @@ jsg::Promise<SubtleCrypto::EncapsulatedKey> SubtleCrypto::encapsulateKey(jsg::Lo
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decapsulateBits(jsg::Lock& js,
     kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
     const CryptoKey& decapsulationKey,
-    kj::Array<const kj::byte> ciphertext) {
+    jsg::JsBufferSource ciphertext) {
   auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+  requireNotShared(ciphertext, "ciphertext");
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateBits());
-    return decapsulationKey.impl->decapsulate(js, ciphertext).addRef(js);
+    return decapsulationKey.impl->decapsulate(js, nonNullBytes(ciphertext.asArrayPtr())).addRef(js);
   });
 }
 
 jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::decapsulateKey(jsg::Lock& js,
     kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
     const CryptoKey& decapsulationKey,
-    kj::Array<const kj::byte> ciphertext,
+    jsg::JsBufferSource ciphertext,
     kj::OneOf<kj::String, ImportKeyAlgorithm> sharedKeyAlgorithmParam,
     bool extractable,
     kj::Array<kj::String> keyUsages) {
   auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+  requireNotShared(ciphertext, "ciphertext");
   auto sharedKeyAlgorithm = interpretAlgorithmParam(kj::mv(sharedKeyAlgorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
     validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateKey());
-    auto secret = decapsulationKey.impl->decapsulate(js, ciphertext);
+    auto secret = decapsulationKey.impl->decapsulate(js, nonNullBytes(ciphertext.asArrayPtr()));
     auto secretBuffer = jsg::JsUint8Array::create(js, secret.asArrayPtr());
     return importKeySync(js, "raw-secret", jsg::JsBufferSource(secretBuffer).addRef(js),
         kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
