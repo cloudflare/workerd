@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fetch-url", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-url-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      durableObjectNamespaces = [(className = "Actor", uniqueKey = "fetch-url")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "SELF", service = "fetch-url")],
+      streamingTails = ["tail"],
+    )),
+    # Relative Durable Object URLs are only accepted under these legacy flags, which apply to the
+    # calling worker, so this caller needs its own service.
+    (name = "legacy-fetch-url", worker = (
+      modules = [(name = "worker", esModule = .legacyFetchUrl)],
+      compatibilityFlags = ["nodejs_compat", "url_original", "fetch_legacy_url", "durable_object_fetch_allows_relative_url"],
+      bindings = [(name = "ns", durableObjectNamespace = (className = "Actor", serviceName = "fetch-url"))],
+      streamingTails = ["tail"],
+    )),
+    (name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "tracing-fetch-url-tail.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);
+
+const legacyFetchUrl :Text = "import assert from 'node:assert/strict'; export const relativeUrl = { async test(_controller, env) { const response = await env.ns.get(env.ns.idFromName('relative')).fetch('/relative?q=1#f'); assert.equal(await response.text(), 'relative response'); } };";
