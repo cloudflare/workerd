@@ -382,3 +382,22 @@ export const endings = {
     }
   },
 };
+
+export const sliceClamp = {
+  async test() {
+    const blob = new Blob(['abcd']);
+    const slice = async (...args) => await blob.slice(...args).text();
+
+    strictEqual(await slice(1.5, 2.5), '');
+    strictEqual(await slice(0.5, 3.5), 'abcd');
+    strictEqual(await slice(-1.5), 'cd');
+    strictEqual(await slice(NaN, NaN), '');
+    strictEqual(await slice(0, Infinity), 'abcd');
+    strictEqual(await slice(Infinity), '');
+    strictEqual(await slice(-Infinity, 2), 'ab');
+    strictEqual(await slice(1, 2 ** 32), 'bcd');
+    strictEqual(await slice(-(2 ** 53)), 'abcd');
+    strictEqual(await slice(2 ** 64), '');
+    strictEqual(await slice('1', '3'), 'bc');
+  },
+};

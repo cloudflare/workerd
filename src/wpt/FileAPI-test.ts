@@ -60,17 +60,8 @@ export default {
   'blob/Blob-slice-overflow.any.js': {},
   'blob/Blob-slice.any.js': {
     comment:
-      'Blob.slice() takes int start/end (blob.h) and truncates fractional values; the spec uses [Clamp] long long, which rounds half to even. ' +
       'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
-    expectedFailures: [
-      'Slicing test: slice (1,1).',
-      'Slicing test: slice (1,3).',
-      'Slicing test: slice (1,5).',
-      'Slicing test: slice (1,7).',
-      'Slicing test: slice (1,8).',
-      'Slicing test: slice (1,9).',
-      'Invalid contentType ("te\x7Fxt/plain")',
-    ],
+    expectedFailures: ['Invalid contentType ("te\x7Fxt/plain")'],
   },
   'blob/Blob-stream.any.js': {},
   'blob/Blob-text.any.js': {
