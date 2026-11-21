@@ -648,17 +648,17 @@ MaybeLocal local_function_call(
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
-
-  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
-  }
+  // A Local has the layout of a v8::Local (see ffi-inl.h), so the arguments pass as they are,
+  // without a copy. V8 takes them as non-const but only reads them.
+  KJ_REQUIRE(args.size() <= INT_MAX, "too many arguments for a JavaScript call", args.size());
+  auto* v8Args = const_cast<v8::Local<v8::Value>*>(
+      args.empty() ? nullptr : &local_as_ref_from_ffi<v8::Value>(args[0]));
 
   // No TryCatch: what the function throws stays pending and propagates once the Rust caller
   // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
   // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
   // by walking the whole stack.
-  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
+  return maybe_local_to_ffi(fn->Call(context, receiver, static_cast<int>(args.size()), v8Args));
 }
 
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
@@ -2309,6 +2309,22 @@ void isolate_try_catch(
   if (callback(data)) {
     catch_exception(tryCatch, exception);
   }
+}
+
+// HandleScope
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::HandleScope scope(isolate);
+  callback(data);
+}
+
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback) {
+  v8::EscapableHandleScope scope(isolate);
+  callback(data, scope);
+}
+
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value) {
+  return to_ffi(scope.Escape(local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
 // Isolate

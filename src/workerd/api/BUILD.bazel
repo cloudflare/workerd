@@ -132,6 +132,7 @@ wd_cc_library(
     name = "analytics-engine",
     srcs = [
         "analytics-engine.c++",
+        "analytics-engine-impl.c++",
     ],
     hdrs = [
         "analytics-engine.h",
@@ -1082,4 +1083,13 @@ wd_test(
     src = "streams/body-read-operation-test.wd-test",
     args = ["--experimental"],
     data = ["streams/body-read-operation-test.js"],
+)
+
+kj_test(
+    src = "worker-loader-source-test.c++",
+    deps = [
+        ":worker-loader",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
