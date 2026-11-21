@@ -1084,3 +1084,12 @@ wd_test(
     args = ["--experimental"],
     data = ["streams/body-read-operation-test.js"],
 )
+
+kj_test(
+    src = "worker-loader-source-test.c++",
+    deps = [
+        ":worker-loader",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
