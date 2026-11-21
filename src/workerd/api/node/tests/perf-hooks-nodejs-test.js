@@ -491,6 +491,23 @@ export const testDetailAcceptsAnyValue = {
   },
 };
 
+export const testMeasureEndMarkWithoutStart = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+
+    perfHooksPerformance.mark('end', { startTime: 123 });
+    for (const start of [undefined, {}]) {
+      const measure = perfHooksPerformance.measure('m', start, 'end');
+      strictEqual(measure.startTime, 0);
+      strictEqual(measure.duration, 123);
+    }
+
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
 export const testGetEntriesByName = {
   test() {
     perfHooksPerformance.clearMarks();

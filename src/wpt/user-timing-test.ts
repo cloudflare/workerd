@@ -71,14 +71,7 @@ export default {
   },
   'mark-measure-return-objects.any.js': { before: clearEntries },
   'mark.any.js': { before: clearEntries },
-  'measure-l3.any.js': {
-    before: clearEntries,
-    comment:
-      'measure() ignores the end mark when the start mark is undefined, and measures up to now instead',
-    expectedFailures: [
-      "When the end mark is given and the start is unprovided, the end time of the measure entry should be the end mark's time, the start time should be 0.",
-    ],
-  },
+  'measure-l3.any.js': { before: clearEntries },
   'measure-with-dict.any.js': {
     before: clearEntries,
     comment:

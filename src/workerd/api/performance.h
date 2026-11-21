@@ -631,6 +631,9 @@ class Performance: public EventTarget {
   const IsolateLimitEnforcer& isolateLimitEnforcer;
   kj::Vector<jsg::Ref<PerformanceEntry>> entries;
 
+  // Returns the start time of the first mark named `name`.
+  kj::Maybe<double> findMarkTime(kj::StringPtr name);
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(entries);
   }
