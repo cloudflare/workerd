@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "6b7b26d7a718abecad1a310b3254c7e9c33f7ce5e7827334361aaa1a0b8caf7e",
+  "checksum": "8674496b282c32f6ca957ef9e4f733485ca159d68b28c98fca83ce8a2f39b3fc",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -118,7 +118,17 @@
       "x86_64-apple-darwin",
       "x86_64-unknown-linux-gnu"
     ],
+    "cfg(target_arch = \"aarch64\")": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu"
+    ],
     "cfg(target_arch = \"wasm32\")": [],
+    "cfg(target_arch = \"x86\")": [],
+    "cfg(target_arch = \"x86_64\")": [
+      "x86_64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu"
+    ],
     "cfg(target_os = \"android\")": [],
     "cfg(target_os = \"hermit\")": [],
     "cfg(target_os = \"macos\")": [
@@ -2092,6 +2102,68 @@
       ],
       "version": "0.3.1"
     },
+    "crc-fast 1.10.0": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "digest",
+          "std"
+        ],
+        "deps": {
+          "common": [
+            {
+              "id": "digest 0.10.7",
+              "target": "digest"
+            }
+          ],
+          "selects": {
+            "cfg(target_arch = \"aarch64\")": [
+              {
+                "id": "spin 0.10.1",
+                "target": "spin"
+              }
+            ],
+            "cfg(target_arch = \"x86\")": [
+              {
+                "id": "spin 0.10.1",
+                "target": "spin"
+              }
+            ],
+            "cfg(target_arch = \"x86_64\")": [
+              {
+                "id": "spin 0.10.1",
+                "target": "spin"
+              }
+            ]
+          }
+        },
+        "edition": "2021"
+      },
+      "library_target_name": "crc_fast",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-Apache",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "crc-fast",
+      "package_url": "https://github.com/awesomized/crc-fast-rust",
+      "repository": {
+        "Http": {
+          "sha256": "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5",
+          "url": "https://static.crates.io/crates/crc-fast/1.10.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "crc_fast",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "1.10.0"
+    },
     "crc32fast 1.5.5": {
       "build_script_attrs": {},
       "common_attrs": {
@@ -2830,6 +2902,10 @@
           {
             "id": "codespan-reporting 0.13.1",
             "target": "codespan_reporting"
+          },
+          {
+            "id": "crc-fast 1.10.0",
+            "target": "crc_fast"
           },
           {
             "id": "data-encoding 2.11.1",
@@ -11280,6 +11356,40 @@
       ],
       "version": "0.6.5"
     },
+    "spin 0.10.1": {
+      "common_attrs": {
+        "crate_features": [
+          "mutex",
+          "once",
+          "rwlock",
+          "spin_mutex"
+        ],
+        "edition": "2015"
+      },
+      "library_target_name": "spin",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "spin",
+      "package_url": "https://github.com/mvdnes/spin-rs.git",
+      "repository": {
+        "Http": {
+          "sha256": "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3",
+          "url": "https://static.crates.io/crates/spin/0.10.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "spin",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.10.1"
+    },
     "spki 0.8.1": {
       "common_attrs": {
         "crate_features": [
@@ -15950,6 +16060,7 @@
     "clang-ast 0.1.36",
     "clap 4.6.7",
     "codespan-reporting 0.13.1",
+    "crc-fast 1.10.0",
     "data-encoding 2.11.1",
     "dns-lookup 4.0.2",
     "encoding_rs 0.8.44",
