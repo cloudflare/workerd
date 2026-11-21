@@ -184,19 +184,15 @@ export default {
     ],
   },
   'idlharness.https.any.js': {
-    comment:
-      'Remaining IDL failures: prototype chain issues, operation .length mismatches',
+    comment: 'Remaining IDL failures: operation .length mismatches',
     expectedFailures: [
       'FileSystemHandle interface: operation isSameEntry(FileSystemHandle)',
-      'FileSystemFileHandle interface: existence and properties of interface object',
       'FileSystemFileHandle interface: operation getFile()',
       'FileSystemFileHandle interface: operation createWritable(optional FileSystemCreateWritableOptions)',
-      'FileSystemDirectoryHandle interface: existence and properties of interface object',
       'FileSystemDirectoryHandle interface: operation getFileHandle(USVString, optional FileSystemGetFileOptions)',
       'FileSystemDirectoryHandle interface: operation getDirectoryHandle(USVString, optional FileSystemGetDirectoryOptions)',
       'FileSystemDirectoryHandle interface: operation removeEntry(USVString, optional FileSystemRemoveOptions)',
       'FileSystemDirectoryHandle interface: operation resolve(FileSystemHandle)',
-      'FileSystemWritableFileStream interface: existence and properties of interface object',
       'FileSystemWritableFileStream interface: operation write(FileSystemWriteChunkType)',
       'FileSystemWritableFileStream interface: operation seek(unsigned long long)',
       'FileSystemWritableFileStream interface: operation truncate(unsigned long long)',
