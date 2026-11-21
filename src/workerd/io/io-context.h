@@ -253,7 +253,8 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   tracing::InvocationSpanContext& getInvocationSpanContext();
 
   // Returns this request's invocation span context, with the span ID replaced by that of
-  // `userSpan` if it has one.
+  // `userSpan` if it has one. The trace ID and flags are then the span's, which differ from the
+  // invocation's for a span outside the invocation's trace.
   tracing::InvocationSpanContext getInvocationSpanContextForUserSpan(SpanParent& userSpan);
 
   // The async trace REQUEST resource for this request, created by delivered(); 0 if the context
@@ -1352,9 +1353,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  // Returns the invocation's traceId/invocationId paired with the currently-active user
-  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
-  // root's spanId when no user span is active.
+  // Returns the invocation's invocationId paired with the currently-active user span's spanId
+  // (as pushed by `ctx.tracing.enterSpan`) and traceId, falling back to the invocation root's
+  // context when no user span is active.
   tracing::InvocationSpanContext getInvocationSpanContext() {
     auto userSpan = getCurrentUserTraceSpan();
     return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
