@@ -414,13 +414,12 @@ impl<'s> IoContext<'s> {
     /// [`v8::Local::<v8::Promise>::then`].
     ///
     /// As with `addFunctor()`, the reaction fails without running `on_fulfilled` if it runs while
-    /// another `IoContext`, or none, is current, and rejects the returned promise. That happens
-    /// when another request created the promise, or, without the
-    /// `handle_cross_request_promise_resolution` compatibility flag, when another request settles
-    /// it. With the flag, V8 runs the reaction in this `IoContext` instead, or never if this
-    /// `IoContext` is gone. The error is the one C++ throws for an I/O object of another request,
-    /// whether another `IoContext` or none is current, without the " (I/O type: ...)" suffix the
-    /// C++ one has.
+    /// another `IoContext`, or none, is current, and rejects the returned promise. That happens,
+    /// without the `handle_cross_request_promise_resolution` compatibility flag, when another
+    /// request settles the promise. With the flag, V8 runs the reaction in this `IoContext`
+    /// whichever request created or settles the promise, or never if this `IoContext` is gone.
+    /// The error is the one C++ throws for an I/O object of another request, whether another
+    /// `IoContext` or none is current, without the " (I/O type: ...)" suffix the C++ one has.
     ///
     /// Unlike `addFunctor()`, which gives the `IoContext` ownership of the continuation, `data` is
     /// held by the reaction, which the garbage collector traces, so it may hold `jsg::Rc`s and

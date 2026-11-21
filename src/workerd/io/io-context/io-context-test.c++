@@ -959,18 +959,32 @@ void collectGarbage(TestFixture& fixture, IoContext::IncomingRequest& request) {
 // In `request`, registers reactions with `kind` on a promise that the script `settle.resolve(v)` or
 // `settle.reject(e)` settles, with the value of the script `held` as their data, and has
 // `globalThis.outcome` record how the promise they return settles: "fulfilled: <value>", or the
-// value's `marker` for an object, or "rejected: <message>".
+// value's `marker` for an object, or "rejected: <message>". The promise is created in `createdIn`,
+// if given, and otherwise in `request`.
 void registerReaction(TestFixture& fixture,
     IoContext::IncomingRequest& request,
     ReactionKind kind,
-    kj::StringPtr held = "41"_kj) {
+    kj::StringPtr held = "41"_kj,
+    kj::Maybe<IoContext::IncomingRequest&> createdIn = kj::none) {
   reactionDataDropContextId = kj::none;
-  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
-    auto promise = runScript(env,
+  auto create = [](const TestFixture::Environment& env) {
+    runScript(env,
         "globalThis.outcome = 'pending';"
         "globalThis.settle = {};"
-        "new Promise((resolve, reject) => { settle.resolve = resolve; settle.reject = reject; })")
-                       .As<v8::Promise>();
+        "globalThis.created = new Promise((resolve, reject) => {"
+        "  settle.resolve = resolve; settle.reject = reject;"
+        "})");
+  };
+  KJ_IF_SOME(creator, createdIn) {
+    fixture.enterContext(creator, create);
+  } else {
+    fixture.enterContext(request, create);
+  }
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    // Taken out of the global, which would otherwise keep the promise alive.
+    auto promise =
+        runScript(env, "(() => { const p = created; delete globalThis.created; return p; })()")
+            .As<v8::Promise>();
     auto heldValue = runScript(env, held);
     v8::Local<v8::Value> returned =
         ::workerd::rust::jsg::local_from_ffi<v8::Promise>(::workerd::rust::jsg::Local{
@@ -1175,6 +1189,30 @@ KJ_TEST("with handle_cross_request_promise_resolution, a reaction that another r
 
   { auto released = kj::mv(otherPending); }
   fixture.drainAndDestroy(kj::mv(other));
+}
+
+KJ_TEST(
+    "with handle_cross_request_promise_resolution, a reaction on a promise that another request "
+    "creates and settles runs in the IoContext that registered it") {
+  capnp::MallocMessageBuilder flagsMessage;
+  TestFixture fixture(crossRequestResolutionParams(flagsMessage));
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+  auto ownerPending = context->registerPendingEvent();
+  auto otherPending = otherContext->registerPendingEvent();
+
+  registerReaction(fixture, *owner, ReactionKind::Then, "41"_kj, *other);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  fixture.pollEventLoop();
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 41");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  { auto released = kj::mv(ownerPending); }
+  { auto released = kj::mv(otherPending); }
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
 }
 
 // How the wait of the last await_js_start() ended.
