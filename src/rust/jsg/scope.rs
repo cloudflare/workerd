@@ -153,8 +153,10 @@ pub struct NestedScope<'t, 's>(PhantomData<&'t &'s ()>);
 /// The escape slot of the `v8::EscapableHandleScope` that [`Lock::with_escapable_handle_scope`]
 /// opens, which moves one handle of the new scope `'t` into the enclosing scope `'s`.
 ///
-/// Like [`NestedScope`], its type tells the compiler that `'s` outlives `'t`. V8 lets a scope
-/// escape one handle, so [`escape`](Self::escape) consumes it; it is neither `Copy` nor `Clone`.
+/// Like [`NestedScope`], its type tells the compiler that `'s` outlives `'t`. A scope can escape
+/// one handle: V8 only debug-checks a second escape, which in a release build overwrites the
+/// first escaped handle, so [`escape`](Self::escape) consumes the slot, which is neither `Copy`
+/// nor `Clone`.
 pub struct EscapableScope<'t, 's> {
     scope: NonNull<v8::ffi::EscapableHandleScope>,
     _marker: PhantomData<&'t &'s ()>,
@@ -163,6 +165,10 @@ pub struct EscapableScope<'t, 's> {
 impl<'t, 's> EscapableScope<'t, 's> {
     /// Returns a handle to `value` in the enclosing scope, where it stays valid after the new
     /// scope closes.
+    ///
+    /// `value` can be a handle of any scope open at the call, including one nested in the new
+    /// scope or the enclosing scope itself: V8 copies the value into a slot it reserved in the
+    /// enclosing scope when the new one opened.
     #[expect(
         unsafe_code,
         reason = "calls v8::EscapableHandleScope::Escape through the FFI"
@@ -170,9 +176,11 @@ impl<'t, 's> EscapableScope<'t, 's> {
     #[must_use]
     pub fn escape<T>(self, value: v8::Local<'t, T>) -> v8::Local<'s, T> {
         let mut scope = self.scope;
-        // SAFETY: the scope is open while the closure that got `self` runs, which `'t` covers,
-        // and `self` is consumed, so its slot is filled at most once. The escaped handle lives in
-        // the enclosing scope, `'s`, and points to the value `value` does, of type `T`.
+        // SAFETY: the scope is open while the closure that got `self` runs, which `'t` covers.
+        // `self` is consumed, so its slot is filled at most once; V8 only debug-checks that, and
+        // a second escape would retarget the first escaped handle. The escaped handle lives in
+        // the slot V8 reserved in the enclosing scope, `'s`, and points to the value `value`
+        // does, of type `T`.
         unsafe {
             v8::Local::from_ffi(v8::ffi::escapable_handle_scope_escape(
                 Pin::new_unchecked(scope.as_mut()),
@@ -279,10 +287,11 @@ impl<'s> Lock<'s> {
     /// Runs `f` in a new `v8::EscapableHandleScope`, which closes when `f` returns, and from
     /// which `f` can return one handle.
     ///
-    /// The scope frees the handles that `f` creates as [`with_handle_scope`](Self::with_handle_scope)'s
-    /// does, except the one that `f` passes to [`EscapableScope::escape`], which returns a handle
-    /// of this lock's scope that `f` can return, as a C++ `js.runInHandleScope()` callback
-    /// returns a `v8::Local` through a `v8::EscapableHandleScope`. Since `escape` is a method,
+    /// The scope frees the handles that `f` creates, as
+    /// [`with_handle_scope`](Self::with_handle_scope)'s does, except the one that `f` passes to
+    /// [`EscapableScope::escape`], which returns a handle of this lock's scope that `f` can
+    /// return, as a C++ `js.withinHandleScope()` callback returns a `v8::Local` through a
+    /// `v8::EscapableHandleScope`. Since `escape` is a method,
     /// `f` can return the handle in a `Result` or an `Option`, and fail without escaping any.
     ///
     /// ```ignore
