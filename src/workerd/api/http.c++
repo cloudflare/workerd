@@ -1490,12 +1490,7 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
   forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
-    // Once a Response is returned, we need to apply the output lock.
-    promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
-      auto& context = IoContext::current();
-      return context.awaitIo(js, context.waitForOutputLocks(),
-          [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
-    });
+    promise = waitForOutputLocks(js, kj::mv(promise));
   }
 
   KJ_SWITCH_ONEOF(state) {
@@ -1514,6 +1509,15 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
   }
 
   stopImmediatePropagation();
+}
+
+jsg::Promise<jsg::Ref<Response>> FetchEvent::waitForOutputLocks(
+    jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
+  return promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
+    auto& context = IoContext::current();
+    return context.awaitIo(js, context.waitForOutputLocks(),
+        [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
+  });
 }
 
 void FetchEvent::passThroughOnException() {
