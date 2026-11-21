@@ -580,22 +580,20 @@ void wrappable_clear_trait_object(Wrappable& wrappable);
 kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 
 // Wrappers
-// Returns the Wrappable's wrapper in `isolate`, creating it if needed, or an empty handle in one
-// of two cases, which `wrappedElsewhere` tells apart:
+// Returns the Wrappable's existing wrapper in `isolate`, or an empty handle when it has none, or
+// when an exception or a termination is pending: an existing wrapper isn't read then, so that
+// wrapping fails the same way whether or not the wrapper exists.
 //
-// - true: the Wrappable already has a wrapper in another isolate. That is a bug in the caller,
-//   which panics. This does not assert, because unwinding would drop the caller's reference to
-//   the Wrappable, and releasing it needs the other isolate's lock.
-// - false: an exception or a termination is pending, or creating the wrapper failed and the
-//   exception is left pending. Creating the wrapper (`ObjectTemplate::NewInstance`) prepares to
-//   run JavaScript, so it is not created while one is pending. An existing wrapper isn't read
-//   then either, so that wrapping fails the same way whether or not the wrapper exists.
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
-// The Wrappable's existing wrapper in `isolate`, as wrap_resource() returns it, without creating
-// one: empty also when the Wrappable has no wrapper yet, and `wrappedElsewhere` and a pending
-// exception or termination are as for wrap_resource().
+// Sets `wrappedElsewhere` when the Wrappable already has a wrapper in another isolate. That is a
+// bug in the caller, which panics. This does not assert, because unwinding would drop the caller's
+// reference to the Wrappable, and releasing it needs the other isolate's lock.
 MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& wrappedElsewhere);
+// Creates the wrapper of a Wrappable that wrappable_get_wrapper() returned none for, from the
+// resource's function template `tmpl`. Empty when an exception or a termination is pending, since
+// wrappable_get_wrapper() also returns none then, or when creating the wrapper failed, with the
+// exception left pending. Creating the wrapper (`ObjectTemplate::NewInstance`) prepares to run
+// JavaScript, so it is not created while one is pending.
+MaybeLocal wrap_resource(Isolate* isolate, Wrappable& wrappable, const Global& tmpl);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,
