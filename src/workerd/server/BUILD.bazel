@@ -280,7 +280,10 @@ wd_cc_library(
     visibility = [":__subpackages__"],
     deps = [
         ":channel-token_capnp",
+        "//src/rust/cxx/kj-rs",
         "//src/workerd/io",
+        "//src/workerd/server/channel-token-codec",
+        "//src/workerd/server/channel-token-codec:ffi.rs@cxx",
         "//src/workerd/util:entropy",
     ],
 )
