@@ -32,9 +32,16 @@
 //                    `path`, or with `rpc` set its identity() method. Returns
 //                    the target's response. A failure is reported with the
 //                    error's `retryable`.
+//   /hold-stubs      Like /hold-stub, `n` stubs at once, each to the DO named
+//                    by `target`, kept for /call-stub-n. Returns the node each
+//                    reached.
+//   /call-stub-n     Calls /identity, or the path given by `path`, on the stub
+//                    /hold-stubs keeps at index `i`. Returns the target's
+//                    response, or `{ error }` with status 500.
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /hold-increment  Waits `ms` (default 1000), then increments.
+//   /holding         Returns how many /hold-increment requests are waiting.
 //   /chain?targets=T Waits `ms` (default 0), sends /chain with the rest of the
 //                    DO names `targets` lists, separated by commas, to the
 //                    first, then increments: a call through other DOs, or
@@ -113,6 +120,31 @@ export default {
       return env.ON_HIBERNATE.fetch(request);
     }
 
+    // One turn of the node's event loop, as long as the caller makes it:
+    // JavaScript that yields to nothing for `n` million iterations. `took` is
+    // how long the turn took by the node's clock, which a Worker reads anew
+    // only once it awaits something: from the request's start to the timer's.
+    if (url.pathname === '/spin') {
+      const start = Date.now();
+      const n = Number(url.searchParams.get('n'));
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < 1_000_000; j++) {
+          sum = (sum * 31 + j) | 0;
+        }
+      }
+      await scheduler.wait(1);
+      return Response.json({ sum, took: Date.now() - start });
+    }
+
+    // A turn of the node's event loop that never ends.
+    if (url.pathname === '/wedge') {
+      let sum = 0;
+      for (;;) {
+        sum = (sum * 31 + 1) | 0;
+      }
+    }
+
     if (url.pathname.startsWith('/kv/')) {
       if (url.pathname === '/kv/clock' || url.pathname === '/kv/gc') {
         const r = await env.KV_WORKER.fetch(
@@ -123,6 +155,7 @@ export default {
       }
       return kv(url, env.KV);
     }
+    if (url.pathname.startsWith('/r2/')) return r2(url, env.R2);
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
@@ -188,6 +221,80 @@ async function kv(url, ns) {
       const options = { prefix: q.prefix, cursor: q.cursor };
       if (q.limit) options.limit = Number(q.limit);
       return Response.json(await ns.list(options));
+    }
+  }
+  return Response.json({ error: 'no such path' }, { status: 404 });
+}
+
+// The R2 binding, by query parameters: /r2/put?key=K&size=N[&meta=M] (N
+// bytes, each its index mod 251, with M bytes of customMetadata), /r2/get?key=K[&offset=O&length=L] (answers the bytes'
+// length and whether they are right), /r2/list?prefix=P, /r2/delete?key=K,
+// and a multipart upload's /r2/create?key=K, /r2/part?key=K&upload=U&n=N
+// &size=S and /r2/complete?key=K&upload=U&parts=JSON. Answers JSON.
+async function r2(url, bucket) {
+  const q = Object.fromEntries(url.searchParams);
+  // Built and compared with native copies and hashes: a loop over each
+  // byte of a multipart object holds the node's thread for seconds in
+  // debug builds, past its lease.
+  const bytes = (size, from = 0) => {
+    const out = new Uint8Array(size);
+    for (let i = 0; i < Math.min(size, 251); i++) out[i] = (from + i) % 251;
+    for (let n = 251; n < size; n *= 2) out.copyWithin(n, 0, n);
+    return out;
+  };
+  const digest = async (b) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', b)).join();
+  switch (url.pathname) {
+    case '/r2/put': {
+      const customMetadata = { m: 'x'.repeat(Number(q.meta ?? 0)) };
+      try {
+        const put = await bucket.put(q.key, bytes(Number(q.size)), {
+          customMetadata,
+        });
+        return Response.json({ etag: put.etag });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 400 });
+      }
+    }
+    case '/r2/get': {
+      const range = q.length
+        ? { offset: Number(q.offset), length: Number(q.length) }
+        : undefined;
+      const got = await bucket.get(q.key, { range });
+      if (got === null) return Response.json(null);
+      const value = new Uint8Array(await got.arrayBuffer());
+      const want = bytes(value.length, Number(q.offset ?? 0));
+      const right = (await digest(value)) === (await digest(want));
+      return Response.json({ size: got.size, length: value.length, right });
+    }
+    case '/r2/list': {
+      // Keys, each listed with the version a head answers.
+      const listed = await bucket.list({ prefix: q.prefix });
+      for (const o of listed.objects) {
+        const head = await bucket.head(o.key);
+        if (head.version !== o.version) return Response.json({ o, head });
+      }
+      return Response.json(listed.objects.map((o) => o.key));
+    }
+    case '/r2/delete':
+      await bucket.delete(q.key);
+      return Response.json({});
+    case '/r2/create': {
+      const upload = await bucket.createMultipartUpload(q.key);
+      return Response.json({ upload: upload.uploadId });
+    }
+    case '/r2/part': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const size = Number(q.size);
+      const n = Number(q.n);
+      return Response.json(
+        await upload.uploadPart(n, bytes(size, (n - 1) * size))
+      );
+    }
+    case '/r2/complete': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const object = await upload.complete(JSON.parse(q.parts));
+      return Response.json({ size: object.size, etag: object.etag });
     }
   }
   return Response.json({ error: 'no such path' }, { status: 404 });
@@ -274,6 +381,8 @@ export class Counter extends DurableObject {
     this.env = env;
     // See /hold-stub. Maps target DO name -> stub.
     this.heldStubs = new Map();
+    // See /holding.
+    this.holding = 0;
 
     state.blockConcurrencyWhile(async () => {
       if (await state.storage.get(BREAK_ON_CONSTRUCT)) {
@@ -368,6 +477,34 @@ export class Counter extends DurableObject {
           { status: 500 }
         );
       }
+    } else if (url.pathname === '/hold-stubs') {
+      const target = url.searchParams.get('target');
+      const n = Number(url.searchParams.get('n'));
+      this.heldStubList = Array.from({ length: n }, () =>
+        this.env.COUNTER.get(this.env.COUNTER.idFromName(target))
+      );
+      const reached = await Promise.all(
+        this.heldStubList.map(
+          async (stub) =>
+            (await (await stub.fetch('http://do/identity')).json()).nodeId
+        )
+      );
+      return Response.json({ nodeId, id: idHex, reached });
+    } else if (url.pathname === '/call-stub-n') {
+      const stub = this.heldStubList[Number(url.searchParams.get('i'))];
+      try {
+        const response = await stub.fetch(
+          'http://do' + (url.searchParams.get('path') ?? '/identity')
+        );
+        if (!response.ok) return response;
+        return Response.json({
+          nodeId,
+          id: idHex,
+          target: await response.json(),
+        });
+      } catch (err) {
+        return Response.json({ error: String(err) }, { status: 500 });
+      }
     } else if (url.pathname === '/vend-stub') {
       const kind = url.searchParams.get('kind');
       const target = url.searchParams.get('target');
@@ -406,10 +543,17 @@ export class Counter extends DurableObject {
       await scheduler.wait(1000);
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/hold-increment') {
-      await scheduler.wait(Number(url.searchParams.get('ms') ?? '1000'));
+      this.holding++;
+      try {
+        await scheduler.wait(Number(url.searchParams.get('ms') ?? '1000'));
+      } finally {
+        this.holding--;
+      }
       const count = ((await this.state.storage.get('count')) ?? 0) + 1;
       await this.state.storage.put('count', count);
       return Response.json({ count, nodeId, id: idHex });
+    } else if (url.pathname === '/holding') {
+      return Response.json({ holding: this.holding, nodeId, id: idHex });
     } else if (url.pathname === '/chain') {
       await scheduler.wait(Number(url.searchParams.get('ms') ?? '0'));
       const [next, ...rest] = (url.searchParams.get('targets') ?? '')
@@ -422,6 +566,9 @@ export class Counter extends DurableObject {
           `http://do/chain?ms=${ms}&targets=${rest.join(',')}`
         );
         if (!response.ok) return response;
+        // Until its body is read, the called DO counts as busy, and a drain
+        // waits for it until it cancels the requests in flight.
+        await response.arrayBuffer();
       }
       const count = ((await this.state.storage.get('count')) ?? 0) + 1;
       await this.state.storage.put('count', count);

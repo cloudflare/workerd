@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
 import promises from 'node:readline/promises';
+import { promisify } from 'node:util';
 
 export const readlineClearLine = {
   test() {
@@ -274,5 +275,24 @@ export const readlineImportedPromisesModule = {
   test() {
     assert.strictEqual(typeof promises, 'object');
     assert.strictEqual(typeof promises.createInterface, 'function');
+  },
+};
+
+export const readlinePromisifiedQuestion = {
+  async test() {
+    const rl = readline.createInterface();
+    const question = promisify(rl.question);
+    assert.strictEqual(
+      question,
+      readline.Interface.prototype.question[promisify.custom]
+    );
+    assert.strictEqual(await question.call(rl, 'name?'), '');
+
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      question.call(rl, 'name?', { signal: controller.signal }),
+      { name: 'AbortError' }
+    );
   },
 };

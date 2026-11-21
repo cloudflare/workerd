@@ -8,7 +8,6 @@
 #include <workerd/io/features.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/stream-utils.h>
 
 namespace workerd::api {
 

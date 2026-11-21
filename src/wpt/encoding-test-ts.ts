@@ -25,6 +25,7 @@ export default {
   'api-invalid-label.any.js': {},
   'api-replacement-encodings.any.js': {},
   'api-surrogates-utf8.any.js': {},
+  'encodeInto-tail-unmodified.any.js': {},
   'encodeInto.any.js': {
     comment: 'Requires MessageChannel.postMessage transfer list support',
     expectedFailures: ['encodeInto() and a detached output buffer'],
@@ -125,15 +126,7 @@ export default {
     comment: 'ReferenceError: window is not defined',
     omittedTests: true,
   },
-  'textdecoder-arguments.any.js': {
-    comment:
-      'TextDecoder does not detach the underlying ArrayBuffer during options argument conversion',
-    disabledTests: [
-      // Behavior differs between platforms: on Windows this test passes while
-      // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
-      'TextDecoder decode() with array buffer detached during arg conversion',
-    ],
-  },
+  'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
   'textdecoder-copy.any.js': {},
   'textdecoder-eof.any.js': {},
@@ -142,16 +135,7 @@ export default {
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},
   'textdecoder-labels.any.js': {},
-  'textdecoder-mistakes.any.js': {
-    comment:
-      'Fatal streaming decoders discard their state on error, so iso-2022-jp state is not preserved and the ASCII byte that ends an incomplete EUC-JP JIS0212 sequence is dropped instead of being decoded',
-    disabledTests: [
-      // Behavior differs between platforms: on Windows this test passes while
-      // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
-      'fatal stream: iso-2022-jp',
-    ],
-    expectedFailures: ['EUC-JP JIS0212 state after a fatal streaming error'],
-  },
+  'textdecoder-mistakes.any.js': {},
   'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {},
   'textencoder-constructor-non-utf.any.js': {},

@@ -15,6 +15,10 @@ fn allocation_failure_is_a_range_error() {
 
 #[test]
 fn other_failures_are_plain_errors() {
-    let error = jsg::Error::from(TranscodeError::OddUtf16leInput);
+    let error = jsg::Error::from(TranscodeError::InvalidChar);
     assert_eq!(error.name, ExceptionType::Error);
+    assert_eq!(
+        error.message,
+        "Unable to transcode Buffer [U_INVALID_CHAR_FOUND]"
+    );
 }

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
-#include "canceler.h"
+#include <workerd/util/canceler.h>
 
 #include <kj/compat/http.h>
 

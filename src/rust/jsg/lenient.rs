@@ -2,119 +2,57 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use crate::NullOrUndefined;
-use crate::Nullable;
-use crate::v8::TracedGlobal;
-use crate::v8::Value;
-
-/// [`Lenient<T>`] is a type for lenient conversion from JavaScript, akin to the
-/// C++ type `LenientOptional`.
+/// An optional `T` that a value of the wrong type leaves absent, like C++ JSG's
+/// `jsg::LenientOptional<T>`.
 ///
-/// It is an alternative to [`NullOrUndefined<T>`] that treats type mismatches as `undefined`
-/// instead of erroring. When `T::try_from_js` reports a shallow conversion mismatch, the
-/// original JS value is preserved as [`Lenient::Unconvertable`] rather than propagating the error.
-/// [`Lenient::Unconvertable`] is considered `undefined` when passed to JavaScript or when
-/// converted into a [`NullOrUndefined<T>`]. Errors from nested conversions or JavaScript
-/// execution still propagate.
+/// `undefined` is absent. Any other value, `null` included, goes through `T`'s conversion,
+/// and a top-level type mismatch is absent too rather than an error. So `null` is `"null"`
+/// for a `LenientOption<String>`, but absent for a `LenientOption<jsg::Rc<R>>`. Errors from
+/// nested conversions or from JavaScript run during the conversion still propagate, and so
+/// do errors from a coercing `T`: a `LenientOption<u32>` takes `null` as `0`, and `'abc'` or
+/// `-1` is a `TypeError`, as for C++ `LenientOptional<uint32_t>`.
 ///
-/// [`Lenient`] is intentionally minimal — it is designed for crossing the Rust<->C++ FFI
-/// boundary, with the possibility of inspecting the JS value. For general-purpose Rust
-/// code, prefer converting to [`NullOrUndefined<T>`].
-pub enum Lenient<T> {
-    Some(T),
-    Unconvertable(TracedGlobal<Value>),
-    Null,
-    Undefined,
-}
+/// An absent value converts to `undefined`. As a method argument it may be omitted, and as a
+/// `#[jsg_struct]` field it is optional, as an [`Option<T>`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LenientOption<T>(pub Option<T>);
 
-impl<T> Lenient<T> {
-    /// Returns `true` if the lenient contains a value.
-    pub fn is_some(&self) -> bool {
-        matches!(self, Self::Some(_))
-    }
-
-    /// Returns `true` if the lenient is `Null`.
-    pub fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    /// # Warning
-    /// This functions considers [`Lenient::Unconvertable`] to be undefined
-    ///
-    /// Returns `true` if the lenient is `Undefined` OR failed to
-    /// convert into `T` across the ffi boundary
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, Self::Undefined | Self::Unconvertable(_))
-    }
-
-    /// Returns `true` if the lenient is `Undefined`
-    pub fn is_undefined_strict(&self) -> bool {
-        matches!(self, Self::Undefined)
-    }
-
-    /// Returns `true` if the lenient failed to convert into `T` across
-    /// the ffi boundary
-    pub fn is_unconvertable(&self) -> bool {
-        matches!(self, Self::Unconvertable(_))
-    }
-
-    /// Splits `self` into a [`NullOrUndefined<T>`] and the original value of a
-    /// failed shallow conversion, if any.
-    ///
-    /// `Some`, `Null`, and `Undefined` preserve their states, with no original
-    /// value in the second element. `Unconvertable` becomes `Undefined`, with
-    /// its original JavaScript value in the second element.
-    pub fn to_parts(self) -> (NullOrUndefined<T>, Option<TracedGlobal<Value>>) {
-        match self {
-            Self::Some(v) => (NullOrUndefined::Some(v), None),
-            Self::Unconvertable(global) => (NullOrUndefined::Undefined, Some(global)),
-            Self::Null => (NullOrUndefined::Null, None),
-            Self::Undefined => (NullOrUndefined::Undefined, None),
-        }
+impl<T> LenientOption<T> {
+    /// Returns the contained `Option<T>`.
+    pub fn into_inner(self) -> Option<T> {
+        self.0
     }
 }
 
-impl<T> From<Lenient<T>> for NullOrUndefined<T> {
-    fn from(value: Lenient<T>) -> Self {
-        match value {
-            Lenient::Some(v) => Self::Some(v),
-            Lenient::Null => Self::Null,
-            Lenient::Unconvertable(_) | Lenient::Undefined => Self::Undefined,
-        }
+/// Derefs to the contained `Option<T>`, as C++ `LenientOptional<T>` is a `kj::Maybe<T>`.
+impl<T> std::ops::Deref for LenientOption<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Option<T> {
+        &self.0
     }
 }
 
-impl<T> From<NullOrUndefined<T>> for Lenient<T> {
-    fn from(value: NullOrUndefined<T>) -> Self {
-        match value {
-            NullOrUndefined::Some(v) => Self::Some(v),
-            NullOrUndefined::Null => Self::Null,
-            NullOrUndefined::Undefined => Self::Undefined,
-        }
+impl<T> std::ops::DerefMut for LenientOption<T> {
+    fn deref_mut(&mut self) -> &mut Option<T> {
+        &mut self.0
     }
 }
 
-impl<T> From<Lenient<T>> for Option<Nullable<T>> {
-    fn from(value: Lenient<T>) -> Self {
-        match value {
-            Lenient::Some(v) => Some(Nullable::Some(v)),
-            Lenient::Null => Some(Nullable::Null),
-            Lenient::Unconvertable(_) | Lenient::Undefined => None,
-        }
+impl<T> Default for LenientOption<T> {
+    fn default() -> Self {
+        Self(None)
     }
 }
 
-impl<T> From<Nullable<T>> for Lenient<T> {
-    fn from(value: Nullable<T>) -> Self {
-        match value {
-            Nullable::Some(v) => Self::Some(v),
-            Nullable::Null => Self::Null,
-        }
+impl<T> From<Option<T>> for LenientOption<T> {
+    fn from(value: Option<T>) -> Self {
+        Self(value)
     }
 }
 
-impl<T> From<Option<Nullable<T>>> for Lenient<T> {
-    fn from(value: Option<Nullable<T>>) -> Self {
-        value.map_or(Self::Undefined, Self::from)
+impl<T> From<LenientOption<T>> for Option<T> {
+    fn from(value: LenientOption<T>) -> Self {
+        value.0
     }
 }

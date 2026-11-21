@@ -7,7 +7,7 @@ load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS")
+load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS", "HEADER_ONLY_CHECKS")
 
 # Canonical name of the capnp-cpp repository (e.g. "+http+capnp-cpp"), as it appears in include
 # paths: `external/<repo>/...` and `bazel-out/<config>/bin/external/<repo>/...`.
@@ -35,6 +35,8 @@ def _get_disabled_checks_for_file(file_path):
 
     Checks listed in CHECK_PATH_FILTERS are only enabled for files under their
     allowed paths. For files not under any allowed path, the check is disabled.
+    Checks listed in HEADER_ONLY_CHECKS are only enabled for header files and
+    disabled otherwise.
     """
     disabled = []
     for check, allowed_paths in CHECK_PATH_FILTERS.items():
@@ -51,6 +53,10 @@ def _get_disabled_checks_for_file(file_path):
                 break
         if not enabled:
             disabled.append(check)
+
+    if not file_path.endswith(".h"):
+        disabled.extend(HEADER_ONLY_CHECKS)
+
     return disabled
 
 def _clang_tidy_aspect_impl(target, ctx):

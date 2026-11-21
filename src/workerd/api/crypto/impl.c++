@@ -231,6 +231,15 @@ kj::EncodingResult<kj::Array<kj::byte>> decodeBase64Url(kj::String text) {
   return kj::decodeBase64(text);
 }
 
+void CryptoKey::Impl::requireExportable() const {
+  JSG_REQUIRE(supportsExport(), DOMNotSupportedError, "Unrecognized or unsupported export of \"",
+      getAlgorithmName(), "\" requested.");
+  // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
+  //   Web IDL says that's deprecated.
+  JSG_REQUIRE(isExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
+      getAlgorithmName(), " key.");
+}
+
 bool CryptoKey::Impl::equals(const kj::Array<kj::byte>&) const {
   return false;
 }

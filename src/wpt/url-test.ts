@@ -69,6 +69,7 @@ export default {
     // Node does the same: https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L24
     omittedTests: true,
   },
+  'url-setters-lone-surrogates.any.js': {},
   'url-setters-stripping.any.js': {},
   'url-setters.any.js': {},
   'url-statics-canparse.any.js': {},

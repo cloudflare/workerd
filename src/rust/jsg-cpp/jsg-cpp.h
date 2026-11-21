@@ -25,9 +25,6 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
 
-#include <kj-rs/kj-rs.h>
-#include <rust/cxx.h>
-
 #include <kj/memory.h>
 
 namespace workerd::rust::jsg_cpp {

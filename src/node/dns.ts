@@ -6,7 +6,10 @@
 import type nodejsDns from 'node:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import * as dns from 'node-internal:internal_dns';
-import { callbackify } from 'node-internal:internal_utils';
+import {
+  callbackify,
+  setCustomPromisifyArgs,
+} from 'node-internal:internal_utils';
 import * as dnsPromises from 'node-internal:internal_dns_promises';
 
 export * from 'node-internal:internal_dns_constants';
@@ -30,6 +33,8 @@ export const getDefaultResultOrder = dns.getDefaultResultOrder.bind(dns);
 export const setDefaultResultOrder = dns.setDefaultResultOrder.bind(dns);
 export const lookup = dns.lookup.bind(dns);
 export const lookupService = callbackify(dns.lookupService.bind(this));
+setCustomPromisifyArgs(lookup, ['address', 'family']);
+setCustomPromisifyArgs(lookupService, ['hostname', 'service']);
 export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
 

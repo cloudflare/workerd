@@ -388,6 +388,10 @@ fn check_deployment(
                 "{owner} defines bucket service \"{name}\". A deployment cannot define a \
                  bucket service. Define it in the instance's config and refer to it by name."
             )),
+            Ok(service::Which::Cache(_)) => errors.push(format!(
+                "{owner} defines cache service \"{name}\". A deployment cannot define a \
+                 cache service. Define it in the instance's config and refer to it by name."
+            )),
             Ok(service::Which::Worker(worker)) => {
                 let worker = worker?;
                 let context = format!("service \"{name}\" in {owner}");

@@ -235,7 +235,12 @@ jobs:
         # dependencies of header targets properly).
         if: inputs.parse_headers
         run: |
-          bazel build --config=parse_headers ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} //src/workerd/util
+          bazel build --config=parse_headers ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} \
+            //src/workerd/util \
+            //src/workerd/util:abortable \
+            //src/workerd/util:canceler \
+            //src/workerd/util:http-util \
+            //src/workerd/util:stream-utils
       - name: Upload test logs
         if: always() && inputs.upload_test_logs
         uses: actions/upload-artifact@v7

@@ -66,6 +66,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjMaybe;
@@ -114,24 +115,58 @@ fn disconnected(what: impl Display) -> KjError {
     KjError::new(KjExceptionType::Disconnected, what.to_string())
 }
 
-/// What kj's `HttpClient` fails with when a response head doesn't parse. `fetch()` in
-/// `workerd/api/http.c++` matches this text to report an invalid response.
+/// What kj's `HttpClient` fails with when a response head doesn't parse.
 const INVALID_RESPONSE: &str = "The headers sent by the server are not valid.";
 
-/// A request's failure: FAILED with kj's message for a response head that doesn't parse, the
-/// I/O error behind it when there is one, else DISCONNECTED (hyper reports a connection that
-/// went away in several shapes). A DISCONNECTED message names every cause: on its own,
-/// `hyper-util`'s error says only `client error (SendRequest)`.
+/// The `kj::Exception` detail on a request's failure when the response head didn't parse.
+///
+/// The payload is the reason, as UTF-8. The same ID as `INVALID_RESPONSE_DETAIL_ID` in
+/// `workerd/jsg/exception.h`, which `fetch()` reads to report an invalid response.
+pub const INVALID_RESPONSE_DETAIL_ID: u64 = 0xb1fc_1336_36df_86e3;
+
+/// What a request fails with, followed by the cause, when the connection for it couldn't be made
+/// and the I/O error behind that is FAILED, as a failed DNS lookup or TLS handshake is.
+const CONNECT_FAILED: &str = "Could not connect to the server:";
+
+/// The `kj::Exception` detail on a request's failure when the connection couldn't be made.
+///
+/// Set with [`CONNECT_FAILED`], when the I/O error behind the failure is FAILED. The payload is
+/// the cause, as UTF-8. The same ID as `CONNECT_FAILED_DETAIL_ID` in `workerd/jsg/exception.h`,
+/// which `fetch()` reads to report a network error.
+pub const CONNECT_FAILED_DETAIL_ID: u64 = 0x4356_f673_7342_b412;
+
+/// `error` with a detail of type `id` whose payload is `reason`.
+fn with_reason(error: KjError, id: u64, reason: String) -> KjError {
+    error.with_details(vec![(id, reason.into_bytes())])
+}
+
+/// A request's failure as a kj exception.
+///
+/// FAILED with kj's message for a response head that doesn't parse (and an
+/// [`INVALID_RESPONSE_DETAIL_ID`] detail), the I/O error behind it when there is one (FAILED ones
+/// while connecting after [`CONNECT_FAILED`], with a [`CONNECT_FAILED_DETAIL_ID`] detail), else
+/// DISCONNECTED (hyper reports a connection that went away in several shapes). A DISCONNECTED
+/// message names every cause: on its own, `hyper-util`'s error says only
+/// `client error (SendRequest)`.
 fn client_error(error: &(dyn Error + 'static)) -> KjError {
+    let connecting = error
+        .downcast_ref::<legacy::Error>()
+        .is_some_and(legacy::Error::is_connect);
     let mut source = Some(error);
     while let Some(e) = source {
         if let Some(io) = e.downcast_ref::<io::Error>() {
+            if connecting && kj_rs_io::exception_type(io) == KjExceptionType::Failed {
+                let cause = io.to_string();
+                let error = failed(format_args!("{CONNECT_FAILED} {cause}"));
+                return with_reason(error, CONNECT_FAILED_DETAIL_ID, cause);
+            }
             return io_kj_error(io);
         }
         if e.downcast_ref::<hyper::Error>()
             .is_some_and(hyper::Error::is_parse)
         {
-            return failed(format_args!("{INVALID_RESPONSE} ({})", causes(error)));
+            let reason = format!("{INVALID_RESPONSE} ({})", causes(error));
+            return with_reason(failed(&reason), INVALID_RESPONSE_DETAIL_ID, reason);
         }
         source = e.source();
     }
@@ -852,10 +887,10 @@ async fn pump_body(mut body: Pin<&mut AsyncInputStream>, sink: BodySink, abort: 
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl Service for Client<'_> {
-    async fn request<'a>(
-        &'a mut self,
+impl Client<'_> {
+    /// The request [`Service::request`] makes, failing with a [`KjError`].
+    async fn exchange<'a>(
+        &'a self,
         method: Method,
         url: &'a [u8],
         headers: HeadersRef<'a>,
@@ -897,6 +932,22 @@ impl Service for Client<'_> {
             Either::Right(((), exchange)) => exchange.await,
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for Client<'_> {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        request_body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> ServiceResult {
+        Ok(self
+            .exchange(method, url, headers, request_body, response)
+            .await?)
+    }
 
     fn connect<'a, 'b>(
         &'a mut self,
@@ -905,7 +956,7 @@ impl Service for Client<'_> {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'b>>
+    ) -> Pin<Box<dyn Future<Output = ServiceResult> + 'b>>
     where
         'a: 'b,
         Self: 'b,
@@ -925,7 +976,8 @@ impl Service for Client<'_> {
             }
             _ => None,
         };
-        Box::pin(self.connect_with(host, headers, connection, response, use_tls, upgrade))
+        let connection = self.connect_with(host, headers, connection, response, use_tls, upgrade);
+        Box::pin(async move { Ok(connection.await?) })
     }
 }
 

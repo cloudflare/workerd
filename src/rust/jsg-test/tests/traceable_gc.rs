@@ -61,12 +61,7 @@ impl jsg::Traced for StreamState {
 #[jsg_resource]
 struct StreamController {
     pub state: StreamState,
-}
-
-impl Drop for StreamController {
-    fn drop(&mut self) {
-        ENUM_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -81,6 +76,7 @@ fn enum_unit_variant_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             StreamController {
+                drops: crate::DropCounter(&ENUM_PARENT_DROPS),
                 state: StreamState::Closed,
             },
         );
@@ -112,6 +108,7 @@ fn enum_variant_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             StreamController {
+                drops: crate::DropCounter(&ENUM_PARENT_DROPS),
                 state: StreamState::Readable(child.clone(lock)),
             },
         );
@@ -147,6 +144,7 @@ fn enum_named_variant_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             StreamController {
+                drops: crate::DropCounter(&ENUM_PARENT_DROPS),
                 state: StreamState::Errored {
                     reason: child.clone(lock),
                 },
@@ -208,12 +206,7 @@ struct Link {
 #[jsg_resource]
 struct Node {
     pub link: jsg::RefCell<Option<Link>>,
-}
-
-impl Drop for Node {
-    fn drop(&mut self) {
-        NODE_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -223,12 +216,7 @@ impl Node {}
 #[jsg_resource]
 struct Back {
     node: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
-}
-
-impl Drop for Back {
-    fn drop(&mut self) {
-        BACK_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -247,12 +235,14 @@ fn cycle_through_struct_field_is_collected() {
         let back = jsg::Rc::new(
             lock,
             Back {
+                drops: crate::DropCounter(&BACK_DROPS),
                 node: jsg::Cell::new(None),
             },
         );
         let node = jsg::Rc::new(
             lock,
             Node {
+                drops: crate::DropCounter(&NODE_DROPS),
                 link: jsg::RefCell::new(Some(Link {
                     target: back.clone(lock),
                 })),
@@ -290,12 +280,7 @@ struct ValueLink {
 #[jsg_resource]
 struct Holder {
     pub link: jsg::RefCell<Option<ValueLink>>,
-}
-
-impl Drop for Holder {
-    fn drop(&mut self) {
-        HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -319,6 +304,7 @@ fn cycle_through_struct_js_value_field_is_collected() {
         let holder = jsg::Rc::new(
             lock,
             Holder {
+                drops: crate::DropCounter(&HOLDER_DROPS),
                 link: jsg::RefCell::new(None),
             },
         );
@@ -348,6 +334,7 @@ fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
         let holder = jsg::Rc::new(
             lock,
             Holder {
+                drops: crate::DropCounter(&HOLDER_DROPS),
                 link: jsg::RefCell::new(None),
             },
         );

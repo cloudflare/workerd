@@ -4,7 +4,10 @@
 
 #pragma once
 
+// r2.h is used to allow including several R2 headers at once, even if they are not used directly
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include "r2-bucket.h"
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include "r2-multipart.h"
 
 namespace workerd::api::public_beta {

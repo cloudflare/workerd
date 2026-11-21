@@ -1,7 +1,15 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { Duplex, Readable, Writable, finished } from 'node:stream';
+import {
+  Duplex,
+  Readable,
+  Writable,
+  finished,
+  pipeline,
+  promises,
+} from 'node:stream';
+import { promisify } from 'node:util';
 import { strictEqual, deepStrictEqual, ok } from 'node:assert';
 import { mock } from 'node:test';
 
@@ -207,5 +215,12 @@ export const testFinishedHeaderBearingWritableCompletesAtFinish = {
     strictEqual(outcome, 'finished()');
     strictEqual(sink.writableFinished, true);
     strictEqual(sink.closed, false);
+  },
+};
+
+export const testPromisifiedPipelineAndFinished = {
+  test() {
+    strictEqual(promisify(pipeline), promises.pipeline);
+    strictEqual(promisify(finished), promises.finished);
   },
 };

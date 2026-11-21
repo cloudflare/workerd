@@ -50,16 +50,20 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate,
 
 namespace rust::jsg_test {
 
-// Lazy initialization of V8System to avoid static initialization order issues
-static ::workerd::jsg::V8System& getV8System() {
-  // Lets tests optimize functions on demand to reach fast callbacks.
-  static ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
-  return v8System;
-}
+namespace {
+// Constructed during static initialization so that V8 starts up on the main thread, before the
+// Rust test harness spawns any test thread, and is torn down on that same thread at exit. On
+// Linux x86-64 V8 protects JIT memory, such as the WebAssembly code pointer table, with a memory
+// protection key that it allocates as the platform is created. Only the allocating thread gets
+// access to the key, and threads inherit their access from the thread that creates them, so V8
+// must start before any thread that will use it. `--allow-natives-syntax` lets tests optimize
+// functions on demand to reach fast callbacks.
+::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
+}  // namespace
 
 TestHarness::TestHarness(
     ::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags, FastApi fastApi)
-    : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
+    : isolate(kj::heap<TestIsolate>(v8System, kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
@@ -262,7 +266,7 @@ void TestHarness::run_in_context(
       // As Worker::Worker does in the zygote: the serializer callbacks are registered with the
       // context, the top level runs, and the context handle and the Rust realm's templates are
       // handed to createSnapshotBlob().
-      auto zygote = kj::heap<TestIsolate>(getV8System(), ::workerd::jsg::newIsolateGroup(), nullptr,
+      auto zygote = kj::heap<TestIsolate>(v8System, ::workerd::jsg::newIsolateGroup(), nullptr,
           kj::heap<::workerd::jsg::IsolateObserver>(),
           ::workerd::jsg::defaultExternalStringAllocator(), v8::Isolate::CreateParams{}, true,
           ::workerd::jsg::SnapshotConfig(::workerd::jsg::MutableSnapshot{
@@ -300,7 +304,7 @@ void TestHarness::run_in_context(
       artifact = zygote->extractSnapshotArtifact();
     }
 
-    auto isolate = kj::heap<TestIsolate>(getV8System(), ::workerd::jsg::newIsolateGroup(), nullptr,
+    auto isolate = kj::heap<TestIsolate>(v8System, ::workerd::jsg::newIsolateGroup(), nullptr,
         kj::heap<::workerd::jsg::IsolateObserver>(),
         ::workerd::jsg::defaultExternalStringAllocator(), v8::Isolate::CreateParams{}, true,
         ::workerd::jsg::SnapshotConfig(
@@ -382,10 +386,54 @@ void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callba
   callback(data);
 }
 
+namespace {
+// Records what is logged on this thread while it lives, as kj::_::LogExpectation does for
+// KJ_EXPECT_LOG.
+class LogCapture final: public kj::ExceptionCallback {
+ public:
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    auto entry = kj::str(severity, ": ", text);
+    messages.push_back(::rust::String::lossy(entry.begin(), entry.size()));
+  }
+
+  ::rust::Vec<::rust::String> messages;
+};
+}  // namespace
+
+::rust::Vec<::rust::String> capture_kj_logs(size_t data, ::rust::Fn<void(size_t)> callback) {
+  // kj::_::Debug has no getter for the severity, so the lowest one that is logged is found.
+  auto previous = kj::LogSeverity::DBG;
+  for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
+         kj::LogSeverity::FATAL}) {
+    if (kj::_::Debug::shouldLog(severity)) {
+      previous = severity;
+      break;
+    }
+  }
+  kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+  KJ_DEFER(kj::_::Debug::setLogLevel(previous));
+  LogCapture capture;
+  callback(data);
+  return kj::mv(capture.messages);
+}
+
+void fail_with_kj_exception(::rust::Str description) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::heapString(description.data(), description.size())));
+}
+
 size_t used_global_handles_size(Isolate* isolate) {
   v8::HeapStatistics stats;
   isolate->GetHeapStatistics(&stats);
   return stats.used_global_handles_size();
+}
+
+int number_of_handles(Isolate* isolate) {
+  return v8::HandleScope::NumberOfHandles(isolate);
 }
 
 int64_t external_memory(Isolate* isolate) {
@@ -522,6 +570,16 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
 
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed) {
   ::workerd::jsg::Lock::from(isolate).setDisallowJavascriptExecution(disallowed);
+}
+
+void set_allow_eval(Isolate* isolate, bool allow) {
+  ::workerd::jsg::Lock::from(isolate).setAllowEval(allow);
+}
+
+::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
+    Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module) {
+  return ::workerd::rust::jsg::to_ffi(
+      ::workerd::jsg::check(v8::WasmModuleObject::FromCompiledModule(isolate, *module)));
 }
 
 void set_error_slots(
