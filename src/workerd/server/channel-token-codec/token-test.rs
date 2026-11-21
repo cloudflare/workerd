@@ -278,3 +278,184 @@ fn a_large_token_spans_segments_and_round_trips() {
     };
     assert_eq!(json_of(&props.unwrap()), big);
 }
+
+/// A token of golden-tokens.txt.
+struct GoldenToken {
+    name: &'static str,
+    usage: Usage,
+    token_type: Type,
+    /// Whether the codec writes the same bytes from the same contents.
+    same_layout: bool,
+    token: Vec<u8>,
+}
+
+fn golden_tokens() -> Vec<GoldenToken> {
+    include_str!("golden-tokens.txt")
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let [name, usage, token_type, layout, hex] = line.split(' ').collect::<Vec<_>>()[..]
+            else {
+                panic!("bad line: {line}");
+            };
+            let usage = match usage {
+                "rpc" => Usage::Rpc,
+                "storage" => Usage::Storage,
+                _ => panic!("bad usage: {line}"),
+            };
+            let token_type = match token_type {
+                "Subrequest" => Type::Subrequest,
+                "ActorClass" => Type::ActorClass,
+                "Rpc" => Type::Rpc,
+                _ => panic!("bad type: {line}"),
+            };
+            let same_layout = match layout {
+                "same" => true,
+                "different" => false,
+                _ => panic!("bad layout: {line}"),
+            };
+            let token = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+            GoldenToken {
+                name,
+                usage,
+                token_type,
+                same_layout,
+                token,
+            }
+        })
+        .collect()
+}
+
+fn golden(name: &str) -> (Usage, Type, Vec<u8>) {
+    let golden = golden_tokens()
+        .into_iter()
+        .find(|golden| golden.name == name)
+        .unwrap();
+    (golden.usage, golden.token_type, golden.token)
+}
+
+/// The number of segments of a token's message.
+fn segments(key: &TokenKey, usage: Usage, token: &[u8]) -> usize {
+    let plaintext = match usage {
+        Usage::Rpc => key.open(token).unwrap(),
+        Usage::Storage => token[4..].to_vec(),
+    };
+    let segments = serialize_packed::read_message(&mut plaintext.as_slice(), ReaderOptions::new())
+        .unwrap()
+        .into_segments();
+    capnp::message::ReaderSegments::len(&segments)
+}
+
+#[test]
+fn golden_tokens_encode_to_the_same_contents_and_mostly_the_same_bytes() {
+    let key = TokenKey::from_cluster_key(b"golden-cluster-key");
+    let tokens = golden_tokens();
+    assert_eq!(tokens.len(), 45);
+    for golden in tokens {
+        let name = golden.name;
+        let (persistent, decoded) =
+            decode(&key, golden.usage, golden.token_type, &golden.token).unwrap();
+        let seal = match golden.usage {
+            Usage::Rpc => Seal::Rpc {
+                iv: golden.token[4..16].try_into().unwrap(),
+            },
+            Usage::Storage => Seal::Storage,
+        };
+        let target = match &decoded {
+            Decoded::Service {
+                name,
+                entrypoint,
+                props,
+            } => Target::Service {
+                name,
+                entrypoint: entrypoint.as_deref(),
+                props: props.as_deref().unwrap(),
+            },
+            Decoded::Actor {
+                namespace_key,
+                id,
+                name,
+            } => Target::Actor {
+                namespace_key,
+                id,
+                name: name.as_deref(),
+            },
+            Decoded::Restored {
+                vendor,
+                restore_arg,
+            } => Target::Restored {
+                vendor,
+                restore_arg: restore_arg.as_deref().unwrap(),
+            },
+        };
+        let again = encode(&key, seal, golden.token_type, persistent, &target).unwrap();
+
+        if golden.same_layout {
+            assert_eq!(again, golden.token, "{name}");
+        } else {
+            assert_ne!(again, golden.token, "{name} has the same layout");
+            assert!(
+                segments(&key, golden.usage, &golden.token) >= 3,
+                "{name}: a different layout of fewer than three segments"
+            );
+            assert_eq!(
+                decode(&key, golden.usage, golden.token_type, &again).unwrap(),
+                (persistent, decoded),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn golden_tokens_read_as_written() {
+    let key = TokenKey::from_cluster_key(b"golden-cluster-key");
+    for usage in ["rpc", "storage"] {
+        let (usage, token_type, token) = golden(&format!("{usage}-subrequest-json"));
+        let (persistent, decoded) = decode(&key, usage, token_type, &token).unwrap();
+        assert_eq!(persistent, Persistent::Yes);
+        let Decoded::Service {
+            name,
+            entrypoint,
+            props,
+        } = decoded
+        else {
+            panic!("not a service");
+        };
+        assert_eq!(name, b"my-service");
+        assert_eq!(entrypoint.as_deref(), Some(&b"MyEntry"[..]));
+        assert_eq!(json_of(&props.unwrap()), r#"{"foo": 123}"#);
+    }
+
+    let (usage, token_type, token) = golden("rpc-actor-not-persistent");
+    let (persistent, decoded) = decode(&key, usage, token_type, &token).unwrap();
+    assert_eq!(persistent, Persistent::No);
+    assert_eq!(
+        decoded,
+        Decoded::Actor {
+            namespace_key: b"my-namespace".to_vec(),
+            id: vec![0xde, 0xad, 0xbe, 0xef],
+            name: Some(b"my-actor".to_vec()),
+        }
+    );
+
+    let (usage, token_type, token) = golden("storage-restored-subrequest");
+    let (_, decoded) = decode(&key, usage, token_type, &token).unwrap();
+    let Decoded::Restored {
+        vendor,
+        restore_arg,
+    } = decoded
+    else {
+        panic!("not restored");
+    };
+    assert_eq!(vendor, golden("storage-vendor").2);
+    assert_eq!(json_of(&restore_arg.unwrap()), r#"{"restore": "me"}"#);
+
+    // Another key fails to authenticate a golden RPC token.
+    let (usage, token_type, token) = golden("rpc-subrequest-json");
+    let other = TokenKey::from_cluster_key(b"another-cluster-key");
+    assert!(decode(&other, usage, token_type, &token).is_err());
+}

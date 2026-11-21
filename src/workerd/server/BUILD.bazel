@@ -430,14 +430,12 @@ kj_test(
     ],
 )
 
-# The C++ handler and the Rust codec against each other.
+# The C++ handler against tokens that its C++ encoder wrote.
 kj_test(
-    src = "channel-token-codec-test.c++",
+    src = "channel-token-golden-test.c++",
+    data = ["//src/workerd/server/channel-token-codec:golden-tokens.txt"],
     deps = [
         ":channel-token",
-        "//src/rust/cxx/kj-rs",
-        "//src/workerd/server/channel-token-codec",
-        "//src/workerd/server/channel-token-codec:ffi.rs@cxx",
     ],
 )
 

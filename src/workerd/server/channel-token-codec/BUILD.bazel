@@ -1,5 +1,7 @@
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
+exports_files(["golden-tokens.txt"])
+
 # The encoding and crypto of channel tokens (channel-token.capnp): key derivation, AES-256-GCM,
 # and the `ChannelToken` message. Pure Rust behind a C++ bridge, so that //src/workerd/server:
 # channel-token, which the server crate's bridge header depends on, can use it without a cycle.
@@ -7,6 +9,8 @@ wd_rust_crate(
     name = "channel-token-codec",
     cxx_bridge_src = "ffi.rs",
     cxx_bridge_visibility = ["//src/workerd/server:__subpackages__"],
+    # Tokens that the C++ encoder wrote, which the codec must keep reading and writing.
+    test_compile_data = ["golden-tokens.txt"],
     visibility = ["//src/workerd/server:__subpackages__"],
     deps = [
         "//src/rust/kj",
