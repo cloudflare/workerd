@@ -1,0 +1,14 @@
+The AsIsHandler closes after writing this response. Announce that closure
+so a subsequent fetch cannot reuse the socket before its FIN arrives.
+Keep the duplicated headers, status text and body under test intact.
+
+--- a/fetch/content-length/resources/identical-duplicates.asis
++++ b/fetch/content-length/resources/identical-duplicates.asis
+@@ -5,5 +5,6 @@
+ Content-Type: text/plain
+ Content-Length: 6
+ Content-Length: 6
+-
++Connection: close
++
+ Test.

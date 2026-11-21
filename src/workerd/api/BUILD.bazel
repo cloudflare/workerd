@@ -959,6 +959,7 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )
 

@@ -845,6 +845,12 @@ class WritableStreamController {
   // existing pending writes should be allowed to complete.
   virtual jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) = 0;
 
+  // Owner teardown may join a close already queued by JavaScript. Value streams override
+  // this to await that close rather than issuing a second public close operation.
+  virtual jsg::Promise<void> closeForTeardown(jsg::Lock& js) {
+    return close(js);
+  }
+
   // Waits for pending data to be written. The returned promise is resolved when all pending writes
   // have completed.
   virtual jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) = 0;

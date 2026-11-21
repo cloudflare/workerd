@@ -40,6 +40,8 @@ wd_test(
 )
 
 wd_test(
+    # Allow Node compatibility startup while macOS runners compile other targets.
+    size = "large",
     src = "cluster-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["cluster-nodejs-test.js"],
