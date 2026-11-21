@@ -7,6 +7,7 @@ use std::hint::black_box;
 
 use jsg::FromJS;
 use jsg::ToJS;
+use jsg::ToJsTypedArray;
 use jsg::v8;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
@@ -182,6 +183,16 @@ impl Target {
     }
 
     #[jsg_method]
+    fn string_make(&self, n: u32) -> String {
+        "a".repeat(n as usize)
+    }
+
+    #[jsg_method]
+    fn wide_make(&self, n: u32) -> String {
+        "\u{6c34}".repeat(n as usize)
+    }
+
+    #[jsg_method]
     fn array_sum(&self, a: Vec<f64>) -> f64 {
         a.iter().copied().sum()
     }
@@ -267,6 +278,32 @@ impl Target {
     #[jsg_method]
     fn bytes_sum<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
         a.as_slice(lock).iter().map(|&x| u32::from(x)).sum()
+    }
+
+    #[jsg_method]
+    fn buffer_make<'s>(&self, lock: &mut jsg::Lock<'s>, n: u32) -> v8::Local<'s, v8::ArrayBuffer> {
+        v8::ArrayBuffer::from_vec(lock, vec![3u8; n as usize])
+    }
+
+    #[jsg_method]
+    fn bytes_make<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        n: u32,
+    ) -> Result<v8::Local<'s, v8::Uint8Array>, jsg::Error> {
+        let n = n as usize;
+        let (buffer, ()) = v8::ArrayBuffer::new_zeroed_with(lock, n, |bytes| bytes.fill(3))
+            .ok_or_else(|| jsg::Error::new_range_error("allocation failed"))?;
+        v8::Uint8Array::from_buffer(lock, &buffer, 0, n)
+    }
+
+    #[jsg_method]
+    fn bytes_make_copy<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        n: u32,
+    ) -> v8::Local<'s, v8::Uint8Array> {
+        vec![3u8; n as usize].to_js_typed_array(lock)
     }
 
     #[jsg_method]
