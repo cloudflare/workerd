@@ -20,6 +20,9 @@
 // src/tests/events/eventsource/AGENTS.md specifies the class, and indexes
 // where the suite pins each of these.
 //
+// The Workers types declare the class with eventsource.public.d.ts, which
+// the class below is checked against.
+//
 // HOW IT FITS TOGETHER
 //
 // The EventSource extends the C++ EventTarget through
@@ -39,6 +42,10 @@
 import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
 import type { RuntimeClassHelpers } from '../runtime-class';
+import type {
+  EventSource as PublishedEventSource,
+  EventSourceEventSourceInit,
+} from './eventsource.public';
 
 const {
   AbortController,
@@ -888,7 +895,7 @@ ObjectDefineProperty(proto, 'constructor', {
   configurable: true,
 } as PropertyDescriptor);
 
-const from = EventSource.fromStream;
+const from = EventSource.fromStream satisfies typeof PublishedEventSource.from;
 delete (EventSource as unknown as Record<string, unknown>).fromStream;
 // Under spec_compliant_property_attributes, lengths count the required
 // arguments.
@@ -906,8 +913,14 @@ ObjectDefineProperties(EventSource, {
     configurable: true,
   },
 });
+// The class agrees with its published declaration: its constructor and
+// instances here, and from() above. The constants above are the numbers it
+// declares.
 setNameAndLength(
-  EventSource,
+  EventSource satisfies new (
+    url: string,
+    init?: EventSourceEventSourceInit
+  ) => PublishedEventSource,
   'EventSource',
   kSpecCompliantPropertyAttributes ? 1 : 0
 );

@@ -98,8 +98,8 @@ class URLSearchParams: public jsg::Object {
     JSG_METHOD(toString);
     JSG_ITERABLE(entries);
 
-    // Declared in types/defines/url.d.ts, the same at every compatibility date. Also renames the
-    // references to this class from urlURLSearchParams.
+    // Declared in src/per_isolate/url/url.ts, the same at every compatibility date. Also renames
+    // the references to this class from urlURLSearchParams.
     JSG_TS_OVERRIDE(type URLSearchParams = never);
   }
 
@@ -219,8 +219,8 @@ class URL: public jsg::Object {
     JSG_STATIC_METHOD(createObjectURL);
     JSG_STATIC_METHOD(revokeObjectURL);
 
-    // Declared in types/defines/url.d.ts, the same at every compatibility date. Also renames the
-    // references to this class from urlURL.
+    // Declared in src/per_isolate/url/url.ts, the same at every compatibility date. Also renames
+    // the references to this class from urlURL.
     JSG_TS_OVERRIDE(type URL = never);
   }
 

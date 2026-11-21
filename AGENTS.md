@@ -193,6 +193,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Task                   | Location                                                      | Notes                                                                                                        |
 | ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Add/modify JS API      | `src/workerd/api/`                                            | C++ with JSG macros; see `jsg/jsg.h` for binding system                                                      |
+| Port a JS API to TS    | `src/per_isolate/` + `src/per_isolate/public-types.d.ts`      | Conventions: `src/per_isolate/AGENTS.md`; types: "Porting an API to the bootstrap" in `types/AGENTS.md`      |
 | Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro; Rust modules in `src/rust/api/` (`lib.rs`)   |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |

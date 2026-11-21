@@ -7,6 +7,7 @@ import { Message } from 'capnp-es';
 import comments from 'virtual:comments.json';
 import extraDefinitions from 'virtual:defines';
 import paramNames from 'virtual:param-names.json';
+import perIsolateDefinitions from 'virtual:per-isolate';
 import rtti from 'workerd:rtti';
 import { installParameterNames } from '../generator/parameter-names';
 import { printDefinitions } from '../index';
@@ -57,7 +58,8 @@ export default {
       const { ambient, importable } = printDefinitions(
         root,
         comments,
-        extraDefinitions
+        extraDefinitions,
+        perIsolateDefinitions
       );
 
       if (format === 'ambient') return new Response(ambient);

@@ -53,6 +53,15 @@ at context creation, before any user code. C++ entry point:
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
   scripts (deviation from the repo-wide new-file rule; keep consistent).
+- `public-types.d.ts` lists the declarations the bootstrap contributes to
+  the Workers types, which `types/` generates from what TypeScript emits
+  here. A published class's signatures are its public declaration, unless
+  the declaration takes a form the class cannot emit, which a
+  `<module>.public.d.ts` beside it then has: see "Per-isolate declarations"
+  in `types/AGENTS.md` for overloads, `@internal`, interfaces merged with a
+  class, and hand-written declarations, and "Porting an API to the
+  bootstrap" there for the steps that move an API's types from C++. The
+  tsconfig sets `stripInternal` for them.
 
 ## EMBEDDER SCRIPTS
 

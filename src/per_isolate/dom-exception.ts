@@ -26,7 +26,12 @@
 // module and export names can never change. Native code knows nothing of the
 // class. The C++ implementation has none, so a reader without the autogate
 // can't read one.
+//
+// The Workers types declare DOMException, whichever class implements it,
+// with dom-exception.public.d.ts, which the class below is checked against.
+// They do not declare QuotaExceededError, which only the autogate provides.
 
+import type { DOMException as PublishedDOMException } from './dom-exception.public';
 import type { SerializationHelpers } from './serialization';
 
 const {
@@ -65,11 +70,25 @@ type Slots = Record<symbol, unknown>;
 // is, as Node renders its DOMException.
 const kInternalClass = SymbolFor('cloudflare:internal-class');
 
+// The names of the legacy code constants, which the constructor and the
+// prototype have.
+type LegacyCodeName = Exclude<keyof typeof PublishedDOMException, 'prototype'>;
+
+// A legacy code constant, with its code as the published declaration types
+// it on both the constructor and instances, and the name it is the code of.
+type LegacyCode = {
+  [Name in LegacyCodeName]: readonly [
+    Name,
+    (typeof PublishedDOMException)[Name] & PublishedDOMException[Name],
+    string | null,
+  ];
+}[LegacyCodeName];
+
 // The legacy code constants, in the order WebIDL declares them, with the
 // name each one is the code of. DOMStringSizeError, NoDataAllowedError and
 // ValidationError are not in WebIDL's table of names, so their code is 0
 // though their constants remain.
-const kLegacyCodes: [string, number, string | null][] = [
+const kLegacyCodes = [
   ['INDEX_SIZE_ERR', 1, 'IndexSizeError'],
   ['DOMSTRING_SIZE_ERR', 2, null],
   ['HIERARCHY_REQUEST_ERR', 3, 'HierarchyRequestError'],
@@ -95,7 +114,7 @@ const kLegacyCodes: [string, number, string | null][] = [
   ['TIMEOUT_ERR', 23, 'TimeoutError'],
   ['INVALID_NODE_TYPE_ERR', 24, 'InvalidNodeTypeError'],
   ['DATA_CLONE_ERR', 25, 'DataCloneError'],
-];
+] as const satisfies readonly LegacyCode[];
 
 const kCodeForName = new SafeMap() as Map<string, number>;
 for (const [, code, name] of kLegacyCodes) {
@@ -317,7 +336,12 @@ function install(): typeof DOMException {
       },
     });
   }
-  return DOMException;
+  // The published declaration's constructor, but for the constants, which
+  // kLegacyCodes checks.
+  return DOMException satisfies new (
+    message?: string,
+    name?: string
+  ) => Omit<PublishedDOMException, LegacyCodeName>;
 }
 
 function installQuotaExceededError(): typeof QuotaExceededError {
