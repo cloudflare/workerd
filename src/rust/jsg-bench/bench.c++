@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <utility>
 
 #ifdef __APPLE__
 #include <malloc/malloc.h>
@@ -125,6 +126,21 @@ class Target final: public Object {
   kj::String stringEcho(kj::String a) {
     return a;
   }
+  kj::String stringMake(uint32_t n) {
+    auto result = kj::heapString(n);
+    result.asArray().fill('a');
+    return result;
+  }
+  kj::String wideMake(uint32_t n) {
+    // U+6C34, as in the utf16 string cases.
+    auto result = kj::heapString(n * 3);
+    for (uint32_t i = 0; i < n; ++i) {
+      result[i * 3] = '\xe6';
+      result[i * 3 + 1] = '\xb0';
+      result[i * 3 + 2] = '\xb4';
+    }
+    return result;
+  }
   double arraySum(kj::Array<double> a) {
     double sum = 0;
     for (auto n: a) sum += n;
@@ -170,6 +186,19 @@ class Target final: public Object {
     benchmark::DoNotOptimize(bytes.begin());
     return static_cast<uint32_t>(bytes.size());
   }
+  kj::Array<kj::byte> bufferMake(uint32_t n) {
+    auto result = kj::heapArray<kj::byte>(n);
+    result.asPtr().fill(3);
+    return result;
+  }
+  JsUint8Array bytesMake(Lock& js, uint32_t n) {
+    auto result = JsUint8Array::create(js, n);
+    if (n > 0) memset(result.asArrayPtr().begin(), 3, n);
+    return result;
+  }
+  JsUint8Array bytesMakeCopy(Lock& js, uint32_t n) {
+    return JsUint8Array::create(js, bufferMake(n));
+  }
   uint32_t bytesSum(v8::Local<v8::Uint8Array> a) {
     if (a->ByteLength() == 0) return 0;
     auto bytes = kj::arrayPtr(
@@ -210,6 +239,8 @@ class Target final: public Object {
     JSG_METHOD_NAMED(union, union_);
     JSG_METHOD(stringLen);
     JSG_METHOD(stringEcho);
+    JSG_METHOD(stringMake);
+    JSG_METHOD(wideMake);
     JSG_METHOD(arraySum);
     JSG_METHOD(arrayEcho);
     JSG_METHOD(arrayMake);
@@ -223,6 +254,9 @@ class Target final: public Object {
     JSG_METHOD(viewSliceLen);
     JSG_METHOD(bytesCopy);
     JSG_METHOD(bytesSum);
+    JSG_METHOD(bufferMake);
+    JSG_METHOD(bytesMake);
+    JSG_METHOD(bytesMakeCopy);
     JSG_METHOD(newNode);
     JSG_METHOD(sameNode);
     JSG_METHOD(takeNode);
@@ -599,6 +633,13 @@ int registerCases() {
           kj::str("t.stringLen(x)===", length), kj::str(length), size >= 65536 ? 16 : 256);
       add(kj::str("string/roundtrip/", encoding, "/", size), setup, "t.stringEcho(x).length",
           "t.stringEcho(x)===x", kj::str(size), size >= 65536 ? 16 : 256);
+      if (encoding != "latin1") {
+        auto make = encoding == "ascii" ? "stringMake" : "wideMake";
+        add(kj::str("string/out/", encoding, "/", size), "",
+            kj::str("t.", make, "(", size, ").length"),
+            kj::str("t.", make, "(", size, ")==='", ch, "'.repeat(", size, ")"), kj::str(size),
+            size >= 65536 ? 16 : 256);
+      }
     }
   }
   for (auto size: smokeTesting() ? std::initializer_list<int>{0, 1, 8}
@@ -632,6 +673,18 @@ int registerCases() {
     }
     add(kj::str("buffer/copy-in/", size), setup, "t.bytesCopy(x)",
         kj::str("t.bytesCopy(x)===", size), kj::str(size), size >= 65536 ? 16 : 256);
+    add(kj::str("buffer/out/array-buffer/", size), "",
+        kj::str("t.bufferMake(", size, ").byteLength"),
+        kj::str("(b=>b instanceof ArrayBuffer&&b.byteLength===", size,
+            "&&new Uint8Array(b).every(v=>v===3))(t.bufferMake(", size, "))"),
+        kj::str(size), size >= 65536 ? 16 : 256);
+    for (auto [make, label]: {std::pair{"bytesMake", "fill"}, std::pair{"bytesMakeCopy", "copy"}}) {
+      add(kj::str("buffer/out/uint8array-", label, "/", size), "",
+          kj::str("t.", make, "(", size, ").length"),
+          kj::str("(b=>b instanceof Uint8Array&&b.length===", size, "&&b.every(v=>v===3))(t.", make,
+              "(", size, "))"),
+          kj::str(size), size >= 65536 ? 16 : 256);
+    }
     add(kj::str("buffer/borrow-sum/", size), setup, "t.bytesSum(x)",
         kj::str("t.bytesSum(x)===", size * 3), kj::str(size * 3), size >= 65536 ? 16 : 256);
   }
