@@ -199,6 +199,9 @@ struct ClusterConfig {
   # that is never completed or aborted, such as an R2 put cut off mid-stream, otherwise keeps its
   # parts, and their storage, forever.
   #
+  # When empty, `serve` takes it from the environment variable `WORKERD_CLUSTER_BUCKET`, ignoring
+  # trailing whitespace. A bucket set nowhere is an error.
+  #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
   # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
@@ -264,6 +267,12 @@ struct ClusterConfig {
   # address since or shares it. The instances' clocks must agree within 30 seconds. It also keys
   # channel tokens, which pass service and Durable Object stubs over RPC. Traffic is not
   # encrypted: run the cluster on a private network (a VPC, WireGuard, Tailscale).
+  #
+  # When empty, `serve` takes the key from the environment variable `WORKERD_CLUSTER_KEY`, or reads
+  # it at startup from the file that `WORKERD_CLUSTER_KEY_FILE` names, such as a mounted secret,
+  # ignoring trailing whitespace. Set only one of the two. The key is text, so the file must be
+  # UTF-8. A config, or a binary that `workerd compile` builds, then holds no key. A key set
+  # nowhere is an error.
   #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 
