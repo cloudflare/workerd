@@ -54,7 +54,10 @@ impl Type for DataPoint {
 }
 
 // Like a C++ JSG_STRUCT: null and undefined are an empty data point, other non-objects are not
-// one, and each field is read and converted in declaration order.
+// one, and each field is read and converted in declaration order. The arrays convert as Rust
+// JSG's Vec does, which differs from C++ JSG when converting an element runs script (see
+// `FromJS for Vec<T>`): the elements are read ahead, up to the first object, so an element that
+// a later getter throws for, or one that script appends, is seen when C++ would not see it.
 impl<'s> FromJS<'s> for DataPoint {
     type ResultType = Self;
 
@@ -103,8 +106,11 @@ fn field<'s, T: FromJS<'s>>(
     })
 }
 
-/// An index or blob: the bytes of a buffer source, or of any other value as a UTF-8 string, like
-/// a C++ `kj::OneOf<kj::Array<kj::byte>, kj::String>`.
+/// An index or blob, like a C++ `kj::OneOf<kj::Array<kj::byte>, kj::String>`.
+///
+/// It is the bytes of a buffer source, or of any other value as a string. A string is written
+/// as `kj::String` holds it: UTF-8, but with each lone surrogate as its three WTF-8 bytes rather
+/// than as U+FFFD.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bytes(pub Vec<u8>);
 
@@ -134,9 +140,30 @@ impl<'s> FromJS<'s> for Bytes {
         if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
             return Ok(Self(buffer.as_slice(lock).to_vec()));
         }
+        if let Ok(buffer) = v8::Local::<v8::SharedArrayBuffer>::try_from(value) {
+            return Ok(Self(shared_bytes(lock, buffer)));
+        }
         if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
             return Ok(Self(view.as_slice(lock).to_vec()));
         }
-        Ok(Self(String::from_js(lock, value)?.into_bytes()))
+        let string = value.to_js_string(lock)?;
+        let mut bytes = vec![0; string.utf8_length(lock)];
+        let written = string.write_utf8(lock, &mut bytes, v8::WriteFlags::None);
+        bytes.truncate(written);
+        Ok(Self(bytes))
     }
+}
+
+/// A copy of the bytes of `buffer`.
+#[expect(
+    unsafe_code,
+    reason = "the bytes of a SharedArrayBuffer are readable only through an unsafe slice"
+)]
+fn shared_bytes<'s>(lock: &Lock<'s>, buffer: v8::Local<'s, v8::SharedArrayBuffer>) -> Vec<u8> {
+    let store = buffer.backing_store();
+    // SAFETY: nothing writes the bytes while they are copied. `lock` keeps this isolate's
+    // JavaScript from running, and no other isolate can reach the memory: only
+    // structuredClone(), within the isolate, deserializes a SharedArrayBuffer, and the
+    // deserializers that cross isolates (RPC, the memory cache, stored values) take none.
+    unsafe { store.as_slice(lock) }.to_vec()
 }

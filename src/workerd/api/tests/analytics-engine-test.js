@@ -134,6 +134,10 @@ export const indexes = testCase(async (env) => {
   await index(new TextEncoder().encode('ab').buffer, bytes('ab'));
   await index(new TextEncoder().encode('u8'), bytes('u8'));
   await index(new DataView(new Uint8Array([1, 2]).buffer), [1, 2]);
+  const shared = new SharedArrayBuffer(3);
+  new Uint8Array(shared).set([7, 8, 9]);
+  await index(shared, [7, 8, 9]);
+  await index(new Uint8Array(shared, 1), [8, 9]);
   await index(null, []);
   await index(undefined, []);
   await index(42, bytes('42'));
@@ -155,6 +159,10 @@ export const blobs = testCase(async (env) => {
   await assertWrites(ae, [{ blobs: [1, true] }], {
     blob1: bytes('1'),
     blob2: bytes('true'),
+  });
+  // A lone surrogate is written as its three WTF-8 bytes, not as U+FFFD.
+  await assertWrites(ae, [{ blobs: ['a\ud800b'] }], {
+    blob1: [0x61, 0xed, 0xa0, 0x80, 0x62],
   });
   const half = 'a'.repeat(8000);
   await assertWrites(ae, [{ blobs: [half, half] }], {
