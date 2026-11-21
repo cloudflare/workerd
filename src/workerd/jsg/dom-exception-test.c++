@@ -185,5 +185,47 @@ KJ_TEST("DOMException deserializes the legacy tag") {
   });
 }
 
+KJ_TEST("DOMException's legacy tag is read from the payload's own properties") {
+  // As the legacy format, but the object holding the message and the stack has no message.
+  // clang-format off
+  kj::byte payload[] = {
+    0xff, 0x0f,                                    // V8 header, version 15
+    0x5c, DOMException::SERIALIZATION_TAG,         // host object, tag
+    10, 'A', 'b', 'o', 'r', 't', 'E', 'r', 'r', 'o', 'r',
+    0x6f,                                          // begin object
+    0x22, 5, 's', 't', 'a', 'c', 'k',
+    0x22, 16, 'A', 'b', 'o', 'r', 't', 'E', 'r', 'r', 'o', 'r', ':', ' ', 'b', 'o', 'o', 'm',
+    0x7b, 1,                                       // end object, one property
+  };
+  // clang-format on
+
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      // A getter that would supply the message if the reader looked past the payload's own
+      // properties.
+      auto define =
+          js.str("globalThis.calls = 0;\n"
+                 "Object.defineProperty(Object.prototype, 'message', {\n"
+                 "  get() { calls++; return 'from a getter'; }, configurable: true });"_kj);
+      check(check(v8::Script::Compile(js.v8Context(), define))->Run(js.v8Context()));
+
+      js.tryCatch([&]() {
+        Deserializer deser(js, payload);
+        deser.readValue(js);
+        KJ_FAIL_EXPECT("the read should fail");
+      }, [&](Value exception) {
+        auto error = KJ_ASSERT_NONNULL(JsValue(exception.getHandle(js)).tryCast<JsObject>());
+        KJ_EXPECT(error.get(js, "name"_kj).toString(js) == "DataCloneError"_kj);
+        KJ_EXPECT(error.get(js, "message"_kj).toString(js) ==
+            "Deserialization failed: DOMException message is not a string"_kj);
+      });
+      KJ_EXPECT(js.global().get(js, "calls"_kj).toString(js) == "0"_kj);
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
