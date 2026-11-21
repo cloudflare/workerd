@@ -135,14 +135,24 @@ impl IsolateState {
     }
 
     /// Whether this thread holds the isolate lock. False once the state is closed.
+    #[inline]
     pub(crate) fn this_thread_holds_lock(&self) -> bool {
         if self.is_closed() {
             return false;
         }
-        if scope_owner::current() == self.isolate {
-            // A scope of the isolate is open on this thread, so this thread holds its lock.
-            return true;
-        }
+        self.in_scope_of_isolate() || self.this_thread_holds_lock_outside_scope()
+    }
+
+    /// Whether a scope of the isolate is open on this thread, which then holds its lock.
+    #[inline]
+    fn in_scope_of_isolate(&self) -> bool {
+        scope_owner::current() == self.isolate
+    }
+
+    /// [`this_thread_holds_lock`](Self::this_thread_holds_lock) when no scope of the isolate is
+    /// open on this thread.
+    #[inline(never)]
+    fn this_thread_holds_lock_outside_scope(&self) -> bool {
         let _queues = self.lock_drop_queues();
         // `close` takes the mutex before it sets `closed`, so the isolate is alive until the
         // guard is dropped.
@@ -206,13 +216,25 @@ impl IsolateState {
     /// [`LockGuarded`](crate::LockGuarded): at once under the lock, even after the state is
     /// closed, until the isolate is about to be disposed; otherwise on the next lock, or, once
     /// the state is closed, after the isolate is disposed.
+    #[inline]
     pub(crate) fn release<T: Releasable>(&self, released: T) {
+        if !self.is_closed() && self.in_scope_of_isolate() {
+            released.release(ReleaseContext::Locked);
+            return;
+        }
+        self.release_outside_scope(released);
+    }
+
+    /// [`release`](Self::release) when no scope of the isolate is open on this thread, or the
+    /// state is closed.
+    #[inline(never)]
+    fn release_outside_scope<T: Releasable>(&self, released: T) {
         // Only a holder of the lock closes the state, so a thread holding it sees it closed or not
         // for as long as it holds it.
         let locked = if self.is_closed() {
             self.this_thread_holds_lock_until_disposing()
         } else {
-            self.this_thread_holds_lock()
+            self.this_thread_holds_lock_outside_scope()
         };
         if locked {
             released.release(ReleaseContext::Locked);
