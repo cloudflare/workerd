@@ -86,16 +86,7 @@ export default {
   'encrypt_decrypt/rsa.js': supportFile,
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
-  'export-key-error-order.https.any.js': {
-    comment:
-      'exportKey() and wrapKey() check extractable before export support, so HKDF and PBKDF2 keys throw InvalidAccessError instead of NotSupportedError',
-    expectedFailures: [
-      'exportKey() with a HKDF key throws NotSupportedError',
-      'wrapKey() with a HKDF key throws NotSupportedError',
-      'exportKey() with a PBKDF2 key throws NotSupportedError',
-      'wrapKey() with a PBKDF2 key throws NotSupportedError',
-    ],
-  },
+  'export-key-error-order.https.any.js': {},
   'generateKey/algorithm_registry.js': {},
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {},
