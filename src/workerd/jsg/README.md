@@ -267,6 +267,10 @@ This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
 
+**Iterator State.** The `State` of `JSG_ITERATOR` and `JSG_ASYNC_ITERATOR` must have a
+public `visitForGc()`, or declare `JSG_HOLDS_NO_GC_HANDLES` if it holds none; otherwise it
+fails to compile. For a type you can't add a member to, specialize `jsg::holdsNoGcHandles<T>`.
+
 **Visit only what this object owns alone.** An object behind a `kj::Rc`, `kj::Arc`, or a
 `kj::Own` of a refcounted type can have other owners that visit it too, and a handle visited
 from two owners is strong or traced depending on which visited last. The `jsg-shared-visit`

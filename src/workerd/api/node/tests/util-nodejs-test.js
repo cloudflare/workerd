@@ -5616,21 +5616,25 @@ export const testPromisify = {
       });
     }
 
-    // TODO(soon): customPromisifyArgs unsupported
-    // {
-    //   const firstValue = 5;
-    //   const secondValue = 17;
+    {
+      const firstValue = 5;
+      const secondValue = 17;
 
-    //   function fn(callback) {
-    //     callback(null, firstValue, secondValue);
-    //   }
+      function fn(callback) {
+        callback(null, firstValue, secondValue);
+      }
 
-    //   fn[customPromisifyArgs] = ['first', 'second'];
+      fn[Symbol.for('nodejs.util.promisify.custom.args')] = ['first', 'second'];
 
-    //   promisify(fn)().then(mustCall((obj) => {
-    //     assert.deepStrictEqual(obj, { first: firstValue, second: secondValue });
-    //   }));
-    // }
+      promisify(fn)().then(
+        commonMustCall((obj) => {
+          assert.deepStrictEqual(obj, {
+            first: firstValue,
+            second: secondValue,
+          });
+        })
+      );
+    }
 
     // vm unsupported
     // {

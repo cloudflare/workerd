@@ -8,9 +8,8 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
 
 #include <kj/function.h>
 #include <kj/memory.h>
@@ -115,6 +114,14 @@ void run_microtasks(Isolate* isolate);
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
+// Calls `callback` with KJ logging at every severity, from INFO up, and returns what it logged on
+// this thread, each as "<severity>: <text>", without writing it to stderr. Logging is restored to
+// its previous severity afterwards.
+::rust::Vec<::rust::String> capture_kj_logs(size_t data, ::rust::Fn<void(size_t)> callback);
+
+// Throws a FAILED kj::Exception with `description`.
+void fail_with_kj_exception(::rust::Str description);
+
 // v8::HeapStatistics::used_global_handles_size() of the isolate.
 size_t used_global_handles_size(Isolate* isolate);
 
@@ -168,6 +175,14 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 // Disallows JavaScript execution, as jsg::DisallowJavaScriptScope does for JSG code, without V8's
 // own guard, or allows it again.
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
+
+// Allows or disallows eval() and WebAssembly compilation, as jsg::Lock::setAllowEval() does.
+void set_allow_eval(Isolate* isolate, bool allow);
+
+// Makes a WebAssembly.Module from `module` without recompiling it, as C++ code that Rust hands a
+// compiled module to does. Throws a KJ exception if V8 creates none.
+::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
+    Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module);
 
 // Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
 // error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not

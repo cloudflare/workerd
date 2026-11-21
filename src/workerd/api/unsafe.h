@@ -1,9 +1,7 @@
 #pragma once
 
-#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/script.h>
 #include <workerd/jsg/url.h>
 
 #include <csignal>
@@ -11,11 +9,11 @@
 
 #ifdef _WIN32
 #include <io.h>
-#else
-#include <unistd.h>
 #endif
 
+#ifdef WORKERD_FUZZILLI
 #include <workerd/api/fuzzilli.h>
+#endif
 
 namespace workerd::api {
 

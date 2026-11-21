@@ -288,6 +288,11 @@ struct TestFixture {
   void setLimitsExceeded(EventOutcome outcome) {
     limitsExceeded = outcome;
   }
+  // Like setLimitsExceeded(), but the limit enforcer records `outcome` only when the next scope of
+  // its enterJs() ends, as an enforcer that measures CPU time over that scope does.
+  void setLimitsExceededOnLeavingJs(EventOutcome outcome) {
+    limitsExceededOnLeavingJs = outcome;
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -353,6 +358,7 @@ struct TestFixture {
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
   kj::Maybe<EventOutcome> limitsExceeded;
+  kj::Maybe<EventOutcome> limitsExceededOnLeavingJs;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

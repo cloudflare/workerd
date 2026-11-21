@@ -3,24 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Object shape of MessageChannel and MessagePort: members, attributes,
-// prototype chains and the marks JSG puts on every runtime class.
-// Divergences (see the ledger in AGENTS.md):
-// - #1: only the TypeScript MessagePort constructor inherits from
-//   EventTarget's, as WebIDL requires.
-// - #2: the TypeScript constructors' `prototype` is non-writable even
-//   without immutable_api_prototypes.
-// - #5: `constructor` comes first among MessagePort.prototype's own keys in
-//   the TypeScript class, last among the string keys in C++.
+// prototype chains and the marks JSG puts on every runtime class. Unlike a
+// JSG class's, MessagePort's constructor inherits from EventTarget's, as
+// WebIDL requires; both constructors' `prototype` is non-writable even
+// without immutable_api_prototypes; and `constructor` comes first among
+// MessagePort.prototype's own keys.
 
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import * as workerThreads from 'node:worker_threads';
 import { attributes } from 'helpers';
-import {
-  immutableApiPrototypes,
-  setToStringTag,
-  specCompliantPropertyAttributes,
-  usingTsImpl,
-} from 'which-impl';
+import { setToStringTag, specCompliantPropertyAttributes } from 'flags';
 
 export const prototypeMethods = {
   test() {
@@ -63,12 +55,13 @@ export const prototypeKeys = {
     const keys = Reflect.ownKeys(MessagePort.prototype).filter(
       (key) => typeof key === 'string'
     );
-    deepStrictEqual(
-      keys,
-      usingTsImpl
-        ? ['constructor', 'postMessage', 'close', 'start', 'onmessage']
-        : ['postMessage', 'close', 'start', 'onmessage', 'constructor']
-    );
+    deepStrictEqual(keys, [
+      'constructor',
+      'postMessage',
+      'close',
+      'start',
+      'onmessage',
+    ]);
     deepStrictEqual(
       Reflect.ownKeys(MessageChannel.prototype).filter(
         (key) => typeof key === 'string'
@@ -88,10 +81,7 @@ export const prototypeChains = {
       Object.getPrototypeOf(MessageChannel.prototype),
       Object.prototype
     );
-    strictEqual(
-      Object.getPrototypeOf(MessagePort),
-      usingTsImpl ? EventTarget : Function.prototype
-    );
+    strictEqual(Object.getPrototypeOf(MessagePort), EventTarget);
     strictEqual(Object.getPrototypeOf(MessageChannel), Function.prototype);
   },
 };
@@ -116,7 +106,7 @@ export const constructorAttributes = {
       );
       strictEqual(
         attributes(Object.getOwnPropertyDescriptor(ctor, 'prototype')),
-        usingTsImpl || immutableApiPrototypes ? 'data' : 'dataw'
+        'data'
       );
     }
   },

@@ -1,7 +1,12 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { notStrictEqual, strictEqual, throws } from 'node:assert';
+import {
+  deepStrictEqual,
+  notStrictEqual,
+  strictEqual,
+  throws,
+} from 'node:assert';
 
 // sync and datasync are generally non-ops. The most they do is
 // verify that the file descriptor is valid.
@@ -27,7 +32,13 @@ import {
   X_OK,
   writeFileSync,
   writeSync,
+  exists,
+  read,
+  readv,
+  write,
+  writev,
 } from 'node:fs';
+import { promisify } from 'node:util';
 
 strictEqual(typeof openSync, 'function');
 strictEqual(typeof closeSync, 'function');
@@ -236,5 +247,37 @@ export const oobWriteTest = {
     );
 
     strictEqual(writeSync(fd, v3, 10, 10, 134217718), 10);
+  },
+};
+
+export const promisifiedCallbacksTest = {
+  async test() {
+    const path = '/tmp/promisify-test.txt';
+    writeFileSync(path, '');
+    const fd = openSync(path, 'r+');
+    try {
+      const data = Buffer.from('hello');
+      const writeResult = await promisify(write)(fd, data, 0, 5, 0);
+      deepStrictEqual(writeResult, { bytesWritten: 5, buffer: data });
+
+      const buffers = [Buffer.from('ab'), Buffer.from('cd')];
+      const writevResult = await promisify(writev)(fd, buffers, 5);
+      deepStrictEqual(writevResult, { bytesWritten: 4, buffer: buffers });
+
+      const into = Buffer.alloc(5);
+      const readResult = await promisify(read)(fd, into, 0, 5, 0);
+      deepStrictEqual(readResult, { bytesRead: 5, buffer: into });
+      strictEqual(into.toString(), 'hello');
+
+      const intov = [Buffer.alloc(2), Buffer.alloc(2)];
+      const readvResult = await promisify(readv)(fd, intov, 5);
+      deepStrictEqual(readvResult, { bytesRead: 4, buffers: intov });
+      strictEqual(Buffer.concat(intov).toString(), 'abcd');
+    } finally {
+      closeSync(fd);
+    }
+
+    strictEqual(await promisify(exists)(path), true);
+    strictEqual(await promisify(exists)('/tmp/does-not-exist'), false);
   },
 };

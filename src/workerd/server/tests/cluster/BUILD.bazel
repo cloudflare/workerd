@@ -13,6 +13,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
     data = [
         ":cluster-broken-deployments.wd-test",
         ":cluster-broken-node.wd-test",
+        ":cluster-cache-worker.js",
         ":cluster-cron.wd-test",
         ":cluster-deployment.wd-test",
         ":cluster-node.wd-test",

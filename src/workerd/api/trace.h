@@ -8,7 +8,6 @@
  * Bindings for trace worker (ie. to support running wrangler tail).
  */
 
-#include <workerd/api/basics.h>
 #include <workerd/api/events.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>

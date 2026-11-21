@@ -70,6 +70,25 @@ wpt_test(
 )
 
 wpt_test(
+    name = "dom",
+    config = "dom-test.ts",
+    exclude_test_dirs = [
+        # Run as their own targets
+        "abort",
+        "events",
+        # Need a document
+        "collections",
+        "crashtests",
+        "lists",
+        "nodes",
+        "observable",
+        "ranges",
+        "traversal",
+    ],
+    wpt_directory = "@wpt//:dom@module",
+)
+
+wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
     wpt_directory = "@wpt//:dom/abort@module",
@@ -96,7 +115,10 @@ wpt_test(
 wpt_test(
     name = "fetch/api",
     size = "large",
-    compat_flags = ["strip_bom_in_read_all_text"],
+    compat_flags = [
+        "fetch_invalid_response_type_error",
+        "strip_bom_in_read_all_text",
+    ],
     config = "fetch/api-test.ts",
     served_wpt_files = [
         "@wpt//:xhr/resources/header-content-length.asis",
@@ -121,6 +143,7 @@ wpt_test(
     name = "fetch/api-ts",
     size = "large",
     compat_flags = [
+        "fetch_invalid_response_type_error",
         "strip_bom_in_read_all_text",
         "typescript_implemented_streams",
     ],
@@ -147,6 +170,7 @@ wpt_test(
 wpt_test(
     name = "fetch/misc",
     size = "large",
+    compat_flags = ["fetch_invalid_response_type_error"],
     config = "fetch/misc-test.ts",
     exclude_test_dirs = [
         # Runs as its own targets
@@ -325,11 +349,14 @@ wpt_test(
     name = "wasm/jsapi",
     size = "large",
     config = "wasm/jsapi-test.ts",
+    # The ESM integration tests call import(), which fails in scripts the harness evaluates
+    exclude_test_dirs = ["esm-integration"],
     extra_wpt_directories = [
         "@wpt//:wasm/jsapi@module",
         "@wpt//:wasm/resources@module",
     ],
     extra_wpt_files = ["@wpt//:wasm/incrementer.wasm"],
+    include_tentative = True,
     # Uses 1.6-2.3 cores on average, and up to 3.4.
     tags = ["cpu:2"],
     wpt_directory = "@wpt//:wasm/jsapi@module",
@@ -365,6 +392,18 @@ wpt_test(
     name = "html/webappapis/timers",
     config = "html/webappapis/timers-test.ts",
     wpt_directory = "@wpt//:html/webappapis/timers@module",
+)
+
+wpt_test(
+    name = "html/webappapis/scripting",
+    config = "html/webappapis/scripting-test.ts",
+    exclude_test_dirs = [
+        # Window, worker and agent-cluster tests that need a browser
+        "event-loops",
+        "events",
+        "processing-model-2",
+    ],
+    wpt_directory = "@wpt//:html/webappapis/scripting@module",
 )
 
 wpt_test(

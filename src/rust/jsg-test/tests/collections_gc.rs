@@ -43,12 +43,14 @@ struct Leaf {
     pub value: u32,
     /// The wrapper of the leaf's parent, which makes a cycle through the parent's field.
     owner: jsg::RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    drops: crate::DropCounter,
 }
 
 fn leaf(lock: &mut jsg::Lock<'_>, value: u32) -> jsg::Rc<Leaf> {
     jsg::Rc::new(
         lock,
         Leaf {
+            drops: crate::DropCounter(&LEAF_DROPS),
             value,
             owner: jsg::RefCell::new(None),
         },
@@ -64,12 +66,6 @@ fn keep_owner<'a>(
     for leaf in leaves {
         let owner = jsg::v8::TracedGlobal::new(lock, owner);
         *leaf.get(lock).owner.borrow_mut(lock) = Some(owner);
-    }
-}
-
-impl Drop for Leaf {
-    fn drop(&mut self) {
-        LEAF_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -90,12 +86,7 @@ static VEC_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct VecParent {
     pub children: Vec<jsg::Rc<Leaf>>,
-}
-
-impl Drop for VecParent {
-    fn drop(&mut self) {
-        VEC_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -116,6 +107,7 @@ fn vec_rc_children_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             VecParent {
+                drops: crate::DropCounter(&VEC_PARENT_DROPS),
                 children: vec![c1.clone(lock), c2.clone(lock), c3.clone(lock)],
             },
         );
@@ -152,7 +144,13 @@ fn vec_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(lock, VecParent { children: vec![] });
+        let parent = jsg::Rc::new(
+            lock,
+            VecParent {
+                drops: crate::DropCounter(&VEC_PARENT_DROPS),
+                children: vec![],
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -178,12 +176,7 @@ static HASHMAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct HashMapParent {
     pub children: HashMap<String, jsg::Rc<Leaf>>,
-}
-
-impl Drop for HashMapParent {
-    fn drop(&mut self) {
-        HASHMAP_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -204,7 +197,13 @@ fn hashmap_rc_values_kept_alive_through_gc() {
         map.insert("a".to_owned(), a.clone(lock));
         map.insert("b".to_owned(), b.clone(lock));
 
-        let parent = jsg::Rc::new(lock, HashMapParent { children: map });
+        let parent = jsg::Rc::new(
+            lock,
+            HashMapParent {
+                drops: crate::DropCounter(&HASHMAP_PARENT_DROPS),
+                children: map,
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         keep_owner(lock, wrapped, [&a, &b]);
         ctx.set_global(lock, "parent", wrapped);
@@ -237,6 +236,7 @@ fn hashmap_rc_empty_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             HashMapParent {
+                drops: crate::DropCounter(&HASHMAP_PARENT_DROPS),
                 children: HashMap::new(),
             },
         );
@@ -265,12 +265,7 @@ static BTREEMAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct BTreeMapParent {
     pub children: BTreeMap<String, jsg::Rc<Leaf>>,
-}
-
-impl Drop for BTreeMapParent {
-    fn drop(&mut self) {
-        BTREEMAP_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -291,7 +286,13 @@ fn btreemap_rc_values_kept_alive_through_gc() {
         map.insert("x".to_owned(), x.clone(lock));
         map.insert("y".to_owned(), y.clone(lock));
 
-        let parent = jsg::Rc::new(lock, BTreeMapParent { children: map });
+        let parent = jsg::Rc::new(
+            lock,
+            BTreeMapParent {
+                drops: crate::DropCounter(&BTREEMAP_PARENT_DROPS),
+                children: map,
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         keep_owner(lock, wrapped, [&x, &y]);
         ctx.set_global(lock, "parent", wrapped);
@@ -324,6 +325,7 @@ fn btreemap_rc_empty_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             BTreeMapParent {
+                drops: crate::DropCounter(&BTREEMAP_PARENT_DROPS),
                 children: BTreeMap::new(),
             },
         );
@@ -353,12 +355,7 @@ static HASHSET_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct HashSetParent {
     pub children: HashSet<jsg::Rc<Leaf>>,
-}
-
-impl Drop for HashSetParent {
-    fn drop(&mut self) {
-        HASHSET_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -385,7 +382,13 @@ fn hashset_rc_elements_kept_alive_through_gc() {
         set.insert(p.clone(lock));
         set.insert(q.clone(lock));
 
-        let parent = jsg::Rc::new(lock, HashSetParent { children: set });
+        let parent = jsg::Rc::new(
+            lock,
+            HashSetParent {
+                drops: crate::DropCounter(&HASHSET_PARENT_DROPS),
+                children: set,
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         keep_owner(lock, wrapped, [&p, &q]);
         ctx.set_global(lock, "parent", wrapped);
@@ -418,6 +421,7 @@ fn hashset_rc_empty_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             HashSetParent {
+                drops: crate::DropCounter(&HASHSET_PARENT_DROPS),
                 children: HashSet::new(),
             },
         );
@@ -446,12 +450,7 @@ static BTREESET_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct BTreeSetParent {
     pub children: BTreeSet<jsg::Rc<Leaf>>,
-}
-
-impl Drop for BTreeSetParent {
-    fn drop(&mut self) {
-        BTREESET_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -477,7 +476,13 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
         set.insert(r.clone(lock));
         set.insert(s.clone(lock));
 
-        let parent = jsg::Rc::new(lock, BTreeSetParent { children: set });
+        let parent = jsg::Rc::new(
+            lock,
+            BTreeSetParent {
+                drops: crate::DropCounter(&BTREESET_PARENT_DROPS),
+                children: set,
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         keep_owner(lock, wrapped, [&r, &s]);
         ctx.set_global(lock, "parent", wrapped);
@@ -510,6 +515,7 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             BTreeSetParent {
+                drops: crate::DropCounter(&BTREESET_PARENT_DROPS),
                 children: BTreeSet::new(),
             },
         );
@@ -538,12 +544,7 @@ static DICT_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct DictParent {
     pub children: jsg::Dict<jsg::Rc<Leaf>>,
-}
-
-impl Drop for DictParent {
-    fn drop(&mut self) {
-        DICT_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -563,6 +564,7 @@ fn dict_rc_values_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             DictParent {
+                drops: crate::DropCounter(&DICT_PARENT_DROPS),
                 children: jsg::Dict::from(vec![
                     ("a".to_owned(), a.clone(lock)),
                     ("b".to_owned(), b.clone(lock)),
@@ -600,12 +602,7 @@ static CELL_VEC_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct CellVecParent {
     pub children: jsg::Cell<Vec<jsg::Rc<Leaf>>>,
-}
-
-impl Drop for CellVecParent {
-    fn drop(&mut self) {
-        CELL_VEC_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -625,6 +622,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellVecParent {
+                drops: crate::DropCounter(&CELL_VEC_PARENT_DROPS),
                 children: jsg::Cell::new(vec![c1.clone(lock), c2.clone(lock)]),
             },
         );
@@ -660,6 +658,7 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellVecParent {
+                drops: crate::DropCounter(&CELL_VEC_PARENT_DROPS),
                 children: jsg::Cell::new(vec![]),
             },
         );
@@ -688,12 +687,7 @@ static CELL_MAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct CellHashMapParent {
     pub children: jsg::Cell<HashMap<String, jsg::Rc<Leaf>>>,
-}
-
-impl Drop for CellHashMapParent {
-    fn drop(&mut self) {
-        CELL_MAP_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -715,6 +709,7 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellHashMapParent {
+                drops: crate::DropCounter(&CELL_MAP_PARENT_DROPS),
                 children: jsg::Cell::new(map),
             },
         );
@@ -750,12 +745,7 @@ struct MixedParent {
     pub singles: Vec<jsg::Rc<Leaf>>,
     pub named: HashMap<String, jsg::Rc<Leaf>>,
     pub direct: jsg::Rc<Leaf>,
-}
-
-impl Drop for MixedParent {
-    fn drop(&mut self) {
-        MIXED_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -779,6 +769,7 @@ fn mixed_collection_fields_all_traced() {
         let parent = jsg::Rc::new(
             lock,
             MixedParent {
+                drops: crate::DropCounter(&MIXED_PARENT_DROPS),
                 singles: vec![vec_child.clone(lock)],
                 named,
                 direct: direct_child.clone(lock),
@@ -826,6 +817,7 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
         let parent = jsg::Rc::new(
             lock,
             VecParent {
+                drops: crate::DropCounter(&VEC_PARENT_DROPS),
                 children: vec![child.clone(lock)],
             },
         );
@@ -864,12 +856,7 @@ static INT_KEY_MAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct IntKeyMapParent {
     pub children: HashMap<u32, jsg::Rc<Leaf>>,
-}
-
-impl Drop for IntKeyMapParent {
-    fn drop(&mut self) {
-        INT_KEY_MAP_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -889,7 +876,13 @@ fn hashmap_integer_key_rc_values_traced() {
         map.insert(0u32, v.clone(lock));
         map.insert(1u32, v.clone(lock)); // same child twice
 
-        let parent = jsg::Rc::new(lock, IntKeyMapParent { children: map });
+        let parent = jsg::Rc::new(
+            lock,
+            IntKeyMapParent {
+                drops: crate::DropCounter(&INT_KEY_MAP_PARENT_DROPS),
+                children: map,
+            },
+        );
         let wrapped = parent.clone(lock).to_js(lock)?;
         keep_owner(lock, wrapped, [&v]);
         ctx.set_global(lock, "parent", wrapped);
@@ -939,12 +932,7 @@ impl jsg::Traced for PrivateData {
 #[jsg_resource]
 struct TraceDelegationParent {
     pub data: PrivateData,
-}
-
-impl Drop for TraceDelegationParent {
-    fn drop(&mut self) {
-        TRACE_DELEGATION_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -964,6 +952,7 @@ fn trace_delegation_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             TraceDelegationParent {
+                drops: crate::DropCounter(&TRACE_DELEGATION_PARENT_DROPS),
                 data: PrivateData {
                     child: child.clone(lock),
                 },
@@ -1002,12 +991,8 @@ static CUSTOM_TRACE_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource(custom_trace)]
 struct CustomTraceParent {
     pub child: jsg::Rc<Leaf>,
-}
-
-impl Drop for CustomTraceParent {
-    fn drop(&mut self) {
-        CUSTOM_TRACE_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    #[expect(dead_code, reason = "counts the parent's drops when it is dropped")]
+    drops: crate::DropCounter,
 }
 
 // User-supplied Traced impl — not generated by the macro because of custom_trace.
@@ -1034,6 +1019,7 @@ fn custom_trace_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CustomTraceParent {
+                drops: crate::DropCounter(&CUSTOM_TRACE_PARENT_DROPS),
                 child: child.clone(lock),
             },
         );

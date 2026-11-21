@@ -2,14 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Event stream interpretation, through EventSource.from(). Cases named
-// after a WPT file are adapted from it (see AGENTS.md). Where the C++
-// parser departs from the HTML standard, the TypeScript one follows the
-// standard; each such case is a ledger divergence (#4 to #8 in AGENTS.md).
+// Event stream interpretation, as the HTML standard specifies it, through
+// EventSource.from(). Cases named after a WPT file are adapted from it (see
+// AGENTS.md).
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { parse } from 'helpers';
-import { usingTsImpl } from 'which-impl';
 
 async function data(chunks) {
   return (await parse(chunks)).messages.map(([, value]) => value);
@@ -182,17 +180,16 @@ export const lastEventIdPersistsAndResets = {
   },
 };
 
-// #4. WPT format-field-event-empty.any.js: an empty `event` field
-// dispatches a 'message'. C++: an event of type ''.
+// WPT format-field-event-empty.any.js: an empty `event` field dispatches a
+// 'message'.
 export const emptyEventField = {
   async test() {
     const { messages } = await parse(['event: \ndata:data\n\n'], ['']);
-    deepStrictEqual(messages, [[usingTsImpl ? 'message' : '', 'data', '']]);
+    deepStrictEqual(messages, [['message', 'data', '']]);
   },
 };
 
-// #5. A BOM split across chunks is stripped. C++ strips only a BOM within
-// the first chunk, so the first line's field name is unknown.
+// A BOM split across chunks is stripped.
 export const bomSplitAcrossChunks = {
   async test() {
     deepStrictEqual(
@@ -201,38 +198,35 @@ export const bomSplitAcrossChunks = {
         new Uint8Array([0xbf]),
         'data: a\n\n',
       ]),
-      usingTsImpl ? ['a'] : []
+      ['a']
     );
   },
 };
 
-// #6. An `id` field containing U+0000 is ignored. C++ takes it.
+// An `id` field containing U+0000 is ignored.
 export const idWithNullIsIgnored = {
   async test() {
     const { messages } = await parse(['id: a\0b\ndata: x\n\n']);
-    deepStrictEqual(messages, [['message', 'x', usingTsImpl ? '' : 'a\0b']]);
+    deepStrictEqual(messages, [['message', 'x', '']]);
   },
 };
 
-// #7. WPT format-field-data.any.js: a `data` field with an empty value
-// dispatches a message with empty data. C++ dispatches nothing for it.
+// WPT format-field-data.any.js: a `data` field with an empty value
+// dispatches a message with empty data.
 export const formatFieldData = {
   async test() {
-    deepStrictEqual(
-      await data(['data:\n\ndata\ndata\n\ndata:test\n\n']),
-      usingTsImpl ? ['', '\n', 'test'] : ['\n', 'test']
-    );
+    deepStrictEqual(await data(['data:\n\ndata\ndata\n\ndata:test\n\n']), [
+      '',
+      '\n',
+      'test',
+    ]);
   },
 };
 
-// #8. A CRLF split across chunks ends one line. C++ ends two, so the empty
-// second one dispatches early.
+// A CRLF split across chunks ends one line.
 export const crlfSplitAcrossChunks = {
   async test() {
-    deepStrictEqual(
-      await data(['data: a\r', '\ndata: b\n\n']),
-      usingTsImpl ? ['a\nb'] : ['a', 'b']
-    );
+    deepStrictEqual(await data(['data: a\r', '\ndata: b\n\n']), ['a\nb']);
   },
 };
 

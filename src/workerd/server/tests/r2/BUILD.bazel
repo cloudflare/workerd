@@ -1,0 +1,17 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "r2-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+# `workerd serve` of a wrangler.jsonc's r2_buckets.
+js_test(
+    name = "r2-wrangler-test",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "r2-wrangler-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

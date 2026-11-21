@@ -2,10 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// NonCoercible<T> takes only the types a value is otherwise coerced to (String, bool, f64
-// and the integers), as C++ JSG's takes only a CoercibleType. A union or a resource
-// would convert a value as it always does, coercion included, once its JavaScript type passed a
-// coarse check.
+// NonCoercible<T> takes only the types a value is otherwise coerced to (String, bool and f64),
+// as C++ JSG's takes only a CoercibleType, so not an integer. A union or a resource has no
+// coercion of its own to disable.
 
 use jsg::FromJS;
 use jsg::NonCoercible;
@@ -30,4 +29,12 @@ pub fn union_name() -> String {
 
 pub fn resource_name() -> String {
     <NonCoercible<jsg::Rc<Thing>> as FromJS<'static>>::type_name() //~ ERROR E0277
+}
+
+pub fn u32_name() -> String {
+    <NonCoercible<u32> as FromJS<'static>>::type_name() //~ ERROR E0277
+}
+
+pub fn i64_name() -> String {
+    <NonCoercible<i64> as FromJS<'static>>::type_name() //~ ERROR E0277
 }

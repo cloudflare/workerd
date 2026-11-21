@@ -1,0 +1,9 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# Secrets Store, the bundled module `/workerd/secrets-store.js`
+# (Worker.Module.bundled).
+wd_cc_embed(
+    name = "secrets-store-js",
+    src = "secrets-store.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)
