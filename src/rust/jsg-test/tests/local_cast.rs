@@ -458,3 +458,29 @@ fn shared_buffer_of_a_view_upcasts() {
         Ok(())
     });
 }
+
+/// A `SharedArrayBuffer` casts to its own handle, whose backing store holds its bytes, and an
+/// `ArrayBuffer` does not.
+#[test]
+fn shared_array_buffer_casts_and_has_its_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(
+                lock,
+                "(() => { const b = new SharedArrayBuffer(3); new Uint8Array(b).set([7, 8, 9]); \
+                 return b; })()",
+            )
+            .unwrap();
+        let buffer = v8::Local::<v8::SharedArrayBuffer>::try_from(value).unwrap();
+        assert!(v8::Local::<v8::ArrayBuffer>::try_from(value).is_err());
+        let store = buffer.backing_store();
+        assert!(store.is_shared());
+        // SAFETY: nothing else in the test can reach the buffer.
+        assert_eq!(unsafe { store.as_slice(lock) }, &[7, 8, 9]);
+
+        let not_shared = ctx.eval_raw(lock, "new ArrayBuffer(3)").unwrap();
+        assert!(v8::Local::<v8::SharedArrayBuffer>::try_from(not_shared).is_err());
+        Ok(())
+    });
+}

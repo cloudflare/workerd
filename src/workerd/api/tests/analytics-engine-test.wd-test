@@ -35,6 +35,10 @@ const mainWorker :Workerd.Worker = (
   ]
 );
 
-const unitTests :Workerd.Config = (
-    services = [ (name = "main", worker = .mainWorker), (name = "analytics", worker = .analyticsWorker) ],
-);
+# analytics-engine-rust-test.wd-test runs these services against the Rust AnalyticsEngine.
+const unitTests :Workerd.Config = (services = .services);
+
+const services :List(Workerd.Service) = [
+  (name = "main", worker = .mainWorker),
+  (name = "analytics", worker = .analyticsWorker),
+];

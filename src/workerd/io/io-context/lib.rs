@@ -115,6 +115,38 @@ impl<'s> IoContext<'s> {
         Ok(bridge::io_context_write_logfwdr(self.id, channel, message)?)
     }
 
+    /// Like [`IoContext::write_logfwdr`], but calls `build` for the message only when it is
+    /// written: at once, or in a Durable Object once the output gate opens. What `build` reads,
+    /// such as [`IoContext::now_in_current_request`], is then read at that time, with this
+    /// `IoContext` current but without a lock. `build` is dropped without being called if the
+    /// `IoContext` is destroyed first, and must not panic when dropped.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one, or if
+    /// `build` is called now and panics or returns anything but exactly one valid serialized
+    /// message. When `build` is called later, those failures fail a `waitUntil` task instead, so
+    /// whatever can fail should be checked before this call.
+    pub fn write_logfwdr_with(
+        &self,
+        channel: u32,
+        build: impl FnOnce() -> Vec<u8> + 'static,
+    ) -> jsg::Result<()> {
+        let message = Box::new(ffi::LogfwdrMessage(Box::new(build)));
+        Ok(bridge::io_context_write_logfwdr_with(
+            self.id, channel, message,
+        )?)
+    }
+
+    /// Counts a write to Workers Analytics Engine against the request's limits, as C++
+    /// `LimitEnforcer::newAnalyticsEngineRequest()` does.
+    ///
+    /// # Errors
+    /// Fails with the error the limit enforcer throws if the write is over a limit, and with an
+    /// internal error if this `IoContext` is no longer the current one.
+    pub fn new_analytics_engine_request(&self) -> jsg::Result<()> {
+        Ok(bridge::io_context_new_analytics_engine_request(self.id)?)
+    }
+
     /// Waits for `future` as part of this request, then calls `callback` with its output in this
     /// `IoContext`, with a new lock. It wraps C++ `IoContext::awaitIoAndRun()`, which shares its
     /// implementation with `IoContext::awaitIo()`, and behaves as it does:

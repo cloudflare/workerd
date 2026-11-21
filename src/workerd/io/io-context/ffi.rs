@@ -97,6 +97,12 @@ pub mod bridge {
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
         fn io_context_write_logfwdr(id: u64, channel: u32, message: &[u8]) -> Result<()>;
+        fn io_context_write_logfwdr_with(
+            id: u64,
+            channel: u32,
+            message: Box<LogfwdrMessage>,
+        ) -> Result<()>;
+        fn io_context_new_analytics_engine_request(id: u64) -> Result<()>;
         fn io_context_await_io_and_run(
             id: u64,
             future: Box<IoFuture>,
@@ -241,6 +247,10 @@ pub mod bridge {
         fn aborted(self: &AbortCallback, exception: KjException);
 
         type WaitUntilFuture;
+
+        /// Builds a message for `io_context_write_logfwdr_with()`.
+        type LogfwdrMessage;
+        fn logfwdr_message_build(message: Box<LogfwdrMessage>) -> Result<Vec<u8>>;
 
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
         async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<()>;
@@ -510,6 +520,27 @@ impl<F> Drop for CatchDropPanic<F> {
             ));
         }
     }
+}
+
+/// What `IoContext::write_logfwdr_with()` builds its message with. C++ drops it, unbuilt, if the
+/// `IoContext` is destroyed before the output gate opens.
+pub struct LogfwdrMessage(pub Box<dyn FnOnce() -> Vec<u8>>);
+
+/// Builds `message`. A panic fails the write, rather than unwinding into C++.
+#[expect(
+    clippy::boxed_local,
+    reason = "C++ owns a Rust type only through a Box"
+)]
+fn logfwdr_message_build(message: Box<LogfwdrMessage>) -> Result<Vec<u8>, cxx::KjError> {
+    std::panic::catch_unwind(AssertUnwindSafe(message.0)).map_err(|payload| {
+        cxx::KjError::new(
+            cxx::KjExceptionType::Failed,
+            format!(
+                "building a logfwdr message panicked: {}",
+                panic_message(&*payload)
+            ),
+        )
+    })
 }
 
 pub fn panic_message(payload: &(dyn Any + Send)) -> &str {
