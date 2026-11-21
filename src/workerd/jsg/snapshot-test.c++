@@ -699,6 +699,32 @@ KJ_TEST("a finished generator and a generator function survive a snapshot round 
 }
 
 // =======================================================================================
+// Kept bytecode. The snapshot keeps the bytecode the zygote compiled, and the context can reach
+// it outside its SharedFunctionInfo: an error's captured stack frames hold the bytecode of each
+// interpreted frame, and a BigInt literal in a constant pool can be a context variable's value.
+// V8 patch 0057 makes the context snapshot share these with the startup snapshot; without it,
+// debug builds abort in the context serializer.
+
+KJ_TEST("bytecode an error's frames reach and a BigInt context variable survive a round trip") {
+  auto artifact = bakeSnapshot("function makeError() { return new Error('kept'); }"
+                               "globalThis.err = makeError();"
+                               "globalThis.big = (() => {"
+                               "  const b = 18446744073709551615n;"
+                               "  return () => b;"
+                               "})();"
+                               "globalThis.double = (n) => n * 2;"
+                               "double(1);"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "err.message"_kj) == "kept"_kj);
+    KJ_EXPECT(eval(js, "err.stack.includes('at makeError')"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "String(big())"_kj) == "18446744073709551615"_kj);
+    KJ_EXPECT(eval(js, "double(21)"_kj) == "42"_kj);
+    KJ_EXPECT(eval(js, "makeError().message"_kj) == "kept"_kj);
+  });
+}
+
+// =======================================================================================
 // FinalizationRegistry cleanups around the snapshot. A cleanup the top level leaves due runs in
 // the zygote before anything is recorded, so what the callback does is part of the snapshot; a
 // cleanup that becomes due only because the zygote's objects were destroyed is never run.
