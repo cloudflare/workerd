@@ -378,13 +378,7 @@ export default {
   },
   'modern-algos/util/mldsa_key_fixtures.js': {},
   'modern-algos/util/supports.js': {},
-  'normalize-algorithm-name.https.any.js': {
-    comment: 'Wrong error type - DOMException code mismatch',
-    expectedFailures: [
-      '"H<U+212A>DF" does not match "HKDF"',
-      '"PB<U+212A>DF2" does not match "PBKDF2"',
-    ],
-  },
+  'normalize-algorithm-name.https.any.js': {},
   'randomUUID.https.any.js': {},
   'secure-curves/derive_bits_keys/cfrg_curves_bits_curve448.https.any.js':
     unsupported('X448'),
