@@ -802,7 +802,7 @@ static kj::Array<kj::byte> syncProcessBuffer(jsg::Lock& js, Context& ctx, Growab
       }
       break;
     }
-  } while (ctx.getAvailOut() == 0);
+  } while (ctx.getAvailOut() == 0 || ctx.hasPendingInput() || ctx.hasPendingOutput());
 
   return result.releaseAsArray();
 }

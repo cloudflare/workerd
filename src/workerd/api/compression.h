@@ -471,6 +471,12 @@ class BrotliEncoderContext final: public BrotliContext {
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
+  bool hasPendingOutput() const {
+    return false;
+  }
+  bool hasPendingInput() const {
+    return false;
+  }
 
  private:
   bool lastResult = false;
@@ -492,6 +498,12 @@ class BrotliDecoderContext final: public BrotliContext {
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
+  bool hasPendingOutput() const {
+    return false;
+  }
+  bool hasPendingInput() const {
+    return false;
+  }
 
  private:
   BrotliDecoderResult lastResult = BROTLI_DECODER_RESULT_SUCCESS;
@@ -510,6 +522,12 @@ class ZstdContext {
   void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
+  kj::uint getAvailIn() const {
+    return input_.size - input_.pos;
+  }
+  bool hasPendingInput() const {
+    return false;
+  }
   void setFlush(int flush);
   kj::uint getAvailOut() const;
   void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
@@ -553,6 +571,10 @@ class ZstdEncoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
+  bool hasPendingOutput() const;
+  bool hasPendingInput() const {
+    return getAvailIn() != 0;
+  }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("cctx", ZSTD_sizeof_CCtx(cctx_.get()));
@@ -578,6 +600,9 @@ class ZstdDecoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
   bool isStreamEnd() const;
+  bool hasPendingOutput() const {
+    return false;
+  }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("dctx", ZSTD_sizeof_DCtx(dctx_.get()));
