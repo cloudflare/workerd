@@ -796,9 +796,11 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   auto isolate = v8::Isolate::GetCurrent();
   auto object =
       jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
-  // Null prototype: opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable
-  // check does Get(value, "then"). A null prototype keeps that lookup off Object.prototype.
-  jsg::check(object->SetPrototype(context, v8::Null(isolate)));
+  // Don't change the object's prototype or add properties here. Either would give it a map other
+  // than the constructor's initial map, and V8 never drops such a wrapper in a scavenge (see
+  // JSObject::IsUnmodifiedApiObject()). Every opaque wrapper would then be a scavenge root until
+  // the next full GC, along with everything its C++ value keeps alive. The template's prototype
+  // shadows `then` instead; see IsolateBase::IsolateBase().
   attachWrapper(isolate, object, needsGcTracing,
       static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
   return object;
