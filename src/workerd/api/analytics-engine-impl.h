@@ -13,10 +13,21 @@ constexpr size_t MAX_INDEX_SIZE_IN_BYTES = 96;
 constexpr uint MAX_ARRAY_MEMBERS = 20;
 constexpr size_t MAX_CUMULATIVE_BYTES_IN_BLOBS = 800 * MAX_ARRAY_MEMBERS;
 
+// A blob or index value: the bytes of a buffer source, or of a string as UTF-8.
+using DataPointBytes = kj::OneOf<kj::Array<kj::byte>, kj::String>;
+
+kj::ArrayPtr<const kj::byte> dataPointBytes(const DataPointBytes& value);
+
+// The validate*() functions throw what the matching set*() function would, without building
+// anything, so that a caller can reject a data point before it starts writing it.
+
+void validateDoubles(kj::ArrayPtr<const double> arr, kj::StringPtr errorPrefix);
+void validateBlobs(kj::ArrayPtr<const kj::Maybe<DataPointBytes>> arr, kj::StringPtr errorPrefix);
+void validateIndexes(kj::ArrayPtr<const kj::Maybe<DataPointBytes>> arr, kj::StringPtr errorPrefix);
+
 template <typename Message>
 void setDoubles(Message msg, kj::ArrayPtr<double> arr, kj::StringPtr errorPrefix) {
-  JSG_REQUIRE(arr.size() <= MAX_ARRAY_MEMBERS, TypeError, errorPrefix, "Maximum of ",
-      MAX_ARRAY_MEMBERS, " doubles supported.");
+  validateDoubles(arr, errorPrefix);
 
   uint index = 1;
   for (auto& item: arr) {
@@ -87,27 +98,12 @@ void setDoubles(Message msg, kj::ArrayPtr<double> arr, kj::StringPtr errorPrefix
 }
 
 template <typename Message>
-void setBlobs(Message msg,
-    kj::ArrayPtr<kj::Maybe<kj::OneOf<kj::Array<kj::byte>, kj::String>>> arr,
-    kj::StringPtr errorPrefix) {
-  JSG_REQUIRE(arr.size() <= MAX_ARRAY_MEMBERS, TypeError, errorPrefix, "Maximum of ",
-      MAX_ARRAY_MEMBERS, " blobs supported.");
-  kj::ArrayPtr<kj::byte> value;
+void setBlobs(Message msg, kj::ArrayPtr<kj::Maybe<DataPointBytes>> arr, kj::StringPtr errorPrefix) {
+  validateBlobs(arr, errorPrefix);
   uint index = 1;
-  size_t sizeSum = 0;
   for (auto& item: arr) {
     KJ_IF_SOME(i, item) {
-      KJ_SWITCH_ONEOF(i) {
-        KJ_CASE_ONEOF(val, kj::Array<kj::byte>) {
-          value = val.asBytes();
-        }
-        KJ_CASE_ONEOF(val, kj::String) {
-          value = val.asBytes();
-        }
-      }
-      sizeSum += value.size();
-      JSG_REQUIRE(sizeSum <= MAX_CUMULATIVE_BYTES_IN_BLOBS, TypeError, errorPrefix,
-          "Cumulative size of blobs exceeds ", MAX_CUMULATIVE_BYTES_IN_BLOBS, " bytes).");
+      auto value = dataPointBytes(i);
       switch (index) {
         case 1:
           msg.setBlob1(value);
@@ -176,28 +172,14 @@ void setBlobs(Message msg,
 }
 
 template <typename Message>
-void setIndexes(Message msg,
-    kj::ArrayPtr<kj::Maybe<kj::OneOf<kj::Array<kj::byte>, kj::String>>> arr,
-    kj::StringPtr errorPrefix) {
-  JSG_REQUIRE(arr.size() <= MAX_INDEXES_LENGTH, TypeError, errorPrefix, "Maximum of ",
-      MAX_INDEXES_LENGTH, " indexes supported.");
+void setIndexes(
+    Message msg, kj::ArrayPtr<kj::Maybe<DataPointBytes>> arr, kj::StringPtr errorPrefix) {
+  validateIndexes(arr, errorPrefix);
   if (arr.size() == 0) {
     return;
   }
-  auto item = kj::mv(arr[0]);
-  kj::ArrayPtr<kj::byte> value;
-  KJ_IF_SOME(i, item) {
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(val, kj::Array<kj::byte>) {
-        value = val.asBytes();
-      }
-      KJ_CASE_ONEOF(val, kj::String) {
-        value = val.asBytes();
-      }
-    }
-    JSG_REQUIRE(value.size() <= MAX_INDEX_SIZE_IN_BYTES, TypeError, errorPrefix,
-        "Size of indexes[0] exceeds ", MAX_INDEX_SIZE_IN_BYTES, " bytes).");
-    msg.setIndex1(value);
+  KJ_IF_SOME(value, arr[0]) {
+    msg.setIndex1(dataPointBytes(value));
   }
 }
 }  // namespace workerd::api
