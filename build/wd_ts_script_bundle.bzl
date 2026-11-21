@@ -195,13 +195,23 @@ def wd_ts_script_bundle(
     #    capnp compiler cannot embed files outside the rule's directory subtree,
     #    so we copy JS outputs into the current package with flattened names.
     #    e.g., main.js -> main, utils/helpers.js -> utils_helpers
+    #
+    #    The copy drops the `__esModule` marker TypeScript emits at the top of a CommonJS
+    #    module. The bootstrap's require() has no use for it, and a script that loads on
+    #    first use runs after user code, which can have replaced Object.defineProperty() or
+    #    given Object.prototype a `get`, which makes the marker's descriptor invalid.
     js_files = [_to_js(s) for s in non_dts]
 
     scripts_dict = {}
     for js in js_files:
         sname = _script_name(js)
         flat = _flat_name(sname)
-        copy_file(name = flat + "@copy", src = js, out = flat)
+        native.genrule(
+            name = flat + "@copy",
+            srcs = [js],
+            outs = [flat],
+            cmd = "sed '/^Object\\.defineProperty(exports, \"__esModule\", { value: true });/d' $< > $@",
+        )
         scripts_dict[flat] = script_prefix + sname
 
     # 3. Optional: generate V8 compile caches
