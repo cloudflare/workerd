@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+  v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-gc-complete-tracing"],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "experimental", "enable_weak_ref"],
+
+  modules = [
+    (name = "worker", esModule = embed "sql-cursor-gc-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "DurableObjectExample",
+      uniqueKey = "5ac1c0c5ac1c0c5ac1c0c5ac1c0c5ac1",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+    (name = "gcCompleteTracing", json = "true"),
+  ],
+);

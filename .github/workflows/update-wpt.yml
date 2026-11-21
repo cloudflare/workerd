@@ -145,6 +145,19 @@ jobs:
           npm install --global @anthropic-ai/claude-code
           # Claude Code's Bash sandbox needs these on Linux.
           sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
+          # Ubuntu 24.04 lets only programs with an AppArmor profile granting userns create user
+          # namespaces, which bubblewrap needs. This profile grants it to bubblewrap alone, rather
+          # than lifting the restriction for the whole runner with a sysctl.
+          sudo tee /etc/apparmor.d/bwrap > /dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+            include if exists <local/bwrap>
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
           printf '%s' "$CLAUDE_SETTINGS" > ~/.config/wpt-triage/settings.json
           chmod 600 ~/.config/wpt-triage/settings.json
       - name: Triage WPT update

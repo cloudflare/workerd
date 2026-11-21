@@ -51,10 +51,6 @@ impl Type for DataPoint {
     fn class_name() -> &'static str {
         NAME
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_object()
-    }
 }
 
 // Like a C++ JSG_STRUCT: null and undefined are an empty data point, other non-objects are not
@@ -115,10 +111,6 @@ pub struct Bytes(pub Vec<u8>);
 impl Type for Bytes {
     fn class_name() -> &'static str {
         "BufferSource or string"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_array_buffer() || value.is_array_buffer_view() || value.is_string()
     }
 }
 

@@ -7,6 +7,10 @@
 
 use std::fmt::Write as _;
 use std::sync::Once;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use tracing::Level;
 use tracing::field::Field;
@@ -118,6 +122,59 @@ pub(crate) fn debug(message: &str) {
     );
 }
 
+static STRUCTURED: AtomicBool = AtomicBool::new(false);
+
+/// Records whether the process's logging is structured, as the command learns it.
+pub fn set_structured(structured: bool) {
+    STRUCTURED.store(structured, Ordering::Relaxed);
+}
+
+/// An error that ends the process without the command's own report of its failure, on stderr,
+/// where what supervises the process looks for why it ended. KJ's logger already writes it there
+/// unless logging is structured, when it goes to stdout as a JSON line: this writes one to stderr
+/// too.
+#[track_caller]
+pub(crate) fn fatal(message: &str) {
+    if STRUCTURED.load(Ordering::Relaxed) {
+        let location = std::panic::Location::caller();
+        ffi::json_log_to_stderr(
+            Severity::Error as u8,
+            location.file(),
+            location.line(),
+            message,
+        );
+    }
+    tracing::error!("{message}");
+}
+
+/// As `fatal`, for a process that ends at once and cannot wait for a write to finish: one line on
+/// stderr that does not block (`ffi::write_stderr_nonblocking`), so that it may be cut short or
+/// lost. Under structured logging, a line of the JSON logger's format; otherwise, a line as KJ's
+/// logger writes it.
+#[track_caller]
+pub(crate) fn fatal_nonblocking(message: &str) {
+    let location = std::panic::Location::caller();
+    let line = if STRUCTURED.load(Ordering::Relaxed) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis());
+        let source = format!("{}:{}", location.file(), location.line());
+        let json = |text: &str| serde_json::Value::from(text).to_string();
+        format!(
+            "{{\"timestamp\":\"{timestamp}\",\"level\":\"error\",\"source\":{},\"message\":{}}}\n",
+            json(&source),
+            json(message),
+        )
+    } else {
+        format!(
+            "{}:{}: error: {message}\n",
+            location.file(),
+            location.line()
+        )
+    };
+    ffi::write_stderr_nonblocking(&line);
+}
+
 /// Routes every `tracing` event of the process to KJ's logger. Idempotent.
 pub fn install() {
     static INSTALLED: Once = Once::new();
@@ -126,4 +183,25 @@ pub fn install() {
         // embedding the server would want.
         let _ = tracing::subscriber::set_global_default(KjLogger);
     });
+}
+
+/// Runs a thread's body inside the logger of the thread that called this.
+///
+/// KJ's logger is the thread's, and under structured logging the JSON logger is installed only on
+/// the thread that runs the command; this installs it as KJ does on a thread of its own
+/// (`kj::ExceptionCallback::getThreadInitializer`).
+pub fn within_thread() -> cluster::Within {
+    let logger = ffi::thread_logger();
+    Box::new(move |body| ffi::run_with_logger(logger, Box::new(ThreadBody(body))))
+}
+
+/// A thread's body, as `ffi::run_with_logger` runs it.
+pub struct ThreadBody(Box<dyn FnOnce() + Send>);
+
+#[expect(
+    clippy::boxed_local,
+    reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
+)]
+pub fn thread_body_run(body: Box<ThreadBody>) {
+    (body.0)();
 }

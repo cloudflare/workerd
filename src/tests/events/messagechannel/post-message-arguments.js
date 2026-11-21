@@ -4,14 +4,12 @@
 
 // postMessage()'s second argument converts as JSG converts
 // `optional (sequence<any> or PostMessageOptions)`, and a non-empty transfer
-// list is refused, since transferring is unsupported.
-// Divergence #6 (see AGENTS.md): the TypeScript implementation recognizes a
-// proxy for an array as an array (Array.isArray()); JSG does not, and
-// converts it as a PostMessageOptions dictionary.
+// list is refused, since transferring is unsupported. Unlike JSG, which
+// converts a proxy for an array as a PostMessageOptions dictionary, the
+// conversion recognizes it as an array (Array.isArray()).
 
 import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
-import { usingTsImpl } from 'which-impl';
 
 const kBadOptions =
   "Failed to execute 'postMessage' on 'MessagePort': parameter 2 is not " +
@@ -129,11 +127,6 @@ export const proxiedArrayOptions = {
   test() {
     const { port1 } = new MessageChannel();
     const options = new Proxy([1], {});
-    if (usingTsImpl) {
-      throws(() => port1.postMessage(1, options), kTransferUnsupported);
-    } else {
-      // Read as a dictionary, whose `transfer` is undefined.
-      port1.postMessage(1, options);
-    }
+    throws(() => port1.postMessage(1, options), kTransferUnsupported);
   },
 };

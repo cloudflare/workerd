@@ -19,6 +19,8 @@ use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 
+use crate::DropCounter;
+
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
 /// and returns the log joined with `|`.
 fn log_after_microtasks(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
@@ -572,17 +574,6 @@ fn panic_in_then_callback_is_an_internal_error() {
         Ok(())
     });
 }
-
-/// Counts its drops in the counter it points to.
-struct DropCounter(&'static AtomicUsize);
-
-impl Drop for DropCounter {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
-jsg::jsg_traced_unchecked!(DropCounter);
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 

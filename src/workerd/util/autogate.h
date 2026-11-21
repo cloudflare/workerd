@@ -93,14 +93,6 @@ namespace workerd::util {
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
   V(TS_STDIO)                                                                                      \
-  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
-     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
-     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
-     cloudflare-internal:messagechannel. */                                                        \
-  V(TS_MESSAGE_CHANNEL)                                                                            \
-  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
-     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
-  V(TS_EVENT_SOURCE)                                                                               \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
@@ -111,13 +103,18 @@ namespace workerd::util {
   /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
-     settles can be collected. When disabled, they stay strong roots and keep such a stream alive  \
-     until its isolate is torn down, and jsg::TracedOwn behaves like kj::Own. */                   \
+     settles can be collected, and the Cursor held by a SQL cursor's iterators. When disabled,     \
+     they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
+     down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
   /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
      class in jsg/dom-exception.h. */                                                              \
   V(TS_DOM_EXCEPTION)                                                                              \
+  /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
+     bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
+     serializer, rather than the C++ method in api/global-scope.h. */                              \
+  V(TS_STRUCTURED_CLONE)                                                                           \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
@@ -136,7 +133,11 @@ namespace workerd::util {
   V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
-  V(WRAPPABLE_EXTERNAL_MEMORY)
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
+     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
+     group's memory pools. */                                                                      \
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

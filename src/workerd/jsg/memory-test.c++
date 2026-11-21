@@ -70,6 +70,7 @@ struct PendingIterable: public Object {
 struct SyncIterable: public Object {
   struct SyncIteratorState {
     kj::String name = kj::str("state");
+    JSG_HOLDS_NO_GC_HANDLES;
     JSG_MEMORY_INFO(SyncIteratorState) {
       tracker.trackField("name", name);
     }

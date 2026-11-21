@@ -6,6 +6,12 @@ js_library(
     visibility = ["//visibility:public"],
 )
 
+js_library(
+    name = "wrangler-serve_js_lib",
+    srcs = ["wrangler-serve.mjs"],
+    visibility = ["//visibility:public"],
+)
+
 js_test(
     name = "server-harness-test",
     size = "small",

@@ -197,6 +197,47 @@ void io_context_abort_without_reason(uint64_t id);
 // given.
 void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future);
 
+// Rust types, defined in ffi.rs.
+struct ReentryFn;
+struct ReentryCall;
+
+// The callback IoContext::makeReentryCallbackWeak() returns, for a Rust function. Each call
+// re-enters the IoContext that created it, as that callback does, and runs the function there with
+// the ReentryCall, which receives the future the function returns; the promise call() returns waits
+// for it. The callback holds the IoContext weakly: it does not keep it alive, and once the
+// IoContext is gone, or its Durable Object is hibernating, call() throws the errors that callback
+// throws. It must be called and destroyed on the IoContext's thread.
+class ReentryCallback final {
+ public:
+  ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function);
+  KJ_DISALLOW_COPY_AND_MOVE(ReentryCallback);
+
+  // Const, so that Rust can call it through a shared reference. The callback that
+  // makeReentryCallbackWeak() returns is not reentrant: it only schedules IoContext::run(), which
+  // runs the function in a later turn.
+  kj::Promise<void> call(::rust::Box<ReentryCall> call) const;
+
+ private:
+  mutable kj::Function<kj::Promise<void>(::rust::Box<ReentryCall>)> callback;
+};
+
+// The promise of one call of a ReentryCallback. A struct of its own, since a kj::Promise crosses
+// to Rust only as the result of an `async` function.
+struct ReentryPromise {
+  kj::Promise<void> promise;
+};
+
+// A ReentryCallback for `function`, in the IoContext that `id` identifies.
+kj::Own<ReentryCallback> io_context_make_reentry_callback_weak(
+    uint64_t id, ::rust::Box<ReentryFn> function);
+
+// ReentryCallback::call(). Throws, as the callback does, if the IoContext is gone or hibernating.
+kj::Own<ReentryPromise> reentry_callback_call(
+    const ReentryCallback& callback, ::rust::Box<ReentryCall> call);
+
+// The promise of `promise`.
+kj::Promise<void> reentry_promise_wait(kj::Own<ReentryPromise> promise);
+
 // Logs `message` as an error, as KJ_LOG(ERROR) does.
 void io_context_log_error(::rust::Str message);
 

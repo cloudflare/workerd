@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/io/io-context/current-with-id.h>
 #include <workerd/io/io-context/ffi.rs.h>
 #include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -23,14 +24,6 @@ namespace {
 // IoContext::Id holds only the process-unique uint64_t that Rust stores.
 static_assert(sizeof(IoContext::Id) == sizeof(uint64_t));
 static_assert(std::is_trivially_copyable_v<IoContext::Id>);
-
-// The current IoContext, which must be the one `id` identifies.
-IoContext& currentWithId(uint64_t id) {
-  auto& context = KJ_REQUIRE_NONNULL(IoContext::tryCurrent(), "there is no current request");
-  KJ_REQUIRE(context.getId() == std::bit_cast<IoContext::Id>(id),
-      "the IoContext is not the one of the current request");
-  return context;
-}
 
 // Wraps a `Literal` (see ffi.h) without copying it.
 kj::ConstString wrapLiteral(Literal bytes) {
@@ -203,10 +196,18 @@ void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future)
   currentWithId(id).addWaitUntil(wait_until_future_wait(kj::mv(future)));
 }
 
+namespace {
+
 // Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This
 // function is the reviewed exception: it throws JsExceptionThrown, which is how IoContext::run()
-// learns of an exception the callback left pending in V8. That use is counted in
-// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function.
+// learns of an exception, or a termination, that Rust left pending in V8, as for C++ code it runs.
+// That use is counted in src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function.
+[[noreturn]] void throwPendingToRun() {
+  throw jsg::JsExceptionThrown();
+}
+
+}  // namespace
+
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
@@ -218,10 +219,9 @@ void io_context_await_io_and_run(
       case IoCallbackOutcome::Succeeded:
         return;
       case IoCallbackOutcome::Failed:
-        // The exception, or termination, is pending in V8. JsExceptionThrown is how
-        // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
-        // stack, and fails the task with it, as for C++ code it runs.
-        throw jsg::JsExceptionThrown();
+        // The exception, or termination, is pending in V8. run() then logs the exception as
+        // uncaught, with its stack, and fails the task with it.
+        throwPendingToRun();
       case IoCallbackOutcome::Panicked:
         // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
         // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
@@ -230,6 +230,47 @@ void io_context_await_io_and_run(
     }
     KJ_UNREACHABLE;
   });
+}
+
+ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)
+    : callback(context.makeReentryCallbackWeak([function = kj::mv(function)](Worker::Lock& lock,
+                                                   IoContext&,
+                                                   ::rust::Box<ReentryCall> call) mutable
+          -> kj::Promise<void> {
+        switch (reentry_fn_run(reinterpret_cast<uintptr_t>(lock.getIsolate()), *function, *call)) {
+          case ReentryOutcome::Started:
+            return reentry_call_wait(kj::mv(call));
+          case ReentryOutcome::Terminated:
+            // The termination is pending in V8. run() then handles it as for C++ code it runs: it
+            // leaves the scope of the limit enforcer, fails with the exceeded limit or the
+            // exception the request was aborted with, and has its microtask checkpoint cancel the
+            // microtasks queued meanwhile.
+            throwPendingToRun();
+          case ReentryOutcome::Panicked:
+            // jsg::catch_panic() threw an internal error and requested a termination, which run()'s
+            // microtask checkpoint delivers. run() would convert a JsExceptionThrown, running
+            // JavaScript first, so the call fails with a KJ exception instead.
+            KJ_FAIL_ASSERT("the function of IoContext::make_reentry_callback_weak() panicked");
+        }
+        KJ_UNREACHABLE;
+      })) {}
+
+kj::Promise<void> ReentryCallback::call(::rust::Box<ReentryCall> call) const {
+  return callback(kj::mv(call));
+}
+
+kj::Own<ReentryCallback> io_context_make_reentry_callback_weak(
+    uint64_t id, ::rust::Box<ReentryFn> function) {
+  return kj::heap<ReentryCallback>(currentWithId(id), kj::mv(function));
+}
+
+kj::Own<ReentryPromise> reentry_callback_call(
+    const ReentryCallback& callback, ::rust::Box<ReentryCall> call) {
+  return kj::heap<ReentryPromise>(callback.call(kj::mv(call)));
+}
+
+kj::Promise<void> reentry_promise_wait(kj::Own<ReentryPromise> promise) {
+  return kj::mv(promise->promise);
 }
 
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {

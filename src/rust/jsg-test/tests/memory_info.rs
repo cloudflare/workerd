@@ -583,7 +583,7 @@ struct Fields {
     pub plain_dict: jsg::Dict<u32>,
     pub dict: jsg::Dict<jsg::Rc<Child>>,
     pub weak: jsg::Weak<Child>,
-    pub lenient: jsg::Lenient<u32>,
+    pub lenient: jsg::LenientOption<jsg::Rc<Child>>,
     pub global: v8::Global<v8::Value>,
     pub store: v8::BackingStore,
     pub borrowed: RefCell<String>,
@@ -615,7 +615,6 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let weak_target = new_child(lock);
-        let unconvertable = ctx.eval_raw(lock, "({ unconvertable: 1 })").unwrap();
         let global = ctx.eval_raw(lock, "({ global: 1 })").unwrap();
         let (c1, c2) = (new_child(lock), new_child(lock));
         ctx.set_global(lock, "c1", c1);
@@ -665,7 +664,7 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             plain_dict,
             dict,
             weak: weak_target.downgrade(lock),
-            lenient: jsg::Lenient::Unconvertable(v8::TracedGlobal::new(lock, unconvertable)),
+            lenient: jsg::LenientOption(Some(new_child(lock))),
             global: global.to_global(lock),
             store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(),
             borrowed: RefCell::new("borrowed".to_owned()),
@@ -901,7 +900,7 @@ fn handles_and_buffers() {
         assert!(snapshot.targets(node, "weak").is_empty());
 
         let lenient = snapshot.target(node, "lenient");
-        assert_eq!(snapshot.nodes[lenient].kind, "object");
+        assert_eq!(snapshot.name(lenient), "workerd / Child");
 
         let global = snapshot.target(node, "global");
         assert_eq!(snapshot.nodes[global].kind, "object");

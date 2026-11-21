@@ -253,10 +253,10 @@ class Context final: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(BenchIsolate, Context, Target, Node, Pair, Octet);
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(VerifyFastIsolate, Context, Target, Node, Pair, Octet);
 
-V8System& system() {
-  static V8System system({"--allow-natives-syntax"_kj, "--expose-gc"_kj});
-  return system;
-}
+// Constructed during static initialization so that V8 starts up, and is torn down, on the main
+// thread, like every JSG test and benchmark. V8 grants access to the memory protection key that
+// guards its JIT memory only to the thread that starts it and the threads that thread creates.
+V8System v8System({"--allow-natives-syntax"_kj, "--expose-gc"_kj});
 
 enum class Binding { CPP, RUST, CPP_FAST, RUST_FAST, CPP_STRUCT_FAST, RUST_STRUCT_FAST };
 enum class CpuTime { THREAD, PROCESS };
@@ -298,8 +298,6 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
       binding == Binding::RUST_STRUCT_FAST;
   JsgConfig config = {
     .fastApiEnabled = binding == Binding::CPP_FAST || binding == Binding::RUST_FAST};
-  // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
-  auto& v8System = system();
   Isolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](auto& js) {
     if (binding == Binding::CPP_STRUCT_FAST) js.setUsingFastJsgStruct();
@@ -408,8 +406,6 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
 // Runs `func` with an isolate locked, a Rust realm attached and a context entered, as creating
 // a Rust resource requires.
 void withRealm(auto func) {
-  // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
-  auto& v8System = system();
   JsgConfig config = {};
   BenchIsolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](auto& js) {

@@ -2209,7 +2209,11 @@ export const urlParseInvalidInput = {
       () => {
         url.parse('http://[127.0.0.1\x00c8763]:8000/');
       },
-      { code: 'ERR_INVALID_URL', input: 'http://[127.0.0.1\x00c8763]:8000/' }
+      {
+        name: 'TypeError',
+        code: 'ERR_INVALID_URL',
+        input: 'http://[127.0.0.1\x00c8763]:8000/',
+      }
     );
 
     {

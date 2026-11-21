@@ -25,6 +25,7 @@
 
 import timers from 'node:timers';
 import timersPromises from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { throws, strictEqual, deepStrictEqual, rejects, ok } from 'node:assert';
 
 export const testEnroll = {
@@ -518,5 +519,12 @@ export default {
       });
     }
     return new Response();
+  },
+};
+
+export const promisifiedTimers = {
+  test() {
+    strictEqual(promisify(timers.setTimeout), timersPromises.setTimeout);
+    strictEqual(promisify(timers.setImmediate), timersPromises.setImmediate);
   },
 };

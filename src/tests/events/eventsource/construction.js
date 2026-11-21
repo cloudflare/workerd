@@ -3,12 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // The constructor: argument conversion, its errors and their order, and
-// the state of a new EventSource. Divergence #3 (see AGENTS.md): calling
-// the TypeScript constructor without `new` throws the language's
-// TypeError.
+// the state of a new EventSource. Calling the constructor without `new`
+// throws the language's TypeError.
 
 import { deepStrictEqual, strictEqual, throws } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
 const kUrl = 'http://example.org/request-headers';
 
@@ -44,10 +42,7 @@ export const constructorRequiresNew = {
   test() {
     throws(() => EventSource(kUrl), {
       name: 'TypeError',
-      message: usingTsImpl
-        ? "Class constructor EventSource cannot be invoked without 'new'"
-        : "Failed to construct 'EventSource': Please use the 'new' " +
-          'operator, this object constructor cannot be called as a function.',
+      message: "Class constructor EventSource cannot be invoked without 'new'",
     });
   },
 };

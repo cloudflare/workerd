@@ -16,6 +16,8 @@ use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
+use crate::DropCounter;
+
 /// Creates a function whose data is `greeting` and stores it as the global `greet`.
 fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greeting: &str) {
     let greet = v8::Function::new(lock, greeting.to_owned(), |lock, greeting, args| {
@@ -152,17 +154,6 @@ fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
 // =============================================================================
 // Garbage collection
 // =============================================================================
-
-/// Counts its drops in the counter it points to.
-struct DropCounter(&'static AtomicUsize);
-
-impl Drop for DropCounter {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
-jsg::jsg_traced_unchecked!(DropCounter);
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 

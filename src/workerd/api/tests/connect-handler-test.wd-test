@@ -49,6 +49,66 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
       )
     ),
+    ( name = "connect-handler-immediate-tls-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-immediate-tls-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+        bindings = [
+          (name = "RELAY", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsRelay")),
+          (name = "CUSTOM_PROTOCOL", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsOverCustomProtocol")),
+          (name = "HOLDS_WRITES", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsHoldsWrites")),
+          (name = "FAILED_HANDSHAKE", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsFailedHandshake")),
+          (name = "NEVER_ACCEPTS", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsNeverAccepts")),
+          (name = "CLOSES_FIRST", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsClosesFirst")),
+          (name = "THROWS_SYNCHRONOUSLY", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsThrowsSynchronously")),
+          (name = "TRANSFERS_BEFORE_ACCEPTING", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsTransfersBeforeAccepting")),
+          (name = "PLAINTEXT_PEER", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsPlaintextPeer")),
+          (name = "WITHOUT_FLAG", service = (
+            name = "connect-handler-test-endpoint",
+            entrypoint = "ConnectEndpoint")),
+        ],
+      )
+    ),
+    ( name = "connect-handler-test-immediate-tls-endpoint",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
+        ],
+        # proxyTo() is experimental.
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_immediate_tls", "experimental"],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "TLS_PORT", fromEnvironment = "TLS_PORT"),
+          (name = "CONNECT_ENDPOINT_PORT", fromEnvironment = "CONNECT_ENDPOINT_PORT"),
+          (name = "CUSTOM_PROTOCOL_UPSTREAM", service = (
+            name = "connect-handler-test-endpoint",
+            entrypoint = "CustomProtocolEndpoint")),
+          (name = "SOCKET_SINK", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "SocketSink")),
+        ],
+      )
+    ),
     ( name = "connect-handler-test-proxy",
       worker = (
         modules = [
@@ -95,6 +155,17 @@ const unitTests :Workerd.Config = (
         ),
       ),
       tlsMode = startTls,
-    ), service = "connect-handler-starttls-test")
+    ), service = "connect-handler-starttls-test"),
+    # Terminates TLS before the connection reaches its handler, with the certificate the `internet`
+    # service trusts: the upstream that connect-handler-immediate-tls-test's relay secures its
+    # connection to.
+    (name = "connect-tls", address = "127.0.0.1:0", tcp = (
+      tlsOptions = (
+        keypair = (
+          privateKey = embed "connect-handler-server.key",
+          certificateChain = embed "connect-handler-server.pem",
+        ),
+      ),
+    ), service = (name = "connect-handler-test-endpoint", entrypoint = "TlsEchoEndpoint"))
   ]
 );

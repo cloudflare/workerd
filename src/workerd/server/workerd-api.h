@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/snapshot.h>

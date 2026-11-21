@@ -1,0 +1,100 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Frankenvalue for APIs implemented in Rust: built from JavaScript by C++ Frankenvalue::fromJs(),
+# so that capabilities serialize into its cap table as in C++, and held by Rust as a
+# `KjOwn<Frankenvalue>`. ffi.h and ffi.c++ are the per-type shims, C++ API code that lives with
+# the class. A package of its own because //src/workerd/io:frankenvalue must not depend on Rust.
+wd_rust_crate(
+    name = "frankenvalue",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io:frankenvalue",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    # For the bridges of crates that take and return a `KjOwn<Frankenvalue>`.
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+    ],
+)
+
+# Separate from the bridge's :ffi.rs@cxx, which only includes ffi.h, so that a C++ library that
+# depends on the crate never closes a cycle through it.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io:frankenvalue",
+    ],
+)
+
+# Snippets that must compile against frankenvalue. See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [
+        ":frankenvalue",
+        "//src/rust/cxx/kj-rs",
+        "@crates_vendor//static_assertions",
+    ],
+)
+
+# The Rust half of frankenvalue-ffi-test: a Rust resource that builds Frankenvalues from its
+# arguments.
+wd_rust_crate(
+    name = "frankenvalue-test-bridge",
+    testonly = True,
+    srcs = ["test_bridge.rs"],
+    crate_root = "test_bridge.rs",
+    cxx_bridge_deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg",
+    ],
+    cxx_bridge_hdrs = ["test-bridge.h"],
+    cxx_bridge_src = "test_bridge.rs",
+    link_deps = [":test-bridge"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    deps = [
+        ":frankenvalue",
+        "//src/rust/jsg",
+    ],
+)
+
+# The C++ consumer test_bridge.rs hands Frankenvalues to, and what it keeps. Every binary that
+# links the bridge crate needs it, including its generated frankenvalue-test-bridge_test.
+wd_cc_library(
+    name = "test-bridge",
+    testonly = True,
+    srcs = ["test-bridge.c++"],
+    hdrs = [
+        "test-bridge.h",
+        "test-bridge-state.h",
+    ],
+    deps = ["//src/workerd/io:frankenvalue"],
+)
+
+# Frankenvalues built by Rust in the requests of a real worker, with Fetchers in them, compared
+# with those C++ builds.
+kj_test(
+    src = "frankenvalue-ffi-test.c++",
+    deps = [
+        ":frankenvalue-test-bridge",
+        ":test-bridge",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/tests:test-fixture",
+    ],
+)

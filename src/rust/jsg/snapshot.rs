@@ -8,11 +8,9 @@
 
 #![expect(
     unsafe_code,
-    reason = "a copy owns a resource through a raw trait object pointer, and a restored \
-              reference is rebuilt from the Wrappable C++ passes"
+    reason = "a restored reference is rebuilt from the Wrappable C++ passes"
 )]
 
-use std::any::TypeId;
 use std::ffi::CStr;
 
 use crate::GarbageCollected;
@@ -22,7 +20,7 @@ use crate::Rc;
 use crate::Resource;
 use crate::Traced;
 use crate::v8::GcVisitor;
-use crate::v8::ffi::TraitObjectPtr;
+use crate::v8::WrappableRc;
 use crate::v8::ffi::Wrappable;
 
 /// A resource whose instances a startup snapshot can carry, as a C++ JSG type does by overriding
@@ -184,27 +182,17 @@ impl<R: SnapshotTransfer> ErasedSnapshotTransfer for Stored<R> {
     }
 }
 
-/// A resource, or what a snapshot stores of one, owned by no `Wrappable` yet.
+/// A resource, or what a snapshot stores of one, in a new `Wrappable` that no `Rc` refers to.
 #[doc(hidden)]
-pub struct SnapshotCopy(TraitObjectPtr);
+pub struct SnapshotCopy(WrappableRc);
 
 impl SnapshotCopy {
     fn of<T: GarbageCollected + 'static>(value: T) -> Self {
-        let raw: *const T = std::rc::Rc::into_raw(std::rc::Rc::new(value));
-        let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
-        Self(TraitObjectPtr::from_raw(fat, TypeId::of::<T>()))
+        Self(WrappableRc::new_unreferenced(value))
     }
 
-    /// The trait object of the copy, for a new `Wrappable` to own.
-    pub(crate) fn into_trait_object(self) -> TraitObjectPtr {
-        let copy = std::mem::ManuallyDrop::new(self);
-        copy.0.clone()
-    }
-}
-
-impl Drop for SnapshotCopy {
-    fn drop(&mut self) {
-        // SAFETY: the pointer came from `Rc::into_raw` in `of`, and no `Wrappable` took it.
-        unsafe { self.0.drop_rc() };
+    /// The address of the copy's `Wrappable`, passing the caller its only `kj::Rc` reference.
+    pub(crate) fn into_wrappable(self) -> usize {
+        self.0.into_wrappable()
     }
 }

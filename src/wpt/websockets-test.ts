@@ -160,9 +160,7 @@ export default {
     replace: removeUseCapture,
   },
   'Send-0byte-data.any.js': {
-    comment:
-      'workerd returns 0 instead of undefined for empty message data; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-65K-data.any.js': {
     replace: removeUseCapture,
@@ -335,10 +333,7 @@ export default {
     comment: 'importScripts is not available in Workers',
     omittedTests: true,
   },
-  'referrer.any.js': {
-    comment: 'Referrer behavior is different in workers',
-    disabledTests: true,
-  },
+  'referrer.any.js': {},
   'remove-own-iframe-during-onerror.window.js': {
     comment: 'iframe tests are browser-specific',
     omittedTests: true,
