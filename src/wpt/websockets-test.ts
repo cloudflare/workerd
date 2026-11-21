@@ -300,7 +300,6 @@ export default {
     comment:
       'Some interface/attribute tests still fail due to event handler and inherited property checks',
     expectedFailures: [
-      'WebSocket interface: existence and properties of interface object',
       'WebSocket interface: attribute onopen',
       'WebSocket interface: attribute onerror',
       'WebSocket interface: attribute onclose',
@@ -309,7 +308,6 @@ export default {
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onerror" with the proper type',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onclose" with the proper type',
       'WebSocket interface: new WebSocket("ws://invalid") must inherit property "onmessage" with the proper type',
-      'CloseEvent interface: existence and properties of interface object',
       'CloseEvent interface: attribute wasClean',
       'CloseEvent interface: attribute code',
       'CloseEvent interface: attribute reason',

@@ -15,7 +15,7 @@ export default {
   },
   'idlharness.any.js': {
     comment:
-      'Event and CustomEvent lack initEvent(), initCustomEvent() and a null target and srcElement, isTrusted is a data property, and the CustomEvent and AbortSignal interface objects do not inherit from Event and EventTarget. The other interfaces in the DOM IDL need a document.',
+      'Event and CustomEvent lack initEvent(), initCustomEvent() and a null target and srcElement, and isTrusted is a data property. The other interfaces in the DOM IDL need a document.',
     expectedFailures: [
       'Event interface: operation initEvent(DOMString, optional boolean, optional boolean)',
       'Event interface: new Event("foo") must inherit property "target" with the proper type',
@@ -23,7 +23,6 @@ export default {
       'Event interface: new Event("foo") must have own property "isTrusted"',
       'Event interface: new Event("foo") must inherit property "initEvent(DOMString, optional boolean, optional boolean)" with the proper type',
       'Event interface: calling initEvent(DOMString, optional boolean, optional boolean) on new Event("foo") with too few arguments must throw TypeError',
-      'CustomEvent interface: existence and properties of interface object',
       'CustomEvent interface: operation initCustomEvent(DOMString, optional boolean, optional boolean, optional any)',
       'CustomEvent interface: new CustomEvent("foo") must inherit property "initCustomEvent(DOMString, optional boolean, optional boolean, optional any)" with the proper type',
       'CustomEvent interface: calling initCustomEvent(DOMString, optional boolean, optional boolean, optional any) on new CustomEvent("foo") with too few arguments must throw TypeError',
@@ -32,7 +31,6 @@ export default {
       'Event interface: new CustomEvent("foo") must have own property "isTrusted"',
       'Event interface: new CustomEvent("foo") must inherit property "initEvent(DOMString, optional boolean, optional boolean)" with the proper type',
       'Event interface: calling initEvent(DOMString, optional boolean, optional boolean) on new CustomEvent("foo") with too few arguments must throw TypeError',
-      'AbortSignal interface: existence and properties of interface object',
       'Window interface: attribute event',
     ],
     omittedTests: [

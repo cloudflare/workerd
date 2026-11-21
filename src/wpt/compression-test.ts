@@ -50,9 +50,11 @@ export default {
   },
   'idlharness.https.any.js': {
     comment:
-      'Workers expose globals differently than browsers - readable/writable attribute tests still fail',
+      'CompressionStream and DecompressionStream inherit from TransformStream, but per spec they only include GenericTransformStream, so their interface object and interface prototype object have the wrong [[Prototype]]',
     expectedFailures: [
+      'CompressionStream interface: existence and properties of interface object',
       'CompressionStream interface: existence and properties of interface prototype object',
+      'DecompressionStream interface: existence and properties of interface object',
       'DecompressionStream interface: existence and properties of interface prototype object',
     ],
   },

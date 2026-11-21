@@ -32,9 +32,11 @@ export default {
   },
   'idlharness.any.js': {
     comment:
-      'Workers expose globals differently than browsers - readable/writable attribute tests still fail',
+      'TextDecoderStream and TextEncoderStream inherit from TransformStream, but per spec they only include GenericTransformStream, so their interface object and interface prototype object have the wrong [[Prototype]]',
     expectedFailures: [
+      'TextDecoderStream interface: existence and properties of interface object',
       'TextDecoderStream interface: existence and properties of interface prototype object',
+      'TextEncoderStream interface: existence and properties of interface object',
       'TextEncoderStream interface: existence and properties of interface prototype object',
     ],
   },

@@ -164,6 +164,9 @@ function report() {
             configurable: desc.configurable,
           },
     errorFrozen: Object.isFrozen(Error),
+    interfaceObjectsLinked:
+      Object.getPrototypeOf(File) === Blob &&
+      Object.getPrototypeOf(CustomEvent) === Event,
     dateFrozen: Object.isFrozen(Date.prototype),
     temporal:
       globalThis.Temporal?.polyfill === true
@@ -259,6 +262,7 @@ async function test(ctrl, env) {
       deepStrictEqual(r.types, NATIVE_TYPES);
       strictEqual(r.join, '1,2');
       strictEqual(r.wasmValidates, true);
+      strictEqual(r.interfaceObjectsLinked, true);
     },
     'stl-set'(r) {
       deepStrictEqual(r.stackTraceLimit, { ...V8_DEFAULT, value: 50 });

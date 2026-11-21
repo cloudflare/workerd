@@ -29,15 +29,7 @@ export default {
   'clear_one_mark.any.js': { before: clearEntries },
   'clear_one_measure.any.js': { before: clearEntries },
   'entry_type.any.js': { before: clearEntries },
-  'idlharness.any.js': {
-    before: clearEntries,
-    comment:
-      'The PerformanceMark and PerformanceMeasure interface objects do not have PerformanceEntry as their [[Prototype]]',
-    expectedFailures: [
-      'PerformanceMark interface: existence and properties of interface object',
-      'PerformanceMeasure interface: existence and properties of interface object',
-    ],
-  },
+  'idlharness.any.js': { before: clearEntries },
   'invoke_with_timing_attributes.worker.js': {
     before: clearEntries,
     // importScripts() does not exist in workerd. The only thing the test needs from
