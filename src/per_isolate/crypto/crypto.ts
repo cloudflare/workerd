@@ -127,9 +127,7 @@ function Crypto(): never {
 const proto = ObjectCreate(ObjectPrototype) as object;
 
 // Finishes the class, in JSG's order: `subtle` (on the prototype, unless it is
-// an instance property), the methods, `DigestStream`, the constructor. The
-// DigestStream is the C++ class, or the TypeScript one under
-// typescript_implemented_streams.
+// an instance property), the methods, `DigestStream`, the constructor.
 function defineCrypto(DigestStream: unknown): typeof Crypto {
   if (!kInstanceProperties) {
     if (kSpecCompliantPropertyAttributes) {
@@ -196,8 +194,16 @@ function defineCrypto(DigestStream: unknown): typeof Crypto {
   return Crypto;
 }
 
-// The context's one instance, the `crypto` global, created on first use, once
-// defineCrypto() has finished the class.
+// The DigestStream is the TypeScript one under typescript_implemented_streams,
+// and otherwise the C++ class, which the backend exports.
+defineCrypto(
+  compatFlags['typescript_implemented_streams']
+    ? (require('crypto/digest-stream') as { DigestStream: unknown })
+        .DigestStream
+    : cryptoBackend.DigestStream
+);
+
+// The context's one instance, the `crypto` global, created on first use.
 // ServiceWorkerGlobalScope::getCrypto() (api/global-scope.h) calls this,
 // through crypto/cpp_exports.
 let instance: object | undefined;
@@ -228,11 +234,11 @@ function newCrypto(subtle: object): object {
 }
 
 export type CryptoExports = {
-  defineCrypto: typeof defineCrypto;
+  Crypto: typeof Crypto;
   getCrypto: typeof getCrypto;
 };
 
 module.exports = {
-  defineCrypto,
+  Crypto,
   getCrypto,
 };

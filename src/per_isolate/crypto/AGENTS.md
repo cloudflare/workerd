@@ -126,14 +126,19 @@ building the string in JavaScript costs about as much as the whole C++ call.
   (TypeError), an integer-typed one (`TypeMismatchError`), of at most 64 KiB
   (`QuotaExceededError`); only then is the entropy source read, so a bad
   argument at the top level reports the bad argument.
-- **`crypto` stays a lazy global.** `ServiceWorkerGlobalScope::getCrypto()`
-  (`src/workerd/api/global-scope.h`) returns `crypto.ts`'s `getCrypto()`,
-  through `crypto/cpp_exports` and `tryCallCryptoCppExport()`, so the property keeps its place, its
+- **Nothing loads until first use.** The global `SubtleCrypto` and `Crypto`
+  are lazy data properties (`utils.defineLazyDataProperty()` in `main.ts`),
+  as JSG's nested types are, so a Worker that never touches WebCrypto pays
+  nothing at startup. `crypto` stays JSG's lazy global:
+  `ServiceWorkerGlobalScope::getCrypto()` (`src/workerd/api/global-scope.h`)
+  requires `crypto/cpp_exports` through `tryCallCryptoCppExport()` and returns
+  `crypto.ts`'s `getCrypto()`, so the property keeps its place, its
   attributes, and user code can still replace it before first use.
-- **The global `Crypto` is redefined in place**, not deleted and added, so it
-  keeps its place among the global's properties. The C++ class is still
-  registered: `crypto.DigestStream` is the C++ class's, or under
-  `typescript_implemented_streams` the TypeScript one.
+- **The global `Crypto` is redefined in place**, over the C++ class's property,
+  so it keeps its place among the global's properties. The C++ class is still
+  registered: `crypto.DigestStream` is the C++ class, which the backend
+  exports as a nested type, or under `typescript_implemented_streams` the
+  TypeScript one.
 - **An error's stack begins in the bootstrap**, as `SubtleCrypto`'s does.
 - **`subtle` follows `workers_api_getters_setters_on_prototype`**: a
   prototype getter, or a read-only own data property of the instance.

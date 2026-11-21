@@ -1636,7 +1636,11 @@ kj::Maybe<jsg::JsValue> tryCallCryptoCppExport(jsg::Lock& js, kj::StringPtr name
       jsg::tryGetBootstrapModules(js) == kj::none) {
     return kj::none;
   }
-  auto function = KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "crypto/cpp_exports"_kj, name),
+  // Loads the TypeScript WebCrypto on first use, as reading the lazy SubtleCrypto or Crypto global
+  // does (src/per_isolate/main.ts).
+  auto exports = KJ_REQUIRE_NONNULL(
+      requireBootstrapExport(js, "crypto/cpp_exports"_kj).tryCast<jsg::JsObject>());
+  auto function = KJ_REQUIRE_NONNULL(exports.get(js, name).tryCast<jsg::JsFunction>(),
       "missing crypto/cpp_exports function", name);
   return function.call(js, js.undefined());
 }

@@ -23,6 +23,7 @@ namespace {
 class EdDsaKey;
 class EllipticKey;
 }  // namespace
+class DigestStream;
 
 // Subset of recognized key usage values.
 //
@@ -875,6 +876,8 @@ class SubtleCrypto final: public jsg::Object {
 
   JSG_RESOURCE_TYPE(SubtleCrypto, CompatibilityFlags::Reader flags) {
     if (util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
+      // The C++ DigestStream, for the TypeScript Crypto without TypeScript streams.
+      JSG_NESTED_TYPE(DigestStream);
       JSG_METHOD_NAMED(isCryptoKey, backendIsCryptoKey);
       JSG_METHOD_NAMED(encrypt, backendEncrypt);
       JSG_METHOD_NAMED(decrypt, backendDecrypt);

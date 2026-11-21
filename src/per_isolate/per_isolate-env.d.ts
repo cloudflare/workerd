@@ -380,6 +380,8 @@ declare interface DigestContext {
 // The operations take arguments that crypto/subtle-conversions has converted,
 // run synchronously and throw what the C++ methods reject with.
 declare interface SubtleCryptoBackend {
+  // The C++ DigestStream class.
+  readonly DigestStream: unknown;
   isCryptoKey(value: unknown): boolean;
 
   encrypt(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;
