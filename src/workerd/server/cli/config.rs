@@ -11,8 +11,10 @@ use std::io::Write;
 
 use capnp::message::ReaderOptions;
 use workerd_capnp::config;
+use workerd_capnp::service;
 
 use crate::bridge::ffi;
+use crate::wrangler::CLUSTER_STORAGE;
 
 /// A `Config` message, checked: encoded as a Cap'n Proto stream (segment table, then segments),
 /// in 8-byte words.
@@ -78,62 +80,93 @@ impl Config {
         bytes_from_words(&self.0)
     }
 
-    /// Fills `cluster.key` and `cluster.bucket` from the environment where the config leaves them
-    /// empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable and
-    /// returns `None` when it is unset or empty. A config without `cluster` is unchanged. A key or
-    /// bucket that neither the config nor the environment sets is an error.
-    pub fn with_cluster_environment(
+    /// The config as `serve` runs it in a cluster, decoded and encoded once.
+    ///
+    /// First, a config without `cluster` joins one at `flags.address`, the value of
+    /// `--cluster-addr`, if it defines [`CLUSTER_STORAGE`] as a writable disk service: it gets a
+    /// `cluster` with that address and every other setting at its default, so the key and bucket
+    /// come from the environment and an `s3://` bucket's endpoint and credentials from the
+    /// `AWS_*` variables. A config with a `cluster` keeps it, since
+    /// `--cluster-addr` overrides its address. A config without either is unchanged, and then
+    /// `flags.advertise`, the value of `--cluster-advertise`, is an error.
+    ///
+    /// Then, with `var`, the cluster's `key` and `bucket` are filled from the environment where
+    /// they are empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable
+    /// and returns `None` when it is unset or empty. A key or bucket that neither the config nor
+    /// the environment sets is an error.
+    pub fn with_cluster(
         self,
-        var: impl Fn(&str) -> Option<String>,
-    ) -> Result<Self, String> {
+        flags: &ClusterFlags<'_>,
+        var: Option<Env<'_>>,
+    ) -> Result<Self, ClusterError> {
+        let usage = |error: capnp::Error| ClusterError::Usage(error.to_string());
         let bytes = self.to_bytes();
-        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
-            .map_err(|error| error.to_string())?;
-        let root = message
-            .get_root::<config::Reader>()
-            .map_err(|error| error.to_string())?;
-        if !root.has_cluster() {
-            return Ok(self);
-        }
-        let cluster = root.get_cluster().map_err(|error| error.to_string())?;
-        let empty = |text: capnp::Result<capnp::text::Reader<'_>>| -> Result<bool, String> {
-            let text = text.and_then(|text| Ok(text.to_string()?));
-            Ok(text.map_err(|error| error.to_string())?.is_empty())
-        };
-        let key = if empty(cluster.get_key())? {
-            cluster_key(&var)?
-        } else {
+        let message =
+            capnp::serialize::read_message(bytes.as_slice(), reader_options()).map_err(usage)?;
+        let root = message.get_root::<config::Reader>().map_err(usage)?;
+        let join = if root.has_cluster() {
             None
-        };
-        let bucket = if empty(cluster.get_bucket())? {
-            var(CLUSTER_BUCKET).and_then(|bucket| non_blank(&bucket))
         } else {
-            None
+            match (flags.address, flags.advertise) {
+                (Some(_), _) if !flags.can_join => {
+                    return Err(ClusterError::Usage(
+                        "--cluster-addr: the config compiled into this executable has no \
+                         cluster, so it cannot join one. Serve the config with `workerd serve \
+                         --cluster-addr` instead, or compile a config that has `cluster`."
+                            .to_owned(),
+                    ));
+                }
+                (Some(_), _) if !has_cluster_storage(root).map_err(usage)? => {
+                    return Err(ClusterError::Usage(format!(
+                        "--cluster-addr: the config has no writable disk service named \
+                         `{CLUSTER_STORAGE}`, which holds the Durable Objects of the cluster's \
+                         deployments on each instance, so it cannot join a cluster. Add one, or \
+                         serve the wrangler config itself, which defines it when joined."
+                    )));
+                }
+                (Some(address), _) => Some(address),
+                (None, Some(_)) => {
+                    return Err(ClusterError::Usage(
+                        "--cluster-advertise: the config has no cluster. Pass --cluster-addr to \
+                         join one."
+                            .to_owned(),
+                    ));
+                }
+                (None, None) => return Ok(self),
+            }
         };
-        let mut missing = Vec::new();
-        if key.is_none() && empty(cluster.get_key())? {
-            missing.push(format!(
-                "cluster.key is not set. Set it in the config, in {CLUSTER_KEY}, or in a file \
-                 named by {CLUSTER_KEY_FILE}."
-            ));
-        }
-        if bucket.is_none() && empty(cluster.get_bucket())? {
-            missing.push(format!(
-                "cluster.bucket is not set. Set it in the config or in {CLUSTER_BUCKET}."
-            ));
-        }
-        if !missing.is_empty() {
-            return Err(missing.join("\n"));
-        }
-        if key.is_none() && bucket.is_none() {
+        let (key, bucket) = match var {
+            None => (None, None),
+            Some(var) => {
+                // A joined config's cluster is new, so its key and bucket are empty.
+                let (key_empty, bucket_empty) = if join.is_some() {
+                    (true, true)
+                } else {
+                    let cluster = root.get_cluster().map_err(usage)?;
+                    let empty = |text: capnp::Result<capnp::text::Reader<'_>>| {
+                        text.and_then(|text| Ok(text.to_str()?.is_empty()))
+                            .map_err(usage)
+                    };
+                    (empty(cluster.get_key())?, empty(cluster.get_bucket())?)
+                };
+                cluster_environment(var, key_empty, bucket_empty)
+                    .map_err(ClusterError::Environment)?
+            }
+        };
+        if join.is_none() && key.is_none() && bucket.is_none() {
             return Ok(self);
         }
         let mut message = capnp::message::Builder::new_default();
-        message.set_root(root).map_err(|error| error.to_string())?;
-        let mut cluster = message
-            .get_root::<config::Builder>()
-            .and_then(config::Builder::get_cluster)
-            .map_err(|error| error.to_string())?;
+        message.set_root(root).map_err(usage)?;
+        let root = message.get_root::<config::Builder>().map_err(usage)?;
+        let mut cluster = match join {
+            Some(address) => {
+                let mut cluster = root.init_cluster();
+                cluster.set_address(address);
+                cluster
+            }
+            None => root.get_cluster().map_err(usage)?,
+        };
         if let Some(key) = key {
             cluster.set_key(key.as_str());
         }
@@ -155,6 +188,84 @@ impl Config {
     }
 }
 
+/// Reads an environment variable: `None` when it is unset or empty.
+pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// What `serve` was told about the cluster: `--cluster-addr` and `--cluster-advertise`, and
+/// whether a config without `cluster` may join one.
+#[derive(Default)]
+pub struct ClusterFlags<'a> {
+    pub address: Option<&'a str>,
+    pub advertise: Option<&'a str>,
+    /// False for the config compiled into an executable: `compile` translates a wrangler config
+    /// for a server that joins no cluster, so the binary has no way to become a node of one.
+    pub can_join: bool,
+}
+
+/// Why [`Config::with_cluster`] refused a config.
+#[derive(Debug)]
+pub enum ClusterError {
+    /// The command line does not fit the config.
+    Usage(String),
+    /// A key or bucket is missing, or the environment variable for one is unusable.
+    Environment(String),
+}
+
+impl fmt::Display for ClusterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Usage(error) | Self::Environment(error) => f.write_str(error),
+        }
+    }
+}
+
+/// Whether `root` defines [`CLUSTER_STORAGE`] as a writable disk service, which a config that
+/// joins a cluster needs for the Durable Objects of the cluster's deployments.
+fn has_cluster_storage(root: config::Reader<'_>) -> capnp::Result<bool> {
+    for service in root.get_services()? {
+        if service.get_name()?.to_str()? == CLUSTER_STORAGE {
+            return Ok(match service.which()? {
+                service::Which::Disk(disk) => disk?.get_writable(),
+                _ => false,
+            });
+        }
+    }
+    Ok(false)
+}
+
+/// The key and bucket to fill from the environment, for a cluster whose key and bucket are empty
+/// as `key_empty` and `bucket_empty` say. `None` for one the config sets. A key or bucket that
+/// neither sets is an error.
+fn cluster_environment(
+    var: Env<'_>,
+    key_empty: bool,
+    bucket_empty: bool,
+) -> Result<(Option<String>, Option<String>), String> {
+    let key = if key_empty { cluster_key(var)? } else { None };
+    let bucket = if bucket_empty {
+        var(CLUSTER_BUCKET).and_then(|bucket| non_blank(&bucket))
+    } else {
+        None
+    };
+    let mut missing = Vec::new();
+    if key_empty && key.is_none() {
+        missing.push(format!(
+            "cluster.key is not set. Set it in the config, in {CLUSTER_KEY}, or in a file named by \
+             {CLUSTER_KEY_FILE}."
+        ));
+    }
+    if bucket_empty && bucket.is_none() {
+        missing.push(format!(
+            "cluster.bucket is not set. Set it in the config or in {CLUSTER_BUCKET}."
+        ));
+    }
+    if missing.is_empty() {
+        Ok((key, bucket))
+    } else {
+        Err(missing.join("\n"))
+    }
+}
+
 /// The environment variable that holds the cluster key when the config leaves it empty.
 pub const CLUSTER_KEY: &str = "WORKERD_CLUSTER_KEY";
 /// The environment variable that names a file holding the cluster key, such as a mounted secret.
@@ -168,7 +279,7 @@ const MIN_KEY: usize = 32;
 
 /// The cluster key from `CLUSTER_KEY` or the file `CLUSTER_KEY_FILE` names, without trailing
 /// whitespace, such as a file's final newline. `None` when neither is set or the key is blank.
-fn cluster_key(var: impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+fn cluster_key(var: Env<'_>) -> Result<Option<String>, String> {
     let (key, source) = match (var(CLUSTER_KEY), var(CLUSTER_KEY_FILE)) {
         (Some(_), Some(_)) => {
             return Err(format!(

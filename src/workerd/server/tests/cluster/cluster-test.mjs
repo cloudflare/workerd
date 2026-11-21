@@ -59,6 +59,10 @@
 //      killed node's entries miss at once.
 //  17. Nodes can take the cluster key and bucket from the environment, a
 //      binary from `workerd compile` too, and compiling embeds neither.
+//  18. Nodes serving a wrangler project, which has no cluster section, join a
+//      cluster with --cluster-addr and the key and bucket from the
+//      environment, and forward Durable Object requests to each other. A
+//      binary from `workerd compile` without a cluster section cannot join.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -160,8 +164,10 @@ class ClusterNode {
   #env;
   #compiled;
 
-  // `localPath` is the directory of the config's disk service `disk`. `env`
-  // adds to the process's environment, or with `undefined` removes from it.
+  // `localPath` is the directory of the config's disk service `disk`, or with
+  // a `disk` of null its `--data-dir`, as for a wrangler config. `env`
+  // adds to the process's environment, or with `undefined` removes from it. A
+  // `configName` of null names no constant, as for a wrangler config.
   constructor({
     binary,
     config,
@@ -241,7 +247,7 @@ class ClusterNode {
     const config = [
       'serve',
       this.#config,
-      ...(this.#configName === undefined ? [] : [this.#configName]),
+      ...(this.#configName == null ? [] : [this.#configName]),
     ];
     const args = [
       ...(this.#compiled ? [] : config),
@@ -251,7 +257,11 @@ class ClusterNode {
       `--socket-addr=http=127.0.0.1:0`,
     ];
     if (this.#localPath !== undefined) {
-      args.push(`--directory-path=${this.#disk}=${this.#localPath}`);
+      args.push(
+        this.#disk === null
+          ? `--data-dir=${this.#localPath}`
+          : `--directory-path=${this.#disk}=${this.#localPath}`
+      );
     }
     args.push(...this.#extraArgs);
 
@@ -571,8 +581,9 @@ class FakeS3 {
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
 // The nodes run the config constant `configName` of `config`, whose disk
-// service `disk` is a directory of each node's own, once `before` has prepared
-// the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). Node `i` gets the
+// service `disk` (with null, the --data-dir) is a directory of each node's
+// own, once `before` has prepared the bucket, of `dialect` ("s3" or "gcs",
+// FakeS3.fresh). Node `i` gets the
 // extra environment variables `nodeEnv(i, root, bucket)`, where `root` is the
 // test's temporary directory, and runs the binary that `nodeBinary(i, root)`
 // names (`compiled` when `workerd compile` built it).
@@ -3874,4 +3885,169 @@ test('cluster: a cron occurrence does not run again on an owner whose clock lags
     );
     assert.strictEqual(runs.length, 1);
   });
+});
+
+test('cluster: nodes serving a wrangler project join a cluster with --cluster-addr', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  try {
+    await writeWranglerProject(project, { name: 'counter' });
+    await withCluster(
+      2,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const counts = [];
+        let id;
+        for (const node of nodes) {
+          const { status, body } = await fetchJson(node.httpPort, '/increment');
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.count);
+          id = body.id;
+        }
+        // One object, so one node forwarded its request to the other.
+        assert.deepStrictEqual(counts, [1, 2]);
+        const record = await bucket.get(
+          `${objectPrefix(id, 'counter-Counter')}/own.json`
+        );
+        assert.notStrictEqual(record, null);
+        const owner = nodes.find(
+          (node) => nodeKeys.get(node.nodeId) === JSON.parse(record).node
+        );
+        assert(owner !== undefined, record);
+        // The object is stored in `do/` where --data-dir points, and nothing
+        // is stored in the project.
+        assert(
+          (await readdir(join(owner.localPath, 'do'))).includes(
+            'counter-Counter'
+          )
+        );
+        assert.deepStrictEqual((await readdir(project)).sort(), [
+          'index.js',
+          'wrangler.jsonc',
+        ]);
+      },
+      {
+        config: join(project, 'wrangler.jsonc'),
+        configName: null,
+        disk: null,
+        extraArgs: () => ['--cluster-addr=127.0.0.1:0'],
+        nodeEnv: async () => ({
+          WORKERD_CLUSTER_KEY: 'test-cluster-shared-secret-of-32-bytes',
+          WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+          AWS_ACCESS_KEY_ID: 'wdtest',
+          AWS_SECRET_ACCESS_KEY: 'wdtest-secret',
+        }),
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('cluster: --cluster-addr and --data-dir are refused where they cannot apply', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  // Spawns `binary` with `args`, and resolves to its exit code and stderr. A
+  // process still running after 30 s is killed, so its code is null.
+  const run = async (binary, args, stdout, extraEnv = {}) => {
+    const child = spawn(binary, args, {
+      stdio: ['ignore', stdout, 'pipe'],
+      env: { ...env, ...extraEnv },
+      timeout: 30_000,
+    });
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d));
+    const code = await new Promise((resolve, reject) => {
+      child.once('error', reject).once('exit', resolve);
+    });
+    return { code, stderr };
+  };
+  try {
+    await writeWranglerProject(project, { name: 'counter' });
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    const binary = join(project, `compiled-workerd${exe}`);
+    const out = await open(binary, 'w', 0o755);
+    try {
+      const compile = await run(
+        env.WORKERD_BINARY,
+        ['compile', join(project, 'wrangler.jsonc')],
+        out.fd
+      );
+      assert.strictEqual(compile.code, 0, compile.stderr);
+    } finally {
+      await out.close();
+    }
+    const { code, stderr } = await run(
+      binary,
+      [
+        '--experimental',
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      'ignore',
+      {
+        ...sharedLibraryPath(env.WORKERD_BINARY),
+        WORKERD_CLUSTER_KEY: 'test-cluster-shared-secret-of-32-bytes',
+        WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+        AWS_ENDPOINT_URL: 'http://127.0.0.1:1',
+      }
+    );
+    assert.notStrictEqual(code, 0);
+    assert.match(
+      stderr.replace(/\s+/g, ' '),
+      /the config compiled into this executable has no cluster, so it cannot join one/
+    );
+
+    // A refusal ends the process with an error that says why.
+    const refused = async (binary, args, message) => {
+      const { code, stderr } = await run(binary, args, 'ignore', {
+        ...sharedLibraryPath(env.WORKERD_BINARY),
+      });
+      assert(code !== 0 && code !== null, `${args.join(' ')}: ${code}`);
+      assert.match(stderr.replace(/\s+/g, ' '), message);
+    };
+    const data = join(project, 'data');
+    // The compiled binary's paths were fixed when it was compiled.
+    await refused(
+      binary,
+      ['--experimental', `--data-dir=${data}`],
+      /--data-dir: the config compiled into this executable fixed its directories/
+    );
+    // A Cap'n Proto config names its own directories.
+    await refused(
+      env.WORKERD_BINARY,
+      ['serve', env.WD_TEST_CONFIG, 'config', `--data-dir=${data}`],
+      /--data-dir: only a wrangler config keeps its state there/
+    );
+    // A config without the disk service `do-storage`, here the wrangler
+    // config translated for a server that joins no cluster, cannot join one:
+    // the cluster's deployments keep their Durable Objects on it.
+    const configOnly = join(project, 'config.bin');
+    await writeFile(
+      configOnly,
+      await compileConfig(join(project, 'wrangler.jsonc'))
+    );
+    await refused(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        '--experimental',
+        '--binary',
+        configOnly,
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      /--cluster-addr: the config has no writable disk service named `do-storage`/
+    );
+    // Joining a cluster needs --experimental, as a config's cluster does.
+    await refused(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        join(project, 'wrangler.jsonc'),
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      /Cluster mode is experimental; it requires --experimental/
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
 });
