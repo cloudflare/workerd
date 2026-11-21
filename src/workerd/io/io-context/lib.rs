@@ -458,10 +458,10 @@ impl<'s> IoContext<'s> {
                 "on_fulfilled must not capture anything"
             );
         };
-        let data = self.reaction_data(data)?;
+        let data = self.in_context(data)?;
         promise
             .into()
-            .then(lock, data, move |lock, data: &ReactionData<D>, value| {
+            .then(lock, data, move |lock, data: &InContext<D>, value| {
                 let context = data.require_current(lock)?;
                 on_fulfilled(lock, &context, &data.data, value)
             })
@@ -495,15 +495,13 @@ impl<'s> IoContext<'s> {
             ) -> jsg::Result<v8::Local<'a, v8::Value>>,
     {
         const { assert!(size_of::<R>() == 0, "on_rejected must not capture anything") };
-        let data = self.reaction_data(data)?;
-        promise.into().catch(
-            lock,
-            data,
-            move |lock, data: &ReactionData<D>, exception| {
+        let data = self.in_context(data)?;
+        promise
+            .into()
+            .catch(lock, data, move |lock, data: &InContext<D>, exception| {
                 let context = data.require_current(lock)?;
                 on_rejected(lock, &context, &data.data, exception)
-            },
-        )
+            })
     }
 
     /// Registers `on_fulfilled` and `on_rejected` to run in this `IoContext` when `promise`
@@ -551,15 +549,15 @@ impl<'s> IoContext<'s> {
             );
         };
         const { assert!(size_of::<R>() == 0, "on_rejected must not capture anything") };
-        let data = self.reaction_data(data)?;
+        let data = self.in_context(data)?;
         promise.into().then_or_catch(
             lock,
             data,
-            move |lock, data: &ReactionData<D>, value| {
+            move |lock, data: &InContext<D>, value| {
                 let context = data.require_current(lock)?;
                 on_fulfilled(lock, &context, &data.data, value)
             },
-            move |lock, data: &ReactionData<D>, exception| {
+            move |lock, data: &InContext<D>, exception| {
                 let context = data.require_current(lock)?;
                 on_rejected(lock, &context, &data.data, exception)
             },
@@ -568,9 +566,9 @@ impl<'s> IoContext<'s> {
 
     /// The data of reactions that run in this `IoContext`, which must be the current one, as
     /// `addFunctor()` requires.
-    fn reaction_data<D>(&self, data: D) -> jsg::Result<ReactionData<D>> {
+    fn in_context<D>(&self, data: D) -> jsg::Result<InContext<D>> {
         bridge::io_context_require_current(self.id)?;
-        Ok(ReactionData {
+        Ok(InContext {
             data,
             owner: self.id,
         })
@@ -1465,14 +1463,14 @@ jsg::jsg_traced_unchecked!(<T> IoOwned<T>);
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);
 
 /// The data of the reactions [`IoContext::then`], [`IoContext::catch`] and
-/// [`IoContext::then_or_catch`] register.
-struct ReactionData<D> {
+/// [`IoContext::then_or_catch`] register, with the `IoContext` they run in.
+struct InContext<D> {
     data: D,
     // The id of the IoContext the reactions run in.
     owner: u64,
 }
 
-impl<D> ReactionData<D> {
+impl<D> InContext<D> {
     /// Returns the `IoContext` the reactions run in, which must be the current one.
     fn require_current<'a>(&self, _lock: &mut jsg::Lock<'a>) -> jsg::Result<IoContext<'a>> {
         bridge::io_context_require_current(self.owner)?;
@@ -1483,7 +1481,7 @@ impl<D> ReactionData<D> {
     }
 }
 
-impl<D: jsg::Traced> jsg::Traced for ReactionData<D> {
+impl<D: jsg::Traced> jsg::Traced for InContext<D> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
         self.data.trace(visitor);
     }
