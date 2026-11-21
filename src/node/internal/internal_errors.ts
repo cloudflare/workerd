@@ -809,6 +809,27 @@ export class GetAddrInfoException extends Error {
   }
 }
 
+// The ICU errors buffer.transcode() reports, with ICU's numbers.
+const ICU_ERRNO = {
+  U_ILLEGAL_ARGUMENT_ERROR: 1,
+  U_INVALID_CHAR_FOUND: 10,
+} as const;
+
+export type TranscodeErrorCode = keyof typeof ICU_ERRNO;
+
+// A failed buffer.transcode(), as Node reports it: a plain Error with ICU's
+// error name in `code` and its number in `errno`.
+export class TranscodeException extends Error {
+  code: TranscodeErrorCode;
+  errno: number;
+
+  constructor(code: TranscodeErrorCode) {
+    super(`Unable to transcode Buffer [${code}]`);
+    this.code = code;
+    this.errno = ICU_ERRNO[code];
+  }
+}
+
 // A read into an empty buffer, as Node reports it (the errno exception of
 // a read that libuv refuses with UV_ENOBUFS).
 export class ENOBUFS extends NodeError {
@@ -1053,13 +1074,19 @@ export class ERR_EINVAL extends NodeSyscallError {
 
 export class ERR_EEXIST extends NodeSyscallError {
   path?: string;
-  constructor(options: { syscall: string; path?: string }) {
-    const message = options.path
-      ? `file already exists, ${options.syscall} '${options.path}'`
-      : 'file already exists';
+  dest?: string;
+  constructor(options: { syscall: string; path?: string; dest?: string }) {
+    let message = 'file already exists';
+    if (options.path !== undefined) {
+      message += `, ${options.syscall} '${options.path}'`;
+      if (options.dest !== undefined) message += ` -> '${options.dest}'`;
+    }
     super('EEXIST', message, options.syscall);
     if (options.path !== undefined) {
       this.path = options.path;
+    }
+    if (options.dest !== undefined) {
+      this.dest = options.dest;
     }
     this.errno = -17; // EEXIST
   }
