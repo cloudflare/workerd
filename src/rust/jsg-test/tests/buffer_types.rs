@@ -39,6 +39,58 @@ fn array_buffer_new_copies_data() {
 }
 
 #[test]
+fn array_buffer_from_vec_holds_the_vec_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let mut data = Vec::with_capacity(16);
+        data.extend_from_slice(&[10u8, 20, 30]);
+        let buf = v8::ArrayBuffer::from_vec(lock, data);
+        assert_eq!(buf.as_slice(lock), &[10, 20, 30]);
+        ctx.set_global(lock, "buf", buf);
+
+        assert!(
+            ctx.eval::<bool>(lock, "buf instanceof ArrayBuffer")
+                .unwrap()
+        );
+        // The length is the Vec's length, not its capacity.
+        assert_eq!(ctx.eval::<u32>(lock, "buf.byteLength").unwrap(), 3);
+        assert_eq!(
+            ctx.eval::<String>(lock, "new Uint8Array(buf).join()")
+                .unwrap(),
+            "10,20,30"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_from_vec_empty() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let buf = v8::ArrayBuffer::from_vec(lock, Vec::with_capacity(8));
+        assert!(buf.is_empty());
+        ctx.set_global(lock, "buf", buf);
+        assert_eq!(ctx.eval::<u32>(lock, "buf.byteLength").unwrap(), 0);
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_from_vec_detach() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        // Detaching frees the backing store, which drops the Vec. The buffer that is still
+        // attached is freed with the isolate. ASan reports a Vec that is leaked or dropped twice.
+        let buf = v8::ArrayBuffer::from_vec(lock, vec![1u8; 64]);
+        let _kept = v8::ArrayBuffer::from_vec(lock, vec![2u8; 64]);
+        buf.detach(lock)?;
+        assert!(buf.was_detached());
+        assert_eq!(buf.byte_length(), 0);
+        Ok(())
+    });
+}
+
+#[test]
 fn array_buffer_new_zeroed_is_zeroed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {

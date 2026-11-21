@@ -358,6 +358,7 @@ pub mod ffi {
             data: *const u8,
             length: usize,
         ) -> Local;
+        pub unsafe fn local_array_buffer_from_vec(isolate: *mut Isolate, data: Vec<u8>) -> Local;
         pub unsafe fn local_new_array_buffer_empty(
             isolate: *mut Isolate,
             byte_length: usize,
@@ -2902,6 +2903,16 @@ impl ArrayBuffer {
                 data.len(),
             ))
         }
+    }
+
+    /// Creates a new `ArrayBuffer` that owns `data`'s memory, as C++ JSG does for a returned
+    /// `kj::Array<kj::byte>`. The bytes aren't copied: V8 drops the `Vec` when it frees the
+    /// buffer, which can be on another thread. With the V8 sandbox on, the `Vec` is outside the
+    /// sandbox, so its bytes are copied into a new backing store, as C++ JSG does.
+    pub fn from_vec<'s>(lock: &mut crate::Lock<'s>, data: Vec<u8>) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::local_array_buffer_from_vec(isolate.as_ffi(), data)) }
     }
 
     /// Attempts to create a new `ArrayBuffer` with `byte_length` bytes using

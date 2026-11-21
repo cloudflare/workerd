@@ -55,6 +55,7 @@
 //! |------|-----------------|
 //! | `numbers.to_js_typed_array(lock)` ([`ToJsTypedArray`](crate::ToJsTypedArray)) | the typed array of the element type: `Uint8Array` for `[u8]`, `Float64Array` for `[f64]`, `BigInt64Array` for `[i64]`, ... |
 //! | `bytes.to_js_array_buffer(lock)` ([`ToJsArrayBuffer`](crate::ToJsArrayBuffer)) | `ArrayBuffer` holding the bytes; `[u8]` only |
+//! | [`v8::ArrayBuffer::from_vec(lock, bytes)`](crate::v8::ArrayBuffer::from_vec) | `ArrayBuffer` that owns a `Vec<u8>`'s memory, with no copy unless the V8 sandbox is on |
 //!
 //! From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array` whose elements convert to
 //! `T`. A typed array parameter is a handle, `v8::Local<'s, v8::Uint8Array>` and so on, which

@@ -531,6 +531,7 @@ uint8_t local_uint8clamped_array_get(const Local& array, size_t index);
 // Local<ArrayBuffer>
 Local local_new_array_buffer(Isolate* isolate, const uint8_t* data, size_t length);
 Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length);
+Local local_array_buffer_from_vec(Isolate* isolate, ::rust::Vec<uint8_t> data);
 MaybeLocal array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode);
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);

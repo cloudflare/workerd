@@ -7,7 +7,6 @@ use std::hint::black_box;
 
 use jsg::FromJS;
 use jsg::ToJS;
-use jsg::ToJsArrayBuffer;
 use jsg::ToJsTypedArray;
 use jsg::v8;
 use jsg_macros::jsg_constructor;
@@ -283,7 +282,7 @@ impl Target {
 
     #[jsg_method]
     fn buffer_make<'s>(&self, lock: &mut jsg::Lock<'s>, n: u32) -> v8::Local<'s, v8::ArrayBuffer> {
-        vec![3u8; n as usize].to_js_array_buffer(lock)
+        v8::ArrayBuffer::from_vec(lock, vec![3u8; n as usize])
     }
 
     #[jsg_method]
