@@ -125,12 +125,22 @@ export default {
   'readable-streams/tee.any.js': {
     comment:
       'Intentional divergence: tee cancel uses AggregateError instead of spec array, ' +
-      'and shared-queue architecture causes different pull counts vs spec clone model',
-    disabledTests: true,
-    // These two HANG: assert_array_equals(AggregateError, [...]) throws inside
-    // the cancel callback, preventing the test promise from ever resolving.
-    // 'ReadableStream teeing: canceling both branches should aggregate the cancel reasons into an array',
-    // 'ReadableStream teeing: canceling both branches in reverse order should aggregate the cancel reasons into an array',
+      'and the shared-queue architecture pulls differently from the spec clone model ' +
+      'and keeps chunks queued before a source error readable on the other branch',
+    disabledTests: [
+      // HANG: assert_array_equals(AggregateError, [...]) throws inside the
+      // cancel callback, preventing the test promise from ever resolving.
+      'ReadableStream teeing: canceling both branches should aggregate the cancel reasons into an array',
+      'ReadableStream teeing: canceling both branches in reverse order should aggregate the cancel reasons into an array',
+    ],
+    expectedFailures: [
+      'ReadableStream teeing: errors in the source should propagate to both branches',
+      'ReadableStreamTee should not pull more chunks than can fit in the branch queue',
+      'ReadableStreamTee should only pull enough to fill the emptiest queue',
+      'ReadableStreamTee stops pulling when original stream errors while branch 1 is reading',
+      'ReadableStreamTee stops pulling when original stream errors while branch 2 is reading',
+      'ReadableStreamTee stops pulling when original stream errors while both branches are reading',
+    ],
   },
   'readable-streams/templated.any.js': {},
 
