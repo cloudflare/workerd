@@ -2043,14 +2043,16 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
-      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
-        // Fetch treats a response that doesn't parse as a network error, which rejects with a
-        // TypeError.
+      // Fetch treats a response that doesn't parse as a network error, which rejects with a
+      // TypeError.
+      auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
         if (typeError) {
-          return JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "Server returned invalid HTTP response: ", reason);
+          return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
         }
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Server returned invalid HTTP response: ", reason);
+        return JSG_KJ_EXCEPTION(FAILED, Error, what, reason);
+      };
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        return networkError("Server returned invalid HTTP response: "_kj, reason);
       }
       return kj::mv(exception);
     });
