@@ -128,12 +128,19 @@ void WebSocket::accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> op
   impl->accept(js, kj::mv(options));
 }
 
-void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
+void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, jsg::USVString> message) {
   // Mark the send here, at the in-scope JS call, rather than in the async output pump where the
   // observer's sentMessage() fires -- the pump runs outside a perf-counter monitor scope, so a
   // mark there would be dropped. "now" at the send() call is the send-initiation time.
   markWebSocketPerfEvent("ws_sent"_kjc);
-  impl->send(js, kj::mv(message));
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(bytes, kj::Array<byte>) {
+      impl->send(js, kj::mv(bytes));
+    }
+    KJ_CASE_ONEOF(text, jsg::USVString) {
+      impl->send(js, kj::String(kj::mv(text)));
+    }
+  }
 }
 
 void WebSocket::close(
