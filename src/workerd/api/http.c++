@@ -1548,6 +1548,15 @@ kj::Maybe<kj::ArrayPtr<const char>> invalidResponseReason(const kj::Exception& e
   return kj::none;
 }
 
+// When the connection for a request couldn't be made, for example because its host didn't resolve
+// or its TLS handshake failed, the cause, from kj-hyper's CONNECT_FAILED_DETAIL_ID detail.
+kj::Maybe<kj::ArrayPtr<const char>> connectFailureReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::CONNECT_FAILED_DETAIL_ID)) {
+    return reason.asChars();
+  }
+  return kj::none;
+}
+
 // Setup spans stay on the native stack so that they finish before fetch returns its JS promise.
 // Keep the fetch span as the propagated parent of the outgoing request.
 class FetchSetupTrace {
@@ -2043,8 +2052,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
-      // Fetch treats a response that doesn't parse as a network error, which rejects with a
-      // TypeError.
+      // Fetch treats a response that doesn't parse, or a connection that couldn't be made, as a
+      // network error, which rejects with a TypeError.
       auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
         if (typeError) {
           return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
@@ -2053,6 +2062,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       };
       KJ_IF_SOME(reason, invalidResponseReason(exception)) {
         return networkError("Server returned invalid HTTP response: "_kj, reason);
+      }
+      KJ_IF_SOME(reason, connectFailureReason(exception)) {
+        return networkError("Network connection failed: "_kj, reason);
       }
       return kj::mv(exception);
     });
