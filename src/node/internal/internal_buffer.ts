@@ -17,6 +17,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_BUFFER_SIZE,
   ERR_UNKNOWN_ENCODING,
+  TranscodeException,
 } from 'node-internal:internal_errors';
 
 import { default as bufferUtil } from 'node-internal:buffer';
@@ -2673,28 +2674,51 @@ export function isUtf8(value: ArrayBufferView) {
   return bufferUtil.isUtf8(value);
 }
 
+// The message of the native transcode's error for malformed input
+// (`TranscodeError::InvalidChar` in src/rust/i18n/error.rs).
+const kInvalidCharMessage = 'Unable to transcode Buffer [U_INVALID_CHAR_FOUND]';
+
+function isTranscodable(encoding: Encoding | undefined): encoding is Encoding {
+  return (
+    encoding === UTF8 ||
+    encoding === UTF16LE ||
+    encoding === LATIN1 ||
+    encoding === ASCII
+  );
+}
+
 export function transcode(
-  source: ArrayBufferView,
+  source: Uint8Array,
   fromEncoding: string,
   toEncoding: string
-) {
-  if (!isArrayBufferView(source)) {
-    throw new ERR_INVALID_ARG_TYPE('source', 'ArrayBufferView', typeof source);
+): Buffer {
+  if (!isUint8Array(source)) {
+    throw new ERR_INVALID_ARG_TYPE('source', ['Buffer', 'Uint8Array'], source);
   }
+  if (source.length === 0) return Buffer.alloc(0);
+
   const normalizedFromEncoding = normalizeEncoding(fromEncoding);
-  if (normalizedFromEncoding === undefined) {
-    throw new ERR_UNKNOWN_ENCODING(fromEncoding);
-  }
   const normalizedToEncoding = normalizeEncoding(toEncoding);
-  if (normalizedToEncoding === undefined) {
-    throw new ERR_UNKNOWN_ENCODING(toEncoding);
+  if (
+    !isTranscodable(normalizedFromEncoding) ||
+    !isTranscodable(normalizedToEncoding)
+  ) {
+    throw new TranscodeException('U_ILLEGAL_ARGUMENT_ERROR');
   }
 
-  const u8: Uint8Array = bufferUtil.transcode(
-    source,
-    normalizedFromEncoding,
-    normalizedToEncoding
-  );
+  let u8: Uint8Array;
+  try {
+    u8 = bufferUtil.transcode(
+      source,
+      normalizedFromEncoding,
+      normalizedToEncoding
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === kInvalidCharMessage) {
+      throw new TranscodeException('U_INVALID_CHAR_FOUND');
+    }
+    throw err;
+  }
   return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 }
 

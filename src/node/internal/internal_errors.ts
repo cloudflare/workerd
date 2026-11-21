@@ -809,6 +809,27 @@ export class GetAddrInfoException extends Error {
   }
 }
 
+// The ICU errors buffer.transcode() reports, with ICU's numbers.
+const ICU_ERRNO = {
+  U_ILLEGAL_ARGUMENT_ERROR: 1,
+  U_INVALID_CHAR_FOUND: 10,
+} as const;
+
+export type TranscodeErrorCode = keyof typeof ICU_ERRNO;
+
+// A failed buffer.transcode(), as Node reports it: a plain Error with ICU's
+// error name in `code` and its number in `errno`.
+export class TranscodeException extends Error {
+  code: TranscodeErrorCode;
+  errno: number;
+
+  constructor(code: TranscodeErrorCode) {
+    super(`Unable to transcode Buffer [${code}]`);
+    this.code = code;
+    this.errno = ICU_ERRNO[code];
+  }
+}
+
 // A read into an empty buffer, as Node reports it (the errno exception of
 // a read that libuv refuses with UV_ENOBUFS).
 export class ENOBUFS extends NodeError {

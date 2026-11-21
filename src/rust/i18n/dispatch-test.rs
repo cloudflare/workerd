@@ -227,42 +227,65 @@ fn ascii_to_utf16le_widens_high_bytes_via_latin1_path() {
 }
 
 #[test]
-fn utf8_continuation_byte_only_input_yields_empty_utf16le() {
+fn utf8_continuation_byte_only_input_to_utf16le_is_invalid() {
     // The UTF8 -> UTF16LE size estimate is zero for input consisting only of
-    // continuation bytes, so the result is empty rather than an error, even
-    // though the input is non-empty.
-    let result = transcode(&[0x80], Encoding::Utf8, Encoding::Utf16Le).unwrap();
-    assert!(result.is_empty());
+    // continuation bytes; that input is as invalid as any other ill-formed
+    // UTF-8 on this pair.
+    for source in [&[0x80][..], &[0x80, 0xbf]] {
+        let result = transcode(source, Encoding::Utf8, Encoding::Utf16Le);
+        assert_eq!(result, Err(TranscodeError::InvalidChar), "{source:?}");
+    }
 }
 
 #[test]
-fn invalid_utf8_to_utf16le_is_unable_to_transcode() {
+fn invalid_utf8_to_utf16le_is_invalid_char() {
     let result = transcode(&[0x61, 0xc3], Encoding::Utf8, Encoding::Utf16Le);
-    assert_eq!(result, Err(TranscodeError::UnableToTranscode));
+    assert_eq!(result, Err(TranscodeError::InvalidChar));
 }
 
 #[test]
-fn odd_length_utf16le_to_utf8_is_rejected() {
+fn odd_length_utf16le_ignores_the_trailing_byte() {
+    // "ab" in UTF-16LE, then a stray byte.
+    let source = [0x61, 0x00, 0x62, 0x00, 0x63];
+    for to in [Encoding::Utf8, Encoding::Latin1, Encoding::Ascii] {
+        assert_eq!(
+            transcode(&source, Encoding::Utf16Le, to).unwrap(),
+            b"ab",
+            "{to:?}"
+        );
+    }
+}
+
+#[test]
+fn odd_length_utf16le_identity_substitutes_the_trailing_byte() {
+    let result = transcode(&[0x61, 0x00, 0x62], Encoding::Utf16Le, Encoding::Utf16Le).unwrap();
+    assert_eq!(result, vec![0x61, 0x00, 0xfd, 0xff]);
+}
+
+#[test]
+fn lone_utf16le_byte_is_invalid_to_utf8_but_empty_to_single_byte() {
     let result = transcode(&[0x61], Encoding::Utf16Le, Encoding::Utf8);
-    assert_eq!(result, Err(TranscodeError::OddUtf16leInput));
+    assert_eq!(result, Err(TranscodeError::InvalidChar));
+    for to in [Encoding::Latin1, Encoding::Ascii] {
+        assert!(
+            transcode(&[0x61], Encoding::Utf16Le, to)
+                .unwrap()
+                .is_empty(),
+            "{to:?}"
+        );
+    }
 }
 
 #[test]
-fn odd_length_utf16le_to_latin1_is_rejected() {
-    let result = transcode(&[0x61], Encoding::Utf16Le, Encoding::Latin1);
-    assert_eq!(result, Err(TranscodeError::OddUtf16leInput));
-}
-
-#[test]
-fn unpaired_surrogate_utf16le_to_utf8() {
+fn unpaired_surrogate_utf16le_to_utf8_is_invalid_char() {
     // U+D800, an unpaired high surrogate, encoded as UTF-16LE bytes.
-    let source = [0x00, 0xd8];
-    // `utf8_length_from_utf16le` does not validate, and reports a nonzero
-    // length for the surrogate, but `convert_utf16le_to_utf8` rejects the input
-    // and writes nothing -- so the mismatch check is what surfaces the
-    // failure.
-    let result = transcode(&source, Encoding::Utf16Le, Encoding::Utf8);
-    assert_eq!(result, Err(TranscodeError::Utf8LengthMismatch));
+    // `utf8_length_from_utf16le` does not validate and reports a nonzero
+    // length, but `convert_utf16le_to_utf8` rejects the input and writes
+    // nothing.
+    for source in [&[0x00, 0xd8][..], &[0x41, 0x00, 0x00, 0xdc]] {
+        let result = transcode(source, Encoding::Utf16Le, Encoding::Utf8);
+        assert_eq!(result, Err(TranscodeError::InvalidChar), "{source:?}");
+    }
 }
 
 #[test]

@@ -95,10 +95,9 @@ impl<'a> Transcoder<'a> {
             (Encoding::Latin1, Encoding::Utf8) => Self::transcode_latin1_to_utf8(source),
             (Encoding::Utf8, Encoding::Utf16Le) => Self::transcode_utf16_from_utf8(source),
             (Encoding::Utf16Le, Encoding::Utf8) => Self::transcode_utf8_from_utf16(source),
+            // A trailing odd byte is ignored, as in `transcode_utf8_from_utf16`.
             (Encoding::Utf16Le, Encoding::Ascii | Encoding::Latin1) => {
-                if !source.len().is_multiple_of(2) {
-                    return Err(TranscodeError::OddUtf16leInput);
-                }
+                let source = &source[..source.len() & !1];
                 Self::transcode_scalar(source, from, to, 0, TranscodeError::BufferTooLarge)
             }
             // The leading bytes that are already valid in the target are
@@ -189,7 +188,7 @@ impl<'a> Transcoder<'a> {
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
                 // 0 means invalid UTF-8 input.
                 if units == 0 {
-                    return Err(TranscodeError::UnableToTranscode);
+                    return Err(TranscodeError::InvalidChar);
                 }
                 if units != expected_units {
                     return Err(TranscodeError::Utf16LengthMismatch);
@@ -201,10 +200,10 @@ impl<'a> Transcoder<'a> {
                 let written = utf16
                     .convert_to_utf8(dest)
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
-                // Invalid input writes 0 bytes, which fails this check because
-                // `expected_bytes` is nonzero here. Invalid input therefore
-                // surfaces as a length mismatch rather than "Unable to
-                // transcode buffer", unlike every other pair.
+                // 0 means invalid UTF-16 input, such as an unpaired surrogate.
+                if written == 0 {
+                    return Err(TranscodeError::InvalidChar);
+                }
                 if written != expected_bytes {
                     return Err(TranscodeError::Utf8LengthMismatch);
                 }
@@ -278,12 +277,15 @@ impl<'a> Transcoder<'a> {
 
     /// UTF-8 to UTF-16LE, sized from [`Utf8Source::utf16_len`].
     ///
-    /// That estimate is zero for some non-empty inputs -- a source of nothing
-    /// but UTF-8 continuation bytes, for instance -- which yields an empty
-    /// result rather than an error.
+    /// That estimate is zero for some invalid non-empty inputs -- a source of
+    /// nothing but UTF-8 continuation bytes, for instance -- which fail here,
+    /// as any other invalid UTF-8 fails in [`Transcoder::transcode_into`].
     fn transcode_utf16_from_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
         let utf8 = Utf8Source::new(source);
         let expected_utf16_length = utf8.utf16_len();
+        if expected_utf16_length == 0 && !source.is_empty() {
+            return Err(TranscodeError::InvalidChar);
+        }
         require_within_isolate_limit(
             expected_utf16_length,
             TranscodeError::ExpectedUtf16LengthTooLarge,
@@ -298,11 +300,14 @@ impl<'a> Transcoder<'a> {
     }
 
     /// UTF-16LE to UTF-8, sized from [`Utf16LeSource::utf8_len`].
+    ///
+    /// Like Node, a trailing odd byte is ignored, and so a lone byte fails, as
+    /// simdutf converts nothing for it.
     fn transcode_utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
-        if !source.len().is_multiple_of(2) {
-            return Err(TranscodeError::OddUtf16leInput);
+        if source.len() == 1 {
+            return Err(TranscodeError::InvalidChar);
         }
-
+        let source = &source[..source.len() & !1];
         let utf16 = Utf16LeSource::new(source);
         let expected_utf8_length = utf16.utf8_len();
         require_within_isolate_limit(
