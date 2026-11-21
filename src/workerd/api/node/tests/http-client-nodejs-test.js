@@ -277,6 +277,65 @@ export const testHttpRequestJoinAuthorizationHeaders = {
   },
 };
 
+// node-fetch v2 passes every header value as an array and calls write()
+// before end(), so the headers get written out with no uniqueHeaders set.
+export const testHttpRequestArrayHeaderValues = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const req = http.request(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.PONG_SERVER_PORT,
+        method: 'POST',
+        headers: {
+          'content-type': ['text/plain'],
+          'x-multi': ['a', 'b'],
+        },
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        res.resume();
+        res.on('end', resolve);
+      }
+    );
+    req.on('error', reject);
+    req.write('ping');
+    req.end();
+    ok(req._header.includes('content-type: text/plain\r\n'));
+    ok(req._header.includes('x-multi: a\r\nx-multi: b\r\n'));
+    await promise;
+  },
+};
+
+export const testHttpRequestUniqueHeadersArrayValues = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const req = http.request(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.PONG_SERVER_PORT,
+        method: 'POST',
+        uniqueHeaders: ['x-unique'],
+        headers: {
+          'x-unique': ['a', 'b'],
+          'x-multi': ['c', 'd'],
+        },
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        res.resume();
+        res.on('end', resolve);
+      }
+    );
+    req.on('error', reject);
+    req.flushHeaders();
+    req.end();
+    ok(req._header.includes('x-unique: a; b\r\n'));
+    ok(req._header.includes('x-multi: c\r\nx-multi: d\r\n'));
+    await promise;
+  },
+};
+
 export const testGetExport = {
   async test() {
     const { get: getFn } = await import('node:http');
