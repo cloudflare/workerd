@@ -110,3 +110,24 @@ test('Inspector answers Runtime.getHeapUsage', async () => {
 
   await inspectorClient.close();
 });
+
+test('Inspector attaches to a Worker Loader worker whose name contains /', async () => {
+  const httpPort = await workerd.getListenPort('http');
+  const response = await fetch(`http://localhost:${httpPort}/loader`);
+  assert.strictEqual(await response.text(), 'ok');
+
+  const inspectorPort = await workerd.getListenInspectorPort();
+  const targets = await (
+    await fetch(`http://localhost:${inspectorPort}/json/list`)
+  ).json();
+  const target = targets.find((t) => t.id.endsWith('a/b/c/0.0'));
+  assert(target, JSON.stringify(targets));
+
+  const inspectorClient = await connectInspector(
+    inspectorPort,
+    target.webSocketDebuggerUrl
+  );
+  const usage = await inspectorClient.Runtime.getHeapUsage();
+  assert(usage.usedSize > 0, JSON.stringify(usage));
+  await inspectorClient.close();
+});
