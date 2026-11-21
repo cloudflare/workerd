@@ -7,7 +7,7 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use cxx::KjError;
+use cxx::KjException;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -43,8 +43,8 @@ impl AlarmOwnedElsewhere {
         Self { then }
     }
 
-    fn unimplemented() -> KjError {
-        kj::not_implemented!("an alarm's interface only runs the alarm")
+    fn unimplemented() -> KjException {
+        kj::not_implemented!("an alarm's interface only runs the alarm").into()
     }
 }
 
