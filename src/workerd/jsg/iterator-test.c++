@@ -64,6 +64,14 @@ struct GeneratorContext: public Object, public ContextGlobal {
     return count;
   }
 
+  uint sequenceOfBufferSourceTest(Lock& js, Sequence<JsBufferSource> sequence) {
+    uint size = 0;
+    for (auto& buffer: sequence) {
+      size += buffer.size();
+    }
+    return size;
+  }
+
   uint asyncGeneratorTest(Lock& js, AsyncGenerator<kj::String> generator) {
     // Value-initialized to 0.
     kj::Pin<uint> count;
@@ -260,6 +268,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
     JSG_METHOD(generatorTest);
     JSG_METHOD(generatorErrorTest);
     JSG_METHOD(sequenceOfSequenceTest);
+    JSG_METHOD(sequenceOfBufferSourceTest);
     JSG_METHOD(generatorWrongType);
     JSG_METHOD(generatorReturnNotCallable);
     JSG_METHOD(asyncGeneratorTest);
@@ -299,6 +308,39 @@ KJ_TEST("Generator works") {
                "return: 42 }; "
                "generatorReturnNotCallable(iter)",
       "throws", "TypeError: Property 'return' is not a function");
+}
+
+KJ_TEST("Sequence follows WebIDL iterable conversion") {
+  Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
+
+  // Elements that hold a v8::Local stay valid after the conversion returns.
+  e.expectEval("function* gen() { yield new Uint8Array(3); yield new ArrayBuffer(2); }; "
+               "sequenceOfBufferSourceTest(gen())",
+      "number", "5");
+  e.expectEval("sequenceOfBufferSourceTest([new Uint8Array(4), new DataView(new ArrayBuffer(1))])",
+      "number", "5");
+
+  e.expectEval("sequenceOfSequenceTest({ *[Symbol.iterator]() { yield new String('ab'); } })",
+      "number", "2");
+  e.expectEval("sequenceOfSequenceTest(['ab'])", "throws",
+      "TypeError: Incorrect type for array element 0: the provided value is not of type "
+      "'Sequence'.");
+
+  // A failed element conversion propagates without calling the iterator's throw() or return().
+  e.expectEval("let closed = false;"
+               "const it = { [Symbol.iterator]() { return this; },"
+               "  next() { return { value: 1, done: false }; },"
+               "  throw() { closed = true; }, return() { closed = true; } };"
+               "try { sequenceOfSequenceTest(it); } catch {}; closed",
+      "boolean", "false");
+
+  e.expectEval("sequenceOfSequenceTest({ [Symbol.iterator]() { return 1; } })", "throws",
+      "TypeError: Result of the Symbol.iterator method is not an object");
+  e.expectEval("sequenceOfSequenceTest({ [Symbol.iterator]() { return { next: 1 }; } })", "throws",
+      "TypeError: Iterator's next method is not a function");
+  e.expectEval(
+      "sequenceOfSequenceTest({ [Symbol.iterator]() { return { next() { return 1; } }; } })",
+      "throws", "TypeError: Iterator result is not an object");
 }
 
 KJ_TEST("AsyncGenerator works") {

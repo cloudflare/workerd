@@ -691,26 +691,37 @@ class SequenceWrapper {
       v8::Local<v8::Value> handle,
       Sequence<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // In this case, if handle is a string, we likely do not want to treat it as
-    // a sequence of characters, which the Generator case would do. If someone
-    // really wants to treat a string as a sequence of characters, then they
-    // should use the Generator interface directly.
-    if (handle->IsString()) return kj::none;
-    KJ_IF_SOME(gen, self.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
-      // The generator gives us no indication of how many items there might be, so we
-      // have to just keep pulling them until it says it's done.
-      kj::Vector<U> items;
-      while (true) {
-        KJ_IF_SOME(item, gen.next(js)) {
-          items.add(kj::mv(item));
-        } else {
-          gen.return_(js, kj::none);
-          break;
-        }
-      }
-      return Sequence<U>(items.releaseAsArray());
+    // https://webidl.spec.whatwg.org/#js-sequence. Only objects convert, so a primitive string
+    // is rejected. Items are unwrapped in the caller's handle scope, so element types that hold
+    // a v8::Local (JsValue, JsBufferSource, ...) stay valid. The cost is a few handles per
+    // element held until the conversion returns.
+    if (!handle->IsObject()) return kj::none;
+
+    auto isolate = js.v8Isolate;
+    auto object = handle.As<v8::Object>();
+    auto method = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
+    if (!method->IsFunction()) return kj::none;
+
+    auto iterator = check(method.As<v8::Function>()->Call(context, object, 0, nullptr));
+    JSG_REQUIRE(
+        iterator->IsObject(), TypeError, "Result of the Symbol.iterator method is not an object");
+    auto next = check(iterator.As<v8::Object>()->Get(context, v8StrIntern(isolate, "next"_kj)));
+    JSG_REQUIRE(next->IsFunction(), TypeError, "Iterator's next method is not a function");
+
+    auto doneKey = v8StrIntern(isolate, "done"_kj);
+    auto valueKey = v8StrIntern(isolate, "value"_kj);
+    kj::Vector<U> items;
+    while (true) {
+      auto result = check(next.As<v8::Function>()->Call(context, iterator, 0, nullptr));
+      JSG_REQUIRE(result->IsObject(), TypeError, "Iterator result is not an object");
+      auto resultObject = result.As<v8::Object>();
+      auto done = check(resultObject->Get(context, doneKey));
+      if (done->BooleanValue(isolate)) break;
+      auto value = check(resultObject->Get(context, valueKey));
+      items.add(self.template unwrap<U>(
+          js, context, value, TypeErrorContext::arrayElement(items.size()), parentObject));
     }
-    return kj::none;
+    return Sequence<U>(items.releaseAsArray());
   }
 };
 
