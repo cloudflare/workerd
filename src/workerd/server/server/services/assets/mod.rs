@@ -34,6 +34,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj::io::AsyncOutputStream;
@@ -244,7 +245,7 @@ impl Service for AssetsRequest {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let assets = Rc::clone(&self.assets);
         let raw = std::str::from_utf8(url).map_err(|_| kj::failed!("request URL is not UTF-8"))?;
         let parsed = url::Url::parse(raw).map_err(|e| kj::failed!("{e}: {raw}"))?;
@@ -298,7 +299,7 @@ impl Service for AssetsRequest {
                     let response = ServiceResponse::from(filter.as_mut());
                     user.request(method, url, headers, request_body, response)
                         .await?;
-                    return filter.finish().await;
+                    return Ok(filter.finish().await?);
                 }
                 Route::Respond(answer) => answer,
                 // The file went away since routing found it.
@@ -335,7 +336,7 @@ impl Service for AssetsRequest {
         };
         let length = answer.body.len() as u64;
         let mut out = assets.send(response, answer.status, &answer.headers, length)?;
-        out.write(answer.body.as_bytes()).await
+        Ok(out.write(answer.body.as_bytes()).await?)
     }
 
     async fn connect<'a>(
@@ -345,7 +346,7 @@ impl Service for AssetsRequest {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         self.user()?
             .connect(host, headers, connection, response, settings)
             .await
@@ -354,26 +355,37 @@ impl Service for AssetsRequest {
 
 #[async_trait::async_trait(?Send)]
 impl Interface for AssetsRequest {
-    async fn prewarm(&mut self, url: &str) -> Result<()> {
+    async fn prewarm(&mut self, url: &str) -> worker::Result<()> {
         match self.user() {
             Ok(user) => user.prewarm(url).await,
             Err(_) => Ok(()),
         }
     }
 
-    async fn run_scheduled(&mut self, time: &SystemTime, cron: &str) -> Result<ScheduledResult> {
+    async fn run_scheduled(
+        &mut self,
+        time: &SystemTime,
+        cron: &str,
+    ) -> worker::Result<ScheduledResult> {
         self.user()?.run_scheduled(time, cron).await
     }
 
-    async fn run_alarm(&mut self, time: &SystemTime, retry_count: u32) -> Result<AlarmResult> {
+    async fn run_alarm(
+        &mut self,
+        time: &SystemTime,
+        retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
         self.user()?.run_alarm(time, retry_count).await
     }
 
-    async fn test(&mut self) -> Result<bool> {
+    async fn test(&mut self) -> worker::Result<bool> {
         self.user()?.test().await
     }
 
-    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+    async fn custom_event(
+        &mut self,
+        event: KjOwn<CustomEvent>,
+    ) -> worker::Result<CustomEventResult> {
         match self.user() {
             Ok(user) => user.custom_event(event).await,
             Err(_) => worker::not_supported(event).await,

@@ -18,6 +18,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::Hangup;
@@ -118,6 +119,7 @@ impl Handler for Forwarding {
         self.service()
             .request(method, url, headers, body, response)
             .await
+            .map_err(KjError::from)
     }
 
     async fn connect<'a>(
@@ -139,6 +141,7 @@ impl Handler for Forwarding {
                 },
             )
             .await
+            .map_err(KjError::from)
     }
 }
 
@@ -389,7 +392,7 @@ impl TestClient {
         headers: &ffi::HttpHeaders,
         request_body: Pin<&mut AsyncInputStream>,
         response: Pin<&mut ffi::HttpServiceResponse>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         self.client
             .clone()
             .request(
@@ -408,7 +411,7 @@ impl TestClient {
         headers: &ffi::HttpHeaders,
         connection: Pin<&mut AsyncIoStream>,
         response: Pin<&mut ffi::ConnectResponse>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         self.client
             .clone()
             .connect(
