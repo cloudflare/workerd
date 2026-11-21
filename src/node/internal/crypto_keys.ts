@@ -78,11 +78,8 @@ import {
 
 import { inspect } from 'node-internal:internal_inspect';
 import { randomBytes } from 'node-internal:crypto_random';
+import { setCustomPromisifyArgs } from 'node-internal:internal_utils';
 const kInspect = inspect.custom;
-
-const kCustomPromisifyArgsSymbol = Symbol.for(
-  'nodejs.util.promisify.custom.args'
-);
 
 // Key input contexts.
 export const KeyContext = {
@@ -734,10 +731,7 @@ export function generateKeyPair(
   }
 }
 
-Object.defineProperty(generateKeyPair, kCustomPromisifyArgsSymbol, {
-  value: ['publicKey', 'privateKey'],
-  enumerable: false,
-});
+setCustomPromisifyArgs(generateKeyPair, ['publicKey', 'privateKey']);
 
 export function generateKeySync(
   type: SecretKeyType,

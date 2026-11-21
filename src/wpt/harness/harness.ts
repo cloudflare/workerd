@@ -95,7 +95,7 @@ export type TestRunnerConfig = {
 };
 
 type Env = {
-  unsafe: { eval: (code: string) => unknown };
+  unsafe: { eval: (code: string, name?: string) => unknown };
   SIDECAR_HOSTNAME: string | null;
   HTTP_PORT: string | null;
   HTTPS_PORT: string | null;
@@ -355,14 +355,16 @@ function evalAsBlock(
   files: string[]
 ): void {
   const code = files.join('\n');
+  // Name the script after the test file, so error locations (e.g. ErrorEvent.filename) point at it
+  const name = globalThis.state.testUrl.href;
 
   if (runInGlobalScope) {
     // In this mode, the scope of const, let and function declarations is limited to stop tests
     // from interfering with each other.
-    env.unsafe.eval(`{ ${code} }`);
+    env.unsafe.eval(`{ ${code} }`, name);
   } else {
     // Additionally, use an IIFE to limit the scope of var and manipulation of the global scope
-    env.unsafe.eval(`(function () { ${code} })();`);
+    env.unsafe.eval(`(function () { ${code} })();`, name);
   }
 }
 

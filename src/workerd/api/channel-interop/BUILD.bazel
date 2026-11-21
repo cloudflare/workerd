@@ -1,0 +1,89 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Fetcher and DurableObjectClass, and the IoChannelFactory channels behind them, for APIs
+# implemented in Rust: they take and return the C++ JSG resources through jsg-cpp. ffi.h and
+# ffi.c++ are the per-type and per-method shims, C++ API code that lives with the classes.
+wd_rust_crate(
+    name = "channel-interop",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    # For the bridges of crates that take and return the channels.
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+# Separate from the bridge's :ffi.rs@cxx, which only includes ffi.h, so that a C++ library that
+# depends on the crate never closes a cycle through it.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io",
+        "//src/workerd/io/io-context:current-with-id",
+    ],
+)
+
+# Snippets that must, or must not, compile against channel-interop. See
+# build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [
+        ":channel-interop",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-context",
+        "@crates_vendor//static_assertions",
+    ],
+)
+
+# The Rust half of channel-interop-test: a Rust resource that takes, returns and holds the
+# classes.
+wd_rust_crate(
+    name = "channel-interop-test-bridge",
+    testonly = True,
+    srcs = ["test_bridge.rs"],
+    crate_root = "test_bridge.rs",
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "test_bridge.rs",
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    deps = [
+        ":channel-interop",
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+# The classes taken and returned by Rust in the requests of a real worker, sending requests to
+# another.
+kj_test(
+    src = "channel-interop-test.c++",
+    deps = [
+        ":channel-interop-test-bridge",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/tests:test-fixture",
+    ],
+)

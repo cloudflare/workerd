@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/basics.h>
 #include <workerd/api/events.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>

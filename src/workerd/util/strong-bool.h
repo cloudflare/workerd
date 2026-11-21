@@ -5,8 +5,12 @@
 
 #include <kj/string.h>
 
-#include <compare>
-#include <cstdint>
+// This header does not use the given includes directly, but any source file that uses
+// WD_STRONG_BOOL will need them.
+// NOLINTBEGIN(misc-include-cleaner)
+#include <compare>  // For operator<=>
+#include <cstdint>  // For std::uint8_t
+// NOLINTEND(misc-include-cleaner)
 
 namespace workerd {
 

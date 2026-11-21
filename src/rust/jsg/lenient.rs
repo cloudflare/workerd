@@ -18,19 +18,24 @@
 pub struct LenientOption<T>(pub Option<T>);
 
 impl<T> LenientOption<T> {
-    /// Returns `true` if the value is present.
-    pub fn is_some(&self) -> bool {
-        self.0.is_some()
-    }
-
-    /// Returns `true` if the value is absent.
-    pub fn is_none(&self) -> bool {
-        self.0.is_none()
-    }
-
     /// Returns the contained `Option<T>`.
     pub fn into_inner(self) -> Option<T> {
         self.0
+    }
+}
+
+/// Derefs to the contained `Option<T>`, as C++ `LenientOptional<T>` is a `kj::Maybe<T>`.
+impl<T> std::ops::Deref for LenientOption<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Option<T> {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for LenientOption<T> {
+    fn deref_mut(&mut self) -> &mut Option<T> {
+        &mut self.0
     }
 }
 

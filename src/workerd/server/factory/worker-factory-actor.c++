@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-sqlite.h>
 #include <workerd/io/io-context.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/workerd-api.h>

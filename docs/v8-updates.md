@@ -85,11 +85,9 @@ from the V8 directory.
     to just bump these dependencies to the latest version on github.
 
     If the new `com_googlesource_chromium_icu` commit changes `U_ICU_VERSION_MAJOR_NUM`
-    (in `source/common/unicode/uvernum.h`), update `RUST_ICU_MAJOR_VERSION_NUMBER` in both
-    `build/deps/rust.MODULE.bazel` and `src/rust/i18n/BUILD.bazel`. A stale value fails the
-    build with undefined `<function>_<version>` ICU symbols, or missing items in
-    `rust_icu_sys` if the two values disagree. If `rust_icu_sys` has no `bindgen/lib_<version>.rs`
-    for the new version, update the crate as well.
+    (in `source/common/unicode/uvernum.h`), update `RUST_ICU_MAJOR_VERSION_NUMBER` in
+    `build/deps/rust.MODULE.bazel`. If `rust_icu_sys` has no `bindgen/lib_<version>.rs` for the
+    new version, update the crate as well.
 
     V8 builds `temporal_capi` (see `deps/rust/Cargo.toml`) from Chromium's
     `third_party/rust`, at the revision in V8's `DEPS`. Every crate in its runtime
@@ -141,9 +139,9 @@ rebases the patches, regenerates `patches/v8/*.patch`, and updates:
   `build/deps/deps.jsonc`.
 
 It also regenerates `com_googlesource_chromium_icu` in `build/deps/gen/deps.MODULE.bazel`
-and sets `RUST_ICU_MAJOR_VERSION_NUMBER` in `build/deps/rust.MODULE.bazel` and
-`src/rust/i18n/BUILD.bazel` to the major version of the new ICU commit, and aligns the
-Rust crates V8 builds from Chromium's `third_party/rust` (see step 10).
+and sets `RUST_ICU_MAJOR_VERSION_NUMBER` in `build/deps/rust.MODULE.bazel` to the major
+version of the new ICU commit, and aligns the Rust crates V8 builds from Chromium's
+`third_party/rust` (see step 10).
 
 If the rebase stops because of conflicts, resolve and continue it in the temporary
 checkout:

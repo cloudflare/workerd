@@ -215,17 +215,12 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before a
-  `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
-  (`Traced::needs_drop_detach`), every `jsg::Rc`, `jsg_cpp::Ref` and `TracedGlobal` it traces is
-  made strong, and every `jsg::Rc` forgets its parent, so that a `Drop` impl may move one out and
-  keep it. A `TracedGlobal` whose value died with the resource is empty by then. A hand-written
-  `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
-  does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
-  Wrappers such as `Option` and `Vec` pass it on, and a `#[jsg_resource]` says so when it
-  implements `Drop` itself. A `#[jsg_struct]`, a `#[jsg_oneof]` or a `#[jsg_resource]` held
-  inline in another resource doesn't look at its fields, which a recursive type would make loop
-  forever, so a `Drop` impl of a type it holds must not move a reference out there. See
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`, so a type that
+  holds GC references must not implement `Drop`. The macros enforce this: a `#[jsg_resource]`
+  that implements `Drop` doesn't compile unless every field's type is
+  `jsg::HoldsNoGcReferences`, and a `#[jsg_struct]` or `#[jsg_oneof]` can't implement `Drop` at
+  all. Rust has no negative trait bounds, so nothing stops a hand-written type that holds a
+  `jsg::Rc` or a `TracedGlobal` from implementing `Drop`; reviewers check those. See
   [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
@@ -240,23 +235,30 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 `callback: Cell<Option<TracedGlobal<Value>>>`, which don't compile. Fix:
 `pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
-Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
+Bad: a `#[jsg_resource]` that holds a `jsg::Rc` and implements `Drop`, which doesn't compile.
+Fix: move the cleanup into a field type that holds no GC references and give that type the
+`Drop` impl.
+
+Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell, `tests/drop_moved_rc.rs`, for a `jsg::Rc` that the `Drop` of a resource or of a
-field's type moves out, and `tests/drop_moved_traced_global.rs`, for a `TracedGlobal` that a
-resource's `Drop` moves out. No test checks a hand-written `impl Traced` that shares traced state
-some other way or reaches it through another kind of cell, a std cell included, or a hand-written
-`impl HoldsNoGcReferences` on a type whose `trace` visits something; reviewers check those.
+std cell, and the `resource-with-gc-references-has-no-drop`, `jsg-struct-has-no-drop` and
+`jsg-oneof-has-no-drop` compile tests, for a `Drop` impl on a type the macros generate code for.
+No test checks a hand-written `impl Traced` that shares traced state some other way or reaches it
+through another kind of cell, a std cell included, a hand-written `impl HoldsNoGcReferences` on a
+type whose `trace` visits something, or a `Drop` impl of a hand-written type that holds GC
+references; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
 C++ JSG will be removed, so Rust JSG must not depend on it. New code in the C++ shims in
 `src/rust/jsg` calls V8 directly (`v8::TryCatch`, `v8::MaybeLocal`, `isolate->ThrowException`) and
 leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are listed in the
-allowlist described below, and are to be removed. The one exception is in
-`src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
-`JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+allowlist described below, and are to be removed. The one exception is `throwPendingToRun()` in
+`src/workerd/io/io-context/ffi.c++`, which throws `JsExceptionThrown` to pass an exception or a
+termination that Rust left pending to `IoContext::run()`, which learns of them no other way. Only
+Rust code that `run()` itself runs reaches it: the callback of `io_context_await_io_and_run()` and
+the function of a `ReentryCallback`. Don't add another throw, or another caller that `run()`
+doesn't run.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),
@@ -935,8 +937,8 @@ Bitwise moves are also why a `TracedGlobal` keeps its handles in a box. In trace
 handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box keeps
 that address valid however the `TracedGlobal` itself moves. A `TracedGlobal` leaves a `jsg::` cell
 strong, and a `std::cell::Cell` or `RefCell` cannot hold one, so a weak `TracedGlobal` moves only on
-its way to being dropped (`jsg::Cell::set`) or in a resource's `Drop` impl, which has `&mut self`.
-The box lives until the strong handle has been reset. GC can still run after the `Realm` is dropped,
+its way to being dropped (`jsg::Cell::set`) or in the `Drop` impl of a hand-written type that
+holds it, which has `&mut self`. The box lives until the strong handle has been reset. GC can still run after the `Realm` is dropped,
 so the box of a `TracedGlobal` dropped then is kept until the isolate is disposed.
 
 A `TracedGlobal` taken out of a `jsg::Cell` with `take(lock)` or `replace(lock, ..)`, or moved

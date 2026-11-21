@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <workerd/io/io-channels.h>
+
 #include <cstdint>
 
 // What test_bridge.rs calls back in C++, defined in test-bridge.c++.
@@ -14,5 +16,9 @@ void record_async_context(uintptr_t isolate);
 
 // Records the IoContext that is current, from the callback of an await_io_and_run().
 void record_await_context();
+
+// Keeps `channel`, which Rust took from a Fetcher in a reentry callback, for the test to check
+// (keptChannel in test-bridge-state.h).
+void keep_channel(kj::Rc<IoChannelFactory::SubrequestChannel> channel);
 
 }  // namespace workerd::io_context::test

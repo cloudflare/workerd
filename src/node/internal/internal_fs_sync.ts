@@ -85,7 +85,7 @@ import {
   COPYFILE_FICLONE,
   COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
-import { Dir, Dirent } from 'node-internal:internal_fs';
+import { Dir, Dirent, direntName } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 
@@ -209,7 +209,8 @@ export function copyFileSync(
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizePath(dest).pathname,
+      path: normalizePath(src).pathname,
+      dest: normalizePath(dest).pathname,
     });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
@@ -551,14 +552,14 @@ export function readdirSync(
     if ((encoding as string) === 'buffer') {
       return handles.map((handle) => {
         return new Dirent(
-          Buffer.from(handle.name),
+          Buffer.from(direntName(handle)),
           handle.type,
           handle.parentPath
         );
       });
     }
     return handles.map((handle) => {
-      return new Dirent(handle.name, handle.type, handle.parentPath);
+      return new Dirent(direntName(handle), handle.type, handle.parentPath);
     });
   }
 

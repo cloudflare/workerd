@@ -51,6 +51,11 @@
 //                                                TokioEventPort's destructor
 //       activePort                            -- enforces one port per thread
 //
+//   Progress (`kj_rs_tokio::Progress`, progress.rs), once started:
+//       TokioEventPort::ProgressProbe         -- a KJ event that counts once per pass through a
+//                                                busy run queue, re-armed by wait() and poll()
+//       a beat task on LOOP_LOCAL_SET         -- counts while the loop sleeps
+//
 //   Wake sources -> SharedState.notify: wake() from any thread (kj::Executor,
 //   CrossThreadPromiseFulfiller); on the loop thread setRunnable(true) and the SleepHooks timer
 //   callback; and the planned timer deadline via tokio's timer wheel.
@@ -113,7 +118,16 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
   // while its WaitScope is still alive. This terminal operation is a no-op when repeated.
   void cancelSpawnedTasks();
 
+  // Starts the progress probe behind `kj_rs_tokio::Progress` (progress.rs, which says why it is
+  // a KJ event), and arms it. Later calls only arm it.
+  void startProgressProbe();
+
  private:
+  class ProgressProbe;
+
+  // Arms the progress probe, if it was started.
+  void armProgressProbe();
+
   // kj::TimerImpl::SleepHooks, installed by wait() for the duration of the park (KJ clears them
   // in advanceTo()). KJ calls updateNextTimerEvent() whenever the earliest deadline changes; a
   // deadline sooner than the one this wait() was planned against ends the park. While installed,
@@ -128,12 +142,14 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 
   const kj::ThreadId ownerThread;
   const kj::MonotonicClock &clock;
-  // Declaration order is destruction order in reverse, and it matters: `loop` is destroyed
-  // first, then `rustPort` (the runtime), then `timerImpl`. The destructor body cancels spawned
-  // tasks before any of them go.
+  // Declaration order is destruction order in reverse, and it matters: the progress probe, an
+  // event in the loop's queue, is destroyed before `loop`, `loop` before `rustPort` (the
+  // runtime), and that before `timerImpl`. The destructor body cancels spawned tasks before any
+  // of them go.
   kj::TimerImpl timerImpl;
   ::rust::Box<TokioPort> rustPort;
   kj::Own<kj::EventLoop> loop;
+  kj::Maybe<kj::Own<ProgressProbe>> progressProbe;
 
   // The earliest timer deadline wait() computed its sleep from (none = no timer; sleep forever).
   // updateNextTimerEvent() compares against it so only a *sooner* deadline ends the park. Loop
@@ -186,5 +202,9 @@ TokioAsyncIoContext setupTokioAsyncIo();
 
 // The same on the heap, for the Rust `kj_rs_tokio::Runtime` to own.
 kj::Own<TokioAsyncIoContext> newTokioAsyncIoContext();
+
+// `TokioEventPort::startProgressProbe()` on the port that drives this thread, for Rust
+// (`kj_rs_tokio::watch_progress`). Fails if there is none.
+void startProgressProbe();
 
 }  // namespace kj_rs_tokio

@@ -25,6 +25,31 @@ const kj::MonotonicClock& requireNoActivePort() {
 }
 }  // namespace
 
+// See `kj_rs_tokio::Progress` (progress.rs) for why the busy half of the count is a KJ event.
+class TokioEventPort::ProgressProbe final: public kj::_::Event {
+ public:
+  explicit ProgressProbe(const TokioPort& rustPort)
+      : kj::_::Event(kj::SourceLocation()),
+        rustPort(rustPort) {}
+
+  void traceEvent(kj::_::TraceBuilder&) override {}
+
+ private:
+  void fire() override {
+    rustPort.count_progress();
+    // Back behind every depth-first and breadth-first event armed so far, to fire once more per
+    // pass through the queue. If there are none, the loop has run out of work: leave the queue,
+    // so that it runs its `evalLast()` events and sleeps. The port arms the probe again once the
+    // loop has events to turn.
+    armBreadthFirst();
+    if (isNext()) {
+      disarm();
+    }
+  }
+
+  const TokioPort& rustPort;
+};
+
 TokioEventPort::TokioEventPort()
     : ownerThread(kj::ThreadId::current()),
       clock(requireNoActivePort()),
@@ -58,6 +83,20 @@ void TokioEventPort::cancelSpawnedTasks() {
   // Guarded so a task-drop panic (surfaced as a kj::Exception by the cxx fork) does not
   // std::terminate if the caller is already unwinding (this runs from destructors).
   unwindDetector.catchExceptionsIfUnwinding([this]() { rustPort->cancel_spawned_tasks(); });
+}
+
+void TokioEventPort::startProgressProbe() {
+  assertOwnerThread();
+  if (progressProbe == kj::none) {
+    progressProbe = kj::heap<ProgressProbe>(*rustPort);
+  }
+  armProgressProbe();
+}
+
+void TokioEventPort::armProgressProbe() {
+  KJ_IF_SOME(probe, progressProbe) {
+    probe->armBreadthFirst();
+  }
 }
 
 void TokioEventPort::setRunnable(bool runnable) {
@@ -98,17 +137,33 @@ bool TokioEventPort::wait() {
   // wait means every kj::Timer promise silently never resolves. Deferred so a wait that throws
   // also clears the sleep hooks.
   KJ_DEFER(timerImpl.advanceTo(clock.now()));
+  bool woken;
   KJ_IF_SOME(timeoutNs, timerImpl.timeoutToNextEvent(clock.now(), kj::NANOSECONDS, kj::maxValue)) {
-    return rustPort->wait_timeout_ns(timeoutNs);
+    woken = rustPort->wait_timeout_ns(timeoutNs);
   } else {
-    return rustPort->wait_forever();
+    woken = rustPort->wait_forever();
   }
+  // Whatever ended the park may start a busy stretch of the loop: events armed during it, the
+  // timers advanceTo() fires below, the cross-thread events KJ takes in once this returns. The
+  // probe counts it, or, if the loop finds nothing to turn, leaves the queue at once.
+  armProgressProbe();
+  return woken;
 }
 
 bool TokioEventPort::poll() {
   assertOwnerThread();
   bool woken = rustPort->poll();
   timerImpl.advanceTo(clock.now());
+  // Only if the loop has events to turn. `WaitScope::poll()` returns, and KJ arms a
+  // `yieldUntilWouldSleep()` waiter, only once a poll leaves the loop with none, which a probe
+  // armed regardless would prevent. That rules out arming it for `woken` too, ahead of the
+  // cross-thread events KJ takes in once this returns: a wake can outlive its event, which KJ
+  // cancels without consuming the wake, and another thread that keeps submitting and cancelling
+  // would keep the loop runnable for good. So the probe counts neither the busy stretch that a
+  // cross-thread event starts here nor one that a waiter starts (see `kj_rs_tokio::Progress`).
+  if (loop->isRunnable()) {
+    armProgressProbe();
+  }
   return woken;
 }
 
@@ -135,6 +190,11 @@ TokioAsyncIoContext setupTokioAsyncIo() {
 
 kj::Own<TokioAsyncIoContext> newTokioAsyncIoContext() {
   return kj::heap<TokioAsyncIoContext>();
+}
+
+void startProgressProbe() {
+  KJ_REQUIRE(activePort != nullptr, "no TokioEventPort drives this thread");
+  activePort->startProgressProbe();
 }
 
 }  // namespace kj_rs_tokio

@@ -23,6 +23,9 @@ runs:
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
         [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+        # Use LLVM 22 to work around https://github.com/actions/runner-images/issues/15367 - the
+        # runner defaults to LLVM 20 which is incompatible with latest MSVC
+        choco upgrade llvm --version=22.1.8
     - name: Configure git hooks
       shell: bash
       # Configure git to quell an irrelevant warning for runners (they never commit / push).

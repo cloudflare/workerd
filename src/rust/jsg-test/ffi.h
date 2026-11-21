@@ -8,9 +8,8 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
 
 #include <kj/function.h>
 #include <kj/memory.h>
