@@ -12763,7 +12763,6 @@ type BrowserRunSnapshotFormat =
   | "links"
   | "scrape"
   | "json";
-
 type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
   BrowserRunJsonBaseOptions & {
     /** Which representations of the page to return. At least two distinct formats
@@ -12799,7 +12798,6 @@ type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
      */
     response_format?: AiTextGenerationResponseFormat;
   };
-
 /** Options for the `accessibilityTree` quick action. */
 type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
   /** When true, prune nodes that carry no semantic meaning, such as generic

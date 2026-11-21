@@ -13143,8 +13143,7 @@ export type BrowserRunSnapshotFormat =
   | "links"
   | "scrape"
   | "json";
-
-type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
+export type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
   BrowserRunJsonBaseOptions & {
     /** Which representations of the page to return. At least two distinct formats
      * are required; request a single format from its dedicated action instead.
@@ -13179,7 +13178,6 @@ type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
      */
     response_format?: AiTextGenerationResponseFormat;
   };
-
 /** Options for the `accessibilityTree` quick action. */
 export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
   /** When true, prune nodes that carry no semantic meaning, such as generic
