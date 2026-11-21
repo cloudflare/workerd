@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -932,4 +933,12 @@ wd_test(
     src = "als-gc-test.wd-test",
     args = ["--experimental"],
     data = ["als-gc-test.js"],
+)
+
+kj_test(
+    src = "zlib-memory-test.c++",
+    deps = [
+        "//src/workerd/api/node",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
