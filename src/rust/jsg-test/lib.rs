@@ -233,11 +233,6 @@ mod ffi {
             disallowed: bool,
         ) -> Result<()>;
 
-        /// Allows or disallows dynamic code evaluation, WebAssembly compilation included.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
-        pub unsafe fn set_allow_eval(isolate: *mut Isolate, allow: bool);
-
         /// Makes a `WebAssembly.Module` from `module` without recompiling it, as C++ code
         /// that the module is handed to does. Fails if V8 creates none.
         #[expect(clippy::allow_attributes)]
@@ -878,13 +873,6 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked.
         unsafe { ffi::set_javascript_execution_disallowed(lock.isolate().as_ffi(), disallowed) }
             .expect("JavaScript execution should have been disallowed");
-    }
-
-    /// Allows or disallows dynamic code evaluation (`eval()`, `new Function()` and WebAssembly
-    /// compilation), as C++ JSG's `jsg::Lock::setAllowEval()` does. The harness disallows it.
-    pub fn set_allow_eval(lock: &mut jsg::Lock<'_>, allow: bool) {
-        // SAFETY: `lock` proves the isolate is locked.
-        unsafe { ffi::set_allow_eval(lock.isolate().as_ffi(), allow) }
     }
 
     /// Makes a `WebAssembly.Module` from `module` in C++, without recompiling it, as C++ code

@@ -1324,6 +1324,15 @@ wd_test(
     data = ["unsafe-test.js"],
 )
 
+wd_test(
+    src = "unsafe-rust-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "unsafe-test.js",
+        "unsafe-test.wd-test",
+    ],
+)
+
 # Test that verifies autogates are ENABLED - only runs in @all-autogates variant
 wd_test(
     src = "autogate-enabled-test.wd-test",

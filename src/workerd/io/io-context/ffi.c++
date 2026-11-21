@@ -325,6 +325,19 @@ void io_context_abort_without_reason(uint64_t id) {
   currentWithId(id).abort(IoContext::abortWithoutReasonException());
 }
 
+void io_context_abort_all_actors(uint64_t id, kj::Exception reason) {
+  currentWithId(id).abortAllActors(reason);
+}
+
+void io_context_delete_all_actors(uint64_t id, kj::Exception reason) {
+  currentWithId(id).deleteAllActors(reason);
+}
+
+kj::Promise<void> io_context_evict_all_actors_for_test(
+    uint64_t id, EvictWebSocketMode webSocketMode) {
+  return kj::evalNow([&]() { return currentWithId(id).evictAllActorsForTest(webSocketMode); });
+}
+
 bool io_context_should_log_uncaught_exceptions() {
   return kj::_::Debug::shouldLog(kj::LogSeverity::INFO);
 }
