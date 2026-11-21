@@ -189,6 +189,72 @@ export const textEncoderTest = {
   },
 };
 
+export const textEncoderInterfaceTest = {
+  test() {
+    const encoder = new TextEncoder();
+    ok(encoder instanceof TextEncoder);
+
+    // `encoding` is an accessor on the prototype under jsg_property_on_prototype_template and
+    // an own property of each instance before it; either way it is in exactly one place.
+    strictEqual(
+      Object.hasOwn(encoder, 'encoding'),
+      !Object.hasOwn(TextEncoder.prototype, 'encoding')
+    );
+
+    // JSG's and the language's messages differ.
+    throws(() => TextEncoder(), TypeError);
+    throws(() => TextEncoder.prototype.encode.call({}, 'a'), TypeError);
+    throws(
+      () => TextEncoder.prototype.encodeInto.call({}, 'a', new Uint8Array(1)),
+      TypeError
+    );
+
+    // `optional USVString input = ""`: only undefined is missing; anything else is
+    // stringified, null included.
+    const decoder = new TextDecoder();
+    strictEqual(decoder.decode(encoder.encode(undefined)), '');
+    strictEqual(decoder.decode(encoder.encode(null)), 'null');
+    strictEqual(decoder.decode(encoder.encode(123)), '123');
+    strictEqual(
+      decoder.decode(encoder.encode({ toString: () => 'obj' })),
+      'obj'
+    );
+    throws(() => encoder.encode(Symbol()), TypeError);
+
+    throws(() => encoder.encodeInto('a', new Uint16Array(1)), TypeError);
+    throws(() => encoder.encodeInto('a'), TypeError);
+    throws(() => encoder.encodeInto(), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'encodeInto' on 'TextEncoder': parameter 1 is not of type 'String'.",
+    });
+    // The arguments are converted in order, so the source is converted to a string, which can
+    // run JavaScript or throw, before the destination is checked.
+    let sourceConverted = false;
+    const source = {
+      toString() {
+        sourceConverted = true;
+        return 'a';
+      },
+    };
+    throws(() => encoder.encodeInto(source, new Uint16Array(1)), TypeError);
+    ok(sourceConverted);
+    throws(() => encoder.encodeInto(Symbol(), new Uint16Array(1)), {
+      name: 'TypeError',
+      message: 'Cannot convert a Symbol value to a string',
+    });
+    deepStrictEqual(encoder.encodeInto(null, new Uint8Array(8)), {
+      read: 4,
+      written: 4,
+    });
+    // Only a missing source is an error; `undefined` converts to "undefined".
+    deepStrictEqual(encoder.encodeInto(undefined, new Uint8Array(16)), {
+      read: 9,
+      written: 9,
+    });
+  },
+};
+
 export const encodeWptTest = {
   test() {
     w3cTestEncode();

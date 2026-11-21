@@ -62,6 +62,7 @@ import type {
   EventTargetInternals,
   ExceptionPolicy,
 } from '../events/event-target-internals';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type { RuntimeClassHelpers } from '../runtime-class';
 
 const {
@@ -95,10 +96,7 @@ const { markAsRuntimeClass, setNameAndLength } =
 
 // JSG's messages, so that misuse reads as it does with the runtime's C++
 // classes.
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const { kIllegalInvocation } = require('jsg-errors') as JsgErrorMessages;
 const kBadOptions =
   "Failed to execute 'postMessage' on 'MessagePort': parameter 2 is not " +
   "of type 'Array or PostMessageOptions'.";

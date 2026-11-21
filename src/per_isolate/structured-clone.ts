@@ -11,6 +11,8 @@
 // C++. Where the conversion differs from C++ it follows WebIDL; the differences
 // are tabled in src/tests/structured-clone/AGENTS.md.
 
+import type { JsgErrorMessages } from './jsg-errors';
+
 const {
   ArrayPrototypePush,
   FunctionPrototypeCall,
@@ -25,10 +27,8 @@ const { structuredClone: nativeStructuredClone } = utils;
 const globalReceiver: unknown = globalThis;
 
 // The C++ texts, kept where the behaviour matches.
-const ILLEGAL_INVOCATION =
-  'Illegal invocation: function called with incorrect `this` reference. See ' +
-  'https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const { kIllegalInvocation: ILLEGAL_INVOCATION } =
+  require('jsg-errors') as JsgErrorMessages;
 const NO_VALUE =
   "Failed to execute 'structuredClone' on 'ServiceWorkerGlobalScope': " +
   "parameter 1 is not of type 'Value'.";

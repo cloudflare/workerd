@@ -15,6 +15,7 @@
 // DataCloneError, as it does for the C++ classes.
 
 import type { UrlAttributes, UrlBackend } from '../url/backend';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
 
@@ -51,10 +52,7 @@ const processInit = kStandard
   ? utils.urlPatternProcessInit
   : utils.legacyUrlPatternProcessInit;
 
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const { kIllegalInvocation } = require('jsg-errors') as JsgErrorMessages;
 const kExecInitWithBase = kStandard
   ? 'Failed to exec URLPattern'
   : 'A baseURL is not allowed when input is an object.';

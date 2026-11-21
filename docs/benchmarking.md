@@ -179,7 +179,9 @@ Only plain-object exports, like the default export above, have `bench` handlers.
 is an ordinary RPC method that `workerd bench` doesn't run. To measure a Durable Object or an RPC
 entrypoint, call it through a binding from a plain object's `bench` handler.
 
-See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js).
+See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js), which
+[text-encoder-ts-bench.wd-bench](../src/workerd/api/tests/text-encoder-ts-bench.wd-bench)
+runs against the TypeScript `TextEncoder`.
 [src/bench/streams/](../src/bench/streams/AGENTS.md) runs the same benchmarks against the C++ and
 TypeScript streams implementations, to compare them.
 [src/bench/serialization/](../src/bench/serialization/structured-clone.js) measures

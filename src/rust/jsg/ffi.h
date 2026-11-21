@@ -339,6 +339,12 @@ void local_string_write_v2(Isolate* isolate,
     uint32_t length,
     uint16_t* buffer,
     int32_t flags);
+// Calls `callback(data, characters, length, oneByte)` with the address of the string's
+// characters, from within a v8::String::ValueView, which flattens the string first.
+void local_string_value_view(Isolate* isolate,
+    const Local& value,
+    size_t data,
+    ::rust::Fn<void(size_t, size_t, uint32_t, bool)> callback);
 void local_string_write_one_byte_v2(Isolate* isolate,
     const Local& value,
     uint32_t offset,

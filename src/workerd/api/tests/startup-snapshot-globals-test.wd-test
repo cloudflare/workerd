@@ -77,6 +77,8 @@ const unitTests :Workerd.Config = (
           (name = "empty-typed-array", service = "empty-typed-array"),
           (name = "message-channel", service = "message-channel"),
           (name = "message-channel-read", service = "message-channel-read"),
+          (name = "text-encoder", service = "text-encoder"),
+          (name = "text-encoder-read", service = "text-encoder-read"),
         ],
       )
     ),
@@ -302,6 +304,24 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"empty-typed-array\""),
+        ],
+      )
+    ),
+    ( name = "text-encoder",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"text-encoder\""),
+        ],
+      )
+    ),
+    ( name = "text-encoder-read",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"text-encoder-read\""),
         ],
       )
     ),

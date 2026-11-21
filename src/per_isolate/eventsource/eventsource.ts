@@ -38,6 +38,7 @@
 
 import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type { RuntimeClassHelpers } from '../runtime-class';
 
 const {
@@ -146,10 +147,7 @@ const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
 ) => string | null;
 
 // JSG's messages, so that misuse reads as it does for a JSG class.
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const { kIllegalInvocation } = require('jsg-errors') as JsgErrorMessages;
 const kNoRequest =
   'An EventSource can only be created within the context of a worker request.';
 

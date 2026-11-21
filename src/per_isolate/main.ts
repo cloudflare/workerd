@@ -376,6 +376,23 @@ if (compatFlags['spec_compliant_property_attributes']) {
   });
 }
 
+// The TypeScript TextEncoder replaces the C++ one on the global, keeping the
+// property's place, and is loaded on first use, as MessageChannel is. The C++
+// class stays registered for primordials.ts, which captures it before this
+// runs.
+if (autogates['ts-text-encoder']) {
+  const { defineLazyDataProperty } = utils;
+  defineLazyDataProperty(
+    ObjectGetPrototypeOf(globalThis) as object,
+    'TextEncoder',
+    'text-encoder',
+    true
+  );
+  if (compatFlags['spec_compliant_property_attributes']) {
+    defineLazyDataProperty(globalThis, 'TextEncoder', 'text-encoder', false);
+  }
+}
+
 // The TypeScript URL and URLSearchParams replace the C++ ones, which
 // global-scope.h then leaves out. Installed as WebIDL installs an interface:
 // own, non-enumerable properties of the global, and not on its prototype.

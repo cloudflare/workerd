@@ -7,6 +7,7 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8::Local;
 use jsg::v8::String as JsString;
+use jsg::v8::StringView;
 use jsg::v8::Utf8Value;
 use jsg::v8::Value;
 use jsg::v8::WriteFlags;
@@ -233,6 +234,61 @@ fn string_write_one_byte_into_buffer() {
         let mut buf = vec![0u8; 3];
         s.write_one_byte(lock, 0, 3, &mut buf, WriteFlags::None);
         assert_eq!(buf, b"abc");
+        Ok(())
+    });
+}
+
+/// `with_value_view` reads a one-byte or two-byte string in place, flattening a cons string
+/// first.
+#[test]
+fn string_with_value_view_reads_the_characters() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let one_byte = from_utf8(lock, "caf\u{e9}");
+        one_byte.with_value_view(lock, |view| match view {
+            StringView::OneByte(chars) => assert_eq!(chars, b"caf\xe9"),
+            StringView::TwoByte(_) => panic!("expected a one-byte string"),
+        });
+        let two_byte = from_utf8(lock, "a\u{1F639}");
+        two_byte.with_value_view(lock, |view| match view {
+            StringView::TwoByte(chars) => assert_eq!(chars, [0x61, 0xd83d, 0xde39]),
+            StringView::OneByte(_) => panic!("expected a two-byte string"),
+        });
+        let empty = from_utf8(lock, "");
+        let length = empty.with_value_view(lock, |view| match view {
+            StringView::OneByte(chars) => chars.len(),
+            StringView::TwoByte(chars) => chars.len(),
+        });
+        assert_eq!(length, 0);
+        // Long enough that V8 concatenates it as a cons string rather than copying.
+        let cons: Local<'_, JsString> = ctx
+            .eval_raw(lock, "'x'.repeat(20) + String(Math.random()).slice(0, 1)")
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert!(!cons.is_flat());
+        cons.with_value_view(lock, |view| match view {
+            StringView::OneByte(chars) => {
+                assert_eq!(chars.len(), 21);
+                assert!(chars[..20].iter().all(|&c| c == b'x'));
+            }
+            StringView::TwoByte(_) => panic!("expected a one-byte string"),
+        });
+        Ok(())
+    });
+}
+
+/// A panic in `with_value_view`'s closure unwinds to its caller, through the C++ view.
+#[test]
+fn string_with_value_view_resumes_a_panic() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "abc");
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            s.with_value_view(lock, |_| panic!("from the closure"));
+        }));
+        let payload = caught.unwrap_err();
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"from the closure"));
         Ok(())
     });
 }
