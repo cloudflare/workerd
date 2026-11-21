@@ -15,6 +15,7 @@ const FIXTURE = [
   "INSERT INTO plain VALUES (1, 'it''s', 1.5, X'00ff10', NULL)",
   "INSERT INTO plain VALUES (2, 'line1\nline2\rend', 9e999, X'', 'x')",
   "INSERT INTO plain VALUES (3, '', -9e999, NULL, 42)",
+  "INSERT INTO plain VALUES (4, 'a\nb\\nc\rd\\re', 0, NULL, NULL)",
   'INSERT INTO "Quoted ""T""" ("select") VALUES (\'a\'), (\'b\')',
   'INSERT INTO child VALUES (1, 1)',
   'CREATE INDEX plain_t ON plain (t)',
@@ -29,6 +30,7 @@ const GOLDEN = {
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(1,\'it\'\'s\',1.5,X\'00ff10\',NULL);',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(2,replace(replace(\'line1\\nline2\\rend\',\'\\r\',char(13)),\'\\n\',char(10)),9e999,X\'\',\'x\');',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(3,\'\',-9e999,NULL,42);',
+    'INSERT INTO "plain" ("id","t","r","b","n") VALUES(4,replace(replace(\'a\\012b\\nc\\015d\\re\',\'\\015\',char(13)),\'\\012\',char(10)),0,NULL,NULL);',
     'CREATE TABLE IF NOT EXISTS "Quoted ""T""" (id INTEGER PRIMARY KEY AUTOINCREMENT, "select" TEXT);',
     'INSERT INTO "Quoted ""T""" ("id","select") VALUES(1,\'a\');',
     'INSERT INTO "Quoted ""T""" ("id","select") VALUES(2,\'b\');',
@@ -45,6 +47,7 @@ const GOLDEN = {
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(1,\'it\'\'s\',1.5,X\'00ff10\',NULL);',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(2,replace(replace(\'line1\\nline2\\rend\',\'\\r\',char(13)),\'\\n\',char(10)),9e999,X\'\',\'x\');',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(3,\'\',-9e999,NULL,42);',
+    'INSERT INTO "plain" ("id","t","r","b","n") VALUES(4,replace(replace(\'a\\012b\\nc\\015d\\re\',\'\\015\',char(13)),\'\\012\',char(10)),0,NULL,NULL);',
     'INSERT INTO "Quoted ""T""" ("id","select") VALUES(1,\'a\');',
     'INSERT INTO "Quoted ""T""" ("id","select") VALUES(2,\'b\');',
     'INSERT INTO "child" ("id","p") VALUES(1,1);',
@@ -66,6 +69,7 @@ const GOLDEN = {
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(1,\'it\'\'s\',1.5,X\'00ff10\',NULL);',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(2,replace(replace(\'line1\\nline2\\rend\',\'\\r\',char(13)),\'\\n\',char(10)),9e999,X\'\',\'x\');',
     'INSERT INTO "plain" ("id","t","r","b","n") VALUES(3,\'\',-9e999,NULL,42);',
+    'INSERT INTO "plain" ("id","t","r","b","n") VALUES(4,replace(replace(\'a\\012b\\nc\\015d\\re\',\'\\015\',char(13)),\'\\012\',char(10)),0,NULL,NULL);',
   ],
 };
 
