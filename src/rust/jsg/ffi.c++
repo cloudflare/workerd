@@ -2051,10 +2051,7 @@ void function_template_set_nested_type(
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto* realm =
-      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
-  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
-  return realm;
+  return static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
 }
 
 namespace {
