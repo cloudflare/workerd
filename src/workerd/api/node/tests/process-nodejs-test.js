@@ -992,6 +992,19 @@ export const processCwd = {
   },
 };
 
+export const processCwdDynamicImport = {
+  async test() {
+    const originalCwd = process.cwd();
+    // Dynamic import evaluates the module outside of any IoContext; its top
+    // level must still see /bundle as the cwd (see #8786). The lazy module
+    // asserts this itself, plus chdir() and a relative read; here we just
+    // check the import resolves and our own cwd is untouched.
+    const lazy = await import('lazy');
+    assert.strictEqual(lazy.LAZY, true);
+    assert.strictEqual(process.cwd(), originalCwd);
+  },
+};
+
 export const processCwdRelative = {
   test() {
     const originalCwd = process.cwd();
