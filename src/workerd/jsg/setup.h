@@ -264,6 +264,17 @@ class IsolateBase {
   // be thrown. Safe to call across threads, without holding the lock.
   void terminateExecution() const;
 
+  // Records that a Rust JSG resource's `Drop` panicked while being destroyed in this isolate. The
+  // resource's cleanup did not finish, so the isolate's state can't be trusted. IoContext checks
+  // hasResourceDropPanicked() each time it enters the isolate, and aborts the isolate before that
+  // JavaScript runs; JavaScript already running when the panic happened is not stopped.
+  void setResourceDropPanicked() {
+    resourceDropPanicked = true;
+  }
+  bool hasResourceDropPanicked() const {
+    return resourceDropPanicked;
+  }
+
   using Logger = Lock::Logger;
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
     maybeLogger = kj::mv(logger);
@@ -899,6 +910,9 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
+
+  // See setResourceDropPanicked().
+  bool resourceDropPanicked = false;
 
   // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
   // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed

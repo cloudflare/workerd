@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+#include <workerd/io/io-context.h>
+#include <workerd/jsg/setup.h>
+#include <workerd/tests/test-fixture.h>
+
+#include <kj/test.h>
+
+namespace workerd {
+namespace {
+
+KJ_TEST("an isolate whose Rust resource Drop panicked is aborted before it runs JavaScript") {
+  TestFixture fixture;
+  uint runCount = 0;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    ++runCount;
+    jsg::IsolateBase::from(env.isolate).setResourceDropPanicked();
+  });
+
+  // TestFixture's abortIsolate() fails with "no abortIsolate", which shows the request reached it.
+  KJ_EXPECT_THROW_MESSAGE("no abortIsolate",
+      fixture.runInIoContext([&](const TestFixture::Environment& env) { ++runCount; }));
+  KJ_EXPECT(runCount == 1);
+}
+
+KJ_TEST(
+    "an isolate whose Rust resource Drop panicked runs no JavaScript when abortIsolate() returns") {
+  // A dynamic Worker's abortIsolate() schedules the restart and returns.
+  struct ReturningAbortFactory final: public TestFixture::DummyIoChannelFactory {
+    ReturningAbortFactory(TimerChannel& timer, uint& abortCount)
+        : DummyIoChannelFactory(timer),
+          abortCount(abortCount) {}
+    void abortIsolate(kj::StringPtr reason) override {
+      ++abortCount;
+    }
+    uint& abortCount;
+  };
+
+  uint abortCount = 0;
+  kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
+      [&abortCount](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<ReturningAbortFactory>(timer, abortCount);
+  };
+  TestFixture fixture({.ioChannelFactory = kj::mv(makeChannelFactory)});
+  uint runCount = 0;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    ++runCount;
+    jsg::IsolateBase::from(env.isolate).setResourceDropPanicked();
+  });
+
+  KJ_EXPECT_THROW_MESSAGE("isolate aborted",
+      fixture.runInIoContext([&](const TestFixture::Environment& env) { ++runCount; }));
+  KJ_EXPECT(abortCount == 1);
+  KJ_EXPECT(runCount == 1);
+}
+
+}  // namespace
+}  // namespace workerd
