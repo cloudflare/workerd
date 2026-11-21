@@ -8,21 +8,30 @@ def wd_cc_benchmark(
         deps = [],
         tags = [],
         visibility = None,
+        tool = False,
         **kwargs):
     """Wrapper for cc_binary that sets common attributes and links the benchmark library.
+
+    Args:
+      name: The benchmark target's name.
+      deps: Libraries the benchmark uses.
+      tags: Tags added to the benchmark's own.
+      visibility: The target's visibility.
+      tool: True to link like wd_cc_binary: statically, with linkopts_tool. False to link like
+        a test binary (dynamically on Linux, with linkopts_default, which turns off link-time
+        optimization); most microbenchmarks produce relatively accurate results that way.
+      **kwargs: Passed to cc_test.
     """
     cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
-        linkstatic = CC_TEST_LINKSTATIC,
+        linkstatic = 1 if tool else CC_TEST_LINKSTATIC,
         visibility = visibility,
         deps = deps + [
             # Runs each benchmark once under `bazel test`; see bench-main.c++.
             "//src/workerd/tests:bench-main",
             "//src/workerd/tests:bench-tools",
-            # Use same linker flags as with test binaries – wd_cc_benchmark is used with
-            # microbenchmarks, which will produce relatively accurate results without thinLTO.
-            "//build/deps:linkopts_default",
+            "//build/deps:linkopts_tool" if tool else "//build/deps:linkopts_default",
             # The kj::setupAsyncIo() seam, linked per binary (see kj_test.bzl).
             "//src/workerd/util:setup-async-io",
         ],
