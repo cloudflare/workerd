@@ -28,23 +28,10 @@ export default {
   'blob/Blob-constructor-endings.any.js': {},
   'blob/Blob-constructor.any.js': {
     comment:
-      'blobParts is converted as kj::Array (Blob::Bits in blob.h), which accepts only real Arrays, ' +
-      'instead of as a WebIDL sequence<BlobPart> iterated through @@iterator. So iterables are rejected, ' +
-      "a length getter isn't called, and changes made to the array during conversion aren't reflected. " +
-      'Transfer lists are not supported by structuredClone. Blob::Options in blob.h declares type before endings, ' +
+      'Transfer lists are not supported by structuredClone or postMessage. Blob::Options in blob.h declares type before endings, ' +
       'so the options are read in that order rather than lexicographically. ' +
       'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
     expectedFailures: [
-      'A plain object with @@iterator should be treated as a sequence for the blobParts argument.',
-      'A plain object with custom @@iterator should be treated as a sequence for the blobParts argument.',
-      'A plain object with @@iterator and a length property should be treated as a sequence for the blobParts argument.',
-      'A String object should be treated as a sequence for the blobParts argument.',
-      'A Uint8Array object should be treated as a sequence for the blobParts argument.',
-      'The length getter should be invoked and any exceptions should be propagated.',
-      'ToUint32 should be applied to the length and any exceptions should be propagated.',
-      'Getters and value conversions should happen in order until an exception is thrown.',
-      'Changes to the blobParts array should be reflected in the returned Blob (pop).',
-      'Changes to the blobParts array should be reflected in the returned Blob (unshift).',
       'Passing a FrozenArray as the blobParts array should work (FrozenArray<MessagePort>).',
       'options properties should be accessed in lexicographic order.',
       'Blob with type "image/gif;\x7F"',
@@ -89,10 +76,8 @@ export default {
   'file/File-constructor-endings.any.js': {},
   'file/File-constructor.any.js': {
     comment:
-      'fileBits is converted as kj::Array rather than a WebIDL sequence, so a custom @@iterator is ignored. ' +
       'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
     expectedFailures: [
-      'Custom @@iterator',
       'Using type in File constructor: ascii/nonprintable\x7F',
     ],
   },

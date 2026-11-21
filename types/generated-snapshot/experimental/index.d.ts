@@ -1106,7 +1106,7 @@ interface SchedulerWaitOptions {
  */
 declare class Blob {
   constructor(
-    bits?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
+    bits?: Iterable<(ArrayBuffer | ArrayBufferView) | string | Blob>,
     options?: BlobOptions,
   );
   /**
@@ -1163,7 +1163,7 @@ interface BlobOptions {
  */
 declare class File extends Blob {
   constructor(
-    bits: ((ArrayBuffer | ArrayBufferView) | string | Blob)[] | undefined,
+    bits: Iterable<(ArrayBuffer | ArrayBufferView) | string | Blob> | undefined,
     name: string,
     options?: FileOptions,
   );

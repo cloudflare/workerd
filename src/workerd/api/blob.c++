@@ -60,7 +60,7 @@ kj::Maybe<kj::String> convertLineEndingsToNative(kj::StringPtr text) {
 // Concatenate an array of segments (parameter to Blob constructor).
 kj::Maybe<jsg::JsBufferSource> concat(
     jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits, LineEndings endings) {
-  auto bits = kj::mv(maybeBits).orDefault(nullptr);
+  auto bits = kj::mv(maybeBits).orDefault({});
   if (bits.size() == 0) {
     return kj::none;
   }

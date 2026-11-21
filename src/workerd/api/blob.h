@@ -42,7 +42,7 @@ class Blob: public jsg::Object {
   };
 
   using BitsValue = kj::OneOf<jsg::JsBufferSource, kj::String, jsg::Ref<Blob>>;
-  using Bits = kj::Array<BitsValue>;
+  using Bits = jsg::Sequence<BitsValue>;
 
   static jsg::Ref<Blob> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options);
