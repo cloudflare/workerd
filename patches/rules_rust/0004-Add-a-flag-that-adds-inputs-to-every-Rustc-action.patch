@@ -1,0 +1,82 @@
+Subject: [PATCH] Add a flag that adds inputs to every Rustc action
+
+extra_rustc_flag can pass rustc a flag that names a file, such as
+-Cprofile-use=<profile>, but nothing adds that file to the Rustc
+action's inputs, so rustc can't read it in a sandbox or on a remote
+executor. The extra_rustc_inputs label flag adds its files to every
+target-configuration Rustc action, as extra_rustc_flag adds its flags.
+---
+
+diff --git a/rust/private/rust.bzl b/rust/private/rust.bzl
+--- a/rust/private/rust.bzl
++++ b/rust/private/rust.bzl
+@@ -714,6 +714,10 @@
+     "_extra_rustc_flags": attr.label(
+         default = Label("//rust/settings:extra_rustc_flags"),
+     ),
++    "_extra_rustc_inputs": attr.label(
++        default = Label("//rust/settings:extra_rustc_inputs"),
++        allow_files = True,
++    ),
+     "_per_crate_rustc_flag": attr.label(
+         default = Label("//rust/settings:per_crate_rustc_flag"),
+     ),
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -848,6 +848,9 @@
+     if linker_script:
+         nolinkstamp_compile_direct_inputs.append(linker_script)
+ 
++    if hasattr(ctx.attr, "_extra_rustc_inputs") and not is_exec_configuration(ctx):
++        nolinkstamp_compile_direct_inputs += ctx.files._extra_rustc_inputs
++
+     if not cc_toolchain:
+         runtime_libs = depset()
+     elif crate_info.type in ["dylib", "cdylib"]:
+diff --git a/rust/settings/BUILD.bazel b/rust/settings/BUILD.bazel
+--- a/rust/settings/BUILD.bazel
++++ b/rust/settings/BUILD.bazel
+@@ -25,6 +25,7 @@
+     "extra_rustc_env",
+     "extra_rustc_flag",
+     "extra_rustc_flags",
++    "extra_rustc_inputs",
+     "incompatible_change_clippy_error_format",
+     "incompatible_do_not_include_data_in_compile_data",
+     "incompatible_do_not_include_transitive_data_in_compile_inputs",
+@@ -109,6 +110,8 @@
+ extra_rustc_flag()
+ 
+ extra_rustc_flags()
++
++extra_rustc_inputs()
+ 
+ incompatible_change_clippy_error_format()
+ 
+diff --git a/rust/settings/settings.bzl b/rust/settings/settings.bzl
+--- a/rust/settings/settings.bzl
++++ b/rust/settings/settings.bzl
+@@ -483,6 +483,22 @@
+     )
+ 
+ # buildifier: disable=unnamed-macro
++def extra_rustc_inputs():
++    """Files that every target-configuration Rustc action takes as inputs, set with `--@rules_rust//rust/settings:extra_rustc_inputs`.
++
++    For files that `extra_rustc_flag` names, such as a profile passed with `-Cprofile-use`. A flag
++    can't add an input itself, and rustc reads only its inputs in a sandbox or on a remote executor.
++    """
++    native.filegroup(
++        name = "empty_extra_rustc_inputs",
++        srcs = [],
++    )
++    native.label_flag(
++        name = "extra_rustc_inputs",
++        build_setting_default = ":empty_extra_rustc_inputs",
++    )
++
++# buildifier: disable=unnamed-macro
+ def extra_exec_rustc_env():
+     """This setting may be used to pass extra environment variables to rustc from the command line in exec configuration.
+ 

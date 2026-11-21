@@ -1,0 +1,76 @@
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
+load("@rules_cc//cc/toolchains:fdo_profile.bzl", "fdo_profile")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Every target here is manual, so that `bazel build //...` and `bazel test //...` never fetch the
+# profile or the x64 Linux LLVM release that llvm-profdata comes from. Only the PGO configs and
+# train.sh, which name these targets, and the Check the PGO build workflow need them. A deleted
+# profile then breaks only the release builds, which pgo-check.yml checks for every day.
+
+# The toolchain's llvm-profdata, which merges the training profiles. The toolchain's LLVM release
+# has it for x64 Linux only, so training runs there.
+native_binary(
+    name = "llvm-profdata",
+    src = "@llvm_linux_x86_64_llvm//:bin/llvm-profdata",
+    out = "llvm-profdata",
+    tags = ["manual"],
+)
+
+# The test wrapper that train.sh runs the training tests under (--run_under), which merges each
+# test's raw profiles. --run_under adds the wrapper's runfiles to the test's, which is how it finds
+# llvm-profdata.
+genrule(
+    name = "profile-env-script",
+    srcs = [
+        "profile-env.sh",
+        ":llvm-profdata",
+    ],
+    outs = ["profile-env-with-llvm-profdata.sh"],
+    cmd = "sed 's|@LLVM_PROFDATA@|$(rlocationpath :llvm-profdata)|' $(location profile-env.sh) > $@",
+    tags = ["manual"],
+)
+
+sh_binary(
+    name = "profile-env",
+    srcs = [":profile-env-script"],
+    data = [":llvm-profdata"],
+    tags = ["manual"],
+)
+
+# The profile that --config=pgo-use optimizes with, which build/pgo/profile.json names. It isn't
+# checked in: Bazel downloads it (profile.bzl). --fdo_optimize takes this target rather than the
+# file because it doesn't resolve repository names the way label-valued flags do.
+fdo_profile(
+    name = "profile",
+    profile = "@workerd_pgo_profile//:workerd.profdata",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# The same file, for rustc, which reads it with -Cprofile-use. --config=pgo-use adds it to every
+# Rustc action's inputs (rules_rust's extra_rustc_inputs).
+alias(
+    name = "profdata",
+    actual = "@workerd_pgo_profile//:workerd.profdata",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# Checks that the path --config=pgo-use passes rustc with -Cprofile-use is the profile's. Running
+# it also checks that the profile build/pgo/profile.json names can be downloaded. Only the Linux
+# builds use the profile.
+sh_test(
+    name = "pgo-config-test",
+    srcs = ["pgo-config-test.sh"],
+    args = [
+        "$(rootpath //:.bazelrc)",
+        "$(execpath :profdata)",
+    ],
+    data = [
+        ":profdata",
+        "//:.bazelrc",
+    ],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
