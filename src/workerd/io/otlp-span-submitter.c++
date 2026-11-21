@@ -277,7 +277,9 @@ kj::Date OtlpSpanSubmitter::getTime() {
   return kj::systemPreciseCalendarClock().now();
 }
 
-bool OtlpSpanSubmitter::submitSpanOpen(tracing::SpanId spanId,
+bool OtlpSpanSubmitter::submitSpanOpen(tracing::TraceId traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
     kj::Date startTime) {
@@ -288,7 +290,9 @@ bool OtlpSpanSubmitter::submitSpanOpen(tracing::SpanId spanId,
   return open(spanId, parentSpanId, operationName, startTime);
 }
 
-bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::SpanId spanId,
+bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::TraceId traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
     kj::Date startTime) {

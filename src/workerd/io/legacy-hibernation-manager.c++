@@ -167,7 +167,8 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   // TODO(mar): Improve accept span context capturing — route snapshotted user span context
   // to serialization point instead of capturing only the invocation root span here.
   auto invCtx = IoContext::current().getInvocationSpanContext();
-  refToHibernatable.userSpanContext = tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
+  refToHibernatable.userSpanContext =
+      tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId(), invCtx.getTraceFlags());
 
   allWs.push_front(kj::mv(hib));
   refToHibernatable.node = allWs.begin();
