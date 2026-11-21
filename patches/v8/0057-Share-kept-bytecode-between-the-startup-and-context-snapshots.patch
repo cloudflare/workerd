@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Divy Srivastava <divy@cloudflare.com>
+Date: Sat, 21 Nov 2026 11:35:20 +0530
+Subject: [PATCH] [snapshot] Share kept bytecode between the startup and
+ context snapshots
+
+With FunctionCodeHandling::kKeep, a SharedFunctionInfo keeps its
+bytecode, and the startup serializer serializes it along with the
+SharedFunctionInfo. The context can reach the same objects in two ways:
+- An error's captured stack frames hold the BytecodeWrapper of each
+  interpreted frame, and through it the bytecode, its constant pool and
+  everything in that (literal boilerplates, BigInts).
+- A BigInt literal in a constant pool can also be the value of a context
+  variable.
+The context serializer then serialized a second copy. Debug builds abort
+("!startup_serializer_->ReferenceMapContains(obj)"); release builds
+silently write the duplicates into the context snapshot.
+
+Send BytecodeWrapper, BytecodeArray and BigInt through the startup
+object cache, as for SharedFunctionInfos, ScopeInfos and HeapNumbers.
+The bytecode is the SharedFunctionInfo's own, which it already shares;
+only its lazily collected source positions change after compilation.
+BigInts are immutable. With kClear, the SharedFunctionInfos drop their
+bytecode first, so an error's frames are the only holder and their
+bytecode moves from the context snapshot to the startup snapshot.
+---
+ src/snapshot/context-serializer.cc | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/snapshot/context-serializer.cc b/src/snapshot/context-serializer.cc
+index 3c2605a3588..9a472422238 100644
+--- a/src/snapshot/context-serializer.cc
++++ b/src/snapshot/context-serializer.cc
+@@ -251,8 +251,16 @@ bool ContextSerializer::ShouldBeInTheStartupObjectCache(Tagged<HeapObject> o) {
+   // We can't allow scripts to be part of the context snapshot because they
+   // contain a unique ID, and deserializing several context snapshots containing
+   // script would cause dupes.
++  //
++  // With FunctionCodeHandling::kKeep, a SharedFunctionInfo keeps its bytecode,
++  // and the context can reach the same bytecode through an error's captured
++  // stack frames, which hold the bytecode of interpreted frames. Sharing it is
++  // what the SharedFunctionInfo does anyway; only its lazily collected source
++  // positions change after compilation. A BigInt literal in the constant pool
++  // can also be the value of a context variable; BigInts are immutable.
+   return IsName(o) || IsScript(o) || IsSharedFunctionInfo(o) ||
+-         IsHeapNumber(o) || IsCode(o) || IsInstructionStream(o) ||
++         IsBytecodeArray(o) || IsBytecodeWrapper(o) || IsHeapNumber(o) ||
++         IsBigInt(o) || IsCode(o) || IsInstructionStream(o) ||
+          IsScopeInfo(o) || IsAccessorInfo(o) || IsInterceptorInfo(o) ||
+          IsTemplateInfo(o) || IsClassPositions(o) ||
+          o->map() == ReadOnlyRoots(isolate()).fixed_cow_array_map();
+-- 
+2.54.0 (Apple Git-157)
+
