@@ -1,0 +1,13 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# `workerd dev` and `workerd serve --env-file` of a wrangler.jsonc.
+js_test(
+    name = "env-files-test",
+    data = [
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:wrangler-serve_js_lib",
+    ],
+    entry_point = "env-files-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

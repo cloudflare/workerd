@@ -18,6 +18,7 @@ fn wd_test_invocation() {
         config,
         serve_or_test,
         test,
+        ..
     } = parse(&[
         "test",
         "--predictable",
@@ -56,6 +57,7 @@ fn serve_options() {
         config,
         const_name,
         serve_or_test,
+        mode,
         serve,
     } = parse(&[
         "serve",
@@ -84,8 +86,8 @@ fn serve_options() {
     assert!(config.binary);
     assert_eq!(config.import_paths, ["inc"]);
     assert_eq!(const_name.const_name, None);
-    assert!(serve_or_test.watch);
-    assert!(serve_or_test.experimental);
+    assert!(mode.watch);
+    assert!(mode.experimental);
     // Later occurrences override earlier ones, as with kj::MainBuilder.
     assert_eq!(
         serve_or_test.inspector_addr.as_deref(),
@@ -438,4 +440,26 @@ fn help_pages_are_complete() {
     let mut compiled = CompiledMain::command();
     compiled.build();
     check(&mut compiled, "compiled");
+}
+
+#[test]
+fn env_files_and_dev() {
+    let Command::Serve {
+        config,
+        serve_or_test,
+        ..
+    } = parse(&["serve", "--env-file", "a", "w.json", "--env-file=b"]).command
+    else {
+        panic!("expected serve")
+    };
+    assert_eq!(config.config_file, "w.json");
+    assert_eq!(serve_or_test.env_files, ["a", "b"]);
+    assert!(!serve_or_test.dev);
+    let Command::Dev { project, .. } = parse(&["dev"]).command else {
+        panic!("expected dev")
+    };
+    assert_eq!(project, ".");
+    for flag in ["-w", "--experimental"] {
+        assert!(Main::try_parse_from(["workerd", "dev", flag]).is_err());
+    }
 }

@@ -8,8 +8,9 @@
 //! `deploy` publishes one ([`deploy`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
-// and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
+// Three modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI
+// declarations; socket_fd.rs, where a descriptor number from the command line becomes an owned
+// descriptor; and dotenv.rs, which sets environment variables before any thread starts.
 // Everything else is safe code over std, socket2 and the bridge.
 
 mod args;
@@ -17,6 +18,7 @@ mod bridge;
 mod config;
 mod deploy;
 mod deployments;
+mod dotenv;
 mod help;
 mod process;
 mod socket_fd;
@@ -37,6 +39,7 @@ use workerd_server::run::RunOptions;
 
 use crate::bridge::ffi;
 use crate::config::Config;
+use crate::dotenv::Sources;
 use crate::process::Executable;
 use crate::process::Process;
 use crate::socket_fd::InheritedSocket;
@@ -92,18 +95,18 @@ fn run_compiled(
     type T = args::CompiledMain;
 
     let args: T = parse(T::command());
-    check_serve_or_test::<T>(&args.serve_or_test);
+    let serve_or_test = args.serve_or_test.with_mode(args.mode);
+    check_serve_or_test::<T>(&serve_or_test);
     let config = Config::from_words(embedded_config).unwrap_or_else(|error| {
         usage_error::<T>(format!("the config compiled into this executable: {error}"))
     });
-    let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
-    let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
-    let process = Process::new(executable, watcher, inherited_sockets);
-    let (config, options) = with_deployments(config, &args.serve_or_test, options, &process);
+    let (options, inherited_sockets) = serve_options::<T>(args.serve, &serve_or_test);
+    let process = this_process::<T>(&serve_or_test, executable, inherited_sockets);
+    let (config, options) = with_deployments(config, &serve_or_test, options, &process);
     entry::serve(
         args.global.verbose,
         config.into_words(),
-        (&args.serve_or_test).into(),
+        (&serve_or_test).into(),
         options,
         watching(process),
     )
@@ -119,27 +122,21 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             config,
             const_name,
             serve_or_test,
+            mode,
             serve,
-        } => {
-            check_serve_or_test::<T>(&serve_or_test);
-            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
-            let process = Process::new(executable, watcher, inherited_sockets);
-            let config = load_config::<T>(
-                config,
-                const_name.const_name,
-                &process,
-                serve_or_test.experimental,
-            );
-            let (config, options) = with_deployments(config, &serve_or_test, options, &process);
-            entry::serve(
-                verbose,
-                config.into_words(),
-                (&serve_or_test).into(),
-                options,
-                watching(process),
-            )
-        }
+        } => run_serve(
+            verbose,
+            config,
+            const_name.const_name,
+            &serve_or_test.with_mode(mode),
+            serve,
+            executable,
+        ),
+        args::Command::Dev {
+            project,
+            serve_or_test,
+            serve,
+        } => run_dev(verbose, &project, serve_or_test, serve, executable),
         args::Command::Compile {
             config,
             const_name,
@@ -151,7 +148,9 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
         args::Command::Fuzzilli {
             config,
             serve_or_test,
+            mode,
         } => {
+            let serve_or_test = serve_or_test.with_mode(mode);
             if !ffi::fuzzilli_supported() {
                 exit_with(&T::command().error(
                     ErrorKind::InvalidSubcommand,
@@ -159,9 +158,14 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 ));
             }
             check_serve_or_test::<T>(&serve_or_test);
-            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(config, None, &process, serve_or_test.experimental);
+            let process = this_process::<T>(&serve_or_test, executable, Vec::new());
+            let config = load_config::<T>(
+                config,
+                None,
+                &process,
+                serve_or_test.experimental,
+                (&serve_or_test).into(),
+            );
             entry::test(
                 verbose,
                 config.into_words(),
@@ -175,19 +179,100 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
         args::Command::Test {
             config,
             serve_or_test,
+            mode,
             test,
-        } => run_test(verbose, config, &serve_or_test, test, executable),
+        } => run_test(
+            verbose,
+            config,
+            &serve_or_test.with_mode(mode),
+            test,
+            executable,
+        ),
         args::Command::Bench {
             config,
             serve_or_test,
+            mode,
             bench,
-        } => run_bench(verbose, config, &serve_or_test, bench, executable),
+        } => run_bench(
+            verbose,
+            config,
+            &serve_or_test.with_mode(mode),
+            bench,
+            executable,
+        ),
         args::Command::Deploy {
             project,
             const_name,
             deploy,
         } => Ok(run_deploy(&project, const_name, &deploy, executable)),
     }
+}
+
+/// `workerd serve`, and `workerd dev` with its options set: serves the config.
+fn run_serve(
+    verbose: bool,
+    config: args::ConfigFileArgs,
+    const_name: Option<String>,
+    serve_or_test: &args::ServeOrTestArgs,
+    serve: args::ServeArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    check_serve_or_test::<T>(serve_or_test);
+    let (options, inherited_sockets) = serve_options::<T>(serve, serve_or_test);
+    let process = this_process::<T>(serve_or_test, executable, inherited_sockets);
+    let config = load_config::<T>(
+        config,
+        const_name,
+        &process,
+        serve_or_test.experimental,
+        serve_or_test.into(),
+    );
+    let (config, options) = with_deployments(config, serve_or_test, options, &process);
+    entry::serve(
+        verbose,
+        config.into_words(),
+        serve_or_test.into(),
+        options,
+        watching(process),
+    )
+}
+
+/// `workerd dev`: serves the project as `serve --watch --experimental` does, reading its `.env`
+/// files. Windows serves without watching.
+fn run_dev(
+    verbose: bool,
+    project: &str,
+    serve_or_test: args::ServeOrTestArgs,
+    serve: args::ServeArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    // Reloading re-executes the server, which is not implemented on Windows.
+    if cfg!(windows) {
+        eprintln!("workerd dev: not reloading on changes, which Windows lacks.");
+    }
+    let mode = args::ModeArgs {
+        watch: !cfg!(windows),
+        experimental: true,
+    };
+    let serve_or_test = args::ServeOrTestArgs {
+        dev: true,
+        ..serve_or_test.with_mode(mode)
+    };
+    let config_file = match deploy::project(project, false) {
+        Ok(deploy::Project::Wrangler(path)) => path.to_string_lossy().into_owned(),
+        Ok(deploy::Project::Capnp(config_file)) => config_file,
+        Err(error) => usage_error::<T>(error),
+    };
+    let config = args::ConfigFileArgs {
+        import_paths: Vec::new(),
+        binary: false,
+        config_file,
+    };
+    run_serve(verbose, config, None, &serve_or_test, serve, executable)
 }
 
 /// `workerd deploy`: publishes the project as a deployment of the cluster whose bucket
@@ -246,7 +331,8 @@ fn run_deploy(
                 binary: args.binary,
                 config_file,
             };
-            (name, load_config::<T>(config, const_name, &process, true))
+            let config = load_config::<T>(config, const_name, &process, true, Sources::default());
+            (name, config)
         }
         Err(error) => usage_error::<T>(error),
     };
@@ -290,7 +376,7 @@ fn run_compile(
     }
     let process = Process::new(executable, None, Vec::new());
     // The binary checks `--experimental` when it runs (the server, for bundled modules).
-    let config = load_config::<T>(config, const_name, &process, true);
+    let config = load_config::<T>(config, const_name, &process, true, Sources::default());
     let written = if config_only {
         config.write_to_stdout()
     } else {
@@ -311,13 +397,13 @@ fn run_test(
 
     check_serve_or_test::<T>(serve_or_test);
     let filter = test.filter.take().unwrap_or_default();
-    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
-    let process = Process::new(executable, watcher, Vec::new());
+    let process = this_process::<T>(serve_or_test, executable, Vec::new());
     let config = load_config::<T>(
         config,
         filter.const_name.clone(),
         &process,
         serve_or_test.experimental,
+        serve_or_test.into(),
     );
     entry::test(
         verbose,
@@ -345,13 +431,13 @@ fn run_bench(
 
     check_serve_or_test::<T>(serve_or_test);
     let filter = bench.filter.take().unwrap_or_default();
-    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
-    let process = Process::new(executable, watcher, Vec::new());
+    let process = this_process::<T>(serve_or_test, executable, Vec::new());
     let config = load_config::<T>(
         config,
         filter.test.const_name.clone(),
         &process,
         serve_or_test.experimental,
+        serve_or_test.into(),
     );
     entry::bench(
         verbose,
@@ -411,6 +497,7 @@ fn load_config<T: CommandFactory>(
     const_name: Option<String>,
     process: &Process,
     experimental: bool,
+    env: Sources,
 ) -> Config {
     let args::ConfigFileArgs {
         import_paths,
@@ -446,7 +533,7 @@ fn load_config<T: CommandFactory>(
         if !std::path::Path::new(&config_file).is_file() {
             usage_error::<T>(format!("{config_file}: No such file."));
         }
-        return wrangler::load(&config_file, process, experimental)
+        return wrangler::load(&config_file, process, experimental, env)
             .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
     }
 
@@ -514,6 +601,28 @@ fn config_errors(errors: &[impl Display], process: &Process) -> ! {
         std::process::exit(1);
     }
     process.reload()
+}
+
+/// This process, after the `.env` files of `--env-file` or `workerd dev` are added to its
+/// environment, watching them and, under `--watch`, its config files. Exits with a usage error
+/// where watching cannot work.
+fn this_process<T: CommandFactory>(
+    serve_or_test: &args::ServeOrTestArgs,
+    executable: Option<Executable>,
+    inherited_sockets: Vec<InheritedSocket>,
+) -> Process {
+    // Before the watcher's thread starts.
+    let read = dotenv::load_into_process(&serve_or_test.env_files, serve_or_test.dev);
+    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
+    let process = Process::new(executable, watcher, inherited_sockets);
+    for path in read {
+        process
+            .watch_file(path.as_os_str().as_encoded_bytes())
+            .unwrap_or_else(|e| {
+                usage_error::<T>(format!("{}: {}", path.display(), e.description()))
+            });
+    }
+    process
 }
 
 /// Starts watching for `--watch`, exiting with a usage error where it cannot work.

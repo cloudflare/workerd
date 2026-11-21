@@ -12,7 +12,8 @@
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
 //! `r2_buckets`, `triggers` (`crons`), `queues`, `workflows`, `d1_databases`,
 //! `secrets_store_secrets`, `ratelimits`, `assets`, `no_bundle` and `$schema`. Any other field is
-//! an error rather than silently ignored.
+//! an error rather than silently ignored. Under `--env-file` or `workerd dev`, a Worker also gets
+//! a string binding, over `vars`, for each variable of its `.env` files (see `dotenv.rs`).
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
@@ -77,6 +78,7 @@ use workerd_capnp::worker;
 
 use crate::config::Config;
 use crate::config::words_from_bytes;
+use crate::dotenv::Sources;
 use crate::process::Process;
 
 const DEFAULT_ADDRESS: &str = "localhost:8787";
@@ -424,9 +426,16 @@ enum Target<'a> {
     Deployment { name: Option<&'a str> },
 }
 
-/// The config `workerd serve` runs for the wrangler config at `path`.
-pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config, String> {
-    translate(path, process, &Target::Serve { experimental }).map(|(_, config)| config)
+/// The config `workerd serve` runs for the wrangler config at `path`, its Worker also bound to
+/// the variables of `env`'s files.
+pub fn load(
+    path: &str,
+    process: &Process,
+    experimental: bool,
+    env: Sources,
+) -> Result<Config, String> {
+    let target = Target::Serve { experimental };
+    translate(path, process, &target, env).map(|(_, config)| config)
 }
 
 /// The deployment `workerd deploy` publishes for the wrangler config at `path`, and its name:
@@ -436,11 +445,17 @@ pub fn load_deployment(
     name: Option<&str>,
     process: &Process,
 ) -> Result<(String, Config), String> {
-    translate(path, process, &Target::Deployment { name })
+    let target = Target::Deployment { name };
+    translate(path, process, &target, Sources::default())
 }
 
 #[expect(clippy::too_many_lines, reason = "a service per wrangler field")]
-fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, Config), String> {
+fn translate(
+    path: &str,
+    process: &Process,
+    target: &Target,
+    env: Sources,
+) -> Result<(String, Config), String> {
     let watch = |p: &Path| {
         process
             .watch_file(p.as_os_str().as_encoded_bytes())
@@ -450,7 +465,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let file = std::path::absolute(path).map_err(|e| e.to_string())?;
     watch(&file)?;
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    let wrangler: Wrangler =
+    let mut wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     check_experimental(&wrangler, target)?;
     check_bindings(&wrangler)?;
@@ -478,6 +493,11 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         Some(main) if wrangler.no_bundle => unbundled(root, main, &watch)?,
         Some(main) => bundle(&esbuild(root), root, main, &watch)?,
     };
+    if wrangler.main.is_some() {
+        for (k, v) in env.bindings(root, &watch)?.0 {
+            wrangler.vars.insert(k, Value::String(v));
+        }
+    }
     let workers = u32::from(wrangler.main.is_some());
 
     let serving = matches!(target, Target::Serve { .. });
