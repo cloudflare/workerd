@@ -585,6 +585,11 @@ void cxxbridge1$kjException$getDetails(kj::Exception *err,
   }
 }
 
+// copy a kj::Exception into a new one allocated by new.
+kj::Exception *cxxbridge1$kjException$clone(const kj::Exception *err) noexcept {
+  return new kj::Exception(err->clone());
+}
+
 // delete kj::Exception allocated by new.
 void cxxbridge1$kjException$dropInPlace(kj::Exception *err) noexcept {
   delete err;

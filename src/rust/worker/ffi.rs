@@ -256,9 +256,9 @@ fn new_cxx_worker(inner: kj_rs::KjOwn<bridge::WorkerInterface>) -> Box<Wrapper> 
     reason = "c++ expects heap-allocation"
 )]
 fn new_promised_interface(start: KjOwn<bridge::WorkerPromise>) -> Box<Wrapper> {
-    crate::Interface::into_ffi(crate::PromisedInterface::new(async move {
-        Ok(bridge::worker_promise_await(start).await?)
-    }))
+    crate::Interface::into_ffi(crate::PromisedInterface::new(bridge::worker_promise_await(
+        start,
+    )))
 }
 
 impl Wrapper {

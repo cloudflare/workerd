@@ -557,7 +557,8 @@ impl Handler for HttpConnection {
                     body,
                     ServiceResponse::from(response.as_mut()),
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -595,7 +596,8 @@ impl Handler for HttpConnection {
                         tls_starter: KjMaybe::None,
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -668,7 +670,8 @@ pub async fn listen_tcp(
                         tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
     };
     accept_loop(
