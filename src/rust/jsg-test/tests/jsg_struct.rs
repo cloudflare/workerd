@@ -377,6 +377,51 @@ fn required_struct_from_null_and_absent_property() {
     });
 }
 
+/// A struct with `required_members`, like a C++ `JSG_STRUCT` with `jsgRequiredMembers`.
+#[jsg_struct(required_members)]
+#[derive(Debug, PartialEq)]
+struct RequiredMembersStruct {
+    pub str: String,
+    pub opt: Option<String>,
+    pub nullable: jsg::Nullable<u32>,
+}
+
+/// With `required_members`, an undefined value for a field that isn't optional is a `TypeError`.
+/// Optional fields still accept undefined, and a `Nullable` field accepts null.
+#[test]
+fn required_members_struct_rejects_undefined_required_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(
+            convert::<RequiredMembersStruct>(lock, ctx, "({ str: 'foo', nullable: null })")?,
+            RequiredMembersStruct {
+                str: "foo".to_owned(),
+                opt: None,
+                nullable: jsg::Nullable::Null,
+            }
+        );
+        assert_eq!(
+            convert::<RequiredMembersStruct>(lock, ctx, "({ str: 'undefined', nullable: 1 })")?.str,
+            "undefined"
+        );
+        for (expr, member) in [
+            ("({})", "str"),
+            ("({ str: undefined, opt: 'bar', nullable: 1 })", "str"),
+            ("({ str: 'foo' })", "nullable"),
+        ] {
+            let err = convert::<RequiredMembersStruct>(lock, ctx, expr).unwrap_err();
+            assert_eq!(err.name, ExceptionType::TypeError);
+            assert_eq!(
+                err.message,
+                format!("Required member '{member}' is missing from 'RequiredMembersStruct'.")
+            );
+        }
+        // Without `required_members`, an absent `String` field converts from undefined.
+        assert_eq!(convert::<TestStruct>(lock, ctx, "({})")?.str, "undefined");
+        Ok(())
+    });
+}
+
 /// A throwing getter fails the conversion, leaving what it threw pending.
 #[test]
 fn struct_from_throwing_getter_propagates_error() {

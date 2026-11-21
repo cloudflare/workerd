@@ -738,7 +738,7 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
 // `static constexpr bool jsgRequiredMembers = true;` treats its non-optional fields as Web IDL
 // required dictionary members instead: unwrapping throws a TypeError when one of them is undefined.
 // `jsg::Optional` and `jsg::LenientOptional` fields still accept undefined, and a `kj::Maybe` field
-// accepts null but not undefined.
+// accepts null but not undefined. Rust JSG's `#[jsg_struct(required_members)]` does the same.
 //
 // Fields with a starting '$' will have that dollar sign prefix stripped in the JS binding. A
 // motivating example to enact that change was WebCrypto which has a field in a dictionary called
