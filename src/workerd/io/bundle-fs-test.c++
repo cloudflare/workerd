@@ -266,6 +266,30 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
   });
 }
 
+KJ_TEST("Bundle module names are stored decoded") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    kj::Vector<WorkerSource::Module> modules(2);
+    modules.add(WorkerSource::Module{
+      .name = "main.js"_kj,
+      .content = WorkerSource::EsModule{.body = "export default 1;"_kj},
+    });
+    modules.add(WorkerSource::Module{
+      .name = "sp ace/\xc3\xa5.js"_kj,
+      .content = WorkerSource::EsModule{.body = "export default 2;"_kj},
+    });
+    auto config = WorkerSource(WorkerSource::ModulesSource{
+      .mainModule = "main.js"_kj,
+      .modules = modules.releaseAsArray(),
+    });
+    auto dir = getBundleDirectory(config);
+
+    KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"sp ace", "\xc3\xa5.js"})));
+    KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"sp%20ace"})) == kj::none);
+  });
+}
+
 KJ_TEST("Transpiled bundle module bodies outlive the WorkerSource (VULN-136997)") {
   // Regression test for VULN-136997: a heap use-after-free.
   //

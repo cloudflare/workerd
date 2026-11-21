@@ -105,7 +105,6 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
   // the produced Directory and discards the closure after the first call.
   return getLazyDirectoryImpl([entries = entries.releaseAsArray()]() mutable {
     Directory::Builder builder;
-    kj::Path kRoot{};
     // Defense-in-depth: reject module names whose parsed path exceeds a sane
     // segment count. Legitimate module paths are short (e.g. "src/util/helpers.js");
     // pathologically deep names can never be addressed by node:fs anyway.
@@ -116,8 +115,7 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
       if (url.getProtocol() != "file:"_kj) {
         continue;
       }
-      auto pathStr = kj::str(url.getPathname().slice(1));
-      auto path = kRoot.eval(pathStr);
+      auto path = KJ_UNWRAP_OR(fileUrlToPath(url), continue);
       if (path.size() > kMaxBundlePathDepth) {
         KJ_LOG(WARNING, "Skipping overly deep module path", path.size());
         continue;

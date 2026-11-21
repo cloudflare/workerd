@@ -7,6 +7,8 @@
 
 #include <v8-microtask-queue.h>
 
+#include <kj/encoding.h>
+
 #include <algorithm>
 
 namespace workerd {
@@ -960,8 +962,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
       jsg::Lock& js, const jsg::Url& url, OpenOptions opts) const override {
 
-    kj::Path root{};
-    auto str = kj::str(url.getPathname().slice(1));
+    auto path = KJ_UNWRAP_OR(fileUrlToPath(url), return FsError::INVALID_PATH);
 
     // We will impose an absolute max number of total file descriptors to
     // max int... in practice, the production system should condemn the
@@ -975,7 +976,6 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     }
 
     auto rootDir = getRoot(js);
-    auto path = root.eval(str);
 
     // open(2) never creates intermediate directories.
     if (path.size() > 0) {
@@ -1392,8 +1392,12 @@ Stat SymbolicLink::stat(jsg::Lock& js) {
 }
 
 jsg::Url SymbolicLink::getTargetUrl() const {
-  auto path = getTargetPath().toString(false);
-  return KJ_ASSERT_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
+  kj::Vector<kj::String> parts;
+  for (auto& part: getTargetPath()) {
+    parts.add(kj::encodeUriPath(part));
+  }
+  return KJ_ASSERT_NONNULL(
+      jsg::Url::tryParse(kj::str("/", kj::strArray(parts, "/")), "file:///"_kj));
 }
 
 kj::String SymbolicLink::getRawTarget() const {
@@ -1450,6 +1454,45 @@ kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
 
+kj::Maybe<kj::String> decodeFileName(kj::ArrayPtr<const char> name) {
+  kj::String str;
+  if (name.findFirst('%') == kj::none) {
+    str = kj::str(name);
+  } else {
+    auto decoded = jsg::Url::percentDecode(name.asBytes());
+    for (auto c: decoded) {
+      if (c == '/' || c == '\0') return kj::none;
+    }
+    str = kj::str(decoded.asChars());
+  }
+  if (str == "."_kj || str == ".."_kj) return kj::none;
+  return kj::mv(str);
+}
+
+kj::Maybe<kj::Path> fileUrlToPath(const jsg::Url& url) {
+  auto pathname = url.getPathname();
+  kj::Vector<kj::String> parts(pathname.size() / 2);
+  size_t start = 0;
+  for (size_t i = 0; i <= pathname.size(); i++) {
+    if (i == pathname.size() || pathname[i] == '/') {
+      if (i > start) {
+        parts.add(KJ_UNWRAP_OR_RETURN(decodeFileName(pathname.slice(start, i)), kj::none));
+      }
+      start = i + 1;
+    }
+  }
+  return kj::Path(parts.releaseAsArray());
+}
+
+kj::String fileUrlToPathString(const jsg::Url& url) {
+  return kj::str(jsg::Url::percentDecode(url.getPathname().asBytes()).asChars());
+}
+
+kj::String encodeFileName(kj::StringPtr name) {
+  // The "./" prefix keeps a name like "a:b" from parsing as a URL with a scheme.
+  return kj::str("./", kj::encodeUriPath(name));
+}
+
 const VirtualFileSystem& VirtualFileSystem::current(jsg::Lock& js) {
   // The VFS is stored in an embedder data slot in the v8::Context associated with
   // the current jsg::Lock. The actual instance is kept alive using a kj::Own held
@@ -1464,13 +1507,13 @@ kj::Maybe<FsNodeWithError> VirtualFileSystem::resolve(
     // We only accept file URLs.
     return kj::none;
   }
-  // We want to strip the leading slash from the path.
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return getRoot(js)->tryOpen(js, root.eval(path),
-      Directory::OpenOptions{
-        .followLinks = options.followLinks,
-      });
+  KJ_IF_SOME(path, fileUrlToPath(url)) {
+    return getRoot(js)->tryOpen(js, path,
+        Directory::OpenOptions{
+          .followLinks = options.followLinks,
+        });
+  }
+  return FsNodeWithError(FsError::INVALID_PATH);
 }
 
 kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
@@ -1479,18 +1522,17 @@ kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
     // We only accept file URLs.
     return kj::none;
   }
-  // We want to strip the leading slash from the path.
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return getRoot(js)->stat(js, root.eval(path));
+  KJ_IF_SOME(path, fileUrlToPath(url)) {
+    return getRoot(js)->stat(js, path);
+  }
+  return kj::OneOf<FsError, Stat>(FsError::INVALID_PATH);
 }
 
 kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(
     jsg::Lock& js, const jsg::Url& url, kj::Maybe<kj::String> rawTarget) const {
   KJ_REQUIRE(url.getProtocol() == "file:"_kj);
-  auto path = kj::str(url.getPathname().slice(1));
-  kj::Path root{};
-  return kj::rc<SymbolicLink>(getRoot(js), root.eval(path), kj::mv(rawTarget));
+  auto path = KJ_REQUIRE_NONNULL(fileUrlToPath(url), "invalid symbolic link target");
+  return kj::rc<SymbolicLink>(getRoot(js), kj::mv(path), kj::mv(rawTarget));
 }
 
 SymbolicLinkRecursionGuardScope::SymbolicLinkRecursionGuardScope() {
