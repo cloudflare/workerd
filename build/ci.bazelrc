@@ -85,9 +85,11 @@ test:ci-macOS --strategy=TestRunner=local
 # can use sudo.
 test:ci-macOS --test_env=CI=true
 
-# Windows CI always runs in the release configuration to prevent breaking the release build.
+# Windows CI runs in the release configuration to prevent breaking the release build, but without
+# ThinLTO, whose link would take minutes for every test binary. The release workflow builds with
+# ThinLTO on every push to main.
 # build:ci-windows --config=windows_no_dbg
-build:ci-windows --config=release_windows
+build:ci-windows --config=release_windows-without-lto
 build:ci-windows-debug --config=debug
 
 # Some tests (like Python import tests) take a long time to run, especially when debug is enabled

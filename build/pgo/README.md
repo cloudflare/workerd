@@ -10,7 +10,8 @@ Rust code: rustc reads the same profile (`-Cprofile-use`) and compiles to bitcod
 code together, inlining across the cxx bridge.
 
 `--config=release_linux-without-pgo` is the release build without ThinLTO or the profile, for
-comparisons. The macOS and Windows release builds don't use the profile yet.
+comparisons. The macOS release builds don't use the profile yet. The Windows release build uses
+ThinLTO, the Rust code included, but not the profile (see [Windows](#windows)).
 
 ## The profile
 
@@ -34,6 +35,18 @@ no profile data.
 
 Functions changed since the profile was trained no longer match it, and compile as if the profile
 didn't cover them, so retrain after changes that move the hot code, such as a V8 update.
+
+## Windows
+
+The profile can't cover the Windows build. Clang finds a function's profile data by the function's
+mangled name, and the Windows build follows MSVC's C++ ABI, which mangles names differently from
+the Itanium ABI that Linux follows: the method that the profile knows as
+`_ZN7workerd6Worker5Actor13getOutputGateEv` is `?getOutputGate@Actor@Worker@workerd@@QEAA...` on
+Windows. Most of the Rust code doesn't match either, as its names include the hash of the standard
+library, which differs by target. That leaves the C code and some of the Rust code, a few percent
+of the profile's counts. Rules_cc's Windows toolchain has no `fdo_optimize` feature, so
+`--fdo_optimize` would do nothing there anyway. A Windows build would need a profile trained on
+Windows.
 
 ## Training
 
