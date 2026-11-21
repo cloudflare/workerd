@@ -17,7 +17,9 @@
 // V8 ignores all of this unless a session has set an async call stack depth
 // (Debugger.setAsyncCallStackDepth), and bounds the number of stored stacks.
 
-#include <workerd/io/async-trace.h>
+#include <workerd/rust/async-trace/listener.h>
+
+#include <kj/memory.h>
 
 namespace v8 {
 class Isolate;

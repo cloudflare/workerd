@@ -410,6 +410,7 @@ kj_test(
         "//conditions:default": [],
     }),
     deps = [
+        ":workerd_capnp",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/workerd/server/factory:worker-factory",
         "//src/workerd/server/server:workerd-server",

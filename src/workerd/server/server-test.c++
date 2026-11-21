@@ -6,6 +6,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/server/factory/worker-factory.h>
 #include <workerd/server/server/bridge.rs.h>
+#include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/thread-scopes.h>
