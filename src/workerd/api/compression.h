@@ -558,10 +558,23 @@ class ZstdDecoderContext final: public ZstdContext {
   bool isStreamEnd() const;
 
  private:
-  size_t lastResult = 0;
+  enum class FrameState {
+    BEFORE_FIRST_FRAME,
+    IN_FRAME,
+    BETWEEN_FRAMES,
+    // Input after the last frame that doesn't start another frame. It is ignored, as in Node.
+    TRAILING_INPUT,
+  };
+
   kj::Own<ZSTD_DCtx> dctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
-  bool frameInProgress_ = false;
+  FrameState frameState_ = FrameState::BEFORE_FIRST_FRAME;
+
+  // After a frame ends, the first 4 bytes of what follows are checked against the zstd and
+  // skippable frame magic numbers, possibly across several writes. 4 means no check is pending.
+  uint nextFramePrefixSize_ = 4;
+  bool mayBeZstdFrame_ = false;
+  bool mayBeSkippableFrame_ = false;
 };
 
 }  // namespace workerd::api
