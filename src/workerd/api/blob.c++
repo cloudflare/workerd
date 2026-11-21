@@ -184,7 +184,7 @@ kj::String normalizeType(kj::String type) {
   // type contains non-printable-ASCII characters we should discard it, and otherwise we should
   // lower-case it.
   for (char& c: type) {
-    if (static_cast<signed char>(c) < 0x20) {
+    if (auto u = static_cast<kj::byte>(c); u < 0x20 || u > 0x7e) {
       // Throw it away.
       return nullptr;
     } else if ('A' <= c && c <= 'Z') {

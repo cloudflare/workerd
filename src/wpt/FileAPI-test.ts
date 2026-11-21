@@ -32,8 +32,7 @@ export default {
       'instead of as a WebIDL sequence<BlobPart> iterated through @@iterator. So iterables are rejected, ' +
       "a length getter isn't called, and changes made to the array during conversion aren't reflected. " +
       'Transfer lists are not supported by structuredClone. Blob::Options in blob.h declares type before endings, ' +
-      'so the options are read in that order rather than lexicographically. ' +
-      'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
+      'so the options are read in that order rather than lexicographically.',
     expectedFailures: [
       'A plain object with @@iterator should be treated as a sequence for the blobParts argument.',
       'A plain object with custom @@iterator should be treated as a sequence for the blobParts argument.',
@@ -47,7 +46,6 @@ export default {
       'Changes to the blobParts array should be reflected in the returned Blob (unshift).',
       'Passing a FrozenArray as the blobParts array should work (FrozenArray<MessagePort>).',
       'options properties should be accessed in lexicographic order.',
-      'Blob with type "image/gif;\x7F"',
     ],
   },
   'blob/Blob-in-worker.worker.js': {
@@ -58,11 +56,7 @@ export default {
   },
   'blob/Blob-newobject.any.js': {},
   'blob/Blob-slice-overflow.any.js': {},
-  'blob/Blob-slice.any.js': {
-    comment:
-      'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
-    expectedFailures: ['Invalid contentType ("te\x7Fxt/plain")'],
-  },
+  'blob/Blob-slice.any.js': {},
   'blob/Blob-stream.any.js': {},
   'blob/Blob-text.any.js': {
     comment:
@@ -80,12 +74,8 @@ export default {
   'file/File-constructor-endings.any.js': {},
   'file/File-constructor.any.js': {
     comment:
-      'fileBits is converted as kj::Array rather than a WebIDL sequence, so a custom @@iterator is ignored. ' +
-      'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
-    expectedFailures: [
-      'Custom @@iterator',
-      'Using type in File constructor: ascii/nonprintable\x7F',
-    ],
+      'fileBits is converted as kj::Array rather than a WebIDL sequence, so a custom @@iterator is ignored.',
+    expectedFailures: ['Custom @@iterator'],
   },
   'file/Worker-read-file-constructor.worker.js': {
     comment: 'FileReader is not implemented',

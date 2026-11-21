@@ -73,9 +73,11 @@ export const test1 = {
     strictEqual(new Blob([], { type: 'FoO\u0019/bAr' }).type, '');
     strictEqual(new Blob([], { type: 'FoO\u0020/bAr' }).type, 'foo /bar');
     strictEqual(new Blob([], { type: 'FoO\u007e/bAr' }).type, 'foo\u007e/bar');
+    strictEqual(new Blob([], { type: 'FoO\u007f/bAr' }).type, '');
     strictEqual(new Blob([], { type: 'FoO\u0080/bAr' }).type, '');
     strictEqual(new File([], 'foo.txt', { type: 'FoO/bAr' }).type, 'foo/bar');
     strictEqual(blob2.slice(1, 2, 'FoO/bAr').type, 'foo/bar');
+    strictEqual(blob2.slice(1, 2, 'FoO\u007f/bAr').type, '');
   },
 };
 
