@@ -733,6 +733,13 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
 //
 // In this example the validate method would throw a `TypeError` if the size of the `abc` field was zero.
 //
+// By default a field that is not optional converts an undefined value like any other value, so a
+// missing `kj::String` field becomes "undefined". A struct that declares
+// `static constexpr bool jsgRequiredMembers = true;` treats its non-optional fields as Web IDL
+// required dictionary members instead: unwrapping throws a TypeError when one of them is undefined.
+// `jsg::Optional` and `jsg::LenientOptional` fields still accept undefined, and a `kj::Maybe` field
+// accepts null but not undefined.
+//
 // Fields with a starting '$' will have that dollar sign prefix stripped in the JS binding. A
 // motivating example to enact that change was WebCrypto which has a field in a dictionary called
 // "public". '$' was chosen as a token we can use because it's a character for a C++ identifier. If
