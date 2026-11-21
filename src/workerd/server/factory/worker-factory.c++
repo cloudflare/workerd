@@ -1136,20 +1136,26 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
             serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
-            identityTags = makeOtlpIdentityTags(service)](
-            tracing::InvocationSpanContext& invocation) mutable {
+            identityTags = makeOtlpIdentityTags(service), exportsLogs = worker.otlpExportsLogs](
+            tracing::InvocationSpanContext& invocation) mutable -> StartedInvocationSpan {
       // Standalone export samples traces without an upstream decision. Set the invocation's
       // context so user spans and subrequests inherit the same flags.
       invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
       auto parent = invocation.getParent().map(
           [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
-      return startExportedUserSpan(entropySource, exporter.addRef(),
-          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
-          OtlpSpanSubmitter::Options{
-            .serviceName = serviceName,
-            .resource = resource,
-            .defaultTags = identityTags,
-          },
+      auto context =
+          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags());
+      OtlpSpanSubmitter::Options options{
+        .serviceName = serviceName,
+        .resource = resource,
+        .defaultTags = identityTags,
+        .exportLogs = ExportLogs(exportsLogs),
+      };
+      if (exportsLogs) {
+        return startExportedInvocationSpan(
+            entropySource, exporter.addRef(), context, options, invocation.getSpanId());
+      }
+      return startExportedUserSpan(entropySource, exporter.addRef(), context, options,
           "invocation"_kjc, invocation.getSpanId());
     });
   }
@@ -2001,6 +2007,10 @@ void worker_set_otlp_exporter(
     const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
   worker.getImpl().otlpExporter =
       exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
+  worker.getImpl().otlpExportsLogs =
+      exporter.map([](const OtlpExporter& e) {
+    return otlp_exporter_exports_logs(e);
+  }).orDefault(false);
 }
 
 void worker_unlink(const CompiledWorker& worker) {

@@ -71,6 +71,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import {
   createHash,
@@ -1574,6 +1575,101 @@ test('cluster: Durable Objects from before cluster mode are refused', async () =
     assert.match(node.stderr, /from before cluster mode/);
     await rm(local, { recursive: true });
   });
+});
+
+// Logs a line in a Durable Object, then waits for node0's trace and log files
+// in the bucket.
+async function expectParquet({ nodes, bucket, nodeKeys }) {
+  const { status, body } = await fetchJson(
+    nodes[0].httpPort,
+    '/log?name=telemetry'
+  );
+  assert.strictEqual(status, 200, JSON.stringify(body));
+  const node = nodeKeys.get('node0');
+  const deadline = Date.now() + 10_000;
+  let traces = [];
+  let logs = [];
+  while (Date.now() < deadline) {
+    traces = await bucket.list(`telemetry/traces/${node}/`);
+    logs = await bucket.list(`telemetry/logs/${node}/`);
+    if (traces.length > 0 && logs.length > 0) break;
+    await sleep(100);
+  }
+  assert(traces.length > 0, 'no trace file');
+  assert(logs.length > 0, 'no log file');
+  for (const key of [...traces, ...logs]) {
+    assert.match(
+      key,
+      /^telemetry\/(traces|logs)\/[^/]+\/\d{4}\/\d\d\/\d\d\/\d\d\/\d+-[0-9a-f]{8}\.parquet$/
+    );
+    const file = await bucket.get(key);
+    assert(file.startsWith('PAR1') && file.endsWith('PAR1'), key);
+  }
+}
+
+test('cluster: spans and logs are written to the bucket as Parquet', async () => {
+  await withCluster(1, expectParquet, { configName: 'telemetry' });
+});
+
+test('cluster: WORKERD_OTEL=1 writes spans and logs to the bucket', async () => {
+  await withCluster(1, expectParquet, {
+    nodeEnv: () => ({ WORKERD_OTEL: '1', WORKERD_OTEL_FLUSH_MS: '500' }),
+  });
+});
+
+test('cluster: WORKERD_OTEL=<url> posts spans and logs to the collector', async () => {
+  const posts = [];
+  const collector = createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      posts.push({
+        path: req.url,
+        type: req.headers['content-type'],
+        auth: req.headers.authorization,
+        body: Buffer.concat(chunks),
+      });
+      res.end();
+    });
+  });
+  await new Promise((resolve) => collector.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = collector.address();
+    await withCluster(
+      1,
+      async ({ nodes }) => {
+        const { status, body } = await fetchJson(
+          nodes[0].httpPort,
+          '/log?name=collector'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        const deadline = Date.now() + 10_000;
+        const seen = (path) => posts.some((p) => p.path === path);
+        while (Date.now() < deadline) {
+          if (seen('/base/v1/traces') && seen('/base/v1/logs')) break;
+          await sleep(100);
+        }
+        for (const post of posts) {
+          assert.strictEqual(post.type, 'application/x-protobuf', post.path);
+          assert.strictEqual(post.auth, 'Bearer t', post.path);
+        }
+        const logs = posts.filter((p) => p.path === '/base/v1/logs');
+        assert(seen('/base/v1/traces'), 'no traces posted');
+        assert(
+          logs.some((p) => p.body.includes(`log from ${body.id}`)),
+          'no log line posted'
+        );
+      },
+      {
+        nodeEnv: () => ({
+          WORKERD_OTEL: `http://127.0.0.1:${port}/base/`,
+          OTEL_EXPORTER_OTLP_HEADERS: 'authorization=Bearer%20t',
+        }),
+      }
+    );
+  } finally {
+    collector.close();
+  }
 });
 
 test('cluster: each running instance holds a lease record', async () => {
