@@ -82,10 +82,10 @@ kj::Maybe<jsg::JsBufferSource> concat(
         }
         partSize = bytes.size();
       }
-      KJ_CASE_ONEOF(text, kj::String) {
+      KJ_CASE_ONEOF(text, jsg::USVString) {
         if (endings == LineEndings::NATIVE) {
           KJ_IF_SOME(converted, convertLineEndingsToNative(text)) {
-            text = kj::mv(converted);
+            text = jsg::USVString(kj::mv(converted));
           }
         }
         partSize = text.asBytes().size();
@@ -140,7 +140,7 @@ kj::Maybe<jsg::JsBufferSource> concat(
           view.write(bytes.asArrayPtr().first(toCopy));
         }
       }
-      KJ_CASE_ONEOF(text, kj::String) {
+      KJ_CASE_ONEOF(text, jsg::USVString) {
         auto byteLength = text.asBytes().size();
         KJ_ASSERT(byteLength == cachedPartSizes[index++]);
         if (byteLength == 0) continue;
