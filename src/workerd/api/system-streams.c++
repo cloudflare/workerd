@@ -445,13 +445,20 @@ kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
   // ever issues the read that would observe the input's EOF, and the pump never settles.
   // The explicit read still drains the input through EOF, so the producer observes clean
   // completion rather than a mid-stream drop.
-  KJ_IF_SOME(length, input.tryGetLength()) {
-    co_await input.pumpTo(output, length);
-    kj::byte extra;
-    auto n = co_await input.tryRead(&extra, 1, 1);
-    JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
-  } else {
-    co_await input.pumpTo(output);
+  //
+  // The pump reads `input` directly rather than through `nativeInput`, so errors from decoding it
+  // (e.g. corrupt compressed data) must be translated here as `nativeInput.tryRead()` would.
+  try {
+    KJ_IF_SOME(length, input.tryGetLength()) {
+      co_await input.pumpTo(output, length);
+      kj::byte extra;
+      auto n = co_await input.tryRead(&extra, 1, 1);
+      JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
+    } else {
+      co_await input.pumpTo(output);
+    }
+  } catch (...) {
+    kj::throwException(translateEncodedStreamException(kj::getCaughtExceptionAsKj()));
   }
   nativeInput.identityLength = uint64_t{0};
 
