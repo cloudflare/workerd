@@ -4,7 +4,10 @@ const config :Workerd.Config = (
   services = [
     (name = "legacy-error", worker = .legacyError),
     (name = "type-error", worker = .typeError),
-    (name = "internet", network = (allow = ["private"])),
+    (name = "internet", network = (
+      allow = ["public", "private"],
+      tlsOptions = (trustBrowserCas = true),
+    )),
   ],
 );
 
@@ -17,6 +20,7 @@ const legacyError :Workerd.Worker = (
     (name = "EXPECTED_ERROR", text = "Error"),
     (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
     (name = "INVALID_RESPONSE_SERVER_PORT", fromEnvironment = "INVALID_RESPONSE_SERVER_PORT"),
+    (name = "UNTRUSTED_TLS_SERVER_PORT", fromEnvironment = "UNTRUSTED_TLS_SERVER_PORT"),
   ],
 );
 
@@ -29,5 +33,6 @@ const typeError :Workerd.Worker = (
     (name = "EXPECTED_ERROR", text = "TypeError"),
     (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
     (name = "INVALID_RESPONSE_SERVER_PORT", fromEnvironment = "INVALID_RESPONSE_SERVER_PORT"),
+    (name = "UNTRUSTED_TLS_SERVER_PORT", fromEnvironment = "UNTRUSTED_TLS_SERVER_PORT"),
   ],
 );

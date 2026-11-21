@@ -16,6 +16,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
@@ -1526,10 +1527,13 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
-// When the HTTP client failed to parse the response head, the part of the exception's description
-// that says why. kj's HttpClient fails with one of these descriptions, which an embedder's
-// HttpClientErrorHandler may prefix, and kj-hyper (src/rust/cxx/kj-hyper/client.rs) uses the last.
-kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
+// When the HTTP client failed to parse the response head, why. kj-hyper says so in an
+// INVALID_RESPONSE_DETAIL_ID detail. kj's HttpClient, which sets no detail, fails with one of these
+// descriptions, which an embedder's HttpClientErrorHandler may prefix.
+kj::Maybe<kj::ArrayPtr<const char>> invalidResponseReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::INVALID_RESPONSE_DETAIL_ID)) {
+    return reason.asChars();
+  }
   static constexpr kj::StringPtr DESCRIPTIONS[] = {
     "Response headers have no terminal newline."_kj,
     "Invalid response status line"_kj,
@@ -1538,8 +1542,17 @@ kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
   auto description = exception.getDescription();
   for (const auto& text: DESCRIPTIONS) {
     KJ_IF_SOME(start, description.find(text)) {
-      return description.slice(start);
+      return description.slice(start).asArray();
     }
+  }
+  return kj::none;
+}
+
+// When the connection for a request couldn't be made, for example because its host didn't resolve
+// or its TLS handshake failed, the cause, from kj-hyper's CONNECT_FAILED_DETAIL_ID detail.
+kj::Maybe<kj::ArrayPtr<const char>> connectFailureReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::CONNECT_FAILED_DETAIL_ID)) {
+    return reason.asChars();
   }
   return kj::none;
 }
@@ -2039,14 +2052,19 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
-      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
-        // Fetch treats a response that doesn't parse as a network error, which rejects with a
-        // TypeError.
+      // Fetch treats a response that doesn't parse, or a connection that couldn't be made, as a
+      // network error, which rejects with a TypeError.
+      auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
         if (typeError) {
-          return JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "Server returned invalid HTTP response: ", reason);
+          return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
         }
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Server returned invalid HTTP response: ", reason);
+        return JSG_KJ_EXCEPTION(FAILED, Error, what, reason);
+      };
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        return networkError("Server returned invalid HTTP response: "_kj, reason);
+      }
+      KJ_IF_SOME(reason, connectFailureReason(exception)) {
+        return networkError("Network connection failed: "_kj, reason);
       }
       return kj::mv(exception);
     });

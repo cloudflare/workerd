@@ -1860,6 +1860,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # byte or the status line is malformed, `fetch()` rejects with a TypeError, as the Fetch spec
   # requires for a network error. Without the flag it rejects with an Error. The message is
   # "Server returned invalid HTTP response: " followed by the reason either way.
+  #
+  # The same goes for a connection that couldn't be made because its host didn't resolve or its
+  # TLS handshake failed, where the message is "Network connection failed: " followed by the
+  # cause.
 
   connectHandlerImmediateTls @209 :Bool
       $compatEnableFlag("connect_handler_immediate_tls")

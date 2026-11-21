@@ -1527,7 +1527,10 @@ wd_test(
     args = ["--experimental"],
     data = ["fetch-invalid-response-test.js"],
     sidecar = "fetch-invalid-response-sidecar",
-    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
+    sidecar_port_bindings = [
+        "INVALID_RESPONSE_SERVER_PORT",
+        "UNTRUSTED_TLS_SERVER_PORT",
+    ],
 )
 
 js_binary(
