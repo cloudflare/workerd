@@ -122,6 +122,12 @@ class Wrappable: public ::workerd::jsg::Wrappable {
     return addWeakToThis();
   }
 
+  // Records the object Rust moved into the storage, and adds the first strong reference.
+  void init(TraitObjectPtr ptr) {
+    trait_object = ptr;
+    addFirstStrongRef();
+  }
+
   // Frees the allocation of allocate(). Being the only usual deallocation function of the class,
   // it is what `delete` calls, without a size, which would not cover the storage.
   static void operator delete(void* pointer) {
