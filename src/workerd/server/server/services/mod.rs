@@ -32,6 +32,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::WebSocketCompression;
@@ -294,7 +295,7 @@ impl Service for ExternalHttpRequest {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let table = header_table(&self.service.factory);
         let rewriter = &self.service.rewriter;
         let url = std::str::from_utf8(url).map_err(|_| kj::failed!("request URL is not UTF-8"))?;
@@ -329,7 +330,7 @@ impl Service for ExternalHttpRequest {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let mut client = self
             .service
             .pool
@@ -344,16 +345,27 @@ impl Service for ExternalHttpRequest {
 
 #[async_trait::async_trait(?Send)]
 impl Interface for ExternalHttpRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("External HTTP servers"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("External HTTP servers").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("External HTTP servers"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("External HTTP servers").into())
     }
 
     /// Custom events go over capnp RPC to the peer's `WorkerdBootstrap`.
-    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+    async fn custom_event(
+        &mut self,
+        event: KjOwn<CustomEvent>,
+    ) -> worker::Result<CustomEventResult> {
         let connection = self.service.rpc().await?;
         let result = ffi::rpc_client_custom_event(
             &connection.0,
@@ -397,8 +409,8 @@ impl Service for ExternalTcpRequest {
         _headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
         _response: ServiceResponse<'a>,
-    ) -> Result<()> {
-        Err(unsupported("External TCP servers"))
+    ) -> ServiceResult {
+        Err(unsupported("External TCP servers").into())
     }
 
     /// The tunnel is the connection to the server itself, pumped both ways until either side
@@ -410,7 +422,7 @@ impl Service for ExternalTcpRequest {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let stream = self.0.dialer.dial().await.map_err(|e| io_kj_error(&e))?;
         response.accept(200, "OK", &Headers::new(header_table(&self.0.factory)))?;
         Ok(kj_hyper::ffi::pump_tunnel(connection, stream.into_kj()).await?)
@@ -419,12 +431,20 @@ impl Service for ExternalTcpRequest {
 
 #[async_trait::async_trait(?Send)]
 impl Interface for ExternalTcpRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("External TCP servers"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("External TCP servers").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("External TCP servers"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("External TCP servers").into())
     }
 }
 
@@ -495,7 +515,7 @@ impl Service for NetworkRequest {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let mut client = self.client();
         client
             .request(method, url, headers, request_body, response)
@@ -509,7 +529,7 @@ impl Service for NetworkRequest {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let mut client = self.client();
         let mut tls_starter = settings.tls_starter.into();
         let settings = reborrow_settings(settings.use_tls, &mut tls_starter);
@@ -521,12 +541,20 @@ impl Service for NetworkRequest {
 
 #[async_trait::async_trait(?Send)]
 impl Interface for NetworkRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("External HTTP servers"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("External HTTP servers").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("External HTTP servers"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("External HTTP servers").into())
     }
 }
 

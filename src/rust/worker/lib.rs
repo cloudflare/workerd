@@ -23,7 +23,7 @@ pub mod promised;
 
 use std::time::SystemTime;
 
-use cxx::KjError;
+use cxx::KjException;
 pub use kj::http::ConnectResponse;
 pub use kj::http::ConnectSettings;
 pub use kj::http::HeaderId;
@@ -43,7 +43,7 @@ pub use crate::ffi::bridge::CustomEvent;
 pub use crate::ffi::bridge::WorkerInterface;
 pub use crate::promised::PromisedInterface;
 
-pub type Result<T> = std::result::Result<T, KjError>;
+pub type Result<T> = std::result::Result<T, KjException>;
 
 /// An interface representing the services made available by a worker/pipeline to handle a request.
 /// Corresponds to `workerd::WorkerInterface`

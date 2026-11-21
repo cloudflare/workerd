@@ -139,6 +139,17 @@ mod ffi {
         Held,
     }
 
+    /// What `register_reaction()` registers with.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ReactionKind {
+        /// `IoContext::then()`.
+        Then,
+        /// `IoContext::catch()`.
+        Catch,
+        /// `IoContext::then_or_catch()`.
+        ThenOrCatch,
+    }
+
     /// The `UncaughtExceptionSource` that `log_uncaught_exception()` logs from.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum LogSource {
@@ -176,6 +187,7 @@ mod ffi {
 
         fn record_async_context(isolate: usize);
         fn record_await_context();
+        fn record_drop_context();
         fn keep_channel(channel: KjRc<SubrequestChannel>);
     }
 
@@ -201,6 +213,12 @@ mod ffi {
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
         unsafe fn use_owned_value(isolate: usize) -> Result<i32>;
+        unsafe fn register_reaction(
+            isolate: usize,
+            kind: ReactionKind,
+            promise: Local,
+            held: Local,
+        ) -> Result<usize>;
         unsafe fn add_owned_span(isolate: usize) -> Result<()>;
         unsafe fn tag_owned_span(isolate: usize) -> Result<bool>;
         fn drop_owned_span_handle();
@@ -784,6 +802,79 @@ unsafe fn use_owned_value(isolate: usize) -> Result<i32> {
             .map_err(|err| to_io(&err))?;
         Ok(uses.unwrap_or(-1))
     })
+}
+
+/// The data of the reactions `register_reaction()` registers: a value they return, which only
+/// they hold, so the garbage collector keeps it only by tracing them. Dropping it records the
+/// `IoContext` that is current then.
+struct HeldValue(v8::TracedGlobal<v8::Value>);
+
+impl Drop for HeldValue {
+    fn drop(&mut self) {
+        ffi::record_drop_context();
+    }
+}
+
+impl jsg::Traced for HeldValue {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+/// In a request, registers reactions on `promise`, a promise in the caller's `HandleScope`, with
+/// `IoContext::then()`, `catch()` or `then_or_catch()` as `kind` says, and returns the promise
+/// they return, in that scope. Their data holds `held`, a value in that scope. Each reaction
+/// records the `IoContext` it runs in, as C++ sees it, and checks that the one it gets can be
+/// used. The fulfillment reaction returns `held`; the rejection reaction returns "caught".
+unsafe fn register_reaction(
+    isolate: usize,
+    kind: ffi::ReactionKind,
+    promise: v8::ffi::Local,
+    held: v8::ffi::Local,
+) -> Result<usize> {
+    fn on_fulfilled<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        held: &HeldValue,
+        _value: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        Ok(held.0.as_local(lock))
+    }
+    fn on_rejected<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        _held: &HeldValue,
+        _exception: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        "caught".to_owned().to_js(lock)
+    }
+
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a promise handle and a value handle of the scope `lock` stands for.
+    let (promise, held) = unsafe {
+        (
+            v8::Local::<v8::Promise>::from_ffi(promise),
+            v8::Local::<v8::Value>::from_ffi(held),
+        )
+    };
+    let held = HeldValue(held.to_traced_global(lock));
+    let returned = IoContext::current(lock)
+        .and_then(|context| match kind {
+            ffi::ReactionKind::Then => context.then(lock, promise, held, on_fulfilled),
+            ffi::ReactionKind::Catch => context.catch(lock, promise, held, on_rejected),
+            ffi::ReactionKind::ThenOrCatch => {
+                context.then_or_catch(lock, promise, held, on_fulfilled, on_rejected)
+            }
+            _ => unreachable!(),
+        })
+        .map_err(|err| to_io(&err))?;
+    // SAFETY: the handle is the caller's to use in its `HandleScope`, which outlives this call.
+    Ok(unsafe { returned.into_ffi() }.ptr)
 }
 
 /// In a request, starts the span `owned_span` and gives it to the request, keeping the handle

@@ -557,6 +557,182 @@ KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {
   KJ_ASSERT(response.statusCode == 200);
 }
 
+namespace {
+
+// Stand-ins for the frames of a stack trace. They are compared, never symbolized.
+void* const TRACED_FRAMES[] = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000)};
+
+constexpr uint64_t TRACED_FAILURE_DETAIL_ID = 0x5c2a7e91d3b4f086ull;
+
+// Builds an exception with the parts a KjError has no field for: a detail record, a context, a
+// remote trace and a stack trace.
+kj::Exception tracedFailure() {
+  kj::Exception e(kj::Exception::Type::DISCONNECTED, "peer.c++", 7, kj::str("the peer went away"));
+  e.setDetail(TRACED_FAILURE_DETAIL_ID, kj::heapArray("detail"_kjb));
+  e.wrapContext("caller.c++", 8, kj::str("while calling the peer"));
+  e.setRemoteTrace(kj::str("remote frames"));
+  for (auto frame: TRACED_FRAMES) {
+    e.addTrace(frame);
+  }
+  return e;
+}
+
+void expectTracedFailure(const kj::Exception& e) {
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(e.getDescription() == "the peer went away");
+  KJ_EXPECT(kj::StringPtr(e.getFile()) == "peer.c++");
+  KJ_EXPECT(e.getLine() == 7);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(e.getDetail(TRACED_FAILURE_DETAIL_ID)) == "detail"_kjb);
+  KJ_EXPECT(e.getRemoteTrace() == "remote frames");
+  auto& context = KJ_ASSERT_NONNULL(e.getContext());
+  KJ_EXPECT(kj::StringPtr(context.file) == "caller.c++");
+  KJ_EXPECT(context.line == 8);
+  KJ_EXPECT(context.description == "while calling the peer");
+  // The promise machinery appends a frame for every continuation the exception passes through,
+  // so the frames it started with are a prefix of its trace.
+  auto trace = e.getStackTrace();
+  KJ_ASSERT(trace.size() >= kj::size(TRACED_FRAMES));
+  KJ_EXPECT(trace.first(kj::size(TRACED_FRAMES)) == kj::arrayPtr(TRACED_FRAMES));
+}
+
+// Fails every event with tracedFailure().
+class FailingWorker final: public WorkerInterface {
+ public:
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return tracedFailure();
+  }
+
+  kj::Promise<bool> test() override {
+    return tracedFailure();
+  }
+};
+
+// The response and connection arguments of request() and connect(). FailingWorker never uses
+// them.
+class UnusedResponse final: public kj::HttpService::Response {
+ public:
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    KJ_UNIMPLEMENTED();
+  }
+};
+
+class UnusedConnectResponse final: public kj::HttpService::ConnectResponse {
+ public:
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_UNIMPLEMENTED();
+  }
+};
+
+class UnusedCustomEvent final: public workerd::WorkerInterface::CustomEvent {
+ public:
+  kj::Promise<Result> run(kj::Own<workerd::IoContext_IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<workerd::Worker::VersionInfo> versionInfo,
+      workerd::Frankenvalue props,
+      kj::TaskSet& waitUntilTasks,
+      bool) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      workerd::FrankenvalueHandler& frankenvalueHandler,
+      workerd::rpc::EventDispatcher::Client dispatcher) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED();
+  }
+  uint16_t getType() override {
+    return 42;
+  }
+  workerd::tracing::EventInfo getEventInfo() const override {
+    return workerd::tracing::CustomEventInfo();
+  }
+};
+
+// Runs `event` to completion and returns the exception it fails with.
+template <typename Func>
+kj::Exception failureOf(kj::WaitScope& waitScope, Func&& event) {
+  return KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event().wait(waitScope); }));
+}
+
+}  // namespace
+
+KJ_TEST("cxx_worker hands back the wrapped C++ worker's exception whole") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::heap<FailingWorker>()));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  kj::NullStream body;
+  UnusedResponse response;
+  expectTracedFailure(failureOf(waitScope, [&]() {
+    return worker->request(kj::HttpMethod::GET, "http://test/"_kj, headers, body, response);
+  }));
+
+  auto pipe = kj::newTwoWayPipe();
+  UnusedConnectResponse connectResponse;
+  expectTracedFailure(failureOf(waitScope, [&]() {
+    return worker->connect(
+        "example.com:443"_kj, headers, *pipe.ends[0], connectResponse, kj::HttpConnectSettings{});
+  }));
+
+  expectTracedFailure(failureOf(waitScope, [&]() { return worker->prewarm("/warm"_kj); }));
+  expectTracedFailure(
+      failureOf(waitScope, [&]() { return worker->runScheduled(kj::UNIX_EPOCH, "0 0 * * *"_kj); }));
+  expectTracedFailure(failureOf(waitScope, [&]() { return worker->runAlarm(kj::UNIX_EPOCH, 0); }));
+  expectTracedFailure(failureOf(waitScope, [&]() { return worker->abandonAlarm(kj::UNIX_EPOCH); }));
+  expectTracedFailure(
+      failureOf(waitScope, [&]() { return worker->customEvent(kj::heap<UnusedCustomEvent>()); }));
+  expectTracedFailure(failureOf(waitScope, [&]() { return worker->test(); }));
+}
+
 // ======================================================================================
 // PromisedInterface: a Rust Interface whose C++ target is still being started.
 
@@ -602,12 +778,18 @@ class RecordingEvent final: public workerd::WorkerInterface::CustomEvent {
 constexpr uint64_t START_FAILURE_DETAIL_ID = 0x8f3e1d2c4b5a6978ull;
 
 // Builds a startup failure that uses every part of a kj::Exception: type, description, throw
-// site and a detail record. Detail records are how CPU, memory, wall-time and kill-switch
-// failures are classified.
+// site, a detail record, a context, a remote trace and a stack trace. Detail records are how CPU,
+// memory, wall-time and kill-switch failures are classified. Every event after the first gets a
+// clone of this exception, so the test checks that a clone keeps all of it.
 kj::Exception startFailure() {
   kj::Exception e(
       kj::Exception::Type::OVERLOADED, "start.c++", 123, kj::str("the worker could not start"));
   e.setDetail(START_FAILURE_DETAIL_ID, kj::heapArray("cpu"_kjb));
+  e.wrapContext("loader.c++", 45, kj::str("while starting the worker"));
+  e.setRemoteTrace(kj::str("remote start frames"));
+  for (auto frame: TRACED_FRAMES) {
+    e.addTrace(frame);
+  }
   return e;
 }
 
@@ -617,6 +799,14 @@ void expectStartFailure(const kj::Exception& e) {
   KJ_EXPECT(kj::StringPtr(e.getFile()) == "start.c++");
   KJ_EXPECT(e.getLine() == 123);
   KJ_EXPECT(KJ_ASSERT_NONNULL(e.getDetail(START_FAILURE_DETAIL_ID)) == "cpu"_kjb);
+  KJ_EXPECT(e.getRemoteTrace() == "remote start frames");
+  auto& context = KJ_ASSERT_NONNULL(e.getContext());
+  KJ_EXPECT(kj::StringPtr(context.file) == "loader.c++");
+  KJ_EXPECT(context.line == 45);
+  KJ_EXPECT(context.description == "while starting the worker");
+  auto trace = e.getStackTrace();
+  KJ_ASSERT(trace.size() >= kj::size(TRACED_FRAMES));
+  KJ_EXPECT(trace.first(kj::size(TRACED_FRAMES)) == kj::arrayPtr(TRACED_FRAMES));
 }
 
 }  // namespace
