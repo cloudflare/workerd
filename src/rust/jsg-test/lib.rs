@@ -166,6 +166,14 @@ mod ffi {
         /// `sizeof` the C++ `Wrappable` of a Rust resource, which its heap snapshot node counts.
         pub fn rust_wrappable_size() -> usize;
 
+        /// A KJ async object, as KJ I/O objects are.
+        type TestAsyncObject;
+
+        /// Returns a new `TestAsyncObject`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn new_test_async_object() -> KjOwn<TestAsyncObject>;
+
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
         /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
         #[expect(clippy::allow_attributes)]
@@ -308,6 +316,14 @@ mod ffi {
         pub unsafe fn cpp_sees_root_frame(isolate: *mut Isolate) -> bool;
     }
 }
+
+#[expect(
+    unsafe_code,
+    reason = "lets a test resource hold a KJ async object, as a resource must not"
+)]
+// SAFETY: a `TestAsyncObject` holds no state, so destroying it on any thread touches nothing of
+// another's.
+unsafe impl Send for ffi::TestAsyncObject {}
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
 

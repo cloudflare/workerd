@@ -456,6 +456,10 @@ int64_t external_memory(Isolate* isolate) {
   return ::rust::String(serialized.begin(), serialized.size());
 }
 
+kj::Own<TestAsyncObject> new_test_async_object() {
+  return kj::heap<TestAsyncObject>();
+}
+
 size_t rust_wrappable_size() {
   return sizeof(::workerd::rust::jsg::Wrappable);
 }
