@@ -151,6 +151,10 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
+        /// `v8::HandleScope::NumberOfHandles()`: the local handles alive in the isolate's
+        /// handle scopes.
+        pub unsafe fn number_of_handles(isolate: *mut Isolate) -> i32;
+
         /// The external memory that embedders have attributed to the isolate; see
         /// `external_memory` in `ffi.h`.
         pub unsafe fn external_memory(isolate: *mut Isolate) -> i64;
@@ -796,6 +800,14 @@ impl Harness {
     pub fn used_global_handles_size(lock: &mut jsg::Lock<'_>) -> usize {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
+    }
+
+    /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
+    /// counts taken earlier.
+    #[must_use]
+    pub fn number_of_handles(lock: &mut jsg::Lock<'_>) -> i32 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::number_of_handles(lock.isolate().as_ffi()) }
     }
 
     /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have

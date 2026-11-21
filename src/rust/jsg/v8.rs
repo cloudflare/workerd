@@ -262,6 +262,8 @@ pub mod ffi {
         type PropertySetterCallbackInfo;
         type PropertyQueryCallbackInfo;
         type Wrappable;
+        /// C++ `v8::EscapableHandleScope`, which `Lock::with_escapable_handle_scope` opens.
+        type EscapableHandleScope;
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
@@ -1032,6 +1034,23 @@ pub mod ffi {
             callback: unsafe fn(usize) -> bool,
             exception: &mut MaybeLocal,
         );
+
+        // HandleScope
+        pub unsafe fn isolate_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize),
+        );
+        pub unsafe fn isolate_escapable_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize, Pin<&mut EscapableHandleScope>),
+        );
+        #[nothrow]
+        pub unsafe fn escapable_handle_scope_escape(
+            scope: Pin<&mut EscapableHandleScope>,
+            value: Local,
+        ) -> Local;
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
