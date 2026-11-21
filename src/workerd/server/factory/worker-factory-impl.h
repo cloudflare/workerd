@@ -8,13 +8,13 @@
 
 #include "worker-factory.h"
 
-#include <workerd/api/bench.h>
-#include <workerd/io/actor-sqlite.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/container-client.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/server/bridge.rs.h>
+#include <workerd/server/workerd.capnp.h>
 
 #include <capnp/rpc-twoparty.h>
 #include <capnp/serialize.h>
@@ -203,8 +203,8 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
 
   WorkerInfo info;
   // How long the phases of compiling the worker took, which `workerd bench` reports for the
-  // throwaway copies `factory_bench_startup()` compiles.
-  api::WorkerStartupTiming startupTiming;
+  // throwaway copies `factory_start_throwaway_worker()` compiles.
+  WorkerStartupTiming startupTiming{};
 
   const Worker& getWorker() const {
     return *KJ_ASSERT_NONNULL(worker);

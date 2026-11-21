@@ -15,6 +15,7 @@
 
 #include <rust/cxx.h>
 
+#include <kj/function.h>
 #include <kj/memory.h>
 
 namespace kj_rs_tokio {
@@ -24,6 +25,7 @@ struct TokioAsyncIoContext;
 namespace workerd::server {
 class WorkerFactory;
 struct PendingCommand;
+struct ThreadBody;
 }  // namespace workerd::server
 
 namespace workerd::server::cli {
@@ -50,5 +52,12 @@ BuildInfo build_info();
 [[noreturn]] void cli_exit(int32_t code);
 void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);
+void write_stderr_nonblocking(::rust::Str text);
+
+struct ThreadLogger {
+  kj::Function<void(kj::Function<void()>)> initializer;
+};
+kj::Own<ThreadLogger> thread_logger();
+void run_with_logger(kj::Own<ThreadLogger> logger, ::rust::Box<ThreadBody> body);
 
 }  // namespace workerd::server::cli

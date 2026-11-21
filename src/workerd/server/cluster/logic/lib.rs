@@ -16,6 +16,7 @@
 pub mod cache;
 pub mod handoff;
 pub mod lease;
+pub mod watchdog;
 
 /// What a node knows of the cluster's membership, for what routes by it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

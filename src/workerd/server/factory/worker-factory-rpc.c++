@@ -9,6 +9,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/jsg/exception.h>
+#include <workerd/rust/worker/bridge.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/util/mimetype.h>
 

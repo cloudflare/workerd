@@ -287,18 +287,25 @@ thread_local! {
     pub static HOST_DROPS: Cell<u32> = const { Cell::new(0) };
 }
 
+/// Counts in `HOST_DROPS` the `Host`s dropped. `Host` holds GC references, so it can't implement
+/// `Drop` itself. The count is per thread, as tests that make a `Host` run in parallel.
+#[jsg_macros::jsg_traced]
+pub struct HostDropCounter;
+
+impl Drop for HostDropCounter {
+    fn drop(&mut self) {
+        HOST_DROPS.with(|drops| drops.set(drops.get() + 1));
+    }
+}
+
 /// A Rust resource that uses C++ resources, as a ported `ExecutionContext` would.
 #[jsg_resource(memory_info)]
 pub struct Host {
     pub label: String,
     /// A C++ resource, traced as a `jsg::Ref` field of a C++ resource is.
     pub held: jsg::RefCell<Option<jsg_cpp::Ref<ffi::TestCppHolder>>>,
-}
-
-impl Drop for Host {
-    fn drop(&mut self) {
-        HOST_DROPS.with(|drops| drops.set(drops.get() + 1));
-    }
+    #[jsg_memory_info(skip)]
+    pub drops: HostDropCounter,
 }
 
 #[jsg_resource]
@@ -393,6 +400,7 @@ unsafe fn host_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::MaybeLocal {
                 Host {
                     label: label.to_owned(),
                     held: jsg::RefCell::new(None),
+                    drops: HostDropCounter,
                 },
             )
             .to_js(lock)

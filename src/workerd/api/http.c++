@@ -20,7 +20,6 @@
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
@@ -254,28 +253,23 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto contentType =
-        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
-            TypeError, "Parsing a Body as FormData requires a Content-Type header.");
+    KJ_ASSERT(!bodyStream.isDisturbed(js));
+    auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
 
-    if (!bodyStream.isNull()) {
-      KJ_ASSERT(!bodyStream.isDisturbed(js));
-      return bodyStream.text(js, bufferingLimit())
-          .then(js,
-              [contentType = kj::mv(contentType), formData = kj::mv(formData)](
-                  auto& js, kj::String rawText) mutable {
-        formData->parse(js, kj::mv(rawText), contentType,
-            !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-        return kj::mv(formData);
-      });
-    }
-
-    // Theoretically, we already know if this will throw: the empty string is a valid
-    // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
-    // FormData::parse() make the decision, to keep the logic in one place.
-    formData->parse(
-        js, kj::String(), contentType, !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-    return js.resolvedPromise(kj::mv(formData));
+    // The body is read before the Content-Type is checked, so that an error from the body stream
+    // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
+    // application/x-www-form-urlencoded but not as multipart/form-data.
+    // See https://fetch.spec.whatwg.org/#concept-body-consume-body
+    auto limit = bodyStream.isNull() ? 0 : bufferingLimit();
+    return bodyStream.text(js, limit).then(js,
+        [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
+            auto& js, kj::String rawText) mutable {
+      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
+          "Parsing a Body as FormData requires a Content-Type header.");
+      formData->parse(js, kj::mv(rawText), contentType,
+          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
+      return kj::mv(formData);
+    });
   });
 }
 
@@ -341,6 +335,8 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
+  // The body of an `input` Request, when `init` doesn't replace it.
+  kj::Maybe<JsReadableStream> inputBody;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
@@ -399,16 +395,7 @@ jsg::Ref<Request> Request::constructor(
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        KJ_IF_SOME(oldJsBody, oldRequest->getBody(js)) {
-          // The stream spec says to "create a proxy" for the passed in readable, which it
-          // defines generically as creating a TransformStream and using pipeThrough to pass
-          // the input stream through, giving the TransformStream's readable to the extracted
-          // body below. We don't need to do that. Instead, we just create a new stream that
-          // takes over ownership of the internals of the given stream (carrying the retransmit
-          // buffer forward, if any). The given stream is left in a locked/disturbed mode so
-          // that it can no longer be used.
-          body = Body::ExtractedBody(js, oldJsBody.detach(js));
-        }
+        inputBody = oldRequest->getBody(js);
       }
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
@@ -515,8 +502,8 @@ jsg::Ref<Request> Request::constructor(
           // of these fields was modified, but the original Request object that we're rewriting
           // already represented a GET/HEAD method with a body, we allow that to pass through.
           // We support proxying such requests and rewriting their URL/headers/etc.)
-          JSG_REQUIRE(
-              (method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) || body == kj::none,
+          JSG_REQUIRE((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+                  (body == kj::none && inputBody == kj::none),
               TypeError, "Request with a GET or HEAD method cannot have a body.");
         }
       }
@@ -541,6 +528,20 @@ jsg::Ref<Request> Request::constructor(
 
   if (headers == kj::none) {
     headers = js.alloc<Headers>();
+  }
+
+  KJ_IF_SOME(oldJsBody, inputBody) {
+    // This runs after every check that can throw, so a failed construction leaves `input`
+    // usable.
+    //
+    // The stream spec says to "create a proxy" for the passed in readable, which it
+    // defines generically as creating a TransformStream and using pipeThrough to pass
+    // the input stream through, giving the TransformStream's readable to the extracted
+    // body below. We don't need to do that. Instead, we just create a new stream that
+    // takes over ownership of the internals of the given stream (carrying the retransmit
+    // buffer forward, if any). The given stream is left in a locked/disturbed mode so
+    // that it can no longer be used.
+    body = Body::ExtractedBody(js, oldJsBody.detach(js));
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.

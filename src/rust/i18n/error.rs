@@ -33,8 +33,6 @@ pub enum TranscodeError {
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
-    #[error("Failed to initialize converter")]
-    ConverterOpenFailed,
     #[error("Invalid encoding passed to transcode")]
     InvalidEncoding,
     #[error("Failed to allocate memory for Uint8Array")]

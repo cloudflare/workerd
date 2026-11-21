@@ -10,7 +10,6 @@
 #include <workerd/api/node/process.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/util.h>
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -19,8 +18,6 @@
 #include <workerd/rust/jsg/jsg.h>
 
 #include <node/node.capnp.h>
-
-#include <capnp/dynamic.h>
 
 namespace workerd::api::node {
 

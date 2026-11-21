@@ -82,6 +82,9 @@ pub use bridge::CppRef;
 /// }
 /// ```
 ///
+/// `src/workerd/api/channel-interop` declares `api::Fetcher` and `api::DurableObjectClass` this
+/// way.
+///
 /// # Safety
 ///
 /// `try_unwrap` only returns references made for the C++ class `Self` stands for, and `wrap`

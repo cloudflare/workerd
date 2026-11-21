@@ -6,7 +6,7 @@
 //! `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`)
 //! through the cxx bridge in [`ffi`]. [`dispatch`] picks the conversion for
 //! each encoding pair, sizes the destination, and checks the result; [`ffi`]
-//! wraps the ICU and simdutf functions that perform the conversions.
+//! wraps the simdutf functions behind most of the conversions.
 
 use jsg::Lock;
 use jsg::v8;
@@ -14,7 +14,7 @@ use jsg::v8;
 mod dispatch;
 mod error;
 mod ffi;
-mod single_byte;
+mod scalar;
 
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;

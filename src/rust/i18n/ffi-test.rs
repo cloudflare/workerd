@@ -2,73 +2,72 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use jsg_test::Harness;
-
 use super::*;
-
-// `Harness::new()` initializes the V8 platform, which is what installs the
-// embedded ICU data. ICU converter opens fail without it, even though these
-// tests never create an isolate or run JavaScript.
-fn init_icu() -> Harness {
-    Harness::new()
-}
 
 fn utf16le(text: &str) -> Vec<u8> {
     text.encode_utf16().flat_map(u16::to_le_bytes).collect()
 }
 
-/// Runs [`convert_ex`] the way `dispatch` does, and returns what it wrote.
-fn convert(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
-    let to = Converter::open(to).unwrap();
-    let from = Converter::open(from).unwrap();
-    let mut target = vec![0; source.len() * to.max_char_size()];
-    let written = convert_ex(&to, &from, source, &mut target).unwrap();
-    target.truncate(written);
-    target
-}
-
-// ICU. These pin down the ICU behaviour `dispatch` relies on.
+// simdutf. These pin down the simdutf behaviour `dispatch` relies on.
 
 #[test]
-fn max_char_sizes_come_from_icu() {
-    let _harness = init_icu();
-    for (encoding, max) in [(Encoding::Utf8, 3), (Encoding::Utf16Le, 2)] {
-        let converter = Converter::open(encoding).unwrap();
-        assert_eq!(converter.max_char_size(), max, "{encoding:?}");
+fn ascii_prefix_stops_at_the_first_non_ascii_byte() {
+    let long = [&[b'a'; 100][..], &[0xff, b'a']].concat();
+    let cases: [&[u8]; 5] = [
+        b"",
+        b"plain ascii",
+        "caf\u{e9}".as_bytes(),
+        &[0x80, 0x41],
+        &long,
+    ];
+    for source in cases {
+        let ascii = source.iter().take_while(|byte| byte.is_ascii()).count();
+        assert_eq!(ascii_prefix_len(source), ascii, "{source:x?}");
     }
 }
 
 #[test]
-fn ill_formed_input_decodes_to_replacement_characters() {
-    const FFFD: &[u8] = "\u{fffd}".as_bytes();
-    let _harness = init_icu();
-    assert_eq!(
-        convert(Encoding::Utf8, Encoding::Utf8, &[0xe2, 0x82, 0x41]),
-        [FFFD, b"A"].concat()
-    );
-    assert_eq!(
-        convert(
-            Encoding::Utf16Le,
-            Encoding::Utf16Le,
-            &[0x00, 0xd8, 0x41, 0x00]
-        ),
-        [0xfd, 0xff, 0x41, 0x00]
-    );
+fn utf8_valid_prefix_matches_the_standard_library() {
+    let long = [&[b'a'; 100][..], "\u{e9}".as_bytes(), &[0xe2, 0x82, 0x41]].concat();
+    let cases: [&[u8]; 7] = [
+        b"",
+        b"plain ascii",
+        "caf\u{e9}\u{1f600}".as_bytes(),
+        &[0x41, 0x80],
+        &[0xed, 0xa0, 0x80],
+        &[0xc3, 0xa9, 0xe2, 0x82],
+        &long,
+    ];
+    for source in cases {
+        let valid = str::from_utf8(source).map_or_else(|error| error.valid_up_to(), str::len);
+        assert_eq!(utf8_valid_prefix_len(source), valid, "{source:x?}");
+    }
 }
 
 #[test]
-fn a_short_target_is_a_failure() {
-    let _harness = init_icu();
-    let to = Converter::open(Encoding::Utf8).unwrap();
-    let from = Converter::open(Encoding::Utf8).unwrap();
-    let mut target = [0; 2];
+fn utf16le_valid_prefix_stops_at_unpaired_surrogates_and_odd_bytes() {
+    let valid = utf16le("a\u{1f600}\u{feff}");
+    assert_eq!(utf16le_valid_prefix_len(&valid), valid.len());
     assert_eq!(
-        convert_ex(&to, &from, "\u{e9}\u{e9}".as_bytes(), &mut target),
-        None
+        utf16le_valid_prefix_len(&[0x41, 0x00, 0x00, 0xd8, 0x41, 0x00]),
+        2
     );
+    assert_eq!(utf16le_valid_prefix_len(&[0x00, 0xdc]), 0);
+    assert_eq!(utf16le_valid_prefix_len(&[0x41, 0x00, 0x42]), 2);
+    assert_eq!(utf16le_valid_prefix_len(&[0x41, 0x00, 0x00, 0xd8, 0x42]), 2);
 }
 
-// simdutf. These pin down the simdutf behaviour `dispatch` relies on.
+#[test]
+fn latin1_to_utf8_encodes_every_byte() {
+    let source: Vec<u8> = (0..=255).collect();
+    let expected: String = source.iter().map(|&byte| char::from(byte)).collect();
+    let latin1 = Latin1Source::new(&source);
+    assert_eq!(latin1.utf8_len(), expected.len());
+    let mut target = vec![0; latin1.utf8_len()];
+    assert_eq!(latin1.convert_to_utf8(&mut target), Some(expected.len()));
+    assert_eq!(target, expected.as_bytes());
+    assert_eq!(latin1.convert_to_utf8(&mut target[1..]), None);
+}
 
 #[test]
 fn latin1_widens_every_byte() {

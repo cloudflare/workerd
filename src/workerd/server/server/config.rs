@@ -1532,7 +1532,9 @@ impl Server {
             _ => None,
         };
         if let Some(cluster) = &cluster {
-            // Actor databases open only under a lease.
+            // Actor databases open only under a lease, which the lease thread keeps from here on,
+            // however long linking takes: it watches the event loop only once the node serves
+            // (`ClusterNode::serving`).
             cluster
                 .cluster
                 .join()

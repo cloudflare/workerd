@@ -9,7 +9,8 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = [
           "nodejs_compat",
-          "formdata_parser_supports_files"
+          "formdata_parser_supports_files",
+          "streams_enable_constructors"
         ],
       )
     ),

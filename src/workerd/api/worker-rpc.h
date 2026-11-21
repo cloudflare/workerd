@@ -21,9 +21,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/jsg/url.h>
 
 #include <capnp/message.h>
 
