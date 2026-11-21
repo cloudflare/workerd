@@ -19,6 +19,9 @@ extern kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY;
 
 // The IoContext the last await_io_and_run() callback ran in, if any.
 extern kj::Maybe<uint64_t> awaitContextId;
+// Once the data of register_reaction() has been dropped, the IoContext that was current then, if
+// any.
+extern kj::Maybe<kj::Maybe<uint64_t>> reactionDataDropContextId;
 // Fulfilled when an await_io_and_run() callback runs, if set.
 extern kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
 

@@ -405,6 +405,175 @@ impl<'s> IoContext<'s> {
         })
     }
 
+    /// Registers `on_fulfilled` to run in this `IoContext` when `promise` is fulfilled, and
+    /// returns the promise for its result, as C++ `promise.then(js, ioctx.addFunctor(func))`
+    /// does. A rejection passes through without running it, in whatever `IoContext` is current.
+    ///
+    /// `on_fulfilled` gets this `IoContext`, as `addFunctor()` passes the current `IoContext` to
+    /// a functor that takes one, then `data`, then the value. It must capture nothing, as for
+    /// [`v8::Local::<v8::Promise>::then`].
+    ///
+    /// As with `addFunctor()`, the reaction fails without running `on_fulfilled` if it runs while
+    /// another `IoContext`, or none, is current, and rejects the returned promise. That happens,
+    /// without the `handle_cross_request_promise_resolution` compatibility flag, when another
+    /// request settles the promise. With the flag, V8 runs the reaction in this `IoContext`
+    /// whichever request created or settles the promise, or never if this `IoContext` is gone.
+    /// The error is the one C++ throws for an I/O object of another request, whether another
+    /// `IoContext` or none is current, without the " (I/O type: ...)" suffix the C++ one has.
+    ///
+    /// Unlike `addFunctor()`, which gives the `IoContext` ownership of the continuation, `data` is
+    /// held by the reaction, which the garbage collector traces, so it may hold `jsg::Rc`s and
+    /// `TracedGlobal`s, and a cycle through them can be collected. It is dropped once a reaction
+    /// has run, in whatever `IoContext` is current then: by a rejection that passes through, or a
+    /// reaction that fails, it may be dropped in another request's `IoContext`, or in none.
+    /// Otherwise it is dropped when the garbage collector collects the reactions, rather than when
+    /// the `IoContext` is destroyed. So an I/O object, which a functor of `addFunctor()` would
+    /// capture, goes in `data` inside an [`IoOwned`] (see [`IoContext::add_object`]), which drops
+    /// it in its `IoContext` wherever the handle is dropped.
+    ///
+    /// # Errors
+    /// Fails unless this `IoContext` is the current one, as `addFunctor()` does, or, leaving an
+    /// exception pending, if V8 does; see [`v8::Local::<v8::Promise>::then`].
+    pub fn then<D, F>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        data: D,
+        on_fulfilled: F,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        D: jsg::Traced + 'static,
+        F: Copy
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                &D,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<v8::Local<'a, v8::Value>>,
+    {
+        const {
+            assert!(
+                size_of::<F>() == 0,
+                "on_fulfilled must not capture anything"
+            );
+        };
+        let data = self.in_context(data)?;
+        promise
+            .into()
+            .then(lock, data, move |lock, data: &InContext<D>, value| {
+                let context = data.require_current(lock)?;
+                on_fulfilled(lock, &context, &data.data, value)
+            })
+    }
+
+    /// Registers `on_rejected` to run in this `IoContext` when `promise` is rejected, and returns
+    /// the promise for its result, as C++ `promise.catch_(js, ioctx.addFunctor(func))` does. A
+    /// fulfillment passes through without running it, in whatever `IoContext` is current.
+    ///
+    /// Like [`IoContext::then`] otherwise, with the rejection reason in place of the value.
+    ///
+    /// # Errors
+    /// Fails unless this `IoContext` is the current one, as `addFunctor()` does, or, leaving an
+    /// exception pending, if V8 does; see [`v8::Local::<v8::Promise>::catch`].
+    pub fn catch<D, R>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        data: D,
+        on_rejected: R,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        D: jsg::Traced + 'static,
+        R: Copy
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                &D,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<v8::Local<'a, v8::Value>>,
+    {
+        const { assert!(size_of::<R>() == 0, "on_rejected must not capture anything") };
+        let data = self.in_context(data)?;
+        promise
+            .into()
+            .catch(lock, data, move |lock, data: &InContext<D>, exception| {
+                let context = data.require_current(lock)?;
+                on_rejected(lock, &context, &data.data, exception)
+            })
+    }
+
+    /// Registers `on_fulfilled` and `on_rejected` to run in this `IoContext` when `promise`
+    /// settles, and returns the promise for the result of whichever runs, as C++
+    /// `promise.then(js, ioctx.addFunctor(func), ioctx.addFunctor(errorFunc))` does.
+    ///
+    /// Like [`IoContext::then`] otherwise: either callback gets this `IoContext`, then `data`,
+    /// which they share, then the value or the rejection reason, and neither runs while another
+    /// `IoContext`, or none, is current.
+    ///
+    /// # Errors
+    /// Fails unless this `IoContext` is the current one, as `addFunctor()` does, or, leaving an
+    /// exception pending, if V8 does; see [`v8::Local::<v8::Promise>::then_or_catch`].
+    pub fn then_or_catch<D, F, R>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        data: D,
+        on_fulfilled: F,
+        on_rejected: R,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        D: jsg::Traced + 'static,
+        F: Copy
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                &D,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<v8::Local<'a, v8::Value>>,
+        R: Copy
+            + 'static
+            + for<'a> Fn(
+                &mut jsg::Lock<'a>,
+                &IoContext<'a>,
+                &D,
+                v8::Local<'a, v8::Value>,
+            ) -> jsg::Result<v8::Local<'a, v8::Value>>,
+    {
+        const {
+            assert!(
+                size_of::<F>() == 0,
+                "on_fulfilled must not capture anything"
+            );
+        };
+        const { assert!(size_of::<R>() == 0, "on_rejected must not capture anything") };
+        let data = self.in_context(data)?;
+        promise.into().then_or_catch(
+            lock,
+            data,
+            move |lock, data: &InContext<D>, value| {
+                let context = data.require_current(lock)?;
+                on_fulfilled(lock, &context, &data.data, value)
+            },
+            move |lock, data: &InContext<D>, exception| {
+                let context = data.require_current(lock)?;
+                on_rejected(lock, &context, &data.data, exception)
+            },
+        )
+    }
+
+    /// The data of reactions that run in this `IoContext`, which must be the current one, as
+    /// `addFunctor()` requires.
+    fn in_context<D>(&self, data: D) -> jsg::Result<InContext<D>> {
+        bridge::io_context_require_current(self.id)?;
+        Ok(InContext {
+            data,
+            owner: self.id,
+        })
+    }
+
     /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
     /// dropped when the `IoContext` is destroyed, or when the returned handle is dropped, unless
     /// [`IoOwned::take`] has taken it. How the value is reached differs from C++; see
@@ -1292,6 +1461,31 @@ jsg::jsg_traced_unchecked!(<T> IoOwned<T>);
 
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);
+
+/// The data of the reactions [`IoContext::then`], [`IoContext::catch`] and
+/// [`IoContext::then_or_catch`] register, with the `IoContext` they run in.
+struct InContext<D> {
+    data: D,
+    // The id of the IoContext the reactions run in.
+    owner: u64,
+}
+
+impl<D> InContext<D> {
+    /// Returns the `IoContext` the reactions run in, which must be the current one.
+    fn require_current<'a>(&self, _lock: &mut jsg::Lock<'a>) -> jsg::Result<IoContext<'a>> {
+        bridge::io_context_require_current(self.owner)?;
+        Ok(IoContext {
+            id: self.owner,
+            _lock: PhantomData,
+        })
+    }
+}
+
+impl<D: jsg::Traced> jsg::Traced for InContext<D> {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        self.data.trace(visitor);
+    }
+}
 
 /// A span an `IoContext` owns, from [`IoContext::add_span`].
 ///

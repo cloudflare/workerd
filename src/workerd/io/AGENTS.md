@@ -45,6 +45,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `awaitIo(js, kjPromise, func)` bridges KJ→JS; `func` runs under V8 lock. `awaitIo(js, kjPromise)` for identity
 - `awaitJs(js, jsPromise)` bridges JS→KJ
 - `addObject(kj::Own<T>)` returns `IoOwn<T>` — the **only** safe way to store KJ I/O objects reachable from JS heap
+- `promise.then(js, ioctx.addFunctor(func))` runs a continuation only in its own request. Rust's counterpart is `IoContext::then()` / `catch()` / `then_or_catch()` in the `io-context` crate; use them rather than `v8::Local<v8::Promise>::then()` for reactions that must run in the request that registered them
 - Cross-context actions (`IoCrossContextExecutor::tryExecute()`, `DeleteQueue::scheduleAction()`) can wait in the owning IoContext's queue, keeping what they capture alive: coalesce actions holding just a weak reference, and count native copies of JS data as external memory. See `scheduleAction()` in `io-own.h`.
 - Two-phase locking: `Worker::AsyncLock` (fair queue) → `Worker::Lock` (V8 isolate lock)
 - `ActorCacheOps` methods return `kj::OneOf<Result, kj::Promise<Result>>` — sync when cached, async otherwise
