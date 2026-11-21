@@ -368,12 +368,15 @@ class SubtleCrypto final: public jsg::Object {
   // first argument. This can usually be a raw string algorithm name, or an object with a `name`
   // field and other fields. The other fields differ based on which algorithm is named and which
   // function is being called. We achieve polymorphism here by making all the fields except `name`
-  // be `jsg::Optional`... ugly, but it works.
+  // be `jsg::Optional`... ugly, but it works. `name` is a required member, so an algorithm object
+  // without one throws a TypeError.
 
   // Type of the `algorithm` parameter passed to `digest()`. Also used as the type of the `hash`
   // parameter of many other algorithm structs.
   struct HashAlgorithm {
     kj::String name;
+
+    static constexpr bool jsgRequiredMembers = true;
 
     JSG_STRUCT(name);
   };
@@ -404,6 +407,8 @@ class SubtleCrypto final: public jsg::Object {
     // The optional label/application data to associate with the message (for RSA-OAEP)
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> label;
 
+    static constexpr bool jsgRequiredMembers = true;
+
     JSG_STRUCT(name, iv, additionalData, tagLength, counter, length, label);
   };
 
@@ -425,6 +430,8 @@ class SubtleCrypto final: public jsg::Object {
 
     // Used for ML-DSA context parameter.
     jsg::Optional<jsg::JsRef<jsg::JsValue>> context;
+
+    static constexpr bool jsgRequiredMembers = true;
 
     JSG_STRUCT(name, hash, dataLength, saltLength, context);
     JSG_STRUCT_TS_OVERRIDE({ context?: ArrayBuffer | ArrayBufferView });
@@ -452,6 +459,8 @@ class SubtleCrypto final: public jsg::Object {
     // When name == "ECDSA": "P-256", "P-384", or "P-521"
     jsg::Optional<kj::String> namedCurve;
 
+    static constexpr bool jsgRequiredMembers = true;
+
     JSG_STRUCT(name, hash, modulusLength, publicExponent, length, namedCurve);
   };
 
@@ -476,6 +485,8 @@ class SubtleCrypto final: public jsg::Object {
     // compressed format. (The standard algorithms do not recognize this option.)
     jsg::Optional<bool> compressed;
 
+    static constexpr bool jsgRequiredMembers = true;
+
     JSG_STRUCT(name, hash, length, namedCurve, compressed);
   };
 
@@ -498,6 +509,8 @@ class SubtleCrypto final: public jsg::Object {
     // Bit string that corresponds to the context and application specific context for the derived
     // keying material
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> info;
+
+    static constexpr bool jsgRequiredMembers = true;
 
     JSG_STRUCT(name, salt, iterations, hash, $public, info);
   };

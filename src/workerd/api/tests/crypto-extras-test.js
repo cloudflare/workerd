@@ -661,3 +661,55 @@ export const keyOperationAlgorithmNormalization = {
     );
   },
 };
+
+export const missingAlgorithmNameIsTypeError = {
+  async test() {
+    const subtle = crypto.subtle;
+    const data = new Uint8Array(4);
+    const aesKey = await subtle.generateKey(
+      { name: 'AES-GCM', length: 128 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    const hmacKey = await subtle.generateKey(
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign', 'verify']
+    );
+    const hkdfKey = await subtle.importKey('raw', data, 'HKDF', false, [
+      'deriveBits',
+      'deriveKey',
+    ]);
+    const typeError = { name: 'TypeError' };
+    // Without capture_async_api_throws, argument conversion errors throw instead of rejecting, so
+    // each call runs inside an async function.
+
+    const calls = [
+      (alg) => subtle.digest(alg, data),
+      (alg) => subtle.generateKey(alg, false, ['sign']),
+      (alg) => subtle.importKey('raw', data, alg, false, ['sign']),
+      (alg) => subtle.encrypt(alg, aesKey, data),
+      (alg) => subtle.decrypt(alg, aesKey, data),
+      (alg) => subtle.sign(alg, hmacKey, data),
+      (alg) => subtle.verify(alg, hmacKey, data, data),
+      (alg) => subtle.deriveBits(alg, hkdfKey, 128),
+    ];
+    for (const algorithm of [{}, { name: undefined }]) {
+      for (const call of calls) {
+        await rejects(async () => call(algorithm), typeError);
+      }
+    }
+
+    // A nested hash dictionary has a required name too.
+    await rejects(
+      async () =>
+        subtle.generateKey({ name: 'HMAC', hash: {} }, false, ['sign']),
+      typeError
+    );
+
+    // A name that is present but unknown is still NotSupportedError.
+    await rejects(async () => subtle.digest({ name: 'undefined' }, data), {
+      name: 'NotSupportedError',
+    });
+  },
+};

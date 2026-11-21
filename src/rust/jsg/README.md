@@ -109,6 +109,13 @@ When converting back to JavaScript, `Null` produces a `null` property; `Undefine
 is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
 that flag, just as `None` does for an `Option<T>` field.
 
+A field whose type isn't optional converts from `undefined` like any other value when it is
+missing, so an absent `String` field reads as `"undefined"`. `#[jsg_struct(required_members)]`,
+like a C++ `JSG_STRUCT` with `jsgRequiredMembers`, makes such fields Web IDL required members:
+an `undefined` value is a `TypeError` ("Required member 'x' is missing from 'T'."). `Option<T>`,
+`LenientOption<T>` and `NullOrUndefined<T>` fields still accept `undefined`, and a `Nullable<T>`
+field accepts `null` but not `undefined`.
+
 `LenientOption<T>` is C++ `jsg::LenientOptional<T>`: an optional `T` for which a top-level
 type mismatch is absent rather than an error, while `null` goes through `T`. See its rustdoc
 in `lenient.rs`.
