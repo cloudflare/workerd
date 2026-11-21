@@ -510,10 +510,10 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Joins `config` to a cluster with `--cluster-addr` if it has none and `can_join` (not for a
-/// compiled config), fills its cluster key and bucket from the environment
-/// ([`Config::with_cluster`]), then adds cluster deployments to `config` and records their
-/// service sources in `options`.
+/// Joins `config` to a cluster with `--cluster-addr` if it has none, `can_join` (not for a
+/// compiled config) and a writable disk service `do-storage`, fills its cluster key and bucket
+/// from the environment ([`Config::with_cluster`]), then adds cluster deployments to `config` and
+/// records their service sources in `options`.
 ///
 /// Only joining happens without `--experimental`, so that the server refuses the cluster as it
 /// refuses one in the config. A public cluster address or an error in `config` found during

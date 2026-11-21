@@ -4016,6 +4016,26 @@ test('cluster: --cluster-addr and --data-dir are refused where they cannot apply
       ['serve', env.WD_TEST_CONFIG, 'config', `--data-dir=${data}`],
       /--data-dir: only a wrangler config keeps its state there/
     );
+    // A config without the disk service `do-storage`, here the wrangler
+    // config translated for a server that joins no cluster, cannot join one:
+    // the cluster's deployments keep their Durable Objects on it.
+    const configOnly = join(project, 'config.bin');
+    await writeFile(
+      configOnly,
+      await compileConfig(join(project, 'wrangler.jsonc'))
+    );
+    await refused(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        '--experimental',
+        '--binary',
+        configOnly,
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      /--cluster-addr: the config has no writable disk service named `do-storage`/
+    );
     // Joining a cluster needs --experimental, as a config's cluster does.
     await refused(
       env.WORKERD_BINARY,

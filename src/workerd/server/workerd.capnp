@@ -100,7 +100,8 @@ struct Config {
   # --cluster-addr=<addr>` joins a config without it, such as a wrangler config, to a cluster as if
   # it were `(address = "<addr>")`: every other field at its default, so `key` and `bucket` come
   # from the environment. A config compiled into a binary by `workerd compile` cannot join this
-  # way; compile one that sets `cluster`.
+  # way; compile one that sets `cluster`. Nor can a config without the writable disk service
+  # `do-storage`, which holds the Durable Objects of the cluster's deployments on each instance.
   #
   # A wrangler config joined this way defines the disk service `do-storage`, which holds its
   # Durable Objects and those of the cluster's deployments, even if it has none of its own (see

@@ -11,8 +11,10 @@ use std::io::Write;
 
 use capnp::message::ReaderOptions;
 use workerd_capnp::config;
+use workerd_capnp::service;
 
 use crate::bridge::ffi;
+use crate::wrangler::CLUSTER_STORAGE;
 
 /// A `Config` message, checked: encoded as a Cap'n Proto stream (segment table, then segments),
 /// in 8-byte words.
@@ -81,9 +83,10 @@ impl Config {
     /// The config as `serve` runs it in a cluster, decoded and encoded once.
     ///
     /// First, a config without `cluster` joins one at `flags.address`, the value of
-    /// `--cluster-addr`: it gets a `cluster` with that address and every other setting at its
-    /// default, so the key and bucket come from the environment and an `s3://` bucket's endpoint
-    /// and credentials from the `AWS_*` variables. A config with a `cluster` keeps it, since
+    /// `--cluster-addr`, if it defines [`CLUSTER_STORAGE`] as a writable disk service: it gets a
+    /// `cluster` with that address and every other setting at its default, so the key and bucket
+    /// come from the environment and an `s3://` bucket's endpoint and credentials from the
+    /// `AWS_*` variables. A config with a `cluster` keeps it, since
     /// `--cluster-addr` overrides its address. A config without either is unchanged, and then
     /// `flags.advertise`, the value of `--cluster-advertise`, is an error.
     ///
@@ -112,6 +115,14 @@ impl Config {
                          --cluster-addr` instead, or compile a config that has `cluster`."
                             .to_owned(),
                     ));
+                }
+                (Some(_), _) if !has_cluster_storage(root).map_err(usage)? => {
+                    return Err(ClusterError::Usage(format!(
+                        "--cluster-addr: the config has no writable disk service named \
+                         `{CLUSTER_STORAGE}`, which holds the Durable Objects of the cluster's \
+                         deployments on each instance, so it cannot join a cluster. Add one, or \
+                         serve the wrangler config itself, which defines it when joined."
+                    )));
                 }
                 (Some(address), _) => Some(address),
                 (None, Some(_)) => {
@@ -206,6 +217,20 @@ impl fmt::Display for ClusterError {
             Self::Usage(error) | Self::Environment(error) => f.write_str(error),
         }
     }
+}
+
+/// Whether `root` defines [`CLUSTER_STORAGE`] as a writable disk service, which a config that
+/// joins a cluster needs for the Durable Objects of the cluster's deployments.
+fn has_cluster_storage(root: config::Reader<'_>) -> capnp::Result<bool> {
+    for service in root.get_services()? {
+        if service.get_name()?.to_str()? == CLUSTER_STORAGE {
+            return Ok(match service.which()? {
+                service::Which::Disk(disk) => disk?.get_writable(),
+                _ => false,
+            });
+        }
+    }
+    Ok(false)
 }
 
 /// The key and bucket to fill from the environment, for a cluster whose key and bucket are empty
