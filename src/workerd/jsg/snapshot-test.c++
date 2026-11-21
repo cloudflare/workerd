@@ -671,9 +671,9 @@ KJ_TEST("a type with no snapshot transfer does not matter once unreachable") {
 }
 
 // =======================================================================================
-// Generators. A suspended generator would resume in bytecode that CreateBlob(kClear) discards, so
-// one the snapshot would carry fails the zygote. A generator function, or a generator that has
-// finished, never resumes and is fine.
+// Generators. Resuming a suspended generator in a restored Worker is untested, so one the snapshot
+// would carry fails the zygote. A generator function, or a generator that has finished, never
+// resumes and is fine.
 
 KJ_TEST("an async function the top level left awaiting fails the zygote") {
   // The awaited promise is kept on the global; its reaction holds the suspended function.
