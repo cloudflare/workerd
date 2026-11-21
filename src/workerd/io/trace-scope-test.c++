@@ -21,10 +21,35 @@ kj::Rc<WorkerTracer> makeTracer() {
   return kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
 }
 
+class NullSpanSubmitter final: public SpanSubmitter {
+ public:
+  bool submitSpanOpen(tracing::TraceId,
+      kj::Maybe<tracing::TraceFlags>,
+      tracing::SpanId,
+      tracing::SpanId,
+      kj::ConstString,
+      kj::Date) override {
+    return true;
+  }
+  void submitSpanClose(tracing::SpanId, kj::Date, kj::Date, Span::TagMap&&) override {}
+  void submitSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
+  void submitSpanException(tracing::SpanId,
+      kj::Date,
+      kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(1);
+  }
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId(1, 2);
+  }
+};
+
 kj::Rc<BaseTracer> makeObservedTracer() {
   auto tracer = makeTracer();
-  tracer->setMakeUserRequestSpanFunc(
-      [](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) { return observedParent(2); });
+  tracer->setUserSpanSubmitter(kj::refcounted<NullSpanSubmitter>());
   return kj::mv(tracer);
 }
 
@@ -146,10 +171,11 @@ KJ_TEST(
       auto targetContext = fixture.newIoContext();
       auto target = fixture.newUndeliveredIncomingRequest(*targetContext, makeObservedTracer());
       target->delivered();
+      auto targetUserSpanId = target->getInvocationSpanContext().getSpanId().getId();
       fixture.enterContext(*target, [&](const TestFixture::Environment& env) {
         jsg::AsyncContextFrame::Scope scope(env.js, captured);
         KJ_EXPECT(spanId(targetContext->getCurrentTraceSpan()) == 1);
-        KJ_EXPECT(spanId(targetContext->getCurrentUserTraceSpan()) == 2);
+        KJ_EXPECT(spanId(targetContext->getCurrentUserTraceSpan()) == targetUserSpanId);
         if (cacheSpan) {
           auto span = activeSpan(env);
           KJ_EXPECT(span.get() == KJ_ASSERT_NONNULL(cached).get());
@@ -185,10 +211,11 @@ KJ_TEST("an unobserved actor continuation masks a newer request's observed spans
   });
   auto second = fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer());
   second->delivered();
+  auto secondUserSpanId = second->getInvocationSpanContext().getSpanId().getId();
   fixture.drainAndDestroy(kj::mv(first));
   fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
     KJ_EXPECT(spanId(context->getCurrentTraceSpan()) == 1);
-    KJ_EXPECT(spanId(context->getCurrentUserTraceSpan()) == 2);
+    KJ_EXPECT(spanId(context->getCurrentUserTraceSpan()) == secondUserSpanId);
     jsg::AsyncContextFrame::Scope scope(env.js, captured);
     KJ_EXPECT(!context->getCurrentTraceSpan().isObserved());
     KJ_EXPECT(!context->getCurrentUserTraceSpan().isObserved());

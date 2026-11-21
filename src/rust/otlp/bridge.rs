@@ -74,6 +74,14 @@ mod ffi {
         stack: &'a [u8],
     }
 
+    /// The span that was active when a log was made: `span_id`, zero for none, in the trace
+    /// `trace_id` with `trace_flags`. An empty `trace_id` means the invocation's trace.
+    struct ActiveSpan<'a> {
+        trace_id: &'a [u8],
+        trace_flags: u32,
+        span_id: u64,
+    }
+
     /// An encoded `ExportLogsServiceRequest` and the number of records in it. When there is
     /// nothing to send yet, `request` is empty and `record_count` is zero.
     struct LogBatch {
@@ -94,8 +102,8 @@ mod ffi {
         /// One invocation's spans on their way to a collector. Times are unix nanoseconds.
         type SpanBuffer;
 
-        /// `trace_id` is the 16-byte id every span shares. `resource` describes the worker and
-        /// goes on every request. `default_attributes` are applied to every span at its close
+        /// `trace_id` is the 16-byte id of the invocation's trace. `resource` describes the worker
+        /// and goes on every request. `default_attributes` are applied to every span at its close
         /// without overriding the span's own.
         fn new_span_buffer(
             trace_id: &[u8],
@@ -105,9 +113,12 @@ mod ffi {
         ) -> Box<SpanBuffer>;
 
         /// Returns false when the span is not buffered: its id is already open, or too many spans
-        /// are. Updates and the close of such a span are ignored.
+        /// are. Updates and the close of such a span are ignored. `trace_id` and `trace_flags` are
+        /// the span's trace; an empty `trace_id` means the invocation's.
         fn open_span(
             buffer: &mut SpanBuffer,
+            trace_id: &[u8],
+            trace_flags: u32,
             span_id: u64,
             parent_span_id: u64,
             name: &[u8],
@@ -145,12 +156,11 @@ mod ffi {
             resource: Box<Attributes>,
             default_attributes: Box<Attributes>,
         ) -> Box<LogBuffer>;
-        /// `span_id` is the span that was active, or zero. `message` is the JSON array of the
-        /// call's arguments, unless `truncated`. `error_info` has an entry per argument, or none
-        /// when no argument was an `Error`.
+        /// `message` is the JSON array of the call's arguments, unless `truncated`. `error_info`
+        /// has an entry per argument, or none when no argument was an `Error`.
         fn add_log(
             buffer: &mut LogBuffer,
-            span_id: u64,
+            span: &ActiveSpan,
             time: i64,
             level: LogLevel,
             message: &[u8],
@@ -159,7 +169,7 @@ mod ffi {
         ) -> LogBatch;
         fn add_exception_log(
             buffer: &mut LogBuffer,
-            span_id: u64,
+            span: &ActiveSpan,
             time: i64,
             name: &[u8],
             message: &[u8],
@@ -176,6 +186,13 @@ mod ffi {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn trace(trace_id: &[u8], trace_flags: u32) -> Option<buffer::Trace> {
+    (!trace_id.is_empty()).then(|| buffer::Trace {
+        id: trace_id.to_vec(),
+        flags: trace_flags,
+    })
 }
 
 fn batch(batch: Option<buffer::Batch>) -> ffi::Batch {
@@ -244,12 +261,20 @@ fn new_span_buffer(
 
 fn open_span(
     buffer: &mut SpanBuffer,
+    trace_id: &[u8],
+    trace_flags: u32,
     span_id: u64,
     parent_span_id: u64,
     name: &[u8],
     start: i64,
 ) -> bool {
-    buffer.open(span_id, parent_span_id, text(name), start)
+    buffer.open(
+        span_id,
+        parent_span_id,
+        text(name),
+        start,
+        trace(trace_id, trace_flags),
+    )
 }
 
 fn set_span_name(buffer: &mut SpanBuffer, span_id: u64, name: &[u8]) {
@@ -305,9 +330,16 @@ fn new_log_buffer(
     Box::new(LogBuffer::new(options, *resource, *default_attributes))
 }
 
+fn active_span(span: &ffi::ActiveSpan) -> logs::ActiveSpan {
+    logs::ActiveSpan {
+        id: span.span_id,
+        trace: trace(span.trace_id, span.trace_flags),
+    }
+}
+
 fn add_log(
     buffer: &mut LogBuffer,
-    span_id: u64,
+    span: &ffi::ActiveSpan,
     time: i64,
     level: ffi::LogLevel,
     message: &[u8],
@@ -332,19 +364,26 @@ fn add_log(
             })
         })
         .collect();
-    log_batch(buffer.add_log(span_id, time, level, &message, truncated, error_info))
+    log_batch(buffer.add_log(
+        active_span(span),
+        time,
+        level,
+        &message,
+        truncated,
+        error_info,
+    ))
 }
 
 fn add_exception_log(
     buffer: &mut LogBuffer,
-    span_id: u64,
+    span: &ffi::ActiveSpan,
     time: i64,
     name: &[u8],
     message: &[u8],
     stack: KjMaybe<&[u8]>,
 ) -> ffi::LogBatch {
     let stack = Option::from(stack).map(text);
-    log_batch(buffer.add_exception(span_id, time, text(name), text(message), stack))
+    log_batch(buffer.add_exception(active_span(span), time, text(name), text(message), stack))
 }
 
 fn add_invocation_log(buffer: &mut LogBuffer, spans: &mut SpanBuffer) -> ffi::LogBatch {

@@ -10,6 +10,7 @@
 #include <workerd/tests/test-fixture.h>
 
 #include <opentelemetry/proto/collector/logs/v1/logs_service.pb.h>
+#include <opentelemetry/proto/collector/trace/v1/trace_service.pb.h>
 
 #include <kj/test.h>
 
@@ -19,13 +20,17 @@ namespace {
 class RecordingSpanSubmitter final: public SpanSubmitter {
  public:
   kj::Vector<kj::Date> starts;
+  kj::Vector<tracing::SpanId> parentSpanIds;
   kj::Vector<kj::Date> exceptions;
 
-  bool submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
     starts.add(startTime);
+    parentSpanIds.add(parentSpanId);
     return true;
   }
 
@@ -42,6 +47,9 @@ class RecordingSpanSubmitter final: public SpanSubmitter {
   }
   tracing::SpanId makeSpanId() override {
     return tracing::SpanId(nextId++);
+  }
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId(nextId++, 0);
   }
 
  private:
@@ -65,9 +73,17 @@ class RecordingExporter final: public OtlpSpanExporter {
   uint spanCount = 0;
   uint logCount = 0;
   kj::Vector<otlp::collector::logs::v1::ExportLogsServiceRequest> logRequests;
+  kj::Vector<otlp::trace::v1::Span> spans;
 
   void exportSpans(kj::Array<const kj::byte> request, uint count) override {
     spanCount += count;
+    otlp::collector::trace::v1::ExportTraceServiceRequest decoded;
+    KJ_ASSERT(decoded.ParseFromArray(request.begin(), request.size()));
+    for (auto& resourceSpans: decoded.resource_spans()) {
+      for (auto& scopeSpans: resourceSpans.scope_spans()) {
+        for (auto& span: scopeSpans.spans()) spans.add(span);
+      }
+    }
   }
   void exportLogs(kj::Array<const kj::byte> request, uint count) override {
     logCount += count;
@@ -130,7 +146,8 @@ KJ_TEST("streaming spans use I/O time while native spans use precise time") {
     auto time = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS;
     KJ_ASSERT(env.context.now() == time);
     auto submitter = kj::refcounted<RecordingSpanSubmitter>();
-    auto observer = kj::rc<UserSpanObserver>(kj::addRef(*submitter));
+    auto observer = kj::rc<UserSpanObserver>(
+        kj::addRef(*submitter), tracing::SpanContext(tracing::TraceId(nullptr), kj::none));
     KJ_EXPECT(observer->getTime() == time);
     auto runtime = SpanBuilder(observer->newChild(), "runtime"_kjc);
     auto user =
@@ -148,6 +165,58 @@ KJ_TEST("streaming spans use I/O time while native spans use precise time") {
 
 KJ_TEST("native span clocks work without an IoContext") {
   expectNativeClocks();
+}
+
+// The OTLP form of a trace ID.
+std::string otlpId(kj::ArrayPtr<const kj::byte> bytes) {
+  return std::string(bytes.asChars().begin(), bytes.size());
+}
+
+const otlp::trace::v1::Span& exportedSpan(RecordingExporter& exporter, kj::StringPtr name) {
+  for (auto& span: exporter.spans) {
+    if (span.name() == name.cStr()) return span;
+  }
+  KJ_FAIL_ASSERT("span not exported", name);
+}
+
+KJ_TEST("an exported span's descendants outside its trace are exported in their own trace") {
+  TestEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  tracing::TraceId invocationTraceId(1, 2);
+  tracing::TraceId remoteTraceId(4, 5);
+  {
+    auto root = startExportedUserSpan(entropy, exporter.addRef(),
+        tracing::SpanContext(invocationTraceId, tracing::SpanId(3), tracing::TraceFlags(1)),
+        {.serviceName = "trace-test"}, "root"_kjc);
+    SpanParent parent(root);
+    auto local = parent.newChild("local"_kjc);
+    auto remote = parent.forActiveContext(
+        tracing::SpanContext(remoteTraceId, tracing::SpanId(6), tracing::TraceFlags(0)));
+    auto remoteChild = remote.newChild("remote"_kjc);
+    SpanParent remoteChildParent(remoteChild);
+    auto remoteGrandchild = remoteChildParent.newChild("remote-grandchild"_kjc);
+    auto newRoot = parent.forActiveContext(kj::none).newChild("new-root"_kjc);
+  }
+  KJ_ASSERT(exporter->spanCount == 5, exporter->spanCount);
+
+  auto invocationTrace = otlpId(invocationTraceId.toProtobuf());
+  auto remoteTrace = otlpId(remoteTraceId.toProtobuf());
+  auto& local = exportedSpan(*exporter, "local"_kj);
+  KJ_EXPECT(local.trace_id() == invocationTrace);
+  KJ_EXPECT(local.flags() == 1);
+  auto& remote = exportedSpan(*exporter, "remote"_kj);
+  KJ_EXPECT(remote.trace_id() == remoteTrace);
+  KJ_EXPECT(remote.flags() == 0);
+  KJ_EXPECT(remote.parent_span_id() == std::string("\0\0\0\0\0\0\0\x06", 8));
+  auto& grandchild = exportedSpan(*exporter, "remote-grandchild"_kj);
+  KJ_EXPECT(grandchild.trace_id() == remoteTrace);
+  KJ_EXPECT(grandchild.parent_span_id() == remote.span_id());
+  // A span that starts a new trace has no parent.
+  auto& newRoot = exportedSpan(*exporter, "new-root"_kj);
+  KJ_EXPECT(newRoot.trace_id() != invocationTrace);
+  KJ_EXPECT(newRoot.trace_id() != remoteTrace);
+  KJ_EXPECT(newRoot.parent_span_id().empty());
+  KJ_EXPECT(newRoot.flags() == 1);
 }
 
 KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps") {
@@ -245,7 +314,8 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
   tracer->setEventInfo(*request, tracing::CustomEventInfo());
   request->delivered();
   // Other spans go under the invocation's only when its spans are exported.
-  KJ_EXPECT(tracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none).isObserved() ==
+  KJ_EXPECT(tracer->observesUserSpans() == bool(exportSpans));
+  KJ_EXPECT(tracer->makeUserRequestSpan(request->getInvocationSpanContext()).isObserved() ==
       bool(exportSpans));
   kj::Maybe<tracing::InvocationSpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
@@ -348,6 +418,44 @@ KJ_TEST("an exported invocation has no record of its own unless asked to") {
 KJ_TEST("an exported invocation exports no logs unless asked to") {
   auto exporter = exportInvocation(ExportLogs::NO);
   KJ_EXPECT(exporter->logCount == 0);
+}
+
+KJ_TEST("delivered() gives the root user span the invocation's span context") {
+  TestFixture fixture;
+  auto submitter = kj::refcounted<RecordingSpanSubmitter>();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  KJ_EXPECT(!tracer->observesUserSpans());
+  tracer->setUserSpanSubmitter(kj::addRef(*submitter));
+  KJ_EXPECT(tracer->observesUserSpans());
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
+  request->getInvocationSpanContext().setDefaultTraceFlags(tracing::TraceFlags(0x01));
+  request->delivered();
+
+  auto& invocation = request->getInvocationSpanContext();
+  auto root = request->getRootUserTraceSpan();
+  auto rootContext = KJ_ASSERT_NONNULL(root.toSpanContext());
+  KJ_EXPECT(rootContext.getTraceId() == invocation.getTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getSpanId()) == invocation.getSpanId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rootContext.getTraceFlags()) == tracing::TraceFlags(0x01));
+
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment&) { auto child = root.newChild("child"_kjc); });
+  KJ_ASSERT(submitter->parentSpanIds.size() == 1);
+  KJ_EXPECT(submitter->parentSpanIds[0] == invocation.getSpanId());
+
+  // A UserSpanObserver without a span ID round-trips kj::none rather than a zero SpanId.
+  auto withoutSpanId = kj::rc<UserSpanObserver>(
+      kj::addRef(*submitter), tracing::SpanContext(tracing::TraceId(1, 2), kj::none));
+  auto roundTripped = KJ_ASSERT_NONNULL(withoutSpanId->toSpanContext());
+  KJ_EXPECT(roundTripped.getTraceId() == tracing::TraceId(1, 2));
+  KJ_EXPECT(roundTripped.getSpanId() == kj::none);
+
+  fixture.drainAndDestroy(kj::mv(request));
 }
 
 }  // namespace

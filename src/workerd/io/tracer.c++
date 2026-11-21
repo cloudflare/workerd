@@ -77,6 +77,12 @@ void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
 }
 }  // namespace
 
+BaseTracer::BaseTracer() = default;
+
+BaseTracer::~BaseTracer() noexcept(false) {
+  selfRef->invalidate();
+}
+
 kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
@@ -212,30 +218,52 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
+void WorkerTracer::addSpanOpen(tracing::TraceId traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
     kj::Date startTime) {
+  // Remembered for the span's later events until it closes, including its exceptions, which go to
+  // the invocation's log submitter even without a streaming tail.
+  KJ_IF_SOME(topLevelContext, topLevelInvocationSpanContext) {
+    if (traceId == nullptr) {
+      traceId = topLevelContext.getTraceId();
+      traceFlags = topLevelContext.getTraceFlags();
+    } else if (traceId != topLevelContext.getTraceId() ||
+        traceFlags != topLevelContext.getTraceFlags()) {
+      spanTraces.upsert(spanId.getId(), SpanTrace{.traceId = traceId, .traceFlags = traceFlags},
+          [](SpanTrace& existing, SpanTrace&& replacement) { existing = kj::mv(replacement); });
+    }
+  }
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Compose SpanOpen. An all-zero spanId is interpreted as having no spans above this one, thus we
-  // use the Onset spanId instead (taken from topLevelContext). We go to great lengths to rule out
-  // getting an all-zero spanId by chance (see SpanId::fromEntropy()), so this should be safe.
-  if (parentSpanId == tracing::SpanId::nullId) {
-    parentSpanId = topLevelContext.getSpanId();
-  }
+  // Spans at the top of the invocation are children of its root user span, which stands for the
+  // onset span (see makeUserRequestSpan()). A span with no parent starts its trace, and its event
+  // has no parent span ID.
   size_t spanNameSize = operationName.size();
-  auto spanOpenContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), parentSpanId, topLevelContext.getTraceFlags());
+  auto spanOpenContext = tracing::InvocationSpanContext(
+      traceId, topLevelContext.getInvocationId(), parentSpanId, traceFlags);
   tailStreamWriter->report(
       spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
 }
 
+tracing::InvocationSpanContext WorkerTracer::spanEventContext(tracing::SpanId spanId) {
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  KJ_IF_SOME(spanTrace, spanTraces.find(spanId.getId())) {
+    return tracing::InvocationSpanContext(
+        spanTrace.traceId, topLevelContext.getInvocationId(), spanId, spanTrace.traceFlags);
+  }
+  return tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+}
+
 void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
+  KJ_DEFER(spanTraces.erase(span.spanId.getId()));
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -265,9 +293,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 
   // Compose Attributes and SpanClose, which are available at span completion time and transmitted
   // together.
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto spanComponentContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), span.spanId, topLevelContext.getTraceFlags());
+  auto spanComponentContext = spanEventContext(span.spanId);
 
   if (span.tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
     tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
@@ -295,9 +321,7 @@ void WorkerTracer::addSpanLinksInternal(
     tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE || links.links.size() == 0) return;
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
   auto size = links.size();
   writer->report(context, kj::mv(links), timestamp, size);
 }
@@ -309,9 +333,7 @@ void WorkerTracer::addSpanUpdateInternal(
   }
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
   auto size = update.size();
   tailStreamWriter->report(context, kj::mv(update), timestamp, size);
 }
@@ -326,7 +348,8 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     stackPtr = s;
   }
   recordInvocationLevelException(context, name, message, stackPtr);
-  exportInvocationException(context.getSpanId(), timestamp, name, message, stackPtr);
+  exportInvocationException(context.getTraceId(), context.getTraceFlags(), context.getSpanId(),
+      timestamp, name, message, stackPtr);
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -368,15 +391,19 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
     stackPtr = s;
   }
   recordInvocationSpanException(code, name, message, stackPtr);
-  exportInvocationException(spanId, timestamp, name, message, stackPtr);
+  KJ_IF_SOME(spanTrace, spanTraces.find(spanId.getId())) {
+    exportInvocationException(
+        spanTrace.traceId, spanTrace.traceFlags, spanId, timestamp, name, message, stackPtr);
+  } else {
+    exportInvocationException(
+        tracing::TraceId(nullptr), kj::none, spanId, timestamp, name, message, stackPtr);
+  }
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
 
   reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
@@ -642,10 +669,9 @@ void WorkerTracer::setReturn(
   }
 }
 
-void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
-  KJ_ASSERT(
-      makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
-  makeUserRequestSpanFunc = kj::mv(func);
+void BaseTracer::setUserSpanSubmitter(kj::Own<SpanSubmitter> submitter) {
+  KJ_ASSERT(userSpanSubmitter == kj::none, "setUserSpanSubmitter can only be called once");
+  userSpanSubmitter = kj::mv(submitter);
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {
@@ -771,18 +797,20 @@ void BaseTracer::exportInvocationLog(const tracing::InvocationSpanContext& conte
   KJ_IF_SOME(logs, invocationLogs) {
     auto truncated =
         message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
-    logs->submitLog(context.getSpanId(), timestamp, level,
-        message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated, errorInfo);
+    logs->submitLog(context.getTraceId(), context.getTraceFlags(), context.getSpanId(), timestamp,
+        level, message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated, errorInfo);
   }
 }
 
-void BaseTracer::exportInvocationException(tracing::SpanId spanId,
+void BaseTracer::exportInvocationException(const tracing::TraceId& traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     kj::Date timestamp,
     kj::StringPtr name,
     kj::StringPtr message,
     kj::Maybe<kj::StringPtr> stack) {
   KJ_IF_SOME(logs, invocationLogs) {
-    logs->submitException(spanId, timestamp, name, message, stack);
+    logs->submitException(traceId, traceFlags, spanId, timestamp, name, message, stack);
   }
 }
 
@@ -792,11 +820,10 @@ void BaseTracer::endInvocationSpan(
   invocationSpan.end();
 }
 
-SpanParent BaseTracer::makeUserRequestSpan(
-    tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+SpanParent BaseTracer::makeUserRequestSpan(const tracing::InvocationSpanContext& context) {
   if (invocationSpan.isObserved() && invocationExportsSpans) return SpanParent(invocationSpan);
-  KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(traceId), traceFlags);
+  KJ_IF_SOME(submitter, userSpanSubmitter) {
+    return SpanParent(kj::rc<UserSpanObserver>(kj::addRef(*submitter), context.toSpanContext()));
   } else {
     return SpanParent(nullptr);
   }
@@ -834,20 +861,59 @@ kj::Date SpanSubmitter::getTime() {
   return IoContext::current().now();
 }
 
+kj::Rc<UserSpanObserver> UserSpanObserver::forOpenedRoot(kj::Own<SpanSubmitter> submitter,
+    const tracing::SpanContext& parentContext,
+    tracing::SpanId spanId) {
+  return kj::rc<UserSpanObserver>(
+      kj::Badge<UserSpanObserver>(), kj::mv(submitter), parentContext, spanId);
+}
+
+tracing::SpanContext UserSpanObserver::childParent() {
+  if (traceId == nullptr) {
+    // No active span, so as in OpenTelemetry's Tracer.startSpan() the child starts a new trace. It
+    // is marked sampled, as OpenTelemetry's default sampler does for a root span: its spans are
+    // recorded.
+    return tracing::SpanContext(submitter->makeRootTraceId(), kj::none, tracing::TraceFlags(0x01));
+  }
+  return tracing::SpanContext(traceId, spanId, traceFlags);
+}
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
-  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
+  auto parent = childParent();
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter),
+      parent.getSpanId().orDefault(tracing::SpanId::nullId), parent.getTraceId(),
+      parent.getTraceFlags());
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChildFromUserCode() {
-  return kj::rc<UserSpanObserver>(
-      kj::addRef(*submitter), spanId, traceId, traceFlags, /*fromUserCode=*/true);
+  auto parent = childParent();
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter),
+      parent.getSpanId().orDefault(tracing::SpanId::nullId), parent.getTraceId(),
+      parent.getTraceFlags(), /*fromUserCode=*/true);
+}
+
+kj::Rc<SpanObserver> UserSpanObserver::forActiveContext(
+    kj::Maybe<const tracing::SpanContext&> context) {
+  // As in OpenTelemetry's Tracer.startSpan(), an invalid context is treated as no context.
+  KJ_IF_SOME(c, context) {
+    KJ_IF_SOME(spanId, c.getSpanId()) {
+      if (c.getTraceId() != nullptr && spanId != tracing::SpanId::nullId) {
+        return kj::rc<UserSpanObserver>(kj::addRef(*submitter), c);
+      }
+    }
+  }
+  return withoutActiveSpan(kj::addRef(*submitter));
+}
+
+kj::Rc<UserSpanObserver> UserSpanObserver::withoutActiveSpan(kj::Own<SpanSubmitter> submitter) {
+  return kj::rc<UserSpanObserver>(kj::Badge<UserSpanObserver>(), kj::mv(submitter));
 }
 
 kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   if (traceId == nullptr) {
     return kj::none;
   }
-  return tracing::SpanContext(traceId, spanId, traceFlags);
+  return tracing::SpanContext(
+      traceId, spanId == tracing::SpanId::nullId ? kj::none : kj::Maybe(spanId), traceFlags);
 }
 
 void UserSpanObserver::onClose(
@@ -878,10 +944,11 @@ void UserSpanObserver::onLinks(tracing::SpanLinks links) {
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
   this->startTime = startTime;
   if (fromUserCode) {
-    wasAccepted =
-        submitter->submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    wasAccepted = submitter->submitUserSpanOpen(
+        traceId, traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   } else {
-    wasAccepted = submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    wasAccepted = submitter->submitSpanOpen(
+        traceId, traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 }
 
