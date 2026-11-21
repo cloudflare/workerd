@@ -715,9 +715,11 @@ Deserializer::Deserializer(
           released.sharedArrayBuffers.asPtr(),
           kj::mv(maybeOptions)) {}
 
-Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed)
+Deserializer::Deserializer(
+    Lock& js, v8::ValueDeserializer& deser, AfterReadCallbacks& afterReadCallbacks, Borrowed)
     : totalInputSize(0),
       deser(deser),
+      foreignAfterReadCallbacks(afterReadCallbacks),
       readDepth(1) {}
 
 void Deserializer::init(Lock& js,
@@ -763,7 +765,10 @@ JsValue Deserializer::readValue(Lock& js) {
   ++readDepth;
   KJ_DEFER(--readDepth);
   KJ_DEFER(if (readDepth == 1) jsSerializableClasses.clear());
-  KJ_ON_SCOPE_FAILURE(if (readDepth == 1) pendingJsSerializables.clear());
+  KJ_ON_SCOPE_FAILURE(if (readDepth == 1) {
+    pendingJsSerializables.clear();
+    afterReadCallbacks.clear();
+  });
   auto value = [&]() {
     js.setDisallowJavascriptExecution(true);
     KJ_DEFER(js.setDisallowJavascriptExecution(false));
@@ -771,10 +776,33 @@ JsValue Deserializer::readValue(Lock& js) {
     return JsValue(check(readDepth > 1 ? readValueInHostObject(js.v8Isolate, deser)
                                        : deser.ReadValue(js.v8Context())));
   }();
-  if (readDepth == 1 && !pendingJsSerializables.empty()) {
-    finishJsSerializables(js);
-  }
+  if (readDepth == 1) finishRead(js);
   return value;
+}
+
+void Deserializer::afterRead(Function<void()> callback) {
+  KJ_REQUIRE(readDepth > 0, "afterRead() is for a type's deserialize()");
+  KJ_REQUIRE(
+      !callingAfterReadCallbacks, "afterRead() can't be called from an afterRead() callback");
+  KJ_IF_SOME(foreign, foreignAfterReadCallbacks) {
+    foreign.add([callback = kj::mv(callback)](v8::Isolate* isolate) mutable -> bool {
+      try {
+        auto& js = Lock::from(isolate);
+        // As finishRead() does.
+        JSG_REQUIRE(!js.isJavascriptExecutionDisallowed(), DOMDataCloneError,
+            "This value cannot be deserialized here.");
+        callback(js);
+        return true;
+      } catch (JsExceptionThrown&) {
+        return false;
+      } catch (...) {
+        throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+        return false;
+      }
+    });
+  } else {
+    afterReadCallbacks.add(kj::mv(callback));
+  }
 }
 
 uint Deserializer::readRawUint32() {
@@ -1054,11 +1082,11 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   return instance;
 }
 
-void Deserializer::finishJsSerializables(Lock& js) {
+void Deserializer::finishRead(Lock& js) {
   auto context = js.v8Context();
 
   // Each instance's data follows the top-level value, in the order the instances were read.
-  // Reading one's data may read more instances.
+  // Reading one's data may read more instances, and add callbacks.
   kj::Vector<V8Ref<v8::Value>> data(pendingJsSerializables.size());
   {
     js.setDisallowJavascriptExecution(true);
@@ -1068,15 +1096,31 @@ void Deserializer::finishJsSerializables(Lock& js) {
     }
   }
 
-  // Initializing the instances runs JavaScript, which a caller may have disallowed.
-  JSG_REQUIRE(!js.isJavascriptExecutionDisallowed(), DOMDataCloneError,
-      "Objects implemented in JavaScript cannot be deserialized here.");
+  // Both run JavaScript, which a caller may have disallowed.
+  if (!pendingJsSerializables.empty()) {
+    JSG_REQUIRE(!js.isJavascriptExecutionDisallowed(), DOMDataCloneError,
+        "Objects implemented in JavaScript cannot be deserialized here.");
+  }
+  if (!afterReadCallbacks.empty()) {
+    JSG_REQUIRE(!js.isJavascriptExecutionDisallowed(), DOMDataCloneError,
+        "This value cannot be deserialized here.");
+  }
+
+  // The instances first, so that a callback finds every instance in the value initialized. Their
+  // `deserialize` functions use no other object in the value, and so need no callback to have run.
   auto pending = kj::mv(pendingJsSerializables);
   for (auto i: kj::indices(pending)) {
     v8::Local<v8::Function> deserialize =
         jsSerializableClasses[pending[i].classIndex].deserialize.getHandle(js);
     v8::Local<v8::Value> args[] = {pending[i].instance.getHandle(js), data[i].getHandle(js)};
     check(deserialize->Call(context, js.undefined(), kj::size(args), args));
+  }
+
+  auto callbacks = kj::mv(afterReadCallbacks);
+  callingAfterReadCallbacks = true;
+  KJ_DEFER(callingAfterReadCallbacks = false);
+  for (auto& callback: callbacks) {
+    callback(js);
   }
 }
 
@@ -1095,14 +1139,16 @@ v8::Maybe<bool> writeApiObject(
   }
 }
 
-v8::MaybeLocal<v8::Object> readApiObject(
-    v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag) {
+v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
+    v8::ValueDeserializer& deser,
+    uint32_t tag,
+    AfterReadCallbacks& afterReadCallbacks) {
   return readHostObjectWithoutJs(isolate, tag, [&]() -> v8::MaybeLocal<v8::Object> {
     try {
       auto& js = Lock::from(isolate);
       js.setDisallowJavascriptExecution(true);
       KJ_DEFER(js.setDisallowJavascriptExecution(false));
-      Deserializer deserializer(js, deser, Deserializer::Borrowed{});
+      Deserializer deserializer(js, deser, afterReadCallbacks, Deserializer::Borrowed{});
       return deserializer.readApiObject(js, tag);
     } catch (JsExceptionThrown&) {
       return {};

@@ -97,7 +97,9 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   JSG_STRUCT, which then reads only own properties. It must do nothing that can run
 //   JavaScript: get a property that the object may lack as an own data property (a getter on its
 //   prototype chain would run), assign one (a setter would run), convert an object to a primitive
-//   or to JSON, call a function, or serialize a value.
+//   or to JSON, call a function, or serialize a value. Work on what it read that can run
+//   JavaScript goes in a callback that it gives `deserializer.afterRead()`, called once the value
+//   has been read.
 // * A value that `deserialize()` reads with `deserializer.readValue()` may contain instances of
 //   classes implemented in JavaScript (below) that are not yet initialized: their own
 //   `deserialize` runs only once the top-level value has been read. Keep such a value as it is,
@@ -383,6 +385,11 @@ class Serializer final: v8::ValueSerializer::Delegate {
   v8::ValueSerializer& ser;
 };
 
+// The callbacks that readApiObject() (below) leaves to its caller: those that the deserializers of
+// the workerd API objects it reads give Deserializer::afterRead(). Each returns false if its
+// callback throws, leaving the exception pending.
+using AfterReadCallbacks = kj::Vector<kj::Function<bool(v8::Isolate*)>>;
+
 // Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
 // the stack.
@@ -436,8 +443,23 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
   // Reads a value. Called from a type's `deserialize()` for a value nested in its own, it may
   // return instances of classes implemented in JavaScript that are not yet initialized (see the
-  // comment on Serializer).
+  // comment on Serializer). A top-level read where the caller has disallowed JavaScript execution
+  // throws DataCloneError if the value holds an object that needs JavaScript to finish: an
+  // instance of a class implemented in JavaScript, or one whose deserializer calls afterRead().
   JsValue readValue(Lock& js);
+
+  // Has `callback` called once the top-level value has been read and every instance of a class
+  // implemented in JavaScript in it initialized, where JavaScript can run: for a type's
+  // `deserialize()` whose work on what it read can run JavaScript, which it must not do itself (see
+  // the comment on Serializer). It returns its object at once, and finishes it in the callback;
+  // JavaScript that an earlier callback runs can reach the object first, so it must be consistent
+  // from the start. Callbacks are called in the order they were added. If one throws, readValue()
+  // throws it and the rest are not called; if the read fails first, none is. Where the caller has
+  // disallowed JavaScript execution, readValue() throws DataCloneError instead. Call it only from
+  // a type's `deserialize()`, never from a callback: it throws if a callback that readValue()
+  // calls tries, and a Deserializer that reads for another delegate is gone by the time that
+  // delegate calls them.
+  void afterRead(Function<void()> callback);
 
   // The raw reads throw DataCloneError if the data ends too soon.
   uint32_t readRawUint32();
@@ -462,15 +484,18 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
  private:
   // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
   struct Borrowed {};
-  Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed);
-  friend v8::MaybeLocal<v8::Object> readApiObject(
-      v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+  Deserializer(
+      Lock& js, v8::ValueDeserializer& deser, AfterReadCallbacks& afterReadCallbacks, Borrowed);
+  friend v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
+      v8::ValueDeserializer& deser,
+      uint32_t tag,
+      AfterReadCallbacks& afterReadCallbacks);
 
   // Reads the workerd API object that `tag` names through its type's deserializer.
   v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
 
   // Reads an instance of a class implemented in JavaScript, which is created at once and
-  // initialized by finishJsSerializables().
+  // initialized by finishRead().
   v8::Local<v8::Object> readJsSerializable(Lock& js);
 
   // A class implemented in JavaScript that readJsSerializable() found.
@@ -494,9 +519,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // throws DataCloneError if it names none.
   size_t findJsSerializableClass(Lock& js, kj::String deserializeInfo);
 
-  // Reads the data of the instances that readJsSerializable() created during the current
-  // top-level readValue(), then initializes them with their classes' `deserialize` functions.
-  void finishJsSerializables(Lock& js);
+  // Finishes the current top-level readValue(): reads the data of the instances that
+  // readJsSerializable() created, initializes them with their classes' `deserialize` functions,
+  // and then calls the callbacks that afterRead() was given.
+  void finishRead(Lock& js);
 
   void init(Lock& js,
       kj::ArrayPtr<const kj::byte> data,
@@ -526,10 +552,17 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // The instances of classes implemented in JavaScript read by the current top-level readValue(),
   // in the order they were read.
   kj::Vector<PendingJsSerializable> pendingJsSerializables;
+  // The callbacks that afterRead() was given during the current top-level readValue().
+  kj::Vector<Function<void()>> afterReadCallbacks;
+  // For a Deserializer that reads for another delegate, the callbacks that afterRead() was given,
+  // which that delegate calls.
+  kj::Maybe<AfterReadCallbacks&> foreignAfterReadCallbacks;
   // How many calls to readValue() are in progress: a type's deserializer calls it for nested
   // values. A Deserializer that reads for another delegate starts at 1: that delegate reads the
   // top-level value.
   uint readDepth = 0;
+  // Whether finishRead() is calling the callbacks that afterRead() was given, which must give none.
+  bool callingAfterReadCallbacks = false;
   // Error.prototype of the current context, once findJsSerializableClass() needs it.
   kj::Maybe<V8Ref<v8::Value>> errorPrototype;
   // The classes that findJsSerializableClass() has found during the current top-level
@@ -554,9 +587,14 @@ v8::Maybe<bool> writeApiObject(
 // Reads the workerd API object that `tag` names, as Deserializer's ReadHostObject() does once it
 // has read a tag other than a native error's or SERIALIZATION_TAG_JS_SERIALIZABLE, which the
 // caller reads itself. JavaScript execution is disallowed meanwhile: an attempt to run it throws
-// DataCloneError, as it does under Deserializer.
-v8::MaybeLocal<v8::Object> readApiObject(
-    v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+// DataCloneError, as it does under Deserializer. Adds to `afterReadCallbacks` the callbacks
+// that the type's deserializer gives Deserializer::afterRead(), which the caller calls, in order,
+// once it has read the whole value and initialized its own instances of classes implemented in
+// JavaScript.
+v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
+    v8::ValueDeserializer& deser,
+    uint32_t tag,
+    AfterReadCallbacks& afterReadCallbacks);
 
 // Calls `read`, which reads the host object that `tag` names for a v8::ValueDeserializer delegate,
 // so that an attempt to run JavaScript fails the read with DataCloneError, as it does under

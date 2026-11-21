@@ -23,6 +23,7 @@ struct SerTestContext: public ContextGlobalObject {
     QUX = 3,
     BOX = 4,
     PROBER = 5,
+    FINISHER = 6,
     // RawJsSerializable writes this tag, which the Deserializer reads itself.
     JS_SERIALIZABLE = SERIALIZATION_TAG_JS_SERIALIZABLE,
   };
@@ -193,6 +194,41 @@ struct SerTestContext: public ContextGlobalObject {
       return js.alloc<Prober>(JsRef<JsValue>(js, val));
     }
     JSG_SERIALIZABLE(SerializationTag::PROBER);
+
+   private:
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(val);
+    }
+  };
+
+  // Holds any value, as Box does, and once the whole value is read, passes it to the global
+  // `afterRead` function, as a deserializer whose work runs JavaScript does.
+  struct Finisher: public jsg::Object {
+    JsRef<JsValue> val;
+    Finisher(JsRef<JsValue> val): val(kj::mv(val)) {}
+
+    static jsg::Ref<Finisher> constructor(jsg::Lock& js, JsRef<JsValue> val) {
+      return js.alloc<Finisher>(kj::mv(val));
+    }
+
+    JSG_RESOURCE_TYPE(Finisher) {}
+
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+      serializer.write(js, val.getHandle(js));
+    }
+    static jsg::Ref<Finisher> deserialize(
+        Lock& js, SerializationTag tag, Deserializer& deserializer) {
+      auto val = deserializer.readValue(js);
+      // The callback of one holding 'nest' calls afterRead(), as no callback may.
+      bool nest = val.strictEquals(js.str("nest"_kj));
+      deserializer.afterRead([val = JsRef<JsValue>(js, val), nest, &deserializer](Lock& js) {
+        if (nest) deserializer.afterRead([](Lock&) {});
+        auto afterRead = js.global().get(js, "afterRead"_kj);
+        KJ_ASSERT_NONNULL(afterRead.tryCast<JsFunction>()).callNoReceiver(js, val.getHandle(js));
+      });
+      return js.alloc<Finisher>(JsRef<JsValue>(js, val));
+    }
+    JSG_SERIALIZABLE(SerializationTag::FINISHER);
 
    private:
     void visitForGc(GcVisitor& visitor) {
@@ -380,11 +416,13 @@ struct SerTestContext: public ContextGlobalObject {
   struct ForeignDeserializer final: public v8::ValueDeserializer::Delegate {
     ForeignDeserializer(v8::Isolate* isolate, kj::ArrayPtr<const kj::byte> data)
         : deser(isolate, data.begin(), data.size(), this) {}
+    ~ForeignDeserializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
     v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override {
       uint32_t tag;
       KJ_ASSERT(deser.ReadUint32(&tag));
-      return readApiObject(isolate, deser, tag);
+      return readApiObject(isolate, deser, tag, afterReadCallbacks);
     }
+    AfterReadCallbacks afterReadCallbacks;
     v8::ValueDeserializer deser;
   };
 
@@ -398,7 +436,11 @@ struct SerTestContext: public ContextGlobalObject {
   JsValue foreignDeserialize(Lock& js, kj::ArrayPtr<const kj::byte> data) {
     ForeignDeserializer deser(js.v8Isolate, data);
     check(deser.deser.ReadHeader(js.v8Context()));
-    return JsValue(check(deser.deser.ReadValue(js.v8Context())));
+    auto value = JsValue(check(deser.deser.ReadValue(js.v8Context())));
+    for (auto& callback: deser.afterReadCallbacks) {
+      if (!callback(js.v8Isolate)) throw JsExceptionThrown();
+    }
+    return value;
   }
 
   // Round-trips `in` through the foreign serializer and deserializer.
@@ -428,6 +470,13 @@ struct SerTestContext: public ContextGlobalObject {
     return foreignDeserialize(js, released.data);
   }
 
+  // Calls `fn` with JavaScript execution disallowed, as C++ code that must run none disallows it.
+  JsValue withoutJs(Lock& js, jsg::Function<JsValue()> fn) {
+    js.setDisallowJavascriptExecution(true);
+    KJ_DEFER(js.setDisallowJavascriptExecution(false));
+    return fn(js);
+  }
+
   // Mirror of the global `structuredClone(value, { transfer })`, for testing transfer handling.
   JsValue structuredCloneWithTransfer(
       Lock& js, JsValue value, jsg::Optional<kj::Array<JsValue>> transfer) {
@@ -445,6 +494,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Qux);
     JSG_NESTED_TYPE(Box);
     JSG_NESTED_TYPE(Prober);
+    JSG_NESTED_TYPE(Finisher);
     JSG_NESTED_TYPE(RawJsSerializable);
     JSG_METHOD(setModule);
     JSG_METHOD(clearModules);
@@ -458,6 +508,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(foreignMatchesSerializer);
     JSG_METHOD(foreignToSerializer);
     JSG_METHOD(serializerToForeign);
+    JSG_METHOD(withoutJs);
     JSG_METHOD(structuredCloneWithTransfer);
   }
 };
@@ -469,6 +520,7 @@ JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
     SerTestContext::Qux,
     SerTestContext::Box,
     SerTestContext::Prober,
+    SerTestContext::Finisher,
     SerTestContext::RawJsSerializable);
 
 KJ_TEST("deserialization header diagnostics expose metadata without payload contents") {
@@ -808,6 +860,67 @@ KJ_TEST("a deserializer that tries to run JavaScript fails the read with a DataC
       "string",
       "DataCloneError: Deserialization failed: the value can't be read without running "
       "JavaScript.");
+}
+
+KJ_TEST("a deserializer's afterRead() callbacks run once the value is read") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  constexpr kj::StringPtr AFTER_READ = "const seen = [];\n"
+                                       "globalThis.afterRead = (v) => {\n"
+                                       "  seen.push(Array.isArray(v) ? v[0] : v);\n"
+                                       "  if (v === 'throw') throw new Error('boom');\n"
+                                       "};\n"_kj;
+  for (auto roundTrip: {"roundTrip"_kj, "foreignRoundTrip"_kj}) {
+    auto expectEval = [&](kj::StringPtr code, kj::StringPtr type, kj::StringPtr value) {
+      e.expectEval(kj::str("const ROUND_TRIP = ", roundTrip, ";\n", AFTER_READ, code), type, value);
+    };
+
+    // In the order they were given, so a nested value's before the value holding it.
+    expectEval("ROUND_TRIP([new Finisher('a'), new Finisher(['b', new Finisher('c')]),\n"
+               "    new Finisher('d')]);\n"
+               "seen.join()",
+        "string", "a,c,b,d");
+
+    // One that throws fails the read, and the rest are not called.
+    expectEval("try { ROUND_TRIP([new Finisher('a'), new Finisher('throw'), new Finisher('c')]) }\n"
+               "catch (e) { `${e.message} ${seen}` }",
+        "string", "boom a,throw");
+
+    // None is called if the read fails.
+    expectEval("try { ROUND_TRIP([new Finisher('a'), new Baz(false)]) }\n"
+               "catch (e) { `${e.message} ${seen.length}` }",
+        "string", "throw from deserialize() 0");
+
+    // Nor where JavaScript execution is disallowed.
+    expectEval("try { withoutJs(() => ROUND_TRIP(new Finisher('a'))) }\n"
+               "catch (e) { `${e.name}: ${e.message} ${seen.length}` }",
+        "string", "DataCloneError: This value cannot be deserialized here. 0");
+  }
+
+  // A callback that calls afterRead() fails the read. (One that a Deserializer reading for another
+  // delegate gave can't: that Deserializer is gone by then.)
+  {
+    KJ_EXPECT_LOG(ERROR, "afterRead() can't be called from an afterRead() callback");
+    e.expectEval(kj::str(AFTER_READ,
+                     "try {\n"
+                     "  roundTrip([new Finisher('a'), new Finisher('nest'), new Finisher('c')]);\n"
+                     "  'read'\n"
+                     "} catch (e) { `${e.message.split(';')[0]} ${seen}` }"),
+        "string", "internal error a");
+  }
+
+  // After the instances of classes implemented in JavaScript are initialized, including those
+  // read with their data, after the callback was given.
+  e.expectEval(kj::str(JS_CLASSES, AFTER_READ,
+                   "globalThis.afterRead = (h) => seen.push(h.value.x);\n"
+                   "roundTrip(new Finisher(new Holder(new Point(1))));\n"
+                   "`${seen} ${log}`"),
+      "string", "2 clone 1,deserialize 1");
+  // Including those given while the data is read.
+  e.expectEval(kj::str(JS_CLASSES, AFTER_READ,
+                   "globalThis.afterRead = (p) => seen.push(p.x);\n"
+                   "roundTrip(new Holder(new Finisher(new Point(1))));\n"
+                   "seen.join()"),
+      "string", "2");
 }
 
 KJ_TEST("serialization of classes implemented in JavaScript") {

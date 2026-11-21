@@ -548,6 +548,11 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     v8::Local<v8::Value> value;
     if (!deser.ReadValue(isolate->GetCurrentContext()).ToLocal(&value)) return {};
     if (!pendingJsSerializables.empty() && !finishJsSerializables()) return {};
+    // After the instances, as jsg::Deserializer calls them.
+    auto callbacks = kj::mv(afterReadCallbacks);
+    for (auto& callback: callbacks) {
+      if (!callback(isolate)) return {};
+    }
     return value;
   }
 
@@ -560,7 +565,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
         return tag == SERIALIZATION_TAG_NATIVE_ERROR ? readError() : readJsSerializable();
       });
     }
-    return ::workerd::jsg::readApiObject(isolate, deser, tag);
+    return ::workerd::jsg::readApiObject(isolate, deser, tag, afterReadCallbacks);
   }
 
   // V8's GetSharedArrayBufferFromId() throws for a SharedArrayBuffer, which the data only refers
@@ -898,6 +903,9 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // were read, which read() initializes once it has read the value. Globals, since V8 hands the
   // delegate values in handle scopes of its own, which end before deserialization does.
   kj::Vector<PendingJsSerializable> pendingJsSerializables;
+  // What the deserializers of the workerd API objects that the value contains leave until it is
+  // read, which read() calls once it has initialized the instances.
+  ::workerd::jsg::AfterReadCallbacks afterReadCallbacks;
   v8::ValueDeserializer deser;
 };
 
