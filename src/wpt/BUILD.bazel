@@ -363,6 +363,28 @@ wpt_test(
 )
 
 wpt_test(
+    name = "wasm/webapi",
+    compat_flags = [
+        "fetch_invalid_response_type_error",
+        "webassembly_dynamic_compilation",
+        "webassembly_streaming",
+    ],
+    config = "wasm/webapi-test.ts",
+    # The ESM-integration tests are browser-only .html tests
+    exclude_test_dirs = ["esm-integration"],
+    extra_wpt_directories = ["@wpt//:wasm/jsapi@module"],
+    served_wpt_files = ["@wpt//:wasm/incrementer.wasm"],
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:wasm/webapi@module",
+)
+
+wpt_test(
     name = "FileAPI",
     config = "FileAPI-test.ts",
     wpt_directory = "@wpt//:FileAPI@module",

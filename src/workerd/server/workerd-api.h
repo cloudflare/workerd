@@ -57,6 +57,8 @@ class WorkerdApi final: public Worker::Api {
   CompatibilityFlags::Reader getFeatureFlags() const override;
   kj::ArrayPtr<const Worker::Api::InboundListener> getInboundListeners() const override;
   kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const override;
+  void installWasm(jsg::Lock& js) const override;
+  kj::Maybe<jsg::JsFunction> newWasmCompileFunction(jsg::Lock& js) const override;
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
       jsg::Lock& lock, Worker::Api::NewContextOptions options = {}) const override;
   jsg::Dict<NamedExport> unwrapExports(

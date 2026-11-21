@@ -1877,4 +1877,27 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  webassemblyStreaming @210 :Bool
+      $compatEnableFlag("webassembly_streaming")
+      $experimental;
+  # Provides WebAssembly.compileStreaming() and WebAssembly.instantiateStreaming(), which compile a
+  # module from a Response (or a promise for one) as its body arrives. As the WebAssembly Web API
+  # specifies, they reject with a TypeError unless the Response is ok, has a body nobody has read
+  # and has the Content-Type `application/wasm`. Compiling is allowed only where
+  # WebAssembly.compile() is, so without webassembly_dynamic_compilation they reject with a
+  # CompileError outside of code that may evaluate code. Without the flag, WebAssembly has neither
+  # function.
+
+  webassemblyDynamicCompilation @211 :Bool
+      $compatEnableFlag("webassembly_dynamic_compilation")
+      $experimental;
+  # Allows compiling WebAssembly from bytes while handling a request: WebAssembly.compile(),
+  # WebAssembly.instantiate() with bytes, new WebAssembly.Module() and, with
+  # webassembly_streaming, compileStreaming() and instantiateStreaming(). eval() and new
+  # Function() stay disallowed. The embedder sees each module's bytes before the Worker gets the
+  # module and can refuse it, and the asynchronous functions don't settle until the embedder has
+  # accepted the module. new WebAssembly.Module() can't wait, so if the embedder refuses its
+  # module later, the request is aborted and the isolate condemned. Without the flag, compiling
+  # WebAssembly from bytes is allowed only at startup and under an unsafe eval binding.
 }

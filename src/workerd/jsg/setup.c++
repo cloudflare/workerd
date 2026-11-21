@@ -512,6 +512,7 @@ IsolateBase::IsolateBase(V8System& system,
       }()),
       snapshotConfig(kj::mv(snapshotConf)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
+      foregroundTaskSignal(kj::arc<ForegroundTaskSignal>()),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       activeSpanAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -525,6 +526,14 @@ IsolateBase::IsolateBase(V8System& system,
     ptr->SetOOMErrorHandler(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
+    // Fill the runners before SetData() publishes them; until then V8PlatformWrapper hands out
+    // the platform's own runners.
+    auto& platform = system.platformWrapper->getInner();
+    for (auto i: kj::indices(foregroundTaskRunners)) {
+      foregroundTaskRunners[i] = std::make_shared<V8PlatformWrapper::NotifyingTaskRunner>(
+          platform.GetForegroundTaskRunner(ptr, static_cast<v8::TaskPriority>(i)),
+          foregroundTaskSignal.addRef());
+    }
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
@@ -1195,6 +1204,8 @@ IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
   externalMemoryTarget->detach();
+  // V8 can post a foreground task while it tears a job down, after every waiter is gone.
+  foregroundTaskSignal->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
@@ -1214,6 +1225,20 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });
+}
+
+std::shared_ptr<v8::TaskRunner> getNotifyingForegroundTaskRunner(
+    v8::Isolate* isolate, v8::TaskPriority priority) {
+  auto base = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  if (base == nullptr) return nullptr;
+  return base->getForegroundTaskRunner(priority);
+}
+
+std::shared_ptr<v8::TaskRunner> IsolateBase::getForegroundTaskRunner(
+    v8::TaskPriority priority) const {
+  auto index = static_cast<size_t>(priority);
+  if (index >= kj::size(foregroundTaskRunners)) return nullptr;
+  return foregroundTaskRunners[index];
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
@@ -1375,10 +1400,11 @@ bool IsolateBase::isJsApiWrapperNativeErrorCallback(
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
-  // Don't allow WASM unless arbitrary eval() is allowed.
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->evalAllowed;
+  // Don't allow WASM unless arbitrary eval() is allowed, or the embedder allows it.
+  auto isolate = v8::Isolate::GetCurrent();
+  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  if (self->evalAllowed) return true;
+  return self->allowWasmCodeGenerationHook != nullptr && self->allowWasmCodeGenerationHook(isolate);
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
