@@ -754,6 +754,14 @@ wd_cc_library(
 ]
 
 kj_test(
+    src = "streams/draining-reader-lock-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture-expose-gc",
+    ],
+)
+
+kj_test(
     # Each injection point drains microtasks and forces a full GC, including under ASan.
     size = "large",
     src = "streams/termination-injection-test.c++",
