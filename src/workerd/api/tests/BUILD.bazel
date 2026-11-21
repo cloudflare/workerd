@@ -881,6 +881,14 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-shared-buffer-test.wd-test",
+    data = [
+        "crypto-shared-buffer-non-pedantic-test.js",
+        "crypto-shared-buffer-test.js",
+    ],
+)
+
+wd_test(
     src = "crypto-sha3-test.wd-test",
     data = ["crypto-sha3-test.js"],
 )

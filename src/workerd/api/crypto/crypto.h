@@ -663,7 +663,7 @@ class SubtleCrypto final: public jsg::Object {
   jsg::Promise<jsg::Ref<CryptoKey>> decapsulateKey(jsg::Lock& js,
       kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithm,
       const CryptoKey& decapsulationKey,
-      kj::Array<const kj::byte> ciphertext,
+      jsg::JsBufferSource ciphertext,
       kj::OneOf<kj::String, ImportKeyAlgorithm> sharedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
@@ -671,7 +671,7 @@ class SubtleCrypto final: public jsg::Object {
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> decapsulateBits(jsg::Lock& js,
       kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithm,
       const CryptoKey& decapsulationKey,
-      kj::Array<const kj::byte> ciphertext);
+      jsg::JsBufferSource ciphertext);
 
   jsg::Promise<jsg::Ref<CryptoKey>> getPublicKey(
       jsg::Lock& js, const CryptoKey& key, kj::Array<kj::String> keyUsages);

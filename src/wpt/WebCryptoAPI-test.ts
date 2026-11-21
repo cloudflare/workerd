@@ -431,16 +431,7 @@ export default {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
-  'sharedarraybuffer.https.any.js': {
-    comment:
-      'SubtleCrypto BufferSource arguments accept views backed by a SharedArrayBuffer instead of throwing TypeError',
-    expectedFailures: [
-      'digest() data is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() data is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() AesGcmParams.iv is a Uint8Array(SharedArrayBuffer)',
-      'encrypt() AesGcmParams.additionalData is a Uint8Array(SharedArrayBuffer)',
-    ],
-  },
+  'sharedarraybuffer.https.any.js': {},
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': supportFile,
   'sign_verify/ecdsa_vectors.js': supportFile,
