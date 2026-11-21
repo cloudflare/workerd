@@ -209,7 +209,8 @@ export function copyFileSync(
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizePath(dest).pathname,
+      path: normalizePath(src).pathname,
+      dest: normalizePath(dest).pathname,
     });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
