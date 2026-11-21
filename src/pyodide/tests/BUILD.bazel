@@ -125,6 +125,13 @@ py_wd_test(
 
 py_wd_test("stdlib-zip")
 
+# Only the development bundle is built from this tree; the others are released bundles, fetched
+# from R2, which have no bytecode until they are re-released.
+py_wd_test(
+    "stdlib-pyc",
+    python_flags = ["development"],
+)
+
 js_binary(
     name = "socket-server",
     entry_point = "sockets/socket-server.js",

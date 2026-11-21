@@ -33,6 +33,24 @@ py_binary(
     visibility = ["//src/pyodide:__pkg__"],
 )
 
+# Build-time tool that adds precompiled bytecode to the stdlib zip in the Pyodide bundle. Bytecode
+# is specific to a Python minor version, so there is one binary per version, each running on that
+# interpreter. Used by python_bundles.bzl.
+[
+    py_binary(
+        name = "compile_stdlib_" + version.replace(".", "_"),
+        srcs = ["compile_stdlib.py"],
+        main = "compile_stdlib.py",
+        python_version = version,
+        visibility = ["//src/pyodide:__pkg__"],
+    )
+    for version in [
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
+]
+
 # Shared by pack_python_packages.py, which writes the message embedded in the bundle, and the C++
 # reader in src/workerd/api/pyodide.
 wd_cc_capnp_library(
