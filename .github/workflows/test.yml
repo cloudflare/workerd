@@ -391,6 +391,31 @@ jobs:
             echo "::endgroup::"
           done
 
+  # Builds the container image (docker/) from test-linux's binary and checks that it serves a
+  # wrangler project, so that the image a release publishes keeps working between releases.
+  docker-image:
+    name: Test the container image
+    needs: [test-linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+          persist-credentials: false
+      - name: Download workerd binary
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-X64-binary
+          path: ${{ runner.temp }}/workerd/amd64
+      - name: Build the image
+        run: |
+          docker buildx build --platform linux/amd64 --load --tag workerd:test \
+            --file docker/Dockerfile "$RUNNER_TEMP/workerd"
+      - name: Test the image
+        run: docker/test.sh workerd:test linux/amd64
+
   wpt-report:
     needs: [test-linux]
     uses: ./.github/workflows/_wpt.yml

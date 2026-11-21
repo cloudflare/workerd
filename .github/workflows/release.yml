@@ -319,3 +319,124 @@ jobs:
       - run: cp -r bazel-bin/types/definitions/. npm/workers-types
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
       - run: cd npm/workers-types && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
+
+  # The container image docker.io/cloudflare/workerd (see docker/README.md), from the binaries of
+  # the npm packages, once those are published. publish-image pushes and signs it by digest only,
+  # verify-image tests that digest on each platform, and tag-image then points the tags at it. A
+  # digest that fails its tests stays untagged. A failure in any of them leaves npm as it is.
+  # These jobs run only on main, once the repository variable DOCKER_HUB_USERNAME is set. The
+  # third-party actions in the jobs with Docker Hub credentials are pinned by commit.
+  publish-image:
+    name: Publish the container image
+    needs: [version, upload-artifacts, publish-wrapper]
+    if: ${{ vars.DOCKER_HUB_USERNAME != '' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # For cosign's keyless signing.
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    env:
+      IMAGE: docker.io/cloudflare/workerd
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+          persist-credentials: false
+      # The build context: each platform's binary at <arch>/workerd.
+      - name: Download Linux-X64
+        uses: actions/download-artifact@v8
+        with:
+          name: Linux-X64-binary
+          path: ${{ runner.temp }}/workerd/amd64
+      - name: Download Linux-ARM64
+        uses: actions/download-artifact@v8
+        with:
+          name: Linux-ARM64-binary
+          path: ${{ runner.temp }}/workerd/arm64
+      # The runner's Docker cannot push by digest, so the build runs on BuildKit in a container,
+      # pinned here. The build runs nothing, so it needs no emulation.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ vars.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Push the image by digest
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ runner.temp }}/workerd
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          sbom: true
+          provenance: mode=max
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Sign the image
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+  verify-image:
+    name: Verify the container image (${{ matrix.arch }})
+    needs: [publish-image]
+    if: ${{ vars.DOCKER_HUB_USERNAME != '' && github.ref == 'refs/heads/main' }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+          persist-credentials: false
+      # The repository is public, so this pulls the digest without logging in.
+      - name: Test the pushed image
+        run: docker/test.sh "docker.io/cloudflare/workerd@$DIGEST" "linux/$ARCH"
+        env:
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+
+  tag-image:
+    name: Tag the container image
+    needs: [version, publish-image, verify-image]
+    if: ${{ vars.DOCKER_HUB_USERNAME != '' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      IMAGE: docker.io/cloudflare/workerd
+      DIGEST: ${{ needs.publish-image.outputs.digest }}
+      VERSION: ${{ needs.version.outputs.version }}
+      # As the npm packages are tagged.
+      CHANNEL: ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest' }}
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ vars.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      # The tags point at the signed, tested digest, with its attestations.
+      - name: Tag the image
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" --tag "$IMAGE:$CHANNEL" \
+            "$IMAGE@$DIGEST"
+          for tag in "$VERSION" "$CHANNEL"; do
+            tagged=$(docker buildx imagetools inspect "$IMAGE:$tag" --format '{{.Manifest.Digest}}')
+            if [ "$tagged" != "$DIGEST" ]; then
+              echo "::error::$IMAGE:$tag is $tagged, not the signed $DIGEST"
+              exit 1
+            fi
+          done
