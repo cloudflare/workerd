@@ -1380,6 +1380,14 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
     return p.getHandle(js);
   }
   constexpr auto kSpecifier = "node:buffer"_kj;
+  // This loads the module on first access. With the new module registry, a require() at
+  // evaluation depth 0 drains the microtask queue, so a first access during a request would run
+  // the Worker's pending microtasks inside this getter. node:buffer is a synchronous built-in
+  // that settles without a drain, so it is resolved as if nested in a module evaluation.
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     KJ_IF_SOME(p, bufferValue) {
       // There's a chance that resolving the module caused side-effects
@@ -1448,6 +1456,11 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
     }
   })();
 
+  // Resolved as if nested in a module evaluation, for the reason given in getBuffer().
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveInternalModule(specifier)) {
     KJ_IF_SOME(p, processValue) {
       // There's a chance that resolving the module caused side-effects
