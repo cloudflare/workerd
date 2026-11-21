@@ -784,12 +784,6 @@ pub mod ffi {
         );
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
 
-        pub unsafe fn wrappable_downgrade(wrappable: Pin<&mut Wrappable>) -> WrappableWeakRc;
-        pub unsafe fn wrappable_weak_clone(weak: &WrappableWeakRc) -> WrappableWeakRc;
-        pub unsafe fn wrappable_weak_is_alive(weak: &WrappableWeakRc) -> bool;
-        pub unsafe fn wrappable_weak_upgrade(weak: &WrappableWeakRc) -> KjMaybe<KjRc<Wrappable>>;
-        pub unsafe fn wrappable_weak_drop(weak: &mut WrappableWeakRc);
-
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
         pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
@@ -1124,13 +1118,6 @@ pub mod ffi {
         pub type_id_lo: usize,
         /// `TypeId::of::<R>()` high 64 bits.
         pub type_id_hi: usize,
-    }
-
-    /// A `kj::WeakRc<Wrappable>`, with its layout: the pointers to its weak cell and to the
-    /// Wrappable. Owned by a [`WrappableWeak`](super::WrappableWeak).
-    pub struct WrappableWeakRc {
-        cell: usize,
-        ptr: usize,
     }
 
     pub struct ConstructorDescriptor {
@@ -5925,9 +5912,7 @@ impl WrappableRc {
     /// The caller must hold the Wrappable's isolate lock, which guards the reference's count.
     pub(crate) fn downgrade(&self) -> WrappableWeak {
         WrappableWeak {
-            // SAFETY: the Wrappable is valid (guaranteed by KjRc lifetime).
-            handle: unsafe { ffi::wrappable_downgrade(self.as_pin_mut()) },
-            _not_send: PhantomData,
+            handle: self.handle.downgrade(),
         }
     }
 
@@ -6162,46 +6147,30 @@ impl WrappableRc {
     }
 }
 
-/// An owned `kj::WeakRc<Wrappable>`, made by [`WrappableRc::downgrade`].
+/// A weak reference to a Wrappable, made by [`WrappableRc::downgrade`].
 ///
 /// Its count is not atomic, so every operation, dropping included, needs the Wrappable's isolate
 /// lock, or must be the one thread that releases references once the isolate is disposed (see
 /// [`IsolateState`]).
+#[derive(Clone)]
 pub(crate) struct WrappableWeak {
-    handle: ffi::WrappableWeakRc,
-    _not_send: PhantomData<*const ()>,
+    handle: kj_rs::KjWeakRc<ffi::Wrappable>,
 }
 
 impl WrappableWeak {
-    /// Whether the Wrappable is alive.
+    /// Whether the Wrappable is alive and not condemned (see `wrappable_is_condemned`).
     pub(crate) fn is_alive(&self) -> bool {
-        // SAFETY: `handle` is a valid `kj::WeakRc`.
-        unsafe { ffi::wrappable_weak_is_alive(&self.handle) }
+        self.handle.try_get().is_some_and(|wrappable| {
+            // SAFETY: the Wrappable has not expired, and the caller holds its isolate lock, so
+            // nothing destroys it during the call.
+            !unsafe { ffi::wrappable_is_condemned(wrappable.as_ref()) }
+        })
     }
 
     /// Returns a strong reference to the Wrappable if it is alive.
     pub(crate) fn upgrade(&self) -> Option<WrappableRc> {
-        // SAFETY: `handle` is a valid `kj::WeakRc`.
-        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
-            unsafe { ffi::wrappable_weak_upgrade(&self.handle) }.into();
-        handle.map(|handle| WrappableRc { handle })
-    }
-}
-
-impl Clone for WrappableWeak {
-    fn clone(&self) -> Self {
-        Self {
-            // SAFETY: `handle` is a valid `kj::WeakRc`.
-            handle: unsafe { ffi::wrappable_weak_clone(&self.handle) },
-            _not_send: PhantomData,
-        }
-    }
-}
-
-impl Drop for WrappableWeak {
-    fn drop(&mut self) {
-        // SAFETY: `handle` is a valid `kj::WeakRc`, not used after this.
-        unsafe { ffi::wrappable_weak_drop(&mut self.handle) };
+        // SAFETY: nothing calls `KjRc::get_mut` on a Wrappable (see `WrappableRc::as_pin_mut`).
+        unsafe { self.handle.upgrade() }.map(|handle| WrappableRc { handle })
     }
 }
 

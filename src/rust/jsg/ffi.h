@@ -77,14 +77,6 @@ struct TraitObjectPtr {
 };
 #endif
 
-#ifndef CXXBRIDGE1_STRUCT_workerd$rust$jsg$WrappableWeakRc
-#define CXXBRIDGE1_STRUCT_workerd$rust$jsg$WrappableWeakRc
-struct WrappableWeakRc {
-  uintptr_t cell;
-  uintptr_t ptr;
-};
-#endif
-
 // A Wrappable subclass for Rust objects.
 //
 // Lives on the KJ heap (via kj::Refcounted through Wrappable) and integrates
@@ -115,12 +107,6 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
     return addRefToThis();
-  }
-
-  // Returns a new kj::WeakRc reference to this Wrappable, which expires when the last kj::Rc
-  // reference is dropped, before the Wrappable and its Rust object are destroyed.
-  kj::WeakRc<Wrappable> toWeakRc() {
-    return addWeakToThis();
   }
 
   // Frees the allocation of allocate(). Being the only usual deallocation function of the class,
@@ -166,17 +152,11 @@ void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr);
 void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 
-// A jsg::Weak holds a kj::WeakRc<Wrappable> as a WrappableWeakRc, which has its layout. Like the
-// kj::Rc of a jsg::Rc, its count is not atomic, and Rust's IsolateState serializes its release.
-WrappableWeakRc wrappable_downgrade(Wrappable& wrappable);
-WrappableWeakRc wrappable_weak_clone(const WrappableWeakRc& weak);
-bool wrappable_weak_is_alive(const WrappableWeakRc& weak);
-kj::Maybe<kj::Rc<Wrappable>> wrappable_weak_upgrade(const WrappableWeakRc& weak);
-void wrappable_weak_drop(WrappableWeakRc& weak);
 void wrappable_add_strong_ref(Wrappable& wrappable);
 // Whether a collection found the Wrappable unreachable and is sweeping it (see
-// jsg::Wrappable::isCondemned()). wrappable_weak_is_alive() and Weak::upgrade refuse such a
-// Wrappable; wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
+// jsg::Wrappable::isCondemned()). A jsg::Weak, which holds a kj::WeakRc<Wrappable>, refuses such a
+// Wrappable in is_alive and upgrade; wrappable_try_condemn also condemns it, as C++
+// WeakRef::tryAddRef() does.
 bool wrappable_is_condemned(const Wrappable& wrappable);
 bool wrappable_try_condemn(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);

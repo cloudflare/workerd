@@ -83,6 +83,9 @@ The `kj-rs` bridge supports:
 - `kj::Maybe<T>` and `kj::Date`.
 - Conversions provided by [`kj-rs/convert.h`](kj-rs/convert.h).
 
+`kj_rs::KjWeakRc<T>` mirrors `kj::WeakRc<T>` for Rust code, which makes one with
+`KjRc::downgrade()`; a bridge signature can't use it.
+
 ### Async functions
 
 Bridge declarations support async calls in both directions:

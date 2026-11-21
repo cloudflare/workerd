@@ -1355,48 +1355,6 @@ kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {
   return wrappable.toRc();
 }
 
-namespace {
-
-static_assert(sizeof(WrappableWeakRc) == sizeof(kj::WeakRc<Wrappable>) &&
-    alignof(WrappableWeakRc) == alignof(kj::WeakRc<Wrappable>));
-
-// A kj::WeakRc holds only its cell and referent pointers, so Rust may move its bytes.
-const kj::WeakRc<Wrappable>& weakRcFromFfi(const WrappableWeakRc& weak) {
-  return *reinterpret_cast<const kj::WeakRc<Wrappable>*>(&weak);
-}
-
-WrappableWeakRc weakRcToFfi(kj::WeakRc<Wrappable> weak) {
-  WrappableWeakRc result;
-  new (&result) kj::WeakRc<Wrappable>(kj::mv(weak));
-  return result;
-}
-
-}  // namespace
-
-WrappableWeakRc wrappable_downgrade(Wrappable& wrappable) {
-  return weakRcToFfi(wrappable.toWeakRc());
-}
-
-WrappableWeakRc wrappable_weak_clone(const WrappableWeakRc& weak) {
-  // clone() only adds a reference to the shared cell.
-  return weakRcToFfi(const_cast<kj::WeakRc<Wrappable>&>(weakRcFromFfi(weak)).clone());
-}
-
-bool wrappable_weak_is_alive(const WrappableWeakRc& weak) {
-  KJ_IF_SOME(wrappable, weakRcFromFfi(weak).tryGet()) {
-    return !wrappable.isCondemned();
-  }
-  return false;
-}
-
-kj::Maybe<kj::Rc<Wrappable>> wrappable_weak_upgrade(const WrappableWeakRc& weak) {
-  return weakRcFromFfi(weak).upgrade();
-}
-
-void wrappable_weak_drop(WrappableWeakRc& weak) {
-  reinterpret_cast<kj::WeakRc<Wrappable>*>(&weak)->~WeakRc();
-}
-
 void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
 }
