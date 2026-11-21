@@ -43,6 +43,21 @@ fn cluster_config(cluster: Option<(&str, &str)>) -> Config {
     )))
 }
 
+/// A config without a cluster that can join one: it defines the disk service `do-storage`.
+fn joinable_config() -> Config {
+    let mut message = capnp::message::Builder::new_default();
+    let mut services = message.init_root::<config::Builder>().init_services(2);
+    services.reborrow().get(0).set_name("main");
+    let mut storage = services.get(1);
+    storage.set_name(CLUSTER_STORAGE);
+    let mut disk = storage.init_disk();
+    disk.set_path("/var/lib/workerd/do");
+    disk.set_writable(true);
+    Config(words_from_bytes(&capnp::serialize::write_message_to_words(
+        &message,
+    )))
+}
+
 /// The cluster's key and bucket in `config`.
 fn cluster_of(config: &Config) -> (String, String) {
     let message = read(config);
@@ -309,9 +324,7 @@ fn cluster_environment_reports_an_unreadable_key_file() {
 
 #[test]
 fn cluster_address_joins_a_config_without_cluster_with_defaults() {
-    let config = cluster_config(None)
-        .join(Some("10.0.0.4:7000"), None)
-        .unwrap();
+    let config = joinable_config().join(Some("10.0.0.4:7000"), None).unwrap();
     let message = read(&config);
     let cluster = message
         .get_root::<config::Reader>()
@@ -377,20 +390,50 @@ fn a_config_joins_and_takes_the_environment_in_one_pass() {
         advertise: None,
         can_join: true,
     };
-    let config = cluster_config(None)
-        .with_cluster(&flags, Some(&var))
-        .unwrap();
+    let config = joinable_config().with_cluster(&flags, Some(&var)).unwrap();
     assert_eq!(
         cluster_of(&config),
         (key.to_owned(), "s3://bucket/prefix".to_owned())
     );
     // Without the environment, the joined cluster's key is missing.
     let Err(ClusterError::Environment(error)) =
-        cluster_config(None).with_cluster(&flags, Some(&env(&[])))
+        joinable_config().with_cluster(&flags, Some(&env(&[])))
     else {
         panic!("expected an environment error");
     };
     assert!(error.starts_with("cluster.key is not set."), "{error}");
+}
+
+#[test]
+fn a_config_without_cluster_storage_cannot_join_a_cluster() {
+    let expected = "--cluster-addr: the config has no writable disk service named `do-storage`, \
+                    which holds the Durable Objects of the cluster's deployments on each \
+                    instance, so it cannot join a cluster. Add one, or serve the wrangler config \
+                    itself, which defines it when joined.";
+    // None at all, as in `cluster_config`, or one by that name that is not a disk or is read-only.
+    let storage = |disk: bool| {
+        let mut message = capnp::message::Builder::new_default();
+        let mut services = message.init_root::<config::Builder>().init_services(1);
+        let mut service = services.reborrow().get(0);
+        service.set_name(CLUSTER_STORAGE);
+        if disk {
+            service.init_disk().set_path("/var/lib/workerd/do");
+        } else {
+            service.init_external().set_address("10.0.0.5:80");
+        }
+        Config(words_from_bytes(&capnp::serialize::write_message_to_words(
+            &message,
+        )))
+    };
+    for config in [cluster_config(None), storage(false), storage(true)] {
+        let Err(error) = config.join(Some("10.0.0.4:7000"), None) else {
+            panic!("expected an error");
+        };
+        assert_eq!(error, expected);
+    }
+    // A config with a cluster is not checked: it is joined as written.
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")));
+    assert!(config.join(Some("10.0.0.4:7000"), None).is_ok());
 }
 
 #[test]
