@@ -552,6 +552,9 @@ struct Worker::Impl {
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
+
+  // See Lock::getRequestRootTraceFrame().
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> requestRootTraceFrame;
 };
 
 // Note that Isolate mutable state is protected by locking the JsgWorkerIsolate unless otherwise
@@ -2972,6 +2975,21 @@ kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getTraceAsyncContextKe
 
 kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getUserTraceAsyncContextKey() {
   return worker.getIsolate().userTraceAsyncContextKey.addRef();
+}
+
+jsg::AsyncContextFrame& Worker::Lock::getRequestRootTraceFrame() {
+  KJ_IF_SOME(frame, worker.impl->requestRootTraceFrame) {
+    return *frame;
+  }
+  jsg::Lock& js = *this;
+  // A new frame copies the current frame's storage, so build this one in the root.
+  jsg::AsyncContextFrame::Scope rootScope(js);
+  auto requestRoot = js.v8Ref(v8::Null(js.v8Isolate).As<v8::Value>());
+  jsg::AsyncContextFrame::StorageEntry entries[] = {
+    {getTraceAsyncContextKey(), requestRoot.addRef(js)},
+    {getUserTraceAsyncContextKey(), kj::mv(requestRoot)},
+  };
+  return *worker.impl->requestRootTraceFrame.emplace(jsg::AsyncContextFrame::create(js, entries));
 }
 
 bool Worker::Lock::isInspectorEnabled() {

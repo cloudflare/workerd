@@ -944,7 +944,12 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     auto key = ioContext.getCurrentLock().getUserTraceAsyncContextKey();
     KJ_IF_SOME(value, frame.get(*key)) {
-      auto holder = value.getHandle(js).As<v8::Object>();
+      auto handle = value.getHandle(js);
+      if (IoContext::isRequestRootTraceScope(handle)) {
+        // A request-root entry is shared by all requests, so the span can't be cached on it.
+        handle = ioContext.getRequestRootUserTraceScope(ioContext.getCurrentLock());
+      }
+      auto holder = handle.As<v8::Object>();
       auto& scopeState = jsg::unwrapOpaqueRef<IoContext::UserTraceScopeState>(js.v8Isolate, holder);
       auto cacheKey = v8::Private::ForApi(js.v8Isolate, js.strIntern("workerd.activeSpan"_kjc));
       if (jsg::check(holder->HasPrivate(js.v8Context(), cacheKey))) {

@@ -871,6 +871,12 @@ class Worker::Lock {
   // Get the opaque storage key to use for recording user trace information in async contexts.
   kj::Arc<jsg::AsyncContextFrame::StorageKey> getUserTraceAsyncContextKey();
 
+  // Returns this worker's request-root frame, made on first use. It inherits nothing, and its
+  // entries for both trace keys are request-root entries (see
+  // IoContext::isRequestRootTraceScope()): they hold no request's state, and readers resolve them
+  // to the root spans of the current request. So every request can share the frame.
+  jsg::AsyncContextFrame& getRequestRootTraceFrame();
+
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
