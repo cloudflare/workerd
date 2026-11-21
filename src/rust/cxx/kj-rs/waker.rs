@@ -1,107 +1,150 @@
+//! FFI island: the `RawWakerVTable` bridging the C++ `FutureWakerCell` into
+//! `std::task::Waker`. `std`'s vtable ABI is four raw-pointer functions, so this file is where
+//! ownership must round-trip through a raw `RawWaker` data slot — everywhere else (including the
+//! whole C++ interface) waker ownership is a real `kj::Arc` handle. A genuine unsafe seam.
 #![allow(
     unsafe_code,
     reason = "converts between `Waker` and the C++ waker through raw pointers"
 )]
 
+use std::mem::ManuallyDrop;
 use std::task::RawWaker;
 use std::task::RawWakerVTable;
 use std::task::Waker;
 
-use crate::ffi::KjWaker;
+use crate::KjArc;
+use crate::ffi::FutureWakerCell;
+use crate::ffi::PollWaker;
 
-// Safety: We use the type system to express the Sync nature of KjWaker in the cxx-rs FFI boundary.
-// Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of const-qualified
-// functions is thread-safe by convention. Our implementations of KjWakers in C++ respect this
-// convention.
+// Thread-safety: `std::task::Waker` documents that the vtable functions must be thread-safe, and
+// `Waker: Send + Sync` means safe Rust may clone, wake, and drop these from any thread. The
+// vtables uphold that for real: clone/drop are atomic refcount operations on the
+// `FutureWakerCell` (`Send + Sync`; see the impls in ffi.rs), and `wakeByRef` routes wakes
+// through an owning-executor check on the C++ side — same-thread wakes arm the event directly,
+// foreign-thread wakes go through a cross-thread fulfiller (waker.h).
+
+// =======================================================================================
+// The poll's Waker: a view of the PollWaker's cell that owns no reference
 //
-// Note: Implementing these traits does not seem to be required for building, but the Waker
-// documentation makes it clear Send and Sync are a requirement of the pointed-to type.
+// C++ passes each poll a `&PollWaker`, which holds a strong reference to the event's cell until
+// the poll returns. The `Waker` lent to `Future::poll()` is the cell's own `RawWaker` (the
+// owned-cell vtable below, `data` = the cell) minus that reference, so it is the same `RawWaker`
+// as every clone of it: `Waker::will_wake` holds between the poll's waker and the clones
+// retained from earlier polls. Futures use that to keep a parked waker rather than replace it,
+// and hyper's `want::Giver` wakes the waker it replaces, so without it a hyper connection would
+// re-arm its own event on every poll and keep the loop from ever going idle.
+
+/// The `Waker` for one poll driven by `waker`. `ManuallyDrop` because it carries no reference to
+/// release: the `PollWaker` holds one for as long as the poll runs, and the poll bridge
+/// (future.rs) drops this before returning.
+pub fn lend(waker: &PollWaker) -> ManuallyDrop<Waker> {
+    let raw = RawWaker::new(
+        std::ptr::from_ref::<FutureWakerCell>(waker.cell()).cast::<()>(),
+        &CELL_WAKER_VTABLE,
+    );
+    // Safety: the vtable functions below uphold the RawWaker contract (see the thread-safety
+    // note above). Their `data` contract is a live cell, which the `PollWaker`'s reference
+    // guarantees for as long as this view exists; `ManuallyDrop` keeps the view's drop from
+    // releasing a reference it does not hold, while its clones take references of their own.
+    ManuallyDrop::new(unsafe { Waker::from_raw(raw) })
+}
+
+// =======================================================================================
+// Owned-cell vtable: retained Wakers holding a strong reference to a FutureWakerCell
 //
-// https://doc.rust-lang.org/std/task/struct.RawWaker.html
-// https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl Send for KjWaker {}
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl Sync for KjWaker {}
+// `data` carries one strong reference (a disowned `KjArc<FutureWakerCell>`). Clone takes another
+// reference; drop re-owns and releases the carried one. All of it is safe from any thread: the
+// refcount is atomic and the cell's wake is executor-routed (waker.h).
 
-impl From<&KjWaker> for Waker {
-    fn from(waker: &KjWaker) -> Self {
-        let waker = RawWaker::new(
-            std::ptr::from_ref::<KjWaker>(waker).cast::<()>(),
-            &KJ_WAKER_VTABLE,
-        );
-        // Safety: KjWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
-        // implementation functions are all thread-safe.
-        //
-        // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe { Self::from_raw(waker) }
+/// Surrender the handle's strong reference into a bare pointer for a `RawWaker` data slot.
+/// Reversed by `FutureWakerCell::reown` in [`cell_waker_drop`].
+fn cell_into_raw(cell: KjArc<FutureWakerCell>) -> *const FutureWakerCell {
+    let ptr = cell.get();
+    std::mem::forget(cell);
+    ptr
+}
+
+/// # Safety
+///
+/// `data` must point to a live `FutureWakerCell`: either one produced by [`cell_into_raw`]
+/// whose strong reference this `RawWaker` still carries, or the cell of a `PollWaker` whose poll
+/// is still running ([`lend`], whose view is never dropped through the vtable). These vtable
+/// entries are only installed alongside such pointers, by [`lend`] and the functions below. It
+/// is never null: both sources are references to a cell.
+unsafe fn cell_deref<'a>(data: *const ()) -> &'a FutureWakerCell {
+    debug_assert!(!data.is_null(), "owned-cell RawWaker with a null data slot");
+    // Safety: live and non-null per this fn's `# Safety` contract (the carried strong reference
+    // keeps the cell alive).
+    unsafe { &*data.cast::<FutureWakerCell>() }
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`].
+unsafe fn cell_waker_clone(data: *const ()) -> RawWaker {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    let cell = unsafe { cell_deref(data) };
+    RawWaker::new(
+        cell_into_raw(cell.add_ref()).cast::<()>(),
+        &CELL_WAKER_VTABLE,
+    )
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`].
+unsafe fn cell_waker_wake_by_ref(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract.
+    unsafe { cell_deref(data) }.wake_by_ref();
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_deref`], and the `RawWaker` must carry a strong reference (it does
+/// unless it is a view from [`lend`], which is never dropped), which is released (the `RawWaker`
+/// must not be used again -- guaranteed by the `Waker` contract for `drop`).
+unsafe fn cell_waker_drop(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract; `data` carries a strong reference,
+    // so re-own it and let the handle fall, releasing the reference.
+    let _cell = unsafe { cell_deref(data).reown() };
+}
+
+/// # Safety
+///
+/// Same contract as [`cell_waker_drop`].
+unsafe fn cell_waker_wake(data: *const ()) {
+    // Safety: forwarded from this fn's `# Safety` contract; wake-then-release.
+    unsafe {
+        cell_waker_wake_by_ref(data);
+        cell_waker_drop(data);
     }
 }
 
-// Helper function for use in KjWaker's RawWakerVTable implementation to factor out a tedious null
-// pointer check.
-fn deref_kj_waker<'a>(data: *const ()) -> Option<&'a KjWaker> {
-    if data.is_null() {
-        None
-    } else {
-        let p = data.cast::<KjWaker>();
-        // Safety:
-        // 1. p is guaranteed non-null by the check above.
-        // 2. This function is only used in the implementations of our RawWakerVTable for KjWaker.
-        //    All vtable implementation functions are trivially guaranteed that their owning Waker
-        //    object is still alive. We assume the Waker was constructed correctly to begin with,
-        //    and that therefore the pointer still points to valid memory.
-        // 3. We do not read or write the KjWaker's memory, so there are no atomicity concerns nor
-        //    interleaved pointer/reference access concerns.
-        //
-        // https://doc.rust-lang.org/std/ptr/index.html#safety
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        Some(unsafe { &*p })
-    }
-}
-
-pub fn kj_waker_clone(data: *const ()) -> RawWaker {
-    let new_data = if let Some(kj_waker) = deref_kj_waker(data) {
-        kj_waker.clone_kj_waker().cast::<()>()
-    } else {
-        std::ptr::null()
-    };
-    RawWaker::new(new_data, &KJ_WAKER_VTABLE)
-}
-
-pub fn kj_waker_wake(data: *const ()) {
-    if let Some(kj_waker) = deref_kj_waker(data) {
-        kj_waker.wake();
-    }
-}
-
-pub fn kj_waker_wake_by_ref(data: *const ()) {
-    if let Some(kj_waker) = deref_kj_waker(data) {
-        kj_waker.wake_by_ref();
-    }
-}
-
-pub fn kj_waker_drop(data: *const ()) {
-    if let Some(kj_waker) = deref_kj_waker(data) {
-        kj_waker.drop();
-    }
-}
-
-static KJ_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    kj_waker_clone,
-    kj_waker_wake,
-    kj_waker_wake_by_ref,
-    kj_waker_drop,
+static CELL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    cell_waker_clone,
+    cell_waker_wake,
+    cell_waker_wake_by_ref,
+    cell_waker_drop,
 );
 
-/// If `waker` wraps a `KjWaker`, return the `KjWaker` pointer it was originally constructed with,
-/// or null if `waker` does not wrap a `KjWaker`. Note that the `KjWaker` pointer originally used
-/// to construct `waker` may itself by null.
-pub fn try_into_kj_waker_ptr(waker: &Waker) -> *const KjWaker {
-    if waker.vtable() == &KJ_WAKER_VTABLE {
-        waker.data().cast::<KjWaker>()
+/// If `waker` is a KJ `FutureWakerCell` (the poll's waker from [`lend`], or a clone of one),
+/// return the cell, borrowed from `waker` itself. Foreign Wakers return `None`: they expose no
+/// `FuturePollEvent` to arm directly, so `RustPromiseAwaiter` takes its generic fallback path for
+/// them.
+pub fn try_waker_cell(waker: &Waker) -> Option<&FutureWakerCell> {
+    // Identity comparison on the vtable pointer, NOT `==`: `RawWakerVTable`'s `PartialEq` compares
+    // its function pointers, and Rust does not guarantee function-pointer equality across codegen
+    // units (distinct fns may share an address, and a fn may have several). A different vtable that
+    // happened to carry the same callbacks could pass a value compare, after which we would cast an
+    // unrelated `data` pointer to `FutureWakerCell` -- an invalid unsafe cast. `ptr::eq` on the
+    // vtable static is the reliable discriminator: CELL_WAKER_VTABLE is the one and only vtable
+    // whose `data` is a cell.
+    if std::ptr::eq(waker.vtable(), &raw const CELL_WAKER_VTABLE) {
+        // Safety: Wakers carrying CELL_WAKER_VTABLE always point at a live cell (the
+        // `cell_deref` contract), kept alive by `waker` itself or, for a lent view, by the
+        // running poll that `waker` cannot outlive; the returned borrow is tied to `waker`.
+        Some(unsafe { cell_deref(waker.data()) })
     } else {
-        std::ptr::null()
+        None
     }
 }

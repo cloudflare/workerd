@@ -5,12 +5,11 @@
 // TcpStream/UnixStream, a listener set, an address list) by calling the bridged operations in
 // ffi.rs, which return kj::Promises. What the adapters add, and where the rules live:
 //
-//  - Operation-start policy. A bridged Rust future is cold until first polled, whereas KJ's
-//    native streams start their operation inside the call. Every promise-returning method here
-//    therefore starts its operation before returning: coroutine bodies run to their first
-//    co_await by construction, and non-coroutine methods wrap the bridged promise in started()
-//    (async-io.c++: kj::Promise::eagerlyEvaluate, whose first poll is synchronous). A promise
-//    that is kept but never awaited still completes as the loop turns. When the syscall itself
+//  - Operation-start policy. KJ's native streams start their operation inside the call, and so
+//    does every promise-returning method here: kj-rs converts a bridged Rust future into an
+//    eager kj::Promise, polled to its first suspension point before the call returns, and
+//    coroutine bodies run to their first co_await by construction. A promise that is kept but
+//    never awaited still completes as the loop turns. When the syscall itself
 //    happens is tokio's decision, not KJ's (stream.rs, "When the syscall happens"). Dropping a
 //    promise drops the Rust future, which releases the socket's readiness interest; a stream with
 //    a cancelled read remains usable.
