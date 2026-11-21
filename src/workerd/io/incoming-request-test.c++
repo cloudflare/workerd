@@ -438,6 +438,66 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   fixture.drainAndDestroy(kj::mv(second));
 }
 
+// An IoChannelFactory numbered in the order the fixture's incoming requests were created.
+struct NumberedChannelFactory final: public TestFixture::DummyIoChannelFactory {
+  NumberedChannelFactory(TimerChannel& timer, uint number)
+      : DummyIoChannelFactory(timer),
+        number(number) {}
+  uint number;
+};
+
+uint channelFactoryNumber(IoContext& context) {
+  return kj::downcast<NumberedChannelFactory>(context.getIoChannelFactory()).number;
+}
+
+// Delivers two requests to one actor, the older numbered 0 and the newer 1, and has the newer
+// return while the actor has background work, so that it stays current. Calls `body` with the
+// actor's context and a function that has the older request return too.
+void withReturnedNewerRequest(TestFixture::SetupParams params,
+    kj::FunctionParam<void(IoContext&, kj::FunctionParam<void()> returnOlder)> body) {
+  uint created = 0;
+  params.actorId = Worker::Actor::Id(kj::str("io-channels-test"));
+  params.ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+      [&created](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<NumberedChannelFactory>(timer, created++);
+  });
+  TestFixture fixture(kj::mv(params));
+  auto context = fixture.newIoContext();
+  auto older = fixture.newIncomingRequest(*context);
+  auto newer = fixture.newIncomingRequest(*context);
+  context->addWaitUntil(kj::NEVER_DONE);
+
+  ErrorHandlerImpl errorHandler;
+  kj::TaskSet waitUntilTasks(errorHandler);
+  newer->drain(waitUntilTasks, kj::mv(newer));
+
+  auto returnOlder = [&]() {
+    if (older.get() != nullptr) older->drain(waitUntilTasks, kj::mv(older));
+  };
+  body(*context, returnOlder);
+  returnOlder();
+}
+
+KJ_TEST("an actor's calls use the channels of its newest running request") {
+  withReturnedNewerRequest(
+      {.autogateKeys = kj::arr(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)},
+      [](IoContext& context, kj::FunctionParam<void()> returnOlder) {
+    KJ_EXPECT(channelFactoryNumber(context) == 0);
+
+    // Once every request has returned, the calls use the current request's channels.
+    returnOlder();
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
+}
+
+KJ_TEST("without IO_CHANNELS_FROM_RUNNING_REQUEST, an actor's calls use its current request's "
+        "channels") {
+  withReturnedNewerRequest(
+      {.ignoreAllAutogatesEnv = true}, [](IoContext& context, kj::FunctionParam<void()>) {
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
+}
+
 KJ_TEST("cancelPendingWorkForHibernation() cancels pending work but keeps abort watchers armed") {
   TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-test"))});
   auto& waitScope = fixture.getWaitScope();
