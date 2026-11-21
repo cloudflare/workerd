@@ -285,8 +285,6 @@ wd_cc_library(
     ],
 )
 
-wd_capnp_library(src = "docker-api.capnp")
-
 wd_capnp_library(
     src = "compiled-bindings.capnp",
     deps = [":workerd_capnp"],
