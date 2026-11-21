@@ -168,8 +168,13 @@ inline kj::Own<workerd::WorkerInterface> fromImpl(
 // Wraps a worker that is still starting in the Rust `PromisedInterface`, the counterpart of
 // `newPromisedWorkerInterface`. Every event waits for `start`, then runs on the worker it
 // resolves to.
+//
+// `start` is evaluated eagerly, so the worker starts as soon as it can rather than when the
+// first event arrives, as with the C++ implementation. Its result, a failure included, waits in
+// the promise until an event awaits it.
 inline kj::Own<workerd::WorkerInterface> newPromisedInterface(WorkerPromise start) {
-  return kj::from<kj_rs::Rust>(new_promised_interface(kj::heap<WorkerPromise>(kj::mv(start))));
+  return kj::from<kj_rs::Rust>(
+      new_promised_interface(kj::heap<WorkerPromise>(start.eagerlyEvaluate(nullptr))));
 }
 
 }  // namespace workerd::rust::worker

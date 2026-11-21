@@ -94,7 +94,8 @@ pub mod bridge {
         fn new_cxx_worker(inner: KjOwn<WorkerInterface>) -> Box<Wrapper>;
 
         /// Creates a `PromisedInterface` for the C++ worker that `start` resolves to. `start` is
-        /// not awaited until the first event arrives.
+        /// not awaited until the first event arrives; C++ callers make it eager first, with
+        /// `newPromisedInterface()` in bridge.h.
         #[expect(
             clippy::unnecessary_box_returns,
             reason = "c++ expects heap-allocation"

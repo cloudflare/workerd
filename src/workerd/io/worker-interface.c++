@@ -113,6 +113,9 @@ class PromisedWorkerInterface final: public WorkerInterface {
 }  // namespace
 
 kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise) {
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_PROMISED_WORKER_INTERFACE)) {
+    return rust::worker::newPromisedInterface(kj::mv(promise));
+  }
   return kj::heap<PromisedWorkerInterface>(kj::mv(promise));
 }
 
