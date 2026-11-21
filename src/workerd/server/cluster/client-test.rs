@@ -161,25 +161,32 @@ async fn call(bucket: &Bucket, call: Call) -> std::result::Result<String, String
     })
 }
 
+/// In `retried`, the request's connection closes unanswered.
+const CLOSE: u16 = 0;
+
 /// Drives `bucket` as `end_to_end` does, through calls the bucket answers
-/// only after refusing them once or more.
+/// only after refusing them, or closing their connections, once or more.
 async fn retried(
     bucket: &Bucket,
     server: &Server,
     queue: &Mutex<VecDeque<Answer>>,
     version: (&'static str, &str),
 ) {
-    let answer = |status| Answer::Reply {
-        status,
-        headers: if status == 200 {
-            vec![(version.0, version.1.to_owned())]
-        } else {
-            Vec::new()
+    let answer = |status| match status {
+        CLOSE => Answer::Close,
+        _ => Answer::Reply {
+            status,
+            headers: if status == 200 {
+                vec![(version.0, version.1.to_owned())]
+            } else {
+                Vec::new()
+            },
+            body: String::new(),
         },
-        body: String::new(),
     };
     let unknown = |status| Err(format!("unknown: PUT k: {status} to a retry"));
     let written = Ok(format!("Some({:?})", version.1));
+    let closed = "client error (SendRequest): connection closed before message completed";
     for (call_, statuses, expected) in [
         // A 429 or 503 may follow a write the bucket applied, and a guard
         // that fails after it may fail against that write.
@@ -188,11 +195,22 @@ async fn retried(
         (Call::PutIfAbsent, &[429, 412], unknown(412)),
         (Call::PutIfAbsent, &[503, 429, 412], unknown(412)),
         (Call::PutIfAbsent, &[503, 200], written.clone()),
-        (Call::PutIfAbsent, &[429, 200], written),
+        (Call::PutIfAbsent, &[429, 200], written.clone()),
         (Call::PutIfAbsent, &[412], Ok("None".into())),
         // A write without a guard fails no guard.
         (Call::Put, &[503, 200], Ok("written".into())),
         (Call::Put, &[503, 412], Err("PUT k: 412 ".into())),
+        // So may a connection that failed with the request on it, which
+        // the bucket may have received whole.
+        (Call::PutIfAbsent, &[CLOSE, 412], unknown(412)),
+        (Call::PutIfAbsent, &[CLOSE, 503, 200], written.clone()),
+        (Call::Put, &[CLOSE, 200], Ok("written".into())),
+        (
+            Call::Get,
+            &[CLOSE, CLOSE, 200],
+            Ok(format!("Some({:?})", version.1)),
+        ),
+        (Call::Put, &[CLOSE; 5], Err(format!("PUT k: {closed}"))),
     ] {
         queue
             .lock()
@@ -202,6 +220,48 @@ async fn retried(
         assert_eq!(outcome, expected, "{call_:?} answered {statuses:?}");
         assert_eq!(server.take().len(), statuses.len(), "{statuses:?}");
     }
+
+    // A new connection that closed before the request went out on it: the
+    // request is sent again, and a guard that fails then fails against no
+    // copy of this write. Each answer closes its connection, so that the
+    // next request opens one.
+    let closing = |status| Answer::Reply {
+        status,
+        headers: vec![
+            ("connection", "close".to_owned()),
+            (version.0, version.1.to_owned()),
+        ],
+        body: String::new(),
+    };
+    for (call_, hang_ups, statuses, expected) in [
+        (Call::PutIfAbsent, 1, &[412][..], Ok("None".into())),
+        (Call::PutIfAbsent, 2, &[200], written.clone()),
+        (Call::Get, 1, &[200], written.clone()),
+    ] {
+        server.hang_up(hang_ups);
+        queue
+            .lock()
+            .unwrap()
+            .extend(statuses.iter().map(|status| closing(*status)));
+        let outcome = call(bucket, call_).await;
+        assert_eq!(outcome, expected, "{call_:?} after {hang_ups} hang-ups");
+        assert_eq!(server.take().len(), statuses.len(), "{call_:?}");
+        // The request went out on new connections, not a pooled one.
+        assert_eq!(server.hang_ups(), 0, "{call_:?}");
+    }
+    server.hang_up(5);
+    let outcome = call(bucket, Call::Put).await;
+    let message = outcome.expect_err("five hang-ups");
+    assert!(message.starts_with("PUT k: client error ("), "{message}");
+    assert_eq!(server.take().len(), 0);
+    assert_eq!(server.hang_ups(), 0);
+
+    // Any other failure is the answer: a body cut short after the head.
+    let head = vec![(version.0, version.1.to_owned())];
+    queue.lock().unwrap().push_back(Answer::Cut(head));
+    let outcome = call(bucket, Call::Get).await;
+    assert!(outcome.is_err(), "{outcome:?}");
+    assert_eq!(server.take().len(), 1);
 }
 
 /// Drives `bucket`, the client of the fake bucket `b` at `server`, which
