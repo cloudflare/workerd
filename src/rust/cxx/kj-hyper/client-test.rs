@@ -93,7 +93,20 @@ fn a_response_head_that_does_not_parse_fails_as_kj_does() {
             "{}",
             error.description()
         );
+        assert_eq!(
+            detail(&error, INVALID_RESPONSE_DETAIL_ID),
+            Some(error.description().as_bytes())
+        );
     });
+}
+
+/// The payload of `error`'s detail of type `id`.
+fn detail(error: &KjError, id: u64) -> Option<&[u8]> {
+    let details = error.details()?;
+    details
+        .iter()
+        .find(|(type_id, _)| *type_id == id)
+        .map(|(_, payload)| payload.as_slice())
 }
 
 #[test]

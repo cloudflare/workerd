@@ -114,14 +114,27 @@ fn disconnected(what: impl Display) -> KjError {
     KjError::new(KjExceptionType::Disconnected, what.to_string())
 }
 
-/// What kj's `HttpClient` fails with when a response head doesn't parse. `fetch()` in
-/// `workerd/api/http.c++` matches this text to report an invalid response.
+/// What kj's `HttpClient` fails with when a response head doesn't parse.
 const INVALID_RESPONSE: &str = "The headers sent by the server are not valid.";
 
-/// A request's failure: FAILED with kj's message for a response head that doesn't parse, the
-/// I/O error behind it when there is one, else DISCONNECTED (hyper reports a connection that
-/// went away in several shapes). A DISCONNECTED message names every cause: on its own,
-/// `hyper-util`'s error says only `client error (SendRequest)`.
+/// The `kj::Exception` detail on a request's failure when the response head didn't parse.
+///
+/// The payload is the reason, as UTF-8. The same ID as `INVALID_RESPONSE_DETAIL_ID` in
+/// `workerd/jsg/exception.h`, which `fetch()` reads to report an invalid response.
+pub const INVALID_RESPONSE_DETAIL_ID: u64 = 0xb1fc_1336_36df_86e3;
+
+/// `error` with a detail of type `id` whose payload is `reason`.
+fn with_reason(error: KjError, id: u64, reason: String) -> KjError {
+    error.with_details(vec![(id, reason.into_bytes())])
+}
+
+/// A request's failure as a kj exception.
+///
+/// FAILED with kj's message for a response head that doesn't parse (and an
+/// [`INVALID_RESPONSE_DETAIL_ID`] detail), the I/O error behind it when there is one, else
+/// DISCONNECTED (hyper reports a connection that went away in several shapes). A DISCONNECTED
+/// message names every cause: on its own, `hyper-util`'s error says only
+/// `client error (SendRequest)`.
 fn client_error(error: &(dyn Error + 'static)) -> KjError {
     let mut source = Some(error);
     while let Some(e) = source {
@@ -131,7 +144,8 @@ fn client_error(error: &(dyn Error + 'static)) -> KjError {
         if e.downcast_ref::<hyper::Error>()
             .is_some_and(hyper::Error::is_parse)
         {
-            return failed(format_args!("{INVALID_RESPONSE} ({})", causes(error)));
+            let reason = format!("{INVALID_RESPONSE} ({})", causes(error));
+            return with_reason(failed(&reason), INVALID_RESPONSE_DETAIL_ID, reason);
         }
         source = e.source();
     }
