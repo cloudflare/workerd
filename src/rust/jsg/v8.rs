@@ -1224,12 +1224,11 @@ pub mod ffi {
         // Leaves what creating the wrapper throws pending; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
-            wrappable: KjRc<Wrappable>,
+            wrappable: Pin<&mut Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            wrapped_elsewhere: &mut bool,
         ) -> MaybeLocal /* v8::Local<Value> */;
 
-        // The existing wrapper, as `wrap_resource` returns it, without creating one; see `ffi.h`.
+        // See `ffi.h`.
         pub unsafe fn wrappable_get_wrapper(
             isolate: *mut Isolate,
             wrappable: Pin<&mut Wrappable>,
@@ -5836,19 +5835,12 @@ impl WrappableRc {
             return Ok(Some(wrapper));
         }
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
-        // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
-        let handle = unsafe {
-            ffi::wrap_resource(
-                lock.isolate().as_ffi(),
-                self.handle.clone(),
-                &constructor,
-                &mut wrapped_elsewhere,
-            )
-        };
-        if wrapped_elsewhere {
-            return Ok(None);
-        }
+        // SAFETY: isolate is valid and locked; the Wrappable has no wrapper, as checked above, or
+        // an exception is pending and `wrap_resource` returns before it attaches one; the
+        // constructor is a function template of the isolate, which the Realm's template cache
+        // keeps alive.
+        let handle =
+            unsafe { ffi::wrap_resource(lock.isolate().as_ffi(), self.as_pin_mut(), &constructor) };
         // SAFETY: the wrapper is created in the scope of `lock`.
         let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
         Ok(Some(wrapper))
