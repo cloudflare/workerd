@@ -313,32 +313,6 @@ wd_cc_library(
     ],
 )
 
-wd_cc_library(
-    name = "container-client",
-    srcs = ["container-client.c++"],
-    hdrs = ["container-client.h"],
-    implementation_deps = [
-        "//src/workerd/util:stream-utils",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":channel-token",
-        ":docker-api_capnp",
-        "//src/workerd/io",
-        "//src/workerd/io:container_capnp",
-        "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:sentry",
-        "//src/workerd/util:strings",
-        "//src/workerd/util:uuid",
-        "@ada-url",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
-    ],
-)
-
 # Calls kj::setupAsyncIo() (its own thread's loop) but does not supply it: the BINARY picks the I/O
 # backend by linking //src/workerd/util:setup-async-io (the tokio backend; kj_test and
 # wd_cc_benchmark do this for every test binary) or @capnp-cpp//src/kj:kj-async (kj's own event
@@ -453,14 +427,6 @@ copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin",
     out = "pyodide.capnp.bin",
-)
-
-kj_test(
-    src = "container-client-test.c++",
-    deps = [
-        ":container-client",
-        "@capnp-cpp//src/kj",
-    ],
 )
 
 kj_test(

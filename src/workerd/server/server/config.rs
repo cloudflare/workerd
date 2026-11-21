@@ -58,6 +58,7 @@ use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
 use crate::cluster::PeerSession;
 use crate::cluster::SessionService;
+use crate::container::registry::Containers;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
@@ -70,6 +71,7 @@ use crate::worker::WorkerService;
 pub struct Factory {
     inner: KjOwn<ffi::WorkerFactory>,
     loopback: Loopback,
+    containers: Containers,
 }
 
 impl Factory {
@@ -78,7 +80,14 @@ impl Factory {
         Self {
             inner,
             loopback: Loopback::default(),
+            containers: Containers::default(),
         }
+    }
+
+    /// The clients of the actors' containers.
+    #[must_use]
+    pub fn containers(&self) -> &Containers {
+        &self.containers
     }
 
     /// The `loopback:` namespace of this server's sockets and external services.

@@ -139,6 +139,71 @@ fn upgrade_hijacks_the_connection() {
 }
 
 #[test]
+fn connect_tunnels_to_the_authority() {
+    let (api, loopback) = api();
+    runtime().block_on(async {
+        let listener = loopback.listen("docker").unwrap();
+        let server = async {
+            let mut stream = listener.accept().await.unwrap();
+            let request = read_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\n\r\nearly")
+                .await
+                .unwrap();
+            let mut input = [0; 4];
+            stream.read_exact(&mut input).await.unwrap();
+            assert_eq!(&input, b"ping");
+            stream.write_all(b" pong").await.unwrap();
+            stream.shutdown().await.unwrap();
+            request
+        };
+        let client = async {
+            let Upgrade::Hijacked(mut io) = api
+                .connect("10.0.0.2:8080", &[("X-Dst-Addr", "10.0.0.2:8080")])
+                .await
+                .unwrap()
+            else {
+                panic!("not hijacked");
+            };
+            io.write_all(b"ping").await.unwrap();
+            let mut output = String::new();
+            io.read_to_string(&mut output).await.unwrap();
+            output
+        };
+        let (request, output) = futures::join!(server, client);
+        assert_eq!(output, "early pong");
+        assert!(request.starts_with("CONNECT 10.0.0.2:8080 HTTP/1.1\r\n"));
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("host: 10.0.0.2:8080\r\n"));
+        assert!(lower.contains("x-dst-addr: 10.0.0.2:8080\r\n"));
+    });
+}
+
+#[test]
+fn refused_connect_reports_the_status_and_body() {
+    let (api, loopback) = api();
+    runtime().block_on(async {
+        let server = serve_one(
+            &loopback,
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 13\r\n\r\nnot listening",
+        );
+        let client = api.connect("10.0.0.2:8080", &[]);
+        let (_, upgrade) = futures::join!(server, client);
+        let Upgrade::Refused {
+            status,
+            status_text,
+            body,
+        } = upgrade.unwrap()
+        else {
+            panic!("hijacked");
+        };
+        assert_eq!(status, 400);
+        assert_eq!(status_text, "Bad Request");
+        assert_eq!(body, "not listening");
+    });
+}
+
+#[test]
 fn refused_upgrade_reports_the_status() {
     let (api, loopback) = api();
     runtime().block_on(async {

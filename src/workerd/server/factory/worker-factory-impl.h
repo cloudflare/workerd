@@ -11,7 +11,6 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
-#include <workerd/server/container-client.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/server/bridge.rs.h>
 #include <workerd/server/workerd.capnp.h>
@@ -92,8 +91,6 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
-  // Expires with this factory, which owns every container cleanup that uses `network`.
-  WeakOwner<kj::Network&> weakNetwork;
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
   kj::Own<Options> options;
@@ -113,20 +110,6 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   ChannelTokenHandler channelTokenHandler;
   kj::Maybe<::rust::Box<ServerHandle>> server;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorRegistrar;
-
-  // The Docker client of an actor's container. Actors and `setInactivityTimeout()` timers own the
-  // client; while one lives, the actor's next incarnation takes the same one.
-  struct Container {
-    kj::Maybe<ContainerClient&> client;
-    // Cancels `cleanup` when the next client takes the container over.
-    kj::Canceler canceler;
-    // Docker removing the container, once the last client to hold it has shut down.
-    kj::ForkedPromise<void> cleanup = kj::Promise<void>(kj::READY_NOW).fork();
-  };
-  // By container id. A callback of each client points at its entry.
-  kj::HashMap<kj::String, kj::Own<Container>> containers;
-  // Set by factory_shutdown_containers: no actor may acquire a container client any more.
-  bool containerShutdownStarted = false;
 
   // Background work no request owns: container cleanup, trace delivery, and the Rust server's
   // tasks (factory_spawn). Declared last, so that it is destroyed first: a task may hold anything

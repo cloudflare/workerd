@@ -31,6 +31,9 @@ pub use crate::cluster::Committer;
 pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
+pub use crate::container::handle::ContainerHandle;
+pub use crate::container::handle::ContainerPort;
+pub use crate::container::handle::ContainerProcess;
 pub use crate::entry::PendingCommand;
 pub use crate::entry::run_pending_command;
 pub use crate::in_process::InProcessServer;
@@ -154,6 +157,84 @@ pub mod ffi {
     struct ContainerRef {
         service_index: u32,
         namespace_index: u32,
+    }
+
+    /// A label of a container.
+    struct ContainerLabel {
+        name: String,
+        value: String,
+    }
+
+    /// A directory snapshot `start()` restores.
+    struct ContainerSnapshotRestore {
+        snapshot_id: String,
+        restore_path: String,
+    }
+
+    /// Where `start()` takes the image from: `source_text` names it. `Default` is the config's
+    /// image (the union's `containerSnapshotId` member, unset).
+    enum ContainerSource {
+        Default,
+        Image,
+        Snapshot,
+    }
+
+    /// `rpc::Container::StartParams`. A list the params do not have is empty and not `has_`.
+    struct ContainerStart {
+        entrypoint: Vec<String>,
+        has_entrypoint: bool,
+        environment: Vec<String>,
+        has_environment: bool,
+        enable_internet: bool,
+        labels: Vec<ContainerLabel>,
+        directory_snapshots: Vec<ContainerSnapshotRestore>,
+        source: ContainerSource,
+        source_text: String,
+        /// The `containers_pid_namespace` compatibility flag.
+        pid_namespace: bool,
+    }
+
+    /// `rpc::Container::ExecOptions` and the command. A field the params do not have is empty
+    /// and not `has_`; the PTY's size is meaningful with `pty`.
+    struct ContainerExec {
+        cmd: Vec<String>,
+        env: Vec<String>,
+        has_env: bool,
+        working_directory: String,
+        has_working_directory: bool,
+        user: String,
+        has_user: bool,
+        combined_output: bool,
+        pty: bool,
+        pty_cols: u16,
+        pty_rows: u16,
+    }
+
+    /// How a container's egress mapping proxies what it matches.
+    enum EgressProtocol {
+        Http,
+        Https,
+        Tcp,
+    }
+
+    /// `rpc::Container::DirectorySnapshot`, without the name, which the shim copies.
+    struct ContainerDirectorySnapshot {
+        id: String,
+        size: u64,
+        dir: String,
+    }
+
+    /// `rpc::Container::ContainerSnapshot`, without the name, which the shim copies.
+    struct ContainerImageSnapshot {
+        id: String,
+        size: u64,
+    }
+
+    /// `rpc::Container::InspectInfo`: `started`, or none.
+    struct ContainerInspect {
+        started: bool,
+        labels: Vec<ContainerLabel>,
+        image: String,
     }
 
     /// A facet's id and class, as the actor that owns the facet resolved them.
@@ -506,6 +587,7 @@ pub mod ffi {
             hooks: Box<ActorHooks>,
             hibernation_manager: KjMaybe<KjRc<HibernationManager>>,
             container: KjMaybe<&ContainerRef>,
+            container_client: KjMaybe<KjOwn<ContainerCapability>>,
         ) -> Result<KjOwn<ActorHandle>>;
 
         /// A live actor.
@@ -626,16 +708,19 @@ pub mod ffi {
             tunnel: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
 
-        /// Shuts down the Docker client of every actor's container and resolves once Docker has
-        /// removed the containers. No actor can start a container afterwards.
-        async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
-        /// Shuts down the Docker client of root actor `actor`'s container, in the namespace
-        /// `unique_key`, and resolves once Docker has removed the container.
-        async fn factory_stop_container(
+        /// A Worker's `ByteStream` a process's output goes to: `capnp::ExplicitEndOutputStream`.
+        type ExecOutput;
+        async fn exec_output_write(output: Pin<&mut ExecOutput>, data: &[u8]) -> Result<()>;
+        /// Ends the stream, and drops it once it has ended.
+        async fn exec_output_end(output: KjOwn<ExecOutput>) -> Result<()>;
+        fn exec_output_abort(output: Pin<&mut ExecOutput>, reason: KjException);
+
+        /// A container's client as the `rpc::Container::Client` an actor holds.
+        type ContainerCapability;
+        fn new_container_capability(
             factory: &WorkerFactory,
-            unique_key: &str,
-            actor: &str,
-        ) -> Result<()>;
+            client: Box<ContainerHandle>,
+        ) -> KjOwn<ContainerCapability>;
         /// Gives `metadata` what made it when an actor's work makes it: the actor's
         /// `ActorHooks::stamp_cause`.
         fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);
@@ -930,6 +1015,64 @@ pub mod ffi {
         /// Ends the server's tasks and drops the factory, logging an error if a service still
         /// holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
+
+        /// A container's client (container/handle.rs), behind the C++ shim's
+        /// `rpc::Container::Server`, which keeps the handle alive while a call runs.
+        type ContainerHandle;
+        async unsafe fn status<'a>(self: &'a ContainerHandle) -> Result<bool>;
+        async unsafe fn start<'a>(
+            self: &'a ContainerHandle,
+            params: &'a ContainerStart,
+        ) -> Result<()>;
+        async unsafe fn monitor<'a>(self: &'a ContainerHandle) -> Result<i32>;
+        async unsafe fn destroy<'a>(self: &'a ContainerHandle) -> Result<()>;
+        async unsafe fn signal<'a>(self: &'a ContainerHandle, signo: u32) -> Result<()>;
+        async unsafe fn exec<'a>(
+            self: &'a ContainerHandle,
+            params: &'a ContainerExec,
+            // Not `stdout` and `stderr`, which are macros on Windows.
+            out: KjMaybe<KjOwn<ExecOutput>>,
+            err: KjMaybe<KjOwn<ExecOutput>>,
+        ) -> Result<Box<ContainerProcess>>;
+        async unsafe fn tcp_port<'a>(
+            self: &'a ContainerHandle,
+            port: u16,
+        ) -> Result<Box<ContainerPort>>;
+        async unsafe fn set_inactivity_timeout<'a>(
+            self: &'a ContainerHandle,
+            duration_ms: i64,
+        ) -> Result<()>;
+        async unsafe fn set_egress<'a>(
+            self: &'a ContainerHandle,
+            protocol: EgressProtocol,
+            host_port: &'a str,
+            token: &'a [u8],
+        ) -> Result<()>;
+        async unsafe fn snapshot_directory<'a>(
+            self: &'a ContainerHandle,
+            dir: &'a str,
+        ) -> Result<ContainerDirectorySnapshot>;
+        async unsafe fn snapshot_container<'a>(
+            self: &'a ContainerHandle,
+        ) -> Result<ContainerImageSnapshot>;
+        async unsafe fn inspect<'a>(self: &'a ContainerHandle) -> Result<ContainerInspect>;
+        async unsafe fn set_labels<'a>(
+            self: &'a ContainerHandle,
+            labels: &'a [ContainerLabel],
+        ) -> Result<()>;
+
+        /// A process a container's `exec()` started, behind `rpc::Container::ProcessHandle`.
+        type ContainerProcess;
+        fn pid(self: &ContainerProcess) -> i32;
+        async unsafe fn wait<'a>(self: &'a ContainerProcess) -> Result<i32>;
+        /// The process's stdin; its `shutdownWrite()` ends it.
+        fn stdin_writer(self: &ContainerProcess) -> Result<KjOwn<AsyncIoStream>>;
+        async unsafe fn kill<'a>(self: &'a ContainerProcess, signo: u32) -> Result<()>;
+        async unsafe fn resize<'a>(self: &'a ContainerProcess, cols: u16, rows: u16) -> Result<()>;
+
+        /// A port of a container, behind `rpc::Container::Port`: `connect()` is a tunnel to it.
+        type ContainerPort;
+        async unsafe fn connect<'a>(self: &'a ContainerPort) -> Result<KjOwn<AsyncIoStream>>;
 
         /// A background task of the server, run by the factory's task set (`factory_spawn`);
         /// `task_run` is the promise the task set holds.

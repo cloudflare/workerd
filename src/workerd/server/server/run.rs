@@ -536,24 +536,29 @@ pub async fn run(
         }
     }
 
-    // All incoming requests have drained. Stop container-enabled actors so they cannot race
-    // their terminal Docker cleanup, then wait for it while their namespaces remain available.
+    stop_containers(&server, stop.map(|(_, deadlines)| deadlines.stop)).await;
+    Ok(())
+}
+
+/// Once all incoming requests have drained, stops container-enabled actors so they cannot race
+/// their terminal Docker cleanup, then waits for it, until `until` at most, while their
+/// namespaces remain available.
+async fn stop_containers(server: &Server, until: Option<tokio::time::Instant>) {
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
-    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
         namespace.begin_container_cleanup(until).await;
     }
-    let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
-    let Some((_, deadlines)) = stop else {
-        return Ok(cleanup.await?);
-    };
-    if let Ok(result) = tokio::time::timeout_at(deadlines.stop, cleanup).await {
-        return Ok(result?);
+    let cleanup = server.factory().containers().shutdown();
+    match until {
+        None => cleanup.await,
+        Some(until) => {
+            if tokio::time::timeout_at(until, cleanup).await.is_err() {
+                tracing::warn!("leaving containers behind at the stop deadline");
+            }
+        }
     }
-    tracing::warn!("leaving containers behind at the stop deadline");
-    Ok(())
 }
 
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.

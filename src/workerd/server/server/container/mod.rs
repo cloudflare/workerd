@@ -4,6 +4,9 @@
 
 //! Durable Object containers on a local Docker engine (`Worker.containerEngine.localDocker`).
 //!
+//! - `registry`: the server's clients, one per container, and their cleanup.
+//! - `client`: one container's client, the methods of `rpc::Container`; `exec` and `port` are
+//!   the processes and ports it hands out, and `handle` what the C++ shim calls.
 //! - `egress`: the mappings a Worker installs and the listener the egress sidecar sends the
 //!   container's connections to.
 //! - `docker`: HTTP requests to the Docker Engine API and to the egress sidecar, with hyper.
@@ -11,6 +14,11 @@
 //! - `tar`: the one-file archive the API takes a file for a container as.
 
 pub mod api;
+pub mod client;
 pub mod docker;
 pub mod egress;
+pub mod exec;
+pub mod handle;
+pub mod port;
+pub mod registry;
 pub mod tar;

@@ -18,6 +18,7 @@
 
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/async-trace.h>
+#include <workerd/io/container.capnp.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/otlp-span-submitter.h>
 #include <workerd/io/request-tracker.h>
@@ -27,6 +28,7 @@
 #include <workerd/rust/worker/ffi.rs.h>
 #include <workerd/server/channel-token.h>
 
+#include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
@@ -58,6 +60,7 @@ struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
+struct ContainerHandle;
 
 // The hibernation manager of an evicted actor, handed to its replacement.
 using HibernationManager = Worker::Actor::HibernationManager;
@@ -86,6 +89,7 @@ class CompiledWorker;
 class ActorHandle;
 class ActorStorage;
 class EgressChannel;
+class ContainerCapability;
 class SubrequestChannelHandle;
 class ActorClassChannelHandle;
 class RpcClient;
@@ -265,7 +269,8 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
     const ActorStorageSpec& spec,
     ::rust::Box<ActorHooks> hooks,
     kj::Maybe<kj::Rc<HibernationManager>> hibernationManager,
-    kj::Maybe<const ContainerRef&> container);
+    kj::Maybe<const ContainerRef&> container,
+    kj::Maybe<kj::Own<ContainerCapability>> containerClient);
 
 // =======================================================================================
 
@@ -368,9 +373,22 @@ kj::Promise<void> egress_channel_connect(const WorkerFactory& factory,
     ::rust::Str host,
     kj::Own<kj::AsyncIoStream> tunnel);
 
-kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
-kj::Promise<void> factory_stop_container(
-    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor);
+// A Worker's `ByteStream` a container process's output goes to.
+using ExecOutput = capnp::ExplicitEndOutputStream;
+kj::Promise<void> exec_output_write(ExecOutput& output, ::rust::Slice<const uint8_t> data);
+kj::Promise<void> exec_output_end(kj::Own<ExecOutput> output);
+void exec_output_abort(ExecOutput& output, kj::Exception reason);
+
+// A container's client as the capability an actor holds.
+class ContainerCapability {
+ public:
+  explicit ContainerCapability(rpc::Container::Client client): client(kj::mv(client)) {}
+
+  rpc::Container::Client client;
+};
+kj::Own<ContainerCapability> new_container_capability(
+    const WorkerFactory& factory, ::rust::Box<ContainerHandle> client);
+
 void stamp_current_actor_cause(RequestMetadata& metadata);
 
 // =======================================================================================

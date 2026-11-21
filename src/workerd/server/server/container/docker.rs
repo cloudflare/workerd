@@ -261,7 +261,34 @@ impl Api {
         let headers = request.headers_mut();
         headers.insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
         headers.insert(header::UPGRADE, HeaderValue::from_static("tcp"));
+        self.hijack(request, |status| status == 101).await
+    }
 
+    /// `CONNECT authority` with `headers`, which a 2xx answer turns into a tunnel.
+    ///
+    /// # Errors
+    ///
+    /// A connection that fails.
+    pub async fn connect(&self, authority: &str, headers: &[(&str, &str)]) -> Result<Upgrade> {
+        let mut builder = http::Request::builder()
+            .method(Method::CONNECT)
+            .uri(authority)
+            .header(header::HOST, authority);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let request = builder.body(Full(None)).map_err(http_error)?;
+        self.hijack(request, |status| (200..300).contains(&status))
+            .await
+    }
+
+    /// Sends `request`, whose answer hands over the connection when `hijacked` says so of its
+    /// status.
+    async fn hijack(
+        &self,
+        request: http::Request<Full>,
+        hijacked: impl Fn(u16) -> bool,
+    ) -> Result<Upgrade> {
         let io = self.dial().await?;
         let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(io))
             .await
@@ -269,7 +296,7 @@ impl Api {
         let exchange = pin!(async move {
             let response = sender.send_request(request).await.map_err(http_error)?;
             let status = response.status().as_u16();
-            if status == 101 {
+            if hijacked(status) {
                 let upgraded = hyper::upgrade::on(response).await.map_err(http_error)?;
                 return Ok(Upgrade::Hijacked(TokioIo::new(upgraded)));
             }

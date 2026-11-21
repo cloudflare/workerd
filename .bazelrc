@@ -585,7 +585,6 @@ build:release_windows --copt="-fstrict-aliasing"
 # disabling inlining (using /Od would work too but we still want to have whatever optimizations we
 # can have)
 build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-inline
-build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
 # Work around Windows test failures in rpc-related tests
 build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
 # Work around clang-cl crashes with LLVM 22

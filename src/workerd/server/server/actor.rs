@@ -76,6 +76,7 @@ use crate::cluster::moved;
 use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
+use crate::container::handle::ContainerHandle;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -1458,12 +1459,31 @@ impl ActorContainer {
             facet_id: self.facet_id()?.into(),
             replicated: ns.cluster().is_some(),
         };
+        let container_client = match ns.container() {
+            Some(container) => {
+                let actor_key = format!(
+                    "{}-{}",
+                    ns.unique_key().unwrap_or_default(),
+                    ffi::actor_id_key(&id)
+                );
+                let client = ns
+                    .factory
+                    .containers()
+                    .client(&ns.factory, container, &actor_key)?;
+                Some(ffi::new_container_capability(
+                    ns.factory.raw(),
+                    Box::new(ContainerHandle(client)),
+                ))
+            }
+            None => None,
+        };
         let actor = Rc::new(class.new_actor(NewActor {
             id,
             storage,
             spec,
             hooks: Box::new(ActorHooks(Weak::clone(&self.this))),
             container: ns.container(),
+            container_client,
             hibernation_manager: self.manager.borrow_mut().take(),
         })?);
         let monitor = self.spawn(monitor_on_broken(
@@ -1731,12 +1751,8 @@ impl ActorContainer {
                 return;
             };
             let unique_key = ns.unique_key().unwrap_or_default();
-            if ns.container().is_some()
-                && let Err(e) =
-                    ffi::factory_stop_container(ns.factory.raw(), unique_key, &self.key).await
-            {
-                let e = crate::Error::from(e);
-                tracing::warn!("stopping {}'s container: {}", self.key, e.description());
+            if ns.container().is_some() {
+                ns.factory.containers().stop(unique_key, &self.key).await;
             }
             if let Some(owned) = owned
                 && owned.hand_off().await
