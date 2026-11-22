@@ -1391,6 +1391,56 @@ KJ_TEST("Server: Expect: 100-continue is answered when the Worker reads the body
   }
 }
 
+KJ_TEST("Server: request headers read after the Worker goes async, and response spellings") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    const body = await request.text();
+          `    const seen = ["host", "x-dup", "x-empty", "x-lower"]
+          `        .map(name => name + "=" + request.headers.get(name));
+          `    const headers = new Headers();
+          `    headers.append("x-a-empty", "");
+          `    headers.append("x-b-lower", "1");
+          `    headers.append("x-c-Mixed", "2");
+          `    return new Response([body, ...seen].join(";"), {headers});
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.send(R"(
+    POST / HTTP/1.1
+    Host: foo
+    X-Dup: 1
+    x-lower: a
+    X-Empty:
+    x-dup: 2
+    Content-Length: 5
+
+  )"_blockquote);
+  // The Worker waits for the body, and reads the headers once it has it.
+  KJ_EXPECT(!conn.isEof());
+  conn.send("hello");
+  auto body = "hello;host=foo;x-dup=1, 2;x-empty=;x-lower=a"_kj;
+  conn.recv(kj::str("HTTP/1.1 200 OK\n"
+                    "Content-Length: ",
+      body.size(),
+      "\n"
+      "Content-Type: text/plain;charset=UTF-8\n"
+      "x-a-empty: \n"
+      "x-b-lower: 1\n"
+      "x-c-Mixed: 2\n"
+      "\n",
+      body));
+}
+
 KJ_TEST("Server: serve modular Worker with imports") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

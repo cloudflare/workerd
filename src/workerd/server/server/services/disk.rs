@@ -244,7 +244,7 @@ pub(crate) fn kj_headers<'t>(
     table: &'t HeaderTable,
     map: &http::HeaderMap,
 ) -> Result<kj_hyper::ffi::Borrowing<'t, kj::http::ffi::HttpHeaders>> {
-    kj_hyper::HeaderBlock::new(map, &http::Extensions::new()).to_kj(table)
+    kj_hyper::HeaderBlock::new(map, &http::Extensions::new()).into_kj(table)
 }
 
 pub(crate) fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {

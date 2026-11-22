@@ -192,9 +192,8 @@ impl HttpRewriter {
         physical_protocol: &str,
         headers: HeadersRef<'a>,
     ) -> Result<Option<(Rewritten<'a>, Option<String>)>> {
-        let mut url = url.to_owned();
         let mut edits = Vec::new();
-        if self.style == Style::Host {
+        let url = if self.style == Style::Host {
             let Ok(parsed) = url.parse::<Uri>() else {
                 return Ok(None);
             };
@@ -217,8 +216,10 @@ impl HttpRewriter {
             let path = parsed
                 .path_and_query()
                 .map_or("/", http::uri::PathAndQuery::as_str);
-            url = format!("{scheme}://{host}{path}");
-        }
+            [scheme, "://", host, path].concat()
+        } else {
+            url.to_owned()
+        };
 
         let mut cf_blob_json = None;
         if let Some(header) = &self.cf_blob_header

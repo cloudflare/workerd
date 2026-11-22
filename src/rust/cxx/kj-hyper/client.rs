@@ -660,7 +660,7 @@ impl Client<'_> {
         into: ServiceResponse<'_>,
     ) -> Result<()> {
         let (parts, mut body) = response.into_parts();
-        let headers = HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(self.table)?;
+        let headers = HeaderBlock::new(&parts.headers, &parts.extensions).into_kj(self.table)?;
         let length = http_body::Body::size_hint(&body).exact();
         let mut out = into.send(
             u32::from(parts.status.as_u16()),
@@ -739,7 +739,7 @@ impl Client<'_> {
         let (parts, _) = response.into_parts();
         let hangup = parts.extensions.get::<Shared<Hangup>>().cloned();
         let response_headers =
-            HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(self.table)?;
+            HeaderBlock::new(&parts.headers, &parts.extensions).into_kj(self.table)?;
         let upgrade = parts
             .extensions
             .get::<OnUpgrade>()
@@ -1037,7 +1037,7 @@ impl Client<'_> {
                 if !received.status().is_success() {
                     let (parts, mut body) = received.into_parts();
                     let headers =
-                        HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(self.table)?;
+                        HeaderBlock::new(&parts.headers, &parts.extensions).into_kj(self.table)?;
                     let mut out = response.reject(
                         u32::from(parts.status.as_u16()),
                         &reason(&parts),
@@ -1055,7 +1055,7 @@ impl Client<'_> {
                 let (parts, _) = received.into_parts();
                 let hangup = parts.extensions.get::<Shared<Hangup>>().cloned();
                 let headers =
-                    HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(self.table)?;
+                    HeaderBlock::new(&parts.headers, &parts.extensions).into_kj(self.table)?;
                 response.accept(
                     u32::from(parts.status.as_u16()),
                     &reason(&parts),
