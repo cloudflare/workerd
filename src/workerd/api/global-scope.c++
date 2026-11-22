@@ -448,19 +448,23 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::mv(jsStream);
   }
 
-  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
-
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
-  if (body != kj::none && !jsHeaders->hasCommon(capnp::CommonHeaderName::CONTENT_LENGTH) &&
-      !jsHeaders->hasCommon(capnp::CommonHeaderName::TRANSFER_ENCODING)) {
+  //
+  // The header goes on a shallow copy of the kj headers rather than on the Headers object, which
+  // would then have to build its maps right away instead of only if JavaScript changes it.
+  kj::Maybe<kj::HttpHeaders> withLength;
+  if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
+    auto& copy = withLength.emplace(headers.cloneShallow());
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
-      jsHeaders->setCommon(capnp::CommonHeaderName::CONTENT_LENGTH, kj::str(l));
+      copy.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(l));
     } else {
-      jsHeaders->setCommon(capnp::CommonHeaderName::TRANSFER_ENCODING, kj::str("chunked"));
+      copy.setPtr(kj::HttpHeaderId::TRANSFER_ENCODING, "chunked");
     }
   }
+  auto jsHeaders = js.alloc<Headers>(js, withLength.orDefault(headers), Headers::Guard::REQUEST);
 
   if (defaultFetcher == kj::none) {
     // The default fetcher can be shared across requests since it does not persist any

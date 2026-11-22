@@ -5,6 +5,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <kj/compat/http.h>
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
@@ -53,6 +54,12 @@ public:
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
   // reference, so the output must be consumed immediately.
   void shallowCopyTo(kj::HttpHeaders& out);
+
+  // Whether this object still holds the snapshot it was built from rather than its own maps.
+  // For tests.
+  bool holdsSnapshot() const {
+    return snapshot != kj::none;
+  }
 
   // Returns headers with lower-case name and comma-concatenated duplicates.
   kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
@@ -201,6 +208,39 @@ private:
     }
   };
 
+  // The headers of a kj::HttpHeaders, copied as they were received: names and values in one
+  // buffer, in the order kj::HttpHeaders::forEach() gave them. Immutable once built, so the
+  // Headers objects that clone one share it.
+  struct Snapshot {
+    struct Entry {
+      kj::StringPtr name;
+      kj::StringPtr value;
+    };
+    kj::Array<char> text;
+    kj::Array<Entry> entries;
+
+    // Copies `headers`, or returns none if it has no headers or too many to be worth reading
+    // without an index.
+    static kj::Maybe<kj::Arc<Snapshot>> tryCopy(const kj::HttpHeaders& headers);
+
+    // Above this many headers, reads that scan the entries would cost more than building the
+    // maps, so a Headers object builds them right away.
+    static constexpr size_t MAX_ENTRIES = 64;
+  };
+
+  // While set, holds all of this object's headers, and `commonHeaders` and `uncommonHeaders` are
+  // empty. A Headers object built from a kj::HttpHeaders starts this way, so that one which
+  // JavaScript never changes or iterates costs a single copy rather than a few allocations per
+  // header. Reads and iteration are answered from the snapshot; anything that changes the headers
+  // first builds the maps from it as the constructor used to (see materialize()).
+  kj::Maybe<kj::Arc<Snapshot>> snapshot;
+
+  // The snapshot this object held before materialize(), kept until the object is destroyed.
+  // shallowCopyTo() and getSetCookie() hand out pointers into the snapshot, and before snapshots
+  // a header's strings lived until that header was changed. Keeping the retired snapshot means a
+  // change to one header still leaves pointers to every other header valid.
+  kj::Maybe<kj::Arc<Snapshot>> retiredSnapshot;
+
   // This wastes one slot, but it is a fixed array for fast access.
   kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
 
@@ -208,6 +248,20 @@ private:
   kj::HashMap<kj::String, kj::Own<Header>> uncommonHeaders;
 
   Guard guard;
+
+  // Builds `commonHeaders` and `uncommonHeaders` from `snapshot`, if set, and drops it. Called
+  // before anything that changes the headers or reads them other than by name.
+  void materialize();
+
+  // Adds a header to the maps: appendUnguarded() without the materialize().
+  void appendToMaps(kj::String name, kj::String value);
+
+  // Fills `out` from `snapshot`, in the order shallowCopyTo() would after materialize().
+  static void shallowCopySnapshotTo(const Snapshot& snapshot, kj::HttpHeaders& out);
+
+  // getDisplayedHeaders() for `snapshot`, giving what it would after materialize().
+  static kj::Array<DisplayedHeader> getSnapshotDisplayedHeaders(
+      const Snapshot& snapshot, bool getSetCookie);
 
   kj::Maybe<Header&> tryGetHeader(const HeaderKey& key);
 
