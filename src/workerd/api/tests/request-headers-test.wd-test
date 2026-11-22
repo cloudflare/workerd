@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "request-headers-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "request-headers-test.js" )
+        ],
+        bindings = [
+          ( name = "SELF", service = "request-headers-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "http_headers_getsetcookie"],
+      )
+    )
+  ]
+);
