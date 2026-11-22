@@ -1216,8 +1216,7 @@ class WeakV8Ref final {
 template <V8Value T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const V8Ref<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
-  // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
-  trackField(edgeName, value.handle.Get(isolate_).template As<v8::Value>(), nodeName);
+  trackField(edgeName, value.handle.Get(isolate_), nodeName);
 }
 
 // A value of type T, or `undefined`.
@@ -2139,6 +2138,8 @@ using ReturnType = ReturnType_<Func, T, passLock>::Type;
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = MaintainPromise<ReturnType<Func, Param, passLock>>;
 
+class ModuleRegistry;
+
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
 // (or a subclass of jsg::Object).
@@ -2152,14 +2153,24 @@ class ContextGlobal {
 
   const capnp::SchemaLoader& getSchemaLoader();
 
+  // Reports the module registry to the heap snapshot. Called from the memory info of the
+  // resource type that inherits ContextGlobal (see visitSubclassForMemoryInfo()).
+  void jsgGetContextGlobalMemoryInfo(MemoryTracker& tracker) const;
+
  private:
   // This opaque owner is used to keep the ModuleRegistry alive as long as the ContextGlobal
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
+  // The registry that moduleRegistryBackingOwner owns, if it is the legacy one.
+  kj::Maybe<const ModuleRegistry&> legacyModuleRegistry;
   kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
+    moduleRegistryBackingOwner = kj::mv(registry);
+  }
+  void setLegacyModuleRegistry(kj::Own<ModuleRegistry> registry) {
+    legacyModuleRegistry = *registry;
     moduleRegistryBackingOwner = kj::mv(registry);
   }
   void setSchemaLoader(const capnp::SchemaLoader& schemaLoader);
@@ -2220,6 +2231,17 @@ template <typename T>
 consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
+
+// Opt-out for a type with no public `visitForGc()`, required by templates that would otherwise skip
+// it silently (such as the State of JSG_ITERATOR). Mark a struct by putting JSG_HOLDS_NO_GC_HANDLES
+// in its body. For a type you can't add a member to, specialize the variable in workerd::jsg:
+//
+//     template <>
+//     inline constexpr bool holdsNoGcHandles<IoOwn<Foo>> = true;
+template <typename T>
+inline constexpr bool holdsNoGcHandles = requires { typename T::JsgHoldsNoGcHandles; };
+
+#define JSG_HOLDS_NO_GC_HANDLES using JsgHoldsNoGcHandles = void
 
 // Visitor used during garbage collection. Any resource class that holds `Ref`s should
 // implement GC visitation by declaring a private method like:

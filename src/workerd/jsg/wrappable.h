@@ -212,8 +212,9 @@ class Wrappable: public kj::Refcounted {
   }
 
   enum InternalFields : int {
-    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
-    // tag that helps us to identify a v8 API object as one of our own.
+    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`, or to `WORKERD_RUST_WRAPPABLE_TAG`
+    // for the wrapper of a Rust JSG resource. This is a workerd-specific tag that helps us to
+    // identify a v8 API object as one of our own.
     WRAPPABLE_TAG_FIELD_INDEX,
 
     // Number of internal fields in a wrapper object.
@@ -315,8 +316,9 @@ class Wrappable: public kj::Refcounted {
   // is garbage-collected (or unlink() is called).
   //
   // The object MUST have exactly INTERNAL_FIELD_COUNT internal field slots. Internal field 0 holds
-  // the workerd-API marker (see isWorkerdApiObject); the C++ object pointer itself is stored in
-  // V8's CppHeap pointer table rather than an internal field.
+  // the workerd-API marker (see isWorkerdApiObject), or WORKERD_RUST_WRAPPABLE_TAG if `tag` is
+  // kRustResourceWrappableTag; the C++ object pointer itself is stored in V8's CppHeap pointer
+  // table rather than an internal field.
   //
   // If `needsGcTracing` is true, then the virtual method jsgVisitForGc() will be called to
   // perform GC tracing. If false, the method is never called (may be more efficient, if the
@@ -456,8 +458,15 @@ class Wrappable: public kj::Refcounted {
   // In a Worker started from a snapshot, once every restored wrapper is linked: one entry per
   // entry snapshotReferences() returned in the zygote, the restored instance behind that object's
   // wrapper, or nullptr when the snapshot carried no wrapper for it (keep what this instance has).
-  // Must not throw.
+  // Runs under the isolate lock with the new context entered. Must not throw.
   virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
+
+  // In a Worker started from a snapshot, once the embedder has populated the restored context's
+  // embedder-data slots (IsolateBase::notifySnapshotContextReady()): lets a restored instance
+  // bind state that lives on the context and so was not available to snapshotClone(), which runs
+  // before the context exists. Called with the context entered, on every object with a live
+  // wrapper. Must not throw, attach or detach wrappers, or allocate on the V8 or cppgc heap.
+  virtual void snapshotContextReady(Lock& js) {}
 
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);

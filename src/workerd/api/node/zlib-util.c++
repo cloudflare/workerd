@@ -35,6 +35,38 @@ uint32_t ZlibUtil::crc32Sync(InputSource data, uint32_t value) {
 }
 
 namespace {
+// Throws `error` with a Node.js-style string `code` property.
+[[noreturn]] void throwWithCode(jsg::Lock& js, jsg::JsObject error, kj::StringPtr code) {
+  error.set(js, "code", js.str(code));
+  js.throwException(error);
+}
+
+[[noreturn]] void throwWithCode(jsg::Lock& js, jsg::JsValue error, kj::StringPtr code) {
+  throwWithCode(js, KJ_ASSERT_NONNULL(error.tryCast<jsg::JsObject>()), code);
+}
+
+// Matches the error Node.js reports for a failed one-shot zlib, brotli or zstd call.
+[[noreturn]] void throwCompressionError(jsg::Lock& js, const CompressionError& error) {
+  auto err = KJ_ASSERT_NONNULL(js.error(error.message).tryCast<jsg::JsObject>());
+  err.set(js, "errno", js.num(error.err));
+  throwWithCode(js, err, error.code);
+}
+
+// Equivalent to Node.js' validateInteger() range check, which throws ERR_OUT_OF_RANGE.
+void checkRange(jsg::Lock& js, kj::StringPtr name, int64_t value, int64_t min, int64_t max) {
+  if (value < min || value > max) {
+    throwWithCode(js,
+        js.rangeError(kj::str("The value of \"", name, "\" is out of range. It must be >= ", min,
+            " and <= ", max, ". Received ", value)),
+        "ERR_OUT_OF_RANGE"_kj);
+  }
+}
+
+void checkChunkOptions(jsg::Lock& js, kj::uint chunkSize, kj::uint maxOutputLength) {
+  checkRange(js, "options.chunkSize"_kj, chunkSize, Z_MIN_CHUNK, Z_MAX_CHUNK);
+  checkRange(js, "options.maxOutputLength"_kj, maxOutputLength, 1, Z_MAX_CHUNK);
+}
+
 class GrowableBuffer final {
   // A copy of kj::Vector with some additional methods for use as a growable buffer with a maximum
   // size
@@ -748,7 +780,7 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
 
 namespace {
 template <typename Context>
-static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
+static kj::Array<kj::byte> syncProcessBuffer(jsg::Lock& js, Context& ctx, GrowableBuffer& result) {
   do {
     result.addChunk();
     ctx.setOutputBuffer(kj::ArrayPtr(result.end(), result.available()));
@@ -756,7 +788,7 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
     ctx.work();
 
     KJ_IF_SOME(error, ctx.getError()) {
-      JSG_FAIL_REQUIRE(Error, error.message);
+      throwCompressionError(js, error);
     }
 
     result.adjustUnused(ctx.getAvailOut());
@@ -765,7 +797,9 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
       // The output buffer was completely filled and has reached maxOutputLength.
       // If the stream is done, the output just happened to fit exactly — return it.
       // Otherwise the decompressed data exceeds maxOutputLength.
-      JSG_REQUIRE(ctx.isStreamEnd(), RangeError, "Memory limit exceeded");
+      if (!ctx.isStreamEnd()) {
+        throwWithCode(js, js.rangeError("Memory limit exceeded"_kj), "ERR_BUFFER_TOO_LARGE"_kj);
+      }
       break;
     }
   } while (ctx.getAvailOut() == 0);
@@ -784,13 +818,7 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
 
-  // TODO(soon): Extend JSG_REQUIRE so we can pass the full level of info NodeJS provides, like the code field
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
-          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
-  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
-          Z_MAX_CHUNK, ". Received ", maxOutputLength));
+  checkChunkOptions(js, chunkSize, maxOutputLength);
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   ctx.initialize(opts.level.orDefault(Z_DEFAULT_LEVEL),
@@ -798,18 +826,14 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
       opts.strategy.orDefault(Z_DEFAULT_STRATEGY), kj::mv(opts.dictionary));
 
   auto flush = opts.flush.orDefault(Z_NO_FLUSH);
-  JSG_REQUIRE(Z_NO_FLUSH <= flush && flush <= Z_TREES, RangeError,
-      kj::str("The value of \"options.flush\" is out of range. It must be >= ", Z_NO_FLUSH,
-          " and <= ", Z_TREES, ". Received ", flush));
+  checkRange(js, "options.flush"_kj, flush, Z_NO_FLUSH, Z_TREES);
 
   auto finishFlush = opts.finishFlush.orDefault(Z_FINISH);
-  JSG_REQUIRE(Z_NO_FLUSH <= finishFlush && finishFlush <= Z_TREES, RangeError,
-      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ", Z_NO_FLUSH,
-          " and <= ", Z_TREES, ". Received ", flush));
+  checkRange(js, "options.finishFlush"_kj, finishFlush, Z_NO_FLUSH, Z_TREES);
 
   ctx.setFlush(finishFlush);
   ctx.setInputBuffer(getInputFromSource(data));
-  return syncProcessBuffer(ctx, result);
+  return syncProcessBuffer(js, ctx, result);
 }
 
 void ZlibUtil::zlibWithCallback(jsg::Lock& js,
@@ -839,45 +863,32 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
 
-  // TODO(soon): Extend JSG_REQUIRE so we can pass the full level of info NodeJS provides, like the code field
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
-          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
-  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
-          Z_MAX_CHUNK, ". Received ", maxOutputLength));
+  checkChunkOptions(js, chunkSize, maxOutputLength);
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   KJ_IF_SOME(err, ctx.initialize()) {
-    JSG_FAIL_REQUIRE(Error, err.message);
+    throwCompressionError(js, err);
   }
 
   KJ_IF_SOME(params, opts.params) {
     for (const auto& field: params.fields) {
       KJ_IF_SOME(err, ctx.setParams(field.name.parseAs<int>(), field.value)) {
-        JSG_FAIL_REQUIRE(Error, err.message);
+        throwCompressionError(js, err);
       }
     }
   }
 
   auto flush = opts.flush.orDefault(BROTLI_OPERATION_PROCESS);
-  JSG_REQUIRE(BROTLI_OPERATION_PROCESS <= flush && flush <= BROTLI_OPERATION_EMIT_METADATA,
-      RangeError,
-      kj::str("The value of \"options.flush\" is out of range. It must be >= ",
-          BROTLI_OPERATION_PROCESS, " and <= ", BROTLI_OPERATION_EMIT_METADATA, ". Received ",
-          flush));
+  checkRange(
+      js, "options.flush"_kj, flush, BROTLI_OPERATION_PROCESS, BROTLI_OPERATION_EMIT_METADATA);
 
   auto finishFlush = opts.finishFlush.orDefault(BROTLI_OPERATION_FINISH);
-  JSG_REQUIRE(
-      BROTLI_OPERATION_PROCESS <= finishFlush && finishFlush <= BROTLI_OPERATION_EMIT_METADATA,
-      RangeError,
-      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ",
-          BROTLI_OPERATION_PROCESS, " and <= ", BROTLI_OPERATION_EMIT_METADATA, ". Received ",
-          finishFlush));
+  checkRange(js, "options.finishFlush"_kj, finishFlush, BROTLI_OPERATION_PROCESS,
+      BROTLI_OPERATION_EMIT_METADATA);
 
   ctx.setFlush(finishFlush);
   ctx.setInputBuffer(getInputFromSource(data));
-  return syncProcessBuffer(ctx, result);
+  return syncProcessBuffer(js, ctx, result);
 }
 
 template <typename Context>
@@ -901,23 +912,18 @@ kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdCont
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
 
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
-          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
-  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
-      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
-          Z_MAX_CHUNK, ". Received ", maxOutputLength));
+  checkChunkOptions(js, chunkSize, maxOutputLength);
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   // Initialize the context
   if constexpr (Context::Mode == ZlibMode::ZSTD_ENCODE) {
     uint64_t pledgedSrcSize = opts.pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
     KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize)) {
-      JSG_FAIL_REQUIRE(Error, err.message);
+      throwCompressionError(js, err);
     }
   } else {
     KJ_IF_SOME(err, ctx.initialize()) {
-      JSG_FAIL_REQUIRE(Error, err.message);
+      throwCompressionError(js, err);
     }
   }
 
@@ -925,24 +931,20 @@ kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdCont
   KJ_IF_SOME(params, opts.params) {
     for (const auto& field: params.fields) {
       KJ_IF_SOME(err, ctx.setParams(field.name.parseAs<int>(), field.value)) {
-        JSG_FAIL_REQUIRE(Error, err.message);
+        throwCompressionError(js, err);
       }
     }
   }
 
   auto flush = opts.flush.orDefault(ZSTD_e_continue);
-  JSG_REQUIRE(ZSTD_e_continue <= flush && flush <= ZSTD_e_end, RangeError,
-      kj::str("The value of \"options.flush\" is out of range. It must be >= ", ZSTD_e_continue,
-          " and <= ", ZSTD_e_end, ". Received ", flush));
+  checkRange(js, "options.flush"_kj, flush, ZSTD_e_continue, ZSTD_e_end);
 
   auto finishFlush = opts.finishFlush.orDefault(ZSTD_e_end);
-  JSG_REQUIRE(ZSTD_e_continue <= finishFlush && finishFlush <= ZSTD_e_end, RangeError,
-      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ",
-          ZSTD_e_continue, " and <= ", ZSTD_e_end, ". Received ", finishFlush));
+  checkRange(js, "options.finishFlush"_kj, finishFlush, ZSTD_e_continue, ZSTD_e_end);
 
   ctx.setFlush(finishFlush);
   ctx.setInputBuffer(getInputFromSource(data));
-  return syncProcessBuffer(ctx, result);
+  return syncProcessBuffer(js, ctx, result);
 }
 
 template <typename Context>

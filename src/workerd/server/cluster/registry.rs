@@ -56,6 +56,9 @@ pub struct Registry {
     instance: u64,
     /// Live peers' records, as of the last listing.
     listed: RefCell<HashMap<String, NodeRecord>>,
+    /// When the latest listing that succeeded started, and the nodes it
+    /// found live, sorted: unlike `listed`, nothing else changes it.
+    listing: RefCell<Option<(u64, Vec<String>)>>,
     /// Dead peers whose records remain, as of the last listing.
     dead: RefCell<Vec<String>>,
     /// This instance left the cluster: it renews its record no more.
@@ -86,6 +89,7 @@ impl Registry {
                 std::time::SystemTime::now(),
             ),
             listed: RefCell::new(HashMap::new()),
+            listing: RefCell::new(None),
             dead: RefCell::new(Vec::new()),
             left: Cell::new(false),
             draining: Cell::new(false),
@@ -198,7 +202,7 @@ impl Registry {
     /// alarms. The record goes once they have. A renewal of ours that lands
     /// first is expired too; no renewal starts after this.
     pub async fn deregister(&self) -> Result<()> {
-        self.left.set(true);
+        self.leave();
         let Some(mut version) = self.own.take() else {
             return Ok(());
         };
@@ -236,7 +240,14 @@ impl Registry {
         self.draining.set(true);
     }
 
-    /// Whether `deregister` ran.
+    /// Marks this instance as having left the cluster, without writing its
+    /// record: for the registry that reads the peers while another, on the
+    /// lease thread, writes the record (`keeper::Thread`).
+    pub fn leave(&self) {
+        self.left.set(true);
+    }
+
+    /// Whether this instance left: `deregister` or `leave` ran.
     pub fn left(&self) -> bool {
         self.left.get()
     }
@@ -329,7 +340,21 @@ impl Registry {
             .filter(|n| !self.listed.borrow().contains_key(*n))
             .map(str::to_owned)
             .collect();
+        // Listings overlap (`Ownership::successor` lists too): the latest
+        // started is kept. `now_ms` is when this one started, or earlier.
+        let mut live: Vec<_> = peers.iter().map(|p| p.node.clone()).collect();
+        live.sort();
+        let mut listing = self.listing.borrow_mut();
+        if listing.as_ref().is_none_or(|(at, _)| *at <= now_ms) {
+            *listing = Some((now_ms, live));
+        }
         Ok(peers)
+    }
+
+    /// When the latest listing that succeeded started, and the live nodes it
+    /// found, this one included, sorted.
+    pub fn listing(&self) -> Option<(u64, Vec<String>)> {
+        self.listing.borrow().clone()
     }
 
     /// The live nodes, this one included, as of the last listing.

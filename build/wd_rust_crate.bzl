@@ -36,6 +36,13 @@ def rust_cxx_bridge(
         deps = deps,
         visibility = visibility,
         tags = tags,
+        # The ISA extensions of wd_cc_library(): LLVM inlines a function only into a caller that
+        # has all of its target features, so without them no shim would be inlined into its bridge
+        # function.
+        copts = select({
+            "@platforms//cpu:aarch64": ["-mcrc"],
+            "@platforms//cpu:x86_64": ["-msse4.2"],
+        }),
     )
 
 def rust_cxx_include_prefix():

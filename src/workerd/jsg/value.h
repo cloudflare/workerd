@@ -328,7 +328,8 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive bigint.");
 
-    JSG_REQUIRE(value <= static_cast<uint64_t>(kj::maxValue), TypeError,
+    // UINT64_MAX is not a double: it rounds up to 2^64, which a uint64_t can't hold.
+    JSG_REQUIRE(value < 0x1p64, TypeError,
         kj::str("Value out of range. Must be less than or equal to ",
             static_cast<uint64_t>(kj::maxValue), "."));
 
@@ -369,9 +370,8 @@ class PrimitiveWrapper {
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
-    JSG_REQUIRE(
-        value <= static_cast<int64_t>(kj::maxValue) && value >= static_cast<int64_t>(kj::minValue),
-        TypeError,
+    // INT64_MAX is not a double: it rounds up to 2^63, which an int64_t can't hold.
+    JSG_REQUIRE(value < 0x1p63 && value >= -0x1p63, TypeError,
         kj::str("Value out of range. Must be between ", static_cast<int64_t>(kj::minValue), " and ",
             static_cast<int64_t>(kj::maxValue), " (inclusive)."));
 

@@ -147,8 +147,14 @@ void UnhandledRejectionHandler::ensureProcessingWarnings(jsg::Lock& js) {
 
 void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void* data) {
   auto* handler = static_cast<UnhandledRejectionHandler*>(data);
-  KJ_DEFER(isolate->RemoveMicrotasksCompletedCallback(
-      &UnhandledRejectionHandler::onMicrotasksCompleted, data));
+  KJ_DEFER({
+    isolate->RemoveMicrotasksCompletedCallback(
+        &UnhandledRejectionHandler::onMicrotasksCompleted, data);
+    // `scheduled` goes with the callback. An event handler that rejects a promise, or that handles
+    // a rejected one, sets it again during processWarnings(), which also processes what the
+    // handler reported.
+    handler->scheduled = false;
+  });
   auto& js = Lock::from(isolate);
   KJ_TRY {
     handler->processWarnings(js);
@@ -157,7 +163,6 @@ void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void
     js.requestExtraMicrotaskCheckpoint();
   }
   KJ_CATCH(exception) {
-    handler->scheduled = false;
     KJ_LOG(ERROR, "uncaught exception while processing unhandled rejections", exception);
   }
 }

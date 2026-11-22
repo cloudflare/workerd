@@ -24,21 +24,24 @@ export const checkPortsSetCorrectly = {
   },
 };
 
-// TODO(soon): This is triggering io-context error. Fix this edge case.
 // Test is taken from Node.js: test/parallel/test-http-client-request-options.js
-// export const testHttpClientRequestOptions = {
-//   async test(_ctrl, env) {
-//     const headers = { foo: 'Bar' };
-//     const { promise, resolve, reject } = Promise.withResolvers();
-//     const url = new URL(`http://localhost:${env.PONG_SERVER_PORT}/ping?q=term`);
-//     url.headers = headers;
-//     const clientReq = http.request(url);
-//     clientReq.on('close', resolve);
-//     clientReq.on('error', reject)
-//     clientReq.end();
-//     await promise;
-//   },
-// };
+export const testHttpClientRequestOptions = {
+  async test(_ctrl, env) {
+    const headers = { foo: 'Bar' };
+    const url = new URL(
+      `http://${env.SIDECAR_HOSTNAME}:${env.PONG_SERVER_PORT}/ping?q=term`
+    );
+    url.headers = headers;
+    const clientReq = http.request(url);
+    const closed = once(clientReq, 'close');
+    clientReq.end();
+    const [res] = await once(clientReq, 'response');
+    strictEqual(res.headers['x-echo-url'], '/ping?q=term');
+    strictEqual(res.headers['x-echo-foo'], headers.foo);
+    res.resume();
+    await closed;
+  },
+};
 
 // Test is taken from test/parallel/test-http-client-default-headers-exist.js
 export const testHttpClientDefaultHeadersExist = {

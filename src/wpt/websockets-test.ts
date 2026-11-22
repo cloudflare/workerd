@@ -107,19 +107,13 @@ export default {
     disabledTests: true,
   },
   'Create-extensions-empty.any.js': {
-    comment: 'workerd WebSocket.extensions is null instead of empty string',
-    expectedFailures: [
-      "Create WebSocket - wsocket.extensions should be set to '' after connection is established - Connection should be closed",
-    ],
     replace: removeUseCapture,
   },
-  'Create-http-urls.any.js': {
-    comment: 'workerd requires ws/wss scheme, not http/https',
-    expectedFailures: ['WebSocket: ensure both HTTP schemes are supported'],
-  },
+  'Create-http-urls.any.js': {},
   'Create-invalid-urls.any.js': {},
   'Create-non-absolute-url.any.js': {
-    comment: 'workerd throws SyntaxError for non-absolute URLs',
+    comment:
+      'A Worker has no base URL, so a relative URL throws a SyntaxError, as fetch() rejects it. The test resolves against location, which only the harness defines.',
     expectedFailures: [
       // Trailing space is significant: the subtest name interpolates the input, which is ''.
       'Create WebSocket - Pass a non absolute URL: ',
@@ -166,9 +160,7 @@ export default {
     replace: removeUseCapture,
   },
   'Send-0byte-data.any.js': {
-    comment:
-      'workerd returns 0 instead of undefined for empty message data; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-65K-data.any.js': {
     replace: removeUseCapture,
@@ -341,10 +333,7 @@ export default {
     comment: 'importScripts is not available in Workers',
     omittedTests: true,
   },
-  'referrer.any.js': {
-    comment: 'Referrer behavior is different in workers',
-    disabledTests: true,
-  },
+  'referrer.any.js': {},
   'remove-own-iframe-during-onerror.window.js': {
     comment: 'iframe tests are browser-specific',
     omittedTests: true,

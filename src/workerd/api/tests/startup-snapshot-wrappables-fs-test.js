@@ -5,10 +5,13 @@
 // The fs service of startup-snapshot-wrappables-test: the shared case plus node:fs, whose module
 // object (FileSystemModule) carries its temporary-name counter through the snapshot. A directory
 // made at the top level and one made at request time must get the names a plain Worker gives
-// them, so a name minted after the restore cannot collide with one the top level saved. Today the
-// case starts as a plain Worker (see the runner), so the counter check only pins the names down.
+// them, so a name minted after the restore cannot collide with one the top level saved. Both
+// node:fs and node:url reach UrlUtil, a Rust JSG resource (src/rust/api/url.rs) that transfers
+// as a stateless type; domainToASCII() at request time runs on the instance behind the restored
+// wrapper.
 
 import fs from 'node:fs';
+import { domainToASCII } from 'node:url';
 import { report } from './worker.js';
 
 const tmpAtTopLevel = fs.mkdtempSync('/tmp/snap-');
@@ -20,6 +23,7 @@ export default {
       await report({
         tmpAtTopLevel: tmpAtTopLevel === '/tmp/snap-0',
         tmpAtRequest: tmpAtRequest === '/tmp/snap-1',
+        urlUtil: domainToASCII('español.com') === 'xn--espaol-zwa.com',
       })
     );
   },

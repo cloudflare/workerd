@@ -21,3 +21,41 @@ fn outside_a_request_there_is_no_io_context() {
         Ok(())
     });
 }
+
+/// `then()`, `catch()` and `then_or_catch()` fail unless their `IoContext` is the current one, as
+/// C++ `IoContext::addFunctor()` does.
+#[test]
+fn registering_reactions_requires_the_io_context_to_be_current() {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        clippy::unnecessary_wraps,
+        reason = "the signature of a reaction"
+    )]
+    fn reaction<'a>(
+        lock: &mut jsg::Lock<'a>,
+        _context: &IoContext<'a>,
+        _data: &(),
+        _value: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        Ok(lock.undefined())
+    }
+
+    let harness = Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        // No request is in progress, so no IoContext is current.
+        let context = IoContext {
+            id: 1,
+            _lock: PhantomData,
+        };
+        let undefined = lock.undefined();
+        let promise = v8::Promise::resolved(lock, undefined)?;
+        assert!(context.then(lock, promise, (), reaction).is_err());
+        assert!(context.catch(lock, promise, (), reaction).is_err());
+        assert!(
+            context
+                .then_or_catch(lock, promise, (), reaction, reaction)
+                .is_err()
+        );
+        Ok(())
+    });
+}

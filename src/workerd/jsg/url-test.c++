@@ -7,8 +7,6 @@
 #include <kj/table.h>
 #include <kj/test.h>
 
-#include <regex>
-
 namespace workerd::jsg::test {
 namespace {
 

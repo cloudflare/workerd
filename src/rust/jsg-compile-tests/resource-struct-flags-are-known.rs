@@ -6,7 +6,7 @@
 // silently off: with `memroy_info`, the resource would report no fields.
 use jsg_macros::jsg_resource;
 
-#[jsg_resource(memroy_info)] //~ ERROR expected `name = "..."`, `custom_trace`, `memory_info`, `custom_memory_info`, `ts_root`, `ts_override = "..."` or `ts_define = "..."`
+#[jsg_resource(memroy_info)] //~ ERROR expected `name = "..."`, `custom_trace`, `memory_info`, `custom_memory_info`, `snapshot_stateless`, `ts_root`, `ts_override = "..."` or `ts_define = "..."`
 struct Holder {
     name: String,
 }

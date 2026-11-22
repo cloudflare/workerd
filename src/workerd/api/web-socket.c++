@@ -6,13 +6,13 @@
 
 #include "blob.h"
 #include "events.h"
-#include "messagechannel.h"
 #include "util.h"
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/url.h>
 
 // TODO(EW-10817): Re-enable the autogate consultation in WebSocket::acceptAsHibernatable() and
 // in the revival ctor below when the HibernatableWebSocketAdapter path is functional. The
@@ -419,19 +419,15 @@ void LegacyWebSocketAdapter::initConnection(jsg::Lock& js, kj::Promise<PackedWeb
     native.state.init<AwaitingAcceptanceOrCoupling>(
         AwaitingAcceptanceOrCoupling{IoContext::current().addObject(kj::mv(packedSocket.ws))});
 
-    // both `protocol` and `extensions` start off as empty strings.
-    // They become null if the connection is established and no protocol/extension was chosen.
-    // https://html.spec.whatwg.org/multipage/web-sockets.html#dom-websocket-protocol
-    KJ_IF_SOME(proto, packedSocket.proto) {
-      protocol = kj::mv(proto);
+    // Both `protocol` and `extensions` start off as empty strings. Per the spec they stay empty if
+    // the server selected no protocol or extension; without the compat flag they become null.
+    // https://websockets.spec.whatwg.org/#dom-websocket-protocol
+    if (FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions()) {
+      protocol = kj::mv(packedSocket.proto).orDefault(kj::String());
+      extensions = kj::mv(packedSocket.extensions).orDefault(kj::String());
     } else {
-      protocol = kj::none;
-    }
-
-    KJ_IF_SOME(ext, packedSocket.extensions) {
-      extensions = kj::mv(ext);
-    } else {
-      extensions = kj::none;
+      protocol = kj::mv(packedSocket.proto);
+      extensions = kj::mv(packedSocket.extensions);
     }
 
     // Fire open event.
@@ -510,6 +506,27 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Check if we have a valid URL
   constexpr auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
+
+  if (FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions()) {
+    // https://websockets.spec.whatwg.org/#dom-websocket-websocket. A Worker has no base URL, so a
+    // relative URL fails to parse. The serialized URL then takes the same path as without the flag.
+    auto parsed = JSG_REQUIRE_NONNULL(
+        jsg::Url::tryParse(url.asPtr()), DOMSyntaxError, wsErr, "The url is invalid.");
+    switch (parsed.getSchemeType()) {
+      case jsg::Url::SchemeType::HTTP:
+        KJ_ASSERT(parsed.setProtocol("ws"_kj));
+        break;
+      case jsg::Url::SchemeType::HTTPS:
+        KJ_ASSERT(parsed.setProtocol("wss"_kj));
+        break;
+      case jsg::Url::SchemeType::WS:
+      case jsg::Url::SchemeType::WSS:
+        break;
+      default:
+        JSG_FAIL_REQUIRE(DOMSyntaxError, wsErr, "The url scheme must be ws, wss, http or https.");
+    }
+    url = kj::str(parsed.getHref());
+  }
 
   // To be compatible with fetch() implementation:
   // - First parse the URL with REMOTE_HREF which requires hostname.

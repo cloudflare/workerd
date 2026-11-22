@@ -407,8 +407,9 @@ class InvocationSpanState final: public SpanState {
       kj::String message,
       kj::Maybe<kj::String> stack) override {
     KJ_IF_SOME(valueContext, context) {
-      KJ_IF_SOME(observer, parent.getObserver()) {
-        auto timestamp = observer.getTime();
+      if (parent.isObserved()) {
+        // Tail events use I/O time; the native invocation span records its own precise timestamp.
+        auto timestamp = IoContext::current().now();
         KJ_IF_SOME(valueTracer, tracer) {
           valueTracer->runIfAlive([&](BaseTracer& tracer) {
             tracer.addSpanException(valueContext.getSpanId(), timestamp, kj::mv(code), kj::mv(name),
@@ -463,6 +464,21 @@ class NoopSpanState final: public SpanState {
 // Span
 
 Span::Span(kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state): state(kj::mv(state)) {}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> Span::snapshotClone() const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(own, kj::Own<SpanState>) {
+      // A span created outside an IoContext (see Tracing::startSpan()).
+      if (dynamic_cast<const user_tracing::NoopSpanState*>(own.get()) == nullptr) return kj::none;
+      return ownAsWrappable(
+          kj::refcounted<Span>(kj::Own<SpanState>(kj::refcounted<user_tracing::NoopSpanState>())));
+    }
+    KJ_CASE_ONEOF(io, IoOwn<SpanState>) {
+      return kj::none;
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
 bool Span::getIsTraced() {
   KJ_SWITCH_ONEOF(state) {

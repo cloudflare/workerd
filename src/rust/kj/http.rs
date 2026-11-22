@@ -469,6 +469,12 @@ impl<'a> From<Pin<&'a mut ffi::ConnectResponse>> for ConnectResponse<'a> {
     }
 }
 
+/// What a [`Service`] call ends with.
+///
+/// Its error is the `kj::Exception` itself, so an exception that passes through a service reaches
+/// the caller with everything it holds: context, remote trace and stack trace included.
+pub type ServiceResult = core::result::Result<(), cxx::KjException>;
+
 #[async_trait::async_trait(?Send)]
 pub trait Service {
     /// Make an HTTP request.
@@ -479,7 +485,7 @@ pub trait Service {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()>;
+    ) -> ServiceResult;
 
     /// Make a CONNECT request
     ///
@@ -495,7 +501,7 @@ pub trait Service {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()>;
+    ) -> ServiceResult;
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
     /// To obtain `kj::HttpService` on C++ side finish wrapping with `fromRust()`
@@ -518,7 +524,7 @@ impl Service for CxxService<'_> {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let service = self.0.as_mut();
         ffi::request(
             service,
@@ -539,7 +545,7 @@ impl Service for CxxService<'_> {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
+    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ServiceResult> + 'b>>
     where
         'a: 'b,
         Self: 'b,
@@ -575,7 +581,7 @@ impl DynHttpService {
         headers: &'a ffi::HttpHeaders,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: Pin<&'a mut ffi::HttpServiceResponse>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let response = ServiceResponse::from(response);
         self.0
             .request(method, url, HeadersRef(headers), request_body, response)
@@ -590,7 +596,7 @@ impl DynHttpService {
         connection: Pin<&'a mut AsyncIoStream>,
         response: Pin<&'a mut ffi::ConnectResponse>,
         settings: ConnectSettings<'a>,
-    ) -> impl Future<Output = Result<()>> {
+    ) -> impl Future<Output = ServiceResult> {
         let headers = HeadersRef(headers);
         let response = ConnectResponse::from(response);
         self.0

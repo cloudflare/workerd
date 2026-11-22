@@ -11,6 +11,7 @@
 //! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
+use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -49,12 +50,7 @@ static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct ParentResource {
     pub child: jsg::Rc<SimpleResource>,
     pub optional_child: Option<jsg::Rc<SimpleResource>>,
-}
-
-impl Drop for ParentResource {
-    fn drop(&mut self) {
-        PARENT_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -143,6 +139,7 @@ fn resource_with_traced_ref_field() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: Some(optional_child.clone(lock)),
             },
@@ -184,6 +181,7 @@ fn child_traced_ref_kept_alive_by_parent() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -239,6 +237,91 @@ fn weak_ref_upgrade() {
         // No wrapper, so resource is destroyed immediately when last strong ref drops
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert!(!weak.is_alive(lock));
+        assert!(weak.upgrade(lock).is_none());
+        Ok(())
+    });
+}
+
+/// Tests that a `Weak` has expired when the resource's `Drop` runs, so that it can't be upgraded
+/// to an `Rc` of a resource being dropped.
+#[test]
+fn weak_ref_expired_during_drop() {
+    static UPGRADED_DURING_DROP: AtomicUsize = AtomicUsize::new(0);
+    static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    thread_local! {
+        /// The lock that the resource is dropped under, for its `Drop` to use.
+        static DROP_LOCK: Cell<*mut jsg::Lock<'static>> = const { Cell::new(std::ptr::null_mut()) };
+    }
+
+    #[jsg_resource]
+    struct SelfObserver {
+        this: Cell<jsg::Weak<Self>>,
+    }
+
+    impl Drop for SelfObserver {
+        fn drop(&mut self) {
+            #[expect(
+                unsafe_code,
+                reason = "borrows the lock of the code dropping the resource"
+            )]
+            // SAFETY: the test sets `DROP_LOCK` to its lock just before dropping the resource,
+            // and doesn't use the lock until the drop returns.
+            let lock = unsafe { &*DROP_LOCK.get() };
+            let this = self.this.take();
+            if this.is_alive(lock) || this.upgrade(lock).is_some() {
+                UPGRADED_DURING_DROP.fetch_add(1, Ordering::SeqCst);
+            }
+            DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl SelfObserver {}
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SelfObserver {
+                this: Cell::default(),
+            },
+        );
+        strong.get(lock).this.set(strong.downgrade(lock));
+        DROP_LOCK.set(std::ptr::from_mut(lock).cast());
+        std::mem::drop(strong);
+        DROP_LOCK.set(std::ptr::null_mut());
+        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(UPGRADED_DURING_DROP.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+}
+
+/// A resource aligned to 16 bytes, the most a resource may be.
+#[jsg_resource(custom_trace)]
+#[repr(align(16))]
+struct Aligned {
+    pub value: u64,
+}
+
+impl jsg::Traced for Aligned {
+    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl Aligned {}
+
+/// Tests that a resource aligned to 16 bytes is aligned in its Wrappable's allocation, and that a
+/// weak reference to it outlives it.
+#[test]
+fn resource_aligned_to_16_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(lock, Aligned { value: 7 });
+        assert_eq!(std::ptr::from_ref(strong.get(lock)).addr() % 16, 0);
+        let weak = strong.downgrade(lock);
+        assert_eq!(weak.upgrade(lock).map(|rc| rc.get(lock).value), Some(7));
+        drop(strong);
         assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
@@ -320,6 +403,7 @@ fn traced_ref_in_gc() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -394,8 +478,8 @@ fn weak_ref_get_returns_none_after_drop() {
 
 /// Tests that `WeakRef::default()` creates a dead weak reference.
 ///
-/// A default `WeakRef` has `wrappable: None` and an expired `Weak<R>`.
-/// All operations must be safe: `get()` -> `None`, `upgrade()` -> `None`, `is_alive()` -> `false`.
+/// A default `Weak` refers to no resource, so `upgrade()` returns `None` and `is_alive()` returns
+/// `false`.
 #[test]
 fn weak_ref_default_is_dead() {
     let harness = crate::Harness::new();
@@ -824,6 +908,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -906,12 +991,7 @@ static NULLABLE_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct NullableParent {
     pub child: jsg::Nullable<jsg::Rc<SimpleResource>>,
-}
-
-impl Drop for NullableParent {
-    fn drop(&mut self) {
-        NULLABLE_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -934,6 +1014,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             NullableParent {
+                drops: crate::DropCounter(&NULLABLE_PARENT_DROPS),
                 child: jsg::Nullable::Some(child.clone(lock)),
             },
         );
@@ -970,6 +1051,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             NullableParent {
+                drops: crate::DropCounter(&NULLABLE_PARENT_DROPS),
                 child: jsg::Nullable::Null,
             },
         );
@@ -1059,6 +1141,7 @@ fn traced_ref_drop_respects_strong_flag() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -1171,12 +1254,7 @@ struct CyclicResource {
     /// The stored "callback". Uses `jsg::Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
     callback: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
-}
-
-impl Drop for CyclicResource {
-    fn drop(&mut self) {
-        CYCLIC_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1200,6 +1278,7 @@ fn global_value_back_ref_is_collected_by_gc() {
         let resource = jsg::Rc::new(
             lock,
             CyclicResource {
+                drops: crate::DropCounter(&CYCLIC_RESOURCE_DROPS),
                 callback: jsg::Cell::new(None),
             },
         );
@@ -1260,12 +1339,7 @@ static CELL_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct CellParent {
     pub child: jsg::Cell<jsg::Rc<CellChild>>,
-}
-
-impl Drop for CellParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1275,12 +1349,7 @@ impl CellParent {}
 #[jsg_resource]
 struct CellOptionParent {
     pub child: jsg::Cell<Option<jsg::Rc<CellChild>>>,
-}
-
-impl Drop for CellOptionParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1290,12 +1359,7 @@ impl CellOptionParent {}
 #[jsg_resource]
 struct CellNullableParent {
     pub child: jsg::Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
-}
-
-impl Drop for CellNullableParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1313,6 +1377,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(child.clone(lock)),
             },
         );
@@ -1350,6 +1415,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellOptionParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(Some(child.clone(lock))),
             },
         );
@@ -1383,6 +1449,7 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellOptionParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(None),
             },
         );
@@ -1415,6 +1482,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellNullableParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(jsg::Nullable::Some(child.clone(lock))),
             },
         );
@@ -1448,6 +1516,7 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellNullableParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(jsg::Nullable::Null),
             },
         );
@@ -1718,6 +1787,7 @@ fn parent_with_unwrapped_child_released_after_dispose() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child,
                 optional_child: None,
             },
@@ -1731,24 +1801,25 @@ fn parent_with_unwrapped_child_released_after_dispose() {
     assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
 }
 
-/// A resource whose drop waits at a barrier, to stop the thread draining the queue.
-#[jsg_resource(custom_trace)]
-struct DisposeGate {
-    barrier: std::sync::Arc<std::sync::Barrier>,
+/// Waits at its barrier when it is dropped.
+struct WaitOnDrop(std::sync::Arc<std::sync::Barrier>);
+
+jsg::jsg_traced_unchecked!(WaitOnDrop);
+
+impl Drop for WaitOnDrop {
+    fn drop(&mut self) {
+        self.0.wait();
+    }
 }
 
-impl jsg::Traced for DisposeGate {
-    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+/// A resource whose drop waits at a barrier, to stop the thread draining the queue.
+#[jsg_resource]
+struct DisposeGate {
+    barrier: WaitOnDrop,
 }
 
 #[jsg_resource]
 impl DisposeGate {}
-
-impl Drop for DisposeGate {
-    fn drop(&mut self) {
-        self.barrier.wait();
-    }
-}
 
 /// After the isolate is disposed, no lock serializes the reference counts. Another thread
 /// dropping references while the dispose hook releases the queued ones must not update the
@@ -1766,7 +1837,7 @@ fn rc_dropped_on_another_thread_while_the_disposed_queue_drains() {
         let gate = jsg::Rc::new(
             lock,
             DisposeGate {
-                barrier: std::sync::Arc::clone(&barrier),
+                barrier: WaitOnDrop(std::sync::Arc::clone(&barrier)),
             },
         );
         let queued: Vec<_> = (0..100_000).map(|_| resource.clone(lock)).collect();
