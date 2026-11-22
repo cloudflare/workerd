@@ -688,6 +688,12 @@ pub mod ffi {
             on_fulfilled: &Local,
             on_rejected: &Local,
         ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_callback(
+            isolate: *mut Isolate,
+            promise: &Local,
+            callback: usize,
+            data: &Local,
+        ) -> MaybeLocal;
 
         // Local<PromiseResolver>
         pub unsafe fn promise_resolver_new(isolate: *mut Isolate) -> MaybeLocal;

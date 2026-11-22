@@ -456,10 +456,15 @@ void local_promise_mark_as_handled(const Local& promise);
 bool local_promise_has_handler(const Local& promise);
 // `promise.then(on_fulfilled, on_rejected)`, without looking up `then` or the species
 // constructor. An empty result means an exception is pending (one that a promise hook threw, or a
-// termination), as local_function_call() leaves it. While one is pending this, and the
+// termination), as local_function_call() leaves it. While one is pending these, and the
 // PromiseResolver shims, call nothing in V8, which would clear it.
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected);
+// `promise.then(f)`, where `f` is a new function that V8 calls `callback` for, with `data` as its
+// V8 data, as C++ JSG's PromiseWrapper adds the reactions that convert a promise's value. A
+// rejection passes through without a reaction.
+MaybeLocal local_promise_then_callback(
+    Isolate* isolate, const Local& promise, size_t callback, const Local& data);
 
 // Local<PromiseResolver>
 // An empty result, or false, means an exception is pending, as for local_promise_then_or_catch().

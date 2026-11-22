@@ -821,6 +821,20 @@ MaybeLocal local_promise_then_or_catch(
       local_as_ref_from_ffi<v8::Function>(on_rejected)));
 }
 
+MaybeLocal local_promise_then_callback(
+    Isolate* isolate, const Local& promise, size_t callback, const Local& data) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Function> function;
+  if (!v8::Function::New(context,
+          reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+          local_as_ref_from_ffi<v8::Value>(data))
+           .ToLocal(&function)) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(context, function));
+}
+
 // Local<PromiseResolver>
 MaybeLocal promise_resolver_new(Isolate* isolate) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
