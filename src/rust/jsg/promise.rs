@@ -423,8 +423,12 @@ impl<'s> Local<'s, Promise> {
         self.debug_assert_isolate(lock);
         let _ = (on_fulfilled, on_rejected);
         let data = ReactionData(crate::RefCell::new(Some(data)));
-        let [on_fulfilled, on_rejected] =
-            Function::new_sharing_data(lock, data, [reaction::<T, F>(), reaction::<T, R>()])?;
+        let [on_fulfilled, on_rejected] = Function::new_sharing_data(
+            lock,
+            data,
+            [reaction::<T, F>(), reaction::<T, R>()],
+            ffi::ConstructorBehavior::Throw,
+        )?;
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; all three
         // are valid handles, and a non-empty result is a promise in the lock's scope.
         unsafe {

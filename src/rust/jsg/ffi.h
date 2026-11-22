@@ -52,6 +52,7 @@ enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
 enum class JsErrorType : ::std::uint8_t;
 enum class PromiseState : ::std::uint8_t;
+enum class ConstructorBehavior : ::std::uint8_t;
 enum class ArrayIterateUntil : ::std::uint8_t;
 enum class InternalErrorLog : ::std::uint8_t;
 enum class FastApiType : ::std::uint8_t;
@@ -405,7 +406,8 @@ MaybeLocal local_function_call(
 // Creates a function that calls `callback` with `data`, an opaque wrapper that
 // wrappable_attach_opaque_wrapper() returned, as its data. Returns empty if an exception or a
 // termination is pending, or if V8 could not create the function.
-MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
+MaybeLocal function_new(
+    Isolate* isolate, size_t callback, const Local& data, ConstructorBehavior behavior);
 
 // Struct shapes
 // Returns a `v8::Global<v8::DictionaryTemplate>` declaring `keys` as data properties, in order.
@@ -461,8 +463,9 @@ bool local_promise_has_handler(const Local& promise);
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected);
 // `promise.then(f)`, where `f` is a new function that V8 calls `callback` for, with `data` as its
-// V8 data, as C++ JSG's PromiseWrapper adds the reactions that convert a promise's value. A
-// rejection passes through without a reaction.
+// V8 data, as C++ JSG's PromiseWrapper adds the reactions that convert a promise's value: not a
+// constructor, so that V8 creates no prototype object for it. A rejection passes through without
+// a reaction.
 MaybeLocal local_promise_then_callback(
     Isolate* isolate, const Local& promise, size_t callback, const Local& data);
 
