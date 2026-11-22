@@ -394,6 +394,19 @@ impl<'s> Local<'s, Promise> {
         .ok_or_else(Error::pending)
     }
 
+    /// A promise that follows this one through a reaction that passes on its value, as C++ JSG
+    /// follows a promise that a method returns: it settles one microtask after this one, with
+    /// the same value or reason. Unlike [`Local::then`], it allocates no data and registers no
+    /// rejection reaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving an exception pending, if V8 does; see [`Promise`].
+    pub fn pass_through(self, lock: &mut Lock<'s>) -> crate::Result<Self> {
+        let undefined = lock.undefined();
+        self.then_conversion(lock, undefined, |_, value| Ok(value))
+    }
+
     /// Registers `on_fulfilled` and `on_rejected` to run when the promise settles, like
     /// `promise.then(onFulfilled, onRejected)`, and returns the promise for the result of
     /// whichever runs.
