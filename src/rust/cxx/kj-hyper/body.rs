@@ -1,9 +1,9 @@
 //! HTTP message bodies in both directions, and header conversion.
 //!
 //! Headers are copied at the crossing, and written as kj writes them. kj headers reach hyper
-//! through `for_each_header` -> [`Head::append`], in the order `kj::HttpHeaders::forEach` yields:
-//! the header table's first, in the table's order and spelling (see [`Head`]), then the rest as
-//! added. The connection-level headers are the protocol's, not the application's, as under kj's
+//! through `for_each_header` into a [`Head`], in the order `kj::HttpHeaders::forEach` yields:
+//! the header table's first, in the table's order and spelling, then the rest as added. The
+//! connection-level headers are the protocol's, not the application's, as under kj's
 //! `connectionHeaders` ([`Head::claim`]), and [`Head`] always sets the framing
 //! (`Content-Length` / `Transfer-Encoding: chunked`) and `Connection: close` (a drain, a
 //! failure's answer, a refused CONNECT) itself, at kj's position, so hyper finds them and appends
@@ -33,9 +33,11 @@ use std::task::Poll;
 
 use bytes::Buf;
 use bytes::Bytes;
+use bytes::BytesMut;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
+use http::header;
 use http_body::Body;
 use http_body::Frame;
 use http_body::SizeHint;
@@ -363,6 +365,22 @@ const BUILTIN: [&str; 12] = [
     "Host",
 ];
 
+/// The [`Builtin`] headers' names, indexed by the enum.
+const BUILTIN_NAMES: [http::HeaderName; BUILTIN.len()] = [
+    header::CONNECTION,
+    http::HeaderName::from_static("keep-alive"),
+    header::TE,
+    header::TRAILER,
+    header::UPGRADE,
+    header::CONTENT_LENGTH,
+    header::TRANSFER_ENCODING,
+    header::SEC_WEBSOCKET_KEY,
+    header::SEC_WEBSOCKET_VERSION,
+    header::SEC_WEBSOCKET_ACCEPT,
+    header::SEC_WEBSOCKET_EXTENSIONS,
+    header::HOST,
+];
+
 /// The builtin headers a message's protocol sets itself (kj's `connectionHeaders`): the
 /// application's values for them are not sent.
 #[derive(Clone, Copy, Debug)]
@@ -397,12 +415,23 @@ impl Protocol {
 ///
 /// `http::HeaderName` lowercases, so the spellings ride along in hyper's `HeaderCaseMap`
 /// extension, which its encoder honors (made public by
-/// patches/rust/crates/hyper/public-header-case-map.patch).
+/// patches/rust/crates/hyper/public-header-case-map.patch). hyper title-cases a name it has no
+/// spelling for (kj-hyper sets `title_case_headers`), so a message whose names are all spelled as
+/// hyper title-cases them and whose values are not empty carries no extension. hyper pairs a
+/// name's spellings with its values in order and title-cases the values past its last spelling,
+/// so a name with a spelling for any of its values gets one for each.
+///
+/// kj may free its headers once the call that passed them returns, while hyper writes them
+/// later, so they are copied: each value and spelling into one buffer that they share as
+/// `Bytes` slices, rather than into an allocation of its own.
 pub struct Head {
     builtin: [Option<http::HeaderValue>; BUILTIN.len()],
-    /// Every other header, in kj's order.
-    map: http::HeaderMap,
-    spellings: HeaderCaseMap,
+    /// Every other header, in kj's order, with its spelling if hyper would write it otherwise.
+    others: Vec<(http::HeaderName, http::HeaderValue, Option<Bytes>)>,
+    /// Whether any of `others` has a spelling.
+    spelled: bool,
+    /// Holds the values and spellings appended so far, each split off as it is copied in.
+    buffer: BytesMut,
 }
 
 impl Head {
@@ -417,25 +446,45 @@ impl Head {
     pub fn empty() -> Self {
         Self {
             builtin: Default::default(),
-            map: http::HeaderMap::new(),
-            spellings: HeaderCaseMap::default(),
+            others: Vec::new(),
+            spelled: false,
+            buffer: BytesMut::new(),
         }
     }
 
-    /// One header from kj, in order. kj validated both parts, so they are valid here too.
+    /// Makes room for `headers` more headers whose names and values total `bytes`, before
+    /// they are appended.
+    pub fn reserve(&mut self, headers: usize, bytes: usize) {
+        self.others.reserve(headers);
+        self.buffer.reserve(bytes);
+    }
+
+    /// One header, in kj's order; one whose value `http` refuses is dropped. kj refuses the same
+    /// values (NUL, CR and LF), so none of kj's own headers is.
     pub fn append(&mut self, name: &[u8], value: &[u8]) {
-        let Ok(value) = http::HeaderValue::from_bytes(value) else {
-            return;
-        };
+        if let Ok(value) = http::HeaderValue::from_maybe_shared(self.share(value)) {
+            self.append_value(name, value);
+        }
+    }
+
+    /// One header, its value already in the buffer ([`Self::share`]).
+    fn append_value(&mut self, name: &[u8], value: http::HeaderValue) {
         let builtin = BUILTIN
             .iter()
             .position(|spelling| spelling.as_bytes().eq_ignore_ascii_case(name));
         if let Some(builtin) = builtin {
             self.builtin[builtin] = Some(value);
         } else if let Ok(header) = http::HeaderName::from_bytes(name) {
-            self.spellings.append(&header, Bytes::copy_from_slice(name));
-            self.map.append(header, value);
+            let spelling = (!is_title_case(name)).then(|| self.share(name));
+            self.spelled |= spelling.is_some();
+            self.others.push((header, value, spelling));
         }
+    }
+
+    /// `data` copied into the buffer, as bytes that share it.
+    fn share(&mut self, data: &[u8]) -> Bytes {
+        self.buffer.extend_from_slice(data);
+        self.buffer.split().freeze()
     }
 
     /// Drops the application's values of the headers that are `protocol`'s to set.
@@ -464,28 +513,95 @@ impl Head {
     }
 
     /// Installs the headers and their spellings on a message's parts.
-    pub fn apply(mut self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
-        let mut map = http::HeaderMap::with_capacity(self.map.len() + BUILTIN.len());
-        for (spelling, value) in BUILTIN.into_iter().zip(self.builtin) {
-            // `from_bytes` lowercases; the spellings are valid header names.
-            if let (Some(value), Ok(name)) =
-                (value, http::HeaderName::from_bytes(spelling.as_bytes()))
-            {
-                self.spellings
+    pub fn apply(self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
+        let builtins = self.builtin.iter().flatten().count();
+        let mut map = http::HeaderMap::with_capacity(self.others.len() + builtins);
+        let mut spellings = None;
+        for ((spelling, name), value) in BUILTIN.into_iter().zip(BUILTIN_NAMES).zip(self.builtin) {
+            let Some(value) = value else {
+                continue;
+            };
+            // A builtin header has this one value, and `others` has none of its name.
+            if !is_title_case(spelling.as_bytes()) {
+                spellings
+                    .get_or_insert_with(HeaderCaseMap::default)
                     .append(&name, Bytes::from_static(spelling.as_bytes()));
-                map.append(name, value);
             }
+            map.append(name, value);
         }
-        map.extend(self.map);
+        for (name, value, spelling) in self.others {
+            if self.spelled {
+                let spellings = spellings.get_or_insert_with(HeaderCaseMap::default);
+                let has_spellings = spellings.get_all_internal(&name).next().is_some();
+                match spelling {
+                    Some(spelling) => {
+                        // The name's earlier values went unspelled, as hyper would write them.
+                        if !has_spellings {
+                            for _ in map.get_all(&name) {
+                                spellings.append(&name, title_case(&name));
+                            }
+                        }
+                        spellings.append(&name, spelling);
+                    }
+                    None if has_spellings => spellings.append(&name, title_case(&name)),
+                    None => {}
+                }
+            }
+            map.append(name, value);
+        }
+        // hyper's client writes an empty value as `Name:` only through the extension.
+        let spellings = spellings.or_else(|| {
+            map.values()
+                .any(http::HeaderValue::is_empty)
+                .then(HeaderCaseMap::default)
+        });
         *headers = map;
-        extensions.insert(self.spellings);
+        if let Some(spellings) = spellings {
+            extensions.insert(spellings);
+        }
     }
 }
 
-/// Incoming headers packed for C++ to build `kj::HttpHeaders` from in one allocation.
+/// Whether hyper's title-casing of the lowercased `spelling` gives `spelling` back: a letter at
+/// the start or after a `-` is uppercase, and every other letter is lowercase.
+fn is_title_case(spelling: &[u8]) -> bool {
+    let mut after_dash = true;
+    spelling.iter().all(|&c| {
+        let cased = if after_dash {
+            !c.is_ascii_lowercase()
+        } else {
+            !c.is_ascii_uppercase()
+        };
+        after_dash = c == b'-';
+        cased
+    })
+}
+
+/// `name` as hyper title-cases it.
+fn title_case(name: &http::HeaderName) -> Bytes {
+    let mut after_dash = true;
+    let cased: Vec<u8> = name
+        .as_str()
+        .bytes()
+        .map(|c| {
+            let c = if after_dash {
+                c.to_ascii_uppercase()
+            } else {
+                c
+            };
+            after_dash = c == b'-';
+            c
+        })
+        .collect();
+    cased.into()
+}
+
+/// Incoming headers packed for C++ to build `kj::HttpHeaders` over without copying them again.
 ///
-/// Each header's name and value, each followed by a NUL, and their lengths. Names keep the
-/// peer's spelling where hyper recorded it (`preserve_header_case`); hyper groups repeated names.
+/// Each header's name and value, each followed by a NUL (kj's strings are NUL-terminated), and
+/// their lengths. Names keep the peer's spelling where hyper recorded it
+/// (`preserve_header_case`); hyper groups repeated names. The arena is sized exactly up front,
+/// so it is written without growing, and handed to the headers as it is ([`Self::into_kj`]).
 #[derive(Default)]
 pub struct HeaderBlock {
     arena: Vec<u8>,
@@ -495,35 +611,48 @@ pub struct HeaderBlock {
 impl HeaderBlock {
     pub fn new(map: &http::HeaderMap, extensions: &http::Extensions) -> Self {
         let spellings = extensions.get::<HeaderCaseMap>();
-        let mut block = Self::default();
-        for name in map.keys() {
-            let mut spelled = spellings.map(|s| s.get_all_internal(name));
-            for value in map.get_all(name) {
-                let spelling = spelled.as_mut().and_then(Iterator::next);
-                let name = spelling.map_or(name.as_str().as_bytes(), |s| s.as_ref());
-                // hyper bounds a header block far below 4 GiB.
-                let (Ok(name_len), Ok(value_len)) =
-                    (u32::try_from(name.len()), u32::try_from(value.len()))
-                else {
-                    continue;
-                };
-                block.arena.extend_from_slice(name);
-                block.arena.push(0);
-                block.arena.extend_from_slice(value.as_bytes());
-                block.arena.push(0);
-                block.lens.extend([name_len, value_len]);
+        // A spelling is as long as its name.
+        let size = map
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.len() + 2)
+            .sum();
+        let mut block = Self {
+            arena: Vec::with_capacity(size),
+            lens: Vec::with_capacity(2 * map.len()),
+        };
+        // A map yields each name's values together, so a name's spellings are looked up once.
+        let mut last = None;
+        let mut spelled = None;
+        for (name, value) in map {
+            if last != Some(name) {
+                last = Some(name);
+                spelled = spellings.map(|s| s.get_all_internal(name));
             }
+            let spelling = spelled.as_mut().and_then(Iterator::next);
+            let name = spelling.map_or(name.as_str().as_bytes(), |s| s.as_ref());
+            // hyper bounds a header block far below 4 GiB.
+            let (Ok(name_len), Ok(value_len)) =
+                (u32::try_from(name.len()), u32::try_from(value.len()))
+            else {
+                continue;
+            };
+            block.arena.extend_from_slice(name);
+            block.arena.push(0);
+            block.arena.extend_from_slice(value.as_bytes());
+            block.arena.push(0);
+            block.lens.extend([name_len, value_len]);
         }
         block
     }
 
-    /// The headers as `kj::HttpHeaders` over `table`, which they borrow.
+    /// The headers as `kj::HttpHeaders` over `table`, which they borrow. The headers take the
+    /// arena over and point into it.
     ///
     /// # Errors
     ///
     /// A block whose lengths do not describe its bytes.
-    pub fn to_kj<'t>(&self, table: &'t HttpHeaderTable) -> Result<Borrowing<'t, HttpHeaders>> {
-        headers_from_block(table, &self.arena, &self.lens)
+    pub fn into_kj(self, table: &HttpHeaderTable) -> Result<Borrowing<'_, HttpHeaders>> {
+        headers_from_block(table, self.arena, &self.lens)
     }
 }
 

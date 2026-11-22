@@ -283,15 +283,48 @@ class ConnectResponseImpl final: public kj::HttpService::ConnectResponse {
 }  // namespace
 
 void for_each_header(const kj::HttpHeaders& headers, Head& head) {
-  headers.forEach(
-      [&](kj::StringPtr name, kj::StringPtr value) { head.append(bytes(name), bytes(value)); });
+  // Sized first, so that the head copies the values into one buffer it allocates once.
+  size_t count = 0;
+  size_t size = 0;
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    ++count;
+    size += name.size() + value.size();
+  });
+  head.reserve(count, size);
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    append_kj_header(head, bytes(name), bytes(value));
+  });
 }
 
+namespace {
+
+// Frees a header block's arena, which Rust allocated and handed over (headers_from_block()).
+class RustArenaDisposer final: public kj::ArrayDisposer {
+ public:
+  static const RustArenaDisposer INSTANCE;
+
+ protected:
+  void disposeImpl(void* firstElement,
+      size_t elementSize,
+      size_t elementCount,
+      size_t capacity,
+      void (*destroyElement)(void*)) const override {
+    drop_header_arena(static_cast<uint8_t*>(firstElement), elementCount);
+  }
+};
+
+const RustArenaDisposer RustArenaDisposer::INSTANCE;
+
+}  // namespace
+
 kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
-    ::rust::Slice<const uint8_t> arena,
+    uint8_t* arena,
+    size_t arenaLen,
     ::rust::Slice<const uint32_t> lens) {
+  // Owned before anything can throw, so that a failure frees it too. The headers point into it
+  // and own it, so it lives exactly as long as they do; Rust no longer has it.
+  kj::Array<char> owned(reinterpret_cast<char*>(arena), arenaLen, RustArenaDisposer::INSTANCE);
   KJ_REQUIRE(lens.size() % 2 == 0, "malformed header block");
-  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
   kj::ArrayPtr<const char> rest = owned;
   auto next = [&](uint32_t len) {
     KJ_REQUIRE(len < rest.size() && rest[len] == '\0', "malformed header block");

@@ -12,6 +12,7 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::ptr;
 use std::slice;
 
 pub use bridge::AsyncInputStream;
@@ -131,15 +132,19 @@ mod bridge {
         /// Every header, in kj's order, appended to `head`.
         fn for_each_header(headers: &HttpHeaders, head: &mut Head);
         /// `kj::HttpHeaders` from a packed block (body.rs's `HeaderBlock`), checked against the
-        /// block's bounds.
+        /// block's bounds. The headers own the arena, and free it with `drop_header_arena`;
+        /// so does a failure.
         ///
         /// # Safety
         ///
         /// The headers keep a reference to `table`, which the `KjOwn` does not carry: the
-        /// caller keeps `table` alive for as long as they exist ([`Borrowing`] does).
+        /// caller keeps `table` alive for as long as they exist ([`Borrowing`] does). `arena`
+        /// and `arena_len` are a `Box<[u8]>` released to the call, which nothing else uses
+        /// again.
         unsafe fn headers_from_block(
             table: &HttpHeaderTable,
-            arena: &[u8],
+            arena: *mut u8,
+            arena_len: usize,
             lens: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
         /// kj's parse of a request method; false for one kj has no name for.
@@ -215,7 +220,11 @@ mod bridge {
 
     extern "Rust" {
         type Head;
-        fn append(self: &mut Head, name: &[u8], value: &[u8]);
+        fn reserve(self: &mut Head, headers: usize, bytes: usize);
+        /// One of kj's headers, which kj has checked.
+        fn append_kj_header(head: &mut Head, name: &[u8], value: &[u8]);
+        /// Frees the arena of a header block that `headers_from_block` was given.
+        unsafe fn drop_header_arena(arena: *mut u8, len: usize);
 
         type RustIo;
         async unsafe fn rust_io_read(
@@ -315,18 +324,23 @@ impl<T: OwnTarget> Deref for Borrowing<'_, T> {
     }
 }
 
-/// `kj::HttpHeaders` over `table` from a packed block ([`crate::body::HeaderBlock`]).
+/// `kj::HttpHeaders` over `table` from a packed block ([`crate::body::HeaderBlock`]), owning
+/// `arena` and pointing into it.
 ///
 /// # Errors
 ///
 /// A block whose lengths do not describe its bytes.
 pub fn headers_from_block<'t>(
     table: &'t HttpHeaderTable,
-    arena: &[u8],
+    arena: Vec<u8>,
     lens: &[u32],
 ) -> Result<Borrowing<'t, HttpHeaders>> {
-    // SAFETY: the result is bounded by `'t`, the borrow of `table` the headers keep.
-    let own = unsafe { bridge::headers_from_block(table, arena, lens) }?;
+    // A block is sized exactly (`HeaderBlock::new`), so this does not reallocate.
+    let arena = Box::into_raw(arena.into_boxed_slice());
+    let (ptr, len) = (arena.cast::<u8>(), arena.len());
+    // SAFETY: the result is bounded by `'t`, the borrow of `table` the headers keep. The arena
+    // is released here and passed whole; C++ owns it from the call on, success or failure.
+    let own = unsafe { bridge::headers_from_block(table, ptr, len, lens) }?;
     Ok(Borrowing {
         own,
         borrow: PhantomData,
@@ -422,6 +436,20 @@ unsafe fn body_read<'a>(
 ) -> impl Future<Output = Result<usize>> + 'a {
     // SAFETY: forwarded.
     body.read(unsafe { uninit(ptr, len) }, min_bytes)
+}
+
+fn append_kj_header(head: &mut Head, name: &[u8], value: &[u8]) {
+    // Checked, though kj refuses the same bytes `http` does, since the unchecked constructor also
+    // requires UTF-8, which a kj value need not be.
+    head.append(name, value);
+}
+
+/// # Safety
+///
+/// `arena` and `len` are a `Box<[u8]>` that [`headers_from_block`] released, not yet freed.
+unsafe fn drop_header_arena(arena: *mut u8, len: usize) {
+    // SAFETY: per the contract.
+    drop(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(arena, len)) });
 }
 
 fn body_length(body: &RustBody) -> KjMaybe<u64> {
