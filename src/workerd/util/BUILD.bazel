@@ -130,6 +130,22 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "http-headers-patch",
+    hdrs = ["http-headers-patch.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+kj_test(
+    src = "http-headers-patch-test.c++",
+    deps = [
+        ":http-headers-patch",
+    ],
+)
+
+wd_cc_library(
     name = "http-util",
     hdrs = [
         "http-util.h",

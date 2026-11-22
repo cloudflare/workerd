@@ -9,6 +9,7 @@
 #include "worker-factory-impl.h"
 
 #include <workerd/api/sockets.h>
+#include <workerd/util/http-headers-patch.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/websocket-error-handler.h>
 
@@ -47,27 +48,31 @@ class RewritingResponse final: public kj::HttpService::Response {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    return inner.send(statusCode, statusText, rewrite(headers), expectedBodySize);
+    HttpHeadersPatch patch(headers);
+    rewrite(patch);
+    return inner.send(statusCode, statusText, patch.get(), expectedBodySize);
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    return inner.acceptWebSocket(rewrite(headers));
+    HttpHeadersPatch patch(headers);
+    rewrite(patch);
+    return inner.acceptWebSocket(patch.get());
   }
 
  private:
   kj::HttpService::Response& inner;
   kj::Array<Edit> edits;
 
-  kj::HttpHeaders rewrite(const kj::HttpHeaders& headers) {
-    auto rewritten = headers.cloneShallow();
+  // Most sockets inject no response headers, and those that do often find them already set: the
+  // patch copies the headers only for an edit that changes them.
+  void rewrite(HttpHeadersPatch& patch) {
     for (auto& edit: edits) {
       KJ_IF_SOME(value, edit.value) {
-        rewritten.setPtr(edit.id, value);
+        patch.setPtr(edit.id, value);
       } else {
-        rewritten.unset(edit.id);
+        patch.unset(edit.id);
       }
     }
-    return rewritten;
   }
 };
 
