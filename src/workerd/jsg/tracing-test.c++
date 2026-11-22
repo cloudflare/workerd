@@ -510,9 +510,12 @@ KJ_TEST("wrappables are charged as external memory while they live") {
 
   // Collected, so the charges are released again, with slack for a few boxes the GCs leave alive.
   // The GC is requested from C++ without stack scanning, as a stale stack slot that points at
-  // `keep` would keep every box alive.
+  // `keep` would keep every box alive. The loop in keepBoxes() may still have an optimizing
+  // compile job pending on a background thread, and that job keeps every box alive too, so it is
+  // first aborted and waited for.
   e.expectEval("keep = null", "object", "null");
   e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    lock.v8Isolate->ClearCachesForTesting();
     for (int i = 0; i < 2; ++i) {
       lock.v8Isolate->RequestGarbageCollectionForTesting(
           v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
