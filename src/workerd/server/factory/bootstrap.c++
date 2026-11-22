@@ -140,6 +140,18 @@ void startTcmallocBackgroundThread() {
 #endif
 }
 
+// tcmalloc samples an allocation about every 2 MiB by default and records its stack for heap
+// profiles, but nothing in workerd ever reads those profiles. On x86-64, the stack is walked by
+// following frame pointers, and release builds omit them, in Rust as well as C++. A sampled
+// allocation on a path that does not keep the frame chain, such as hyper's HTTP parsing, can then
+// walk off the end of the stack and crash with SIGSEGV (cloudflare/workerd#8801). Turning sampling
+// off removes both the crash and the cost of sampling.
+void disableTcmallocHeapSampling() {
+#ifdef WORKERD_USE_TCMALLOC
+  tcmalloc::MallocExtension::SetProfileSamplingInterval(0);
+#endif
+}
+
 // =======================================================================================
 
 // How the binary was built, for `workerd bench`'s report: a sanitizer's instrumentation and a
@@ -191,6 +203,7 @@ class Bootstrap {
     }
     TRACE_EVENT("workerd", "Bootstrap()");
     startTcmallocBackgroundThread();
+    disableTcmallocHeapSampling();
 
     // The process is set up for this config and these options: autogates, the test and bench
     // modes, and V8 with its flags (V8 reads the test modes as it starts).
