@@ -47,10 +47,16 @@ class RewritingResponse final: public kj::HttpService::Response {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    if (edits.size() == 0) {
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
     return inner.send(statusCode, statusText, rewrite(headers), expectedBodySize);
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    if (edits.size() == 0) {
+      return inner.acceptWebSocket(headers);
+    }
     return inner.acceptWebSocket(rewrite(headers));
   }
 
@@ -58,8 +64,10 @@ class RewritingResponse final: public kj::HttpService::Response {
   kj::HttpService::Response& inner;
   kj::Array<Edit> edits;
 
+  // The result refers to `headers`, which outlive it: they need only last until send() or
+  // acceptWebSocket() returns, and so does the result.
   kj::HttpHeaders rewrite(const kj::HttpHeaders& headers) {
-    auto rewritten = headers.cloneShallow();
+    auto rewritten = headers.derive();
     for (auto& edit: edits) {
       KJ_IF_SOME(value, edit.value) {
         rewritten.setPtr(edit.id, value);
