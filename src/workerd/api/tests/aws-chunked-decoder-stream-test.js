@@ -4,6 +4,9 @@
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 
+// An experimental global, which the linter's environment doesn't declare.
+const { AwsChunkedDecoderStream } = globalThis;
+
 const encoder = new TextEncoder();
 
 function concat(chunks) {
