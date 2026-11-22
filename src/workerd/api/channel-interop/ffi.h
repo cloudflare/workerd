@@ -35,6 +35,7 @@ using ActorClassChannel = IoChannelFactory::ActorClassChannel;
 // The options of a Fetcher on a numbered channel, by names in this namespace, which the bridge
 // declares them by as shared enums. C++ `Fetcher` takes whether it is in-house as a bool.
 using RequiresHostAndProtocol = Fetcher::RequiresHostAndProtocol;
+using EvictWebSocketMode = IoChannelFactory::EvictWebSocketMode;
 enum class InHouse { YES, NO };
 
 // Per-type shims of jsg_cpp::CppResource.
@@ -71,6 +72,11 @@ bool fetcher_map_virtual_host(
 // channel->requireAllowsTransfer().
 bool subrequest_channel_require_allows_transfer(
     v8::Isolate* isolate, const SubrequestChannel& channel);
+
+// channel->evictForTest(webSocketMode), which holds the channel until it settles. What it
+// throws rejects the promise.
+kj::Promise<void> subrequest_channel_evict_for_test(
+    kj::Rc<SubrequestChannel> channel, EvictWebSocketMode webSocketMode);
 
 // durableObjectClass.getChannel(ioctx).
 bool durable_object_class_channel(v8::Isolate* isolate,

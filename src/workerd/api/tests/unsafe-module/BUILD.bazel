@@ -7,3 +7,11 @@ wd_test(
     args = ["--experimental"],
     data = glob(["*.js"]),
 )
+
+wd_test(
+    # As unsafe-module-test.
+    size = "large",
+    src = "unsafe-module-rust-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]) + ["unsafe-module-test.wd-test"],
+)

@@ -1,17 +1,18 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-const unitTests :Workerd.Config = (
-  services = [
-    ( name = "unsafe-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "unsafe-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "experimental"],
-        bindings = [
-          (name = "unsafe", unsafeEval = void )
-        ]
-      )
-    ),
-  ],
-);
+# unsafe-rust-test.wd-test runs these services against the Rust unsafe modules.
+const unitTests :Workerd.Config = (services = .services);
+
+const services :List(Workerd.Service) = [
+  ( name = "unsafe-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "unsafe-test.js")
+      ],
+      compatibilityFlags = ["nodejs_compat", "experimental"],
+      bindings = [
+        (name = "unsafe", unsafeEval = void )
+      ]
+    )
+  ),
+];

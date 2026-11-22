@@ -30,6 +30,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
+pub use ffi::bridge::EvictWebSocketMode;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
@@ -141,10 +142,10 @@ impl<'s> IoContext<'s> {
     /// is logged as an uncaught exception and recorded in the request's `waitUntil()` status. A
     /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
-    /// `future` and its output are `Send` because the future's later polls run without the
-    /// isolate lock.
-    /// A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since every other use takes a
-    /// [`jsg::Lock`], which the future doesn't have.
+    /// `future` and its output are `Send`, which C++ does not need: it polls and drops the future
+    /// only on this `IoContext`'s thread, and [`await_io_local`](Self::await_io_local) waits for
+    /// one that is only `'static`. A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since
+    /// every other use takes a [`jsg::Lock`], which the future doesn't have.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
@@ -154,8 +155,20 @@ impl<'s> IoContext<'s> {
         F: Future<Output = T> + Send + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
     {
+        self.await_io_and_run_on_thread(future, callback)
+    }
+
+    /// [`await_io_and_run`](Self::await_io_and_run) for any `'static` future and output. Callers
+    /// bound what they accept; see [`await_io_local`](Self::await_io_local) for what this relies
+    /// on.
+    fn await_io_and_run_on_thread<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
+    {
         let future = ffi::IoFuture(Box::pin(async move {
-            let output: Box<dyn Any + Send> = Box::new(future.await);
+            let output: Box<dyn Any> = Box::new(future.await);
             output
         }));
         let callback = ffi::IoCallback(Box::new(move |lock, output| {
@@ -203,6 +216,22 @@ impl<'s> IoContext<'s> {
         F: Future<Output = T> + Send + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
     {
+        self.await_io_on_thread(lock, future, callback)
+    }
+
+    /// [`await_io`](Self::await_io) for any `'static` future and output. Callers bound what they
+    /// accept; see [`await_io_local`](Self::await_io_local) for what this relies on.
+    fn await_io_on_thread<T, F, C>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+        callback: C,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
+    {
         let resolver = v8::PromiseResolver::new(lock)?;
         let outcome = CallbackOutcome::default();
         let promise = resolver
@@ -212,7 +241,7 @@ impl<'s> IoContext<'s> {
         // `catch_poll_panic()` turns a panic while polling into an output, so that it rejects the
         // promise instead of failing the task as `io_future_wait()` would. `io_future_wait()`
         // still catches a panic while dropping the future when the wait is cancelled.
-        self.await_io_and_run(catch_poll_panic(future), move |lock, output| {
+        self.await_io_and_run_on_thread(catch_poll_panic(future), move |lock, output| {
             let resolver = resolver.as_local(lock);
             let result = match output {
                 Ok(output) => {
@@ -236,6 +265,37 @@ impl<'s> IoContext<'s> {
             resolver.resolve(lock, undefined)
         })?;
         Ok(promise)
+    }
+
+    /// [`await_io`](Self::await_io) for a future, and an output, that need not be `Send`, only
+    /// `'static`: such as the future of a C++ `kj::Promise` that an `async` C++ function of a cxx
+    /// bridge returns, which belongs to the thread that made it. Waiting, `callback` and the
+    /// promise work as for `await_io`.
+    ///
+    /// Nothing moves to another thread. C++ polls and drops `future`, and runs `callback` with
+    /// its output, only on this `IoContext`'s thread, as it runs the `kj::Promise` that C++
+    /// `awaitIo()` waits for, so they may hold objects that belong to that thread. `future` is
+    /// polled and dropped without the isolate lock, as for `await_io`, and is `'static`, so it
+    /// can't hold a `v8::Local` of a lock; a `v8::Global` or `jsg::Rc` it holds can only be
+    /// dropped, which needs no lock. Lock-guarded state is
+    /// `Send` (`src/rust/jsg/README.md` §Safety rules, rule 5), so nothing that isn't is shared
+    /// with a thread that holds the lock; a C++ object whose destructor needs the lock reaches
+    /// Rust in a `jsg::LockGuarded`, never as a bare `KjOwn`.
+    ///
+    /// # Errors
+    /// As for `await_io`.
+    pub fn await_io_local<T, F, C>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+        callback: C,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: 'static,
+        F: Future<Output = T> + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
+    {
+        self.await_io_on_thread(lock, future, callback)
     }
 
     /// [`await_io`](Self::await_io) for a future whose output converts to the promise's value:
@@ -698,7 +758,10 @@ impl<'s> IoContext<'s> {
     /// and the output reaches only the call's future, which is not `Send` either. The futures are
     /// polled and dropped without the isolate lock, and are `'static`, as `function` is, so they
     /// can't hold a `v8::Local` of a lock; a `v8::Global` or `jsg::Rc` they hold can only be
-    /// dropped, which needs no lock.
+    /// dropped, which needs no lock. Lock-guarded state is
+    /// `Send` (`src/rust/jsg/README.md` §Safety rules, rule 5), so nothing that isn't is shared
+    /// with a thread that holds the lock; a C++ object whose destructor needs the lock reaches
+    /// Rust in a `jsg::LockGuarded`, never as a bare `KjOwn`.
     ///
     /// # Example
     ///
@@ -807,6 +870,45 @@ impl<'s> IoContext<'s> {
             Ok(()) => lock.terminate_execution_now(),
             Err(err) => err,
         }
+    }
+
+    /// Aborts every Durable Object this Worker's isolate can address, except those in
+    /// namespaces that prevent eviction, with `reason`, as C++ `IoContext::abortAllActors()`
+    /// does. Only workerd implements it.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one, or with
+    /// what C++ throws, as it does where the `IoChannelFactory` does not implement it.
+    pub fn abort_all_actors(&self, reason: cxx::KjException) -> jsg::Result<()> {
+        Ok(bridge::io_context_abort_all_actors(self.id, reason)?)
+    }
+
+    /// Like [`abort_all_actors`](Self::abort_all_actors), but also deletes their storage and
+    /// cancels their alarms, as C++ `IoContext::deleteAllActors()` does.
+    ///
+    /// # Errors
+    /// As for `abort_all_actors`.
+    pub fn delete_all_actors(&self, reason: cxx::KjException) -> jsg::Result<()> {
+        Ok(bridge::io_context_delete_all_actors(self.id, reason)?)
+    }
+
+    /// Evicts every running Durable Object in the namespaces this Worker can address that
+    /// allow eviction, as the runtime does when they go idle, keeping their storage, as C++
+    /// `IoContext::evictAllActorsForTest()` does. Returns a future for when they are evicted,
+    /// which can be waited for with [`await_io_local`](Self::await_io_local). What C++ throws, as it does
+    /// where the `IoChannelFactory` does not implement it, fails the future.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn evict_all_actors_for_test(
+        &self,
+        web_socket_mode: EvictWebSocketMode,
+    ) -> jsg::Result<impl Future<Output = Result<(), cxx::KjException>> + 'static + use<>> {
+        bridge::io_context_check_current(self.id)?;
+        Ok(bridge::io_context_evict_all_actors_for_test(
+            self.id,
+            web_socket_mode,
+        ))
     }
 
     /// Logs `exception`, a value JavaScript threw or rejected a promise with, as an uncaught

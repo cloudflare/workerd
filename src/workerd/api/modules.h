@@ -11,10 +11,13 @@
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/tracing.h>
+#include <workerd/api/unsafe-api/ffi.rs.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/api/wrapped-binding.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/rust/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -52,18 +55,95 @@ class EnvModule final: public jsg::Object {
   }
 };
 
+// The unsafe modules come from Rust (src/workerd/api/unsafe-api) when the RUST_UNSAFE_MODULES
+// autogate is on, and from unsafe.h otherwise. workerd:fuzzilli always comes from unsafe.h.
+inline bool useRustUnsafeModules() {
+  return util::Autogate::isEnabled(util::AutogateKey::RUST_UNSAFE_MODULES);
+}
+
+// registerUnsafeModules() and registerUnsafeModule(), from Rust or C++.
+template <class Registry>
+void registerUnsafeModulesOf(Registry& registry, auto featureFlags) {
+  if (!useRustUnsafeModules()) {
+    registerUnsafeModules(registry, featureFlags);
+    if (featureFlags.getUnsafeModule()) {
+      registerUnsafeModule(registry);
+    }
+    return;
+  }
+
+  ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> rustRegistry(registry);
+  unsafe_api::register_unsafe_modules(rustRegistry);
+#ifdef WORKERD_FUZZILLI
+  unsafe_api::register_stdin_module(rustRegistry);
+  if (featureFlags.getWorkerdExperimental()) {
+    registry.template addBuiltinModule<Fuzzilli>(
+        "workerd:fuzzilli", workerd::jsg::ModuleRegistry::Type::BUILTIN);
+  }
+#endif
+  if (featureFlags.getUnsafeModule()) {
+    unsafe_api::register_unsafe_module(rustRegistry);
+  }
+}
+
+// getInternalUnsafeModuleBundle(), from Rust or C++.
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getInternalUnsafeModuleBundleOf(auto featureFlags) {
+  if (!useRustUnsafeModules()) {
+    return getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags);
+  }
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
+  unsafe_api::register_unsafe_modules(adapter);
+  return builder.finish();
+}
+
+// getExternalUnsafeModuleBundle(), from Rust or C++.
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getExternalUnsafeModuleBundleOf(auto featureFlags) {
+  if (!useRustUnsafeModules()) {
+    return getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags);
+  }
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
+  unsafe_api::register_unsafe_module(adapter);
+  return builder.finish();
+}
+
+#ifdef WORKERD_FUZZILLI
+// getExternalFuzzilliModuleBundle(), with workerd:stdin from Rust or C++.
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getExternalFuzzilliModuleBundleOf(auto featureFlags) {
+  if (!useRustUnsafeModules()) {
+    return getExternalFuzzilliModuleBundle<TypeWrapper>(featureFlags);
+  }
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  {
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
+    unsafe_api::register_stdin_module(adapter);
+  }
+  if (featureFlags.getWorkerdExperimental()) {
+    static const auto kFuzzilliSpecifier = "workerd:fuzzilli"_url;
+    builder.addSynthetic(kFuzzilliSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<Fuzzilli, TypeWrapper>(
+            [](jsg::Lock& js) { return js.alloc<Fuzzilli>(); }));
+  }
+  return builder.finish();
+}
+#endif
+
 // `moduleSource`, if given, provides the storage V8 reads the compiled-in module sources from;
 // see jsg/module-source.h.
 template <class Registry>
 void registerModules(
     Registry& registry, auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
   node::registerNodeJsCompatModules(registry, featureFlags, moduleSource);
-  registerUnsafeModules(registry, featureFlags);
+  registerUnsafeModulesOf(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
-  }
-  if (featureFlags.getUnsafeModule()) {
-    registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
@@ -89,14 +169,14 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
   builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
-  builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalUnsafeModuleBundleOf<TypeWrapper>(featureFlags));
   builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalWrappedBindingModuleBundle<TypeWrapper>(featureFlags));
   if (featureFlags.getUnsafeModule()) {
-    builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+    builder.add(getExternalUnsafeModuleBundleOf<TypeWrapper>(featureFlags));
   }
 #ifdef WORKERD_FUZZILLI
-  builder.add(getExternalFuzzilliModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getExternalFuzzilliModuleBundleOf<TypeWrapper>(featureFlags));
 #endif
 
   if (featureFlags.getRttiApi()) {

@@ -57,7 +57,7 @@ impl WasmModules {
 
 /// Defines the global `bytes`, a `Uint8Array` of `ANSWER_MODULE`, and allows compiling it.
 fn define_bytes(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    Harness::set_allow_eval(lock, true);
+    lock.set_allow_eval(true);
     let bytes = ANSWER_MODULE.to_js_typed_array(lock);
     ctx.set_global(lock, "bytes", bytes);
 }

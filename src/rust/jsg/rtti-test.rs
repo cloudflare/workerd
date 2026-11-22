@@ -663,3 +663,49 @@ fn registration_replaces_the_declared_typescript_override() {
         ("FlaggedWithCache".to_owned(), define)
     );
 }
+
+struct BytesHolder;
+
+impl TypeInfo for BytesHolder {
+    fn describe(cx: &mut Context) -> Type {
+        cx.structure::<Self>("BytesHolder", TypeScript::default(), |_, _| {
+            vec![Member::Property {
+                name: "bytes",
+                ty: Type::Bytes,
+                readonly: true,
+                prototype: true,
+                lazy: false,
+            }]
+        })
+    }
+}
+
+// As C++ RTTI writes a `kj::Array<kj::byte>`, which the TypeScript generator recognizes by the
+// array's and the element's names.
+#[test]
+fn bytes_are_described_as_a_cpp_byte_array() {
+    let mut cx = Context::default();
+    BytesHolder::describe(&mut cx);
+    let message = read_context(&cx);
+    let root = message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap();
+    let structure = root
+        .get_groups()
+        .unwrap()
+        .get(0)
+        .get_structures()
+        .unwrap()
+        .get(0);
+    let member = structure.get_members().unwrap().get(0);
+    let rtti_capnp::type_::Array(array) = property(member).get_type().unwrap().which().unwrap()
+    else {
+        panic!("not an array");
+    };
+    let array = array.unwrap();
+    assert_eq!(array.get_name().unwrap(), "kj::Array");
+    let rtti_capnp::type_::Number(number) = array.get_element().unwrap().which().unwrap() else {
+        panic!("not a number");
+    };
+    assert_eq!(number.unwrap().get_name().unwrap(), "unsigned char");
+}

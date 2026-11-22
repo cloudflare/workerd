@@ -77,6 +77,25 @@ impl Lock<'_> {
     pub(crate) fn isolate_state(&mut self) -> &Arc<IsolateState> {
         self.realm().state()
     }
+
+    /// Runs `f` with code generation from strings allowed, then disallows it, also when `f`
+    /// panics. It disallows it afterwards whatever it was before, as C++ does with
+    /// `setAllowEval(true)` followed by `KJ_DEFER(setAllowEval(false))`.
+    pub fn with_eval_allowed<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        struct Disallow(v8::IsolatePtr);
+        impl Drop for Disallow {
+            #[expect(unsafe_code, reason = "changes a JSG setting of the locked isolate")]
+            fn drop(&mut self) {
+                // SAFETY: the isolate is valid and locked: the guard lives only within
+                // `with_eval_allowed`, which borrows the lock.
+                unsafe { v8::ffi::isolate_set_allow_eval(self.0.as_ffi(), false) }
+            }
+        }
+
+        self.set_allow_eval(true);
+        let _disallow = Disallow(self.isolate);
+        f(self)
+    }
 }
 
 /// A V8 isolate that the current thread has locked.
@@ -139,6 +158,31 @@ impl Isolate {
     pub fn captures_throws_as_rejections(&mut self) -> bool {
         // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
         unsafe { v8::ffi::isolate_captures_throws_as_rejections(self.as_ffi()) }
+    }
+
+    /// Returns true if the isolate allows code generation from strings: `eval()`,
+    /// `new Function()` and compiling WebAssembly, as C++ `jsg::Lock::isEvalAllowed()` does.
+    #[expect(unsafe_code, reason = "asks JSG about the locked isolate")]
+    pub fn is_eval_allowed(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_is_eval_allowed(self.as_ffi()) }
+    }
+
+    /// Allows or disallows code generation from strings, as C++ `jsg::Lock::setAllowEval()`
+    /// does. It has no effect in an isolate that always allows it.
+    #[expect(unsafe_code, reason = "changes a JSG setting of the locked isolate")]
+    pub fn set_allow_eval(&mut self, allow: bool) {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_set_allow_eval(self.as_ffi(), allow) }
+    }
+
+    /// Returns true if the isolate was started from a startup snapshot, rather than evaluating
+    /// its Worker's top level itself (C++ `IsolateBase::isStartingFromSnapshot()`; see
+    /// `docs/startup-snapshot.md`).
+    #[expect(unsafe_code, reason = "asks JSG about the locked isolate")]
+    pub fn is_starting_from_snapshot(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_is_starting_from_snapshot(self.as_ffi()) }
     }
 }
 

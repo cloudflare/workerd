@@ -17,6 +17,8 @@
 // reach another request's IoContext, or one that has been destroyed.
 namespace workerd::io_context {
 
+using EvictWebSocketMode = IoChannelFactory::EvictWebSocketMode;
+
 // The message of the error IoContext::current() throws outside a request.
 ::rust::Str io_context_no_request_message();
 
@@ -180,6 +182,16 @@ void io_context_abort(uint64_t id, kj::Exception reason);
 // IoContext::abort() with IoContext::abortWithoutReasonException(), for ctx.abort() without a
 // reason. Does not terminate execution.
 void io_context_abort_without_reason(uint64_t id);
+
+// IoContext::abortAllActors() and deleteAllActors() with `reason`, for workerd:unsafe's
+// abortAllDurableObjects() and deleteAllDurableObjects().
+void io_context_abort_all_actors(uint64_t id, kj::Exception reason);
+void io_context_delete_all_actors(uint64_t id, kj::Exception reason);
+
+// IoContext::evictAllActorsForTest(), for workerd:unsafe's evictAllDurableObjects(). What the
+// call throws, as it does unless the IoChannelFactory implements it, rejects the promise.
+kj::Promise<void> io_context_evict_all_actors_for_test(
+    uint64_t id, EvictWebSocketMode webSocketMode);
 
 // IoContext::addWaitUntil() for `future`, the Rust await_js() of the promise ctx.waitUntil() was
 // given.

@@ -9,6 +9,7 @@
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/unsafe-api/ffi.rs.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/modules-new.h>
@@ -741,6 +742,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     case Global::UNSAFE_EVAL:
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_UNSAFE_MODULES)) {
+        return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+            api::unsafe_api::new_unsafe_eval(lock.v8Isolate)));
+      }
       return lock.wrap(context, lock.alloc<api::UnsafeEval>());
 
     case Global::ACTOR_CLASS:

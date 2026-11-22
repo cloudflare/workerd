@@ -341,8 +341,7 @@ class IsolateBase {
   }
 
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
-    if (alwaysAllowEval) return;
-    evalAllowed = allow;
+    setAllowEvalImpl(allow);
   }
 
   inline bool isEvalAllowed(kj::Badge<Lock>) const {
@@ -1128,6 +1127,13 @@ class IsolateBase {
   friend class ExternalMemoryTarget;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
+  friend bool isEvalAllowed(v8::Isolate* isolate);
+  friend void setAllowEval(v8::Isolate* isolate, bool allow);
+
+  inline void setAllowEvalImpl(bool allow) {
+    if (alwaysAllowEval) return;
+    evalAllowed = allow;
+  }
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   friend kj::Exception createTunneledException(

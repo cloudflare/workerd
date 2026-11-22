@@ -43,6 +43,7 @@ mod wrappable;
 pub use arguments::Arguments;
 pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
+pub use buffer::Bytes;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
 pub use cell::Cell;
