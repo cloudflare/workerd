@@ -148,7 +148,14 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   KJ_UNREACHABLE;
 }
 
-Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers): headersRef(headers) {
+Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init) {
+  KJ_IF_SOME(i, init) {
+    KJ_IREQUIRE(i.contentType == kj::none);
+    bodyStream = kj::mv(i.stream);
+  }
+}
+
+Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers) {
   KJ_IF_SOME(i, init) {
     KJ_IF_SOME(ct, i.contentType) {
       if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
@@ -237,7 +244,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
     // When running with a warning handler, let's warn the developer if they do this.
     auto& context = IoContext::current();
     if (context.hasWarningHandler()) {
-      KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
+      KJ_IF_SOME(type, getContentTypeHeader(js)) {
         maybeWarnIfNotText(js, type);
       }
     }
@@ -255,7 +262,7 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "It can only be used once. Use tee() first if you need to read it twice.");
 
     KJ_ASSERT(!bodyStream.isDisturbed(js));
-    auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
+    auto maybeContentType = getContentTypeHeader(js);
 
     // The body is read before the Content-Type is checked, so that an error from the body stream
     // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
@@ -283,8 +290,8 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](auto&& b) -> kj::String {
+    kj::String contentType =
+        self->getContentTypeHeader(js).map([](auto&& b) -> kj::String {
       return kj::mv(b);
     }).orDefault(nullptr);
 
@@ -633,8 +640,8 @@ kj::Maybe<Request::Redirect> Request::tryParseRedirect(kj::StringPtr redirect) {
   return kj::none;
 }
 
-void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
-  headers->shallowCopyTo(out);
+void Request::shallowCopyHeadersTo(kj::HttpHeaders& out, const CommonHeaderIds& ids) {
+  headers->shallowCopyTo(out, ids);
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
@@ -1021,15 +1028,45 @@ Response::Response(jsg::Lock& js,
       bodyEncoding(bodyEncoding),
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
+Response::Response(jsg::Lock& js,
+    int statusCode,
+    kj::Maybe<kj::String> statusText,
+    PendingHeaders headers,
+    CfProperty&& cf,
+    kj::Maybe<Body::ExtractedBody> body,
+    kj::Array<kj::String> urlList,
+    kj::Maybe<jsg::Ref<WebSocket>> webSocket,
+    Response::BodyEncoding bodyEncoding)
+    : Body(js, kj::mv(body)),
+      statusCode(statusCode),
+      statusText(kj::mv(statusText)),
+      pendingContentType(kj::mv(headers.contentType)),
+      pendingGuard(headers.guard),
+      cf(kj::mv(cf)),
+      urlList(kj::mv(urlList)),
+      webSocket(kj::mv(webSocket)),
+      bodyEncoding(bodyEncoding),
+      asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
+
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
   auto guard =
       FeatureFlags::get(js).getPedanticWpt() ? Headers::Guard::IMMUTABLE : Headers::Guard::NONE;
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(guard), CfProperty(), kj::none);
+  return js.alloc<Response>(
+      js, 0, kj::none, PendingHeaders{.guard = guard}, CfProperty(), kj::none);
 }
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
     jsg::Optional<Initializer> maybeInit) {
+  return constructorImpl(js, kj::mv(optionalBodyInit), kj::mv(maybeInit), kj::none);
+}
+
+// `contentTypeWithoutHeaders`, if given, is the Content-Type to use instead of the one the body
+// implies when the initializer has no headers.
+jsg::Ref<Response> Response::constructorImpl(jsg::Lock& js,
+    jsg::Optional<kj::Maybe<Body::Initializer>>&& optionalBodyInit,
+    jsg::Optional<Initializer>&& maybeInit,
+    kj::Maybe<kj::String> contentTypeWithoutHeaders) {
   auto bodyInit = kj::mv(optionalBodyInit).orDefault(kj::none);
   Initializer init = kj::mv(maybeInit).orDefault(InitializerDict());
 
@@ -1038,7 +1075,10 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
   kj::Maybe<kj::String> statusText;
   kj::Maybe<Body::ExtractedBody> body = kj::none;
-  jsg::Ref<Headers> headers = nullptr;
+  // Left null when the new Response can defer creating its Headers object, in which case
+  // `pendingHeaders` holds the Content-Type it starts with, if not the one its body implies.
+  kj::Maybe<jsg::Ref<Headers>> headers;
+  PendingHeaders pendingHeaders;
   CfProperty cf;
   kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none;
 
@@ -1063,7 +1103,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       KJ_IF_SOME(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(initHeaders));
       } else {
-        headers = js.alloc<Headers>();
+        pendingHeaders.contentType = kj::mv(contentTypeWithoutHeaders);
       }
 
       KJ_IF_SOME(newCf, initDict.cf) {
@@ -1087,7 +1127,13 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
       statusText = otherResponse->statusText.clone();
-      headers = js.alloc<Headers>(js, *otherResponse->headers);
+      KJ_IF_SOME(otherHeaders, otherResponse->headers) {
+        headers = js.alloc<Headers>(js, *otherHeaders);
+      } else {
+        // Copying Headers yields an unguarded object.
+        pendingHeaders.contentType = otherResponse->pendingContentType.map(
+            [](const kj::String& type) { return kj::str(type); });
+      }
       cf = otherResponse->cf.deepClone(js);
       KJ_IF_SOME(otherWs, otherResponse->webSocket) {
         webSocket = otherWs.addRef();
@@ -1142,7 +1188,29 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     }
   }
 
-  return js.alloc<Response>(js, statusCode, kj::mv(statusText), kj::mv(headers),
+  KJ_IF_SOME(h, headers) {
+    return js.alloc<Response>(js, statusCode, kj::mv(statusText), kj::mv(h), kj::mv(cf),
+        kj::mv(body), nullptr, kj::mv(webSocket), bodyEncoding);
+  }
+
+  // As the Body constructor would, use the body's Content-Type unless there already is one.
+  KJ_IF_SOME(b, body) {
+    KJ_IF_SOME(type, b.contentType) {
+      KJ_IF_SOME(existing, pendingHeaders.contentType) {
+        // Both are set. Let the Body constructor deal with it, warnings included.
+        auto created = js.alloc<Headers>(pendingHeaders.guard);
+        created->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(existing));
+        return js.alloc<Response>(js, statusCode, kj::mv(statusText), kj::mv(created),
+            kj::mv(cf), kj::mv(body), nullptr, kj::mv(webSocket), bodyEncoding);
+      }
+      pendingHeaders.contentType = kj::mv(type);
+    }
+    b.contentType = kj::none;
+  }
+  KJ_IF_SOME(type, pendingHeaders.contentType) {
+    type = Headers::normalizeCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(type));
+  }
+  return js.alloc<Response>(js, statusCode, kj::mv(statusText), kj::mv(pendingHeaders),
       kj::mv(cf), kj::mv(body), nullptr, kj::mv(webSocket), bodyEncoding);
 }
 
@@ -1208,15 +1276,13 @@ jsg::Ref<Response> Response::json_(
       KJ_CASE_ONEOF(dict, InitializerDict) {
         KJ_IF_SOME(headers, dict.headers) {
           dict.headers = maybeSetContentType(js, Headers::constructor(js, kj::mv(headers)));
-        } else {
-          dict.headers = maybeSetContentType(js, js.alloc<Headers>());
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
         auto newInit = InitializerDict{
           .status = res->statusCode,
           .statusText = res->statusText.clone(),
-          .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
+          .headers = maybeSetContentType(js, Headers::constructor(js, res->getHeaders(js))),
           .cf = res->cf.getRef(js),
           .encodeBody =
               kj::str(res->bodyEncoding == Response::BodyEncoding::MANUAL ? "manual" : "automatic"),
@@ -1229,10 +1295,6 @@ jsg::Ref<Response> Response::json_(
         maybeInit = kj::mv(newInit);
       }
     }
-  } else {
-    maybeInit = InitializerDict{
-      .headers = maybeSetContentType(js, js.alloc<Headers>()),
-    };
   }
 
   auto json = any.toJson(js);
@@ -1244,23 +1306,31 @@ jsg::Ref<Response> Response::json_(
     JSG_REQUIRE(json != "undefined"_kj, TypeError,
         "Response.json() requires a value that can be serialized to JSON.");
   }
-  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
+  // Without headers in the initializer, the Response starts out with just this Content-Type.
+  return constructorImpl(
+      js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit), MimeType::JSON.toString());
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   JSG_REQUIRE(
       webSocket == kj::none, TypeError, "Cannot clone a response to a WebSocket handshake.");
 
-  auto headersClone = headers->clone(js);
   auto cfClone = cf.deepClone(js);
 
   auto bodyClone = Body::clone(js);
 
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
-  return js.alloc<Response>(js, statusCode,
-      statusText.clone(),
-      kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
+  KJ_IF_SOME(h, headers) {
+    return js.alloc<Response>(js, statusCode, statusText.clone(), h->clone(js), kj::mv(cfClone),
+        kj::mv(bodyClone), kj::mv(urlListClone));
+  }
+  return js.alloc<Response>(js, statusCode, statusText.clone(),
+      PendingHeaders{
+        .contentType = pendingContentType.map([](const kj::String& type) { return kj::str(type); }),
+        .guard = pendingGuard,
+      },
+      kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 
 kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
@@ -1280,7 +1350,11 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
 
   auto& context = IoContext::current();
   kj::HttpHeaders outHeaders(context.getHeaderTable());
-  headers->shallowCopyTo(outHeaders);
+  KJ_IF_SOME(h, headers) {
+    h->shallowCopyTo(outHeaders, context.getHeaderIds().commonHeaderIds);
+  } else KJ_IF_SOME(type, pendingContentType) {
+    outHeaders.setPtr(kj::HttpHeaderId::CONTENT_TYPE, type);
+  }
 
   KJ_IF_SOME(ws, webSocket) {
     // `Response::acceptWebSocket()` can throw if we did not ask for a WebSocket. This
@@ -1376,7 +1450,23 @@ kj::StringPtr Response::getReasonPhrase() {
   return defaultStatusText(statusCode);
 }
 jsg::Ref<Headers> Response::getHeaders(jsg::Lock& js) {
-  return headers.addRef();
+  KJ_IF_SOME(h, headers) {
+    return h.addRef();
+  }
+  auto created = js.alloc<Headers>(pendingGuard);
+  KJ_IF_SOME(type, pendingContentType) {
+    created->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(type));
+    pendingContentType = kj::none;
+  }
+  headers = created.addRef();
+  return created;
+}
+
+kj::Maybe<kj::String> Response::getContentTypeHeader(jsg::Lock& js) {
+  KJ_IF_SOME(h, headers) {
+    return h->getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
+  }
+  return pendingContentType.map([](const kj::String& type) { return kj::str(type); });
 }
 
 bool Response::getOk() {
@@ -1417,7 +1507,7 @@ void Response::serialize(jsg::Lock& js,
           InitializerDict{
             .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
             .statusText = statusText.map([](auto& txt) { return kj::str(txt); }),
-            .headers = headers.addRef(),
+            .headers = getHeaders(js),
             .cf = cf.getRef(js),
 
             // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
@@ -1591,9 +1681,9 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
     kj::Maybe<TraceContext>& traceContext) {
   auto& ioContext = IoContext::current();
   kj::HttpHeaders headers(ioContext.getHeaderTable());
-  request.shallowCopyHeadersTo(headers);
+  request.shallowCopyHeadersTo(headers, ioContext.getHeaderIds().commonHeaderIds);
 
-  auto headerIds = ioContext.getHeaderIds();
+  auto& headerIds = ioContext.getHeaderIds();
   switch (request.getCacheMode()) {
     case Request::CacheMode::RELOAD:
       KJ_FALLTHROUGH;
@@ -1786,7 +1876,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
     KJ_IF_SOME(length, response.body->tryGetLength()) {
       ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
     }
-    auto headerIds = IoContext::current().getHeaderIds();
+    auto& headerIds = IoContext::current().getHeaderIds();
     KJ_IF_SOME(cfRay, response.headers->get(headerIds.cfRay)) {
       ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
     }

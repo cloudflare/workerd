@@ -6,6 +6,10 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <kj/compat/http.h>
 
+namespace workerd {
+class CommonHeaderIds;
+}
+
 namespace workerd::api {
 
 class Headers final: public jsg::Object {
@@ -40,6 +44,9 @@ public:
   explicit Headers(Guard guard): guard(guard) {}
   explicit Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
+
+  // Copies `other` into a single immutable buffer that the new object reads from until something
+  // needs storage it can change. Copies of the new object share that buffer.
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
   KJ_DISALLOW_COPY_AND_MOVE(Headers);
 
@@ -51,8 +58,9 @@ public:
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
-  // reference, so the output must be consumed immediately.
-  void shallowCopyTo(kj::HttpHeaders& out);
+  // reference, so the output must be consumed immediately. `out` must have been constructed with
+  // the table that `ids` describes.
+  void shallowCopyTo(kj::HttpHeaders& out, const CommonHeaderIds& ids);
 
   // Returns headers with lower-case name and comma-concatenated duplicates.
   kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
@@ -102,6 +110,9 @@ public:
   // common headers by their common enum ID. These are not intended for public use and should be
   // used with caution. These also avoid guard checks.
   kj::Maybe<kj::String> getCommon(jsg::Lock& js, capnp::CommonHeaderName idx);
+
+  // Trims and validates `value` as setCommon() does before storing it.
+  static kj::String normalizeCommon(capnp::CommonHeaderName idx, kj::String value);
   bool hasCommon(capnp::CommonHeaderName idx);
   void setCommon(capnp::CommonHeaderName idx, kj::String value);
   void deleteCommon(capnp::CommonHeaderName idx);
@@ -111,6 +122,12 @@ public:
                jsg::Optional<jsg::Value>);
 
   bool inspectImmutable();
+
+  // For tests: whether this object still reads from the copy of the kj::HttpHeaders it was built
+  // from rather than from storage of its own.
+  bool isNativeForTest() const {
+    return native != kj::none;
+  }
 
   JSG_ITERATOR(EntryIterator, entries,
                kj::Array<kj::String>,
@@ -201,6 +218,37 @@ private:
     }
   };
 
+  // A flat, immutable copy of the kj::HttpHeaders this object was built from: one allocation for
+  // the strings and one for the entries, rather than a Header, a Vector and two Strings per
+  // header. Shared between copies, which may live on as long as any of them.
+  class NativeHeaders final: public kj::AtomicRefcounted {
+   public:
+    struct Entry {
+      kj::uint commonId;  // Zero if the header isn't a common header.
+      kj::StringPtr name;  // As received.
+      kj::StringPtr value;
+    };
+
+    NativeHeaders(kj::Array<char> chars, kj::Array<Entry> entries)
+        : chars(kj::mv(chars)),
+          entries(kj::mv(entries)) {}
+
+    kj::Array<char> chars;
+    kj::Array<Entry> entries;  // In kj::HttpHeaders::forEach() order.
+  };
+
+  // While this is set, `native` holds every header and commonHeaders and uncommonHeaders are
+  // empty. Reads are served from it; anything else calls materialize() first.
+  kj::Maybe<kj::Own<const NativeHeaders>> native;
+
+  // Moves the headers from `native` into commonHeaders and uncommonHeaders, producing exactly what
+  // appending each of them in order would. Inline, as every change calls it and most find nothing
+  // to move.
+  void materialize() {
+    if (native != kj::none) materializeNative();
+  }
+  void materializeNative();
+
   // This wastes one slot, but it is a fixed array for fast access.
   kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
 
@@ -210,6 +258,19 @@ private:
   Guard guard;
 
   kj::Maybe<Header&> tryGetHeader(const HeaderKey& key);
+
+  // Like appendUnguarded(), for a name already known to be the common header `id`.
+  void appendCommonUnguarded(kj::uint id, kj::StringPtr name, kj::String value);
+  // Like appendUnguarded(), for a name already known not to be a common header. `key` is its
+  // lower-cased form.
+  void appendUncommonUnguarded(kj::String key, kj::String name, kj::String value);
+
+  // Reads from `native`: the values of the headers matching `key`, in order, or joined with ", ".
+  kj::Vector<kj::StringPtr> getNative(const NativeHeaders& native, const HeaderKey& key);
+  kj::Maybe<kj::String> getNativeJoined(const NativeHeaders& native, const HeaderKey& key);
+
+  void shallowCopyNativeTo(const NativeHeaders& native, kj::HttpHeaders& out,
+      const CommonHeaderIds& ids);
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");

@@ -1808,6 +1808,12 @@ wd_test(
 )
 
 wd_test(
+    src = "lazy-headers-test.wd-test",
+    args = ["--experimental"],
+    data = ["lazy-headers-test.js"],
+)
+
+wd_test(
     src = "request-signal-enabled.wd-test",
     args = ["--experimental"],
     data = ["request-signal-enabled.js"],

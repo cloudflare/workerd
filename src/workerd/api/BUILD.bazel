@@ -854,6 +854,14 @@ kj_test(
 )
 
 kj_test(
+    src = "headers-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "blob-test.c++",
     deps = [
         "//src/workerd/io",

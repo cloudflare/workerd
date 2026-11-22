@@ -91,9 +91,9 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     auto httpClient = getHttpClient(
         context, jsRequest->serializeCfBlobJson(js), traceContext, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
-    jsRequest->shallowCopyHeadersTo(requestHeaders);
+    jsRequest->shallowCopyHeadersTo(requestHeaders, context.getHeaderIds().commonHeaderIds);
 
-    auto headerIds = context.getHeaderIds();
+    auto& headerIds = context.getHeaderIds();
     // parse each of the request headers to add info to span
     KJ_IF_SOME(range, requestHeaders.get(headerIds.range)) {
       traceContext.setTag("cache.request.header.range"_kjc, range);
@@ -370,7 +370,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
                             .getHttpClient(context, jsRequest->serializeCfBlobJson(js),
                                 traceContext, enableCompatFlags);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
-      jsRequest->shallowCopyHeadersTo(requestHeaders);
+      jsRequest->shallowCopyHeadersTo(requestHeaders, context.getHeaderIds().commonHeaderIds);
       auto nativeRequest = httpClient->request(kj::HttpMethod::PUT,
           validateUrl(jsRequest->getUrl()), requestHeaders, payloadStream->tryGetLength());
 
@@ -555,7 +555,7 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     auto httpClient = getHttpClient(
         context, jsRequest->serializeCfBlobJson(js), traceContext, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
-    jsRequest->shallowCopyHeadersTo(requestHeaders);
+    jsRequest->shallowCopyHeadersTo(requestHeaders, context.getHeaderIds().commonHeaderIds);
     // HACK: The cache doesn't permit PURGE requests from the outside world. It does this by
     //   filtering on X-Real-IP, which can't be set from the outside world. X-Real-IP can, however,
     //   be set by a Worker when making requests to its own origin, as "spoofing" client IPs to

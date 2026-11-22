@@ -82,7 +82,11 @@ class Body: public jsg::Object {
   // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
   static ExtractedBody extractBody(jsg::Lock& js, Initializer init);
 
+  // Sets the Content-Type that `init` implies in `headers`, unless they already have one.
   explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
+  // For an owner that keeps track of the implied Content-Type itself: it must take `init`'s
+  // contentType before calling this.
+  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init);
 
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
@@ -156,10 +160,8 @@ class Body: public jsg::Object {
   // working outside of a request context (where IoContext::current() would throw).
   uint64_t bufferingLimit();
 
-  // HACK: This `headersRef` variable refers to a Headers object in the Request/Response subclass.
-  //   As such, it will briefly dangle during object destruction. While unlikely to be an issue,
-  //   it's worth being aware of.
-  Headers& headersRef;
+  // The owner's Content-Type header, consulted when consuming the body.
+  virtual kj::Maybe<kj::String> getContentTypeHeader(jsg::Lock& js) = 0;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(bodyStream);
@@ -884,7 +886,8 @@ class Request final: public Body {
   Redirect getRedirectEnum() {
     return redirect;
   }
-  void shallowCopyHeadersTo(kj::HttpHeaders& out);
+  // `out` must have been constructed with the table that `ids` describes.
+  void shallowCopyHeadersTo(kj::HttpHeaders& out, const CommonHeaderIds& ids);
   kj::Maybe<kj::String> serializeCfBlobJson(jsg::Lock& js);
 
   // ---------------------------------------------------------------------------
@@ -1095,6 +1098,10 @@ class Request final: public Body {
   // Controls how to handle Content-Encoding headers in the response
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
 
+  kj::Maybe<kj::String> getContentTypeHeader(jsg::Lock& js) override {
+    return headers->getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
+  }
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, fetcher, signal, thisSignal, cf);
   }
@@ -1109,6 +1116,24 @@ class Response final: public Body {
       int statusCode,
       kj::Maybe<kj::String> statusText,
       jsg::Ref<Headers> headers,
+      CfProperty&& cf,
+      kj::Maybe<Body::ExtractedBody> body,
+      kj::Array<kj::String> urlList = {},
+      kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
+      BodyEncoding bodyEncoding = BodyEncoding::AUTO);
+
+  // The headers of a Response whose Headers object hasn't been created yet: at most a
+  // Content-Type, already normalized, and the guard the object will get.
+  struct PendingHeaders {
+    kj::Maybe<kj::String> contentType;
+    Headers::Guard guard = Headers::Guard::NONE;
+  };
+
+  // `body`'s contentType must have been folded into `headers` already.
+  Response(jsg::Lock& js,
+      int statusCode,
+      kj::Maybe<kj::String> statusText,
+      PendingHeaders headers,
       CfProperty&& cf,
       kj::Maybe<Body::ExtractedBody> body,
       kj::Array<kj::String> urlList = {},
@@ -1269,6 +1294,7 @@ class Response final: public Body {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("statusText", statusText);
     tracker.trackField("headers", headers);
+    tracker.trackField("pendingContentType", pendingContentType);
     tracker.trackField("webSocket", webSocket);
     tracker.trackField("cf", cf);
     for (const auto& url: urlList) {
@@ -1282,7 +1308,14 @@ class Response final: public Body {
   // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
   // requires, while getReasonPhrase() derives the status code's conventional phrase.
   kj::Maybe<kj::String> statusText;
-  jsg::Ref<Headers> headers;
+
+  // Most Responses carry no headers beyond the Content-Type their body implies, and are sent
+  // without JavaScript ever looking at them. So the Headers object is only created when something
+  // asks for it (see getHeaders()); until then, pendingContentType and pendingGuard describe it.
+  kj::Maybe<jsg::Ref<Headers>> headers;
+  kj::Maybe<kj::String> pendingContentType;
+  Headers::Guard pendingGuard = Headers::Guard::NONE;
+
   CfProperty cf;
 
   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
@@ -1308,6 +1341,13 @@ class Response final: public Body {
   // actually start consuming it. If a JS-backed ReadableStream is used, we end up losing the
   // appropriate async context in the promise read loop since that is kicked off later.
   kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext;
+
+  static jsg::Ref<Response> constructorImpl(jsg::Lock& js,
+      jsg::Optional<kj::Maybe<Body::Initializer>>&& bodyInit,
+      jsg::Optional<Initializer>&& maybeInit,
+      kj::Maybe<kj::String> contentTypeWithoutHeaders);
+
+  kj::Maybe<kj::String> getContentTypeHeader(jsg::Lock& js) override;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, webSocket, cf, asyncContext);

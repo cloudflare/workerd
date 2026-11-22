@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "lazy-headers-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "lazy-headers-test.js" )
+        ],
+        bindings = [
+          ( name = "SELF", service = "lazy-headers-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "http_headers_getsetcookie"],
+      )
+    )
+  ]
+);
