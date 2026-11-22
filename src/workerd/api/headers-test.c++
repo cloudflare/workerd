@@ -168,11 +168,11 @@ void expectSameReads(jsg::Lock& js,
     KJ_EXPECT(show(a.getPtr(js, name)) == show(b.getPtr(js, name)), name, context);
     KJ_EXPECT(a.has(kj::str(name)) == b.has(kj::str(name)), name, context);
   };
-  for (auto name: NAMES) {
+  for (const auto& name: NAMES) {
     check(name);
     check(random.recase(name));
   }
-  for (auto name: COMMON_NAMES) check(name);
+  for (const auto& name: COMMON_NAMES) check(name);
   check("not-a-header"_kj);
   check(""_kj);
 
@@ -254,7 +254,7 @@ KJ_TEST("Headers built from a kj::HttpHeaders read as if built from its maps") {
 
     // A table that indexes every common name, as workerd's does.
     kj::HttpHeaderTable::Builder builder;
-    for (auto name: COMMON_NAMES) builder.add(name);
+    for (const auto& name: COMMON_NAMES) builder.add(name);
     builder.add("CF-Ray");
     auto indexed = builder.build();
     checkTable(env.js, *indexed, 2);

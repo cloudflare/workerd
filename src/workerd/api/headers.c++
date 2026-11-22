@@ -782,7 +782,7 @@ kj::Maybe<kj::String> Headers::getCommon(jsg::Lock& js, capnp::CommonHeaderName 
 kj::Array<kj::StringPtr> Headers::getSetCookie() {
   KJ_IF_SOME(s, snapshot) {
     auto values = findSnapshotValues(*s, "set-cookie"_kj);
-    if (values.size() == 0) return nullptr;
+    if (values.empty()) return nullptr;
     return values.releaseAsArray();
   }
   auto& header = commonHeaders[static_cast<kj::uint>(capnp::CommonHeaderName::SET_COOKIE)];
