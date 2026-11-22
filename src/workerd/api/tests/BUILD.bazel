@@ -1971,6 +1971,12 @@ wd_test(
 )
 
 wd_test(
+    src = "request-headers-test.wd-test",
+    args = ["--experimental"],
+    data = ["request-headers-test.js"],
+)
+
+wd_test(
     src = "r2-write-http-metadata-validation-test.wd-test",
     args = [
         "--experimental",

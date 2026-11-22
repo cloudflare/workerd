@@ -209,6 +209,71 @@ private:
 
   Guard guard;
 
+  // Headers copied from a kj::HttpHeaders that have not been converted into commonHeaders and
+  // uncommonHeaders yet. While this is set, those two are empty and reads are answered from the
+  // snapshot instead, without allocating an object per header. The first change converts it
+  // (see materialize()). It is never changed, so copies of this object share it.
+  struct Snapshot final: public kj::Refcounted {
+    struct Entry {
+      kj::StringPtr name;
+      kj::StringPtr value;
+    };
+
+    // In the order kj::HttpHeaders::forEach() produced them. Converting the snapshot appends them
+    // in this order, so every read must give the result appending them would have.
+    kj::Array<Entry> entries;
+
+    // Owns the NUL-terminated strings that `entries` point to.
+    kj::Array<char> text;
+
+    // The entries that share a name, as appending them would have collected them into one Header.
+    struct Group {
+      // The first entry's spelling, which is the name such a Header would keep.
+      kj::StringPtr name;
+      // The common header ID, or 0 for an uncommon header.
+      uint commonId;
+      // Indices into `entries`, in order.
+      kj::ArrayPtr<const uint> indices;
+    };
+
+    // Returns the groups ordered by lower-cased name. `indices` receives the storage the groups
+    // point into.
+    kj::Array<Group> group(kj::Array<uint>& indices) const;
+
+    // The values of the entries named `lowerName` (which is lower case), in order.
+    kj::Vector<kj::StringPtr> valuesOf(kj::StringPtr lowerName) const;
+    bool has(kj::StringPtr lowerName) const;
+
+    kj::Own<const Snapshot> deepCopy() const;
+
+    // Copies of a Headers share one Snapshot, so heap snapshots track it as one node that each of
+    // them has an edge to.
+    kj::StringPtr jsgGetMemoryName() const {
+      return "HeadersSnapshot"_kjc;
+    }
+    size_t jsgGetMemorySelfSize() const {
+      return sizeof(Snapshot);
+    }
+    void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackFieldWithSize("entries", entries.size() * sizeof(Entry));
+      tracker.trackFieldWithSize("text", text.size());
+    }
+  };
+  kj::Maybe<kj::Own<const Snapshot>> snapshot;
+
+  // Lookups in a snapshot scan it, so a kj::HttpHeaders with more entries than this is converted
+  // right away instead.
+  static constexpr size_t MAX_SNAPSHOT_ENTRIES = 64;
+
+  // Converts `snapshot`, if set, into commonHeaders and uncommonHeaders. Must be called before
+  // changing or reading those directly. Inline, since most Headers that change never had one.
+  void materialize() {
+    if (snapshot != kj::none) materializeSnapshot();
+  }
+  void materializeSnapshot();
+
+  void appendHeader(kj::String name, kj::String value);
+
   kj::Maybe<Header&> tryGetHeader(const HeaderKey& key);
 
   void checkGuard() {
