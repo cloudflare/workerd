@@ -1,0 +1,8 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Base = import "memory-cache-cpp.wd-bench";
+
+# The benchmarks of memory-cache-cpp.wd-bench, against the Rust MemoryCache.
+const unitTests :Workerd.Config = (
+  services = Base.services,
+  autogates = ["workerd-autogate-rust-memory-cache"],
+);
