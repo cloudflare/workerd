@@ -58,8 +58,10 @@ public:
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
-  // reference, so the output must be consumed immediately. `out` must have been constructed with
-  // the table that `ids` describes.
+  // reference, so the output must be consumed immediately.
+  void shallowCopyTo(kj::HttpHeaders& out);
+  // The same, setting common headers by id rather than by name. `out` must have been constructed
+  // with the table that `ids` describes.
   void shallowCopyTo(kj::HttpHeaders& out, const CommonHeaderIds& ids);
 
   // Returns headers with lower-case name and comma-concatenated duplicates.
@@ -269,8 +271,9 @@ private:
   kj::Vector<kj::StringPtr> getNative(const NativeHeaders& native, const HeaderKey& key);
   kj::Maybe<kj::String> getNativeJoined(const NativeHeaders& native, const HeaderKey& key);
 
+  void shallowCopyToImpl(kj::HttpHeaders& out, kj::Maybe<const CommonHeaderIds&> ids);
   void shallowCopyNativeTo(const NativeHeaders& native, kj::HttpHeaders& out,
-      const CommonHeaderIds& ids);
+      kj::Maybe<const CommonHeaderIds&> ids);
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");

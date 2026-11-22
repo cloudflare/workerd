@@ -139,10 +139,10 @@ KJ_TEST("Headers::shallowCopyTo() writes what adding each value by name would") 
 
     // What Headers produced when it added every value by name: common headers in
     // CommonHeaderName order, then the rest sorted by name.
-    auto addAll = [](kj::HttpHeaders& out) {
+    auto addAll = [](kj::HttpHeaders& out, kj::StringPtr age = "age"_kj) {
       out.addPtrPtr("Accept", "a");
       out.addPtrPtr("Accept", "b");
-      out.addPtrPtr("age", "");
+      out.addPtrPtr(age, "");
       out.addPtrPtr("Cache-Control", "");
       out.addPtrPtr("Cache-Control", "no-cache");
       out.addPtrPtr("Set-Cookie", "c1");
@@ -162,6 +162,20 @@ KJ_TEST("Headers::shallowCopyTo() writes what adding each value by name would") 
       headers->shallowCopyTo(out, ids);
       KJ_EXPECT(out.serializeResponse(200, "OK") == expected.serializeResponse(200, "OK"),
           out.toString(), expected.toString());
+    }
+
+    {
+      // Without ids, every value is added by the name it was appended under, on this table or any
+      // other: what Headers did before it set common headers by id.
+      const kj::HttpHeaderTable otherTable;
+      for (const kj::HttpHeaderTable* t: {&table, &otherTable}) {
+        kj::HttpHeaders expected(*t);
+        addAll(expected, "Age"_kj);
+        kj::HttpHeaders out(*t);
+        headers->shallowCopyTo(out);
+        KJ_EXPECT(out.serializeResponse(200, "OK") == expected.serializeResponse(200, "OK"),
+            out.toString(), expected.toString());
+      }
     }
 
     {
@@ -252,6 +266,11 @@ KJ_TEST("Headers built from kj::HttpHeaders copy out what their materialized for
       KJ_EXPECT(
           fromNative.serializeResponse(200, "OK") == fromMaterialized.serializeResponse(200, "OK"),
           fromNative.toString(), fromMaterialized.toString());
+      kj::HttpHeaders fromNativeByName(table);
+      native->shallowCopyTo(fromNativeByName);
+      KJ_EXPECT(fromNativeByName.serializeResponse(200, "OK") ==
+              fromMaterialized.serializeResponse(200, "OK"),
+          fromNativeByName.toString(), fromMaterialized.toString());
       KJ_EXPECT(fromNative.toString().contains("X-A: 2\r\nX-A: 3\r\n"), fromNative.toString());
     }
   });

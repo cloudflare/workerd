@@ -537,16 +537,14 @@ kj::Maybe<kj::Own<jsg::Wrappable>> Headers::snapshotClone() const {
 
 namespace {
 
-// Adds the values of the common header `commonId` to `out` -- what addPtrPtr(name, value) for each
-// value would do, without looking the name up in the table again.
+// Adds the values of the common header `commonId`, which is `id` in `out`'s table, to `out` --
+// what addPtrPtr(name, value) for each value would do, without looking the name up again.
 template <typename T>
-void copyCommonHeaderTo(kj::HttpHeaders& out,
-    const CommonHeaderIds& ids,
+void copyCommonHeaderById(kj::HttpHeaders& out,
+    kj::HttpHeaderId id,
     kj::uint commonId,
     kj::StringPtr name,
     kj::ArrayPtr<const T> values) {
-  auto id = ids.toKj(static_cast<capnp::CommonHeaderName>(commonId));
-
   if (out.get(id) != kj::none) {
     // Let kj merge these with what `out` already holds.
     for (auto& value: values) {
@@ -578,11 +576,37 @@ void copyCommonHeaderTo(kj::HttpHeaders& out,
   }
 }
 
+// Adds the values of the common header `commonId` to `out`: by id given the ids of `out`'s table,
+// otherwise by name.
+template <typename T>
+void copyCommonHeaderTo(kj::HttpHeaders& out,
+    kj::Maybe<const CommonHeaderIds&> maybeIds,
+    kj::uint commonId,
+    kj::StringPtr name,
+    kj::ArrayPtr<const T> values) {
+  KJ_IF_SOME(ids, maybeIds) {
+    copyCommonHeaderById(
+        out, ids.toKj(static_cast<capnp::CommonHeaderName>(commonId)), commonId, name, values);
+  } else {
+    for (auto& value: values) {
+      out.addPtrPtr(name, value);
+    }
+  }
+}
+
 }  // namespace
 
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
+void Headers::shallowCopyTo(kj::HttpHeaders& out) {
+  shallowCopyToImpl(out, kj::none);
+}
+
 void Headers::shallowCopyTo(kj::HttpHeaders& out, const CommonHeaderIds& ids) {
+  shallowCopyToImpl(out, ids);
+}
+
+void Headers::shallowCopyToImpl(kj::HttpHeaders& out, kj::Maybe<const CommonHeaderIds&> ids) {
   KJ_IF_SOME(n, native) {
     shallowCopyNativeTo(*n, out, ids);
     return;
@@ -627,7 +651,7 @@ void Headers::shallowCopyTo(kj::HttpHeaders& out, const CommonHeaderIds& ids) {
 
 // Produces what shallowCopyTo() would after materialize(), without materializing.
 void Headers::shallowCopyNativeTo(
-    const NativeHeaders& native, kj::HttpHeaders& out, const CommonHeaderIds& ids) {
+    const NativeHeaders& native, kj::HttpHeaders& out, kj::Maybe<const CommonHeaderIds&> ids) {
   // Each common header's values go out together, in order, under the name it first arrived with.
   // Only repeated Set-Cookie values become unindexed headers, so the order in which different
   // common headers are written doesn't change the result.
@@ -645,7 +669,7 @@ void Headers::shallowCopyNativeTo(
     auto& entry = native.entries[i];
     if (entry.commonId == 0) continue;
     if (counts[entry.commonId] == 1) {
-      copyCommonHeaderTo(out, ids, entry.commonId, entry.name, kj::arrayPtr(&entry.value, 1));
+      copyCommonHeaderTo(out, ids, entry.commonId, entry.name, kj::arrayPtr(entry.value));
     } else if (counts[entry.commonId] == 2) {
       // The first of several entries for this header: gather the rest.
       kj::Vector<kj::StringPtr> values;
