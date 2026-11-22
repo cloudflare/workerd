@@ -8,6 +8,7 @@
 #include <workerd/jsg/jsvalue.h>
 
 #include <ncrypto.h>
+#include <openssl/hkdf.h>
 
 namespace workerd::api {
 namespace {
@@ -62,6 +63,19 @@ class HkdfKey final: public CryptoKey::Impl {
 
     return JSG_REQUIRE_NONNULL(hkdf(js, derivedLengthBytes, hashType, keyData, salt, info),
         DOMOperationError, "HKDF deriveBits failed.");
+  }
+
+  kj::Maybe<kj::Array<kj::byte>> hkdfExtract(
+      const EVP_MD* digest, kj::ArrayPtr<const kj::byte> salt) const override {
+    auto prk = kj::heapArray<kj::byte>(EVP_MAX_MD_SIZE);
+    size_t prkLength = 0;
+    if (HKDF_extract(prk.begin(), &prkLength, digest, keyData.begin(), keyData.size(), salt.begin(),
+            salt.size()) != 1) {
+      return kj::none;
+    }
+    auto result = kj::heapArray(prk.first(prkLength));
+    OPENSSL_cleanse(prk.begin(), prk.size());
+    return kj::mv(result);
   }
 
   bool supportsExport() const override {

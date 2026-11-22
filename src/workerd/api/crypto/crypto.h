@@ -5,6 +5,8 @@
 #pragma once
 // WebCrypto API
 
+#include <workerd/api/js-readable-stream.h>
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/writable.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
@@ -336,6 +338,11 @@ class CryptoKey: public jsg::Object {
 
   bool verifyX509Public(const X509* x509) const;
   bool verifyX509Private(const X509* x509) const;
+
+  // Runs HKDF-Extract (RFC 5869) with this key as the input keying material and returns the
+  // pseudorandom key, so that native code can derive keys from it without the key material
+  // reaching JavaScript. Throws unless this is an HKDF key that may be used for derivation.
+  kj::Array<kj::byte> hkdfExtract(const EVP_MD* digest, kj::ArrayPtr<const kj::byte> salt) const;
 
  private:
   jsg::TracedOwn<Impl> impl;
@@ -996,6 +1003,164 @@ class DigestStream: public WritableStream {
 };
 
 // =======================================================================================
+// Segmented encryption streams (experimental)
+//
+// Non-standard transform streams that encrypt and decrypt in fixed-size, individually
+// authenticated segments, so that a reader can start at any segment and stream without holding
+// the whole message. See segment-cipher.h for the format. Both sides are native streams, so a
+// pipe through one of these between two other native streams never runs JavaScript.
+
+// The HKDF info for each segment: prefix || encode(index) || suffix.
+struct SegmentKeyInfo {
+  jsg::JsRef<jsg::JsBufferSource> prefix;
+  // "decimal", "uint32be" or "uint64be".
+  kj::String index;
+  jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> suffix;
+
+  JSG_STRUCT(prefix, index, suffix);
+  JSG_STRUCT_TS_OVERRIDE(SegmentKeyInfo {
+    prefix: ArrayBuffer | ArrayBufferView;
+    index: 'decimal' | 'uint32be' | 'uint64be';
+    suffix?: ArrayBuffer | ArrayBufferView;
+  });
+};
+
+// Every segment's key is HKDF-Expand(HKDF-Extract(salt, key), info(segment index)).
+struct SegmentKeySchedule {
+  // Only "HKDF".
+  kj::String derive;
+  kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm> hash;
+  // An HKDF key whose usages include "deriveKey" or "deriveBits". Its material stays native.
+  jsg::Ref<CryptoKey> key;
+  jsg::JsRef<jsg::JsBufferSource> salt;
+  SegmentKeyInfo info;
+  // The HMAC key's info, for AES-CBC-HMAC-SHA256 only.
+  jsg::Optional<SegmentKeyInfo> macInfo;
+
+  JSG_STRUCT(derive, hash, key, salt, info, macInfo);
+  JSG_STRUCT_TS_OVERRIDE(SegmentKeySchedule {
+    derive: 'HKDF';
+    salt: ArrayBuffer | ArrayBufferView;
+  });
+};
+
+// The parameters that determine the sizes of a segmented message.
+struct SegmentLayoutOptions {
+  // "AES-GCM", "ChaCha20-Poly1305" or "AES-CBC-HMAC-SHA256".
+  kj::String algorithm;
+  // Plaintext bytes per segment; only the last segment may be shorter.
+  double segmentSize;
+
+  JSG_STRUCT(algorithm, segmentSize);
+  JSG_STRUCT_TS_OVERRIDE(SegmentLayoutOptions {
+    algorithm: 'AES-GCM' | 'ChaCha20-Poly1305' | 'AES-CBC-HMAC-SHA256';
+  });
+};
+
+struct SegmentCipherOptions {
+  kj::String algorithm;
+  double segmentSize;
+  SegmentKeySchedule keys;
+  // The AES key size in bits, for AES-GCM: 128 or 256 (the default).
+  jsg::Optional<uint32_t> length;
+  // The index of the first segment this stream handles. Defaults to 0.
+  jsg::Optional<double> firstSegment;
+  // Encryption: optional, and if set, more or less input is an error.
+  // Decryption: required; the number of plaintext bytes the input holds.
+  jsg::Optional<double> plaintextLength;
+  // Decryption only: the number of plaintext bytes to drop from the start of the output.
+  jsg::Optional<double> outputOffset;
+  // Decryption only: the most plaintext bytes to output.
+  jsg::Optional<double> outputLength;
+
+  JSG_STRUCT(algorithm,
+      segmentSize,
+      keys,
+      length,
+      firstSegment,
+      plaintextLength,
+      outputOffset,
+      outputLength);
+  JSG_STRUCT_TS_OVERRIDE(SegmentCipherOptions {
+    algorithm: 'AES-GCM' | 'ChaCha20-Poly1305' | 'AES-CBC-HMAC-SHA256';
+  });
+};
+
+class SegmentEncryptionStream: public jsg::Object {
+ public:
+  SegmentEncryptionStream(JsReadableStream readable, JsWritableStream writable)
+      : readable(kj::mv(readable)),
+        writable(kj::mv(writable)) {}
+
+  static jsg::Ref<SegmentEncryptionStream> constructor(jsg::Lock& js, SegmentCipherOptions options);
+
+  // The encrypted size of a plaintext of the given length.
+  static double encryptedLength(double plaintextLength, SegmentLayoutOptions options);
+
+  JsReadableStream getReadable(jsg::Lock& js) {
+    return readable.addRef(js);
+  }
+  JsWritableStream getWritable(jsg::Lock& js) {
+    return writable.addRef(js);
+  }
+
+  JSG_RESOURCE_TYPE(SegmentEncryptionStream) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
+    JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
+    JSG_STATIC_METHOD(encryptedLength);
+
+    JSG_TS_OVERRIDE({
+      constructor(options: SegmentCipherOptions);
+      readonly readable: ReadableStream<Uint8Array>;
+      readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+    });
+  }
+
+ private:
+  JsReadableStream readable;
+  JsWritableStream writable;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(readable, writable);
+  }
+};
+
+class SegmentDecryptionStream: public jsg::Object {
+ public:
+  SegmentDecryptionStream(JsReadableStream readable, JsWritableStream writable)
+      : readable(kj::mv(readable)),
+        writable(kj::mv(writable)) {}
+
+  static jsg::Ref<SegmentDecryptionStream> constructor(jsg::Lock& js, SegmentCipherOptions options);
+
+  JsReadableStream getReadable(jsg::Lock& js) {
+    return readable.addRef(js);
+  }
+  JsWritableStream getWritable(jsg::Lock& js) {
+    return writable.addRef(js);
+  }
+
+  JSG_RESOURCE_TYPE(SegmentDecryptionStream) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
+    JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
+
+    JSG_TS_OVERRIDE({
+      constructor(options: SegmentCipherOptions & { plaintextLength: number });
+      readonly readable: ReadableStream<Uint8Array>;
+      readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+    });
+  }
+
+ private:
+  JsReadableStream readable;
+  JsWritableStream writable;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(readable, writable);
+  }
+};
+
+// =======================================================================================
 // Crypto
 
 // Implements the Crypto interface as prescribed by:
@@ -1038,6 +1203,10 @@ class Crypto final: public jsg::Object {
     JSG_METHOD(randomUUID);
 
     JSG_NESTED_TYPE(DigestStream);
+    if (flags.getWorkerdExperimental()) {
+      JSG_NESTED_TYPE(SegmentEncryptionStream);
+      JSG_NESTED_TYPE(SegmentDecryptionStream);
+    }
 
     JSG_TS_OVERRIDE({
       getRandomValues<
@@ -1077,7 +1246,9 @@ class Crypto final: public jsg::Object {
       api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \
       api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
       api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestStream::Options,         \
-      api::DigestContextHandle
+      api::DigestContextHandle, api::SegmentKeyInfo, api::SegmentKeySchedule,                      \
+      api::SegmentLayoutOptions, api::SegmentCipherOptions, api::SegmentEncryptionStream,          \
+      api::SegmentDecryptionStream
 
 }  // namespace workerd::api
 

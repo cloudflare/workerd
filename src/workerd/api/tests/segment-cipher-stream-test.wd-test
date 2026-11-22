@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "segment-cipher-stream-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "segment-cipher-stream-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+      )
+    ),
+    ( name = "segment-cipher-stream-ts-streams-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "segment-cipher-stream-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "typescript_implemented_streams"],
+      )
+    ),
+    ( name = "segment-cipher-stream-gated-test",
+      worker = (
+        modules = [(name = "worker", esModule = "import { strictEqual } from 'node:assert';\nexport const gated = { test() {\n  strictEqual(crypto.SegmentEncryptionStream, undefined);\n  strictEqual(crypto.SegmentDecryptionStream, undefined);\n} };\n")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

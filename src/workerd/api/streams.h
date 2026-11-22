@@ -12,6 +12,7 @@
 // NOLINTBEGIN(misc-include-cleaner)
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/streams/aws-chunked.h>
 #include <workerd/api/streams/compression.h>
 #include <workerd/api/streams/encoding.h>
 #include <workerd/api/streams/identity-transform-stream.h>
@@ -39,7 +40,8 @@ namespace workerd::api {
       api::DecompressionStream, api::CompressionCodec, api::TextEncoderStream,                     \
       api::TextDecoderStream, api::TextDecoderStream::TextDecoderStreamInit,                       \
       api::ByteLengthQueuingStrategy, api::CountQueuingStrategy, api::QueuingStrategyInit,         \
-      api::ReadableStreamNativeSource, api::WritableStreamNativeSink
+      api::ReadableStreamNativeSource, api::WritableStreamNativeSink,                              \
+      api::AwsChunkedDecoderStream, api::AwsChunkedDecoderStream::Options
 // The list of streams.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

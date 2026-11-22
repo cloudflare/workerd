@@ -323,6 +323,13 @@ class CryptoKey::Impl {
   }
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {}
 
+  // See CryptoKey::hkdfExtract(). Only HKDF keys implement this; the caller has already checked
+  // the key's algorithm and usages.
+  virtual kj::Maybe<kj::Array<kj::byte>> hkdfExtract(
+      const EVP_MD* digest, kj::ArrayPtr<const kj::byte> salt) const {
+    return kj::none;
+  }
+
   virtual bool verifyX509Public(const X509* cert) const {
     return false;
   }
@@ -473,6 +480,8 @@ static inline T integerCeilDivision(T a, T b) {
 class ZeroOnFree {
  public:
   inline ZeroOnFree(kj::Array<kj::byte>&& inner): inner(kj::mv(inner)) {}
+  // Moving leaves this empty, so only the destination zeroes the bytes.
+  ZeroOnFree(ZeroOnFree&&) = default;
   ~ZeroOnFree() noexcept(false);
 
   inline size_t size() const {

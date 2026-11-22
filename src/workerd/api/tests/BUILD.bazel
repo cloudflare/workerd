@@ -880,6 +880,18 @@ wd_test(
 )
 
 wd_test(
+    src = "aws-chunked-decoder-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["aws-chunked-decoder-stream-test.js"],
+)
+
+wd_test(
+    src = "segment-cipher-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["segment-cipher-stream-test.js"],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],

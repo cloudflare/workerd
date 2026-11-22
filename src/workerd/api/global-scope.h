@@ -11,6 +11,7 @@
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
+#include <workerd/api/streams/aws-chunked.h>
 #ifdef WORKERD_FUZZILLI
 #include "unsafe.h"
 
@@ -1135,6 +1136,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(HTMLRewriter);
     if (flags.getWorkerdExperimental()) {
       JSG_NESTED_TYPE(Datagram);
+      JSG_NESTED_TYPE(AwsChunkedDecoderStream);
     }
 
     // Performance API

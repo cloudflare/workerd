@@ -696,6 +696,17 @@ bool CryptoKey::verifyX509Private(const X509* cert) const {
   return impl->verifyX509Private(cert);
 }
 
+kj::Array<kj::byte> CryptoKey::hkdfExtract(
+    const EVP_MD* digest, kj::ArrayPtr<const kj::byte> salt) const {
+  JSG_REQUIRE(impl->getAlgorithmName() == "HKDF"_kj, DOMInvalidAccessError,
+      "Expected an HKDF key, but got a key for ", impl->getAlgorithmName(), ".");
+  auto derivationUsages = CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits();
+  JSG_REQUIRE((impl->getUsages() & derivationUsages) != CryptoKeyUsageSet(), DOMInvalidAccessError,
+      "The HKDF key's usages must include \"deriveKey\" or \"deriveBits\".");
+  return JSG_REQUIRE_NONNULL(
+      impl->hkdfExtract(digest, salt), DOMOperationError, "HKDF-Extract failed.");
+}
+
 void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(algorithmProperty, usagesProperty);
   visitor.visit(impl);

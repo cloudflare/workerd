@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "aws-chunked-decoder-stream-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+      )
+    ),
+    ( name = "aws-chunked-decoder-stream-ts-streams-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "typescript_implemented_streams"],
+      )
+    ),
+    ( name = "aws-chunked-decoder-stream-gated-test",
+      worker = (
+        modules = [(name = "worker", esModule = "import { strictEqual } from 'node:assert';\nexport const gated = { test() {\n  strictEqual(globalThis.AwsChunkedDecoderStream, undefined);\n} };\n")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

@@ -325,6 +325,7 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
   Datagram: typeof Datagram;
+  AwsChunkedDecoderStream: typeof AwsChunkedDecoderStream;
   Performance: typeof Performance;
   PerformanceEntry: typeof PerformanceEntry;
   PerformanceMark: typeof PerformanceMark;
@@ -1261,6 +1262,8 @@ declare abstract class Crypto {
    */
   randomUUID(): string;
   DigestStream: typeof DigestStream;
+  SegmentEncryptionStream: typeof SegmentEncryptionStream;
+  SegmentDecryptionStream: typeof SegmentDecryptionStream;
 }
 /**
  * The **`SubtleCrypto`** interface of the Web Crypto API provides a number of low-level cryptographic functions.
@@ -1607,6 +1610,51 @@ declare class DigestStream extends WritableStream<
 }
 interface DigestStreamOptions {
   toWellFormed?: boolean;
+}
+interface SegmentKeyInfo {
+  prefix: ArrayBuffer | ArrayBufferView;
+  index: "decimal" | "uint32be" | "uint64be";
+  suffix?: ArrayBuffer | ArrayBufferView;
+}
+interface SegmentKeySchedule {
+  derive: "HKDF";
+  hash: string | SubtleCryptoHashAlgorithm;
+  key: CryptoKey;
+  salt: ArrayBuffer | ArrayBufferView;
+  info: SegmentKeyInfo;
+  macInfo?: SegmentKeyInfo;
+}
+interface SegmentLayoutOptions {
+  algorithm: "AES-GCM" | "ChaCha20-Poly1305" | "AES-CBC-HMAC-SHA256";
+  segmentSize: number;
+}
+interface SegmentCipherOptions {
+  algorithm: "AES-GCM" | "ChaCha20-Poly1305" | "AES-CBC-HMAC-SHA256";
+  segmentSize: number;
+  keys: SegmentKeySchedule;
+  length?: number;
+  firstSegment?: number;
+  plaintextLength?: number;
+  outputOffset?: number;
+  outputLength?: number;
+}
+declare class SegmentEncryptionStream {
+  constructor(options: SegmentCipherOptions);
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+  static encryptedLength(
+    plaintextLength: number,
+    options: SegmentLayoutOptions,
+  ): number;
+}
+declare class SegmentDecryptionStream {
+  constructor(
+    options: SegmentCipherOptions & {
+      plaintextLength: number;
+    },
+  );
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
 }
 /**
  * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.
@@ -3374,6 +3422,18 @@ interface QueuingStrategyInit {
    * Note that the provided high water mark will not be validated ahead of time. Instead, if it is negative, NaN, or not a number, the resulting ByteLengthQueuingStrategy will cause the corresponding stream constructor to throw.
    */
   highWaterMark: number;
+}
+declare class AwsChunkedDecoderStream {
+  constructor(options?: AwsChunkedDecoderStreamOptions);
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+  readonly trailers: Promise<Headers>;
+}
+interface AwsChunkedDecoderStreamOptions {
+  decodedLength?: number;
+  allowedTrailers?: string[];
+  maxTrailerBytes?: number;
+  drainOnError?: boolean;
 }
 interface TracePreviewInfo {
   id: string;
