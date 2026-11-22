@@ -279,8 +279,8 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
   // The user trace scope value for rootUserTraceSpan, made the first time
-  // IoContext::getRootUserTraceScope() needs it. For an unobserved stateless request, which runs
-  // without a trace frame, tracing.getActiveSpan() caches the request's no-op span on it.
+  // IoContext::getRootUserTraceScope() needs it. The request's trace frames hold it, and
+  // tracing.getActiveSpan() caches the request's root span on it.
   kj::Maybe<jsg::Value> rootUserTraceScope;
 
   // The invocation span context identifies the trace id, invocation id, and root
@@ -1363,16 +1363,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return RequestTraceScope(lock, *this);
   }
 
-  // True if the IoContext is stateless and its current request observes neither its span nor its
-  // user span. Such a request that starts in the root frame runs without a trace frame (see
-  // makeRequestTraceScope()).
-  bool isUnobservedStatelessRequest();
-
-  // For code that runs outside any trace frame while an unobserved stateless request is current,
-  // the user trace scope value of that request's root user span, made once per request. Returns
-  // nothing otherwise: outside any trace frame, an observed request's code was bound outside every
-  // request.
-  kj::Maybe<v8::Local<v8::Object>> getRootUserTraceScope(Worker::Lock& lock);
+  // The user trace scope value of the current request's root user span, made once per request.
+  // The request's trace frames hold it, and tracing.getActiveSpan() uses it for code that runs
+  // outside them, so the request's root span is the same object either way. Returns nothing if the
+  // IoContext has no current request.
+  kj::Maybe<jsg::Value&> getRootUserTraceScope(Worker::Lock& lock);
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.

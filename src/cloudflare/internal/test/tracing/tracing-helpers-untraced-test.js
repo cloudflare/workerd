@@ -8,7 +8,8 @@ import assert from 'node:assert';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { tracing } from 'cloudflare:workers';
 
-const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
+// Bound outside every request, so it runs with no trace context of its own.
+const getActiveSpanBoundAtModuleScope = AsyncLocalStorage.bind(() =>
   tracing.getActiveSpan()
 );
 
@@ -20,10 +21,9 @@ export const getActiveSpan = {
     assert.strictEqual(tracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
 
-    // An unobserved request runs without a trace frame, so code bound outside every request can't
-    // be told apart from the request's own code: it gets the request's no-op span. In a traced
-    // request it gets no span (see tracing-helpers-test.js).
-    assert.strictEqual(getActiveSpanOutsideInvocationContext(), invocationSpan);
+    // An unobserved request runs without a trace frame of its own, so this is also how the
+    // request's own code finds its span.
+    assert.strictEqual(getActiveSpanBoundAtModuleScope(), invocationSpan);
 
     await ctx.tracing.startActiveSpan('untraced-op', async (span) => {
       assert.strictEqual(span.isTraced, false);

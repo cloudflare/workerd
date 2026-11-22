@@ -1586,31 +1586,26 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
 
 IoContext::RequestTraceScope::RequestTraceScope(Worker::Lock& lock, IoContext& context) {
   jsg::Lock& js = lock;
-  if (context.isUnobservedStatelessRequest() && jsg::AsyncContextFrame::current(js) == kj::none) {
+  if (context.actor == kj::none && !context.getMetrics().getSpan().isObserved() &&
+      !context.getRootUserTraceSpan().isObserved() &&
+      jsg::AsyncContextFrame::current(js) == kj::none) {
     return;
   }
   jsg::AsyncContextFrame::StorageEntry entries[] = {
     {lock.getTraceAsyncContextKey(), context.makeTraceScopeValue(lock, kj::none)},
-    {lock.getUserTraceAsyncContextKey(), context.makeUserTraceScopeValue(lock, kj::none)},
+    {lock.getUserTraceAsyncContextKey(),
+      KJ_ASSERT_NONNULL(context.getRootUserTraceScope(lock)).addRef(js)},
   };
   scope.emplace(js, entries);
 }
 
-bool IoContext::isUnobservedStatelessRequest() {
-  return actor == kj::none && !incomingRequests.empty() && !getMetrics().getSpan().isObserved() &&
-      !getRootUserTraceSpan().isObserved();
-}
-
-kj::Maybe<v8::Local<v8::Object>> IoContext::getRootUserTraceScope(Worker::Lock& lock) {
-  if (!isUnobservedStatelessRequest()) return kj::none;
-  jsg::Lock& js = lock;
+kj::Maybe<jsg::Value&> IoContext::getRootUserTraceScope(Worker::Lock& lock) {
+  if (incomingRequests.empty()) return kj::none;
   auto& request = getCurrentIncomingRequest();
   KJ_IF_SOME(value, request.rootUserTraceScope) {
-    return value.getHandle(js).As<v8::Object>();
+    return value;
   }
-  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none))
-      .getHandle(js)
-      .As<v8::Object>();
+  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none));
 }
 
 jsg::Value IoContext::makeTraceScopeValue(

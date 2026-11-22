@@ -40,15 +40,11 @@ uint64_t spanId(SpanParent parent) {
   return KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(context).getSpanId()).getId();
 }
 
-jsg::Optional<jsg::Ref<api::user_tracing::Span>> maybeActiveSpan(
-    const TestFixture::Environment& env) {
+jsg::Ref<api::user_tracing::Span> activeSpan(const TestFixture::Environment& env) {
   auto tracing = env.js.alloc<api::Tracing>();
   auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<api::user_tracing::Span>>());
-  return tracing->getActiveSpan(env.js, handler);
-}
-
-jsg::Ref<api::user_tracing::Span> activeSpan(const TestFixture::Environment& env) {
-  return KJ_ASSERT_NONNULL(maybeActiveSpan(env));
+  auto span = tracing->getActiveSpan(env.js, handler);
+  return kj::mv(KJ_ASSERT_NONNULL(span));
 }
 
 KJ_TEST("an unobserved stateless request builds no frame and makes its no-op span once") {
@@ -124,8 +120,9 @@ KJ_TEST("a frame made in an unobserved request resolves to the spans of the requ
     jsg::AsyncContextFrame::Scope scope(env.js, captured);
     KJ_EXPECT(spanId(targetContext->getCurrentTraceSpan()) == 1);
     KJ_EXPECT(spanId(targetContext->getCurrentUserTraceSpan()) == 2);
-    // Like code bound outside every request, the frame gives an observed request no active span.
-    KJ_EXPECT(maybeActiveSpan(env) == kj::none);
+    auto span = activeSpan(env);
+    KJ_EXPECT(span->getIsTraced());
+    KJ_EXPECT(activeSpan(env).get() == span.get());
   });
   fixture.drainAndDestroy(kj::mv(target));
 }
@@ -142,6 +139,22 @@ KJ_TEST("an observed stateless request builds its own request frame") {
     auto scope = context->makeRequestTraceScope(env.lock);
     KJ_EXPECT(jsg::AsyncContextFrame::current(env.js) != kj::none);
     KJ_EXPECT(spanId(context->getCurrentTraceSpan()) == 1);
+  });
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("code outside a traced request's frame gets the request's active span") {
+  TestFixture fixture({.useRealTimers = false});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer());
+  request->delivered();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    auto span = activeSpan(env);
+    KJ_EXPECT(span->getIsTraced());
+    // As a function bound outside every request would run.
+    jsg::AsyncContextFrame::Scope rootScope(env.js, kj::none);
+    KJ_EXPECT(activeSpan(env).get() == span.get());
   });
   fixture.drainAndDestroy(kj::mv(request));
 }

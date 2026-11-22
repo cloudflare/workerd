@@ -941,20 +941,17 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
   // this is cached so that repeated calls return the same reference
   auto& ioContext = IoContext::current();
   auto& lock = ioContext.getCurrentLock();
-  kj::Maybe<v8::Local<v8::Object>> maybeHolder;
+  kj::Maybe<jsg::Value&> entry;
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
-    KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
-      maybeHolder = value.getHandle(js).As<v8::Object>();
-    }
+    entry = frame.get(*lock.getUserTraceAsyncContextKey());
   }
-  if (maybeHolder == kj::none) {
-    // An unobserved stateless request runs without a trace frame (see
-    // IoContext::makeRequestTraceScope()), so its active span is its root span. Code bound outside
-    // every request also runs without one, and can't be told apart from such a request's code: it
-    // gets the request's no-op span too. During any other request, it gets no span.
-    maybeHolder = ioContext.getRootUserTraceScope(lock);
+  if (entry == kj::none) {
+    // With no entry, as in an unobserved stateless request (see IoContext::makeRequestTraceScope())
+    // or a function bound outside every request, the active span is the current request's root
+    // span, which getCurrentUserTraceSpan() also falls back to.
+    entry = ioContext.getRootUserTraceScope(lock);
   }
-  auto holder = KJ_UNWRAP_OR_RETURN(maybeHolder, kj::none);
+  auto holder = KJ_UNWRAP_OR_RETURN(entry, kj::none).getHandle(js).As<v8::Object>();
   auto& scopeState = jsg::unwrapOpaqueRef<IoContext::UserTraceScopeState>(js.v8Isolate, holder);
   auto cacheKey = v8::Private::ForApi(js.v8Isolate, js.strIntern("workerd.activeSpan"_kjc));
   if (jsg::check(holder->HasPrivate(js.v8Context(), cacheKey))) {
