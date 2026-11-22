@@ -1020,8 +1020,11 @@ async function test(state) {
     'Error: not authorized'
   );
 
-  // Assert foreign keys can be truly turned off, not just deferred
+  // Assert foreign keys can be truly turned off, not just deferred. `PRAGMA foreign_keys` is a
+  // no-op inside a transaction, so first wait for the implicit transaction holding the writes
+  // above to commit.
   await state.blockConcurrencyWhile(async () => {
+    await storage.sync();
     sql.exec(`PRAGMA foreign_keys = OFF;`);
   });
   storage.transactionSync(() => {
@@ -1045,8 +1048,9 @@ async function test(state) {
   sql.exec(`INSERT INTO B VALUES (1);`);
   assert.deepEqual(Array.from(sql.exec(`pragma foreign_key_check;`)), []);
 
-  // Restore foreign keys for the rest of the tests
+  // Restore foreign keys for the rest of the tests (again outside of a transaction)
   await state.blockConcurrencyWhile(async () => {
+    await storage.sync();
     sql.exec(`PRAGMA foreign_keys = ON;`);
   });
 

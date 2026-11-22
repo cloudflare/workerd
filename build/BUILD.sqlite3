@@ -20,6 +20,11 @@ SQLITE_DEFINES = [
     "SQLITE_ENABLE_RTREE",
     "SQLITE_ENABLE_UPDATE_DELETE_LIMIT",
     "SQLITE_OMIT_SHARED_CACHE",
+    # Sync with fdatasync() rather than fsync(). fdatasync() still flushes the metadata needed to
+    # read the data back (including the file size); it only skips timestamps. This only affects
+    # the unix VFS on non-Apple platforms: on macOS SQLite always uses fsync() or F_FULLFSYNC, and
+    # Windows uses a different VFS.
+    "HAVE_FDATASYNC=1",
 ]
 
 SQLITE_DEFINES_FOR_LEMON = " ".join(["-D" + x for x in SQLITE_DEFINES])
