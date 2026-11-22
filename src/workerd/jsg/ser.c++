@@ -180,6 +180,8 @@ constexpr kj::StringPtr MALFORMED_DATA_MESSAGE =
     "Deserialization failed: the data is malformed."_kj;
 }  // namespace
 
+Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
+
 void Serializer::ExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, func, " could not be cloned.");
