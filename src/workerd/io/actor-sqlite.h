@@ -13,10 +13,10 @@
 
 namespace workerd {
 
-// An implementation of ActorCacheOps that is backed by SqliteKv.
 // See the `groupCommit` parameter of ActorSqlite's constructor.
 WD_STRONG_BOOL(ActorSqliteGroupCommit);
 
+// An implementation of ActorCacheOps that is backed by SqliteKv.
 class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorHandler {
   // TODO(perf): This interface is not designed ideally for wrapping SqliteKv. In particular, we
   //   end up allocating extra copies of all the results. It would be nicer if we could actually
