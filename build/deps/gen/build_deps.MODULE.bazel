@@ -90,6 +90,13 @@ bazel_dep(name = "protobuf", version = "37.0-rc3")
 
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.28")
+single_version_override(
+    module_name = "rules_cc",
+    patch_strip = 1,
+    patches = [
+        "//:patches/rules_cc/0001-Add-fdo_optimize-to-the-clang-cl-toolchain.patch",
+    ],
+)
 
 # rules_foreign_cc
 bazel_dep(name = "rules_foreign_cc", version = "0.17.0")

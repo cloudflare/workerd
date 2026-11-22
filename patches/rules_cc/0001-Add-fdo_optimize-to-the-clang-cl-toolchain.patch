@@ -1,0 +1,28 @@
+--- a/cc/private/toolchain/windows_cc_toolchain_config.bzl
++++ b/cc/private/toolchain/windows_cc_toolchain_config.bzl
+@@ -1452,6 +1452,25 @@
+         ]
+         if symbol_check_feature:
+             features.append(symbol_check_feature)
++
++        # clang-cl reads the LLVM profiles that clang does, with the same flag (--fdo_optimize with
++        # a .profdata file). cl.exe's own PGO works differently and isn't offered here.
++        if ctx.attr.compiler == "clang-cl":
++            features.append(feature(
++                name = "fdo_optimize",
++                flag_sets = [
++                    flag_set(
++                        actions = [ACTION_NAMES.c_compile, ACTION_NAMES.cpp_compile],
++                        flag_groups = [
++                            flag_group(
++                                flags = ["-fprofile-use=%{fdo_profile_path}"],
++                                expand_if_available = "fdo_profile_path",
++                            ),
++                        ],
++                    ),
++                ],
++                provides = ["profile"],
++            ))
+     else:
+         targets_windows_feature = feature(
+             name = "targets_windows",

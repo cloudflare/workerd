@@ -580,6 +580,23 @@ build:macos_lld_icf --linkopt="-Wl,--icf=safe"
 build:release_windows --config=release_windows-without-lto
 build:release_windows --copt=-flto=thin --config=rust-lto
 
+# PGO for the Windows release build needs a profile trained on Windows (build/pgo/README.md).
+# pgo-instrument-windows builds the binary that trains it, pgo-use-windows optimizes with it; both
+# work like their Linux counterparts, pgo-instrument and pgo-use. clang-cl's instrumented objects
+# name the profile runtime (clang_rt.profile.lib) themselves, so the link needs no flag.
+build:pgo-instrument-windows --config=release_windows --copt=-fprofile-generate
+build:pgo-instrument-windows --@rules_rust//rust/settings:extra_rustc_env=RUSTC_BOOTSTRAP=1
+build:pgo-instrument-windows --@rules_rust//:extra_rustc_flag=-Cprofile-generate
+build:pgo-instrument-windows --@rules_rust//:extra_rustc_flag=-Zno-profiler-runtime
+# --fdo_optimize needs patches/rules_cc/0001, which gives the clang-cl toolchain an fdo_optimize
+# feature.
+build:pgo-use-windows --fdo_optimize=//build/pgo:profile
+build:pgo-use-windows --copt=-mllvm=-no-pgo-warn-mismatch
+build:pgo-use-windows --copt=-mllvm=-disable-loop-idiom-all --linkopt=/mllvm:-disable-loop-idiom-all
+build:pgo-use-windows --@rules_rust//rust/settings:extra_rustc_inputs=//build/pgo:profdata
+build:pgo-use-windows --@rules_rust//:extra_rustc_flag=-Cprofile-use=${extra_rustc_inputs}
+build:pgo-use-windows --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
+
 build:release_windows-without-lto --config=release
 # Windows uses /O2 as its preferred optimization setting and enabled by bazel in the opt
 # configuration, but for clang-cl this is equivalent to only -O2 and a few other things. -O3 is
