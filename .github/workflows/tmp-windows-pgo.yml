@@ -1,0 +1,287 @@
+# TEMPORARY, DO NOT MERGE: a prototype of PGO for the Windows release build. In one job, so that the
+# profile never leaves the runner, it builds the instrumented binary (pgo-instrument-windows),
+# trains a profile by serving the PGO workload's Workers with it, builds release_windows with that
+# profile (pgo-use-windows), runs the release WPT tests on the result, and benchmarks it against the
+# release builds with and without ThinLTO. It publishes nothing. Delete this file before the PR
+# leaves draft.
+name: TEMPORARY Windows PGO prototype
+
+on:
+  pull_request:
+
+concurrency:
+  group: tmp-windows-pgo-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+  CI_FLAGS: --strip=always --config=ci --config=ci-release
+
+jobs:
+  pgo:
+    if: github.head_ref == 'dlapid/workerd-pgo-windows-train'
+    runs-on: windows-2025-16core
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+        with:
+          GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+      - name: Configure download mirrors
+        shell: bash
+        run: |
+          if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
+          fi
+      - name: Tools
+        shell: bash
+        run: |
+          clang-cl --version
+          ls "/c/Program Files/LLVM/bin/llvm-profdata.exe"
+          mkdir -p /c/pgo/bin
+          curl -fsSL -o /c/pgo/oha.exe https://github.com/hatoo/oha/releases/latest/download/oha-windows-amd64.exe
+          /c/pgo/oha.exe --version
+      - name: Write the scripts
+        shell: bash
+        run: |
+          cp src/workerd/server/tests/pgo-workload/*.js /c/pgo/
+          cat > /c/pgo/render.js <<'EOF'
+          // Not trained on: builds an HTML table from JSON.
+          export default {
+            fetch() {
+              const rows = [];
+              for (let i = 0; i < 200; i++) {
+                rows.push({ id: i, name: `item ${i}`, price: (i * 1.37).toFixed(2), tags: ['a', 'b', i % 3 ? 'c' : 'd'] });
+              }
+              const html = ['<table><tr><th>id</th><th>name</th><th>price</th><th>tags</th></tr>'];
+              for (const r of JSON.parse(JSON.stringify(rows))) {
+                html.push(`<tr><td>${r.id}</td><td>${r.name}</td><td>${r.price}</td><td>${r.tags.join(', ')}</td></tr>`);
+              }
+              html.push('</table>');
+              return new Response(html.join(''), { headers: { 'content-type': 'text/html' } });
+            },
+          };
+          EOF
+          cat > /c/pgo/rewriter.js <<'EOF'
+          // Not trained on: rewrites an HTML page with HTMLRewriter.
+          const page = '<html><body>' + Array.from({ length: 300 }, (_, i) =>
+            `<div class="c${i % 7}"><a href="/p/${i}">link ${i}</a><img src="/i/${i}.png"></div>`).join('') + '</body></html>';
+          export default {
+            async fetch() {
+              const rewritten = new HTMLRewriter()
+                .on('a', { element(e) { e.setAttribute('href', 'https://example.com' + e.getAttribute('href')); } })
+                .on('img', { element(e) { e.setAttribute('loading', 'lazy'); } })
+                .transform(new Response(page, { headers: { 'content-type': 'text/html' } }));
+              return new Response(await rewritten.text());
+            },
+          };
+          EOF
+          cat > /c/pgo/pgo.py <<'EOF'
+          # `train <binary>`: serves the PGO workload with an instrumented binary, then drains it with
+          # Ctrl-Break so that it exits normally and writes its profile.
+          # `bench <name>=<binary>...`: benchmarks the binaries, server pinned to one core, oha on others,
+          # the binaries' order rotating from round to round.
+          import ctypes, json, os, signal, socket, statistics, subprocess, sys, time
+          D = 'C:/pgo'
+          OHA = f'{D}/oha.exe'
+          ENC = dict(encoding='utf-8', errors='replace')
+          PORTS = {'hello': 18081, 'hello-async': 18082, 'mixed': 18083, 'render': 18084, 'rewriter': 18085}
+          order = {'customer': 'c-42', 'items': [{'sku': 'a', 'price': 3.5, 'qty': 2},
+                                                  {'sku': 'b', 'price': 10, 'qty': 1},
+                                                  {'sku': 'c', 'price': 0.25, 'qty': 12}]}
+          JSON_POST = ['-m', 'POST', '-H', 'content-type: application/json', '-d', json.dumps(order)]
+          # The pgo-workload test's paths and weights: what Linux training sends, 10,000 per weight.
+          TRAIN = [
+              ('hello', '/', 4, [], '200'), ('hello-async', '/', 4, [], '200'),
+              ('mixed', '/json', 1, JSON_POST, '200'),
+              ('mixed', '/headers', 1, ['-H', 'accept-language: en-US,en;q=0.9', '-H', 'cookie: session=abc123; theme=dark',
+                                        '-H', 'user-agent: pgo-workload'], '200'),
+              ('mixed', '/stream', 1, [], '200'), ('mixed', '/transform', 1, [], '200'),
+              ('mixed', '/subrequest?n=7', 1, [], '200'), ('mixed', '/crypto?key=value', 1, [], '200'),
+              ('mixed', '/url?a=1&b=two', 1, [], '200'),
+              ('mixed', '/text', 1, ['-m', 'POST', '-d', 'abc' * 700], '201'),
+              ('mixed', '/missing', 1, [], '404'),
+          ]
+          BENCH = [
+              ('sync hello world', 'hello', '/', 100000, []),
+              ('async hello world', 'hello-async', '/', 100000, []),
+              ('json', 'mixed', '/json', 50000, JSON_POST),
+              ('crypto', 'mixed', '/crypto?key=value', 50000, []),
+              ('subrequest', 'mixed', '/subrequest?n=7', 30000, []),
+              ('render (not trained)', 'render', '/', 20000, []),
+              ('rewriter (not trained)', 'rewriter', '/', 5000, []),
+          ]
+
+          def worker(name, file, bindings=''):
+              return (f'const {name} :Workerd.Worker = ( modules = [ ( name = "worker", esModule = embed "{file}" ) ],'
+                      f' compatibilityDate = "DATE"{bindings} );')
+
+          def config(binary):
+              date = subprocess.check_output([binary, '--version'], **ENC).split()[1]
+              names = {'hello': 'hello', 'hello-async': 'helloAsync', 'mixed': 'mixed', 'upstream': 'upstream',
+                       'render': 'render', 'rewriter': 'rewriter'}
+              services = ', '.join(f'( name = "{n}", worker = .{v} )' for n, v in names.items())
+              sockets = ', '.join(f'( name = "{n}", address = "127.0.0.1:{p}", http = (), service = "{n}" )'
+                                  for n, p in PORTS.items())
+              text = '\n'.join([
+                  'using Workerd = import "/workerd/workerd.capnp";',
+                  f'const config :Workerd.Config = ( services = [ {services} ], sockets = [ {sockets} ] );',
+                  worker('hello', 'hello.js'), worker('helloAsync', 'hello-async.js'),
+                  worker('mixed', 'mixed.js', ', bindings = [ ( name = "upstream", service = "upstream" ) ]'),
+                  worker('upstream', 'upstream.js'), worker('render', 'render.js'), worker('rewriter', 'rewriter.js'),
+              ]).replace('DATE', date)
+              open(f'{D}/config.capnp', 'w').write(text)
+              print('compatibility date', date, flush=True)
+              return f'{D}/config.capnp'
+
+          def pin(proc, mask):
+              assert ctypes.windll.kernel32.SetProcessAffinityMask(int(proc._handle), mask)
+
+          def wait_ready(proc):
+              deadline = time.monotonic() + 120
+              for port in PORTS.values():
+                  while True:
+                      assert proc.poll() is None, f'workerd exited with {proc.returncode}'
+                      try:
+                          socket.create_connection(('127.0.0.1', port), timeout=1).close()
+                          break
+                      except OSError:
+                          assert time.monotonic() < deadline, 'workerd did not start'
+                          time.sleep(0.05)
+
+          HELP = subprocess.run([OHA, '--help'], capture_output=True, **ENC).stdout
+          JSON_ARGS = ['--output-format', 'json'] if '--output-format' in HELP else ['-j']
+
+          def oha(url, n, extra, concurrency=50, status='200', mask=0xFF00):
+              proc = subprocess.Popen([OHA, '--no-tui', *JSON_ARGS, '-n', str(n), '-c', str(concurrency), *extra, url],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, **ENC)
+              pin(proc, mask)
+              out, err = proc.communicate()
+              assert proc.returncode == 0, err
+              result = json.loads(out)
+              codes = result.get('statusCodeDistribution', {})
+              assert set(codes) == {status}, (url, codes)
+              return result['summary']['requestsPerSec']
+
+          def train(binary):
+              cfg = config(binary)
+              os.makedirs(f'{D}/raw', exist_ok=True)
+              env = dict(os.environ, KJ_CLEAN_SHUTDOWN='1', LLVM_PROFILE_FILE=f'{D}/raw/workerd-%p-%m.profraw')
+              log = open(f'{D}/train.log', 'w')
+              # Its own console, which the Ctrl-Break helper attaches to.
+              proc = subprocess.Popen([binary, 'serve', cfg], stdout=log, stderr=log, env=env,
+                                      creationflags=subprocess.CREATE_NEW_CONSOLE)
+              wait_ready(proc)
+              for sock, path, weight, extra, status in TRAIN:
+                  start = time.monotonic()
+                  oha(f'http://127.0.0.1:{PORTS[sock]}{path}', weight * 10000, extra, 16, status, 0xFFFF)
+                  print(f'trained {sock}{path}: {weight * 10000} requests in {time.monotonic() - start:.1f}s', flush=True)
+              # The helper receives the Ctrl-Break it sends too: SetConsoleCtrlHandler(NULL, TRUE)
+              # ignores only Ctrl-C, so it installs a handler that swallows every event.
+              helper = ('import ctypes, sys; k = ctypes.windll.kernel32; k.FreeConsole(); '
+                        'assert k.AttachConsole(int(sys.argv[1])); '
+                        'h = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)(lambda event: 1); '
+                        'assert k.SetConsoleCtrlHandler(h, True); '
+                        'assert k.GenerateConsoleCtrlEvent(1, 0); print("sent Ctrl-Break")')
+              sent = subprocess.run([sys.executable, '-c', helper, str(proc.pid)])
+              print('helper exited with', hex(sent.returncode & 0xFFFFFFFF), flush=True)
+              code = proc.wait(timeout=300)
+              print('workerd exited with', code)
+              raws = os.listdir(f'{D}/raw')
+              print('raw profiles:', raws)
+              assert raws, 'no profile written'
+
+          def bench(bins):
+              cfg = config(next(iter(bins.values())))
+              rps = {b: {w[0]: [] for w in BENCH} for b in bins}
+              rounds = 5
+              for r in range(rounds):
+                  names = list(bins)
+                  names = names[r % len(names):] + names[:r % len(names)]
+                  for b in names:
+                      log = open(f'{D}/bench-{b}.log', 'a')
+                      proc = subprocess.Popen([bins[b], 'serve', cfg], stdout=log, stderr=log)
+                      pin(proc, 1 << 2)
+                      try:
+                          wait_ready(proc)
+                          for name, sock, path, n, extra in BENCH:
+                              url = f'http://127.0.0.1:{PORTS[sock]}{path}'
+                              oha(url, n // 10, extra)
+                              v = oha(url, n, extra)
+                              rps[b][name].append(v)
+                              print(f'round {r} {b:10} {name:24} {v:10.0f} rps', flush=True)
+                      finally:
+                          proc.terminate()
+                          proc.wait()
+              first = next(iter(bins))
+              head = '| Worker | ' + ' | '.join(bins) + ' |'
+              lines = [head, '|---|' + '--:|' * len(bins)]
+              for w, *_ in BENCH:
+                  base = statistics.median(rps[first][w])
+                  cells = [f'{base:,.0f}'] + [
+                      f'{statistics.median(rps[b][w]):,.0f} ({100 * (statistics.median(rps[b][w]) / base - 1):+.1f}%)'
+                      for b in list(bins)[1:]]
+                  lines.append(f'| {w} | ' + ' | '.join(cells) + ' |')
+              lines += ['', f'Requests per second, median of {rounds} rounds. Sizes: ' +
+                        ', '.join(f'{b} {os.path.getsize(p):,} B' for b, p in bins.items()), '',
+                        'All rounds: ' + json.dumps(rps)]
+              print('\n'.join(lines))
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+                  f.write('\n'.join(lines) + '\n')
+
+          if sys.argv[1] == 'train':
+              train(sys.argv[2])
+          else:
+              bench(dict(a.split('=', 1) for a in sys.argv[2:]))
+          EOF
+      - name: Build the release binaries
+        shell: bash
+        run: |
+          for c in release_windows-without-lto:release release_windows:thinlto pgo-instrument-windows:instrumented; do
+            bazel build --remote_cache=$REMOTE_CACHE --config=${c%%:*} $CI_FLAGS //src/workerd/server:workerd
+            mkdir -p /c/pgo/bin/${c##*:}
+            cp bazel-bin/src/workerd/server/workerd.exe /c/pgo/bin/${c##*:}/
+          done
+          ls -la /c/pgo/bin/*
+      - name: Train
+        shell: bash
+        run: |
+          python /c/pgo/pgo.py train C:/pgo/bin/instrumented/workerd.exe
+          mkdir -p /c/pgo/local
+          "/c/Program Files/LLVM/bin/llvm-profdata.exe" merge -o /c/pgo/local/workerd.profdata /c/pgo/raw/*.profraw
+          "/c/Program Files/LLVM/bin/llvm-profdata.exe" show /c/pgo/local/workerd.profdata | tail -8
+          echo 'exports_files(["workerd.profdata"])' > /c/pgo/local/BUILD.bazel
+          touch /c/pgo/local/REPO.bazel
+      - name: Build with the profile, and run the release WPT tests
+        shell: bash
+        run: |
+          bazel test --remote_cache=$REMOTE_CACHE --config=release_windows --config=pgo-use-windows \
+            --override_repository=workerd_pgo_profile=C:/pgo/local $CI_FLAGS --config=wpt-report \
+            //src/workerd/server:workerd //src/wpt/...
+          mkdir -p /c/pgo/bin/pgo
+          cp bazel-bin/src/workerd/server/workerd.exe /c/pgo/bin/pgo/
+      - name: Benchmark
+        shell: bash
+        run: |
+          python /c/pgo/pgo.py bench release=C:/pgo/bin/release/workerd.exe \
+            thinlto=C:/pgo/bin/thinlto/workerd.exe thinlto+pgo=C:/pgo/bin/pgo/workerd.exe
+      - name: Collect logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p tmp-pgo-logs
+          cp /c/pgo/*.log *.bazel-profile.gz tmp-pgo-logs/ 2>/dev/null || true
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tmp-windows-pgo-logs
+          path: |
+            tmp-pgo-logs
+            bazel-testlogs/**/test.xml
