@@ -153,9 +153,8 @@ kj::String copiedToKj(const kj::HttpHeaderTable& table, Headers& headers) {
 }
 
 kj::String displayed(jsg::Lock& js, Headers& headers) {
-  return kj::strArray(KJ_MAP(h, headers.getDisplayedHeaders(js)) {
-    return kj::str(h.key, ": ", h.value);
-  }, "\n");
+  return kj::strArray(
+      KJ_MAP(h, headers.getDisplayedHeaders(js)) { return kj::str(h.key, ": ", h.value); }, "\n");
 }
 
 // Every read of `a` and `b` that doesn't change them gives the same answer.

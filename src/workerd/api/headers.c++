@@ -593,8 +593,8 @@ void Headers::shallowCopySnapshotTo(const Snapshot& s, kj::HttpHeaders& out) {
   for (uint i = 0; i < n; i++) {
     if (common[i] != 0) order[count++] = i;
   }
-  std::stable_sort(order.begin(), order.begin() + count,
-      [&](uint a, uint b) { return common[a] < common[b]; });
+  std::stable_sort(
+      order.begin(), order.begin() + count, [&](uint a, uint b) { return common[a] < common[b]; });
   for (uint i: order.first(count)) {
     out.addPtrPtr(entries[first[i]].name, entries[i].value);
   }

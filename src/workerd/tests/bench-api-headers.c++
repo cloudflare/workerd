@@ -114,16 +114,16 @@ struct ApiHeadersRequest: public benchmark::Fixture {
     fixture = kj::heap<TestFixture>();
 
     kj::HttpHeaderTable::Builder builder;
-    for (auto name: {"Accept-Charset", "Accept-Encoding", "Accept-Language", "Accept-Ranges",
-           "Accept", "Access-Control-Allow-Origin", "Age", "Allow", "Authorization",
-           "Cache-Control", "Content-Disposition", "Content-Encoding", "Content-Language",
-           "Content-Length", "Content-Location", "Content-Range", "Content-Type", "Cookie", "Date",
-           "ETag", "Expect", "Expires", "From", "Host", "If-Match", "If-Modified-Since",
-           "If-None-Match", "If-Range", "If-Unmodified-Since", "Last-Modified", "Link",
-           "Location", "Max-Forwards", "Proxy-Authenticate", "Proxy-Authorization", "Range",
-           "Referer", "Refresh", "Retry-After", "Server", "Set-Cookie",
-           "Strict-Transport-Security", "Transfer-Encoding", "User-Agent", "Vary", "Via",
-           "WWW-Authenticate", "CF-Ray", "CF-Cache-Status", "Pragma", "Origin"}) {
+    for (auto name:
+        {"Accept-Charset", "Accept-Encoding", "Accept-Language", "Accept-Ranges", "Accept",
+          "Access-Control-Allow-Origin", "Age", "Allow", "Authorization", "Cache-Control",
+          "Content-Disposition", "Content-Encoding", "Content-Language", "Content-Length",
+          "Content-Location", "Content-Range", "Content-Type", "Cookie", "Date", "ETag", "Expect",
+          "Expires", "From", "Host", "If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
+          "If-Unmodified-Since", "Last-Modified", "Link", "Location", "Max-Forwards",
+          "Proxy-Authenticate", "Proxy-Authorization", "Range", "Referer", "Refresh", "Retry-After",
+          "Server", "Set-Cookie", "Strict-Transport-Security", "Transfer-Encoding", "User-Agent",
+          "Vary", "Via", "WWW-Authenticate", "CF-Ray", "CF-Cache-Status", "Pragma", "Origin"}) {
       builder.add(name);
     }
     table = builder.build();
@@ -168,7 +168,8 @@ struct ApiHeadersRequest: public benchmark::Fixture {
     fixture->runInIoContext([&](const TestFixture::Environment& env) {
       for (auto _: state) {
         for (size_t i = 0; i < 1000; ++i) {
-          auto headers = env.js.alloc<api::Headers>(env.js, *kjHeaders, api::Headers::Guard::REQUEST);
+          auto headers =
+              env.js.alloc<api::Headers>(env.js, *kjHeaders, api::Headers::Guard::REQUEST);
           func(env.js, *headers);
           benchmark::DoNotOptimize(headers);
         }
