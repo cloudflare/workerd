@@ -99,6 +99,11 @@ are ignored.
   converts with the slow path's checks, while C++ JSG receives it as a `uint32_t`, so the
   `dispatch/u32` cases compare different argument conversions as well. The Rust callback checks and casts `Local<Value>` to `Function`.
   The C++ callback benchmark calls V8 directly, not through `jsg::Function`.
+- The `promise/` cases call methods that return a Rust `jsg::Promise` or a C++ `jsg::Promise`,
+  and each call also runs the microtasks, so the reactions it adds run inside the timed loop.
+  `untyped-void` returns a promise without a typed value to convert, as a floor for the others.
+  Both isolates capture throws as rejections, as the `capture_async_api_throws` compatibility
+  flag makes them do; `throw-captured` measures a method whose callback throws.
 - `allocate-collect/N` times the creation of N objects followed by garbage collection. Other
   collection benchmarks keep objects alive. `native/lifetime/N` times the creation of one
   object, N reference clones, and cleanup.
