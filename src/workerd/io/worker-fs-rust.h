@@ -13,6 +13,8 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/util/strong-bool.h>
 
+#include <kj/debug.h>
+
 namespace workerd {
 
 // Logs a line written to stdout or stderr through console.log, with the isolate's prefix for the
@@ -33,9 +35,25 @@ class RustSymbolicLink final {
   ::rust::Box<vfs::RsSymbolicLink> inner;
 };
 
+// Rust holds the guard mutably for the whole of a check or resolution through it, which may call
+// C++, such as a lazy directory's loader. That C++ must not check or resolve a link through the
+// same guard, which would be a second mutable borrow, so the guard is lent to one call at a time
+// and a call while it is lent throws.
 class RustLinkGuard final {
  public:
+  template <typename Func>
+  auto lend(Func&& func) {
+    KJ_REQUIRE(!lent,
+        "a symbolic link was checked or resolved while a link of the Rust file system resolved "
+        "through the same guard");
+    lent = true;
+    KJ_DEFER(lent = false);
+    return func(*inner);
+  }
+
+ private:
   ::rust::Box<vfs::RsLinkGuard> inner = vfs::link_guard_new();
+  bool lent = false;
 };
 
 class RustTmpStore final {

@@ -879,7 +879,8 @@ kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> resolveLink(
     jsg::Lock& js, const RustSymbolicLink& link) {
   auto resolved = withHost(js, [&](Host& host) {
     KJ_IF_SOME(guard, SymbolicLinkRecursionGuardScope::tryGetRustGuard()) {
-      return link_resolve_in(link.get(), host, *guard.inner);
+      return guard.lend(
+          [&](vfs::RsLinkGuard& inner) { return link_resolve_in(link.get(), host, inner); });
     }
     return link_resolve(link.get(), host);
   });
@@ -920,7 +921,8 @@ kj::Own<RustLinkGuard> newLinkGuard() {
 }
 
 kj::Maybe<FsError> checkLink(RustLinkGuard& guard, const RustSymbolicLink& link) {
-  return toError(link_guard_check(*guard.inner, link.get()));
+  return guard.lend(
+      [&](vfs::RsLinkGuard& inner) { return toError(link_guard_check(inner, link.get())); });
 }
 
 kj::Own<RustTmpStore> newTmpStore(MakeCurrent makeCurrent) {

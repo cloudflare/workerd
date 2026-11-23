@@ -145,6 +145,46 @@ KJ_TEST("A lazy directory's failed load throws from the operation and is retried
   });
 }
 
+KJ_TEST("C++ that a link's resolution calls can't check a link against the same guard") {
+  FsTestIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
+  isolate.runInLockScope([&](FsTestIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(
+        lock, lock.newContext<FsTestContext>().getHandle(lock), [&](jsg::Lock& js) {
+      // The loader runs while the link below resolves through it, and on its first call checks
+      // another link against the walk's guard, as a loader that resolved links would.
+      kj::Maybe<kj::Rc<SymbolicLink>> other;
+      size_t loads = 0;
+      auto lazy = getLazyDirectoryImpl([&]() -> kj::Rc<Directory> {
+        if (loads++ == 0) {
+          KJ_EXPECT(SymbolicLinkRecursionGuardScope::checkSeen(KJ_ASSERT_NONNULL(other).get()) ==
+              kj::none);
+        }
+        Directory::Builder builder;
+        builder.add("x", File::newReadable("x"_kj.asBytes()));
+        return builder.finish();
+      });
+      Directory::Builder builder;
+      builder.add("lazy", kj::mv(lazy));
+      auto root = builder.finish();
+      other = kj::rc<SymbolicLink>(root.addRef(), kj::Path({"lazy"}), kj::none);
+      auto link = kj::rc<SymbolicLink>(root.addRef(), kj::Path({"lazy", "x"}), kj::none);
+
+      SymbolicLinkRecursionGuardScope scope;
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_VFS)) {
+        // Rust holds the guard for the whole resolution, so the check throws, from the
+        // resolution once Rust has returned.
+        KJ_EXPECT_THROW_MESSAGE("resolved through the same guard", (void)link->resolve(js));
+        KJ_EXPECT(loads == 1);
+      } else {
+        // C++ keeps the guard in the scope, where the loader's check is one more link seen.
+        KJ_EXPECT(link->resolve(js) != kj::none);
+      }
+      // The guard is no longer lent: resolving again loads the directory and succeeds.
+      KJ_EXPECT(link->resolve(js) != kj::none);
+    });
+  });
+}
+
 KJ_TEST("An empty read-only file viewing no bytes") {
   FsTestIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
   isolate.runInLockScope([&](FsTestIsolate::Lock& lock) {
