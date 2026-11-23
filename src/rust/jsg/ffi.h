@@ -559,6 +559,12 @@ uint8_t* local_array_buffer_data(const Local& buffer);
 uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
+// Local<SharedArrayBuffer>
+size_t local_shared_array_buffer_byte_length(const Local& buffer);
+// Copies the first `out.size()` bytes of the buffer, or all of them if it has fewer, into `out`,
+// and returns how many it copied.
+size_t local_shared_array_buffer_copy_to(const Local& buffer, ::rust::Slice<uint8_t> out);
+
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module);
 

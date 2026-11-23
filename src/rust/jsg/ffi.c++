@@ -953,6 +953,20 @@ size_t local_array_buffer_get_backing_store(const Local& buffer) {
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
+// Local<SharedArrayBuffer>
+size_t local_shared_array_buffer_byte_length(const Local& buffer) {
+  return local_as_ref_from_ffi<v8::SharedArrayBuffer>(buffer)->ByteLength();
+}
+
+size_t local_shared_array_buffer_copy_to(const Local& buffer, ::rust::Slice<uint8_t> out) {
+  auto buf = local_as_ref_from_ffi<v8::SharedArrayBuffer>(buffer);
+  auto size = kj::min(buf->ByteLength(), out.size());
+  if (size > 0) {
+    memcpy(out.data(), buf->Data(), size);
+  }
+  return size;
+}
+
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
   return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
