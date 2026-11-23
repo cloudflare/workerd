@@ -4,8 +4,8 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 # Regenerates ../aws-chunked-sdk-fixtures.js: uploads the fixture payloads with each client to a
-# local server that records the request bodies, then writes them out. Needs node, uv, go and
-# openssl, and network access to fetch the clients. See README.md.
+# local server that records the request bodies, then writes them out. Needs node, python3, uv, go
+# and openssl, and network access to fetch the clients. See README.md.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

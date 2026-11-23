@@ -26,9 +26,9 @@ The signed fixtures are signed with AWS's documented example credentials, `AKIDE
 `wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY`, in `us-east-1`. The decoder does not verify
 signatures, so the test checks only that it decodes these bodies.
 
-To regenerate, run `./generate.sh`. It needs `node`, `uv`, `go` and `openssl`, and fetches the
-clients at the versions above. The signatures change on every run, since they cover the request
-time.
+To regenerate, run `./generate.sh`. It needs `node`, `python3`, `uv`, `go` and `openssl`, and
+fetches the clients at the versions above. The signatures change on every run, since they cover
+the request time.
 
 - `capture.py` is the recording server.
 - `js-v3-client.mjs`, `boto3-client.py` and `go-client.go` upload the payloads.
