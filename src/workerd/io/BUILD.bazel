@@ -773,6 +773,14 @@ kj_test(
 )
 
 kj_test(
+    src = "invocation-span-time-test.c++",
+    deps = [
+        ":invocation-span",
+        "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
         ":io",
