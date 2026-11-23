@@ -31,12 +31,10 @@ wd_cc_library(
     deps = [
         "//src/rust/cxx/kj-rs",
         "//src/rust/worker:bridge",
-        "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
         "//src/workerd/io:otlp-span-submitter",
         "//src/workerd/server:channel-token",
-        "//src/workerd/server:workerd_capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-http",
@@ -54,6 +52,9 @@ wd_cc_library(
         "worker-factory-listen.c++",
         "worker-factory-otlp.c++",
         "worker-factory-rpc.c++",
+    ],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
     ],
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
@@ -77,7 +78,9 @@ wd_cc_library(
         "//src/workerd/server:workerd-api",
         "//src/workerd/server:workerd_capnp",
         "//src/workerd/server/server:bridge.rs@cxx",
+        "//src/workerd/util",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:http-util",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:sentry",

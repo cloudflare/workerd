@@ -12,7 +12,7 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers`, `rewriting_response` and `image_filter_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, `edit_headers`, `rewriting_response` and `image_filter_response`, the safe wrappers over the bridge's `unsafe fn`s of those names, and `ThreadLogger`'s `Send`"
 )]
 
 pub use assets_router::mitigations::should_block_image_response;
@@ -37,6 +37,8 @@ pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::log::ThreadBody;
+pub use crate::log::thread_body_run;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
@@ -168,6 +170,22 @@ pub mod ffi {
         body: KjOwn<AsyncInputStream>,
     }
 
+    /// How long one phase of starting a worker took, on the monotonic and thread CPU clocks, in
+    /// nanoseconds.
+    struct StartupPhaseTiming {
+        wall_ns: i64,
+        cpu_ns: i64,
+    }
+
+    /// How long the phases of starting a worker took, for `workerd bench`; see
+    /// `BenchReport.Group.startup` (bench.capnp) for what each covers.
+    struct WorkerStartupTiming {
+        isolate: StartupPhaseTiming,
+        script: StartupPhaseTiming,
+        worker: StartupPhaseTiming,
+        total: StartupPhaseTiming,
+    }
+
     /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
     struct ConfigReport {
         error: bool,
@@ -193,14 +211,6 @@ pub mod ffi {
         facet_id: KjMaybe<u32>,
         /// The cluster replicates the actor's commits: each waits for `Committer::commit`.
         replicated: bool,
-    }
-
-    /// What an alarm does when another instance owns its object: runs again later, a retry
-    /// that counts against no limit, or is done.
-    #[repr(u8)]
-    enum AlarmElsewhere {
-        Retry,
-        Done,
     }
 
     /// What a channel token is for (`IoChannelFactory::ChannelTokenUsage`): restoring a stub over
@@ -332,11 +342,24 @@ pub mod ffi {
         /// levels onto it).
         fn kj_log(severity: u8, file: &str, line: u32, message: &str);
 
+        /// The calling thread's logger, for a thread the process starts to install around its
+        /// body (`kj::ExceptionCallback::getThreadInitializer`): the JSON logger under
+        /// structured logging.
+        type ThreadLogger;
+        fn thread_logger() -> KjOwn<ThreadLogger>;
+        /// Runs `body` on the calling thread with `logger` installed around it.
+        fn run_with_logger(logger: KjOwn<ThreadLogger>, body: Box<ThreadBody>);
+
         /// One of the command line's own messages under structured logging, at a
         /// `kj::LogSeverity`: a line of the JSON logger's format on stderr, where the logger's
         /// own lines go to stdout. What supervises the process reads the reason of a failed
         /// start from stderr.
         fn json_log_to_stderr(severity: u8, file: &str, line: u32, message: &str);
+
+        /// Writes `text` to stderr with one write that does not block, so that all of it, part
+        /// of it or none of it is written, for a process that ends at once. Writes nothing on
+        /// Windows.
+        fn write_stderr_nonblocking(text: &str);
     }
 
     // =====================================================================================
@@ -399,17 +422,15 @@ pub mod ffi {
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
         ) -> Result<KjOwn<CompiledWorker>>;
-        /// Times starting the config's worker `services[config_service]`, which `spec` compiled,
-        /// for `workerd bench`: compiles and destroys throwaway copies of it in new isolates, as
-        /// `params` (an encoded `BenchParams` message, bench.capnp, in words) ask. Returns the
-        /// startup `BenchReport.Group` of the timings, encoded, without its name. A copy that
-        /// fails to start fails the group; an error means it could not be run at all.
-        async fn factory_bench_startup(
+        /// Compiles a throwaway copy of the config's worker `services[config_service]`, which
+        /// `spec` compiled, in a new isolate, destroys it, and returns how long the phases of
+        /// starting it took, for `workerd bench`. The copy has no inspector. Fails if the copy
+        /// fails to start.
+        async fn factory_start_throwaway_worker(
             factory: &WorkerFactory,
             spec: &WorkerSpec,
             config_service: u32,
-            params: &[u64],
-        ) -> Result<Vec<u64>>;
+        ) -> Result<WorkerStartupTiming>;
 
         /// Whether the config's assets service `services[config_service]` prefers serving an
         /// asset to a navigation (`assetsSecFetchModeNavigateHeaderPrefersAssetServing`), under
@@ -560,9 +581,6 @@ pub mod ffi {
             name: &str,
             at_ms: u64,
         ) -> Result<()>;
-        /// What an alarm runs on when another instance owns its object: nothing, and then
-        /// `then`.
-        fn alarm_owned_elsewhere(then: AlarmElsewhere) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -852,6 +870,10 @@ pub mod ffi {
     // `'static`. C++ keeps the arguments alive until the promise settles or is destroyed.
 
     extern "Rust" {
+        /// A thread's body, run by `run_with_logger` (log.rs).
+        type ThreadBody;
+        fn thread_body_run(body: Box<ThreadBody>);
+
         /// The Rust half of a command, run by `with_process_context` (entry.rs).
         type PendingCommand;
         fn run_pending_command(
@@ -1151,6 +1173,10 @@ pub mod ffi {
         fn take(self: &mut WorkerInterfaceList, index: usize) -> Result<KjOwn<WorkerInterface>>;
     }
 }
+
+// SAFETY: a thread logger is made to be moved to the thread it is for, as `kj::Thread` moves the
+// initializer it wraps to the thread it starts; it is used there alone.
+unsafe impl Send for ffi::ThreadLogger {}
 
 // =====================================================================================
 /// A response whose headers are edited before they reach `inner`. Borrows `inner` for its life,

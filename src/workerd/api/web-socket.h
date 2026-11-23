@@ -5,7 +5,6 @@
 #pragma once
 
 #include "basics.h"
-#include "events.h"
 
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
@@ -17,7 +16,6 @@
 #include <kj/refcount.h>
 
 #include <cstdlib>
-#include <list>
 
 namespace workerd {
 class ActorObserver;

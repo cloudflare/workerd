@@ -26,12 +26,14 @@ it, the fields are defined as data properties, an absent optional field as `unde
 JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
 setter on `Object.prototype` runs, and what it throws is passed on.
 
-Optional fields can use `Option<T>` (`None` is absent) or `jsg::NullOrUndefined<T>`
-(`Undefined` is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>`
-when a field must distinguish `null` from `undefined`; its `Null` state always
-produces a property whose value is `null`. An absent input property becomes `None`
-or `Undefined`, respectively. If all public fields are optional, a `null` or
-`undefined` input is accepted as an empty dictionary.
+A field is optional when its type is one that a method may omit as an argument
+(`FromJS::is_optional`), whatever name or alias it is spelled with: `Option<T>` (`None` is
+absent), `jsg::LenientOption<T>` (`None` is absent) or `jsg::NullOrUndefined<T>` (`Undefined`
+is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` when a field must
+distinguish `null` from `undefined`; its `Null` state always produces a property whose value is
+`null`. An absent input property converts from `undefined`, so it becomes the absent state. If
+all public fields are optional, a `null` or `undefined` input is accepted as an empty
+dictionary.
 
 A field that holds a JavaScript value, as a C++ `jsg::JsRef<jsg::JsValue>` field does, is a
 `jsg::v8::TracedGlobal<M>`. It converts as a `Local<'s, M>` does: `TracedGlobal<Value>` takes any

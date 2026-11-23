@@ -164,6 +164,7 @@ class FileSystemModule final: public jsg::Object {
   void rm(jsg::Lock& js, FilePath path, RmOptions options);
 
   struct DirEntHandle {
+    // The entry's own name, or in a recursive read its path relative to the directory read.
     kj::String name;
     kj::String parentPath;
     int type;

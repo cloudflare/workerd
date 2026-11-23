@@ -292,6 +292,12 @@ wd_test(
     sidecar_randomize_ip = False,
 )
 
+wd_test(
+    src = "connect-handler-starttls-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-handler-starttls-lifetime-test.js"],
+)
+
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
 # NeuterableIoStream when the handler promise resolves, preventing use-after-free.
 wd_test(
@@ -736,6 +742,20 @@ wd_test(
     src = "sql-resizable-arraybuffer-test.wd-test",
     args = ["--experimental"],
     data = ["sql-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
+    src = "sql-cursor-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+)
+
+wd_test(
+    src = "sql-cursor-gc-gate-off-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+    # Every gate is on in that variant.
+    generate_all_autogates_variant = False,
 )
 
 wd_test(
@@ -1513,7 +1533,10 @@ wd_test(
     args = ["--experimental"],
     data = ["fetch-invalid-response-test.js"],
     sidecar = "fetch-invalid-response-sidecar",
-    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
+    sidecar_port_bindings = [
+        "INVALID_RESPONSE_SERVER_PORT",
+        "UNTRUSTED_TLS_SERVER_PORT",
+    ],
 )
 
 js_binary(

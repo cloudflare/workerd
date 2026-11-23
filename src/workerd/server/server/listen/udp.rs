@@ -230,7 +230,8 @@ pub async fn listen_udp(
                     let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
                     let mut worker = CxxWorkerInterface::new(channel.start_request(metadata)?);
                     let event = ffi::new_udp_connect_event(&address, flow);
-                    worker.custom_event(event).await.map(drop)
+                    worker.custom_event(event).await?;
+                    Ok(())
                 });
             }
         }

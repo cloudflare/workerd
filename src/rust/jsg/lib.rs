@@ -5,6 +5,7 @@
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod arguments;
@@ -86,9 +87,11 @@ pub use resource::undescribed;
 pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::EscapableScope;
 pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
+pub use scope::NestedScope;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
@@ -120,6 +123,10 @@ pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
+#[doc(hidden)]
+pub use wrappable::DropCheck;
+#[doc(hidden)]
+pub use wrappable::DropCheckFallback;
 pub use wrappable::FromJS;
 pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
@@ -187,6 +194,9 @@ mod ffi {
         type Global = crate::v8::ffi::Global;
 
         // Realm
+        /// Null if no Realm is attached. `#[nothrow]` so that cross-language LTO inlines it:
+        /// a struct conversion reads the Realm on each call.
+        #[nothrow]
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
         /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
         /// none has been detached, which sets the dispose hook.
@@ -1062,8 +1072,9 @@ impl<'s> Lock<'s> {
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the Realm stays attached
+        // while the lock is in use, and `self` is borrowed for as long as the result.
+        unsafe { attached_realm(self.isolate().as_ffi()).as_mut() }
     }
 
     /// Returns the current worker's compatibility flags reader.
@@ -1742,15 +1753,6 @@ pub trait GarbageCollected: Traced {
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
 
-    /// Whether the resource implements `Drop` itself or a field's type needs it (see
-    /// [`Traced::needs_drop_detach`]). If so, its references are made strong and forget their
-    /// parent before it is dropped, so that a `Drop` impl may move them out (see
-    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
-    /// type that needs it must override it to return `true`.
-    fn detach_before_drop(&self) -> bool {
-        false
-    }
-
     /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
     /// which makes a Worker whose top level leaves it reachable start without the snapshot.
     /// `#[jsg_resource]` implements it.
@@ -1887,6 +1889,29 @@ unsafe fn isolate_disposed(state: *const IsolateState) {
     state.isolate_disposed();
 }
 
+/// The Realm attached to `isolate`. The caller chooses whether to borrow it shared or unique.
+///
+/// # Panics
+///
+/// Panics if no Realm is attached.
+///
+/// # Safety
+///
+/// `isolate` must be valid and locked by this thread.
+#[expect(
+    unsafe_code,
+    reason = "reads the Realm pointer from the isolate's data slot"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "a Realm is attached to every isolate that runs Rust JSG code"
+)]
+unsafe fn attached_realm(isolate: *mut v8::ffi::Isolate) -> NonNull<Realm> {
+    // SAFETY: the isolate is valid and locked (guaranteed by the caller).
+    let realm = unsafe { ffi::realm_from_isolate(isolate) };
+    NonNull::new(realm).expect("Rust Realm not set on isolate")
+}
+
 /// See the bridge declaration.
 #[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
 unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
@@ -1904,8 +1929,10 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
     // (guaranteed by the C++ caller, and checked above).
     let isolate = unsafe { Isolate::from_raw(isolate) };
-    // SAFETY: the Realm is attached while the hook that calls this is installed.
-    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    // SAFETY: the isolate is valid and locked, and the Realm is attached while the hook that
+    // calls this is installed. The reference is shared, since releasing a reference can drop a
+    // resource, whose `Drop` may reach the Realm.
+    let realm = unsafe { attached_realm(isolate.as_ffi()).as_ref() };
     realm.state.drain_awaiting_lock(isolate);
 }
 

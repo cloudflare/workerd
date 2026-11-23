@@ -103,8 +103,9 @@ namespace workerd::util {
   /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
-     settles can be collected. When disabled, they stay strong roots and keep such a stream alive  \
-     until its isolate is torn down, and jsg::TracedOwn behaves like kj::Own. */                   \
+     settles can be collected, and the Cursor held by a SQL cursor's iterators. When disabled,     \
+     they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
+     down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
   /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
@@ -133,7 +134,11 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* An actor's outgoing calls use the I/O channels of its newest request that is still running,   \
+     rather than its newest request, which may have returned and be waiting only for background    \
+     work. See IoContext::getIncomingRequestForIoChannels(). */                                    \
+  V(IO_CHANNELS_FROM_RUNNING_REQUEST)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

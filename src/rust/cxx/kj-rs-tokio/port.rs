@@ -5,6 +5,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -42,6 +43,10 @@ thread_local! {
     /// calls while the KJ event loop and timer are still alive (spawned tasks may own KJ
     /// promises), with `TokioPort::drop` as the fallback.
     static LOOP_LOCAL_SET: RefCell<Option<Rc<LocalSet>>> = const { RefCell::new(None) };
+
+    /// The count the port's progress probe advances (`crate::Progress`), registered by
+    /// `TokioPort::new` and cleared on drop.
+    static LOOP_PROGRESS: RefCell<Option<Arc<AtomicU64>>> = const { RefCell::new(None) };
 }
 
 /// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
@@ -52,8 +57,13 @@ pub fn current_handle() -> Option<Handle> {
 }
 
 /// Returns this thread's KJ-loop `LocalSet`, if a `TokioEventPort` exists on this thread.
-fn current_local_set() -> Option<Rc<LocalSet>> {
+pub fn current_local_set() -> Option<Rc<LocalSet>> {
     LOOP_LOCAL_SET.with(|l| l.borrow().clone())
+}
+
+/// Returns this thread's port's progress count, if a `TokioEventPort` exists on this thread.
+pub fn current_progress() -> Option<Arc<AtomicU64>> {
+    LOOP_PROGRESS.with(|p| p.borrow().clone())
 }
 
 /// Spawns a future onto this thread's KJ-loop tokio runtime.
@@ -123,6 +133,9 @@ struct SharedState {
 pub struct TokioPort {
     runtime: EnteredRuntime,
     state: Arc<SharedState>,
+    /// What the C++ port's progress probe counts (`count_progress`), shared with every
+    /// `crate::Progress`.
+    progress: Arc<AtomicU64>,
     owner_thread: std::thread::ThreadId,
 }
 
@@ -189,9 +202,12 @@ impl TokioPort {
         LOOP_LOCAL_SET.with(|l| {
             *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
         });
+        let progress = Arc::new(AtomicU64::new(0));
+        LOOP_PROGRESS.with(|p| *p.borrow_mut() = Some(Arc::clone(&progress)));
         Self {
             runtime,
             state,
+            progress,
             owner_thread: std::thread::current().id(),
         }
     }
@@ -300,6 +316,11 @@ impl TokioPort {
         self.take_wake_latch()
     }
 
+    /// See the bridge doc (ffi.rs): the C++ port's progress probe fired.
+    pub(crate) fn count_progress(&self) {
+        self.progress.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub(crate) fn wake(&self) {
         self.state.woken.store(true, Ordering::SeqCst);
         self.state.notify.notify_one();
@@ -336,6 +357,9 @@ impl Drop for TokioPort {
         // nothing left to clear.
         let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
             *h.borrow_mut() = None;
+        });
+        let _ = LOOP_PROGRESS.try_with(|p| {
+            *p.borrow_mut() = None;
         });
         // Fallback cancellation of spawned tasks (normally already done, while the KJ loop was
         // still alive, by the C++ `TokioEventPort` destructor -- see `cancel_spawned_tasks`). A

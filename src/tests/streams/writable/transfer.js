@@ -27,8 +27,8 @@ export const structuredCloneWritable = {
       },
     });
     throws(() => structuredClone(ws, { transfer: [ws] }), {
-      name: 'TypeError',
-      message: 'Object is not transferable',
+      name: 'DataCloneError',
+      message: 'Object is not transferable.',
     });
     throws(
       () => structuredClone(ws),

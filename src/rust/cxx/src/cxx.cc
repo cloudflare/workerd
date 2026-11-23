@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 extern "C" {
 void cxxbridge1$cxx_string$init(std::string *s, const std::uint8_t *ptr,
@@ -582,6 +583,11 @@ void cxxbridge1$kjException$getDetails(kj::Exception *err,
     output[i].data_len = detail.value.size();
     output[i].data_ptr = detail.value.begin();
   }
+}
+
+// copy a kj::Exception into a new one allocated by new.
+kj::Exception *cxxbridge1$kjException$clone(const kj::Exception *err) noexcept {
+  return new kj::Exception(err->clone());
 }
 
 // delete kj::Exception allocated by new.

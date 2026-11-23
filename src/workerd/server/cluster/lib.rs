@@ -53,6 +53,7 @@ mod fake_http;
 pub mod gcs;
 mod google_auth;
 mod http;
+mod keeper;
 mod log;
 #[cfg(test)]
 mod log_tests;
@@ -80,6 +81,9 @@ pub use cluster::Route;
 pub use cluster::Setup;
 pub use cluster::now_ms;
 pub use cluster::open_bucket;
+pub use keeper::Fence;
+pub use keeper::Progress;
+pub use keeper::Within;
 pub use log::DB;
 pub use log::facet_path;
 pub use log::facet_prefix;

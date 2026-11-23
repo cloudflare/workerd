@@ -101,8 +101,8 @@ export const nonTransferableObjectsRejected = {
     // serializer, which transfers only ArrayBuffers.
     for (const item of [{}, [], () => {}, new Map()]) {
       throws(() => structuredClone(1, { transfer: [item] }), {
-        name: 'TypeError',
-        message: CPP_BAD_ITEM,
+        name: 'DataCloneError',
+        message: 'Object is not transferable.',
       });
     }
   },

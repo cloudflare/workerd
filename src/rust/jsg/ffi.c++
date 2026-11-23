@@ -21,6 +21,7 @@
 #include <kj/mutex.h>
 #include <kj/string.h>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -647,17 +648,17 @@ MaybeLocal local_function_call(
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
-
-  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
-  }
+  // A Local has the layout of a v8::Local (see ffi-inl.h), so the arguments pass as they are,
+  // without a copy. V8 takes them as non-const but only reads them.
+  KJ_REQUIRE(args.size() <= INT_MAX, "too many arguments for a JavaScript call", args.size());
+  auto* v8Args = const_cast<v8::Local<v8::Value>*>(
+      args.empty() ? nullptr : &local_as_ref_from_ffi<v8::Value>(args[0]));
 
   // No TryCatch: what the function throws stays pending and propagates once the Rust caller
   // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
   // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
   // by walking the whole stack.
-  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
+  return maybe_local_to_ffi(fn->Call(context, receiver, static_cast<int>(args.size()), v8Args));
 }
 
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
@@ -1521,6 +1522,25 @@ void wrappable_visit_ref(
   }
 }
 
+namespace {
+
+// V8's `ReturnValue::Set(double)` goes through `Number::New`, which allocates a local handle even
+// when the result is a Smi. `Set(int32_t)` stores a Smi in place. For a double that is an int32
+// and not -0, it produces the same value `Number::New` would.
+void setReturnNumber(auto returnValue, double value) {
+  if (value >= std::numeric_limits<int32_t>::min() &&
+      value <= std::numeric_limits<int32_t>::max()) {
+    auto integer = static_cast<int32_t>(value);
+    if (integer == value && (integer != 0 || !std::signbit(value))) {
+      returnValue.Set(integer);
+      return;
+    }
+  }
+  returnValue.Set(value);
+}
+
+}  // namespace
+
 // FunctionCallbackInfo
 Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
@@ -1547,7 +1567,7 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 }
 
 void fci_set_return_number(FunctionCallbackInfo* args, double value) {
-  args->GetReturnValue().Set(value);
+  setReturnNumber(args->GetReturnValue(), value);
 }
 
 void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
@@ -1576,7 +1596,7 @@ void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
 }
 
 void pci_set_return_number(PropertyCallbackInfo* info, double value) {
-  info->GetReturnValue().Set(value);
+  setReturnNumber(info->GetReturnValue(), value);
 }
 
 void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
@@ -2031,10 +2051,7 @@ void function_template_set_nested_type(
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto* realm =
-      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
-  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
-  return realm;
+  return static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
 }
 
 namespace {
@@ -2292,6 +2309,22 @@ void isolate_try_catch(
   if (callback(data)) {
     catch_exception(tryCatch, exception);
   }
+}
+
+// HandleScope
+void isolate_handle_scope(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::HandleScope scope(isolate);
+  callback(data);
+}
+
+void isolate_escapable_handle_scope(
+    Isolate* isolate, size_t data, ::rust::Fn<void(size_t, EscapableHandleScope&)> callback) {
+  v8::EscapableHandleScope scope(isolate);
+  callback(data, scope);
+}
+
+Local escapable_handle_scope_escape(EscapableHandleScope& scope, Local value) {
+  return to_ffi(scope.Escape(local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
 // Isolate

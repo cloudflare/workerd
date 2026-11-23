@@ -193,6 +193,11 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
+  // Hides `detector` in an opaque wrapper, the kind that jsg::Promise uses to carry C++ values.
+  jsg::JsValue wrapOpaquely(jsg::Lock& js, jsg::Ref<GcDetector> detector) {
+    return jsg::JsValue(wrapOpaque(js.v8Context(), kj::mv(detector)));
+  }
+
   void assert_(bool condition, jsg::Optional<kj::String> message) {
     JSG_ASSERT(condition, Error, message.orDefault(nullptr));
   }
@@ -207,6 +212,7 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_METHOD(putBack);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
+    JSG_METHOD(wrapOpaquely);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -295,6 +301,22 @@ KJ_TEST("GC collects objects when expected") {
     a = null;
     gc({type: "minor"});
     assert(b.siblingCollected, "minor GC did not collect transitive native objects");
+  )",
+      "undefined", "undefined");
+
+  // Test that minor GC collects an opaque wrapper and the native object it holds.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      wrapOpaquely(pair[0]);
+    })();
+    pair = null;
+    // As with ValueBox below, the first pass drops the opaque wrapper, which releases its strong
+    // reference to the detector, and the second drops the detector's own wrapper.
+    gc({type: "minor"});
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect an opaque wrapper");
   )",
       "undefined", "undefined");
 
@@ -488,9 +510,12 @@ KJ_TEST("wrappables are charged as external memory while they live") {
 
   // Collected, so the charges are released again, with slack for a few boxes the GCs leave alive.
   // The GC is requested from C++ without stack scanning, as a stale stack slot that points at
-  // `keep` would keep every box alive.
+  // `keep` would keep every box alive. The loop in keepBoxes() may still have an optimizing
+  // compile job pending on a background thread, and that job keeps every box alive too, so it is
+  // first aborted and waited for.
   e.expectEval("keep = null", "object", "null");
   e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    lock.v8Isolate->ClearCachesForTesting();
     for (int i = 0; i < 2; ++i) {
       lock.v8Isolate->RequestGarbageCollectionForTesting(
           v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);

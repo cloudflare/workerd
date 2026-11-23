@@ -215,17 +215,12 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before a
-  `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
-  (`Traced::needs_drop_detach`), every `jsg::Rc`, `jsg_cpp::Ref` and `TracedGlobal` it traces is
-  made strong, and every `jsg::Rc` forgets its parent, so that a `Drop` impl may move one out and
-  keep it. A `TracedGlobal` whose value died with the resource is empty by then. A hand-written
-  `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
-  does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
-  Wrappers such as `Option` and `Vec` pass it on, and a `#[jsg_resource]` says so when it
-  implements `Drop` itself. A `#[jsg_struct]`, a `#[jsg_oneof]` or a `#[jsg_resource]` held
-  inline in another resource doesn't look at its fields, which a recursive type would make loop
-  forever, so a `Drop` impl of a type it holds must not move a reference out there. See
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`, so a type that
+  holds GC references must not implement `Drop`. The macros enforce this: a `#[jsg_resource]`
+  that implements `Drop` doesn't compile unless every field's type is
+  `jsg::HoldsNoGcReferences`, and a `#[jsg_struct]` or `#[jsg_oneof]` can't implement `Drop` at
+  all. Rust has no negative trait bounds, so nothing stops a hand-written type that holds a
+  `jsg::Rc` or a `TracedGlobal` from implementing `Drop`; reviewers check those. See
   [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
@@ -240,23 +235,30 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 `callback: Cell<Option<TracedGlobal<Value>>>`, which don't compile. Fix:
 `pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
-Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
+Bad: a `#[jsg_resource]` that holds a `jsg::Rc` and implements `Drop`, which doesn't compile.
+Fix: move the cleanup into a field type that holds no GC references and give that type the
+`Drop` impl.
+
+Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell, `tests/drop_moved_rc.rs`, for a `jsg::Rc` that the `Drop` of a resource or of a
-field's type moves out, and `tests/drop_moved_traced_global.rs`, for a `TracedGlobal` that a
-resource's `Drop` moves out. No test checks a hand-written `impl Traced` that shares traced state
-some other way or reaches it through another kind of cell, a std cell included, or a hand-written
-`impl HoldsNoGcReferences` on a type whose `trace` visits something; reviewers check those.
+std cell, and the `resource-with-gc-references-has-no-drop`, `jsg-struct-has-no-drop` and
+`jsg-oneof-has-no-drop` compile tests, for a `Drop` impl on a type the macros generate code for.
+No test checks a hand-written `impl Traced` that shares traced state some other way or reaches it
+through another kind of cell, a std cell included, a hand-written `impl HoldsNoGcReferences` on a
+type whose `trace` visits something, or a `Drop` impl of a hand-written type that holds GC
+references; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
 C++ JSG will be removed, so Rust JSG must not depend on it. New code in the C++ shims in
 `src/rust/jsg` calls V8 directly (`v8::TryCatch`, `v8::MaybeLocal`, `isolate->ThrowException`) and
 leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are listed in the
-allowlist described below, and are to be removed. The one exception is in
-`src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
-`JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+allowlist described below, and are to be removed. The one exception is `throwPendingToRun()` in
+`src/workerd/io/io-context/ffi.c++`, which throws `JsExceptionThrown` to pass an exception or a
+termination that Rust left pending to `IoContext::run()`, which learns of them no other way. Only
+Rust code that `run()` itself runs reaches it: the callback of `io_context_await_io_and_run()` and
+the function of a `ReentryCallback`. Don't add another throw, or another caller that `run()`
+doesn't run.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),
@@ -834,6 +836,37 @@ lock. `jsg::allow_scopes_of_another_isolate` (`unsafe`) lifts the rule for code 
 scopes of a second isolate. Handles that outlive scopes remember their isolate and panic when
 used in another: `Global<T>`, `TracedGlobal<T>`, and the JS wrapper of a `jsg::Rc<T>`.
 
+`lock.with_handle_scope(|lock, _| ...)` runs a closure in a new `v8::HandleScope`, which frees the
+handles the closure creates when it returns, as a C++ `v8::HandleScope` does at the end of its
+block. A loop that creates handles on every iteration, such as one that calls a function many
+times, runs its body in one, so that they don't pile up in the callback's scope. The closure gets
+the new scope's lock, with which the enclosing scope's handles can still be used: its second
+argument, a `jsg::NestedScope<'t, 's>`, tells the compiler that the enclosing scope `'s` outlives
+the new one `'t`, as `std::thread::scope`'s `Scope` does. What the closure returns can't hold a
+handle of the new scope. A panic in the closure resumes once the scope is closed.
+
+```rust
+for _ in 0..calls {
+    lock.with_handle_scope(|lock, _| f.call(lock, None, &[]).map(drop))?;
+}
+```
+
+To return a handle of the new scope, as a C++ `js.runInHandleScope()` callback that returns a
+`v8::Local` does, `lock.with_escapable_handle_scope(|lock, scope| ...)` opens a
+`v8::EscapableHandleScope` instead. Its closure gets a `jsg::EscapableScope<'t, 's>`, which is
+proof of the same bound as `NestedScope`, and whose `escape(local)` turns one `Local<'t, T>` into
+a `Local<'s, T>`. `escape` consumes it, since V8 lets a scope escape one handle, and the closure
+can return what it returns in a `Result` or `Option`.
+
+```rust
+let object = lock.with_escapable_handle_scope(|lock, scope| -> jsg::Result<_> {
+    let object = lock.new_object();
+    let value = compute(lock)?;
+    object.set(lock, "value", value)?;
+    Ok(scope.escape(object))
+})?;
+```
+
 ### `Local<'s, T>`
 
 A `Copy` handle to a V8 value, valid for the scope `'s` it was created in. Every API that
@@ -935,8 +968,8 @@ Bitwise moves are also why a `TracedGlobal` keeps its handles in a box. In trace
 handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box keeps
 that address valid however the `TracedGlobal` itself moves. A `TracedGlobal` leaves a `jsg::` cell
 strong, and a `std::cell::Cell` or `RefCell` cannot hold one, so a weak `TracedGlobal` moves only on
-its way to being dropped (`jsg::Cell::set`) or in a resource's `Drop` impl, which has `&mut self`.
-The box lives until the strong handle has been reset. GC can still run after the `Realm` is dropped,
+its way to being dropped (`jsg::Cell::set`) or in the `Drop` impl of a hand-written type that
+holds it, which has `&mut self`. The box lives until the strong handle has been reset. GC can still run after the `Realm` is dropped,
 so the box of a `TracedGlobal` dropped then is kept until the isolate is disposed.
 
 A `TracedGlobal` taken out of a `jsg::Cell` with `take(lock)` or `replace(lock, ..)`, or moved
@@ -996,6 +1029,26 @@ or a JavaScript exception is pending, `Function::new` creates nothing and return
 (see "Errors from JavaScript"), as `call` does; return it to keep the termination or the exception
 propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
 0, and it can be called with `new`.
+
+A function that needs no state can skip the `Wrappable`: `v8::Function::from_callback(lock,
+callback)` creates one that V8 calls `callback` for directly, like C++ `v8::Function::New()` with
+a plain callback, so a call costs no more than V8's own. Its data is `undefined` and it has no
+signature, so `this` can be any value; like a `Function::new` function, its `name` is empty, its
+`length` is 0 and it can be called with `new`. It fails as `Function::new` does. Build `callback`
+with `jsg::function_callback` from a closure that captures nothing: the closure gets a lock per
+call and sets its result with `set_return_value`, and a panic in it throws an internal error and
+terminates execution. An `extern "C"` callback also works, but it gets no lock and no panic
+handling, so a panic in it aborts the process.
+
+```rust
+let second = v8::Function::from_callback(
+    lock,
+    jsg::function_callback(|_lock, args| {
+        let value = args.get(1);
+        args.set_return_value(value);
+    }),
+)?;
+```
 
 ### Conventions of the `v8` module
 
