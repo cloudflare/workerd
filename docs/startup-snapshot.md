@@ -132,10 +132,14 @@ all of these hold:
       bytecode flushing never discards it. V8 patch 0054 adds
       `SnapshotCreator::HasSuspendedGenerators()`, which looks for one among the objects
       `CreateBlob()` would serialize. Then `SnapshotCreator::CreateBlob()` runs. V8 calls
-      `serializeInternalFields()` for each wrapper's tag field and `serializeApiWrapperCallback()`
-      for each wrapper's shim pointer; the latter writes the object's `liveWrappables` index as
-      the payload. Afterwards `WrappablesSerializeMetadata::dropUnreachableWrappables()` raises
-      what the callbacks found (an unknown shim, a type with no transfer) and drops the clones of
+      `serializeApiWrapperCallback()` for each wrapper's shim pointer, which writes the object's
+      `liveWrappables` index as the payload. Nothing is stored in a wrapper's internal field,
+      and V8 serializes an empty one by itself, so no internal-field serializer is registered.
+      The field has to be there all the same: without it V8 could defer a wrapper it reaches
+      deep in the object graph, and the API-wrapper serializer needs the wrapper written at
+      once (`Wrappable::INTERNAL_FIELD_COUNT`). Afterwards
+      `WrappablesSerializeMetadata::checkCallbackFindings()` raises what the callback found (an
+      unknown shim, a type with no transfer) and `dropUnreachableWrappables()` drops the clones of
       objects that were recorded but not reachable at `CreateBlob()`.
 7. Back in `factory_new_worker()`: if the zygote threw or reported errors, the artifact is
    discarded. Otherwise `extractSnapshotArtifact()` hands it over, the deferred console lines are
@@ -156,9 +160,10 @@ long as the isolate does. In order:
    builds the object the restored wrapper will be attached to (a stateless type's constructor,
    or a second `snapshotClone()` of the stored clone) and pre-allocates its CppgcShim, since the
    deserializer callback runs under V8's `DisallowGarbageCollection` and may not allocate.
-3. `v8::Context::New()` deserializes the context. `deserializeInternalFields()` restores the
-   wrapper-tag marker of every wrapper; `deserializeApiWrapperCallback()` links each wrapper to
-   the shim pre-allocated for its payload's slot (`HeapTracer::linkRestoredWrapper()`). Then
+3. `v8::Context::New()` deserializes the context. `deserializeApiWrapperCallback()` links each
+   wrapper to the shim pre-allocated for its payload's slot
+   (`HeapTracer::linkRestoredWrapper()`); the shim carries the tag that says what the wrapper
+   wraps. Then
    `relinkReferences()` hands each restored object that referred to other transferred objects
    (`Wrappable::snapshotReferences()`, such as `Crypto`'s `subtle`) their restored instances
    (`snapshotRelink()`), `releaseSlotsWithChecks()` verifies every serialized slot was linked
@@ -316,10 +321,8 @@ A typed array that keeps its bytes off the V8 heap, over a zero-length ArrayBuff
 detached (`new Uint8Array(new ArrayBuffer(0))`), neither fails the zygote nor restores soundly: V8
 serializes its backing store although it holds no bytes, and on restore copies the zero bytes to
 the null start of a zero-length allocation. That is undefined behavior, which UBSan aborts on. The
-zygote cannot detect it in every build: the internal-field serializer that would see the view is
-not called for ArrayBuffer views when V8 is built with `v8_array_buffer_view_internal_field_count
-= 0`. workerd's own modules avoid leaving such a view reachable at their top level (`node:zlib`'s
-flush buffers are `Buffer.alloc(0)`, which V8 keeps on its heap).
+zygote does not detect it. workerd's own modules avoid leaving such a view reachable at their top
+level (`node:zlib`'s flush buffers are `Buffer.alloc(0)`, which V8 keeps on its heap).
 
 ## Console output
 

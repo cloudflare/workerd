@@ -356,8 +356,8 @@ class Socket: public jsg::Object {
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
 
   // Claims the socket prebuilt by RpcDeserializerExternalHandler::prepare() (see
-  // hydrateRpcSocket below). The TypeHandler unwraps the prebuilt slot's wrapped socket -- an
-  // internal-field read, safe under the deserializer's no-JS scope.
+  // hydrateRpcSocket below). The TypeHandler unwraps the prebuilt slot's wrapped socket -- a
+  // read of the wrapper's CppHeap pointer, safe under the deserializer's no-JS scope.
   static jsg::Ref<Socket> deserialize(jsg::Lock& js,
       rpc::SerializationTag tag,
       jsg::Deserializer& deserializer,

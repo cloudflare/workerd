@@ -118,35 +118,36 @@ fn v8_unwrap_string_returns_correct_values() {
     });
 }
 
-/// Tests that `unwrap_resource` rejects a C++ JSG object (tagged with `WORKERD_WRAPPABLE_TAG`).
+/// Tests that `unwrap_resource` rejects the wrapper of a C++ JSG object.
 ///
-/// Rust wrappables use `WORKERD_RUST_WRAPPABLE_TAG` (0xeb05), while C++ JSG objects use
-/// `WORKERD_WRAPPABLE_TAG` (0xeb04). Attempting to unwrap a C++ object through the Rust path
-/// must return None to prevent reading garbage from non-existent `data[2]` fields.
+/// The `CppHeap` pointer of a Rust resource's wrapper has the tag `kRustResourceWrappableTag`,
+/// and that of a C++ object's wrapper has another. Unwrapping a C++ object through the Rust
+/// path must return None rather than take the C++ object for a Rust one.
 #[test]
-fn unwrap_resource_rejects_cpp_tagged_object() {
+fn unwrap_resource_rejects_cpp_wrapper() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+        let cpp_obj = crate::Harness::create_cpp_wrapped_object(lock);
 
-        // unwrap_resource returns None because the object has the C++ tag, not the Rust tag.
+        // unwrap_resource returns None because the wrapper has a C++ tag, not the Rust tag.
         let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
             // SAFETY: isolate is valid and locked, value is a valid Local.
             unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), cpp_obj.into_ffi()) }
                 .into();
         assert!(
             result.is_none(),
-            "unwrap_resource should return None for a C++ tagged object"
+            "unwrap_resource should return None for the wrapper of a C++ object"
         );
 
         Ok(())
     });
 }
 
-/// Tests that `unwrap_resource` rejects a plain JS object with no internal fields.
+/// Tests that `unwrap_resource` rejects a plain JS object.
 ///
-/// A plain `{}` object has no wrappable tag at all. This verifies we don't crash on
-/// objects that were never wrapped by either the C++ or Rust JSG layer.
+/// A plain `{}` object is not an API wrapper, so it has no `CppHeap` pointer to read a tag from.
+/// This verifies we don't crash on objects that were never wrapped by either the C++ or Rust JSG
+/// layer.
 #[test]
 fn unwrap_resource_rejects_plain_js_object() {
     let harness = crate::Harness::new();

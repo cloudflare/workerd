@@ -138,7 +138,9 @@ struct OwnDataProperty {
 v8::Maybe<kj::Maybe<OwnDataProperty>> getOwnDataProperty(
     v8::Isolate* isolate, v8::Local<v8::Object> object, kj::StringPtr name) {
   using Result = kj::Maybe<OwnDataProperty>;
-  if (object->InternalFieldCount() > 0) return v8::Just<Result>(kj::none);
+  if (::workerd::jsg::Wrappable::tryGetWrapperTag(isolate, object) != kj::none) {
+    return v8::Just<Result>(kj::none);
+  }
   auto context = isolate->GetCurrentContext();
   auto key = newString(isolate, name);
   // False for a Proxy, so the descriptor below is not a Proxy trap's.
@@ -273,7 +275,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   }
 
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
-    if (object->InternalFieldCount() > 0) return v8::Just(true);
+    if (::workerd::jsg::Wrappable::tryGetWrapperTag(isolate, object) != kj::none) {
+      return v8::Just(true);
+    }
     bool isJsSerializable;
     if (!hasPrivateUnlessPlain(object, jsSerializeModeKey).To(&isJsSerializable)) {
       return v8::Nothing<bool>();
@@ -288,10 +292,10 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
     // An instance of a class implemented in JavaScript is checked for first, as jsg::Serializer
-    // checks for it, since such a class may make native errors and DOMExceptions. It has no
-    // internal fields, unlike a workerd API object, and no mark is undefined.
+    // checks for it, since such a class may make native errors and DOMExceptions. It is not a
+    // workerd API object, and no mark is undefined.
     v8::Local<v8::Value> mark = v8::Undefined(isolate);
-    if (object->InternalFieldCount() == 0 &&
+    if (::workerd::jsg::Wrappable::tryGetWrapperTag(isolate, object) == kj::none &&
         !object->GetPrivate(isolate->GetCurrentContext(), jsSerializeModeKey).ToLocal(&mark)) {
       return v8::Nothing<bool>();
     }

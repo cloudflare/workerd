@@ -711,11 +711,10 @@ class IsolateBase {
   }
 
   // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is
-  // inside a handle scope. `badTagFieldsCount` and `wrappablesMetadata` are the data of the
-  // serializer callbacks; both must stay alive until createSnapshotBlob() has checked them.
-  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
-      uint32_t* badTagFieldsCount,
-      WrappablesSerializeMetadata* wrappablesMetadata);
+  // inside a handle scope. `wrappablesMetadata` is the data of the API-wrapper serializer
+  // callback; it must stay alive until createSnapshotBlob() has checked it.
+  void setSnapshotDefaultContext(
+      v8::Local<v8::Context> defaultContext, WrappablesSerializeMetadata* wrappablesMetadata);
 
   // Zygote only, right after its top level has run and before anything of the context is
   // recorded for the snapshot. Runs the FinalizationRegistry cleanups the top level left due, the
@@ -734,10 +733,9 @@ class IsolateBase {
   void settleFinalizationRegistriesForSnapshot(Lock& js);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
-  // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
-  // setSnapshotDefaultContext(); the metadata records the live wrappers right before CreateBlob()
-  // and both are checked afterwards. No JavaScript runs from the moment the metadata records the
-  // wrappers until CreateBlob() returns; the caller runs
+  // `wrappablesMetadata` is the object given to setSnapshotDefaultContext(); it records the live
+  // wrappers right before CreateBlob() and is checked afterwards. No JavaScript runs from the
+  // moment the metadata records the wrappers until CreateBlob() returns; the caller runs
   // settleFinalizationRegistriesForSnapshot() beforehand.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
@@ -748,7 +746,6 @@ class IsolateBase {
   // replay. Collected at the io layer because jsg cannot see api::EventTarget.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
       kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
-      const uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata,
       kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
 
@@ -959,7 +956,7 @@ class IsolateBase {
   kj::HashMap<TypeHandlerKey, const void*> typeHandlerRegistry;
 
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
-  // object with 2 internal fields.
+  // object with a wrapper's internal field.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
   // FunctionTemplate returned by getDomExceptionTemplate().
@@ -1524,8 +1521,6 @@ class Isolate: public IsolateBase {
         metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer,
             jsgIsolate.finalizedSnapshotArtifact(),
             [this](v8::CppHeapPointerTag tag) { return jsgIsolate.snapshotRecreateFnFor(tag); });
-        options.internalFieldsDeserializer =
-            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
             v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
         abortOnGc.emplace(v8Isolate, metadata);
@@ -1535,10 +1530,6 @@ class Isolate: public IsolateBase {
       abortOnGc = kj::none;
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      KJ_REQUIRE(metadata.badTagFieldsCount == 0,
-          "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
-          "wrapper markers",
-          metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         {
           // snapshotRelink() runs with the new context entered.

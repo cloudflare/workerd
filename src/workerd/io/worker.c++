@@ -2406,12 +2406,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
 
-    // Data of the snapshot serializer callbacks registered with the zygote context. Both outlive
-    // the handle scope below because createSnapshotBlob() checks them after that scope closes.
+    // Data of the API-wrapper serializer callback registered with the zygote context. It outlives
+    // the handle scope below because createSnapshotBlob() checks it after that scope closes.
     // Unused unless the isolate is preparing a snapshot.
-    // * The counter serializeInternalFields() writes through while V8 runs CreateBlob().
-    uint32_t snapshotBadTagFieldsCount = 0;
-    // * The API-wrapper serializer's metadata.
     jsg::WrappablesSerializeMetadata wrappablesMetadata;
 
     // Zygote only: the context global's JS event listeners, recorded inside the handle scope
@@ -2444,8 +2441,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(
-            context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
+        isolateBase.setSnapshotDefaultContext(context, &wrappablesMetadata);
       }
 
       // Run per-isolate bootstrap for freshly created service worker contexts.
@@ -2763,7 +2759,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
       isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
-          &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords));
+          &wrappablesMetadata, kj::mv(listenerRecords));
     }
   });
 }

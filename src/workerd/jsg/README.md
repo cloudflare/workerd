@@ -621,8 +621,10 @@ constructor and initializes it once the whole value has been read, with JavaScri
    detachWrapper(); JS wrapper = empty shell
 ```
 
-Internal fields: slot 0 = `WORKERD_WRAPPABLE_TAG`, slot 1 = `Wrappable*` pointer.
-Check: `jsg::Wrappable::isWorkerdApiObject(object)`.
+The `Wrappable` is reached through the wrapper's CppHeap pointer, whose tag says what it wraps
+(`wrappable-tag.h`). A wrapper's one internal field (`Wrappable::INTERNAL_FIELD_COUNT`) stays
+empty; V8 needs it to be there.
+Check: `jsg::Wrappable::isWorkerdApiObject(isolate, object)`.
 
 ## Startup Snapshot
 

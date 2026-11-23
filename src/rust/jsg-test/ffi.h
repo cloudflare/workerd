@@ -138,9 +138,9 @@ int64_t external_memory(Isolate* isolate);
 // sizeof(::workerd::rust::jsg::Wrappable).
 size_t rust_wrappable_size();
 
-// Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
-// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
-::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
+// Creates the wrapper of a C++ Wrappable: an opaque wrapper (jsg::wrapOpaque()), whose CppHeap
+// pointer has a C++ tag. Used to test that Rust unwrap rejects the wrappers of C++ objects.
+::workerd::rust::jsg::Local create_cpp_wrapped_object(Isolate* isolate);
 
 // Calls a function that C++ JSG wrapped (Lock::wrapReturningFunction()), whose data is also an
 // opaque wrapper, and returns whether rust::jsg::fci_get_data_wrappable() finds a Rust Wrappable

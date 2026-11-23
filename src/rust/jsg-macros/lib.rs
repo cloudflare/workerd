@@ -390,12 +390,7 @@ fn describe_struct(
 pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fast = fast_callback(&input_fn.sig);
-    let mut output = callback(
-        quote! { #input_fn }.into(),
-        Callback::Function,
-        Some(attr),
-        ReceiverCheck::Signature,
-    );
+    let mut output = callback(quote! { #input_fn }.into(), Callback::Function, Some(attr));
     output.extend(TokenStream::from(fast));
     output
 }
@@ -410,25 +405,10 @@ enum Callback {
     Setter,
 }
 
-/// How a `&self` callback finds its receiver's resource.
-#[derive(Clone, Copy)]
-enum ReceiverCheck {
-    /// The callback is registered with the type's `v8::Signature`, which V8 checks before
-    /// calling it, so it skips the marker check.
-    Signature,
-    /// The callback has no signature, so the receiver can be any value.
-    Marker,
-}
-
 /// `method_attr` is a method's `#[jsg_method]` arguments; argument errors for
 /// methods match C++ JSG's.
-fn callback(
-    item: TokenStream,
-    kind: Callback,
-    method_attr: Option<TokenStream>,
-    receiver_check: ReceiverCheck,
-) -> TokenStream {
-    callback_with_instance(item, kind, None, method_attr, receiver_check)
+fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>) -> TokenStream {
+    callback_with_instance(item, kind, None, method_attr)
 }
 
 fn callback_with_instance(
@@ -436,7 +416,6 @@ fn callback_with_instance(
     kind: Callback,
     instance_kind: Option<Callback>,
     method_attr: Option<TokenStream>,
-    receiver_check: ReceiverCheck,
 ) -> TokenStream {
     let mut input_fn = parse_macro_input!(item as ItemFn);
     // A disposer's callback has the name this callback has. It is this one for a method that is
@@ -452,7 +431,6 @@ fn callback_with_instance(
         &input_fn,
         callback_names(fn_name, kind, instance_kind),
         method_name.as_deref(),
-        receiver_check,
     ) {
         Ok(callbacks) => callbacks,
         Err(error) => return error.into(),
@@ -487,7 +465,6 @@ fn generate_callbacks(
     input_fn: &ItemFn,
     callback_kinds: impl Iterator<Item = (Callback, syn::Ident)> + Clone,
     method_name: Option<&str>,
-    receiver_check: ReceiverCheck,
 ) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
     let fn_name = &input_fn.sig.ident;
     let fn_sig = &input_fn.sig;
@@ -565,7 +542,7 @@ fn generate_callbacks(
 
     let result_handling = result_handling(fn_sig, receiver);
 
-    let invocation = invocation(fn_name, receiver, receiver_check, &arg_exprs);
+    let invocation = invocation(fn_name, receiver, &arg_exprs);
 
     // Comments do not survive into the expansion, so the SAFETY comment on the `unsafe` block
     // that borrows the resource cannot satisfy the lint.
@@ -670,17 +647,9 @@ fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::
 fn invocation(
     fn_name: &syn::Ident,
     receiver: Receiver,
-    receiver_check: ReceiverCheck,
     arg_exprs: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
-    let resolve = match receiver_check {
-        ReceiverCheck::Signature => {
-            quote! { jsg::v8::resolve_method_receiver::<Self>(lock, this) }
-        }
-        ReceiverCheck::Marker => {
-            quote! { jsg::v8::resolve_receiver::<Self>(lock, this) }
-        }
-    };
+    let resolve = quote! { jsg::v8::resolve_receiver::<Self>(lock, this) };
     match receiver {
         Receiver::SelfRef => quote! {
             let this = args.this();
@@ -1088,13 +1057,7 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     // Member factories select placement at template construction, so both V8 callback
     // signatures are available regardless of the automatic-registration placement.
-    callback_with_instance(
-        item,
-        Callback::Function,
-        Some(instance_kind),
-        None,
-        ReceiverCheck::Marker,
-    )
+    callback_with_instance(item, Callback::Function, Some(instance_kind), None)
 }
 
 /// Registers a method as `prototype[Symbol.dispose]` of a `#[jsg_resource]` type, which
@@ -1161,7 +1124,6 @@ fn disposer(attr_name: &str, attr: TokenStream, item: TokenStream) -> TokenStrea
         quote! { #input_fn }.into(),
         Callback::Function,
         Some(TokenStream::new()),
-        ReceiverCheck::Signature,
     )
 }
 
@@ -1177,12 +1139,7 @@ fn disposer(attr_name: &str, attr: TokenStream, item: TokenStream) -> TokenStrea
 pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Reuse jsg_method callback generation, without a signature: registration as
     // Member::Property is handled by #[jsg_resource] on the enclosing impl block.
-    callback(
-        item,
-        Callback::Function,
-        Some(TokenStream::new()),
-        ReceiverCheck::Marker,
-    )
+    callback(item, Callback::Function, Some(TokenStream::new()))
 }
 
 /// Registers a method as the wildcard property of a `#[jsg_resource]` type.
@@ -1232,15 +1189,13 @@ pub fn jsg_callable(attr: TokenStream, item: TokenStream) -> TokenStream {
         "it runs on the instance that is called",
         callable_callback_name,
         |_| CALLED_AS_FUNCTION.to_owned(),
-        ReceiverCheck::Marker,
     )
 }
 
 /// Expands `#[attr_name]`, an attribute without arguments on a method that takes `&self` or
 /// `this: jsg::Rc<Self>` (`why` says why it needs one), into the method and a function callback
-/// named by `callback_name`, which checks its receiver as `receiver_check` says. Argument errors
-/// name the method `method_name`. The method keeps its other attributes, so that a
-/// `#[jsg_method]` after this one expands.
+/// named by `callback_name`. Argument errors name the method `method_name`. The method keeps its
+/// other attributes, so that a `#[jsg_method]` after this one expands.
 fn instance_function_attribute(
     attr: TokenStream,
     item: TokenStream,
@@ -1248,7 +1203,6 @@ fn instance_function_attribute(
     why: &str,
     callback_name: fn(&syn::Ident) -> syn::Ident,
     method_name: fn(&syn::Ident) -> String,
-    receiver_check: ReceiverCheck,
 ) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
@@ -1274,12 +1228,7 @@ fn instance_function_attribute(
     if let Some(error) = error {
         return reject(&input_fn, callback_names, &error).into();
     }
-    let callbacks = generate_callbacks(
-        &input_fn,
-        callback_names,
-        Some(&method_name(fn_name)),
-        receiver_check,
-    );
+    let callbacks = generate_callbacks(&input_fn, callback_names, Some(&method_name(fn_name)));
     match callbacks {
         Ok(callbacks) => {
             let method = reemit_method(&input_fn);
@@ -1326,7 +1275,6 @@ pub fn jsg_iterable(attr: TokenStream, item: TokenStream) -> TokenStream {
         "it runs on the instance that is iterated",
         iterable_callback_name,
         |fn_name| snake_to_camel(&fn_name.to_string()),
-        ReceiverCheck::Signature,
     )
 }
 

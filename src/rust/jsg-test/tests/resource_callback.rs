@@ -5,9 +5,7 @@
 //! Tests for resource method callbacks.
 //!
 //! These tests ensure that resource methods can be called from JavaScript and that
-//! the resource pointer is correctly unwrapped. This specifically validates that
-//! V8's internal field embedder data type tags are used correctly when getting
-//! aligned pointers from internal fields.
+//! the resource pointer is correctly unwrapped from the receiver's `CppHeap` pointer.
 
 use std::cell::Cell;
 
@@ -135,9 +133,8 @@ fn primitive_results_preserve_numbers_undefined_and_errors() {
     });
 }
 
-/// Validates that resource methods can be called from JavaScript.
-/// This test ensures the embedder data type tag is correctly used when
-/// unwrapping resource pointers from V8 internal fields.
+/// Validates that resource methods can be called from JavaScript, with the resource unwrapped
+/// from the receiver.
 #[test]
 fn resource_method_callback_receives_correct_self() {
     let harness = crate::Harness::new();
@@ -1152,8 +1149,7 @@ fn instance_method_throws_on_object_inheriting_from_resource() {
     });
 }
 
-/// Validates that `resolve_receiver`, used by callbacks without a signature,
-/// finds only a wrapper of the requested resource type.
+/// Validates that `resolve_receiver` finds only a wrapper of the requested resource type.
 #[test]
 fn resolve_receiver_rejects_everything_but_the_resource_type() {
     let harness = crate::Harness::new();
@@ -1182,7 +1178,7 @@ fn resolve_receiver_rejects_everything_but_the_resource_type() {
                 "resolved {source}"
             );
         }
-        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+        let cpp_obj = crate::Harness::create_cpp_wrapped_object(lock);
         assert!(v8::resolve_receiver::<EchoResource>(lock, cpp_obj).is_none());
 
         let value = ctx.eval_raw(lock, "obj").unwrap();
