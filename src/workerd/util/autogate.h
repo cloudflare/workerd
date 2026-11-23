@@ -89,10 +89,6 @@ namespace workerd::util {
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
-  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
-     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
-     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
-  V(TS_STDIO)                                                                                      \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
