@@ -223,33 +223,50 @@ export const listingOrder = {
   },
 };
 
-// A listing whose reply would pass the binding's 1 MiB stops short, with a
-// cursor that resumes after its last key.
+// A listing whose reply would pass its budget stops short, with a cursor
+// that resumes after its last key or prefix. The budget is bytes, not
+// characters, and counts prefixes, which a page may stop at: here each
+// object is 11 KB of UTF-8 in 3,600 characters, and is followed by a key
+// under a prefix of 1 KB. Fifty of each pass the budget in bytes, not in
+// characters. A delimited page holds 43 of each with about 5 KB to spare,
+// short of the next object, so it ends at a prefix.
 export const largeListings = {
   async test(ctrl, env) {
-    const customMetadata = { m: 'x'.repeat(6000) };
-    const keys = Array.from(
-      { length: 100 },
-      (_, i) => `l/${String(i).padStart(3, '0')}`
+    const wide = { customMetadata: { m: '字'.repeat(3600) } };
+    const names = Array.from(
+      { length: 50 },
+      (_, i) => `w/${String(i).padStart(3, '0')}`
     );
+    const long = (n) => `${n}${'x'.repeat(1000)}/`;
+    const keys = names.flatMap((n) => [n, `${long(n)}k`]);
     await Promise.all(
-      keys.map((k) => env.BUCKET.put(k, '', { customMetadata }))
+      names.flatMap((n) => [
+        env.BUCKET.put(n, '', wide),
+        env.BUCKET.put(`${long(n)}k`, ''),
+      ])
     );
-    const listed = [];
-    let cursor;
-    let pages = 0;
-    do {
-      const page = await env.BUCKET.list({
-        prefix: 'l/',
-        include: ['customMetadata'],
-        cursor,
-      });
-      listed.push(...page.objects.map((o) => o.key));
-      cursor = page.truncated ? page.cursor : undefined;
-      pages++;
-    } while (cursor);
-    assert.ok(pages > 1, `${pages} page`);
-    assert.deepStrictEqual(listed, keys.toSorted());
+    const listAll = async (options) => {
+      const pages = [];
+      let cursor;
+      do {
+        const page = await env.BUCKET.list({
+          prefix: 'w/',
+          include: ['customMetadata'],
+          cursor,
+          ...options,
+        });
+        pages.push(page);
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+      return {
+        pages,
+        objects: pages.flatMap((p) => p.objects.map((o) => o.key)),
+        prefixes: pages.flatMap((p) => p.delimitedPrefixes),
+      };
+    };
+    const flat = await listAll({});
+    assert.ok(flat.pages.length > 1, `${flat.pages.length} page`);
+    assert.deepStrictEqual(flat.objects, keys.toSorted());
     // A page HEADs its objects only as far as its budget reaches, and
     // never the last here, whose HEAD would fail.
     await env.PROBE.fetch('http://control/', {
@@ -257,41 +274,22 @@ export const largeListings = {
       body: keys.at(-1),
     });
     const cut = await env.PROBED.list({
-      prefix: 'l/',
+      prefix: 'w/',
       include: ['customMetadata'],
     });
     assert.ok(cut.truncated);
     const { heads } = await (await env.PROBE.fetch('http://control/')).json();
     assert.ok(heads < keys.length, `${heads} HEADs`);
-    await env.BUCKET.delete(keys);
-
-    // The budget is bytes, not characters, and counts prefixes, which a
-    // page may stop at: here each object is over 10 KB of UTF-8 in 3,500
-    // characters, and is followed by a prefix of almost 1 KB.
-    const wide = { customMetadata: { m: '字'.repeat(3500) } };
-    const names = keys.map((k) => `w/${k.slice(2)}`);
-    const long = (n) => `${n}${'x'.repeat(900)}/`;
-    await Promise.all(
-      names.flatMap((n) => [
-        env.BUCKET.put(n, '', wide),
-        env.BUCKET.put(`${long(n)}k`, ''),
-      ])
+    const seen = await listAll({ delimiter: '/' });
+    assert.ok(seen.pages.length > 1, `${seen.pages.length} page`);
+    const [first] = seen.pages;
+    assert.strictEqual(
+      first.objects.length,
+      first.delimitedPrefixes.length,
+      'the first page ends at a prefix'
     );
-    const seen = { objects: [], prefixes: [] };
-    cursor = undefined;
-    do {
-      const page = await env.BUCKET.list({
-        prefix: 'w/',
-        delimiter: '/',
-        include: ['customMetadata'],
-        cursor,
-      });
-      seen.objects.push(...page.objects.map((o) => o.key));
-      seen.prefixes.push(...page.delimitedPrefixes);
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor);
     assert.deepStrictEqual(seen.objects, names);
     assert.deepStrictEqual(seen.prefixes, names.map(long));
-    await env.BUCKET.delete([...names, ...names.map((n) => `${long(n)}k`)]);
+    await env.BUCKET.delete(keys);
   },
 };
