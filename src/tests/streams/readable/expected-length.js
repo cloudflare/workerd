@@ -11,17 +11,14 @@
 // DIVERGENCE (ledger #35): forks made before any read carry the declared
 // length in TypeScript; C++ gives tee branches no length, so they go out
 // chunked. Once anything has been read before a fork, the fork and its
-// own forks go out chunked in both (PARITY). A partly read stream itself
-// (ledger #36, a C++ defect) is pinned in js-rpc-streams-crossflag-test.js,
-// as no consumer here accepts one.
+// own forks go out chunked in both (PARITY). A partly read stream itself,
+// which reports no length in both (PARITY), is pinned in
+// js-rpc-streams-crossflag-test.js, as no consumer here accepts one.
 //
-// C++ DEFECT (ledger #37): a response whose body declares expectedLength
-// (a default source or a TransformStream readable) and is compressed on
-// the way out by Content-Encoding: gzip. TypeScript reports no length for
-// an encoded body, so it goes out chunked and decodes in full. C++ keeps
-// the uncompressed length as the Content-Length, as its tryGetLength()
-// ignores the encoding, so the compressed body falls short of it and the
-// reader fails with 'Network connection lost.'
+// PARITY: a response whose body declares expectedLength (a default source
+// or a TransformStream readable) and is compressed on the way out by
+// Content-Encoding: gzip reports no length for the encoded body, so it
+// goes out chunked and decodes in full.
 //
 // PARITY: a body (a default source or a TransformStream readable) that
 // delivers less than its declared expectedLength fails the transfer with
@@ -141,17 +138,13 @@ export const shortBodyFailsTransfer = {
   },
 };
 
-// C++ DEFECT (ledger #37)
+// PARITY
 export const compressedResponseDropsDeclaredLength = {
   async test(ctrl, env) {
     for (const kind of BODY_KINDS) {
       const resp = await env.SELF.fetch(`http://example.org/gzip?body=${kind}`);
       strictEqual(resp.headers.get('content-encoding'), 'gzip', kind);
-      if (usingTsImpl) {
-        strictEqual(await resp.text(), PAYLOAD, kind);
-      } else {
-        await rejects(resp.text(), { message: 'Network connection lost.' });
-      }
+      strictEqual(await resp.text(), PAYLOAD, kind);
     }
   },
 };

@@ -286,6 +286,15 @@ let isByteStreamController: (value: unknown) => boolean;
 // proxies up front), matching the #-brand's no-tunneling behavior.
 const kReadableStreamBrand = utils.getPrivateSymbol('kReadableStreamBrand');
 
+// A V8-private marker that C++ stamps on the streams it makes over in-memory
+// data, whose underlying sources ignore the reason they are canceled with
+// (SourceIgnoresCancelReason in streams/common.h). A C++ pump that cancels a
+// marked stream because its sink failed passes no reason. Shells carry it
+// forward (see makeShell), since they read the same source.
+const kSourceIgnoresCancelReason = utils.getPrivateSymbol(
+  'kSourceIgnoresCancelReason'
+);
+
 // The Node.js stream-interop hooks, keyed by the well-known symbols Node's
 // own web streams carry. node:stream's finished()/eos() observes a web
 // stream's completion through `stream[kIsClosedPromise].promise` (which
@@ -4111,11 +4120,11 @@ class ReadableStream<R> {
     };
 
     // A shell carries another stream's state forward: a tee branch, or the
-    // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, records whether anything was read before the fork,
-    // and shares `controller`, if any; the caller gives it a consumer when
-    // it has data to read. Callers make shells before handing `from` off,
-    // which disturbs it.
+    // stream detach() moves a body to. It copies the state, stored error,
+    // pending closure and kSourceIgnoresCancelReason marker, records whether
+    // anything was read before the fork, and shares `controller`, if any; the
+    // caller gives it a consumer when it has data to read. Callers make shells
+    // before handing `from` off, which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -4126,6 +4135,12 @@ class ReadableStream<R> {
       shell.#pendingClosure = from.#pendingClosure;
       shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
+      const marks = from as unknown as Record<symbol, unknown>;
+      if (marks[kSourceIgnoresCancelReason] === true) {
+        (shell as unknown as Record<symbol, unknown>)[
+          kSourceIgnoresCancelReason
+        ] = true;
+      }
       return shell;
     };
 
@@ -5156,15 +5171,21 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
 });
 
 // Captured controller operations for INTERNAL stream production (from() and
-// the C++ iterable-body arm via the cppExports below). The prototype is
-// user-reachable once the class is installed as a global, so internal
-// production must not dispatch through it -- per WHATWG, from() uses
+// the C++ iterable-body and in-memory-body arms via the cppExports below).
+// The prototype is user-reachable once the class is installed as a global, so
+// internal production must not dispatch through it -- per WHATWG, from() uses
 // internal controller operations, unaffected by prototype patching.
 const defaultControllerEnqueue = uncurryThis(
   ReadableStreamDefaultController.prototype.enqueue
 ) as (controller: object, chunk: unknown) => void;
 const defaultControllerClose = uncurryThis(
   ReadableStreamDefaultController.prototype.close
+) as (controller: object) => void;
+const byteControllerEnqueue = uncurryThis(
+  ReadableByteStreamController.prototype.enqueue
+) as (controller: object, chunk: ArrayBufferView) => void;
+const byteControllerClose = uncurryThis(
+  ReadableByteStreamController.prototype.close
 ) as (controller: object) => void;
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
   __proto__: kNullProtoObject,
@@ -5204,6 +5225,20 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
+  // The same for the byte streams of the C++ in-memory-body arm
+  // (JsReadableStream::create() over a string or buffer). With `close`, the
+  // stream is closed after the chunk, so that the pull that enqueues the last
+  // chunk calls in once.
+  readableByteControllerEnqueue: (
+    controller: object,
+    chunk: ArrayBufferView,
+    close: boolean
+  ): void => {
+    byteControllerEnqueue(controller, chunk);
+    if (close) byteControllerClose(controller);
+  },
+  readableByteControllerClose: (controller: object): void =>
+    byteControllerClose(controller),
   consumeReadableStreamAsArrayBufferRecord,
   extractNativeSourceForCollection,
   detachReadableStream,

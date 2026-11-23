@@ -645,12 +645,7 @@ jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str) {
 
 namespace {
 
-struct EncodedPrefix {
-  size_t read;
-  size_t written;
-};
-
-EncodedPrefix encodeLatin1Prefix(kj::ArrayPtr<const char> input, kj::ArrayPtr<char> output) {
+Utf8EncodedPrefix encodeLatin1Prefix(kj::ArrayPtr<const char> input, kj::ArrayPtr<char> output) {
   size_t ascii =
       simdutf::validate_ascii_with_errors(input.begin(), kj::min(input.size(), output.size()))
           .count;
@@ -668,7 +663,7 @@ EncodedPrefix encodeLatin1Prefix(kj::ArrayPtr<const char> input, kj::ArrayPtr<ch
   return {ascii + result.input_count, ascii + result.output_count};
 }
 
-EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> output) {
+Utf8EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> output) {
   size_t read;
   size_t written;
   if (output.size() / 3 >= input.size()) {
@@ -715,23 +710,83 @@ EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr
   return {read + result.input_count, written + result.output_count};
 }
 
+bool isLeadSurrogate(char16_t unit) {
+  return (unit & 0xfc00) == 0xd800;
+}
+
+bool isTrailSurrogate(char16_t unit) {
+  return (unit & 0xfc00) == 0xdc00;
+}
+
+// As encodeUtf16Prefix(), but writes a lone surrogate as WTF-8.
+Utf8EncodedPrefix encodeUtf16PrefixAsWtf8(
+    kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> output) {
+  size_t read = 0;
+  size_t written = 0;
+  if (output.size() / 3 >= input.size()) {
+    auto result =
+        simdutf::convert_utf16_to_utf8_with_errors(input.begin(), input.size(), output.begin());
+    if (result.error == simdutf::SUCCESS) {
+      return {input.size(), result.count};
+    }
+    // The output before the error is complete, which simdutf's bounded conversions also rely on.
+    read = result.count;
+    written = simdutf::utf8_length_from_utf16(input.begin(), read);
+  }
+  // Each conversion stops at a lone surrogate, which is written here, or where the output is full.
+  // simdutf reports a lone lead surrogate with three bytes left as the output being full, so the
+  // code unit where it stopped decides which.
+  while (read < input.size()) {
+    auto result = simdutf::convert_utf16_to_utf8_safe_with_details(input.begin() + read,
+        input.size() - read, output.begin() + written, output.size() - written);
+    read += result.input_count;
+    written += result.output_count;
+    if (result.error == simdutf::SUCCESS) {
+      break;
+    }
+    char16_t unit = input[read];
+    bool lone = isTrailSurrogate(unit) ||
+        (isLeadSurrogate(unit) && (read + 1 == input.size() || !isTrailSurrogate(input[read + 1])));
+    if (!lone || output.size() - written < 3) {
+      break;
+    }
+    output[written++] = static_cast<char>(0xe0 | (unit >> 12));
+    output[written++] = static_cast<char>(0x80 | ((unit >> 6) & 0x3f));
+    output[written++] = static_cast<char>(0x80 | (unit & 0x3f));
+    ++read;
+  }
+  return {read, written};
+}
+
 }  // namespace
+
+Utf8EncodedPrefix encodeUtf8Prefix(jsg::Lock& js,
+    jsg::JsString str,
+    size_t start,
+    kj::ArrayPtr<char> output,
+    LoneSurrogates loneSurrogates) {
+  // Nothing may cause a V8 GC while the view is open.
+  v8::String::ValueView view(js.v8Isolate, str);
+  size_t length = view.length();
+  KJ_REQUIRE(start <= length);
+  if (view.is_one_byte()) {
+    return encodeLatin1Prefix(
+        kj::arrayPtr(reinterpret_cast<const char*>(view.data8()), length).slice(start), output);
+  }
+  auto input = kj::arrayPtr(reinterpret_cast<const char16_t*>(view.data16()), length).slice(start);
+  switch (loneSurrogates) {
+    case LoneSurrogates::REPLACE:
+      return encodeUtf16Prefix(input, output);
+    case LoneSurrogates::WTF8:
+      return encodeUtf16PrefixAsWtf8(input, output);
+  }
+  KJ_UNREACHABLE;
+}
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
   auto outputBuf = buffer.asArrayPtr<char>();
-  EncodedPrefix encoded;
-  {
-    // Scope for the view - we can't do anything that might cause a V8 GC!
-    v8::String::ValueView view(js.v8Isolate, input);
-    if (view.is_one_byte()) {
-      encoded = encodeLatin1Prefix(
-          kj::arrayPtr(reinterpret_cast<const char*>(view.data8()), view.length()), outputBuf);
-    } else {
-      encoded = encodeUtf16Prefix(
-          kj::arrayPtr(reinterpret_cast<const char16_t*>(view.data16()), view.length()), outputBuf);
-    }
-  }
+  auto encoded = encodeUtf8Prefix(js, input, 0, outputBuf);
   size_t read = encoded.read;
   size_t written = encoded.written;
   KJ_DASSERT(written <= outputBuf.size());

@@ -36,6 +36,16 @@ export async function rejectionOf(p) {
   }
 }
 
+// A native body holding `body`: the body of the response to a POST through
+// the SELF binding, which answers with the request's body.
+export async function nativeBody(env, body) {
+  const response = await env.SELF.fetch('http://test/', {
+    method: 'POST',
+    body,
+  });
+  return response.body;
+}
+
 // The TypeError a fractional element fill at close() errors a byte stream
 // with (ledger #7).
 export function assertFractionalFillError(e) {

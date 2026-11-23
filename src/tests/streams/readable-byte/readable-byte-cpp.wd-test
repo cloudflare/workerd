@@ -20,6 +20,8 @@ using ReadableByteModules = import "readable-byte-modules.capnp";
 #   set_tostring_tag, writable_stream_spec_compliant_writer: as in the
 #   readable suite (accessor placement, locked pipeTo shape, writer
 #   behavior in pump interactions).
+# - string_body_replace_surrogates: a string body writes a lone surrogate
+#   as U+FFFD; the TypeScript and pedantic cells cover the WTF-8 default.
 const unitTests :Workerd.Config = (
   services = [
     ( name = "streams-readable-byte-cpp",
@@ -37,6 +39,7 @@ const unitTests :Workerd.Config = (
           "set_tostring_tag",
           "writable_stream_spec_compliant_writer",
           "enable_weak_ref",
+          "string_body_replace_surrogates",
         ],
         bindings = [
           ( name = "SELF", service = "streams-readable-byte-cpp" ),

@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fetch-iterable-buffer-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fetch-iterable-buffer-test.js")
+        ],
+        # fetch_iterable_type_support_override_adjustment is deliberately left out, so that in the
+        # default variant nothing else keeps a buffer source from being iterated. The
+        # @all-compat-flags variant has it, because fetch_iterable_type_support implies it after
+        # 2026-01-15; there the test still detects the iterator lookups that precede its check.
+        compatibilityFlags = [
+          "nodejs_compat",
+          "fetch_iterable_type_support",
+          "streams_enable_constructors",
+        ],
+      )
+    ),
+  ],
+);

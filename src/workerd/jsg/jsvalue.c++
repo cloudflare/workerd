@@ -330,7 +330,11 @@ JS_IS_TYPES(V)
 #undef V
 
 kj::String JsValue::toJson(Lock& js) const {
-  return kj::str(check(v8::JSON::Stringify(js.v8Context(), inner)));
+  return toJsJson(js).toString(js);
+}
+
+jsg::JsString JsValue::toJsJson(Lock& js) const {
+  return jsg::JsString(check(v8::JSON::Stringify(js.v8Context(), inner)));
 }
 
 JsValue JsValue::fromJson(Lock& js, kj::ArrayPtr<const char> input) {
@@ -1408,6 +1412,67 @@ bool JsBufferSource::isArrayBufferView() const {
 kj::Array<kj::byte> JsBufferSource::copy() {
   auto ptr = asArrayPtr();
   return kj::heapArray(ptr);
+}
+
+namespace {
+
+// Returns a new view over `buffer` with the same element type as `like`.
+JsArrayBufferView newViewOfSameType(const JsArrayBuffer& buffer,
+    v8::Local<v8::ArrayBufferView> like,
+    size_t offset,
+    size_t numElements) {
+  if (like->IsUint8Array()) {
+    return buffer.newUint8View(offset, numElements);
+  } else if (like->IsInt8Array()) {
+    return buffer.newInt8View(offset, numElements);
+  } else if (like->IsUint8ClampedArray()) {
+    return buffer.newUint8ClampedView(offset, numElements);
+  } else if (like->IsUint16Array()) {
+    return buffer.newUint16View(offset, numElements);
+  } else if (like->IsInt16Array()) {
+    return buffer.newInt16View(offset, numElements);
+  } else if (like->IsUint32Array()) {
+    return buffer.newUint32View(offset, numElements);
+  } else if (like->IsInt32Array()) {
+    return buffer.newInt32View(offset, numElements);
+  } else if (like->IsFloat16Array()) {
+    return buffer.newFloat16View(offset, numElements);
+  } else if (like->IsFloat32Array()) {
+    return buffer.newFloat32View(offset, numElements);
+  } else if (like->IsFloat64Array()) {
+    return buffer.newFloat64View(offset, numElements);
+  } else if (like->IsBigInt64Array()) {
+    return buffer.newBigInt64View(offset, numElements);
+  } else if (like->IsBigUint64Array()) {
+    return buffer.newBigUint64View(offset, numElements);
+  } else if (like->IsDataView()) {
+    return buffer.newDataView(offset, numElements);
+  }
+  KJ_UNREACHABLE;
+}
+
+}  // namespace
+
+JsBufferSource JsBufferSource::copyJs(jsg::Lock& js) {
+  // Copying only reads the source, so read it through the const asArrayPtr(), which, unlike the
+  // non-const overload, accepts an immutable buffer. A detached source reads as empty.
+  auto data = kj::implicitCast<const JsBufferSource&>(*this).asArrayPtr();
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsSharedArrayBuffer()) {
+    return JsBufferSource(JsSharedArrayBuffer::create(js, data));
+  }
+
+  auto buffer = JsArrayBuffer::create(js, data);
+  if (inner->IsArrayBuffer()) {
+    return JsBufferSource(buffer);
+  }
+
+  // A view's copy covers only the bytes the view spans, so it starts at offset 0 of its own
+  // buffer, which is a plain ArrayBuffer even when the source view is over a SharedArrayBuffer.
+  KJ_DASSERT(inner->IsArrayBufferView());
+  auto view = inner.As<v8::ArrayBufferView>();
+  return JsBufferSource(
+      newViewOfSameType(buffer, view, 0, data.size() / JsArrayBufferView(view).getElementSize()));
 }
 
 bool JsBufferSource::isResizable() const {

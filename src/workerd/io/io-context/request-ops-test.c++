@@ -247,44 +247,6 @@ class StatusResponse final: public kj::HttpService::Response {
   uint statusCode = 0;
 };
 
-// Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it
-// exists, and passes on other messages the log level allowed before.
-class UncaughtExceptionLog final: public kj::ExceptionCallback {
- public:
-  UncaughtExceptionLog(): previousLevel(currentLogLevel()) {
-    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
-  }
-  ~UncaughtExceptionLog() noexcept(false) {
-    kj::_::Debug::setLogLevel(previousLevel);
-  }
-
-  void logMessage(kj::LogSeverity severity,
-      const char* file,
-      int line,
-      int contextDepth,
-      kj::String&& text) override {
-    if (text.contains("uncaught exception")) {
-      messages.add(kj::mv(text));
-    } else if (severity >= previousLevel) {
-      next.logMessage(severity, file, line, contextDepth, kj::mv(text));
-    }
-  }
-
-  kj::Vector<kj::String> messages;
-
- private:
-  kj::LogSeverity previousLevel;
-
-  // KJ has no getter for the log level.
-  static kj::LogSeverity currentLogLevel() {
-    for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
-           kj::LogSeverity::FATAL}) {
-      if (kj::_::Debug::shouldLog(severity)) return severity;
-    }
-    return kj::LogSeverity::DBG;
-  }
-};
-
 // Everything a scenario lets the test observe.
 struct Outcome {
   uint statusCode;
@@ -390,7 +352,7 @@ struct ScenarioWorker {
     return response.statusCode;
   }
 
-  Outcome outcome(uint statusCode, UncaughtExceptionLog& log) {
+  Outcome outcome(uint statusCode, LogRecorder& log) {
     return {
       .statusCode = statusCode,
       .events = readEvents(fixture),
@@ -406,7 +368,7 @@ struct ScenarioWorker {
 // Runs `scenario` on the given implementation and returns what was observed once the request
 // and everything it waits for are done.
 Outcome run(kj::StringPtr scenario, Implementation implementation, Flags flags) {
-  UncaughtExceptionLog log;
+  LogRecorder log("uncaught exception");
   ScenarioWorker worker(implementation, flags);
   auto statusCode = worker.request(scenario);
   worker.fixture.pollEventLoop();
@@ -488,7 +450,7 @@ Outcome runOnBoth(kj::StringPtr scenario, Flags flags = {}) {
 // Runs waitUntilStashedPromise, then resolveStashedPromise in a second request while the first
 // still runs, then lets the first finish, and returns what was observed.
 Outcome runCrossRequest(Implementation implementation, Flags flags) {
-  UncaughtExceptionLog log;
+  LogRecorder log("uncaught exception");
   ScenarioWorker worker(implementation, flags);
   KJ_EXPECT(worker.request("waitUntilStashedPromise") == 200);
   worker.fixture.pollEventLoop();
@@ -566,7 +528,7 @@ struct AwaitedOutcome {
 };
 
 AwaitedOutcome runAwaiting(kj::StringPtr scenario, Implementation implementation) {
-  UncaughtExceptionLog log;
+  LogRecorder log("uncaught exception");
   ScenarioWorker worker(implementation);
   KJ_EXPECT(worker.request(scenario) == 200);
   worker.fixture.pollEventLoop();

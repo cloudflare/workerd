@@ -3,12 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/blob.h>
+#include <workerd/api/byte-chunker.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/per-isolate-bootstrap.h>
+#include <workerd/api/streams/common.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/external-pusher.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
@@ -23,6 +26,19 @@ namespace {
 
 constexpr uint64_t kLimit = 1024 * 1024;
 constexpr kj::StringPtr kData = "hello world"_kj;
+
+// The description of the exception a test sink's write fails with, as a pipe's does once nothing
+// reads it.
+constexpr kj::StringPtr kSinkGone = "the sink's reader went away"_kj;
+
+kj::Exception sinkGone() {
+  return kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__, kj::str(kSinkGone));
+}
+
+// A stream over a native memory source holding a copy of `data`.
+JsReadableStream memoryStream(jsg::Lock& js, kj::StringPtr data) {
+  return JsReadableStream::create(js, IoContext::current(), newMemorySource(data.asBytes()));
+}
 
 // The user-visible message produced when consuming an already-consumed stream. This must match
 // the message historically produced by the Body mixin exactly.
@@ -149,6 +165,9 @@ struct StallingSinkCalls {
   bool aborted = false;
   // Completes the latest write; it stops waiting if the write's promise is dropped.
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pendingWrite;
+  // If set, whenWriteDisconnected() reports sinkGone() once this resolves; otherwise it never
+  // resolves.
+  kj::Maybe<kj::ForkedPromise<void>> disconnected;
 };
 
 // A sink whose writes stay pending until the test completes them, recording every call.
@@ -173,6 +192,13 @@ class StallingSink final: public WritableStreamSink {
     calls.aborted = true;
   }
 
+  kj::Promise<kj::Exception> whenWriteDisconnected() override {
+    KJ_IF_SOME(disconnected, calls.disconnected) {
+      return disconnected.addBranch().then([]() { return sinkGone(); });
+    }
+    return kj::NEVER_DONE;
+  }
+
  private:
   StallingSinkCalls& calls;
 
@@ -184,6 +210,50 @@ class StallingSink final: public WritableStreamSink {
   }
 };
 
+// A sink that takes every write synchronously, through tryWriteSync(), and records whether end()
+// came in the same event-loop turn as the last write: whether the pump ended it without first
+// going back to the stream for another read.
+class EndTimingSink final: public WritableStreamSink {
+ public:
+  EndTimingSink(kj::Vector<kj::byte>& data, bool& endedWithLastWrite)
+      : data(data),
+        endedWithLastWrite(endedWithLastWrite) {}
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return tryWriteSync(kj::arr(buffer));
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto& piece: pieces) {
+      data.addAll(piece);
+    }
+    writeInThisTurn = true;
+    clearAtNextTurn = kj::evalLater([this]() { writeInThisTurn = false; }).eagerlyEvaluate(nullptr);
+    return true;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_FAIL_REQUIRE("the pump should write through tryWriteSync()");
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_FAIL_REQUIRE("the pump should write through tryWriteSync()");
+  }
+
+  kj::Promise<void> end() override {
+    endedWithLastWrite = writeInThisTurn;
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {}
+
+ private:
+  kj::Vector<kj::byte>& data;
+  bool& endedWithLastWrite;
+  bool writeInThisTurn = false;
+  kj::Promise<void> clearAtNextTurn = kj::READY_NOW;
+};
+
 KJ_TEST("JsReadableStream null state") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
@@ -191,11 +261,9 @@ KJ_TEST("JsReadableStream null state") {
 
     JsReadableStream stream;
     KJ_EXPECT(stream.isNull());
-    KJ_EXPECT(!stream.isBufferBacked());
     KJ_EXPECT(!stream.isDisturbed(js));
     KJ_EXPECT(!stream.isLocked(js));
     KJ_EXPECT(stream.tryGetLength(js) == kj::none);
-    KJ_EXPECT(stream.tryClone(js) == kj::none);
     KJ_EXPECT(stream.addRef(js).isNull());
   });
 }
@@ -244,24 +312,20 @@ KJ_TEST("JsReadableStream null stream json() rejects like parsing an empty strin
   });
 }
 
-KJ_TEST("JsReadableStream buffer-backed stream") {
+KJ_TEST("JsReadableStream over in-memory data") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     KJ_EXPECT(!stream.isNull());
-    KJ_EXPECT(stream.isBufferBacked());
     KJ_EXPECT(!stream.isDisturbed(js));
     KJ_EXPECT(!stream.isLocked(js));
     KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
 
     auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
       KJ_EXPECT(text == kData);
-      // Consumption leaves the underlying stream disturbed...
       KJ_EXPECT(stream.isDisturbed(js));
-      // ...but the JsReadableStream remains buffer-backed and therefore rewindable.
-      KJ_EXPECT(stream.isBufferBacked());
     }));
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -272,7 +336,7 @@ KJ_TEST("JsReadableStream consuming twice rejects with the historical Body error
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.text(js, kLimit)
                        .then(js,
                            JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
@@ -293,8 +357,8 @@ KJ_TEST("JsReadableStream consumption helpers return stream content") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream forArrayBuffer(js, kj::str(kData));
-    JsReadableStream forBytes(js, kj::str(kData));
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
     auto promise = forArrayBuffer.arrayBuffer(js, kLimit)
                        .then(js,
                            JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
@@ -315,7 +379,7 @@ KJ_TEST("JsReadableStream blob carries the given content type") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.blob(js, kLimit, kj::str("text/plain;charset=UTF-8"))
                        .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
       KJ_EXPECT(blob->getSize() == int(kData.size()));
@@ -330,7 +394,7 @@ KJ_TEST("JsReadableStream json parses stream content") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str("{\"hello\":\"world\"}"));
+    auto stream = memoryStream(js, "{\"hello\":\"world\"}"_kj);
     auto promise =
         stream.json(js, kLimit).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
       KJ_EXPECT(value.getHandle(js).isObject());
@@ -344,9 +408,8 @@ KJ_TEST("JsReadableStream addRef shares the underlying stream") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto ref = stream.addRef(js);
-    KJ_EXPECT(ref.isBufferBacked());
     KJ_EXPECT(!ref.isDisturbed(js));
 
     // Consuming through the addRef disturbs the original: both wrap the same stream.
@@ -358,41 +421,14 @@ KJ_TEST("JsReadableStream addRef shares the underlying stream") {
   });
 }
 
-KJ_TEST("JsReadableStream tryClone rewinds a consumed buffer-backed stream") {
+KJ_TEST("JsReadableStream tee nullifies the original and both branches read the data") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
-    auto promise =
-        stream.text(js, kLimit)
-            .then(js,
-                JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
-                    (jsg::Lock& js, kj::String) {
-                      KJ_EXPECT(stream.isDisturbed(js));
-                      // The clone is a fresh, independent, rewindable stream over the same bytes, even though
-                      // the original has already been consumed. This is the property fetch() redirect handling
-                      // relies upon.
-                      auto clone = KJ_ASSERT_NONNULL(stream.tryClone(js));
-                      KJ_EXPECT(clone.isBufferBacked());
-                      KJ_EXPECT(!clone.isDisturbed(js));
-                      return clone.text(js, kLimit);
-                    }))
-            .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
-    return env.context.awaitJs(js, kj::mv(promise));
-  });
-}
-
-KJ_TEST("JsReadableStream tee carries the buffer and nullifies the original") {
-  TestFixture testFixture;
-  testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto& js = env.js;
-
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto tee = stream.tee(js);
     KJ_EXPECT(stream.isNull());
-    KJ_EXPECT(tee.branch1.isBufferBacked());
-    KJ_EXPECT(tee.branch2.isBufferBacked());
 
     auto promise = tee.branch1.text(js, kLimit)
                        .then(js,
@@ -411,14 +447,13 @@ KJ_TEST("JsReadableStream detach takes over the stream, leaving a disturbed husk
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     // The original still holds the (now locked and disturbed) husk...
     KJ_EXPECT(!stream.isNull());
     KJ_EXPECT(stream.isDisturbed(js));
     KJ_EXPECT(stream.isLocked(js));
-    // ...while the detached stream took over the state, including the retransmit buffer.
-    KJ_EXPECT(detached.isBufferBacked());
+    // ...while the detached stream took over the state.
     KJ_EXPECT(!detached.isDisturbed(js));
 
     auto promise = detached.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
@@ -433,7 +468,7 @@ KJ_TEST("JsReadableStream detach of a consumed stream throws without IgnoreDistu
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String) {
       JSG_TRY(js) {
       stream.detach(js);  // defaults to IgnoreDisturbed::NO
@@ -453,7 +488,7 @@ KJ_TEST("JsReadableStream detach accepts IgnoreDisturbed::YES") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js, IgnoreDisturbed::YES);
     KJ_EXPECT(!detached.isNull());
     KJ_EXPECT(stream.isDisturbed(js));
@@ -468,7 +503,7 @@ KJ_TEST("JsReadableStream cancel disturbs the stream; null cancel is a no-op") {
     // Canceling a null stream is a no-op that yields a resolved promise.
     auto nullPromise = JsReadableStream().cancel(js, kj::none);
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto promise =
         stream.cancel(js, js.error("lost interest")).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js) {
           // Cancellation counts as disturbing the stream.
@@ -487,7 +522,7 @@ KJ_TEST("JsReadableStream forceCancel cancels even when the stream is locked") {
 
     // detach() leaves the original as a locked (and disturbed) husk, which is a convenient way
     // to produce a locked stream without a reader.
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     KJ_EXPECT(stream.isLocked(js));
 
@@ -513,7 +548,7 @@ KJ_TEST("JsReadableStream setPendingClosure is safe on live and null streams") {
 
     JsReadableStream().setPendingClosure(js);  // null: no-op
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     stream.setPendingClosure(js);
     KJ_EXPECT(!stream.isDisturbed(js));
   });
@@ -546,7 +581,6 @@ KJ_TEST("JsReadableStream create wraps a native source") {
 
     auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
     KJ_EXPECT(!stream.isNull());
-    KJ_EXPECT(!stream.isBufferBacked());
     KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
 
     auto promise = stream.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
@@ -563,7 +597,7 @@ KJ_TEST("JsReadableStream pumpTo drains into a sink and ends it") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -578,7 +612,7 @@ KJ_TEST("JsReadableStream pumpTo with EndStream::NO leaves the sink open") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::NO)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -1933,6 +1967,189 @@ KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed queued stream") {
   KJ_EXPECT(ended);
 }
 
+KJ_TEST("JsReadableStream pumpTo starts its first read before it returns") {
+  for (bool typescript: {false, true}) {
+    uint pulls = 0;
+    kj::Vector<kj::byte> collected;
+    bool ended = false;
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    // Under the legacy implementation, fromPull() builds its stream with the public constructor.
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setTypeScriptImplementedStreams(typescript);
+    TestFixture fixture({.featureFlags = flags.asReader()});
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto stream = JsReadableStream::fromPull(
+          js, [&pulls](jsg::Lock& js) -> jsg::Promise<kj::Maybe<jsg::Value>> {
+        if (pulls++ > 0) {
+          return js.resolvedPromise(kj::Maybe<jsg::Value>(kj::none));
+        }
+        auto chunk = jsg::JsUint8Array::create(js, kData.asBytes());
+        return js.resolvedPromise(kj::Maybe<jsg::Value>(js.v8Ref<v8::Value>(jsg::JsValue(chunk))));
+      });
+      auto pump = stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES);
+      // The pump reads the stream under this lock rather than waiting to take it again. A
+      // TypeScript stream pulls only once its start step has settled, a microtask after it was
+      // made, so the pull comes in this lock's microtasks rather than within pumpTo().
+      js.runMicrotasks();
+      KJ_EXPECT(pulls == 1, typescript, pulls);
+      return pump.then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    });
+    KJ_EXPECT(collected.asPtr() == kData.asBytes(), typescript);
+    KJ_EXPECT(ended, typescript);
+  }
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory body ends the sink with its last write") {
+  // The stream closes in the pull that enqueues its last chunk, so the pump's draining read
+  // returns that chunk together with the end, and the pump ends the sink without reading again,
+  // for a body of one chunk or of several. Only the legacy pump writes through tryWriteSync();
+  // the TypeScript one awaits each write, so this sink cannot tell its last read from one more.
+  for (size_t size: {kData.size(), ByteChunker::kMaxChunkSize + 1}) {
+    kj::Vector<kj::byte> collected;
+    bool endedWithLastWrite = false;
+    TestFixture fixture;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto data = kj::heapArray<kj::byte>(size);
+      data.asPtr().fill('a');
+      auto stream =
+          JsReadableStream::create(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+      return stream
+          .pumpTo(js, kj::heap<EndTimingSink>(collected, endedWithLastWrite), EndStream::YES)
+          .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+    });
+    KJ_EXPECT(collected.size() == size, size);
+    KJ_EXPECT(endedWithLastWrite, size);
+  }
+}
+
+// How a test hands an in-memory stream to a pump: as made, detached, or as both branches of a tee.
+enum class Handoff { DIRECT, DETACHED, TEED };
+
+kj::StringPtr KJ_STRINGIFY(Handoff handoff) {
+  switch (handoff) {
+    case Handoff::DIRECT:
+      return "direct"_kj;
+    case Handoff::DETACHED:
+      return "detached"_kj;
+    case Handoff::TEED:
+      return "teed"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory body converts no failed write to JavaScript") {
+  // The stream's source ignores the reason it is canceled with, so the pump cancels it without
+  // converting the sink's exception, which jsg would log and report as an internal exception. A
+  // detached stream, and each branch of a tee, reads the same source.
+  for (bool typescript: {false, true}) {
+    for (size_t size: {kData.size(), 3 * ByteChunker::kMaxChunkSize}) {
+      for (Handoff handoff: {Handoff::DIRECT, Handoff::DETACHED, Handoff::TEED}) {
+        capnp::MallocMessageBuilder message;
+        auto flags = message.initRoot<CompatibilityFlags>();
+        flags.setTypeScriptImplementedStreams(typescript);
+        TestFixture fixture({.featureFlags = flags.asReader()});
+        LogRecorder conversions(kSinkGone);
+        LogRecorder uncaught("uncaught exception");
+        // One sink for each stream handed off.
+        kj::FixedArray<StallingSinkCalls, 2> calls;
+        kj::Vector<kj::Promise<DeferredProxy<void>>> pumps;
+        // Stands in for the I/O the stalled writes would be waiting on, so that the IoContext does
+        // not abort the request as hung.
+        kj::Own<void> pendingEvent;
+
+        auto request = fixture.newIncomingRequest();
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          auto& js = env.js;
+          pendingEvent = env.context.registerPendingEvent();
+          auto pump = [&](JsReadableStream& stream) {
+            auto& sinkCalls = calls[pumps.size()];
+            pumps.add(stream.pumpTo(js, kj::heap<StallingSink>(sinkCalls), EndStream::YES));
+          };
+          auto data = kj::heapArray<kj::byte>(size);
+          data.asPtr().fill('a');
+          auto stream = JsReadableStream::create(
+              js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+          switch (handoff) {
+            case Handoff::DIRECT:
+              pump(stream);
+              break;
+            case Handoff::DETACHED: {
+              auto detached = stream.detach(js);
+              pump(detached);
+              break;
+            }
+            case Handoff::TEED: {
+              auto tee = stream.tee(js);
+              pump(tee.branch1);
+              pump(tee.branch2);
+              break;
+            }
+          }
+        });
+
+        fixture.pollEventLoop();
+        for (auto i: kj::indices(pumps)) {
+          KJ_ASSERT(calls[i].writes == 1, typescript, size, handoff, i);
+        }
+        auto& ws = fixture.getWaitScope();
+        for (auto i: kj::indices(pumps)) {
+          KJ_ASSERT_NONNULL(calls[i].pendingWrite)->reject(sinkGone());
+          auto exception = KJ_ASSERT_NONNULL(
+              kj::runCatchingExceptions([&]() { pumps[i].wait(ws).proxyTask.wait(ws); }));
+          KJ_EXPECT(exception.getDescription() == kSinkGone, exception.getDescription(), typescript,
+              size, handoff, i);
+        }
+        KJ_EXPECT(conversions.messages.empty(), kj::strArray(conversions.messages, " | "),
+            typescript, size, handoff);
+        KJ_EXPECT(uncaught.messages.empty(), kj::strArray(uncaught.messages, " | "), typescript,
+            size, handoff);
+
+        pumps.clear();
+        fixture.drainAndDestroy(kj::mv(request));
+      }
+    }
+  }
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory TypeScript stream whose sink disconnects converts "
+        "nothing to JavaScript") {
+  // When the sink reports that its writes can no longer succeed, the pump cancels the stream with
+  // no reason, as when a write fails. The write in flight then completes, and the canceled stream
+  // ends the pump.
+  auto fixture = makeTsStreamsFixture();
+  LogRecorder conversions(kSinkGone);
+  auto disconnect = kj::newPromiseAndFulfiller<void>();
+  StallingSinkCalls calls;
+  calls.disconnected = disconnect.promise.fork();
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto data = kj::heapArray<kj::byte>(3 * ByteChunker::kMaxChunkSize);
+    data.asPtr().fill('a');
+    auto stream =
+        JsReadableStream::create(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  disconnect.fulfiller->fulfill();
+  fixture.pollEventLoop();
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->fulfill();
+  auto& ws = fixture.getWaitScope();
+  KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws);
+  KJ_EXPECT(calls.writes == 1);
+  KJ_EXPECT(conversions.messages.empty(), kj::strArray(conversions.messages, " | "));
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte chunks") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> collected;
@@ -1966,6 +2183,8 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
 struct QueuedSourceCancels {
   uint count = 0;
   bool reasonWasUndefined = false;
+  // The latest reason, as a string.
+  kj::String reason;
 };
 
 // Builds a plain-JS underlying source (the queued backend) that enqueues kData once as bytes,
@@ -1990,6 +2209,7 @@ jsg::JsValue makeCancelTrackingQueuedSource(
           [&cancels](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
     ++cancels.count;
     cancels.reasonWasUndefined = jsg::JsValue(info[0]).isUndefined();
+    cancels.reason = jsg::JsValue(info[0]).toString(js);
   })));
   return jsg::JsValue(underlying);
 }
@@ -2084,6 +2304,147 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream does not cancel i
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(ended);
   KJ_EXPECT(cancels.count == 0);
+}
+
+// Counts the isolate locks taken.
+class LockCounter final: public IsolateObserver {
+ public:
+  kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>>) const override {
+    ++count;
+    return kj::none;
+  }
+
+  mutable std::atomic<uint> count = 0;
+};
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream settles without the lock") {
+  // The stream closes in the pull that enqueues its only chunk, so the pump's first read is its
+  // last. Nothing is left for JavaScript to do then: the pump writes the chunk, ends the sink and
+  // settles without taking the isolate lock again.
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setTypeScriptImplementedStreams(true);
+  auto locks = kj::atomicRefcounted<LockCounter>();
+  TestFixture fixture(
+      {.featureFlags = flags.asReader(), .isolateObserver = kj::atomicAddRef(*locks)});
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  uint locksBeforeWriteDone = locks->count;
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->fulfill();
+  auto& ws = fixture.getWaitScope();
+  KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws);
+  KJ_EXPECT(calls.ended);
+  KJ_EXPECT(!calls.aborted);
+  KJ_EXPECT(locks->count == locksBeforeWriteDone, locks->count - locksBeforeWriteDone);
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream aborts the sink if its last write "
+        "fails") {
+  auto fixture = makeTsStreamsFixture();
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->reject(JSG_KJ_EXCEPTION(FAILED, Error, "write failed"));
+  auto& ws = fixture.getWaitScope();
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws); }));
+  KJ_EXPECT(exception.getDescription() == "jsg.Error: write failed", exception.getDescription());
+  KJ_EXPECT(calls.aborted);
+  KJ_EXPECT(!calls.ended);
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream keeps a failed write's exception in "
+        "C++") {
+  // As the legacy pump does, the pump cancels the source with the failure and rethrows the failure
+  // as the sink reported it. Passed through JavaScript, it would be logged as an uncaught
+  // exception.
+  auto fixture = makeTsStreamsFixture();
+  LogRecorder uncaught("uncaught exception");
+  QueuedSourceCancels cancels;
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    // The source stays open, so that the write is not the last.
+    auto stream = makeTsStream(js, makeCancelTrackingQueuedSource(js, cancels, false));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->reject(sinkGone());
+  auto& ws = fixture.getWaitScope();
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws); }));
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(exception.getDescription() == kSinkGone, exception.getDescription());
+  KJ_EXPECT(cancels.count == 1);
+  KJ_EXPECT(cancels.reason == "Error: Network connection lost.", cancels.reason);
+  KJ_EXPECT(calls.aborted);
+  KJ_EXPECT(uncaught.messages.empty(), kj::strArray(uncaught.messages, " | "));
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped during its last write") {
+  // As for an earlier write, dropping the pump cancels the write, and the sink is neither ended
+  // nor aborted.
+  auto fixture = makeTsStreamsFixture();
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  auto& pendingWrite = *KJ_ASSERT_NONNULL(calls.pendingWrite);
+  KJ_ASSERT(pendingWrite.isWaiting());
+
+  pump = kj::none;
+  KJ_EXPECT(!pendingWrite.isWaiting(), "the write in flight was not canceled");
+  fixture.pollEventLoop();
+
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(calls.writes == 1);
+  KJ_EXPECT(!calls.ended);
+  KJ_EXPECT(!calls.aborted);
 }
 
 KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped in IoContext teardown") {
@@ -2990,7 +3351,7 @@ KJ_TEST("JsReadableStream::tee of a locked TypeScript-backed stream throws") {
 }
 
 // =======================================================================================
-// buffer-backed streams under the TypeScript implementation
+// in-memory streams under the TypeScript implementation
 
 // A stand-in for the JSG type wrapper accepted by JsReadableStream::jsgWrap. Wrapping a
 // TypeScript-backed stream never consults the wrapper (the TS object IS the handle), so
@@ -3005,13 +3366,12 @@ struct RequireTsBackedWrapper {
   }
 };
 
-KJ_TEST("JsReadableStream buffer-backed streams are TypeScript-backed under the flag") {
+KJ_TEST("JsReadableStream in-memory streams are TypeScript-backed under the flag") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
-    KJ_EXPECT(stream.isBufferBacked());
+    auto stream = memoryStream(js, kData);
     KJ_EXPECT(KJ_ASSERT_NONNULL(stream.tryGetLength(js)) == kData.size());
 
     // The constructed stream is the TypeScript implementation's object: wrapping yields
@@ -3026,48 +3386,19 @@ KJ_TEST("JsReadableStream buffer-backed streams are TypeScript-backed under the 
     auto promise = stream.text(js, kLimit).then(js, JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream), (jsg::Lock& js, kj::String text) {
       KJ_EXPECT(text == kData);
       KJ_EXPECT(stream.isDisturbed(js));
-      // Consumption leaves the wrapper buffer-backed and therefore
-      // rewindable.
-      KJ_EXPECT(stream.isBufferBacked());
     }));
     return env.context.awaitJs(js, kj::mv(promise));
   });
 }
 
-KJ_TEST("JsReadableStream tryClone rewinds a TypeScript-backed buffer stream") {
+KJ_TEST("JsReadableStream tee of a TypeScript-backed in-memory stream") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
-    auto promise = stream.text(js, kLimit)
-                       .then(js,
-                           JSG_VISITABLE_LAMBDA((stream = kj::mv(stream)), (stream),
-                               (jsg::Lock& js, kj::String) {
-                                 KJ_EXPECT(stream.isDisturbed(js));
-                                 // The clone is a fresh, independent, rewindable TypeScript-backed stream
-                                 // over the same bytes, even though the original has been consumed. This
-                                 // is the property fetch() redirect handling relies upon.
-                                 auto clone = KJ_ASSERT_NONNULL(stream.tryClone(js));
-                                 KJ_EXPECT(clone.isBufferBacked());
-                                 KJ_EXPECT(!clone.isDisturbed(js));
-                                 return clone.text(js, kLimit);
-                               }))
-                       .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
-    return env.context.awaitJs(js, kj::mv(promise));
-  });
-}
-
-KJ_TEST("JsReadableStream tee of a TypeScript-backed buffer stream carries the buffer") {
-  auto fixture = makeTsStreamsFixture();
-  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto& js = env.js;
-
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto tee = stream.tee(js);
     KJ_EXPECT(stream.isNull());
-    KJ_EXPECT(tee.branch1.isBufferBacked());
-    KJ_EXPECT(tee.branch2.isBufferBacked());
 
     auto promise = tee.branch1.text(js, kLimit)
                        .then(js,
@@ -3093,7 +3424,7 @@ KJ_TEST("JsReadableStream text() returns the stream's bytes undecoded") {
     fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
       auto& js = env.js;
 
-      JsReadableStream stream(js, kj::str(kNotUtf8));
+      auto stream = memoryStream(js, kNotUtf8);
       auto promise = stream.text(js, kLimit).then(js, [typescript](jsg::Lock&, kj::String text) {
         KJ_EXPECT(text == kNotUtf8, typescript, kj::encodeHex(text.asBytes()));
       });
@@ -3102,16 +3433,16 @@ KJ_TEST("JsReadableStream text() returns the stream's bytes undecoded") {
   }
 }
 
-KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed buffer stream") {
+KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed in-memory stream") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> collected;
   bool ended = false;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // Buffer-backed streams under the flag are native-backed TypeScript streams over the
-    // shared in-memory source: pumpTo extracts the source and pumps at the C++ layer.
-    JsReadableStream stream(js, kj::str(kData));
+    // In-memory streams under the flag are native-backed TypeScript streams: pumpTo extracts
+    // the source and pumps at the C++ layer.
+    auto stream = memoryStream(js, kData);
     return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
         .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
   });
@@ -3146,18 +3477,15 @@ KJ_TEST("JsReadableStream detach takes over a TypeScript-backed native stream") 
   KJ_EXPECT(ended);
 }
 
-KJ_TEST("JsReadableStream detach of a TypeScript-backed buffer stream stays rewindable") {
+KJ_TEST("JsReadableStream detach takes over a TypeScript-backed in-memory stream") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream stream(js, kj::str(kData));
+    auto stream = memoryStream(js, kData);
     auto detached = stream.detach(js);
     KJ_EXPECT(stream.isDisturbed(js));
     KJ_EXPECT(stream.isLocked(js));
-    // The detached stream carries the retransmit buffer forward: it is itself
-    // buffer-backed (rewindable), like the legacy arm.
-    KJ_EXPECT(detached.isBufferBacked());
     KJ_EXPECT(!detached.isDisturbed(js));
 
     auto promise = detached.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
@@ -3396,7 +3724,7 @@ KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-n
     KJ_EXPECT(queuedDefault.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
 
     // Buffer-backed streams sit on the in-memory source, which is identity-only.
-    JsReadableStream buffered(js, kj::str(kData));
+    auto buffered = memoryStream(js, kData);
     KJ_EXPECT(KJ_ASSERT_NONNULL(buffered.tryGetLength(js)) == kData.size());
     KJ_EXPECT(buffered.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
   });
@@ -3417,7 +3745,7 @@ KJ_TEST("JsReadableStream getPreferredEncoding forwards from the native source (
       KJ_EXPECT(queued.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
 
       // Buffer-backed streams sit on the identity-only in-memory source.
-      JsReadableStream buffered(js, kj::str(kData));
+      auto buffered = memoryStream(js, kData);
       KJ_EXPECT(buffered.getPreferredEncoding(js) == StreamEncoding::IDENTITY);
     });
   }
@@ -3855,12 +4183,12 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // One TypeScript-backed (buffer-backed) stream per helper; text() is covered by the
-    // buffer-backed tests above.
-    JsReadableStream forArrayBuffer(js, kj::str(kData));
-    JsReadableStream forBytes(js, kj::str(kData));
-    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
-    JsReadableStream forBlob(js, kj::str(kData));
+    // One TypeScript-backed in-memory stream per helper; text() is covered by the in-memory
+    // stream tests above.
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
+    auto forJson = memoryStream(js, "{\"hello\":\"world\"}"_kj);
+    auto forBlob = memoryStream(js, kData);
 
     auto promise =
         forArrayBuffer.arrayBuffer(js, kLimit)
@@ -3908,11 +4236,11 @@ KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prot
       onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
     })));
 
-    JsReadableStream forArrayBuffer(js, kj::str(kData));
-    JsReadableStream forBytes(js, kj::str(kData));
-    JsReadableStream forText(js, kj::str(kData));
-    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
-    JsReadableStream forBlob(js, kj::str(kData));
+    auto forArrayBuffer = memoryStream(js, kData);
+    auto forBytes = memoryStream(js, kData);
+    auto forText = memoryStream(js, kData);
+    auto forJson = memoryStream(js, "{\"hello\":\"world\"}"_kj);
+    auto forBlob = memoryStream(js, kData);
 
     auto promise =
         forArrayBuffer.arrayBuffer(js, kLimit)

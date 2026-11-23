@@ -1244,10 +1244,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # iterables would be treated as regular objects and not iterated over at all. With this
   # flag enabled, sync and async iterables will be properly iterated over and their values
   # used as the body of the request or response.
-  # The actual compat flag enables the specific AsyncGeneratorIgnoringStrings type wrapper
-  # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
-  # included in kj::OneOf declarations safely with strings and other types. When enabled,
-  # strings are ignored but Arrays will be treated as iterables and not stringified as before.
+  # The actual compat flag enables the specific AsyncGeneratorIgnoringStringsAndBufferSources
+  # type wrapper that allows this behavior and allows sync Generator and AsyncGenerator objects
+  # to be included in kj::OneOf declarations safely with strings, buffer sources, and other
+  # types. When enabled, strings and buffer sources are ignored but Arrays will be treated as
+  # iterables and not stringified as before.
   # Also see fetchIterableTypeSupportOverrideAdjustment.
 
   envModuleNullableSupport @147 :Bool
@@ -1877,4 +1878,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  stringBodyReplaceSurrogates @210 :Bool
+      $compatEnableFlag("string_body_replace_surrogates")
+      $compatDisableFlag("disable_string_body_replace_surrogates");
+  # When enabled, a string used as a Request or Response body is encoded with each lone surrogate
+  # as U+FFFD (EF BF BD), as TextEncoder encodes it and the Fetch standard requires. Otherwise a
+  # lone surrogate is encoded as the three bytes UTF-8 would give its code point (for U+D800,
+  # ED A0 80), which are not valid UTF-8. The body's length is the same either way and only those
+  # bytes differ, but a hash or signature computed over the body differs with them. Reading the
+  # body as text decodes the three invalid bytes as three U+FFFD, and the replacement as one.
 }

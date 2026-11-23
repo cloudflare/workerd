@@ -16,8 +16,10 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "main", esModule = embed "legacy-nodetach-main.js"),
           (name = "legacy-nodetach", esModule = embed "legacy-nodetach.js"),
+          (name = "helpers", esModule = embed "helpers.js"),
         ],
         compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        bindings = [ ( name = "SELF", service = "streams-readable-byte-cpp-nodetach" ) ],
       )
     ),
   ],

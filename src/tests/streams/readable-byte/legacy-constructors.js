@@ -10,6 +10,7 @@
 // with value UNDEFINED (pre internal_stream_byob_return_view).
 
 import { strictEqual, throws } from 'node:assert';
+import { nativeBody } from 'helpers';
 
 export const legacyByteConstructorThrows = {
   test() {
@@ -26,9 +27,8 @@ export const legacyByteConstructorThrows = {
 };
 
 export const legacyNativeByobNoDetach = {
-  async test() {
-    const resp = new Response('hello');
-    const reader = resp.body.getReader({ mode: 'byob' });
+  async test(ctrl, env) {
+    const reader = (await nativeBody(env, 'hello')).getReader({ mode: 'byob' });
     const view = new Uint8Array(8);
     const r = await reader.read(view);
     strictEqual(r.done, false);
@@ -44,9 +44,10 @@ export const legacyNativeByobNoDetach = {
 };
 
 export const legacyNativeReadAtLeast = {
-  async test() {
-    const resp = new Response('foobarbaz');
-    const reader = resp.body.getReader({ mode: 'byob' });
+  async test(ctrl, env) {
+    const reader = (await nativeBody(env, 'foobarbaz')).getReader({
+      mode: 'byob',
+    });
     const r = await reader.readAtLeast(4, new Uint8Array(16));
     strictEqual(r.done, false);
     strictEqual(r.value.byteLength, 9);

@@ -412,7 +412,7 @@ FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
   F(kj::HashSet)                                                                                   \
   F(jsg::Sequence)                                                                                 \
   F(jsg::AsyncGenerator)                                                                           \
-  F(jsg::AsyncGeneratorIgnoringStrings)
+  F(jsg::AsyncGeneratorIgnoringStringsAndBufferSources)
 
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsArray> {

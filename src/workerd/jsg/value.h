@@ -1219,7 +1219,12 @@ class NonCoercibleWrapper {
  public:
   template <CoercibleType T>
   auto getName(this auto&& self, NonCoercible<T>*) {
-    return self.getName(static_cast<T*>(nullptr));
+    if constexpr (kj::isSameType<jsg::JsString, T>()) {
+      // Named as NonCoercible<kj::String> is: the parameter is a string, however C++ holds it.
+      return "string";
+    } else {
+      return self.getName(static_cast<T*>(nullptr));
+    }
   }
 
   template <CoercibleType T>
@@ -1241,7 +1246,7 @@ class NonCoercibleWrapper {
       NonCoercible<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
-        kj::isSameType<jsg::DOMString, T>()) {
+        kj::isSameType<jsg::DOMString, T>() || kj::isSameType<jsg::JsString, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value,
           self.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)) {
