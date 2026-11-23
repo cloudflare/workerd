@@ -9,6 +9,7 @@ it. Gate it on THREAD_SANITIZER instead, which such a build still
 defines.
 
 diff --git a/src/interpreter/bytecode-decoder.cc b/src/interpreter/bytecode-decoder.cc
+index 194a14b47b8e1b4ce4a783422d38efbd0abe05f1..78a6d70cb77338b552d3d6911bd960cb03b1f464 100644
 --- a/src/interpreter/bytecode-decoder.cc
 +++ b/src/interpreter/bytecode-decoder.cc
 @@ -75,7 +75,7 @@ uint32_t BytecodeDecoder::DecodeUnsignedOperand(Address operand_start,

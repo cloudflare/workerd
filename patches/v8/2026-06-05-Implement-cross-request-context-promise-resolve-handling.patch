@@ -36,10 +36,10 @@ index 61e2d8f212af5096ec2c9359766331309777071a..f4247e8c8b4ff6e04e7b377fdaf1b274
  
  #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 822c07be73aa91d6f9101ea6517d4068b08dd43a..d5eec779dc8a1c4a60cd67fe9246c31cb3158599 100644
+index 4ab150ceb70386a84a6eefa864dda11b545ecaa1..7340344a61d2069ebffe9b329e32229628a6c2ee 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1921,6 +1921,8 @@ class V8_EXPORT Isolate {
+@@ -1939,6 +1939,8 @@ class V8_EXPORT Isolate {
  
    class PromiseContextScope;
    void SetPromiseCrossContextCallback(PromiseCrossContextCallback callback);
@@ -49,10 +49,10 @@ index 822c07be73aa91d6f9101ea6517d4068b08dd43a..d5eec779dc8a1c4a60cd67fe9246c31c
    Isolate() = delete;
    ~Isolate() = delete;
 diff --git a/src/api/api.cc b/src/api/api.cc
-index fda095d4640e362ee7165febef4d99e5a7dcf003..9ed7fa2898a72f3fecf99a7594131283bcc38af3 100644
+index 7861de8445ce4b4137ff946c4fc2d335096e3a4e..38ed0abb3a65c583b06ca6105ff11fdd4c98d7bc 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12801,13 +12801,19 @@ void Isolate::SetPromiseCrossContextCallback(
+@@ -12821,13 +12821,19 @@ void Isolate::SetPromiseCrossContextCallback(
    isolate->set_promise_cross_context_callback(callback);
  }
  

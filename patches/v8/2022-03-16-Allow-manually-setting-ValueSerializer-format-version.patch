@@ -23,7 +23,7 @@ index 923a13a76f5220cbb106447f84c279b9a1df3079..240fd2da3b1eb2c7858b026525a96340
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 1565a2a0d2a7fca25ed2fbfe32a4622acfd261cc..e15d0c096f8ee9f3834274ca8edacf98aeb754df 100644
+index 9ca46dc69dc67b7d5d64cdc97e9dd9cdd8a9fec6..07bca31a38d110cc7d49c9103223ac06d305cbe6 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3733,6 +3733,10 @@ ValueSerializer::ValueSerializer(
