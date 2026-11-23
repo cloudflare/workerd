@@ -399,3 +399,28 @@ fn invalid_streaming_content_fails_the_rewriter() {
          the execution of the relevant content handler."
     );
 }
+
+/// A rewriter, with no handlers, made from Rust.
+fn new_handle(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+) -> jsg::Rc<super::HtmlRewriterHandle> {
+    let dispatcher = ctx.eval_raw(lock, "() => {}").unwrap();
+    let dispatcher = jsg::v8::Local::<jsg::v8::Function>::try_from(dispatcher).unwrap();
+    super::new_rewriter(lock, Vec::new(), Vec::new(), "utf-8", dispatcher).unwrap()
+}
+
+#[test]
+fn the_output_buffer_counts_as_external_memory() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let handle = new_handle(lock, ctx);
+        let shared = std::sync::Arc::clone(&handle.get(lock).shared);
+        let base = Harness::external_memory(lock);
+        let mut output = super::Output(std::sync::Arc::clone(&shared));
+        lol_html::OutputSink::handle_chunk(&mut output, &vec![b'x'; 100_000]);
+        assert!(Harness::external_memory(lock) >= base + 100_000);
+        assert_eq!(shared.take_output().len(), 100_000);
+        assert_eq!(Harness::external_memory(lock), base);
+        Ok(())
+    });
+}

@@ -120,7 +120,35 @@ pub fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// What a rewriter's handlers and output sink share with it.
 pub struct Shared {
     pub(crate) dispatcher: DispatcherSlot,
-    output: Mutex<Vec<u8>>,
+    output: Mutex<OutputBuffer>,
+}
+
+/// lol-html's output since it was last taken. It holds the output of a whole chunk unless the
+/// dispatcher takes it, and streamed replacement content as it is written, so its capacity is
+/// attributed to the isolate, as C++ `HTMLRewriter` attributes its output buffer. lol-html's
+/// own memory, which `MAX_ALLOWED_MEMORY_USAGE` bounds, is not, as in C++.
+struct OutputBuffer {
+    bytes: Vec<u8>,
+    /// The capacity of `bytes`, set only when it changes, so that most chunks don't cross the
+    /// FFI boundary.
+    memory: jsg::ExternalMemoryAdjustment,
+}
+
+impl OutputBuffer {
+    fn extend(&mut self, chunk: &[u8]) {
+        let capacity = self.bytes.capacity();
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.capacity() != capacity {
+            self.memory.set(self.bytes.capacity());
+        }
+    }
+
+    fn take(&mut self) -> Vec<u8> {
+        if self.bytes.capacity() != 0 {
+            self.memory.set(0);
+        }
+        std::mem::take(&mut self.bytes)
+    }
 }
 
 thread_local! {
@@ -133,7 +161,7 @@ thread_local! {
 
 impl Shared {
     pub(crate) fn take_output(&self) -> Vec<u8> {
-        std::mem::take(&mut *lock_mutex(&self.output))
+        lock_mutex(&self.output).take()
     }
 
     /// Makes this the rewriter whose lol-html code runs on this thread.
@@ -188,7 +216,7 @@ pub struct Output(Arc<Shared>);
 
 impl OutputSink for Output {
     fn handle_chunk(&mut self, chunk: &[u8]) {
-        lock_mutex(&self.0.output).extend_from_slice(chunk);
+        lock_mutex(&self.0.output).extend(chunk);
     }
 }
 
@@ -292,7 +320,10 @@ pub fn new_rewriter<'s>(
         .ok_or_else(|| parser_error("Expected ASCII-compatible encoding."))?;
     let shared = Arc::new(Shared {
         dispatcher: DispatcherSlot::empty(),
-        output: Mutex::new(Vec::new()),
+        output: Mutex::new(OutputBuffer {
+            bytes: Vec::new(),
+            memory: lock.external_memory_adjustment(0),
+        }),
     });
 
     let mut settings = Settings::new_send()
