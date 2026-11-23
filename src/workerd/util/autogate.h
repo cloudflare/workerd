@@ -141,7 +141,10 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
+     C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \
+  V(RUST_MIMETYPE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

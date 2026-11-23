@@ -3,7 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-// The C++ MIME type parser and serializer behind mimetype.h. Call mimetype.h instead.
+// The C++ MIME type parser and serializer, which mimetype.h uses unless the RUST_MIMETYPE
+// autogate is on. Call mimetype.h instead; this exists for the autogate and for
+// mimetype-legacy-test.c++, and goes once the gate is removed.
 
 #include <workerd/util/mimetype.h>
 
