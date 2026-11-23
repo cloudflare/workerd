@@ -480,6 +480,19 @@ kj::Maybe<const RustMessage&> BridgeContext::getRustResults() const {
       [](const ::rust::Box<RustMessage>& results) -> const RustMessage& { return *results; });
 }
 
+void BridgeContext::setCompletion(kj::Promise<void> promise) {
+  completion = kj::mv(promise);
+}
+
+kj::Promise<void> BridgeContext::takeCompletion() {
+  KJ_IF_SOME(promise, completion) {
+    auto result = kj::mv(promise);
+    completion = kj::none;
+    return result;
+  }
+  KJ_FAIL_REQUIRE("capnp-kj: the call's response was already taken");
+}
+
 kj::Own<CxxMessage> BridgeContext::shareResults() {
   // The same precedence as response(): a tail call's results, then Rust's, which Rust reads
   // through getRustResults() first, then C++'s.
@@ -673,7 +686,7 @@ bool noPromisePipelining(uint64_t interfaceId, uint16_t methodId) {
   return false;
 }
 
-kj::Own<CxxCall> client_call(const capnp::ClientHook& hook,
+SentCall client_call(const capnp::ClientHook& hook,
     uint64_t interfaceId,
     uint16_t methodId,
     ::rust::Box<RustMessage> params) {
@@ -681,12 +694,15 @@ kj::Own<CxxCall> client_call(const capnp::ClientHook& hook,
   hints.noPromisePipelining = noPromisePipelining(interfaceId, methodId);
   auto context = kj::refcounted<BridgeContext>(kj::mv(params), hints);
   auto call = mut(hook).call(interfaceId, methodId, kj::addRef(*context), hints);
-  return kj::heap<CxxCall>(CxxCall{
+  context->setCompletion(kj::mv(call.promise));
+  kj::Maybe<kj::Own<capnp::PipelineHook>> pipeline;
+  if (!hints.noPromisePipelining) {
+    pipeline = kj::mv(call.pipeline);
+  }
+  return SentCall{
     .context = kj::mv(context),
-    .completion = kj::mv(call.promise),
-    .pipeline = kj::mv(call.pipeline),
-    .canPipeline = !hints.noPromisePipelining,
-  });
+    .pipeline = kj::mv(pipeline),
+  };
 }
 
 kj::Promise<void> client_send_streaming(kj::Own<capnp::ClientHook> hook,
@@ -699,20 +715,13 @@ kj::Promise<void> client_send_streaming(kj::Own<capnp::ClientHook> hook,
   co_await capnp::RequestHook::from(kj::mv(request))->sendStreaming();
 }
 
-kj::Own<capnp::PipelineHook> call_pipeline(const CxxCall& call) {
-  return const_cast<capnp::PipelineHook&>(*call.pipeline).addRef();
-}
-
-bool call_can_pipeline(const CxxCall& call) {
-  return call.canPipeline;
-}
-
-kj::Promise<kj::Own<capnp::CallContextHook>> call_response(kj::Own<CxxCall> call) {
+kj::Promise<kj::Own<capnp::CallContextHook>> call_response(
+    kj::Own<capnp::CallContextHook> context) {
   // A continuation rather than a coroutine: KJ can place it in the completion promise's arena,
   // where a coroutine frame is an allocation of its own.
-  return call->completion.then([context = kj::mv(call->context)]() mutable {
+  return bridgeContext(*context).takeCompletion().then([context = kj::mv(context)]() mutable {
     context->releaseParams();
-    return kj::Own<capnp::CallContextHook>(kj::mv(context));
+    return kj::mv(context);
   });
 }
 

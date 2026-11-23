@@ -22,6 +22,7 @@ namespace workerd::rust::capnp_kj {
 // Rust types, defined in the generated bridge header (which includes this file).
 struct RustMessage;
 struct RustServer;
+struct SentCall;
 
 // A C++ message that Rust reads in place: its segments, and its capability table, from which Rust
 // takes a reference to each capability.
@@ -155,6 +156,10 @@ class BridgeContext final: public capnp::CallContextHook,
   kj::Maybe<const RustMessage&> getRustResults() const;
   kj::Own<CxxMessage> shareResults();
 
+  // For a Rust caller: the call that client_call() sent, until call_response() takes it.
+  void setCompletion(kj::Promise<void> promise);
+  kj::Promise<void> takeCompletion();
+
  private:
   capnp::Response<capnp::AnyPointer> response();
 
@@ -182,15 +187,10 @@ class BridgeContext final: public capnp::CallContextHook,
   // Declared after what they view, so that they are destroyed first.
   ContextMessage paramsView;
   ContextMessage resultsView;
-};
 
-// A call sent from Rust.
-struct CxxCall {
-  kj::Own<BridgeContext> context;
-  kj::Promise<void> completion;
-  kj::Own<capnp::PipelineHook> pipeline;
-  // False if the call was sent with `noPromisePipelining`, so `pipeline` is KJ's disabled one.
-  bool canPipeline;
+  // Holds the call, which holds a reference to this context, so call_response() takes it at
+  // once.
+  kj::Maybe<kj::Promise<void>> completion;
 };
 
 kj::Own<capnp::ClientHook> client_add_ref(const capnp::ClientHook& hook);
@@ -201,7 +201,7 @@ kj::Promise<kj::Own<capnp::ClientHook>> client_when_more_resolved(kj::Own<capnp:
 kj::Promise<void> client_when_resolved(kj::Own<capnp::ClientHook> hook);
 kj::Own<capnp::ClientHook> new_broken_cap(::rust::Str description);
 
-kj::Own<CxxCall> client_call(const capnp::ClientHook& hook,
+SentCall client_call(const capnp::ClientHook& hook,
     uint64_t interfaceId,
     uint16_t methodId,
     ::rust::Box<RustMessage> params);
@@ -210,9 +210,7 @@ kj::Promise<void> client_send_streaming(kj::Own<capnp::ClientHook> hook,
     uint16_t methodId,
     ::rust::Box<RustMessage> params);
 
-kj::Own<capnp::PipelineHook> call_pipeline(const CxxCall& call);
-bool call_can_pipeline(const CxxCall& call);
-kj::Promise<kj::Own<capnp::CallContextHook>> call_response(kj::Own<CxxCall> call);
+kj::Promise<kj::Own<capnp::CallContextHook>> call_response(kj::Own<capnp::CallContextHook> context);
 
 kj::Own<capnp::PipelineHook> pipeline_add_ref(const capnp::PipelineHook& pipeline);
 kj::Own<capnp::ClientHook> pipeline_get_cap(

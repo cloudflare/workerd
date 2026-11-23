@@ -41,9 +41,6 @@ pub mod bridge {
         /// A standalone C++ message with its own capability table.
         type CxxMessage;
 
-        /// A call that C++ has sent: a promise for its response, and its pipeline.
-        type CxxCall;
-
         fn client_add_ref(hook: &ClientHook) -> KjOwn<ClientHook>;
         fn client_ptr(hook: &ClientHook) -> usize;
         fn client_get_resolved(hook: &ClientHook) -> KjMaybe<KjOwn<ClientHook>>;
@@ -58,7 +55,7 @@ pub mod bridge {
             interface_id: u64,
             method_id: u16,
             params: Box<RustMessage>,
-        ) -> Result<KjOwn<CxxCall>>;
+        ) -> Result<SentCall>;
 
         /// Sends a `-> stream` call to `hook`, copying `params` into the request.
         async fn client_send_streaming(
@@ -68,17 +65,13 @@ pub mod bridge {
             params: Box<RustMessage>,
         ) -> Result<()>;
 
-        fn call_pipeline(call: &CxxCall) -> KjOwn<PipelineHook>;
-        /// False if the call was sent with `noPromisePipelining`; see `noPromisePipelining()` in
-        /// ffi.h.
-        fn call_can_pipeline(call: &CxxCall) -> bool;
-        /// Resolves to the call's context once the call completes, holding its results. The
-        /// context, and those that the `context_*()` functions other than
-        /// `context_set_results()` take, and that `dispatch_bridge_call()` and
-        /// `dispatch_rust_call()` are given, are a `BridgeContext` (see ffi.h), which C++ checks;
-        /// cxx can't hold one, which is reference counted, so they cross as the hook it
-        /// implements.
-        async fn call_response(call: KjOwn<CxxCall>) -> Result<KjOwn<CallContextHook>>;
+        /// Resolves to the context of a call that `client_call()` sent, once the call completes,
+        /// holding its results. Rust calls it at once. The context, and those that the
+        /// `context_*()` functions other than `context_set_results()` take, and that
+        /// `dispatch_bridge_call()` and `dispatch_rust_call()` are given, are a `BridgeContext`
+        /// (see ffi.h), which C++ checks; cxx can't hold one, which is reference counted, so they
+        /// cross as the hook it implements.
+        async fn call_response(context: KjOwn<CallContextHook>) -> Result<KjOwn<CallContextHook>>;
 
         /// Whether a completed call's results are a Rust message, from a Rust server.
         fn context_has_rust_results(context: &CallContextHook) -> Result<bool>;
@@ -119,6 +112,16 @@ pub mod bridge {
             context: Pin<&mut CallContextHook>,
             results: &RustMessage,
         ) -> Result<()>;
+    }
+
+    /// A call that C++ has sent for Rust.
+    struct SentCall {
+        /// The call's context, which holds the call until `call_response()` takes it. The call
+        /// holds the context in turn, so Rust must pass every context to `call_response()`.
+        context: KjOwn<CallContextHook>,
+        /// The call's pipeline, or none if the call was sent with `noPromisePipelining` (see
+        /// `noPromisePipelining()` in ffi.h), as its results can't hold a capability.
+        pipeline: KjMaybe<KjOwn<PipelineHook>>,
     }
 
     /// A call a Rust server was given, once dispatched.
@@ -176,6 +179,5 @@ pub mod bridge {
     impl KjOwn<ClientHook> {}
     impl KjOwn<PipelineHook> {}
     impl KjOwn<CxxMessage> {}
-    impl KjOwn<CxxCall> {}
     impl KjOwn<CallContextHook> {}
 }

@@ -187,16 +187,15 @@ impl RequestHook for RustMessage {
             Ok(call) => {
                 // A call whose results can't hold a capability has nothing to pipeline on; its
                 // pipeline needs no allocation.
-                let pipeline: Box<dyn PipelineHook> = if bridge::call_can_pipeline(&call) {
-                    Box::new(KjPipeline {
-                        hook: bridge::call_pipeline(&call),
-                    })
-                } else {
-                    Box::new(NoPipeline)
+                let pipeline: Box<dyn PipelineHook> = match Option::from(call.pipeline) {
+                    Some(hook) => Box::new(KjPipeline { hook }),
+                    None => Box::new(NoPipeline),
                 };
+                // Taken at once, as the context holds the call until it is.
+                let response = bridge::call_response(call.context);
                 RemotePromise {
                     promise: Promise::from_future(async move {
-                        let context = bridge::call_response(call).await.map_err(|e| from_kj(&e))?;
+                        let context = response.await.map_err(|e| from_kj(&e))?;
                         Ok(Response::new(
                             Box::new(KjResponse::new(context)?) as Box<dyn ResponseHook>
                         ))
