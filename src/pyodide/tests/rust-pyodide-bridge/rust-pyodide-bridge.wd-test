@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# A Python Worker under the RUST_PYODIDE_BRIDGE autogate, with which the Pyodide runtime imports
+# the Rust resources of src/workerd/api/pyodide-api as its pyodide-internal: modules.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-rust-pyodide-bridge",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py")
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-rust-pyodide-bridge"],
+);

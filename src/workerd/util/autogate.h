@@ -141,7 +141,11 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* The Pyodide runtime's pyodide-internal:internalJaeger and pyodide-internal:limiter modules,   \
+     when the embedder supplies none, are the Rust resources in src/workerd/api/pyodide-api        \
+     instead of the C++ classes in api/pyodide/pyodide.h. */                                       \
+  V(RUST_PYODIDE_BRIDGE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

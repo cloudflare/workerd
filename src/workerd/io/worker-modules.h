@@ -2,10 +2,13 @@
 
 #include <workerd/api/commonjs.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/pyodide-api/ffi.rs.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/rust/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 
 #include <pyodide/pyodide_static.capnp.h>
@@ -525,6 +528,11 @@ void registerPythonCommonModules(jsg::Lock& lock,
   using namespace workerd::api::pyodide;
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
 
+  // With RUST_PYODIDE_BRIDGE, the modules below that api/pyodide-api implements are its Rust
+  // resources rather than the C++ classes.
+  bool rustBridge = util::Autogate::isEnabled(util::AutogateKey::RUST_PYODIDE_BRIDGE);
+  ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> rustModules(modules);
+
   // Inject pyodide bundle.
   KJ_IF_SOME(holder, pyodideWasmModuleHolder) {
     modules.addBuiltinBundle(pyodideBundle, holder);
@@ -564,6 +572,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
   KJ_IF_SOME(tracer, internalJaeger) {
     modules.addBuiltinModule(
         "pyodide-internal:internalJaeger", kj::mv(tracer), jsg::ModuleRegistry::Type::INTERNAL);
+  } else if (rustBridge) {
+    register_disabled_internal_jaeger(rustModules);
   } else {
     modules.addBuiltinModule("pyodide-internal:internalJaeger",
         DisabledInternalJaeger::create(lock), jsg::ModuleRegistry::Type::INTERNAL);
@@ -577,6 +587,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
   KJ_IF_SOME(limiter, maybeLimiter) {
     modules.addBuiltinModule(
         "pyodide-internal:limiter", kj::mv(limiter), jsg::ModuleRegistry::Type::INTERNAL);
+  } else if (rustBridge) {
+    register_disabled_limiter(rustModules);
   } else {
     modules.addBuiltinModule("pyodide-internal:limiter", SimplePythonLimiter::makeDisabled(lock),
         jsg::ModuleRegistry::Type::INTERNAL);

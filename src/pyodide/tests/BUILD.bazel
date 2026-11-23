@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//src/pyodide/tests:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 load("//src/pyodide/tests/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
@@ -18,6 +19,24 @@ vendored_py_wd_test(
 )
 
 py_wd_test("hello")
+
+# A smoke test of the Rust resources: it passes with the C++ classes too, so
+# rust-pyodide-bridge-autogate-test checks that its config names the gate.
+py_wd_test("rust-pyodide-bridge")
+
+py_test(
+    name = "rust-pyodide-bridge-autogate-test",
+    srcs = ["rust-pyodide-bridge/autogate-test.py"],
+    args = [
+        "$(location //src/workerd/util:autogate.h)",
+        "$(location rust-pyodide-bridge/rust-pyodide-bridge.wd-test)",
+    ],
+    data = [
+        "rust-pyodide-bridge/rust-pyodide-bridge.wd-test",
+        "//src/workerd/util:autogate.h",
+    ],
+    main = "rust-pyodide-bridge/autogate-test.py",
+)
 
 py_wd_test("top-level-tests")
 

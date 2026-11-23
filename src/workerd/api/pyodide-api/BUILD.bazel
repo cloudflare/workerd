@@ -1,0 +1,16 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Resources of the Pyodide runtime's internal modules, in Rust. registerPythonCommonModules()
+# (io/worker-modules.h) installs them when the RUST_PYODIDE_BRIDGE autogate is on, and the C++
+# classes of the same names in api/pyodide/pyodide.h otherwise.
+wd_rust_crate(
+    name = "pyodide-api",
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/jsg"],
+)
