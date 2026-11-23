@@ -19,6 +19,7 @@
 #include <workerd/jsg/unwrap-args.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
+#include <workerd/util/autogate.h>
 
 #include <v8-template.h>
 
@@ -1756,7 +1757,8 @@ void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 // V8 installs DOMException and QuotaExceededError as own properties of every global object.
-// Removes them, leaving the global's DOMException, if any, the one a JSG_NESTED_TYPE installs.
+// Without the V8_DOM_EXCEPTION autogate, newContext() removes them, leaving the global's
+// DOMException, if any, the one a JSG_NESTED_TYPE installs.
 void hideV8DomExceptionGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 // Whether TypeWrapper belongs to an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE.
@@ -1918,7 +1920,8 @@ class ResourceWrapper {
     }
 
     // A context deserialized from a startup snapshot has the globals the zygote's context had.
-    if (!js.isStartingFromSnapshot()) {
+    if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION) &&
+        !js.isStartingFromSnapshot()) {
       hideV8DomExceptionGlobals(isolate, context);
     }
 

@@ -13,6 +13,7 @@ import {
   strictEqual,
 } from 'node:assert';
 import { env } from 'cloudflare:workers';
+import { enhancedErrorSerialization, usingV8Impl } from 'which-impl';
 import { assertDomException } from 'helpers';
 
 export const thrownFromAFetchHandler = {
@@ -45,13 +46,16 @@ export const thrownOverRpc = {
 export const returnedOverRpc = {
   async test() {
     const error = await env.RPC.returnDomException();
+    // With enhanced error serialization, V8's has its other own properties.
     // RPC gives the objects it returns a disposer.
+    const hasExtra = usingV8Impl && enhancedErrorSerialization;
     assertDomException(
       error,
       { name: 'AbortError', message: 'returned', code: 20 },
+      ...(hasExtra ? ['extra'] : []),
       'Symbol(Symbol.dispose)'
     );
-    strictEqual(error.extra, undefined);
+    strictEqual(error.extra, hasExtra ? 1 : undefined);
     // RPC drops the received stack and uses the local one.
     strictEqual(typeof error.stack, 'string');
     notStrictEqual(error.stack, 'returned stack');

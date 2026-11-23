@@ -7,10 +7,16 @@
 #include "dom-exception.h"
 #include "setup.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
+#include <v8-exception.h>
 #include <v8-proxy.h>
 #include <v8-value-serializer-version.h>
+
+#include <bit>
+#include <cmath>
+#include <optional>
 
 namespace workerd::jsg {
 namespace {
@@ -247,7 +253,6 @@ Serializer::Serializer(Lock& js, Options options)
 #endif
   prototypeOfObject = js.obj().getPrototype(js);
   jsSerializeModeKey = IsolateBase::getJsSerializeModeKey(js.v8Isolate);
-  domExceptionBrandKey = IsolateBase::getDomExceptionBrandKey(js.v8Isolate);
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.
     ser.SetTreatFunctionsAsHostObjects(true);
@@ -262,8 +267,12 @@ Serializer::Serializer(Lock& js, Options options)
   }
 }
 
-Serializer::Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed)
+Serializer::Serializer(Lock& js,
+    v8::ValueSerializer& ser,
+    Borrowed,
+    EnhancedErrorSerialization enhancedErrorSerialization)
     : treatClassInstancesAsPlainObjects(true),
+      treatErrorsAsHostObjects(enhancedErrorSerialization.toBool()),
       ser(ser) {}
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
@@ -334,19 +343,12 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
     if (hasMode) {
       return v8::Just(true);
     }
-    bool isDomException;
-    if (!object->HasPrivate(isolate->GetCurrentContext(), domExceptionBrandKey)
-             .To(&isDomException)) {
-      return v8::Nothing<bool>();
-    }
-    if (isDomException) {
-      return v8::Just(true);
-    }
   }
 
   // Native errors are host object if the enhanced_error_serialization compat flag is enalbed.
+  // V8's DOMException, a native error, always is: writeApiObject() writes it.
   if (object->IsNativeError()) {
-    return v8::Just(treatErrorsAsHostObjects);
+    return v8::Just(treatErrorsAsHostObjects || object->IsDOMException());
   }
 
   // If `treatClassInstancesAsPlainObjects` is on (the historical default), then nothing else is
@@ -371,7 +373,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       return v8::Just(true);
     }
 
-    if (object->IsNativeError()) {
+    if (object->IsNativeError() && !object->IsDOMException()) {
       auto nameStr = js.str("name"_kj);
       auto messageStr = js.str("message"_kj);
 
@@ -430,13 +432,8 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
 }
 
 void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
-  // The bootstrap's DOMException, an API wrapper object without internal fields, writes what the
-  // C++ class does.
-  KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(js, object)) {
-    writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
-    writeLengthDelimited(info.name.toString(js));
-    writeLengthDelimited(info.message.toString(js));
-    writeLengthDelimited(JsObject(object).get(js, "stack"_kj).toString(js));
+  if (object->IsDOMException()) {
+    writeDomException(js, object.As<v8::DOMException>());
     return;
   }
 
@@ -485,6 +482,55 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
   }
 }
 
+void Serializer::writeDomException(Lock& js, v8::Local<v8::DOMException> domException) {
+  JsObject object(domException.As<v8::Object>());
+  bool isQuotaExceededError = domException->IsQuotaExceededError();
+  writeRawUint32(isQuotaExceededError ? SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR
+                                      : SERIALIZATION_TAG_DOM_EXCEPTION_V3);
+  writeLengthDelimited(JsString(domException->Name()).toString(js));
+  writeLengthDelimited(JsString(domException->Message()).toString(js));
+
+  // `stack` is an own property that the program can change or delete, so its value is written as
+  // it is.
+  auto stackName = js.strIntern("stack"_kj);
+  if (object.has(js, stackName, JsObject::HasOption::OWN)) {
+    writeRawUint32(DOM_EXCEPTION_HAS_STACK);
+    write(js, object.get(js, stackName));
+  } else {
+    writeRawUint32(0);
+  }
+
+  if (isQuotaExceededError) {
+    auto quotaExceededError = domException.As<v8::QuotaExceededError>();
+    auto quota = quotaExceededError->Quota();
+    auto requested = quotaExceededError->Requested();
+    writeRawUint32((quota ? QUOTA_EXCEEDED_ERROR_HAS_QUOTA : 0) |
+        (requested ? QUOTA_EXCEEDED_ERROR_HAS_REQUESTED : 0));
+    if (quota) writeRawUint64(std::bit_cast<uint64_t>(*quota));
+    if (requested) writeRawUint64(std::bit_cast<uint64_t>(*requested));
+  }
+
+  // As for other errors, the other own properties are written only with enhanced error
+  // serialization. They include any that shadow the prototype's attributes, such as `name`.
+  if (!treatErrorsAsHostObjects) {
+    writeRawUint32(0);
+    return;
+  }
+  auto names = object.getPropertyNames(
+      js, KeyCollectionFilter::OWN_ONLY, PropertyFilter::SKIP_SYMBOLS, IndexFilter::SKIP_INDICES);
+  uint32_t count = 0;
+  for (size_t n = 0; n < names.size(); n++) {
+    if (!names.get(js, n).strictEquals(stackName)) ++count;
+  }
+  writeRawUint32(count);
+  for (size_t n = 0; n < names.size(); n++) {
+    auto name = names.get(js, n);
+    if (name.strictEquals(stackName)) continue;
+    write(js, name);
+    write(js, object.get(js, name));
+  }
+}
+
 kj::Maybe<v8::Local<v8::Value>> Serializer::tryGetJsSerializeMark(
     Lock& js, v8::Local<v8::Object> object) {
   // Such an instance has no internal fields, unlike a workerd API object.
@@ -522,9 +568,7 @@ void Serializer::writeJsSerializable(
   uint32_t flags = 0;
   kj::Maybe<JsValue> message;
   kj::Maybe<JsValue> stack;
-  // An error as Error.isError() reports it: V8 asks isJsApiWrapperNativeErrorCallback() about an
-  // API wrapper object, which is one if it is an instance of the bootstrap's DOMException.
-  if (object->IsNativeError() || check(object->HasPrivate(context, domExceptionBrandKey))) {
+  if (object->IsNativeError()) {
     auto value = check(object->Get(context, js.strIntern("message"_kj)));
     if (value->IsString()) {
       flags |= JS_SERIALIZABLE_HAS_MESSAGE;
@@ -940,12 +984,112 @@ v8::Local<v8::Object> Deserializer::readApiObject(Lock& js, uint32_t tag) {
   // top-level value, which that delegate reads.
   JSG_REQUIRE(tag != SERIALIZATION_TAG_JS_SERIALIZABLE, DOMDataCloneError,
       "This deserializer does not support objects implemented in JavaScript.");
+  if (tag == SERIALIZATION_TAG_DOM_EXCEPTION_V3 || tag == SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR) {
+    return readDomException(js, tag);
+  }
   KJ_IF_SOME(result, IsolateBase::from(js.v8Isolate).deserialize(js, tag, *this)) {
     return result;
   } else {
     // Unknown tag is a platform error, so use KJ assert.
     KJ_FAIL_ASSERT("encountered unknown tag in deserialization", tag);
   }
+}
+
+namespace {
+// The amounts of a SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR, which follow its stack.
+struct QuotaExceededErrorAmounts {
+  std::optional<double> quota;
+  std::optional<double> requested;
+};
+
+QuotaExceededErrorAmounts readQuotaExceededErrorAmounts(Deserializer& deserializer) {
+  auto flags = deserializer.readRawUint32();
+  JSG_REQUIRE((flags & ~(QUOTA_EXCEEDED_ERROR_HAS_QUOTA | QUOTA_EXCEEDED_ERROR_HAS_REQUESTED)) == 0,
+      DOMDataCloneError, "Deserialization failed: unsupported QuotaExceededError.");
+  QuotaExceededErrorAmounts result;
+  if (flags & QUOTA_EXCEEDED_ERROR_HAS_QUOTA) {
+    result.quota = std::bit_cast<double>(deserializer.readRawUint64());
+  }
+  if (flags & QUOTA_EXCEEDED_ERROR_HAS_REQUESTED) {
+    result.requested = std::bit_cast<double>(deserializer.readRawUint64());
+  }
+  // As the constructor requires, which V8's API checks fatally.
+  auto isValid = [](std::optional<double> amount) {
+    return !amount || (std::isfinite(*amount) && *amount >= 0);
+  };
+  JSG_REQUIRE(isValid(result.quota) && isValid(result.requested) &&
+          !(result.quota && result.requested && *result.requested < *result.quota),
+      DOMDataCloneError, "Deserialization failed: invalid QuotaExceededError amounts.");
+  return result;
+}
+
+// Sets the value of the own `stack` of `object`, keeping the property's attributes.
+void setOwnStack(Lock& js, JsObject object, JsValue value) {
+  v8::Local<v8::Object> handle = object;
+  v8::Local<v8::String> stackName = js.strIntern("stack"_kj);
+  v8::PropertyDescriptor descriptor(value, /*writable=*/true);
+  check(handle->DefineProperty(js.v8Context(), stackName, descriptor));
+}
+}  // namespace
+
+v8::Local<v8::Object> Deserializer::readDomException(Lock& js, uint32_t tag) {
+  bool isQuotaExceededError = tag == SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR;
+  // Without the autogate, the context's DOMException is the C++ class, and there is no
+  // QuotaExceededError.
+  bool isV8DomException = util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION);
+  JSG_REQUIRE(isV8DomException || !isQuotaExceededError, DOMDataCloneError,
+      "Deserialization failed: QuotaExceededError is not supported.");
+
+  auto name = readLengthDelimitedString();
+  auto message = readLengthDelimitedString();
+  JSG_REQUIRE(!isQuotaExceededError || name == "QuotaExceededError"_kj, DOMDataCloneError,
+      "Deserialization failed: invalid QuotaExceededError name.");
+  auto hasStack = readRawUint32();
+  JSG_REQUIRE(hasStack == 0 || hasStack == DOM_EXCEPTION_HAS_STACK, DOMDataCloneError,
+      "Deserialization failed: unsupported DOMException.");
+  kj::Maybe<JsValue> stack;
+  if (hasStack == DOM_EXCEPTION_HAS_STACK) stack = readValue(js);
+  QuotaExceededErrorAmounts amounts;
+  if (isQuotaExceededError) amounts = readQuotaExceededErrorAmounts(*this);
+
+  // When preserveStackInErrors is true, the received stack is preserved. When it is false, the
+  // received stack is dropped and the local stack is used. Given a stack, the instance captures
+  // none, so it is made with an empty one, which the received stack then replaces.
+  JsObject object = [&]() {
+    if (!isQuotaExceededError) {
+      return js.domException(kj::mv(name), kj::mv(message),
+          preserveStackInErrors ? kj::Maybe<kj::String>(kj::String()) : kj::none);
+    }
+    v8::Local<v8::String> givenStack;
+    if (preserveStackInErrors) givenStack = v8::String::Empty(js.v8Isolate);
+    return JsObject(v8::Exception::QuotaExceededError(
+        js.str(message), amounts.quota, amounts.requested, givenStack)
+                        .As<v8::Object>());
+  }();
+  auto stackName = js.strIntern("stack"_kj);
+  if (preserveStackInErrors) {
+    KJ_IF_SOME(value, stack) {
+      setOwnStack(js, object, value);
+    } else if (isV8DomException) {
+      object.delete_(js, stackName);
+    } else {
+      // The C++ class always has an own `stack`, so it is undefined instead.
+      setOwnStack(js, object, js.undefined());
+    }
+  }
+
+  // The C++ class, without the autogate, drops the other own properties.
+  auto count = readRawUint32();
+  for (uint32_t n = 0; n < count; n++) {
+    auto key = readValue(js);
+    JSG_REQUIRE(key.isString(), DOMDataCloneError,
+        "Deserialization failed: DOMException property name is not a string.");
+    JSG_REQUIRE(!key.strictEquals(stackName), DOMDataCloneError,
+        "Deserialization failed: DOMException has `stack` among its other properties.");
+    auto value = readValue(js);
+    if (isV8DomException) object.createDataProperty(js, key, value);
+  }
+  return object;
 }
 
 kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js) {
@@ -988,14 +1132,9 @@ size_t Deserializer::findJsSerializableClass(Lock& js, kj::String deserializeInf
     errorPrototype = js.v8Ref(check(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context())));
   }
   v8::Local<v8::Value> errorProto = KJ_ASSERT_NONNULL(errorPrototype).getHandle(js);
-  // The bootstrap's DOMException.prototype inherits from Error.prototype, so it is found first.
   auto kind = JsSerializableClass::Kind::OBJECT;
   for (auto current = prototype; current->IsObject();
        current = current.As<v8::Object>()->GetPrototype()) {
-    if (JsObject(current.As<v8::Object>()).hasPrivate(js, DOM_EXCEPTION_PROTOTYPE_KEY)) {
-      kind = JsSerializableClass::Kind::DOM_EXCEPTION;
-      break;
-    }
     if (current == errorProto) {
       kind = JsSerializableClass::Kind::NATIVE_ERROR;
       break;
@@ -1049,11 +1188,6 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   if (preserveStackInErrors || (flags & JS_SERIALIZABLE_KEEP_STACK)) keptStack = stack;
   v8::Local<v8::Object> instance;
   switch (cls.kind) {
-    case JsSerializableClass::Kind::DOM_EXCEPTION:
-      // V8 formats the stack's header lazily, from the name and message that `deserialize` sets.
-      instance = newUninitializedBootstrapDomException(js, JsObject(prototype),
-          keptStack.map([](v8::Local<v8::String> s) { return JsString(s); }));
-      break;
     case JsSerializableClass::Kind::NATIVE_ERROR:
       // The message is what the stack just captured begins with, after the error's name, as for a
       // native error.
@@ -1128,11 +1262,13 @@ void Deserializer::finishRead(Lock& js) {
   }
 }
 
-v8::Maybe<bool> writeApiObject(
-    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object) {
+v8::Maybe<bool> writeApiObject(v8::Isolate* isolate,
+    v8::ValueSerializer& ser,
+    v8::Local<v8::Object> object,
+    EnhancedErrorSerialization enhancedErrorSerialization) {
   try {
     auto& js = Lock::from(isolate);
-    Serializer serializer(js, ser, Serializer::Borrowed{});
+    Serializer serializer(js, ser, Serializer::Borrowed{}, enhancedErrorSerialization);
     serializer.writeApiObject(js, object);
     return v8::Just(true);
   } catch (JsExceptionThrown&) {

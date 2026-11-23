@@ -68,11 +68,14 @@ export {
   structuredCloneRoundTrip,
   nativeInstancesKeepTheirStack,
   subclassesCloneAsDOMException,
-  onlyNameMessageAndStackAreCloned,
+  otherOwnPropertiesAreCloned,
+  stackValuesAreCloned,
+  selfReferencesCannotBeRead,
   nestedAndPosted,
   readsTag8,
   readsTag7,
   readsUtf8,
+  readsTag24,
 } from 'serialization';
 
 export {
@@ -120,7 +123,7 @@ export class DomExceptionRpc extends WorkerEntrypoint {
     return error;
   }
 
-  // The rest are only for the TypeScript implementation's QuotaExceededError
+  // The rest are only for V8's QuotaExceededError
   // (quota-exceeded-error.js).
   returnQuotaExceededError() {
     return new QuotaExceededError('returned', { quota: 1, requested: 2 });

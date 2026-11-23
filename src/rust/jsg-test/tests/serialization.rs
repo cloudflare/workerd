@@ -206,34 +206,40 @@ fn errors_without_their_stacks() {
 }
 
 /// With `preserve_stack_in_errors`, a `DOMException` keeps the received stack. Without it, the
-/// received stack is dropped and the local stack is used.
+/// received stack is dropped and the local stack is used. This holds for the C++ class and for
+/// V8's, under the `V8_DOM_EXCEPTION` autogate.
 #[test]
 fn dom_exceptions_without_their_stacks() {
-    Harness::new().run_in_context(|lock, ctx| {
-        let exception = serialize_exception(lock, ctx, "() => 1");
-        ctx.set_global(lock, "exception", exception);
-        let value = eval(lock, ctx, "exception.stack = 'original', exception");
-        let data = jsg::ser::serialize(lock, value)?;
+    let harness = Harness::new();
+    for autogates in [&[][..], &["v8-dom-exception"][..]] {
+        let _autogates = crate::set_autogates(autogates);
+        harness.run_in_context(|lock, ctx| {
+            let exception = serialize_exception(lock, ctx, "() => 1");
+            ctx.set_global(lock, "exception", exception);
+            let value = eval(lock, ctx, "exception.stack = 'original', exception");
+            let data = jsg::ser::serialize(lock, value)?;
 
-        let kept = jsg::ser::deserialize(lock, &data)?;
-        ctx.set_global(lock, "v", kept);
-        assert!(ctx.eval::<bool>(lock, "v.stack === 'original'").unwrap());
+            let kept = jsg::ser::deserialize(lock, &data)?;
+            ctx.set_global(lock, "v", kept);
+            assert!(ctx.eval::<bool>(lock, "v.stack === 'original'").unwrap());
 
-        let options = jsg::ser::DeserializeOptions {
-            preserve_stack_in_errors: false,
-        };
-        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
-        ctx.set_global(lock, "v", copy);
-        assert!(
-            ctx.eval::<bool>(
-                lock,
-                "v.name === 'DataCloneError' && v.message === '() => 1 could not be cloned.' && \
-                 typeof v.stack === 'string' && v.stack !== 'original'"
-            )
-            .unwrap()
-        );
-        Ok(())
-    });
+            let options = jsg::ser::DeserializeOptions {
+                preserve_stack_in_errors: false,
+            };
+            let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+            ctx.set_global(lock, "v", copy);
+            assert!(
+                ctx.eval::<bool>(
+                    lock,
+                    "v.name === 'DataCloneError' && v.message === '() => 1 could not be cloned.' && \
+                     typeof v.stack === 'string' && v.stack !== 'original'"
+                )
+                .unwrap(),
+                "{autogates:?}"
+            );
+            Ok(())
+        });
+    }
 }
 
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
@@ -301,22 +307,19 @@ fn workerd_api_objects_round_trip() {
 }
 
 #[test]
-fn bootstrap_dom_exceptions_round_trip() {
+fn v8_dom_exceptions_round_trip() {
     let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    let _autogates = crate::set_autogates(&["v8-dom-exception"]);
     harness.run_in_context(|lock, ctx| {
-        // An API wrapper object without internal fields, unlike the C++ DOMException, which V8
-        // would otherwise serialize as an empty plain object. The harness has no DOMException
-        // global, so its prototype stands in for the bootstrap's, and a copy, the C++ class's
-        // instance, is recognized by its code.
-        let prototype = eval(lock, ctx, "Object.create(Error.prototype)");
-        let exception =
-            Harness::new_bootstrap_dom_exception(lock, prototype, "AbortError", "m", "S");
-        ctx.set_global(lock, "exception", exception);
+        // Native errors, which the serializer writes as the C++ class writes a DOMException, and a
+        // QuotaExceededError with its amounts.
         eval(
             lock,
             ctx,
-            "globalThis.isCopy = (e) => e.name === 'AbortError' && e.message === 'm' && \
-             e.code === 20 && e.stack === 'S'",
+            "globalThis.exception = Object.defineProperty(new DOMException('m', 'AbortError'),              'stack', { value: 'S' });
+             globalThis.quotaExceeded = new QuotaExceededError('q', { quota: 1, requested: 2 });
+             globalThis.isCopy = (e) => Object.getPrototypeOf(e) === DOMException.prototype &&              e.name === 'AbortError' && e.message === 'm' && e.code === 20 && e.stack === 'S';
+             globalThis.isQuotaCopy = (e) =>              Object.getPrototypeOf(e) === QuotaExceededError.prototype && e.message === 'q' &&              e.quota === 1 && e.requested === 2 && e.stack === quotaExceeded.stack",
         );
         for (expr, check) in [
             ("exception", "isCopy(v)"),
@@ -325,8 +328,105 @@ fn bootstrap_dom_exceptions_round_trip() {
                 "isCopy(v.exception) && v.again === v.exception",
             ),
             ("new Error('e', { cause: exception })", "isCopy(v.cause)"),
+            ("quotaExceeded", "isQuotaCopy(v)"),
+            // With enhanced error serialization, its other own properties, those that shadow its
+            // attributes included.
+            (
+                "Object.defineProperty(Object.assign(new DOMException('m', 'AbortError'), \
+                 { extra: [1] }), 'name', { value: 'Other' })",
+                "v.extra[0] === 1 && v.name === 'Other' && v.code === 20",
+            ),
+            // Its stack as whatever value it holds, or none.
+            (
+                "Object.assign(new DOMException('m'), { stack: { frames: [] } })",
+                "Array.isArray(v.stack.frames)",
+            ),
+            (
+                "Object.assign(new DOMException('m'), { stack: null })",
+                "v.stack === null",
+            ),
+            (
+                "((e) => (delete e.stack, e))(new DOMException('m'))",
+                "!Object.hasOwn(v, 'stack')",
+            ),
         ] {
             assert_round_trip(lock, ctx, expr, check);
+        }
+        Ok(())
+    });
+}
+
+/// Without enhanced error serialization, V8's `DOMException` is written without its other own
+/// properties.
+#[test]
+fn v8_dom_exceptions_without_enhanced_error_serialization() {
+    let harness = Harness::new();
+    let _autogates = crate::set_autogates(&["v8-dom-exception"]);
+    harness.run_in_context(|lock, ctx| {
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.assign(new DOMException('m', 'AbortError'), { stack: null, extra: 1 })",
+            "v.stack === null && v.extra === undefined && v.name === 'AbortError'",
+        );
+        Ok(())
+    });
+}
+
+/// Without the `V8_DOM_EXCEPTION` autogate, what V8's `DOMException` is written as reads as the
+/// C++ class, without the other own properties. (The harness's global has no `DOMException`
+/// property.)
+#[test]
+fn v8_dom_exceptions_read_without_the_autogate() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    let mut data = Vec::new();
+    {
+        let _autogates = crate::set_autogates(&["v8-dom-exception"]);
+        harness.run_in_context(|lock, ctx| {
+            let value = eval(
+                lock,
+                ctx,
+                "Object.assign(new DOMException('m', 'AbortError'), { stack: 'S', extra: 1 })",
+            );
+            data = jsg::ser::serialize(lock, value)?;
+            Ok(())
+        });
+    }
+    let _autogates = crate::set_autogates(&[]);
+    harness.run_in_context(|lock, ctx| {
+        assert_read(
+            lock,
+            ctx,
+            &data,
+            "v.constructor.name === 'DOMException' && !Error.isError(v) && \
+             v.name === 'AbortError' && v.message === 'm' && v.stack === 'S' && \
+             v.extra === undefined",
+        );
+        Ok(())
+    });
+}
+
+/// V8 registers a host object only once it has been read, so a `DOMException` can't be read if
+/// its stack or its other own properties refer back to it.
+#[test]
+fn v8_dom_exceptions_that_refer_back_to_themselves_cannot_be_read() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    let _autogates = crate::set_autogates(&["v8-dom-exception"]);
+    harness.run_in_context(|lock, ctx| {
+        for expr in [
+            "((e) => (e.stack = { e }, e))(new DOMException('m'))",
+            "((e) => (e.a = [new Map([[1, e]])], e))(new DOMException('m'))",
+        ] {
+            let value = eval(lock, ctx, expr);
+            let data = jsg::ser::serialize(lock, value)?;
+            assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
+            assert_deserialization_throws(
+                lock,
+                ctx,
+                &data,
+                "Error",
+                "Unable to deserialize cloned data.",
+            );
         }
         Ok(())
     });

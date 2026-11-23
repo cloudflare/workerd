@@ -67,29 +67,6 @@ const JS_CLASSES: &str = r"
     Object.defineProperty(e, 'message', { value: data, writable: true, configurable: true });
   });
 
-  // Stands in for the bootstrap's DOMException.prototype, whose instances hold their name and
-  // message as the bootstrap's do.
-  const domExceptionPrototype = Object.create(Error.prototype, {
-    name: { get() { return this[kName]; } },
-    message: { get() { return this[kMessage]; } },
-  });
-  domExceptionPrototype[kDomExceptionPrototype] = true;
-
-  // A DOMException with an amount, as the bootstrap's QuotaExceededError is one with a quota.
-  // newAmountError() makes its instances.
-  class AmountError {
-    get amount() { return this[kX]; }
-  }
-  Object.setPrototypeOf(AmountError.prototype, domExceptionPrototype);
-  const amountErrorCloneable = makeCloneable(AmountError, 'test:AmountError',
-      (e) => ({ message: e.message, amount: e[kX] }), (e, data) => {
-    // In the bootstrap's constructors' order.
-    e[kBrand] = true;
-    e[kName] = 'AmountError';
-    e[kMessage] = data.message;
-    e[kX] = data.amount;
-  });
-
   // Accepts only a number as its data.
   class Strict {
     constructor(x) { this[kMode] = strictCloneable; this[kX] = x; }
@@ -132,7 +109,7 @@ const JS_CLASSES: &str = r"
   class Lazy {}
   Lazy.prototype[kCloneable] = descriptor('lazy:Lazy', () => 1, () => {});
 
-  ({ Point, Holder, TestError, AmountError, Strict, Throws, NoDeserialize, NotADescriptor,
+  ({ Point, Holder, TestError, Strict, Throws, NoDeserialize, NotADescriptor,
       NoDeserializeFunction, LazyDeserialize, notAFunction: 1 })
 ";
 
@@ -142,10 +119,6 @@ fn define_classes<'s>(lock: &mut jsg::Lock<'s>, ctx: &EvalContext<'_>) -> v8::Lo
     for (global, name) in [
         ("kMode", "workerd:serializeMode"),
         ("kCloneable", "workerd:cloneable"),
-        ("kDomExceptionPrototype", "workerd:domExceptionPrototype"),
-        ("kBrand", "workerd:domException"),
-        ("kName", "workerd:errorName"),
-        ("kMessage", "workerd:errorMessage"),
         ("kX", "test:x"),
     ] {
         let symbol = Harness::private_symbol(lock, name);
@@ -158,31 +131,6 @@ fn define_classes<'s>(lock: &mut jsg::Lock<'s>, ctx: &EvalContext<'_>) -> v8::Lo
 fn set_up_classes(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>) {
     let exports = define_classes(lock, ctx);
     ctx.set_bootstrap_module(lock, "test", exports);
-}
-
-/// Makes an `AmountError` as the bootstrap's `QuotaExceededError` constructor makes one: an
-/// instance of the bootstrap's `DOMException`, which [`Harness::new_bootstrap_dom_exception`]
-/// stands in for, marked as cloneable.
-fn new_amount_error<'s>(
-    lock: &mut jsg::Lock<'s>,
-    ctx: &EvalContext<'_>,
-    message: &str,
-    amount: u32,
-) -> v8::Local<'s, v8::Value> {
-    let prototype = eval(lock, ctx, "AmountError.prototype");
-    let error = Harness::new_bootstrap_dom_exception(
-        lock,
-        prototype,
-        "AmountError",
-        message,
-        "sender stack",
-    );
-    ctx.set_global(lock, "newError", error);
-    eval(
-        lock,
-        ctx,
-        &format!("newError[kMode] = amountErrorCloneable; newError[kX] = {amount}; newError"),
-    )
 }
 
 /// Returns the calls that `log` records, and clears it.
@@ -393,28 +341,6 @@ fn errors_round_trip() {
                 assert_round_trip(lock, ctx, expr, check);
             }
 
-            // A class whose prototype inherits from the bootstrap's DOMException.prototype makes
-            // instances of the bootstrap's DOMException.
-            let error = new_amount_error(lock, ctx, "over", 5);
-            ctx.set_global(lock, "error", error);
-            eval(
-                lock,
-                ctx,
-                "globalThis.isCopy = (e) => \
-                   Object.getPrototypeOf(e) === AmountError.prototype && e[kBrand] === true && \
-                   e.name === 'AmountError' && e.message === 'over' && e.amount === 5 && \
-                   e.stack === 'sender stack' && \
-                   !Object.getOwnPropertyDescriptor(e, 'stack').enumerable",
-            );
-            for (expr, check) in [
-                ("error", "isCopy(v)"),
-                (
-                    "({ error, again: error })",
-                    "isCopy(v.error) && v.again === v.error",
-                ),
-            ] {
-                assert_round_trip(lock, ctx, expr, check);
-            }
             Ok(())
         });
     }
@@ -424,13 +350,12 @@ fn errors_round_trip() {
     let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
     harness.run_in_context(|lock, ctx| {
         set_up_classes(lock, ctx);
-        let error = new_amount_error(lock, ctx, "over", 5);
-        ctx.set_global(lock, "error", error);
         assert_round_trip(
             lock,
             ctx,
-            "new Error('outer', { cause: [new Point(1), error] })",
-            "v.cause[0] instanceof Point && v.cause[0].x === 2 && v.cause[1].amount === 5",
+            "new Error('outer', { cause: [new Point(1), new TestError('inner')] })",
+            "v.cause[0] instanceof Point && v.cause[0].x === 2 && \
+             v.cause[1] instanceof TestError && v.cause[1].message === 'inner'",
         );
         // So can a Map or a Set, which V8 fills by calling builtins, holding objects and instances.
         assert_round_trip(
@@ -917,8 +842,8 @@ fn arbitrary_instances_are_read_as_cpp_jsg_reads_them() {
                 seed = (seed * 48271) % 2147483647;
                 return seed % n;
               }
-              const names = ['test:Point', 'test:Holder', 'test:TestError', 'test:AmountError',
-                  'test:Strict', 'test:Throws', 'test:NoDeserialize', 'test:NotADescriptor',
+              const names = ['test:Point', 'test:Holder', 'test:TestError', 'test:Strict',
+                  'test:Throws', 'test:NoDeserialize', 'test:NotADescriptor',
                   'test:NoDeserializeFunction', 'test:notAFunction', 'test:Missing',
                   'test:toString', 'other:Point', 'test', '', ':', 'test:', 'test:Point:',
                   '\0test:Point'];

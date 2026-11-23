@@ -51,9 +51,8 @@
 // inherits from one.
 //
 // The deserializer makes the instance from Export.prototype WITHOUT calling
-// the constructor (making a DOMException with neither brand, name nor
-// message if the prototype inherits from DOMException.prototype, and
-// otherwise a native error if it inherits from Error.prototype), marks it
+// the constructor (making a native error if it inherits from
+// Error.prototype), marks it
 // with the class's Cloneable, and calls deserialize() once the whole value
 // has been read, in the order the instances were read. So:
 //

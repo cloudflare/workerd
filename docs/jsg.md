@@ -2034,9 +2034,23 @@ Unwraps V8's `MaybeLocal` and `Maybe` types, throwing `JsExceptionThrown` if emp
 v8::Local<v8::String> str = check(maybeStr);
 ```
 
-### `jsg::DOMException`
+### DOMException
 
-Implements the standard Web IDL [DOMException][] interface. To throw from C++:
+The global [DOMException][] is one of two implementations, chosen per process by the
+`V8_DOM_EXCEPTION` autogate:
+
+- Without it, `jsg::DOMException` (`dom-exception.h`), a resource type.
+- With it, V8's, along with WebIDL's `QuotaExceededError` subclass. **These are not part of
+  upstream V8.** workerd adds them, and their C++ API, with
+  `patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch`:
+  `v8::Exception::DOMException()` and `v8::Exception::QuotaExceededError()` (in
+  `v8-exception.h`) create instances, `v8::Value::IsDOMException()` and
+  `IsQuotaExceededError()` recognize them, and `v8::DOMException` and `v8::QuotaExceededError`
+  read their name, message and amounts. Look for them in the patch, not in V8's documentation,
+  and change them by changing the patch (see `docs/v8-updates.md`).
+
+Create a DOMException with `js.domException(name, message)` and recognize one with
+`js.tryGetDomExceptionInfo(value)`, which work with either implementation. To throw from C++:
 
 ```cpp
 JSG_REQUIRE(isValid, DOMInvalidStateError, "The object is in an invalid state");

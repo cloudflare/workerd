@@ -212,8 +212,6 @@ class Serializer final: public v8::ValueSerializer::Delegate {
         prototypeOfObject(v8::Object::New(isolate)->GetPrototype()),
         jsSerializeModeKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY))),
-        domExceptionBrandKey(v8::Private::ForApi(
-            isolate, newString(isolate, ::workerd::jsg::DOM_EXCEPTION_BRAND_KEY))),
         ser(isolate, this) {}
   // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
   ~Serializer() noexcept(true) {}
@@ -267,8 +265,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   bool HasCustomHostObject(v8::Isolate*) override {
     // V8 already treats objects with internal fields, such as API objects, as host objects, but
-    // not instances of classes implemented in JavaScript (jsg::Serializer), the bootstrap's
-    // DOMException, an API wrapper object without them, or native errors.
+    // not instances of classes implemented in JavaScript (jsg::Serializer) or native errors,
+    // V8's DOMException among them.
     return true;
   }
 
@@ -278,12 +276,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     if (!hasPrivateUnlessPlain(object, jsSerializeModeKey).To(&isJsSerializable)) {
       return v8::Nothing<bool>();
     }
-    bool isDomException;
-    if (!hasPrivateUnlessPlain(object, domExceptionBrandKey).To(&isDomException)) {
-      return v8::Nothing<bool>();
-    }
-    return v8::Just(
-        isJsSerializable || isDomException || (errorsAreHostObjects && object->IsNativeError()));
+    return v8::Just(isJsSerializable ||
+        (object->IsNativeError() && (errorsAreHostObjects || object->IsDOMException())));
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
@@ -296,9 +290,12 @@ class Serializer final: public v8::ValueSerializer::Delegate {
       return v8::Nothing<bool>();
     }
     if (!mark->IsUndefined()) return writeJsSerializable(object, mark);
-    if (errorsAreHostObjects && object->IsNativeError()) return writeError(object);
+    if (errorsAreHostObjects && object->IsNativeError() && !object->IsDOMException()) {
+      return writeError(object);
+    }
     // writeApiObject() writes a DOMException as jsg::Serializer does.
-    return ::workerd::jsg::writeApiObject(isolate, ser, object);
+    return ::workerd::jsg::writeApiObject(
+        isolate, ser, object, ::workerd::jsg::EnhancedErrorSerialization(errorsAreHostObjects));
   }
 
   // Numbers each SharedArrayBuffer, as jsg::Serializer does. The buffers are not passed on: the
@@ -448,21 +445,14 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     v8::Local<v8::Value> stack;
   };
 
-  // Reads the error fields of `object` as jsg::Serializer does. They are those of an error as
-  // Error.isError() reports it, a native error or an instance of the bootstrap's DOMException: its
-  // `message` and its own `stack`, each if it is a string. Anything else could refer back to the
-  // instance, which a reader cannot resolve while it is still reading the instance's record. Reading
-  // them can run JavaScript. Returns nothing if it throws, leaving the exception pending.
+  // Reads the error fields of `object` as jsg::Serializer does. They are those of a native error:
+  // its `message` and its own `stack`, each if it is a string. Anything else could refer back to
+  // the instance, which a reader cannot resolve while it is still reading the instance's record.
+  // Reading them can run JavaScript. Returns nothing if it throws, leaving the exception pending.
   v8::Maybe<ErrorFields> getErrorFields(v8::Local<v8::Object> object) {
     auto context = isolate->GetCurrentContext();
     ErrorFields result;
-    if (!object->IsNativeError()) {
-      bool isDomException;
-      if (!object->HasPrivate(context, domExceptionBrandKey).To(&isDomException)) {
-        return v8::Nothing<ErrorFields>();
-      }
-      if (!isDomException) return v8::Just(result);
-    }
+    if (!object->IsNativeError()) return v8::Just(result);
 
     v8::Local<v8::Value> message;
     if (!object->Get(context, newString(isolate, "message"_kj)).ToLocal(&message)) {
@@ -491,11 +481,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     return v8::Just(result);
   }
 
-  // Whether `object` carries the private property `key`: jsg::JS_SERIALIZE_MODE_KEY on an instance
-  // of a class implemented in JavaScript, or jsg::DOM_EXCEPTION_BRAND_KEY on one of the
-  // bootstrap's DOMException. As jsg::Serializer does, an object whose prototype is
-  // Object.prototype or null is not checked for either. Reading a private property runs no
-  // JavaScript.
+  // Whether `object` carries the private property `key`, jsg::JS_SERIALIZE_MODE_KEY on an instance
+  // of a class implemented in JavaScript. As jsg::Serializer does, an object whose prototype is
+  // Object.prototype or null is not checked for it. Reading a private property runs no JavaScript.
   v8::Maybe<bool> hasPrivateUnlessPlain(v8::Local<v8::Object> object, v8::Local<v8::Private> key) {
     auto prototype = object->GetPrototype();
     if (prototype == prototypeOfObject || prototype->IsNull()) return v8::Just(false);
@@ -514,7 +502,6 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   kj::Vector<JsSerializableClass> jsSerializableClasses;
   v8::Local<v8::Value> prototypeOfObject;
   v8::Local<v8::Private> jsSerializeModeKey;
-  v8::Local<v8::Private> domExceptionBrandKey;
   v8::ValueSerializer ser;
 };
 
@@ -699,8 +686,6 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
       OBJECT,
       // The prototype inherits from Error.prototype.
       NATIVE_ERROR,
-      // The prototype inherits from the bootstrap's DOMException's.
-      DOM_EXCEPTION,
     };
     Kind kind;
   };
@@ -785,28 +770,17 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
              .ToLocal(&errorPrototype)) {
       return v8::Nothing<Kind>();
     }
-    auto domExceptionPrototypeKey = v8::Private::ForApi(
-        isolate, newString(isolate, ::workerd::jsg::DOM_EXCEPTION_PROTOTYPE_KEY));
-    // The bootstrap's DOMException.prototype inherits from Error.prototype, so it is found first.
     for (v8::Local<v8::Value> current = prototype; current->IsObject();
          current = current.As<v8::Object>()->GetPrototype()) {
-      bool isDomExceptionPrototype;
-      if (!current.As<v8::Object>()
-               ->HasPrivate(context, domExceptionPrototypeKey)
-               .To(&isDomExceptionPrototype)) {
-        return v8::Nothing<Kind>();
-      }
-      if (isDomExceptionPrototype) return v8::Just(Kind::DOM_EXCEPTION);
       if (current == errorPrototype) return v8::Just(Kind::NATIVE_ERROR);
     }
     return v8::Just(Kind::OBJECT);
   }
 
   // What calling the constructor of `cls` would make, minus whatever the constructor does, which
-  // the class's `deserialize` does: an instance of the bootstrap's DOMException's base or a native
-  // error, as the kind of the class says, or else an object, whose prototype is the class's. An
-  // error's `stack` is `stack` if it is given, or else the one V8 captures now, and either way not
-  // enumerable. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception pending.
+  // the class's `deserialize` does: a native error, if the kind of the class says so, or else an
+  // object, whose prototype is the class's. An error's `stack` is `stack` if it is given, or else
+  // the one V8 captures now, and either way not enumerable. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception pending.
   v8::MaybeLocal<v8::Object> newInstance(
       const JsSerializableClass& cls, v8::Local<v8::String> message, v8::Local<v8::String> stack) {
     using Kind = JsSerializableClass::Kind;
@@ -814,13 +788,6 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     auto prototype = cls.prototype.Get(isolate);
     v8::Local<v8::Object> instance;
     switch (cls.kind) {
-      case Kind::DOM_EXCEPTION: {
-        // As jsg::newUninitializedBootstrapDomException() makes one. V8 formats its stack's header
-        // lazily, from the name and message that `deserialize` sets.
-        auto tmpl = ::workerd::jsg::IsolateBase::getDomExceptionTemplate(isolate);
-        if (!tmpl->InstanceTemplate()->NewInstance(context).ToLocal(&instance)) return {};
-        break;
-      }
       case Kind::NATIVE_ERROR:
         // The message is what the stack captured now begins with, after the error's name, as for a
         // native error.
@@ -838,13 +805,9 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     }
     if (instance->SetPrototype(context, prototype).IsNothing()) return {};
     if (cls.kind == Kind::OBJECT) return instance;
-    if (!stack.IsEmpty()) {
-      if (instance->DefineOwnProperty(context, newString(isolate, "stack"_kj), stack, v8::DontEnum)
-              .IsNothing()) {
-        return {};
-      }
-    } else if (cls.kind == Kind::DOM_EXCEPTION &&
-        v8::Exception::CaptureStackTrace(context, instance).IsNothing()) {
+    if (!stack.IsEmpty() &&
+        instance->DefineOwnProperty(context, newString(isolate, "stack"_kj), stack, v8::DontEnum)
+            .IsNothing()) {
       return {};
     }
     return instance;

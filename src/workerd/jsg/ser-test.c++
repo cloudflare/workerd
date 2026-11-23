@@ -407,7 +407,7 @@ struct SerTestContext: public ContextGlobalObject {
       }
     }
     v8::Maybe<bool> WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) override {
-      return writeApiObject(isolate, ser, object);
+      return writeApiObject(isolate, ser, object, EnhancedErrorSerialization::NO);
     }
     v8::Isolate* isolate;
     v8::ValueSerializer ser;

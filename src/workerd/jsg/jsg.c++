@@ -10,9 +10,11 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <v8-cppgc.h>
+#include <v8-exception.h>
 
 #ifdef V8_ENABLE_SANDBOX
 #include <sys/mman.h>
@@ -20,48 +22,8 @@
 
 namespace workerd::jsg {
 
-namespace {
-// As V8 describes an error whose name and message are `name` and `message`, except that a name
-// and message too long to join into one string are described by the name, where V8 abbreviates
-// the message.
-v8::Local<v8::String> describeError(
-    v8::Isolate* isolate, v8::Local<v8::String> name, v8::Local<v8::String> message) {
-  if (name->Length() == 0) return message;
-  if (message->Length() == 0) return name;
-  auto prefix = v8::String::Concat(isolate, name, v8::String::NewFromUtf8Literal(isolate, ": "));
-  if (prefix.IsEmpty()) return name;
-  auto description = v8::String::Concat(isolate, prefix, message);
-  return description.IsEmpty() ? name : description;
-}
-
-v8::Local<v8::Private> privateKey(v8::Isolate* isolate, kj::StringPtr name) {
-  return v8::Private::ForApi(isolate,
-      v8::String::NewFromUtf8(isolate, name.begin(), v8::NewStringType::kInternalized, name.size())
-          .ToLocalChecked());
-}
-}  // namespace
-
 v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value) {
-  auto context = isolate->GetCurrentContext();
-  if (value->IsObject()) {
-    // Reading a private symbol runs no JavaScript: it skips interceptors, Proxy traps and the
-    // prototype chain.
-    auto object = value.As<v8::Object>();
-    v8::Local<v8::Value> name;
-    if (!object->GetPrivate(context, privateKey(isolate, ERROR_NAME_KEY)).ToLocal(&name)) {
-      return {};
-    }
-    if (name->IsString()) {
-      v8::Local<v8::Value> message;
-      if (!object->GetPrivate(context, privateKey(isolate, ERROR_MESSAGE_KEY)).ToLocal(&message)) {
-        return {};
-      }
-      if (message->IsString()) {
-        return describeError(isolate, name.As<v8::String>(), message.As<v8::String>());
-      }
-    }
-  }
-  return value->ToDetailString(context);
+  return value->ToDetailString(isolate->GetCurrentContext());
 }
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -226,6 +188,30 @@ void Lock::maybeAllocGcStress() {
   }
 }
 #endif  // WORKERD_ASAN
+
+JsObject Lock::domException(kj::String name, kj::String message, kj::Maybe<kj::String> stackValue) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION)) {
+    return newCppDomException(kj::mv(name), kj::mv(message), kj::mv(stackValue));
+  }
+  return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
+    // Given a stack, V8 captures none.
+    v8::Local<v8::String> stack;
+    KJ_IF_SOME(value, stackValue) {
+      stack = str(value);
+    }
+    return v8::Exception::DOMException(str(message), str(name), stack).As<v8::Object>();
+  }));
+}
+
+kj::Maybe<Lock::DomExceptionInfo> Lock::tryGetDomExceptionInfo(const JsValue& value) {
+  v8::Local<v8::Value> handle = value;
+  if (!handle->IsDOMException()) return tryGetCppDomExceptionInfo(value);
+  auto domException = handle.As<v8::DOMException>();
+  return DomExceptionInfo{
+    .name = JsString(domException->Name()).toString(*this),
+    .message = JsString(domException->Message()).toString(*this),
+  };
+}
 
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
   return withinHandleScope(
