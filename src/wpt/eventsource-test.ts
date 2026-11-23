@@ -4,15 +4,6 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
-// The TypeScript EventSource (the TS_EVENT_SOURCE autogate) matches the C++
-// one's shape, but its functions are not native.
-const usingTsEventSource = !(
-  EventSource as unknown as { from: () => void }
-).from
-  .toString()
-  .includes('[native code]');
-const kFailsWithCppEventSource = usingTsEventSource ? [] : true;
-
 const kListenerThis =
   "Inside an EventSource listener, `this` is not the EventSource, so the test's this.close() throws";
 
@@ -54,10 +45,7 @@ export default {
     comment: 'Uses postMessage which is not available in workerd',
     omittedTests: true,
   },
-  'event-data.any.js': {
-    comment: 'The C++ EventSource drops an event whose data is empty',
-    expectedFailures: kFailsWithCppEventSource,
-  },
+  'event-data.any.js': {},
   'eventsource-close.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
@@ -105,26 +93,15 @@ export default {
   },
   'eventsource-url.any.js': {},
   'format-bom-2.any.js': {},
-  'format-bom-split.any.js': {
-    comment:
-      'The C++ EventSource does not strip a byte order mark split across chunks',
-    expectedFailures: kFailsWithCppEventSource,
-  },
+  'format-bom-split.any.js': {},
   'format-bom-utf-16.any.js': {},
   'format-bom.any.js': {},
   'format-comments.any.js': {},
-  'format-data-before-final-empty-line.any.js': {
-    comment:
-      'The C++ EventSource sets lastEventId from an event that is never dispatched',
-    expectedFailures: kFailsWithCppEventSource,
-  },
-  'format-field-data.any.js': {
-    comment: 'The C++ EventSource drops an event whose data is empty',
-    expectedFailures: kFailsWithCppEventSource,
-  },
+  'format-data-before-final-empty-line.any.js': {},
+  'format-field-data.any.js': {},
   'format-field-event-empty.any.js': {
-    comment: `${kListenerThis}, and with the C++ EventSource the file hangs`,
-    disabledTests: true,
+    comment: kListenerThis,
+    expectedFailures: true,
   },
   'format-field-event.any.js': {
     comment: kListenerThis,

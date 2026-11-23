@@ -177,6 +177,16 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // Defines key on target as a writable, configurable data property,
+  // enumerable if enumerable is true, whose value is the key export of the
+  // bootstrap module specifier, required when the property is first read (V8's
+  // lazy data property). A read that throws leaves it lazy.
+  defineLazyDataProperty(
+    target: object,
+    key: string | symbol,
+    specifier: string,
+    enumerable: boolean
+  ): void;
   // The request-bound I/O handle (api/request-io.h), bound to the current
   // request, or undefined outside of one.
   createRequestIo(): RequestIo | undefined;
@@ -241,6 +251,12 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The structured clone of `value` (jsg::structuredClone), transferring the
+  // objects in `transfer`, a dense array the caller built. The native
+  // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
+  // any other object throws a TypeError, and an uncloneable value a
+  // DataCloneError. Consumed by structured-clone.
+  structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

@@ -132,6 +132,32 @@ export function spliceOne(list: unknown[], index: number): void {
 // object out of V8's slow dictionary mode.
 export const kNullProtoObject = Object.freeze({ __proto__: null });
 
+export const kCustomPromisifiedSymbol = Symbol.for(
+  'nodejs.util.promisify.custom'
+);
+export const kCustomPromisifyArgsSymbol = Symbol.for(
+  'nodejs.util.promisify.custom.args'
+);
+
+// util.promisify(fn) returns `promisified` instead of wrapping fn.
+export function setCustomPromisified(fn: object, promisified: object): void {
+  Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
+    value: promisified,
+  });
+}
+
+// Makes util.promisify(fn) resolve with an object keyed by `names` when fn
+// calls back with several values, e.g. ['bytesRead', 'buffer'] for fs.read.
+export function setCustomPromisifyArgs(fn: object, names: string[]): void {
+  Object.defineProperty(fn, kCustomPromisifyArgsSymbol, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
+    value: names,
+  });
+}
+
 export const ALL_PROPERTIES = 0;
 export const ONLY_WRITABLE = 1;
 export const ONLY_ENUMERABLE = 2;

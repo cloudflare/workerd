@@ -19,6 +19,7 @@ use jsg_macros::jsg_resource;
 #[jsg_resource]
 struct HandleHolder {
     handle: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -38,12 +39,6 @@ impl HandleHolder {
 }
 
 static HANDLE_HOLDER_DROPS: AtomicUsize = AtomicUsize::new(0);
-
-impl Drop for HandleHolder {
-    fn drop(&mut self) {
-        HANDLE_HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
-}
 
 /// A resource that owns a `HandleHolder`, which GC then reaches only through this resource's
 /// trace.
@@ -69,6 +64,7 @@ impl HolderParent {
 #[jsg_resource]
 struct HandleList {
     handles: jsg::RefCell<Vec<v8::TracedGlobal<v8::Value>>>,
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -81,12 +77,6 @@ impl HandleList {
 }
 
 static HANDLE_LIST_DROPS: AtomicUsize = AtomicUsize::new(0);
-
-impl Drop for HandleList {
-    fn drop(&mut self) {
-        HANDLE_LIST_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
-}
 
 /// A resource whose drops the tests count.
 #[jsg_resource]
@@ -130,6 +120,7 @@ fn wrapped_resource_dropped_after_its_isolate_is_disposed() {
         let resource = jsg::Rc::new(
             lock,
             HandleHolder {
+                drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );
@@ -162,6 +153,7 @@ fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
         let resource = jsg::Rc::new(
             lock,
             HandleHolder {
+                drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );
@@ -197,6 +189,7 @@ fn holder_in_traced_mode(
     let resource = jsg::Rc::new(
         lock,
         HandleHolder {
+            drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
             handle: jsg::Cell::new(None),
         },
     );
@@ -303,6 +296,7 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
         let child = jsg::Rc::new(
             lock,
             HandleHolder {
+                drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );
@@ -447,6 +441,7 @@ fn fill_and_abandon_handle_list(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalConte
     let list = jsg::Rc::new(
         lock,
         HandleList {
+            drops: crate::DropCounter(&HANDLE_LIST_DROPS),
             handles: jsg::RefCell::new(Vec::new()),
         },
     );
@@ -510,6 +505,7 @@ fn visited_global_dropped_after_its_realm_keeps_its_slot_through_a_gc() {
         let resource = jsg::Rc::new(
             lock,
             HandleHolder {
+                drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );
@@ -600,6 +596,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
         let resource = jsg::Rc::new(
             lock,
             HandleHolder {
+                drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                 handle: jsg::Cell::new(None),
             },
         );
@@ -625,6 +622,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
                     drop(jsg::Rc::new(
                         lock,
                         HandleHolder {
+                            drops: crate::DropCounter(&HANDLE_HOLDER_DROPS),
                             handle: jsg::Cell::new(taken.take()),
                         },
                     ));

@@ -3,21 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Object shape of EventSource: members, attributes, prototype chains and
-// the marks JSG puts on every runtime class. Divergences (see the ledger in
-// AGENTS.md):
-// - #1: only the TypeScript constructor inherits from EventTarget's, as
-//   WebIDL requires.
-// - #2: the TypeScript constructor's `prototype` is non-writable even
-//   without immutable_api_prototypes.
+// the marks JSG puts on every runtime class. As WebIDL requires, the
+// constructor inherits from EventTarget's, and its `prototype` is
+// non-writable even without immutable_api_prototypes.
 
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { attributes, streamOf } from 'helpers';
-import {
-  immutableApiPrototypes,
-  setToStringTag,
-  specCompliantPropertyAttributes,
-  usingTsImpl,
-} from 'which-impl';
+import { setToStringTag, specCompliantPropertyAttributes } from 'flags';
 
 // WebIDL constants are non-configurable; JSG's are configurable unless
 // spec_compliant_property_attributes.
@@ -129,10 +121,7 @@ export const prototypeChains = {
       Object.getPrototypeOf(EventSource.prototype),
       EventTarget.prototype
     );
-    strictEqual(
-      Object.getPrototypeOf(EventSource),
-      usingTsImpl ? EventTarget : Function.prototype
-    );
+    strictEqual(Object.getPrototypeOf(EventSource), EventTarget);
   },
 };
 
@@ -156,7 +145,7 @@ export const constructorAttributes = {
     strictEqual(constructor.value, EventSource);
     strictEqual(
       attributes(Object.getOwnPropertyDescriptor(EventSource, 'prototype')),
-      usingTsImpl || immutableApiPrototypes ? 'data' : 'dataw'
+      'data'
     );
   },
 };

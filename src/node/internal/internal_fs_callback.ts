@@ -76,6 +76,10 @@ import {
 } from 'node-internal:internal_errors';
 import { type Dir, Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
+import {
+  setCustomPromisified,
+  setCustomPromisifyArgs,
+} from 'node-internal:internal_utils';
 import { isArrayBufferView } from 'node-internal:internal_types';
 import {
   parseFileMode,
@@ -182,6 +186,15 @@ export function exists(path: FilePath, callback: ExistsCallback): void {
   });
 }
 
+setCustomPromisified(exists, function exists(path: FilePath): Promise<boolean> {
+  return Promise.resolve().then(() => fssync.existsSync(path));
+});
+
+setCustomPromisifyArgs(read, ['bytesRead', 'buffer']);
+setCustomPromisifyArgs(readv, ['bytesRead', 'buffers']);
+setCustomPromisifyArgs(write, ['bytesWritten', 'buffer']);
+setCustomPromisifyArgs(writev, ['bytesWritten', 'buffer']);
+
 export function appendFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
@@ -268,7 +281,8 @@ export function copyFile(
   if (mode & COPYFILE_EXCL && fssync.existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizedDest.pathname,
+      path: normalizedSrc.pathname,
+      dest: normalizedDest.pathname,
     });
   }
 

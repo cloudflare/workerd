@@ -128,6 +128,7 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
     let command = move |config, structured| {
+        crate::log::set_structured(structured);
         let mut runtime = kj_rs_tokio::Runtime::new()?;
         let factory = ffi::bootstrap(
             runtime.context(),
@@ -244,6 +245,9 @@ async fn server_serve(
 ) -> Result<()> {
     crate::log::install();
     let deployments = std::mem::take(&mut options.deployments);
+    options.announce = Some(Box::new(move |line| {
+        report(structured, Severity::Info, line);
+    }));
     let report = reporter(watch.is_some(), structured, deployments);
     let factory = Rc::new(Factory::new(factory));
     let result = with_watch(

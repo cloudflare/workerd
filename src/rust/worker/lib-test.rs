@@ -16,7 +16,7 @@ impl kj::http::Service for HeaderOverrideProxy {
         headers: kj::http::HeadersRef<'a>,
         request_body: std::pin::Pin<&'a mut kj::io::AsyncInputStream>,
         response: kj::http::ServiceResponse<'a>,
-    ) -> kj::Result<()> {
+    ) -> kj::http::ServiceResult {
         let mut headers = headers.clone_shallow();
         headers.set(HeaderId::HOST, "example.com");
         self.0
@@ -32,7 +32,16 @@ impl kj::http::Service for HeaderOverrideProxy {
         _connection: std::pin::Pin<&'a mut kj::io::AsyncIoStream>,
         _response: kj::http::ConnectResponse<'a>,
         _settings: kj::http::ConnectSettings<'a>,
-    ) -> kj::Result<()> {
+    ) -> kj::http::ServiceResult {
         todo!()
     }
+}
+
+#[test]
+fn default_bench_fails_as_unimplemented() {
+    let mut worker = crate::ok::Worker;
+    let error = futures::executor::block_on(crate::Interface::bench(&mut worker, &[]))
+        .expect_err("the default bench must fail");
+    assert_eq!(error.r#type(), cxx::KjExceptionType::Unimplemented);
+    assert_eq!(error.what(), "this service doesn't support bench()");
 }

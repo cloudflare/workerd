@@ -54,8 +54,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
               (jsg::Lock & js, auto c) mutable { return controller->pull(js); }),
           .cancel = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
               (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); }),
-          .expectedLength = transformer.expectedLength.map(
-              [](uint64_t expectedLength) { return expectedLength; }),
+          .expectedLength = transformer.expectedLength,
         },
         kj::mv(readableStrategy));
 

@@ -231,8 +231,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     }
   }
 
-  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message),
-      error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message), error.stack);
 }
 
 void addExceptionToTrace(jsg::Lock& js,
@@ -530,8 +529,11 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
-const jsg::TypeHandler<api::BenchExportedHandler>& Worker::Api::getBenchTypeHandler(
-    jsg::Lock& lock) const {
+v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
+    v8::Local<v8::Value> handler,
+    v8::Local<v8::Value> env,
+    v8::Local<v8::Value> ctx,
+    kj::ArrayPtr<const capnp::word> params) const {
   KJ_UNIMPLEMENTED("bench handlers are only supported under `workerd bench`");
 }
 
@@ -773,6 +775,7 @@ struct Worker::Isolate::Impl {
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
+      ::workerd::rust::jsg::restoreResourceTemplatesFromSnapshot(lock->v8Isolate);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -927,6 +930,10 @@ struct Worker::Script::Impl {
   kj::Array<CompiledGlobal> globals;
 
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> moduleContext;
+
+  // A service worker script is compiled in the context that its first Worker then takes, so
+  // that no throwaway context is deserialized before it.
+  kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> firstWorkerContext;
 
   // If set, then any attempt to use this script shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
@@ -1283,13 +1290,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, reinterpret_cast<intptr_t>(&messageCallback));
 
-    // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
-    // machine is competing for memory so it might as well use all it wants and be lazy about GC.
-    //
-    // In our production environment, however, we can safely assume that there is always memory
-    // pressure, because every machine is handling thousands of tenants all the time. So we might
-    // as well just throw the switch to "moderate" right away.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    // This notification has no lasting effect: V8 handles it synchronously because we hold the
+    // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
+    // starting incremental marking, which we disable. What it does do is free caches shared by the
+    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
+    // the Wasm it runs, and it empties the isolate group's memory pools.
+    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
@@ -1557,6 +1565,11 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      KJ_IF_SOME(c, implToDestroy->firstWorkerContext) {
+        recordedLock.disposeContext(kj::mv(c));
+      } else {
+        // Else block to avoid dangling else clang warning.
+      }
       discardDeferredCodeCaches(lock);
     });
 
@@ -1577,11 +1590,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       v8::Local<v8::Context> context;
       if (modular) {
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
-        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
-            {
-              .newModuleRegistry = impl->tryGetNewModuleRegistry(),
-              .schemaLoader = getSchemaLoader(),
-            }));
+        auto& mContext = impl->moduleContext.emplace(newContext(lock));
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
@@ -1628,16 +1637,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         }
       } else {
-        // Although we're going to compile a script independent of context, V8 requires that
-        // there be an active context, otherwise it will segfault, I guess. So we create a
-        // dummy context. (Undocumented, as usual.)
-        context =
-            v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
-        // We need to set the highest used index in every context we create to be a nullptr
-        // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
-        // a fatal error if the array is smaller than the given index.
-        jsg::setAlignedPointerInEmbedderData(
-            context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
+        // The script is compiled independent of any context, but V8 requires an active one.
+        // Compile in the context that the first Worker will run in, rather than deserializing
+        // a throwaway context first.
+        context = impl->firstWorkerContext.emplace(newContext(lock)).getHandle(lock);
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
@@ -1783,6 +1786,14 @@ void Worker::Script::installVirtualFileSystemOnContext(v8::Local<v8::Context> co
       const_cast<VirtualFileSystem*>(impl->vfs.get()));
 }
 
+jsg::JsContext<api::ServiceWorkerGlobalScope> Worker::Script::newContext(jsg::Lock& lock) const {
+  return isolate->getApi().newContext(lock,
+      {
+        .newModuleRegistry = impl->tryGetNewModuleRegistry(),
+        .schemaLoader = getSchemaLoader(),
+      });
+}
+
 const capnp::SchemaLoader& Worker::Script::getSchemaLoader() const {
   KJ_IF_SOME(moduleRegistry, impl->maybeNewModuleRegistry) {
     return moduleRegistry->getSchemaLoader();
@@ -1849,6 +1860,9 @@ Worker::Script::~Script() noexcept(false) {
     Isolate::Impl::Lock recordedLock(
         *isolate, Worker::Lock::TakeSynchronously(kj::none), stackScope);
     KJ_IF_SOME(c, impl->moduleContext) {
+      recordedLock.disposeContext(kj::mv(c));
+    }
+    KJ_IF_SOME(c, impl->firstWorkerContext) {
       recordedLock.disposeContext(kj::mv(c));
     }
     impl = nullptr;
@@ -2311,28 +2325,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     }
   });
 
-  // Before resolving the main module, if both nodejs_compat_v2 and the new
-  // module registry are enabled, let's pre-resolve the process and buffer modules.
-  // Why? Great question! Resolving these modules synchronously causes the microtask
-  // queue to be pumped, which we don't actually want to do while resolving the main
-  // module until we are ready. Both process and buffer are exposed via globalThis
-  // when the nodejs_compat_v2 flag is used, and if the top-level scope is accessing
-  // either globalThis.process or globalThis.buffer, then we need to make sure that
-  // the modules are already resolved so we don't pump the microtask queue while
-  // synchronously accessing those globals. Resolving them here ensures that they are
-  // ready to go before we begin evaluating the main module.
-  //
-  // The process global reads the process object's own module, not node:process, whose
-  // named exports include the stdio streams and so force them to be built.
   auto featureFlags = FeatureFlags::get(js);
-  if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
-    auto processSpec = featureFlags.getEnableNodeJsProcessV2() ? "node-internal:public_process"_kj
-                                                               : "node-internal:legacy_process"_kj;
-    JSG_REQUIRE_NONNULL(js.resolveInternalModule(processSpec), Error, "Failed to initialize ",
-        processSpec, " module");
-    JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
-        "Failed to initialize node:buffer module");
-  }
 
   // When enable_nodejs_global_timers is enabled, load the module that makes all 6 timer
   // functions (setTimeout, setInterval, clearTimeout, clearInterval, setImmediate,
@@ -2414,12 +2407,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         jsContext = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(&c);
         currentSpan.setTag("module_context"_kjc, true);
       } else {
-        // Create a new context.
-        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
-            {
-              .newModuleRegistry = script->impl->tryGetNewModuleRegistry(),
-              .schemaLoader = script->getSchemaLoader(),
-            }));
+        // Take the context the script was compiled in, if no other Worker has, or else create
+        // a new one. const_cast OK because guarded by `lock`.
+        auto& scriptImpl = *const_cast<Script&>(*script).impl;
+        KJ_IF_SOME(c, scriptImpl.firstWorkerContext) {
+          jsContext = &this->impl->context.emplace(kj::mv(c));
+          scriptImpl.firstWorkerContext = kj::none;
+        } else {
+          jsContext = &this->impl->context.emplace(script->newContext(lock));
+        }
         freshContext = true;
       }
 
@@ -2736,21 +2732,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             "the zygote's top level failed; no startup snapshot was created", e.getDescription());
       }
 
-      // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-      // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-      // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-      // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. The handles the Realm caches
-      // for struct types are reset by the same call. Templates are recreated lazily on demand and
-      // a START_FROM_SNAPSHOT isolate starts with an empty cache.
-      kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-      {
-        auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          rustTemplateHandles.add(
-              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
-        }
-      }
+      // The templates of Rust JSG resource types (e.g. node-internal:dns) are v8::Globals in the
+      // Rust Realm, invisible to the C++ template slots. They are pinned into the snapshot, and
+      // their handles reset with the other isolate handles before CreateBlob().
+      auto rustTemplateHandles =
+          ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
       auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
@@ -4853,6 +4839,10 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
   }
 
   return kj::none;
+}
+
+kj::Maybe<kj::Date> Worker::Actor::getRunningAlarmTime() {
+  return impl->maybeRunningAlarm.map([](Impl::RunningAlarm& alarm) { return alarm.scheduledTime; });
 }
 
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(

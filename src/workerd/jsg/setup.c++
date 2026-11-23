@@ -260,8 +260,7 @@ void IsolateBase::registerTypeHandler(const std::type_info& type, const void* ha
 }
 
 kj::Maybe<const void*> IsolateBase::tryGetTypeHandlerErased(const std::type_info& type) const {
-  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type})
-      .map([](const void* const& handler) { return handler; });
+  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type});
 }
 
 kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type) {
@@ -571,6 +570,13 @@ IsolateBase::IsolateBase(V8System& system,
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+      // Opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable check does
+      // Get(value, "then"). This shadowing property ends that lookup before Object.prototype, so
+      // application code can't intercept it. It lives on the prototype rather than the instance
+      // so that instances keep the constructor's initial map, which V8 requires before it drops
+      // an unreachable wrapper in a scavenge; see Wrappable::attachOpaqueWrapper().
+      opaqueTemplate->PrototypeTemplate()->Set(v8StrIntern(ptr, "then"), v8::Undefined(ptr),
+          static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum | v8::DontDelete));
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
 
       jsSerializeModeKey.Reset(

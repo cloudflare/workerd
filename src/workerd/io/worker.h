@@ -51,7 +51,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-struct BenchExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class CacheContext;
@@ -309,6 +308,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   kj::Own<Impl> impl;
 
   kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
+
+  // Creates a context for this script's code, with its module registry and schema loader.
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const;
 
   friend class Worker;
 
@@ -713,9 +715,16 @@ class Worker::Api {
       jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
-  // Only `workerd bench` delivers the bench event, so the default implementation throws.
-  virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
-      jsg::Lock& lock) const;
+  // Runs the `bench()` handler of `handler`, an exported handler object, with `env` and `ctx`
+  // (undefined if it has none), then the cases it registers: see `bench_run()` in
+  // api/bench-api/ffi.rs. `params` is an encoded `BenchParams` message. Returns a promise for an
+  // ArrayBuffer that holds the group's `BenchReport.Group`, without its name, as an encoded
+  // message. Only `workerd bench` delivers the bench event, so the default implementation throws.
+  virtual v8::Local<v8::Promise> runBench(jsg::Lock& lock,
+      v8::Local<v8::Value> handler,
+      v8::Local<v8::Value> env,
+      v8::Local<v8::Value> ctx,
+      kj::ArrayPtr<const capnp::word> params) const;
 
   // An event listener's callback (api::EventTarget::HandlerFunction).
   using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
@@ -1248,6 +1257,9 @@ class Worker::Actor final: public kj::Refcounted {
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
   kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> getAlarm(kj::Date scheduledTime);
+
+  // If an alarm is running, return the time it was scheduled for.
+  kj::Maybe<kj::Date> getRunningAlarmTime();
 
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or

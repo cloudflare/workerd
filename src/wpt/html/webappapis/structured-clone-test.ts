@@ -43,13 +43,11 @@ export default {
       // because they reject the clone when not cross-origin isolated, while workerd clones it.
       'Growable SharedArrayBuffer',
       // structuredClone can only transfer ArrayBuffers; MessagePort and ReadableStream
-      // transfers throw TypeError "Object is not transferable" (jsg/ser.c++).
+      // transfers throw a DataCloneError.
       'MessagePort',
       'A detached platform object cannot be transferred',
       'An object whose interface is deleted from the global object must still be received',
       'A subclass instance will be received as its closest transferable superclass',
-      // Transferring a Blob throws TypeError rather than a DataCloneError.
-      'Transferring a non-transferable platform object fails',
       // Transferring an already-detached ArrayBuffer succeeds instead of throwing a
       // DataCloneError.
       'A detached ArrayBuffer cannot be transferred',

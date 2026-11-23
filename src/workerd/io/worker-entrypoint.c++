@@ -13,7 +13,6 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -21,15 +20,12 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
 
 namespace {
-
-kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
-  return value.map([](kj::String& text) -> kj::StringPtr { return text; });
-}
 
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
@@ -475,8 +471,18 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         if (context.isFailOpen()) {
           // Fail-open behavior has been chosen, we'd better save an interface that we can use for
           // that purpose later.
-          failOpenService = context.getSubrequestChannelNoChecks(
-              IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+          //
+          // Opening the channel can throw, as a null global outbound does. This runs in a
+          // destructor, usually while the handler's exception unwinds, so it must not throw.
+          // Instead the fail-open request fails with the exception, as it would have had the
+          // channel opened lazily, as a channel to another process does.
+          KJ_TRY {
+            failOpenService = context.getSubrequestChannelNoChecks(
+                IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+          }
+          KJ_CATCH(exception) {
+            failOpenService = WorkerInterface::fromException(kj::mv(exception));
+          }
         }
 
         // When the client disconnects, trigger an abort on request.signal, unless the request has
@@ -523,8 +529,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
           // Getting the handler finishes actor construction, so the claim sees a constructed actor
           // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
-              kj::mv(props), context.getActor(), isDynamicDispatch);
+          auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              context.getActor(), isDynamicDispatch);
           auto retryable = IsRetryableHandler::NO;
           KJ_IF_SOME(h, handler) {
             retryable = h->isFetchRetryable(lock);
@@ -768,8 +774,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     });
   }
 
-  // TODO(soon): Implement basic TLS support for connect handler.
-  JSG_REQUIRE(!settings.useTls, Error, "Incoming CONNECT with TLS not supported");
+  // The handler can't run a handshake on this connection, so a peer that wants TLS from the start
+  // is served only by a handler that has opted in to making it secure further along. See
+  // ServiceWorkerGlobalScope::connect().
+  JSG_REQUIRE(!settings.useTls || featureFlags.getConnectHandlerImmediateTls(), Error,
+      "Incoming CONNECT with TLS not supported");
   // Capture workerTracer, see request() for rationale.
   kj::Maybe<BaseTracer&> workerTracer;
 
@@ -801,7 +810,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     auto& response = KJ_REQUIRE_NONNULL(weakResponse.tryGet(), "response destroyed before connect");
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, kj::mv(settings), lock,
-        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(self.props),
+        lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(self.props),
             context.getActor(), self.isDynamicDispatch));
   })
           .then([weakContext = context.getWeakRef(), workerTracer]() {
@@ -960,7 +969,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
-            asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()));
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
@@ -1053,7 +1062,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(
-              asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
+              entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
           // runAlarm()'s continuation refers to the handler, which may be a per-event heap copy.
           return lock.getGlobalScope()
               .runAlarm(scheduledTime, timeout, retryCount, incomingRequest, lock, handler)
@@ -1154,10 +1163,21 @@ kj::Promise<void> WorkerEntrypoint::bench(
     return context.awaitJs(lock,
         lock.getGlobalScope().bench(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
             params));
   });
-  api::fillBenchReport(result, report);
+  // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
+  // default traversal limit.
+  capnp::FlatArrayMessageReader message(
+      result, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
+  auto group = message.getRoot<bench::BenchReport::Group>();
+  if (group.hasError()) {
+    report.setError(group.getError());
+  }
+  if (group.hasOverhead()) {
+    report.setOverhead(group.getOverhead());
+  }
+  report.setCases(group.getCases());
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -1182,7 +1202,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -1216,11 +1236,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   }
 
   KJ_TRY {
-    return wrapWithCanceler(
-        event
-            ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo),
-                kj::mv(props), waitUntilTasks, isDynamicDispatch)
-            .attach(kj::mv(event)));
+    return wrapWithCanceler(event
+                                ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                                    kj::mv(props), waitUntilTasks, isDynamicDispatch)
+                                .attach(kj::mv(event)));
   }
   KJ_CATCH(exception) {
     markExceptionAsDelivered(exception);

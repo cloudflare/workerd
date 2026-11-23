@@ -9,6 +9,8 @@
 // - globalThis.setImmediate and globalThis.clearImmediate are available
 
 import { strictEqual, ok } from 'node:assert';
+import timersPromises from 'node:timers/promises';
+import { promisify } from 'node:util';
 
 // Test that globalThis.setTimeout returns a Timeout object with expected methods
 export const testGlobalSetTimeoutReturnsObject = {
@@ -384,5 +386,11 @@ export const testSetImmediateWithArgs = {
     );
 
     await promise;
+  },
+};
+
+export const promisifiedGlobalTimers = {
+  test() {
+    strictEqual(promisify(globalThis.setTimeout), timersPromises.setTimeout);
   },
 };

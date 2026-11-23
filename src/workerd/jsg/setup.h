@@ -1399,8 +1399,7 @@ class Isolate: public IsolateBase {
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
       return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
         KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
-          return newBootstrapDomException(*this, prototype, name, message,
-              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
+          return newBootstrapDomException(*this, prototype, name, message, maybeStack);
         }
 
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
@@ -1541,7 +1540,11 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
-        metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        {
+          // snapshotRelink() runs with the new context entered.
+          v8::Context::Scope contextScope(context.getHandle(v8Isolate));
+          metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        }
         metadata.releaseSlotsWithChecks();
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and

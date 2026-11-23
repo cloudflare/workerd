@@ -86,6 +86,27 @@ pub fn host_of_address(address: &str) -> String {
     address.to_owned()
 }
 
+/// The URL `serve` prints for an HTTP(S) `sock` listening at `address` on `port`, with a wildcard
+/// host as localhost.
+#[must_use]
+pub fn url(sock: socket::Reader<'_>, address: &str, port: u16) -> Option<String> {
+    let scheme = match sock.which() {
+        Ok(socket::Which::Http(_)) => "http",
+        Ok(socket::Which::Https(_)) => "https",
+        _ => return None,
+    };
+    url_of(scheme, address, port)
+}
+
+fn url_of(scheme: &str, address: &str, port: u16) -> Option<String> {
+    let host = match host_of_address(address).as_str() {
+        h if h.is_empty() || h == "loopback" || h.starts_with("unix:") => return None,
+        "*" | "0.0.0.0" => "localhost".to_owned(),
+        h => h.to_owned(),
+    };
+    Some(format!("{scheme}://{host}:{port}"))
+}
+
 fn default_port_for(sock: socket::Reader<'_>) -> u16 {
     match sock.which() {
         Ok(socket::Which::Http(_)) => 80,
@@ -536,7 +557,8 @@ impl Handler for HttpConnection {
                     body,
                     ServiceResponse::from(response.as_mut()),
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -574,7 +596,8 @@ impl Handler for HttpConnection {
                         tls_starter: KjMaybe::None,
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -647,7 +670,8 @@ pub async fn listen_tcp(
                         tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
     };
     accept_loop(

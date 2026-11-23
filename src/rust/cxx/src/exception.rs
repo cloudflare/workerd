@@ -74,6 +74,9 @@ pub mod repr {
             max_count: usize,
         );
 
+        #[link_name = "cxxbridge1$kjException$clone"]
+        pub fn kj_exception_clone(err: *const KjException) -> *mut KjException;
+
         #[link_name = "cxxbridge1$kjException$dropInPlace"]
         pub fn kj_exception_drop_in_place(err: *mut KjException);
 
@@ -257,6 +260,18 @@ impl KjException {
     pub fn line(&self) -> i32 {
         // Safety: the bridge representation and ownership invariants satisfy this operation.
         unsafe { repr::kj_exception_get_line(self.err.as_ptr()) }
+    }
+}
+
+/// Copies the `kj::Exception` with `kj::Exception::clone()`, which keeps everything it holds:
+/// context, remote trace and stack trace included.
+impl Clone for KjException {
+    fn clone(&self) -> Self {
+        // Safety: `self.err` is a live `kj::Exception*` that `self` owns.
+        let exception = unsafe { repr::kj_exception_clone(self.err.as_ptr()) };
+        Self {
+            err: NonNull::new(exception).expect("can't allocate new kj::Exception"),
+        }
     }
 }
 

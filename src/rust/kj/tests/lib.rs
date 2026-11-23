@@ -1,6 +1,5 @@
 use std::pin::Pin;
 
-use kj::Result;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::CustomHeaderId;
@@ -10,6 +9,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjMaybe;
@@ -74,7 +74,7 @@ impl Service for ProxyHttpService {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         self.target
             .request(method, url, headers, request_body, response)
             .await?;
@@ -88,7 +88,7 @@ impl Service for ProxyHttpService {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
+    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ServiceResult> + 'b>>
     where
         'a: 'b,
         Self: 'b,

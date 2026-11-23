@@ -30,6 +30,7 @@ Checks: >
   misc-confusable-identifiers,
   workerd-coroutine-hostile-raii,
   misc-header-include-cycle,
+  misc-include-cleaner,
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
@@ -117,6 +118,11 @@ CheckOptions:
     value: "kj::fwd"
   - key: workerd-use-after-move.InvalidationFunctions
     value: "::kj::mv"
+  - key: misc-include-cleaner.MissingIncludes
+    value: False
+  # Ignore KJ headers (too many to clean up for now) and some JSG headers where misc-include-cleaner reports false positives
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: "jsg.h|function.h|kj/.*"
 
 ####
 # Custom checks.

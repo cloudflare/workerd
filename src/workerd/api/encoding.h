@@ -76,9 +76,13 @@ class TextDecoder final: public jsg::Object {
   static jsg::Ref<TextDecoder> constructor(
       jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<ConstructorOptions> options);
 
-  jsg::JsString decode(jsg::Lock& js,
-      jsg::Optional<kj::Array<const kj::byte>> input,
-      jsg::Optional<DecodeOptions> options);
+  // The input is read only after options are converted, so an options getter that detaches it
+  // leaves nothing to decode. JsBufferSource does not take a bare SharedArrayBuffer, which the
+  // byte array catches; that one cannot be detached. C++ callers pass a byte array too.
+  using Input = kj::OneOf<jsg::JsBufferSource, kj::Array<kj::byte>>;
+
+  jsg::JsString decode(
+      jsg::Lock& js, jsg::Optional<Input> input, jsg::Optional<DecodeOptions> options);
 
   kj::StringPtr getEncoding();
 
@@ -105,6 +109,7 @@ class TextDecoder final: public jsg::Object {
     // invalid result without it.
     JSG_TS_OVERRIDE({
       constructor(label?: string, options?: TextDecoderConstructorOptions);
+      decode(input?: ArrayBuffer | ArrayBufferView, options?: TextDecoderDecodeOptions): string;
     });
   }
 
@@ -132,8 +137,6 @@ class TextDecoder final: public jsg::Object {
   bool midStream = false;
 
   static const DecodeOptions DEFAULT_OPTIONS;
-  static constexpr kj::byte DUMMY = 0;
-  static const kj::Array<const kj::byte> EMPTY;
 };
 
 // Implements the TextEncoder interface as prescribed by:
