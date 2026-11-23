@@ -294,6 +294,24 @@ KJ_TEST("C++ streams to a Rust server") {
   KJ_EXPECT(kj::str(response.getData().asChars()) == "one,two,three");
 }
 
+// A failed `-> stream` call fails every later call to the capability, as KJ's LocalClient does
+// for C++ servers, whether the server fails when dispatched or after it waits.
+KJ_TEST("a Rust server's failed streaming call fails the calls after it") {
+  for (const auto& failure: {"fail"_kj, "fail later"_kj}) {
+    Fixture f;
+    auto echo = f.rustEcho("rust:");
+    auto failing = echo.writeRequest();
+    failing.setData(failure.asBytes());
+    auto failed = failing.send();
+    auto next = echo.writeRequest();
+    next.setData("two"_kj.asBytes());
+    auto queued = next.send();
+    KJ_EXPECT_THROW_MESSAGE("write failed", failed.wait(f.waitScope));
+    KJ_EXPECT_THROW_MESSAGE("write failed", queued.wait(f.waitScope));
+    KJ_EXPECT_THROW_MESSAGE("write failed", echo.writtenRequest().send().wait(f.waitScope));
+  }
+}
+
 KJ_TEST("Rust streams to a C++ server") {
   Fixture f;
   ::rust::Vec<::rust::String> chunks;

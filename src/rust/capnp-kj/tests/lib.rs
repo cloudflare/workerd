@@ -95,6 +95,14 @@ impl test_echo::Server for EchoServer {
 
     async fn write(self: Rc<Self>, params: test_echo::WriteParams) -> Result<(), Error> {
         let data = params.get()?.get_data()?;
+        match data {
+            b"fail" => return Err(Error::failed("write failed".to_owned())),
+            b"fail later" => {
+                yield_once().await;
+                return Err(Error::failed("write failed later".to_owned()));
+            }
+            _ => {}
+        }
         self.written.borrow_mut().extend_from_slice(data);
         Ok(())
     }
@@ -256,6 +264,21 @@ async fn rust_call_back(
     }
     .await
     .map_err(capnp_kj::to_kj)
+}
+
+/// Returns pending once, waking its waker, then completes.
+async fn yield_once() {
+    let mut yielded = false;
+    std::future::poll_fn(|cx| {
+        if yielded {
+            std::task::Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    })
+    .await;
 }
 
 /// Streams `chunks` to `echo.write()`, then returns `echo.written()`.

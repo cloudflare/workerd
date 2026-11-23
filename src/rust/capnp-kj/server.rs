@@ -8,7 +8,12 @@
 //! `capnp::Capability::Server` and calls [`RustServer::dispatch`] for each call.
 
 use std::cell::Cell;
+use std::cell::RefCell;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::Context;
+use std::task::Poll;
+use std::task::Waker;
 
 use capnp::Error;
 use capnp::any_pointer;
@@ -83,14 +88,16 @@ impl Cancellation {
     }
 }
 
+/// The rest of a call that didn't complete when it was dispatched.
+type PendingCall = Pin<Box<dyn Future<Output = Result<(), cxx::KjError>>>>;
+
 /// A Rust server, as C++ holds it.
 pub struct RustServer {
     server: Box<dyn ErasedServer>,
     cancellation: Cancellation,
-    /// Whether the call that [`dispatch_call`] last dispatched is a `-> stream` call, for C++ to
-    /// read once `dispatch_call` returns. Dispatching only creates the server's future, so no
-    /// other call is dispatched in between.
-    last_is_streaming: Cell<bool>,
+    /// The call that [`dispatch_call`] last dispatched, if it didn't complete, for C++ to take
+    /// with [`take_pending_call`] as soon as `dispatch_call` returns.
+    pending: RefCell<Option<PendingCall>>,
 }
 
 impl RustServer {
@@ -98,33 +105,33 @@ impl RustServer {
         Self {
             server: Box::new(dispatch),
             cancellation,
-            last_is_streaming: Cell::new(false),
+            pending: RefCell::new(None),
         }
     }
 
     pub fn allows_cancellation(&self, interface_id: u64, method_id: u16) -> bool {
         self.cancellation.allows(interface_id, method_id)
     }
-
-    pub fn last_is_streaming(&self) -> bool {
-        self.last_is_streaming.get()
-    }
 }
 
-/// Dispatches a call that C++ made to `server`, and returns the call's future. The dispatch
-/// happens now, when C++ calls this, rather than when the future is first polled, so that C++
-/// can read [`RustServer::last_is_streaming`] right away; the call needs no state on the heap
-/// besides the future.
+/// Dispatches a call that C++ made to `server`, and runs the server's future until it first
+/// waits, as a C++ server's method runs until its first `co_await`. Most servers complete then,
+/// with their results in the C++ call (see [`KjResults`]), and their calls need no KJ promise of
+/// a Rust future. A call that waits, or fails, leaves the rest of it for C++ to take with
+/// [`take_pending_call`].
 ///
-/// The call's results are in the C++ call by the time the future completes, or the call fails;
-/// see [`KjResults`].
+/// So a Rust server's code runs synchronously inside the C++ code that dispatches the call, as a
+/// C++ server's does. That is usually a turn of KJ's event loop, but KJ also dispatches the next
+/// queued call to a capability while it destroys the promise of a finished or canceled
+/// `-> stream` call to it, which may happen inside another Rust future's poll: a server must not
+/// hold a `RefCell` borrow that its own methods take across awaiting or dropping such a promise.
 pub fn dispatch_call(
     server: &RustServer,
     interface_id: u64,
     method_id: u16,
     params: KjOwn<bridge::CxxMessage>,
     context: KjOwn<bridge::CallContextHook>,
-) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+) -> bridge::Dispatched {
     dispatch(
         server,
         interface_id,
@@ -142,7 +149,7 @@ pub fn dispatch_bridge_call(
     method_id: u16,
     params: KjOwn<bridge::CxxMessage>,
     context: KjOwn<bridge::CallContextHook>,
-) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+) -> bridge::Dispatched {
     dispatch(
         server,
         interface_id,
@@ -160,7 +167,7 @@ pub fn dispatch_rust_call(
     method_id: u16,
     params: Box<RustMessage>,
     context: KjOwn<bridge::CallContextHook>,
-) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+) -> bridge::Dispatched {
     dispatch(
         server,
         interface_id,
@@ -171,13 +178,28 @@ pub fn dispatch_rust_call(
     )
 }
 
+/// The rest of the call that [`dispatch_call`] or its kin last left pending on `server`.
+pub fn take_pending_call(
+    server: &RustServer,
+) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+    let pending = server.pending.take();
+    async move {
+        match pending {
+            Some(call) => call.await,
+            None => Err(to_kj(Error::failed(
+                "capnp-kj: no call is pending on this server".to_owned(),
+            ))),
+        }
+    }
+}
+
 fn dispatch(
     server: &RustServer,
     interface_id: u64,
     method_id: u16,
     params: Box<dyn ParamsHook>,
     context: ResultsContext,
-) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
+) -> bridge::Dispatched {
     let delivery = Delivery::default();
     let dispatched = server.server.dispatch_call(
         interface_id,
@@ -189,21 +211,54 @@ fn dispatch(
             delivery: Rc::clone(&delivery),
         })),
     );
-    server.last_is_streaming.set(dispatched.is_streaming);
-    let promise = dispatched.promise;
-    async move {
-        promise.await.map_err(to_kj)?;
-        // Generated code drops the results before the server's future completes, unless the
-        // server moved them somewhere that outlives the call.
-        if Rc::strong_count(&delivery) > 1 {
-            return Err(to_kj(Error::failed(
-                "capnp-kj: the server kept its results past the end of the call".to_owned(),
-            )));
-        }
-        match delivery.take() {
-            Some(error) => Err(to_kj(error)),
-            None => Ok(()),
-        }
+    let is_streaming = dispatched.is_streaming;
+    let mut promise = dispatched.promise;
+    // The server's future need not wake this poll's waker, only that of its latest poll, so this
+    // one can do nothing: kj-rs polls a pending future again, whether woken or not, once C++
+    // awaits the call's promise.
+    let pending: PendingCall =
+        match Pin::new(&mut promise).poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(result) => {
+                // Dropped first, as awaiting it would, since the future may hold the results.
+                drop(promise);
+                match finish(result, &delivery) {
+                    Ok(()) => {
+                        return bridge::Dispatched {
+                            complete: true,
+                            is_streaming,
+                        };
+                    }
+                    // A failure goes in the call's promise, as a C++ coroutine's does, so that a
+                    // failed `-> stream` call fails the calls queued behind it.
+                    Err(error) => Box::pin(std::future::ready(Err(error))),
+                }
+            }
+            Poll::Pending => Box::pin(async move { finish(promise.await, &delivery) }),
+        };
+    let previous = server.pending.replace(Some(pending));
+    debug_assert!(
+        previous.is_none(),
+        "C++ takes each pending call before dispatching another"
+    );
+    bridge::Dispatched {
+        complete: false,
+        is_streaming,
+    }
+}
+
+/// The outcome of a call whose server's future completed with `result`.
+fn finish(result: Result<(), Error>, delivery: &Delivery) -> Result<(), cxx::KjError> {
+    result.map_err(to_kj)?;
+    // Generated code drops the results before the server's future completes, unless the server
+    // moved them somewhere that outlives the call.
+    if Rc::strong_count(delivery) > 1 {
+        return Err(to_kj(Error::failed(
+            "capnp-kj: the server kept its results past the end of the call".to_owned(),
+        )));
+    }
+    match delivery.take() {
+        Some(error) => Err(to_kj(error)),
+        None => Ok(()),
     }
 }
 

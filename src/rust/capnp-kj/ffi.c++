@@ -111,15 +111,23 @@ class RustServerAdapter final: public capnp::Capability::Server {
       uint16_t methodId,
       capnp::CallContext<capnp::AnyPointer, capnp::AnyPointer> context) override {
     auto& hook = capnp::CallContextHook::from(context);
-    kj::Promise<void> promise = dispatch(interfaceId, methodId, hook);
     // capnpc-rust does not see `$Cxx.allowCancellation`; the Rust server stated it instead.
-    return {kj::mv(promise), server->last_is_streaming(),
-      server->allows_cancellation(interfaceId, methodId)};
+    auto allowCancellation = server->allows_cancellation(interfaceId, methodId);
+    Dispatched dispatched{};
+    KJ_IF_SOME(exception,
+        kj::runCatchingExceptions([&]() { dispatched = dispatch(interfaceId, methodId, hook); })) {
+      // Reading the params failed before the server ran. The server's own failures arrive in
+      // take_pending_call()'s promise.
+      return {kj::mv(exception), false, allowCancellation};
+    }
+    // Most Rust servers succeed when dispatched, and their calls need no promise of a Rust
+    // future.
+    kj::Promise<void> promise = dispatched.complete ? kj::READY_NOW : take_pending_call(*server);
+    return {kj::mv(promise), dispatched.is_streaming, allowCancellation};
   }
 
  private:
-  kj::Promise<void> dispatch(
-      uint64_t interfaceId, uint16_t methodId, capnp::CallContextHook& context) {
+  Dispatched dispatch(uint64_t interfaceId, uint16_t methodId, capnp::CallContextHook& context) {
     // The bridge's own call hands its params to the server in place, and takes the server's
     // results as a Rust message.
     KJ_IF_SOME(bridge, tryBridgeContext(context)) {

@@ -18,6 +18,7 @@ use crate::server::RustServer;
 use crate::server::dispatch_bridge_call;
 use crate::server::dispatch_call;
 use crate::server::dispatch_rust_call;
+use crate::server::take_pending_call;
 
 #[cxx::bridge(namespace = "workerd::rust::capnp_kj")]
 #[expect(
@@ -120,6 +121,15 @@ pub mod bridge {
         ) -> Result<()>;
     }
 
+    /// A call a Rust server was given, once dispatched.
+    struct Dispatched {
+        /// Whether the call succeeded when it was dispatched; if not, C++ takes the rest of the
+        /// call, which waits or has failed, with `take_pending_call()`.
+        complete: bool,
+        /// Whether the method is a `-> stream` method.
+        is_streaming: bool,
+    }
+
     /// A segment of a Rust message.
     struct RustSegment<'a> {
         bytes: &'a [u8],
@@ -137,28 +147,30 @@ pub mod bridge {
 
         type RustServer;
         fn allows_cancellation(self: &RustServer, interface_id: u64, method_id: u16) -> bool;
-        fn last_is_streaming(self: &RustServer) -> bool;
-        async fn dispatch_call(
+        fn dispatch_call(
             server: &RustServer,
             interface_id: u64,
             method_id: u16,
             params: KjOwn<CxxMessage>,
             context: KjOwn<CallContextHook>,
-        ) -> Result<()>;
-        async fn dispatch_bridge_call(
+        ) -> Dispatched;
+        fn dispatch_bridge_call(
             server: &RustServer,
             interface_id: u64,
             method_id: u16,
             params: KjOwn<CxxMessage>,
             context: KjOwn<CallContextHook>,
-        ) -> Result<()>;
-        async fn dispatch_rust_call(
+        ) -> Dispatched;
+        fn dispatch_rust_call(
             server: &RustServer,
             interface_id: u64,
             method_id: u16,
             params: Box<RustMessage>,
             context: KjOwn<CallContextHook>,
-        ) -> Result<()>;
+        ) -> Dispatched;
+        /// The rest of the call that the server last dispatched, if `Dispatched::complete` was
+        /// false; C++ takes it at once.
+        async fn take_pending_call(server: &RustServer) -> Result<()>;
     }
 
     impl KjOwn<ClientHook> {}
