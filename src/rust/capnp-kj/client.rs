@@ -24,6 +24,7 @@ use kj_rs::KjOwn;
 
 use crate::error::from_kj;
 use crate::ffi::bridge;
+use crate::message::CallTarget;
 use crate::message::CxxMessageReader;
 use crate::message::RustMessage;
 
@@ -91,11 +92,11 @@ impl ClientHook for KjClient {
         method_id: u16,
         _size_hint: Option<capnp::MessageSize>,
     ) -> Request<any_pointer::Owned, any_pointer::Owned> {
-        Request::new(Box::new(KjRequest::new(
-            self.add_ref_kj(),
+        Request::new(Box::new(RustMessage::new_request(CallTarget {
+            client: self.add_ref_kj(),
             interface_id,
             method_id,
-        )))
+        })))
     }
 
     fn call(
@@ -105,8 +106,12 @@ impl ClientHook for KjClient {
         params: Box<dyn ParamsHook>,
         mut results: Box<dyn ResultsHook>,
     ) -> Promise<(), Error> {
-        let mut request = KjRequest::new(self.add_ref_kj(), interface_id, method_id);
-        if let Err(e) = params.get().and_then(|p| request.get().set_as(p)) {
+        let mut request = RustMessage::new_request(CallTarget {
+            client: self.add_ref_kj(),
+            interface_id,
+            method_id,
+        });
+        if let Err(e) = params.get().and_then(|p| request.root()?.set_as(p)) {
             return Promise::err(e);
         }
         drop(params);
@@ -154,29 +159,11 @@ impl ClientHook for KjClient {
     }
 }
 
-/// A call being built in Rust, to a C++ capability.
-struct KjRequest {
-    client: KjOwn<bridge::ClientHook>,
-    interface_id: u64,
-    method_id: u16,
-    // Boxed, for C++ to take.
-    params: Box<RustMessage>,
-}
-
-impl KjRequest {
-    fn new(client: KjOwn<bridge::ClientHook>, interface_id: u64, method_id: u16) -> Self {
-        Self {
-            client,
-            interface_id,
-            method_id,
-            params: Box::new(RustMessage::new()),
-        }
-    }
-}
-
-impl RequestHook for KjRequest {
+/// A call being built in Rust, to a C++ capability: its params, which hold its target. C++ takes
+/// the box capnp-rust keeps the request in as the call's params.
+impl RequestHook for RustMessage {
     fn get(&mut self) -> any_pointer::Builder<'_> {
-        match self.params.root() {
+        match self.root() {
             Ok(root) => root,
             // `new` initialized the root, and an `AnyPointer` root reads as any pointer.
             Err(_) => unreachable!(),
@@ -187,14 +174,16 @@ impl RequestHook for KjRequest {
         0
     }
 
-    fn send(self: Box<Self>) -> RemotePromise<any_pointer::Owned> {
-        let Self {
+    fn send(mut self: Box<Self>) -> RemotePromise<any_pointer::Owned> {
+        let Some(CallTarget {
             client,
             interface_id,
             method_id,
-            params,
-        } = *self;
-        match bridge::client_call(&client, interface_id, method_id, params) {
+        }) = self.take_target()
+        else {
+            return no_target();
+        };
+        match bridge::client_call(&client, interface_id, method_id, self) {
             Ok(call) => {
                 // A call whose results can't hold a capability has nothing to pipeline on; its
                 // pipeline needs no allocation.
@@ -227,22 +216,37 @@ impl RequestHook for KjRequest {
         }
     }
 
-    fn send_streaming(self: Box<Self>) -> Promise<(), Error> {
-        let Self {
+    fn send_streaming(mut self: Box<Self>) -> Promise<(), Error> {
+        let Some(CallTarget {
             client,
             interface_id,
             method_id,
-            params,
-        } = *self;
+        }) = self.take_target()
+        else {
+            return Promise::err(Error::failed(NO_TARGET.to_owned()));
+        };
         // Sent now rather than when the promise is first polled, so that streaming calls reach
         // the server in the order they were sent, as `send()`'s do.
-        let sent = bridge::client_send_streaming(client, interface_id, method_id, params);
+        let sent = bridge::client_send_streaming(client, interface_id, method_id, self);
         Promise::from_future(async move { sent.await.map_err(|e| from_kj(&e)) })
     }
 
     fn tail_send(self: Box<Self>) -> Option<(u32, Promise<(), Error>, Box<dyn PipelineHook>)> {
         // Only the two-party RPC system can turn a call into a tail call.
         None
+    }
+}
+
+/// Sending a message that has no target fails: `new_call()` and `call()` give every request one,
+/// and `send()` takes it, so only a message made some other way has none.
+const NO_TARGET: &str = "capnp-kj: the request has no target";
+
+fn no_target() -> RemotePromise<any_pointer::Owned> {
+    RemotePromise {
+        pipeline: any_pointer::Pipeline::new(Box::new(BrokenPipeline {
+            description: NO_TARGET.to_owned(),
+        })),
+        promise: Promise::err(Error::failed(NO_TARGET.to_owned())),
     }
 }
 

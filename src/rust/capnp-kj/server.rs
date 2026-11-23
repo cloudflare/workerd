@@ -129,7 +129,7 @@ pub fn dispatch_call(
         server,
         interface_id,
         method_id,
-        KjParams::Cxx(CxxMessageReader::new(params)),
+        Box::new(CxxMessageReader::new(params)),
         ResultsContext::Cxx(context),
     )
 }
@@ -147,7 +147,7 @@ pub fn dispatch_bridge_call(
         server,
         interface_id,
         method_id,
-        KjParams::Cxx(CxxMessageReader::new(params)),
+        Box::new(CxxMessageReader::new(params)),
         ResultsContext::Bridge(context),
     )
 }
@@ -165,7 +165,8 @@ pub fn dispatch_rust_call(
         server,
         interface_id,
         method_id,
-        KjParams::Rust(params),
+        // The params are their own hook, read in place.
+        params,
         ResultsContext::Bridge(context),
     )
 }
@@ -174,14 +175,14 @@ fn dispatch(
     server: &RustServer,
     interface_id: u64,
     method_id: u16,
-    params: KjParams,
+    params: Box<dyn ParamsHook>,
     context: ResultsContext,
 ) -> impl Future<Output = Result<(), cxx::KjError>> + use<> {
     let delivery = Delivery::default();
     let dispatched = server.server.dispatch_call(
         interface_id,
         method_id,
-        Params::new(Box::new(params)),
+        Params::new(params),
         Results::new(Box::new(KjResults {
             message: None,
             context,
@@ -209,23 +210,6 @@ fn dispatch(
 /// Why a call's results didn't reach the C++ call, if they didn't; shared between the results and
 /// the call's future, which fails with it.
 type Delivery = Rc<Cell<Option<Error>>>;
-
-/// A call's params, read in place.
-enum KjParams {
-    /// From a C++ caller.
-    Cxx(CxxMessageReader),
-    /// From a Rust caller.
-    Rust(Box<RustMessage>),
-}
-
-impl ParamsHook for KjParams {
-    fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
-        match self {
-            Self::Cxx(message) => message.root(),
-            Self::Rust(message) => message.root_as_reader(),
-        }
-    }
-}
 
 /// The C++ call that a Rust server's results go to.
 enum ResultsContext {

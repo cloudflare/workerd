@@ -10,6 +10,7 @@
 use capnp::any_pointer;
 use capnp::message;
 use capnp::private::capability::ClientHook;
+use capnp::private::capability::ParamsHook;
 use capnp::traits::Imbue;
 use capnp::traits::ImbueMut;
 use kj_rs::KjMaybe;
@@ -142,9 +143,21 @@ unsafe impl message::Allocator for PooledAllocator {
 }
 
 /// A message built in Rust, with its capability table.
+///
+/// The params of a call being built in Rust carry the call's target, so that the message is the
+/// call's `RequestHook` (see `client.rs`), and the box capnp-rust keeps the request in is the box
+/// C++ takes the params in.
 pub struct RustMessage {
     builder: message::Builder<PooledAllocator>,
     caps: CapTable,
+    target: Option<CallTarget>,
+}
+
+/// Where a call being built in Rust goes.
+pub struct CallTarget {
+    pub client: KjOwn<bridge::ClientHook>,
+    pub interface_id: u64,
+    pub method_id: u16,
 }
 
 impl RustMessage {
@@ -156,7 +169,21 @@ impl RustMessage {
         Self {
             builder,
             caps: Vec::new(),
+            target: None,
         }
+    }
+
+    /// The params of a call to `target`.
+    pub fn new_request(target: CallTarget) -> Self {
+        Self {
+            target: Some(target),
+            ..Self::new()
+        }
+    }
+
+    /// Takes the call's target, once, to send the call.
+    pub fn take_target(&mut self) -> Option<CallTarget> {
+        self.target.take()
     }
 
     /// The root of the message, imbued with its capability table.
@@ -204,6 +231,18 @@ impl RustMessage {
             Some(Some(hook)) => KjMaybe::Some(KjClient::into_kj(hook.add_ref())),
             _ => KjMaybe::None,
         }
+    }
+}
+
+impl ParamsHook for CxxMessageReader {
+    fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
+        self.root()
+    }
+}
+
+impl ParamsHook for RustMessage {
+    fn get(&self) -> capnp::Result<any_pointer::Reader<'_>> {
+        self.root_as_reader()
     }
 }
 
