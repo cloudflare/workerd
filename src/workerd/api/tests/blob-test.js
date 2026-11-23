@@ -73,9 +73,11 @@ export const test1 = {
     strictEqual(new Blob([], { type: 'FoO\u0019/bAr' }).type, '');
     strictEqual(new Blob([], { type: 'FoO\u0020/bAr' }).type, 'foo /bar');
     strictEqual(new Blob([], { type: 'FoO\u007e/bAr' }).type, 'foo\u007e/bar');
+    strictEqual(new Blob([], { type: 'FoO\u007f/bAr' }).type, '');
     strictEqual(new Blob([], { type: 'FoO\u0080/bAr' }).type, '');
     strictEqual(new File([], 'foo.txt', { type: 'FoO/bAr' }).type, 'foo/bar');
     strictEqual(blob2.slice(1, 2, 'FoO/bAr').type, 'foo/bar');
+    strictEqual(blob2.slice(1, 2, 'FoO\u007f/bAr').type, '');
   },
 };
 
@@ -380,5 +382,24 @@ export const endings = {
       strictEqual(mixed.size, 11);
       strictEqual(await make([inner], { endings: 'native' }).text(), 'p\r\nq');
     }
+  },
+};
+
+export const sliceClamp = {
+  async test() {
+    const blob = new Blob(['abcd']);
+    const slice = async (...args) => await blob.slice(...args).text();
+
+    strictEqual(await slice(1.5, 2.5), '');
+    strictEqual(await slice(0.5, 3.5), 'abcd');
+    strictEqual(await slice(-1.5), 'cd');
+    strictEqual(await slice(NaN, NaN), '');
+    strictEqual(await slice(0, Infinity), 'abcd');
+    strictEqual(await slice(Infinity), '');
+    strictEqual(await slice(-Infinity, 2), 'ab');
+    strictEqual(await slice(1, 2 ** 32), 'bcd');
+    strictEqual(await slice(-(2 ** 53)), 'abcd');
+    strictEqual(await slice(2 ** 64), '');
+    strictEqual(await slice('1', '3'), 'bc');
   },
 };

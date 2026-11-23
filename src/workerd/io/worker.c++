@@ -2325,28 +2325,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     }
   });
 
-  // Before resolving the main module, if both nodejs_compat_v2 and the new
-  // module registry are enabled, let's pre-resolve the process and buffer modules.
-  // Why? Great question! Resolving these modules synchronously causes the microtask
-  // queue to be pumped, which we don't actually want to do while resolving the main
-  // module until we are ready. Both process and buffer are exposed via globalThis
-  // when the nodejs_compat_v2 flag is used, and if the top-level scope is accessing
-  // either globalThis.process or globalThis.buffer, then we need to make sure that
-  // the modules are already resolved so we don't pump the microtask queue while
-  // synchronously accessing those globals. Resolving them here ensures that they are
-  // ready to go before we begin evaluating the main module.
-  //
-  // The process global reads the process object's own module, not node:process, whose
-  // named exports include the stdio streams and so force them to be built.
   auto featureFlags = FeatureFlags::get(js);
-  if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
-    auto processSpec = featureFlags.getEnableNodeJsProcessV2() ? "node-internal:public_process"_kj
-                                                               : "node-internal:legacy_process"_kj;
-    JSG_REQUIRE_NONNULL(js.resolveInternalModule(processSpec), Error, "Failed to initialize ",
-        processSpec, " module");
-    JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
-        "Failed to initialize node:buffer module");
-  }
 
   // When enable_nodejs_global_timers is enabled, load the module that makes all 6 timer
   // functions (setTimeout, setInterval, clearTimeout, clearInterval, setImmediate,
