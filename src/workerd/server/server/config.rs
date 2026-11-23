@@ -132,7 +132,9 @@ impl Factory {
 
     /// Completes `delay` from now on the factory's `kj::Timer`.
     pub async fn sleep(&self, delay: Duration) {
-        let nanos = u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX);
+        // A longer delay would overflow the timer's `kj::TimePoint`; this one is about 146 years.
+        const MAX_NANOS: u64 = i64::MAX.unsigned_abs() / 2;
+        let nanos = u64::try_from(delay.as_nanos()).map_or(MAX_NANOS, |n| n.min(MAX_NANOS));
         // A timer's delay does not fail.
         let _ = ffi::factory_sleep(&self.inner, nanos).await;
     }
