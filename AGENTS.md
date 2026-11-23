@@ -235,6 +235,30 @@ These apply to every kind of commentary that ships with the code, not just code 
 - Referring to historical state is occasionally legitimate, but it's rare and must be explicitly introduced as history, ideally explaining what problem the old approach caused (e.g. "Historically we did X, but that caused Y, so now we do Z").
 - Don't explain what a widely-used tag, flag, or API does at every use site; document such conventions once where they're defined and let readers find that via search.
 
+### Rust structured logging
+
+In Rust `tracing` events (`error!`, `warn!`, `info!`, `debug!`, `trace!`, and `event!`), use a
+short, stable message that says what happened. Put variable details such as errors, IDs, paths,
+counts, and durations in named fields instead of interpolating them into the message:
+
+```rust
+tracing::warn!(%path, attempts, error = &err as &dyn std::error::Error, "failed to read config");
+```
+
+Use consistent field names and include units where needed (e.g. `elapsed_ms`). Pass strings,
+numbers, and booleans directly when possible; use `%` for `Display` or `?` for `Debug` when a value
+needs rendering. Don't preformat a field with `format!` just to log it, duplicate a value in the
+message and a field, or log secrets in either place.
+
+For errors, prefer passing a borrowed `dyn std::error::Error + 'static` directly, as above,
+without `%` or `?`. It implements `tracing::field::Value`, so the subscriber receives the error
+and can inspect its source chain instead of receiving only formatted text.
+
+When reviewing new or changed events, flag interpolated diagnostic details even if the call already
+has some fields. Keep text in the message when it is the payload (e.g. a forwarded Worker warning),
+when the exact rendered text is a contract, or when a test intentionally exercises message
+rendering. Before changing an existing message, check for text-based tests, parsers, and alerts.
+
 ### Use KJ types, not STL
 
 This project uses the KJ library instead of the C++ standard library for most types:
