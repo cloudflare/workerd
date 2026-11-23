@@ -23,8 +23,10 @@
 // requests whose key starts with `prefix` (and does not end with `except`)
 // and whose method is `method` by `delayMs`, then answers `status` instead if
 // given, for the next `times` of them; with `after`, it serves the request
-// first and answers `status` instead of its answer. `GET /_faults` lists
-// them, with `hits`.
+// first and answers `status` instead of its answer. A fault with `via`
+// matches only the requests of a client whose endpoint has the path
+// `/_via/<via>`, which is not part of the request's path otherwise.
+// `GET /_faults` lists them, with `hits`.
 // `GET /_rejected?key=` counts the writes to a key whose precondition failed.
 //
 // With the dialect "gcs", it speaks Cloud Storage's XML API instead: an
@@ -158,6 +160,8 @@ export class FakeS3Server {
 
   async #handle(req, res) {
     const url = new URL(req.url, 'http://s3');
+    const [, via, rest] = /^\/_via\/([^/]+)(.*)$/.exec(url.pathname) ?? [];
+    if (via !== undefined) url.pathname = rest || '/';
     const headers = { date: new Date().toUTCString() };
     const send = (status, body = null, extra = {}) => {
       res.writeHead(status, { ...headers, ...extra });
@@ -195,6 +199,7 @@ export class FakeS3Server {
       (f) =>
         f.hits < f.times &&
         f.method === req.method &&
+        (f.via === undefined || f.via === via) &&
         key.startsWith(f.prefix) &&
         !(f.except !== undefined && key.endsWith(f.except))
     );

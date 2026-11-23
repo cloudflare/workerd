@@ -630,14 +630,20 @@ impl ClusterNode {
     }
 
     /// When a relay of a peer's request that waited here for its object's handoff must start by,
-    /// once this instance stops; none before. Sent on, the request does not outlast its caller's
-    /// retries; but a call this instance relays when its connections deadline comes is cut off as
-    /// one that may have run, which the peer cannot send again. So it relays only while the call
-    /// has the time work in flight on an object being handed off has had, until the `in_flight`
-    /// deadline; from then on it answers `moved`, and the peer sends the request where the object
-    /// went itself.
+    /// once this instance stops; none before. A relay still in flight at `handed_off_relay_cutoff`
+    /// is cut off as a call that may have run, however long the new owner takes to take the
+    /// object over. So it relays only while the call has the time work in flight on an object
+    /// being handed off has had, until the `in_flight` deadline; from then on it answers `moved`,
+    /// and the peer's caller may send the request where the object went itself.
     pub fn handed_off_relay_deadline(&self) -> Option<Instant> {
         self.deadlines.get().map(|deadlines| deadlines.in_flight)
+    }
+
+    /// When a relay of a peer's request that waited here for its object's handoff is cut off,
+    /// once this instance stops; none before: the connections deadline, after which it exits with
+    /// the requests it still serves.
+    pub fn handed_off_relay_cutoff(&self) -> Option<Instant> {
+        self.deadlines.get().map(|deadlines| deadlines.connections)
     }
 
     /// Starts a request a peer makes here, or the debug port: counted on the peer's `session`,
