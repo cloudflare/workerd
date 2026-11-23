@@ -1081,5 +1081,89 @@ cloudflare.script_version.tag = ""
 cloudflare.script_version.message = "")"_kj);
 }
 
+// A collector that records the request it gets and answers with `status` and `responseBody`.
+class CollectorService final: public kj::HttpService {
+ public:
+  CollectorService(kj::HttpHeaderTable& table, uint status, kj::StringPtr responseBody)
+      : table(table),
+        status(status),
+        responseBody(responseBody) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    this->method = method;
+    this->url = kj::str(url);
+    this->headers = headers.clone();
+    length = requestBody.tryGetLength();
+    body = co_await requestBody.readAllBytes();
+    kj::HttpHeaders responseHeaders(table);
+    auto stream = response.send(status, "Status", responseHeaders, responseBody.size());
+    co_await stream->write(responseBody.asBytes());
+    // The client has read the whole body: a write to the response completes once it is read.
+    responseRead = true;
+  }
+
+  kj::Maybe<kj::HttpMethod> method;
+  kj::String url;
+  kj::Maybe<kj::HttpHeaders> headers;
+  kj::Maybe<uint64_t> length;
+  kj::Array<kj::byte> body;
+  bool responseRead = false;
+
+ private:
+  kj::HttpHeaderTable& table;
+  uint status;
+  kj::StringPtr responseBody;
+};
+
+KJ_TEST("postOtlpTraces() POSTs a request as protobuf and reads the whole response") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::HttpHeaderTable::Builder builder;
+  auto routing = builder.add("X-Routing");
+  auto table = builder.build();
+  CollectorService collector(*table, 200, "a response body to drain"_kj);
+  auto client = kj::newHttpClient(collector);
+  kj::HttpHeaders headers(*table);
+  headers.setPtr(routing, "zone=1");
+  // Replaced by the protobuf content type.
+  headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+  auto request = kj::heapArray<const kj::byte>({0x0a, 0x00, 0xff, 0x12});
+  postOtlpTraces(*client, "http://localhost/v1/traces", kj::mv(headers), kj::mv(request))
+      .wait(waitScope);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(collector.method) == kj::HttpMethod::POST);
+  KJ_EXPECT(collector.url == "http://localhost/v1/traces");
+  auto& received = KJ_ASSERT_NONNULL(collector.headers);
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(received.get(kj::HttpHeaderId::CONTENT_TYPE)) == "application/x-protobuf");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(received.get(routing)) == "zone=1");
+  // The body has a known length, so it is not chunked.
+  KJ_EXPECT(KJ_ASSERT_NONNULL(collector.length) == 4);
+  KJ_EXPECT(kj::encodeHex(collector.body) == "0a00ff12");
+  KJ_EXPECT(collector.responseRead);
+}
+
+KJ_TEST("postOtlpTraces() accepts any 2xx and throws on any other status") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto table = kj::HttpHeaderTable::Builder().build();
+  auto post = [&](uint status) {
+    CollectorService collector(*table, status, ""_kj);
+    auto client = kj::newHttpClient(collector);
+    postOtlpTraces(*client, "http://localhost/v1/traces", kj::HttpHeaders(*table),
+        kj::heapArray<const kj::byte>({0x0a, 0x00}))
+        .wait(waitScope);
+  };
+  post(200);
+  post(204);
+  post(299);
+  KJ_EXPECT_THROW_MESSAGE("OTLP collector rejected spans", post(302));
+  KJ_EXPECT_THROW_MESSAGE("OTLP collector rejected spans", post(400));
+  KJ_EXPECT_THROW_MESSAGE("OTLP collector rejected spans", post(503));
+}
+
 }  // namespace
 }  // namespace workerd
