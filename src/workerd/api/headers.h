@@ -104,6 +104,9 @@ public:
   kj::Maybe<kj::String> getCommon(jsg::Lock& js, capnp::CommonHeaderName idx);
   bool hasCommon(capnp::CommonHeaderName idx);
   void setCommon(capnp::CommonHeaderName idx, kj::String value);
+
+  // Normalizes `value` as setCommon() would before storing it.
+  static kj::String normalizeCommon(capnp::CommonHeaderName idx, kj::String value);
   void deleteCommon(capnp::CommonHeaderName idx);
 
   void forEach(jsg::Lock& js,

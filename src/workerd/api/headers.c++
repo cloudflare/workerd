@@ -851,6 +851,10 @@ void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
   KJ_UNREACHABLE;
 }
 
+kj::String Headers::normalizeCommon(capnp::CommonHeaderName idx, kj::String value) {
+  return normalizeHeaderValue(getCommonHeaderName(static_cast<kj::uint>(idx)), kj::mv(value));
+}
+
 void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
   kj::uint index = static_cast<kj::uint>(idx);
   value = normalizeHeaderValue(getCommonHeaderName(index), kj::mv(value));
