@@ -237,6 +237,7 @@ impl Keeper {
     async fn know_clock(&self) -> Result<()> {
         let timing = self.held.timing;
         let deadline = tokio::time::Instant::now() + ms(timing.lease_ms);
+        let mut failed = None;
         loop {
             // With a lease's drift to spare: a node that joined just within
             // the bound would exit at its first round.
@@ -244,12 +245,17 @@ impl Keeper {
             let known = self.lease.borrow().clock(skew_ms);
             match known {
                 Ok(()) => return Ok(()),
-                Err(e) if tokio::time::Instant::now() >= deadline => return Err(Error::Http(e)),
+                // The bucket's fault, if its last read failed.
+                Err(e) if tokio::time::Instant::now() >= deadline => {
+                    return Err(failed.unwrap_or(Error::Http(e)));
+                }
                 Err(_) => {}
             }
-            // A read that fails or stalls only costs its answer.
             let read = self.registry.recorded(self.registry.node());
-            let _ = timeout(ms(timing.renew_attempt_ms), read).await;
+            failed = match timeout(ms(timing.renew_attempt_ms), read).await {
+                Ok(read) => read.err(),
+                Err(_) => Some(Error::Http("reading this node's record timed out".into())),
+            };
             tokio::time::sleep(ms(timing.retry_ms / 4)).await;
         }
     }
