@@ -1262,6 +1262,11 @@ wd_test(
 )
 
 wd_test(
+    src = "pipe-js-source-error-unhandled-rejection-test.wd-test",
+    data = ["pipe-js-source-error-unhandled-rejection-test.js"],
+)
+
+wd_test(
     src = "autovuln-132-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-132-test.js"],
