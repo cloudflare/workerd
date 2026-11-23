@@ -24,7 +24,7 @@ enum class FuturePollStatus : uint8_t {
   Error,
 };
 
-// A class with space for a `T` or a `rust::String`, whichever is larger.
+// A class with space for a `T` or a `kj::Exception*`, whichever is larger.
 template <typename T>
 class FuturePoller {
  public:
@@ -32,8 +32,10 @@ class FuturePoller {
   ~FuturePoller() noexcept(false) {}
 
   // Call `pollFunc()` with a pointer to space to which a `T` (successful result) or a
-  // `rust::String` (error result) may be written, then propagate the result or error to `output`
-  // depending on the return value of `pollFunc()`.
+  // `kj::Exception*` (error result) may be written, then propagate the result or error to `output`
+  // depending on the return value of `pollFunc()`. Any future, including one whose output is not
+  // a `Result`, can produce an error result: a panic while polling it becomes a `FAILED`
+  // exception.
   template <typename F>
   void poll(F&& pollFunc, kj::_::ExceptionOr<T>& output) {
     switch (pollFunc(&result)) {
@@ -79,7 +81,8 @@ using DropCallback = void (*)(void /* RustFuture::fut */* fut);
 // same layout.
 //
 // Cancellation: Destroying the enclosing FutureAwaiter calls this struct's `drop` function pointer,
-// which drops the Rust Future and transitively cancels any KJ sub-promises it was .await'ing.
+// which drops the Rust Future and transitively cancels any KJ sub-promises it was .await'ing. A
+// panic while dropping the Rust Future is logged, not propagated.
 struct RustFuture {
 
   template <typename T>
