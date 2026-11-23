@@ -733,6 +733,14 @@ kj_test(
 )
 
 kj_test(
+    src = "response-lazy-headers-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "util-test.c++",
     deps = [
         ":util",
