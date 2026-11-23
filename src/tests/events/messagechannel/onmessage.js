@@ -7,6 +7,7 @@
 // reassignment.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
+import { setEventTargetThis } from 'flags';
 
 export const onmessageDefaultsToNull = {
   test() {
@@ -92,8 +93,8 @@ export const onmessagePrimitiveClears = {
   },
 };
 
-// The handler is invoked with the global object as `this`, as JSG invokes
-// an event handler assigned through a C++ setter.
+// The handler is invoked with the port as `this`, or the global object
+// without set_event_target_this.
 export const onmessageHandlerReceiver = {
   async test() {
     const { port1, port2 } = new MessageChannel();
@@ -102,7 +103,7 @@ export const onmessageHandlerReceiver = {
       resolve(this);
     };
     port1.postMessage(1);
-    strictEqual(await promise, globalThis);
+    strictEqual(await promise, setEventTargetThis ? port2 : globalThis);
     port1.close();
   },
 };
