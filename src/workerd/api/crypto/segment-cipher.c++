@@ -112,6 +112,11 @@ kj::Array<kj::byte> SegmentInfoTemplate::build(uint64_t segmentIndex) const {
   return result.releaseAsArray();
 }
 
+bool SegmentInfoTemplate::operator==(const SegmentInfoTemplate& other) const {
+  return prefix.asPtr() == other.prefix.asPtr() && index == other.index &&
+      suffix.asPtr() == other.suffix.asPtr();
+}
+
 SegmentCipher::SegmentCipher(SegmentLayout layout, KeySchedule keys, uint32_t keyBits)
     : layout(layout),
       digest(keys.digest),
@@ -134,6 +139,9 @@ SegmentCipher::SegmentCipher(SegmentLayout layout, KeySchedule keys, uint32_t ke
       JSG_REQUIRE(keyBits == 256, DOMOperationError,
           "AES-CBC-HMAC-SHA256 segment keys are 256 bits long (requested ", keyBits, ").");
       JSG_REQUIRE(macInfo != kj::none, TypeError, "AES-CBC-HMAC-SHA256 requires macInfo.");
+      // The same info would derive the same key for encryption and for the MAC.
+      JSG_REQUIRE(KJ_ASSERT_NONNULL(macInfo) != info, TypeError,
+          "macInfo must differ from info, so that the MAC and encryption keys differ.");
       break;
   }
 }
@@ -150,7 +158,21 @@ uint64_t SegmentCipher::maxIndex() const {
 // message only as far as the schedule is unique to it; see the class comment.
 ZeroOnFree SegmentCipher::deriveKey(
     const SegmentInfoTemplate& infoTemplate, uint64_t segmentIndex) const {
-  auto segmentInfo = infoTemplate.build(segmentIndex);
+  return expand(infoTemplate.build(segmentIndex));
+}
+
+SegmentCipher::CbcKeys SegmentCipher::deriveCbcKeys(uint64_t segmentIndex) const {
+  auto encryptionInfo = info.build(segmentIndex);
+  auto macSegmentInfo = KJ_ASSERT_NONNULL(macInfo).build(segmentIndex);
+  // Different templates can still build the same info for some index, such as a prefix ending
+  // in a zero byte against a suffix of one at index 0.
+  JSG_REQUIRE(encryptionInfo.asPtr() != macSegmentInfo.asPtr(), DOMOperationError, "Segment ",
+      segmentIndex,
+      "'s info and macInfo are the same, so its MAC key would be its encryption key.");
+  return {.encryption = expand(encryptionInfo), .mac = expand(macSegmentInfo)};
+}
+
+ZeroOnFree SegmentCipher::expand(kj::ArrayPtr<const kj::byte> segmentInfo) const {
   auto key = kj::heapArray<kj::byte>(keyLength);
   OSSLCALL(HKDF_expand(key.begin(), key.size(), digest, prk.begin(), prk.size(),
       segmentInfo.begin(), segmentInfo.size()));
@@ -207,11 +229,11 @@ kj::Array<kj::byte> SegmentCipher::seal(uint64_t segmentIndex,
     kj::EntropySource& entropy) const {
   KJ_REQUIRE(plaintext.size() > 0 && plaintext.size() <= layout.getSegmentSize());
   auto result = kj::heapArray<kj::byte>(layout.sealedSegmentSize(plaintext.size()));
-  auto key = deriveKey(info, segmentIndex);
 
   switch (layout.getAlgorithm()) {
     case SegmentAlgorithm::AES_GCM:
     case SegmentAlgorithm::CHACHA20_POLY1305: {
+      auto key = deriveKey(info, segmentIndex);
       auto nonce = result.first(AEAD_NONCE_SIZE);
       entropy.generate(nonce);
       auto ctx = newAeadContext(aeadFor(layout.getAlgorithm(), keyLength), key);
@@ -223,6 +245,7 @@ kj::Array<kj::byte> SegmentCipher::seal(uint64_t segmentIndex,
       break;
     }
     case SegmentAlgorithm::AES_CBC_HMAC_SHA256: {
+      auto keys = deriveCbcKeys(segmentIndex);
       auto iv = result.first(CBC_BLOCK_SIZE);
       entropy.generate(iv);
       auto signedLength = result.size() - HMAC_SHA256_SIZE;
@@ -230,7 +253,8 @@ kj::Array<kj::byte> SegmentCipher::seal(uint64_t segmentIndex,
 
       auto ctx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
       KJ_ASSERT(ctx.get() != nullptr);
-      OSSLCALL(EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_cbc(), nullptr, key.begin(), iv.begin()));
+      OSSLCALL(EVP_EncryptInit_ex(
+          ctx.get(), EVP_aes_256_cbc(), nullptr, keys.encryption.begin(), iv.begin()));
       int updateLength = 0;
       OSSLCALL(EVP_EncryptUpdate(
           ctx.get(), out.begin(), &updateLength, plaintext.begin(), plaintext.size()));
@@ -238,8 +262,7 @@ kj::Array<kj::byte> SegmentCipher::seal(uint64_t segmentIndex,
       OSSLCALL(EVP_EncryptFinal_ex(ctx.get(), out.begin() + updateLength, &finalLength));
       KJ_ASSERT(size_t(updateLength + finalLength) == out.size());
 
-      auto macKey = deriveKey(KJ_ASSERT_NONNULL(macInfo), segmentIndex);
-      auto mac = hmacSha256(macKey, result.first(signedLength));
+      auto mac = hmacSha256(keys.mac, result.first(signedLength));
       result.slice(signedLength).copyFrom(mac);
       break;
     }
@@ -249,11 +272,10 @@ kj::Array<kj::byte> SegmentCipher::seal(uint64_t segmentIndex,
 
 kj::Array<kj::byte> SegmentCipher::open(
     uint64_t segmentIndex, kj::ArrayPtr<const kj::byte> sealed) const {
-  auto key = deriveKey(info, segmentIndex);
-
   switch (layout.getAlgorithm()) {
     case SegmentAlgorithm::AES_GCM:
     case SegmentAlgorithm::CHACHA20_POLY1305: {
+      auto key = deriveKey(info, segmentIndex);
       if (sealed.size() <= AEAD_NONCE_SIZE + AEAD_TAG_SIZE) failAuthentication(segmentIndex);
       auto nonce = sealed.first(AEAD_NONCE_SIZE);
       auto in = sealed.slice(AEAD_NONCE_SIZE);
@@ -277,8 +299,8 @@ kj::Array<kj::byte> SegmentCipher::open(
       auto signedData = sealed.first(sealed.size() - HMAC_SHA256_SIZE);
       auto expectedMac = sealed.slice(signedData.size());
       // Encrypt-then-MAC: nothing is decrypted until the MAC verifies.
-      auto macKey = deriveKey(KJ_ASSERT_NONNULL(macInfo), segmentIndex);
-      auto mac = hmacSha256(macKey, signedData);
+      auto keys = deriveCbcKeys(segmentIndex);
+      auto mac = hmacSha256(keys.mac, signedData);
       if (CRYPTO_memcmp(mac.begin(), expectedMac.begin(), HMAC_SHA256_SIZE) != 0) {
         failAuthentication(segmentIndex);
       }
@@ -288,7 +310,8 @@ kj::Array<kj::byte> SegmentCipher::open(
       auto result = kj::heapArray<kj::byte>(in.size());
       auto ctx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
       KJ_ASSERT(ctx.get() != nullptr);
-      OSSLCALL(EVP_DecryptInit_ex(ctx.get(), EVP_aes_256_cbc(), nullptr, key.begin(), iv.begin()));
+      OSSLCALL(EVP_DecryptInit_ex(
+          ctx.get(), EVP_aes_256_cbc(), nullptr, keys.encryption.begin(), iv.begin()));
       int updateLength = 0;
       OSSLCALL(EVP_DecryptUpdate(ctx.get(), result.begin(), &updateLength, in.begin(), in.size()));
       int finalLength = 0;

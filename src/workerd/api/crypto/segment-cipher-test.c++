@@ -23,9 +23,9 @@ class CountingEntropy final: public kj::EntropySource {
   kj::byte next = 0;
 };
 
-SegmentInfoTemplate info(size_t prefixSize) {
+SegmentInfoTemplate info(size_t prefixSize, kj::byte fill = 'e') {
   auto prefix = kj::heapArray<kj::byte>(prefixSize);
-  prefix.asPtr().fill('p');
+  prefix.asPtr().fill(fill);
   return {.prefix = kj::mv(prefix), .index = SegmentIndexEncoding::DECIMAL};
 }
 
@@ -33,7 +33,7 @@ SegmentCipher cipher(SegmentAlgorithm algorithm, size_t prefixSize = 4) {
   auto prk = kj::heapArray<kj::byte>(32);
   prk.asPtr().fill(7);
   kj::Maybe<SegmentInfoTemplate> macInfo;
-  if (algorithm == SegmentAlgorithm::AES_CBC_HMAC_SHA256) macInfo = info(4);
+  if (algorithm == SegmentAlgorithm::AES_CBC_HMAC_SHA256) macInfo = info(4, 'm');
   return SegmentCipher(SegmentLayout(algorithm, 1024),
       SegmentCipher::KeySchedule{
         .digest = EVP_sha256(),
@@ -73,6 +73,37 @@ KJ_TEST("a sealed segment is allocated at exactly its size and opens to its plai
       KJ_EXPECT_THROW_MESSAGE("failed authentication", segments.open(4, sealed));
     }
   }
+}
+
+KJ_TEST("AES-CBC-HMAC-SHA256 refuses a MAC key that is its encryption key") {
+  auto schedule = [](SegmentInfoTemplate encryption, SegmentInfoTemplate mac) {
+    auto prk = kj::heapArray<kj::byte>(32);
+    prk.asPtr().fill(7);
+    return SegmentCipher(SegmentLayout(SegmentAlgorithm::AES_CBC_HMAC_SHA256, 1024),
+        SegmentCipher::KeySchedule{
+          .digest = EVP_sha256(),
+          .prk = kj::mv(prk),
+          .info = kj::mv(encryption),
+          .macInfo = kj::mv(mac),
+        },
+        256);
+  };
+  KJ_EXPECT_THROW_MESSAGE("macInfo must differ from info", schedule(info(4), info(4)));
+
+  // Different templates that build the same info at index 0: "A\0" + index, and "A" + index + "\0".
+  auto bytes = [](kj::StringPtr text) { return kj::heapArray(text.asBytes()); };
+  auto zeroPrefix = SegmentInfoTemplate{
+    .prefix = kj::heapArray<kj::byte>({'A', 0}), .index = SegmentIndexEncoding::UINT32BE};
+  auto zeroSuffix = SegmentInfoTemplate{.prefix = bytes("A"),
+    .index = SegmentIndexEncoding::UINT32BE,
+    .suffix = kj::heapArray<kj::byte>({0})};
+  auto segments = schedule(kj::mv(zeroPrefix), kj::mv(zeroSuffix));
+  CountingEntropy entropy;
+  kj::byte plaintext[] = {1, 2, 3};
+  KJ_EXPECT_THROW_MESSAGE(
+      "MAC key would be its encryption key", segments.seal(0, plaintext, entropy));
+  auto sealed = segments.seal(1, plaintext, entropy);
+  KJ_EXPECT(segments.open(1, sealed) == kj::arrayPtr(plaintext));
 }
 
 }  // namespace

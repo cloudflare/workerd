@@ -15,6 +15,9 @@ bytes with its length; the payload is a sentence repeated to the decoded length.
 | | `minio-go-signed-trailer` | `STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER` |
 | | `minio-go-unsigned-trailer` | `STREAMING-UNSIGNED-PAYLOAD-TRAILER` |
 
+`@aws-sdk/client-s3` 3.1175.0 identifies itself as `aws-sdk-js/3.1174.0` in its user agent, so
+that is the version the `js-v3-*` fixtures record.
+
 The AWS SDKs send aws-chunked uploads only with an unsigned payload and a trailing checksum, for a
 body they cannot hash ahead of time. minio-go signs each chunk when it uploads over plain HTTP. Its
 checksum trailers end in LF before the CRLF.

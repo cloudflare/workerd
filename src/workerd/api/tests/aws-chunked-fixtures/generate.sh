@@ -19,6 +19,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 
   -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" 2>/dev/null
 
 mkdir js py go
+# This release identifies itself as aws-sdk-js/3.1174.0 in its user agent, which the js-v3
+# fixtures record.
 (cd js && npm init -y >/dev/null && npm install --silent @aws-sdk/client-s3@3.1175.0)
 cp "$HERE/js-v3-client.mjs" js/client.mjs
 uv venv -q py/.venv

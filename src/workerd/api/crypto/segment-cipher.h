@@ -98,6 +98,8 @@ struct SegmentInfoTemplate {
 
   kj::Array<kj::byte> build(uint64_t segmentIndex) const;
 
+  bool operator==(const SegmentInfoTemplate& other) const;
+
   // The bytes the template holds, for memory accounting.
   size_t retainedBytes() const {
     return prefix.size() + suffix.size();
@@ -126,7 +128,9 @@ class SegmentCipher {
     // The HKDF pseudorandom key, from CryptoKey::hkdfExtract().
     kj::Array<kj::byte> prk;
     SegmentInfoTemplate info;
-    // Required for, and only allowed with, AES-CBC-HMAC-SHA256.
+    // Required for, and only allowed with, AES-CBC-HMAC-SHA256. It must build a different info
+    // from `info` for every segment index, so that the MAC key is not the encryption key; a
+    // segment for which they match fails to seal or open.
     kj::Maybe<SegmentInfoTemplate> macInfo;
   };
 
@@ -162,6 +166,14 @@ class SegmentCipher {
   size_t keyLength;
 
   ZeroOnFree deriveKey(const SegmentInfoTemplate& infoTemplate, uint64_t segmentIndex) const;
+  ZeroOnFree expand(kj::ArrayPtr<const kj::byte> segmentInfo) const;
+
+  struct CbcKeys {
+    ZeroOnFree encryption;
+    ZeroOnFree mac;
+  };
+  // Derives both keys of AES-CBC-HMAC-SHA256 segment `segmentIndex`, failing if their infos match.
+  CbcKeys deriveCbcKeys(uint64_t segmentIndex) const;
 };
 
 }  // namespace workerd::api

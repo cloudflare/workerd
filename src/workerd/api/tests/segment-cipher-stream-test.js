@@ -616,6 +616,20 @@ export const invalidOptions = {
         }),
       TypeError
     );
+    // The same info for the MAC would make its key the encryption key.
+    throws(
+      () =>
+        new crypto.SegmentEncryptionStream({
+          ...base,
+          algorithm: 'AES-CBC-HMAC-SHA256',
+          keys: { ...base.keys, macInfo: { ...base.keys.info } },
+        }),
+      {
+        name: 'TypeError',
+        message:
+          'macInfo must differ from info, so that the MAC and encryption keys differ.',
+      }
+    );
 
     // The key must be an HKDF key that may derive.
     const aesKey = await crypto.subtle.generateKey(
