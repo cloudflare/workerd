@@ -2,6 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 bool_flag(
     name = "use_perfetto",
@@ -209,6 +210,20 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
     ],
+)
+
+# A Rust MIME type parser and serializer, the counterpart of mimetype.c++.
+wd_rust_crate(
+    name = "mimetype-rs",
+    srcs = glob(["mimetype/**/*.rs"]),
+    crate_root = "mimetype/lib.rs",
+    cxx_bridge_deps = [
+        ":strings",
+        "@capnp-cpp//src/kj",
+    ],
+    cxx_bridge_hdrs = ["mimetype/ffi.h"],
+    cxx_bridge_src = "mimetype/ffi.rs",
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
