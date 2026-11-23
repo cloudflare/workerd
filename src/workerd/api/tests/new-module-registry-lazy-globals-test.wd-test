@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The process and Buffer globals load their modules on first access. A first access must not run
+# the Worker's pending microtasks, whether it happens in a request or during top-level evaluation,
+# and a built-in that emits a process warning before then must not fail.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-lazy-globals-request-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-lazy-globals-request-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "new_module_registry"],
+      ),
+    ),
+    ( name = "new-module-registry-lazy-globals-top-level-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-lazy-globals-top-level-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "new_module_registry"],
+      ),
+    ),
+    ( name = "new-module-registry-lazy-globals-warning-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-lazy-globals-warning-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "enable_nodejs_process_v2", "new_module_registry"],
+      ),
+    ),
+    ( name = "legacy-module-registry-lazy-globals-warning-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-lazy-globals-warning-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "enable_nodejs_process_v2", "legacy_module_registry"],
+      ),
+    ),
+  ],
+);

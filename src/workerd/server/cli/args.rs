@@ -145,6 +145,9 @@ pub struct ServeOrTestArgs {
     #[arg(short = 'd', long = "directory-path", value_name = "name>=<dir", value_parser = parse_override)]
     pub directory_overrides: Vec<Override>,
 
+    #[arg(long, value_name = "dir")]
+    pub data_dir: Option<String>,
+
     #[arg(short = 'e', long = "external-addr", value_name = "name>=<addr", value_parser = parse_override)]
     pub external_overrides: Vec<Override>,
 

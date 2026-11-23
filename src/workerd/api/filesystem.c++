@@ -11,6 +11,8 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 
+#include <kj/map.h>
+
 namespace workerd::api {
 
 // =======================================================================================
@@ -1535,17 +1537,74 @@ void handleCpFile(jsg::Lock& js,
   node::THROW_ERR_UV_EINVAL(js, "cp"_kj);
 }
 
+// How deep handleCpDir() may recurse: the limit NormalizedFilePath::validate() puts on a path's
+// segments. A deeper tree can only be built by renaming or linking directories into one another,
+// and each level of a copy is a native stack frame of up to several kilobytes in debug builds.
+// V8 must still be able to throw at the deepest level, which it refuses once the stack has grown
+// past its own limit of about 1 MiB (a debug build failed that check at 256 levels).
+constexpr uint kMaxCpDepth = 48;
+
+// Whether `target` is `root` or a directory below it. Symbolic links are not followed, since a
+// copy does not follow the links in its source either. Walks with an explicit stack, as the tree
+// can be deeper than the native stack allows, and visits each directory once, so that it ends
+// even if a directory can reach itself.
+bool isWithin(kj::Rc<workerd::Directory> root, const workerd::Directory& target) {
+  kj::HashSet<const workerd::Directory*> seen;
+  kj::Vector<kj::Rc<workerd::Directory>> pending;
+  pending.add(kj::mv(root));
+  while (!pending.empty()) {
+    auto dir = kj::mv(pending.back());
+    pending.removeLast();
+    if (dir.get() == &target) return true;
+    if (seen.contains(dir.get())) continue;
+    seen.insert(dir.get());
+    for (auto& entry: *dir) {
+      KJ_IF_SOME(child, entry.value.tryGet<kj::Rc<workerd::Directory>>()) {
+        pending.add(child.addRef());
+      }
+    }
+  }
+  return false;
+}
+
+// Whether copying `src` into `dest` would write into `src`'s own tree, which makes the copy read
+// what it has just written and recurse without end. cpImpl()'s check on the two paths as written
+// cannot see a destination that a symbolic link places inside the source, so this compares the
+// directories themselves. It must run before the copy writes anything. The two being the same
+// directory is left to handleCpDir(), which reports it as EINVAL.
+bool isDestInsideSrc(kj::Rc<workerd::Directory>& src, const workerd::Directory& dest) {
+  return src.get() != &dest && isWithin(src.addRef(), dest);
+}
+
+[[noreturn]] void throwCpIntoItself(jsg::Lock& js, const jsg::Url& src, const jsg::Url& dest) {
+  node::THROW_ERR_FS_CP_EINVAL(js,
+      kj::str("Cannot copy '", src.getPathname(), "' to a subdirectory of itself, '",
+          dest.getPathname(), "'"));
+}
+
+// Whether the entry `name` of `dir` is a symbolic link.
+bool isSymbolicLink(jsg::Lock& js, workerd::Directory& dir, kj::StringPtr name) {
+  KJ_IF_SOME(node, dir.tryOpen(js, kj::Path({name}), {.followLinks = false})) {
+    return node.is<kj::Rc<workerd::SymbolicLink>>();
+  }
+  return false;
+}
+
 void handleCpDir(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::Directory> src,
     kj::Rc<workerd::Directory> dest,
-    const FileSystemModule::CpOptions& options) {
+    const FileSystemModule::CpOptions& options,
+    uint depth = 0) {
   auto stat = dest->stat(js);
   if (!stat.writable) {
     node::THROW_ERR_UV_EPERM(js, "cp"_kj, "Destination directory is not writable"_kj);
   }
   if (src.get() == dest.get()) {
     node::THROW_ERR_UV_EINVAL(js, "cp"_kj, "Source and destination directories are the same"_kj);
+  }
+  if (depth >= kMaxCpDepth) {
+    node::THROW_ERR_UV_ENAMETOOLONG(js, "cp"_kj, "Directory tree is too deep to copy"_kj);
   }
 
   // entries store the reference to the node and the name of the entry
@@ -1669,6 +1728,12 @@ void handleCpDir(jsg::Lock& js,
         // We have a directory, we will copy it to the destination directory
         // recursively.
 
+        // An existing destination directory reached by following a symbolic link can be
+        // anywhere, so it is checked against `dir`. Any other is a child of `dest`, and so is
+        // outside `dir` as long as the directories form a tree. The VFS does not guarantee that,
+        // but if they don't, the depth limit still bounds the copy.
+        bool destIsLink = options.deferenceSymlinks && isSymbolicLink(js, *dest, name);
+
         // First, we need to check if the destination directory already exists.
         KJ_IF_SOME(existing,
             dest->tryOpen(js, kj::Path({name}),
@@ -1683,7 +1748,11 @@ void handleCpDir(jsg::Lock& js,
                   js, "cp"_kj, kj::str("Cannot copy directory to file: ", name));
             }
             KJ_CASE_ONEOF(existingDir, kj::Rc<workerd::Directory>) {
-              handleCpDir(js, vfs, kj::mv(dir), kj::mv(existingDir), options);
+              if (destIsLink && isDestInsideSrc(dir, *existingDir)) {
+                node::THROW_ERR_FS_CP_EINVAL(
+                    js, "Cannot copy a directory to a subdirectory of itself"_kj);
+              }
+              handleCpDir(js, vfs, kj::mv(dir), kj::mv(existingDir), options, depth + 1);
             }
             KJ_CASE_ONEOF(existingLink, kj::Rc<workerd::SymbolicLink>) {
               // The destination is a symbolic link, we can overwrite it with a directory.
@@ -1703,7 +1772,7 @@ void handleCpDir(jsg::Lock& js,
             throwFsError(js, err, "cp"_kj);
           }
           // Now we can recursively copy the contents of the source directory into the new one.
-          handleCpDir(js, vfs, kj::mv(dir), kj::mv(newDir), options);
+          handleCpDir(js, vfs, kj::mv(dir), kj::mv(newDir), options, depth + 1);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1777,6 +1846,7 @@ void handleCpDir(jsg::Lock& js,
 void handleCpDir(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::Directory> src,
+    const jsg::Url& srcUrl,
     const jsg::Url& dest,
     const FileSystemModule::CpOptions& options) {
   // For this variation of handleCpDir, the dest needs to be created as a directory.
@@ -1785,6 +1855,18 @@ void handleCpDir(jsg::Lock& js,
   auto basePath = kj::str(dest.getPathname().slice(1));
   kj::Path root{};
   auto path = root.eval(basePath);
+
+  // The destination will be created under its nearest existing ancestor, so it lands inside the
+  // source if that ancestor is the source or a directory below it.
+  for (kj::PathPtr ancestor = path; ancestor.size() > 1;) {
+    ancestor = ancestor.parent();
+    KJ_IF_SOME(node, vfs.getRoot(js)->tryOpen(js, ancestor, {.followLinks = true})) {
+      KJ_IF_SOME(dir, node.tryGet<kj::Rc<workerd::Directory>>()) {
+        if (isWithin(src.addRef(), *dir)) throwCpIntoItself(js, srcUrl, dest);
+      }
+      break;
+    }
+  }
 
   KJ_IF_SOME(destDir,
       vfs.getRoot(js)->tryOpen(js, path,
@@ -1840,8 +1922,7 @@ void cpImpl(jsg::Lock& js,
     auto srcPrefix = srcPath.back() == '/' ? kj::str(srcPath) : kj::str(srcPath, "/");
     auto destStr = kj::StringPtr(destPath.begin(), destPath.size());
     if (destStr.size() > srcPrefix.size() && destStr.startsWith(srcPrefix)) {
-      node::THROW_ERR_FS_CP_EINVAL(
-          js, kj::str("Cannot copy '", srcPath, "' to a subdirectory of itself, '", destPath, "'"));
+      throwCpIntoItself(js, src, dest);
     }
   }
 
@@ -1934,8 +2015,8 @@ void cpImpl(jsg::Lock& js,
           node::THROW_ERR_FS_EISDIR(js);
         }
 
-        KJ_IF_SOME(dest, maybeDestNode) {
-          KJ_SWITCH_ONEOF(dest) {
+        KJ_IF_SOME(destNode, maybeDestNode) {
+          KJ_SWITCH_ONEOF(destNode) {
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
               // Simple case: user is trying to copy a directory over a file
               // which is not allowed.
@@ -1951,6 +2032,7 @@ void cpImpl(jsg::Lock& js,
               // directory into the destination directory, only applying the force and
               // errorOnExist options to individual files within the directories.
               // See: https://github.com/nodejs/node/issues/58947
+              if (isDestInsideSrc(dir, *destDir)) throwCpIntoItself(js, src, dest);
               return handleCpDir(js, vfs, kj::mv(dir), kj::mv(destDir), options);
             }
             KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1965,7 +2047,7 @@ void cpImpl(jsg::Lock& js,
         // Yay! we can just copy the file contents to the destination.
         // If the path to the destination does not exist, we will create it
         // if possible.
-        return handleCpDir(js, vfs, kj::mv(dir), dest, options);
+        return handleCpDir(js, vfs, kj::mv(dir), src, dest, options);
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         // If we got here, then the source is itself a symbolic link.

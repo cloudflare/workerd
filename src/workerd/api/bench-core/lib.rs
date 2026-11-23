@@ -8,16 +8,18 @@
 //! This crate root turns the samples that the runner took for a group's cases into a
 //! `BenchReport.Group` (bench.capnp), with summary statistics computed after subtracting the
 //! runner's own overhead and flags for results that can't be trusted. The [`startup`] module
-//! times a Worker's startup and reports it the same way, and [`GlobFilter`] is the case filter.
+//! times a Worker's startup and reports it the same way, [`clock`] reads the clocks both time
+//! with, and [`GlobFilter`] is the case filter.
 //!
 //! The group's name is left unset, since the caller knows it.
 //!
-//! Names and errors that come through the C++ bridge are bytes, written to the report's `Text`
-//! fields unchanged: C++ strings needn't be valid UTF-8, so a Rust `String` couldn't hold all of
-//! them. The [`startup`] module makes its own phase names, and gets a failed start's error as a
+//! Names and errors are bytes, written to the report's `Text` fields unchanged: they come from
+//! JavaScript strings, which needn't be valid UTF-16, as WTF-8, as C++ JSG converts them to a
+//! `kj::String`, so a Rust `String` couldn't hold all of them.
+//! The [`startup`] module makes its own phase names, and gets a failed start's error as a
 //! `String`.
 
-mod ffi;
+pub mod clock;
 mod glob_filter;
 pub mod startup;
 
@@ -30,15 +32,35 @@ use histogram::Options;
 pub use crate::glob_filter::GlobFilter;
 
 /// The sampling budget, when neither the case nor the command line sets one.
-const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
+pub const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
 /// The number of samples, when neither the case nor the command line sets one.
-const DEFAULT_SAMPLES: u32 = 50;
+pub const DEFAULT_SAMPLES: u32 = 50;
 
 /// Under `--quick`, the sampling budget and the number of samples are capped at these.
-const QUICK_MIN_TIME_NS: u64 = 10_000_000;
-const QUICK_SAMPLES: u32 = 5;
+pub const QUICK_MIN_TIME_NS: u64 = 10_000_000;
+pub const QUICK_SAMPLES: u32 = 5;
 
-const MAX_SAMPLES: u32 = 1_000_000;
+/// The most samples a case can ask for.
+pub const MAX_SAMPLES: u32 = 1_000_000;
+
+/// A reading of the monotonic and thread CPU clocks ([`clock::now`]), or the difference of two,
+/// which is how long the code between them took, in nanoseconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Timing {
+    pub wall_ns: i64,
+    pub cpu_ns: i64,
+}
+
+impl std::ops::Sub for Timing {
+    type Output = Self;
+
+    fn sub(self, start: Self) -> Self {
+        Self {
+            wall_ns: self.wall_ns - start.wall_ns,
+            cpu_ns: self.cpu_ns - start.cpu_ns,
+        }
+    }
+}
 
 /// Samples are recorded into histograms in picoseconds, up to an hour per call.
 const HISTOGRAM_HIGHEST_PS: i64 = 3_600_000_000_000_000;

@@ -1,15 +1,13 @@
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # The parts of `workerd bench` that need no JSG: statistics over a group's samples, written as a
-# `BenchReport.Group` (bench.capnp), and the timing of startup groups. With no JSG dependencies,
-# both the worker side (api/bench.c++) and the server (workerd-server) can use it.
+# `BenchReport.Group` (bench.capnp), the timing of startup groups, and the clocks. With no JSG
+# dependencies, both the controller (bench-api) and the server (workerd-server) can use it.
 wd_rust_crate(
     name = "bench-core",
     cxx_bridge_deps = ["@capnp-cpp//src/kj"],
     cxx_bridge_hdrs = ["glob-filter.h"],
-    cxx_bridge_src = "ffi.rs",
-    cxx_bridge_srcs = ["glob_filter.rs"],
-    cxx_bridge_visibility = ["//visibility:public"],
+    cxx_bridge_src = "glob_filter.rs",
     test_deps = ["@crates_vendor//futures"],
     visibility = ["//visibility:public"],
     deps = [
@@ -17,5 +15,8 @@ wd_rust_crate(
         "//src/workerd/io:bench_capnp_rust",
         "@crates_vendor//capnp",
         "@crates_vendor//thiserror",
-    ],
+    ] + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@crates_vendor//libc"],
+    }),
 )

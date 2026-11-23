@@ -928,7 +928,7 @@ void LegacyUrlHandle::append(jsg::USVString name, jsg::USVString value) {
   url->append(kj::mv(name), kj::mv(value));
 }
 void LegacyUrlHandle::delete_(jsg::USVString name, jsg::Optional<jsg::USVString> value) {
-  url->delete_(name, value.map([](jsg::USVString& v) -> kj::StringPtr { return v; }));
+  url->delete_(name, value);
 }
 kj::Maybe<kj::String> LegacyUrlHandle::get(jsg::USVString name) {
   return url->get(name);
@@ -937,7 +937,7 @@ kj::Array<kj::String> LegacyUrlHandle::getAll(jsg::USVString name) {
   return url->getAll(name);
 }
 bool LegacyUrlHandle::has(jsg::USVString name, jsg::Optional<jsg::USVString> value) {
-  return url->has(name, value.map([](jsg::USVString& v) -> kj::StringPtr { return v; }));
+  return url->has(name, value);
 }
 void LegacyUrlHandle::set(jsg::USVString name, jsg::USVString value) {
   url->set(kj::mv(name), kj::mv(value));

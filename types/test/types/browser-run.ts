@@ -39,3 +39,36 @@ browser.script(code, { targetId: 'target' });
 browser.script(code, { browser: 'chrome' });
 // @ts-expect-error `scriptInSession()` was replaced by `script()` with `sessionId`.
 browser.scriptInSession('session', code);
+
+// Snapshot accepts every published format and the options each format uses.
+expectType<Promise<Response>>(
+  browser.quickAction('snapshot', {
+    url: 'https://example.com/',
+    formats: ['pdf', 'links', 'scrape', 'json', 'accessibilityTree'],
+    elements: [{ selector: 'p' }],
+    pdfOptions: { format: 'a4', printBackground: true },
+    visibleLinksOnly: true,
+    excludeExternalLinks: false,
+    interestingOnly: true,
+    root: 'main',
+    prompt: 'Return the page title.',
+    custom_ai: [
+      { model: 'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast' },
+    ],
+  })
+);
+
+// @ts-expect-error `crawl` is internal and is not a published snapshot format.
+const internalSnapshotFormat: BrowserRunSnapshotFormat = 'crawl';
+void internalSnapshotFormat;
+
+// A snapshot result carries one field per requested format.
+declare const snapshotBody: BrowserRunSnapshotSuccessResponse;
+expectType<string | undefined>(snapshotBody.result.pdf);
+expectType<string[] | undefined>(snapshotBody.result.links);
+expectType<BrowserRunScrapeSuccessResponse['result'] | undefined>(
+  snapshotBody.result.scrape
+);
+expectType<Record<string, unknown> | unknown[] | null | undefined>(
+  snapshotBody.result.json
+);
