@@ -46,12 +46,12 @@ Cluster (experimental):
       --cluster-addr <addr>          Cluster address, joining if config has none
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
-  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. An
-  empty cluster key comes from WORKERD_CLUSTER_KEY or the file that
-  WORKERD_CLUSTER_KEY_FILE names, an empty bucket from
-  WORKERD_CLUSTER_BUCKET. On SIGTERM an instance hands its objects to its
-  peers and exits within stopTimeoutMs (8 s by default). GET /ready on
-  the cluster address answers OK once serving.
+  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS.
+  WORKERD_CLUSTER_KEY, or the file that WORKERD_CLUSTER_KEY_FILE names,
+  overrides the config's cluster key, WORKERD_CLUSTER_BUCKET its bucket.
+  On SIGTERM an instance hands its objects to its peers and exits within
+  stopTimeoutMs (8 s by default). GET /ready on the cluster address
+  answers OK once serving.
 "
     };
 }

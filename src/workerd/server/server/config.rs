@@ -2185,8 +2185,8 @@ fn make_cluster(
     // The MAC's other inputs cross the wire, so a short key falls to an offline search.
     if text(conf.get_key())?.len() < 32 {
         report.error(
-            "cluster.key must be at least 32 bytes. Fix it in the config, or leave it empty and \
-             set WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE."
+            "cluster.key must be at least 32 bytes. Fix it in the config, or set \
+             WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE, which override it."
                 .to_owned(),
         );
         return Ok(None);

@@ -140,15 +140,63 @@ fn cluster_environment_fills_an_empty_key_and_bucket() {
 }
 
 #[test]
-fn cluster_environment_does_not_replace_config_values() {
-    let vars = [
-        (CLUSTER_KEY, "from-the-environment"),
-        (CLUSTER_BUCKET, "s3://other/prefix"),
-    ];
-    let config = cluster_config(Some((KEY, "s3://bucket/prefix")));
-    let before = config.0.clone();
-    let config = config.fill(env(&vars)).unwrap();
-    assert_eq!(config.0, before);
+fn cluster_environment_overrides_config_values() {
+    let other = "fedcba9876543210fedcba9876543210";
+    let vars = [(CLUSTER_KEY, other), (CLUSTER_BUCKET, "s3://other/prefix")];
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")))
+        .fill(env(&vars))
+        .unwrap();
+    assert_eq!(
+        cluster_of(&config),
+        (other.to_owned(), "s3://other/prefix".to_owned())
+    );
+
+    // Each variable overrides only its own value.
+    let file = TempFile::new("workerd-cluster-key-override-test", format!("{other}\n"));
+    let vars = [(CLUSTER_KEY_FILE, file.path())];
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")))
+        .fill(env(&vars))
+        .unwrap();
+    assert_eq!(
+        cluster_of(&config),
+        (other.to_owned(), "s3://bucket/prefix".to_owned())
+    );
+    let vars = [(CLUSTER_BUCKET, "s3://other/prefix")];
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")))
+        .fill(env(&vars))
+        .unwrap();
+    assert_eq!(
+        cluster_of(&config),
+        (KEY.to_owned(), "s3://other/prefix".to_owned())
+    );
+}
+
+#[test]
+fn cluster_environment_unset_or_blank_keeps_config_values() {
+    let blank = TempFile::new("workerd-cluster-key-blank-keep-test", "\n");
+    for vars in [
+        vec![],
+        vec![(CLUSTER_KEY, " \n"), (CLUSTER_BUCKET, " \n")],
+        vec![(CLUSTER_KEY_FILE, blank.path())],
+    ] {
+        let config = cluster_config(Some((KEY, "s3://bucket/prefix")));
+        let before = config.0.clone();
+        let config = config.fill(env(&vars)).unwrap();
+        assert_eq!(config.0, before, "{vars:?}");
+    }
+}
+
+#[test]
+fn cluster_environment_refuses_an_unusable_key_over_a_config_key() {
+    let Err(error) = cluster_config(Some((KEY, "s3://bucket/prefix")))
+        .fill(env(&[(CLUSTER_KEY, "0123456789ab")]))
+    else {
+        panic!("accepted");
+    };
+    assert_eq!(
+        error,
+        "cluster: WORKERD_CLUSTER_KEY: the key is 12 bytes, and must be at least 32."
+    );
 }
 
 #[test]
@@ -214,10 +262,10 @@ fn cluster_environment_refuses_a_short_key_naming_its_source() {
 
 #[test]
 fn cluster_environment_requires_a_key_and_bucket() {
-    let missing_key = "cluster.key is not set. Set it in the config, in WORKERD_CLUSTER_KEY, or \
-                       in a file named by WORKERD_CLUSTER_KEY_FILE.";
+    let missing_key = "cluster.key is not set. Set it in WORKERD_CLUSTER_KEY, in a file named by \
+                       WORKERD_CLUSTER_KEY_FILE, or in the config.";
     let missing_bucket =
-        "cluster.bucket is not set. Set it in the config or in WORKERD_CLUSTER_BUCKET.";
+        "cluster.bucket is not set. Set it in WORKERD_CLUSTER_BUCKET or in the config.";
     let blank = TempFile::new("workerd-cluster-key-blank-test", "\n");
     for (cluster, vars, expected) in [
         (("", ""), vec![], format!("{missing_key}\n{missing_bucket}")),

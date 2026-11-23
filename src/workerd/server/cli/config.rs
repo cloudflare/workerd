@@ -90,10 +90,10 @@ impl Config {
     /// `--cluster-addr` overrides its address. A config without either is unchanged, and then
     /// `flags.advertise`, the value of `--cluster-advertise`, is an error.
     ///
-    /// Then, with `var`, the cluster's `key` and `bucket` are filled from the environment where
-    /// they are empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable
-    /// and returns `None` when it is unset or empty. A key or bucket that neither the config nor
-    /// the environment sets is an error.
+    /// Then, with `var`, the cluster's `key` and `bucket` are taken from the environment where it
+    /// sets them, over the config's. See `ClusterConfig` in workerd.capnp. `var` reads an
+    /// environment variable and returns `None` when it is unset or empty. A key or bucket that
+    /// neither the environment nor the config sets is an error.
     pub fn with_cluster(
         self,
         flags: &ClusterFlags<'_>,
@@ -233,30 +233,26 @@ fn has_cluster_storage(root: config::Reader<'_>) -> capnp::Result<bool> {
     Ok(false)
 }
 
-/// The key and bucket to fill from the environment, for a cluster whose key and bucket are empty
-/// as `key_empty` and `bucket_empty` say. `None` for one the config sets. A key or bucket that
-/// neither sets is an error.
+/// The key and bucket that the environment sets, for a cluster whose key and bucket in the config
+/// are empty as `key_empty` and `bucket_empty` say. `None` for one the environment leaves to the
+/// config. A key or bucket that neither sets is an error.
 fn cluster_environment(
     var: Env<'_>,
     key_empty: bool,
     bucket_empty: bool,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let key = if key_empty { cluster_key(var)? } else { None };
-    let bucket = if bucket_empty {
-        var(CLUSTER_BUCKET).and_then(|bucket| non_blank(&bucket))
-    } else {
-        None
-    };
+    let key = cluster_key(var)?;
+    let bucket = var(CLUSTER_BUCKET).and_then(|bucket| non_blank(&bucket));
     let mut missing = Vec::new();
     if key_empty && key.is_none() {
         missing.push(format!(
-            "cluster.key is not set. Set it in the config, in {CLUSTER_KEY}, or in a file named by \
-             {CLUSTER_KEY_FILE}."
+            "cluster.key is not set. Set it in {CLUSTER_KEY}, in a file named by {CLUSTER_KEY_FILE}, \
+             or in the config."
         ));
     }
     if bucket_empty && bucket.is_none() {
         missing.push(format!(
-            "cluster.bucket is not set. Set it in the config or in {CLUSTER_BUCKET}."
+            "cluster.bucket is not set. Set it in {CLUSTER_BUCKET} or in the config."
         ));
     }
     if missing.is_empty() {
@@ -266,11 +262,11 @@ fn cluster_environment(
     }
 }
 
-/// The environment variable that holds the cluster key when the config leaves it empty.
+/// The environment variable that holds the cluster key, over the config's.
 pub const CLUSTER_KEY: &str = "WORKERD_CLUSTER_KEY";
 /// The environment variable that names a file holding the cluster key, such as a mounted secret.
 pub const CLUSTER_KEY_FILE: &str = "WORKERD_CLUSTER_KEY_FILE";
-/// The environment variable that holds the cluster bucket when the config leaves it empty.
+/// The environment variable that holds the cluster bucket, over the config's.
 pub const CLUSTER_BUCKET: &str = "WORKERD_CLUSTER_BUCKET";
 
 /// The shortest cluster key. The server refuses a shorter one in the config; one from the
