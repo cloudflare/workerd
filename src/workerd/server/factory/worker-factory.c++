@@ -5,7 +5,6 @@
 #include "worker-factory-impl.h"
 
 #include <workerd/api/analytics-engine.capnp.h>
-#include <workerd/api/bench.h>
 #include <workerd/api/trace.h>
 #include <workerd/io/access-info.h>
 #include <workerd/io/bundle-fs.h>
@@ -222,8 +221,7 @@ kj::Own<PendingToken> factory_encode_subrequest_token(const WorkerFactory& facto
   auto service = kj::str(serviceName);
   auto ep = toKj(entrypoint);
   return kj::heap<PendingToken>(factory.getImpl().channelTokenHandler.encodeSubrequestChannelToken(
-      usage, service, ep.map([](kj::String& e) -> kj::StringPtr { return e; }), propsRef(props),
-      Persistent(persistent)));
+      usage, service, ep, propsRef(props), Persistent(persistent)));
 }
 
 kj::Own<PendingToken> factory_encode_actor_class_token(const WorkerFactory& factory,
@@ -984,8 +982,7 @@ class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSel
 
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
       IoChannelFactory::ChannelTokenUsage usage) override {
-    return tokens.encodeSubrequestChannelToken(usage, serviceName,
-        entrypoint.map([](kj::String& e) -> kj::StringPtr { return e; }), props, persistent);
+    return tokens.encodeSubrequestChannelToken(usage, serviceName, entrypoint, props, persistent);
   }
 
  private:
@@ -1131,7 +1128,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     OtlpServiceInfo service{
       .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
       .entrypoint = entrypointName,
-      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
+      .durableObjectId = durableObjectId,
     };
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
@@ -1594,9 +1591,8 @@ kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags
     auto version = getPythonBundleName(release);
     if (manager.getPyodideBundle(version) != kj::none) co_return;
     auto bytes = co_await pyodide_bundle_fetch(
-        toRust(options.pyodideBundleDiskCacheDir.map(
-            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
-        toRust(version), toRust(release.getIntegrity()));
+        toRust(kj::Maybe<kj::StringPtr>(options.pyodideBundleDiskCacheDir)), toRust(version),
+        toRust(release.getIntegrity()));
     // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
     // this one waited.
     if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;
@@ -1703,11 +1699,12 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   co_await preloadPython(factory, featureFlags);
   auto& timing = impl->startupTiming;
-  auto startTime = api::BenchTiming::now();
+  auto startTime = bench_clock_now();
   // How long it has been since `start`.
-  auto since = [](api::BenchTiming start) {
-    auto elapsed = api::BenchTiming::now() - start;
-    return StartupPhaseTiming{.wall_ns = elapsed.wallNs, .cpu_ns = elapsed.cpuNs};
+  auto since = [](StartupPhaseTiming start) {
+    auto now = bench_clock_now();
+    return StartupPhaseTiming{
+      .wall_ns = now.wall_ns - start.wall_ns, .cpu_ns = now.cpu_ns - start.cpu_ns};
   };
 
   // The file system roots use their defaults; the config does not expose mount points.
@@ -1835,7 +1832,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     }
   }
 
-  auto isolateStart = api::BenchTiming::now();
+  auto isolateStart = bench_clock_now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = since(isolateStart);
   KJ_IF_SOME(r, registrar) {
@@ -1881,7 +1878,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
-  auto scriptStart = api::BenchTiming::now();
+  auto scriptStart = bench_clock_now();
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
@@ -1889,7 +1886,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the
   // Worker constructed first; the handle is held until then.
-  auto workerStart = api::BenchTiming::now();
+  auto workerStart = bench_clock_now();
   auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {

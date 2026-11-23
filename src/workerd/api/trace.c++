@@ -284,7 +284,7 @@ kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> TraceItem::getDiagnosticChan
 }
 
 kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
-  return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
+  return scriptName;
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getEntrypoint() {
@@ -296,7 +296,7 @@ jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
-  return dispatchNamespace.map([](auto& ns) -> kj::StringPtr { return ns; });
+  return dispatchNamespace;
 }
 
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
@@ -323,7 +323,7 @@ jsg::Optional<TracePreviewInfo> TraceItem::getPreview() {
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
-  return durableObjectId.map([](auto& id) -> kj::StringPtr { return id; });
+  return durableObjectId;
 }
 
 kj::StringPtr TraceItem::getExecutionModel() {
