@@ -34,11 +34,13 @@
 //      services or conflicts with another.
 //  12. A node stopping under load hands its DOs to its peers, two at once
 //      too: requests that arrive meanwhile wait for a DO's handoff and follow
-//      it, JS RPC calls and other DOs' calls included, a peer's request
-//      released late is answered moved rather than sent on, the calls of a
-//      handoff's work are not held, and a DO whose handoff outlasts its
-//      deadline moves once the node left. A rolling restart of the cluster,
-//      paced by the nodes' readiness, fails, loses and replays no request.
+//      it, JS RPC calls and other DOs' calls included. A peer's request that
+//      its caller sends again for longer than a relay would have is answered
+//      moved, and so follows the DO also where taking it over outlasts the
+//      stopping node; any other is sent on, unless released late. The calls of a handoff's work
+//      are not held, and a DO whose handoff outlasts its deadline moves once
+//      the node left. A rolling restart of the cluster, paced by the nodes'
+//      readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
 //  13a. R2: a bucket is seen from every node, each object is an object in
@@ -114,6 +116,10 @@ const CONTROL_FD = 3;
 const SIGTERM_DRAINS = {
   skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
 };
+// What a stopping node logs as it answers moved to a peer's request that
+// waited for a DO's handoff.
+const MOVED_AFTER_HANDOFF =
+  /a peer's request that waited for its handoff is answered moved/;
 
 // cluster-test.wd-test divides the times that takeovers and stops wait out by
 // this (`unsafeTimeDivisor`).
@@ -434,6 +440,12 @@ class FakeS3 {
     return this.#server.port;
   }
 
+  // The endpoint of a node whose requests faults armed with `via` match
+  // (fake-s3.mjs).
+  endpointVia(via) {
+    return `http://127.0.0.1:${this.port}/_via/${via}`;
+  }
+
   // The keys under `prefix` in the cluster's bucket, whose layout is under
   // `cluster/v1/`.
   async list(prefix) {
@@ -554,8 +566,8 @@ class FakeS3 {
 //              what owner records name
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
-// the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
-// what a node adds to its environment.
+// the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv(bucket, i)`
+// answers what node `i` adds to its environment.
 async function withCluster(
   numNodes,
   fn,
@@ -590,7 +602,7 @@ async function withCluster(
           s3Port: bucket.port,
           nodeId: `node${i}`,
           extraArgs: await extraArgs(i),
-          env: nodeEnv(bucket),
+          env: nodeEnv(bucket, i),
         })
       );
     }
@@ -2533,12 +2545,23 @@ test(
       await sleep(500);
       const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
       await sleep(300);
-      // One from a client of the stopping node, one through its peer: each
+      // One from a client of the stopping node, four through its peer: each
       // waits for the request in flight, longer than a retry would, and then
-      // runs where the DO went.
-      const [local, peer] = await Promise.all(
-        [0, 1].map((i) =>
-          fetchJson(nodes[i].httpPort, '/increment?name=waited', {
+      // runs where the DO went. The stopping node sends its client's on there.
+      // It answers the peer's moved, which the peer's stub sends again there,
+      // but for those the stub does not send again, or not for as long as a
+      // relay has until the node exits: one with a streamed body, one with
+      // retries off, and one whose retry timeout ends some 2 s after the
+      // wait, 7 s before the node exits. It sends those on too.
+      const responses = await Promise.all(
+        [
+          [0, ''],
+          [1, '&retryTimeoutMs=20000'],
+          [1, '&stream&retryTimeoutMs=20000'],
+          [1, '&maxRetries=0&retryTimeoutMs=20000'],
+          [1, '&retryTimeoutMs=4500'],
+        ].map(([i, query]) =>
+          fetchJson(nodes[i].httpPort, `/increment?name=waited${query}`, {
             timeoutMs: 20_000,
           })
         )
@@ -2549,14 +2572,16 @@ test(
         [first.body.nodeId, first.body.count],
         [nodes[0].nodeId, 2]
       );
-      for (const response of [local, peer]) {
+      for (const response of responses) {
         assert.strictEqual(response.status, 200, JSON.stringify(response.body));
         assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
       }
       assert.deepStrictEqual(
-        [local.body.count, peer.body.count].sort(),
-        [3, 4]
+        responses.map(({ body }) => body.count).sort((a, b) => a - b),
+        [3, 4, 5, 6, 7]
       );
+      const moved = nodes[0].stderr.match(new RegExp(MOVED_AFTER_HANDOFF, 'g'));
+      assert.strictEqual(moved?.length, 1, nodes[0].stderr);
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
   }
@@ -2602,10 +2627,7 @@ test(
           { timeoutMs: 30_000 }
         );
         // It went to node 0, waited there, and was answered moved.
-        assert.match(
-          nodes[0].stderr,
-          /a peer's request that waited for its handoff is answered moved/
-        );
+        assert.match(nodes[0].stderr, MOVED_AFTER_HANDOFF);
         assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
         assert.deepStrictEqual(
           [peer.body.nodeId, peer.body.count],
@@ -2616,6 +2638,181 @@ test(
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
       },
       { configName: 'shortStop' }
+    );
+  }
+);
+
+test(
+  "cluster: a peer's request that waited for a handoff follows the DO to a slow new owner",
+  SIGTERM_DRAINS,
+  async (t) => {
+    await withCluster(
+      2,
+      async ({ nodes, bucket }) => {
+        const first = await fetchJson(
+          nodes[0].httpPort,
+          '/increment?name=slow-takeover'
+        );
+        assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+        // Node 1 learns the route to node 0.
+        const routed = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=slow-takeover'
+        );
+        assert.strictEqual(routed.body.nodeId, nodes[0].nodeId);
+        const held = fetchJson(
+          nodes[0].httpPort,
+          '/hold-increment?name=slow-takeover&ms=1500',
+          { timeoutMs: 20_000 }
+        );
+        await until(
+          async () => {
+            const { body } = await fetchJson(
+              nodes[0].httpPort,
+              '/holding?name=slow-takeover'
+            );
+            return body.holding === 1;
+          },
+          10_000,
+          'the held request never ran on node 0'
+        );
+        // Node 1 reads the DO's log back as it takes the DO over, which takes
+        // longer than node 0 has from the DO's handoff, 1.5 s into the 4 s
+        // stop, to its exit, 3.6 s in. Only node 1's reads are slow: node 0
+        // may read the log too, to compact it, and its handoff waits for
+        // that.
+        await bucket.setFaults([
+          {
+            method: 'GET',
+            via: 'node1',
+            prefix: `${objectPrefix(first.body.id)}/`,
+            except: '/own.json',
+            delayMs: 3000,
+            times: 1,
+          },
+        ]);
+        const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        await nodes[0].waitForStderr(/cluster: stopping: handing off/, 10_000);
+        // Through the peer. If it reaches node 0 before the handoff ends, as
+        // it all but always does, it waits for it: sent on to node 1 then, it
+        // would still be on its way back when node 0 exits, so node 0 answers
+        // it moved, and node 1's stub sends it again there. Arriving later, it
+        // finds the DO gone from node 0, and is sent again the same way.
+        const peer = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=slow-takeover',
+          { timeoutMs: 30_000 }
+        );
+        assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
+        assert.deepStrictEqual(
+          [peer.body.nodeId, peer.body.count],
+          [nodes[1].nodeId, 4]
+        );
+        if (!MOVED_AFTER_HANDOFF.test(nodes[0].stderr)) {
+          t.diagnostic('the request reached node 0 after the handoff ended');
+        }
+        const done = await held;
+        assert.strictEqual(done.status, 200, JSON.stringify(done.body));
+        assert.deepStrictEqual(
+          [done.body.nodeId, done.body.count],
+          [nodes[0].nodeId, 3]
+        );
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        assert.deepStrictEqual(
+          await bucket.faultHits(),
+          [1],
+          'node 1 read nothing of the DO back'
+        );
+      },
+      {
+        configName: 'shortStop',
+        nodeEnv: (bucket, i) =>
+          i === 1 ? { AWS_ENDPOINT_URL: bucket.endpointVia('node1') } : {},
+      }
+    );
+  }
+);
+
+test(
+  "cluster: a peer's request that waited for a handoff is sent on when its caller retries too briefly",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes, bucket }) => {
+        const first = await fetchJson(
+          nodes[0].httpPort,
+          '/increment?name=brief-retry'
+        );
+        assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+        // Node 1 learns the route to node 0.
+        const routed = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=brief-retry'
+        );
+        assert.strictEqual(routed.body.nodeId, nodes[0].nodeId);
+        const held = fetchJson(
+          nodes[0].httpPort,
+          '/hold-increment?name=brief-retry&ms=2500',
+          { timeoutMs: 20_000 }
+        );
+        await until(
+          async () => {
+            const { body } = await fetchJson(
+              nodes[0].httpPort,
+              '/holding?name=brief-retry'
+            );
+            return body.holding === 1;
+          },
+          10_000,
+          'the held request never ran on node 0'
+        );
+        // Node 1 takes 4.5 s to read the DO's log back as it takes the DO
+        // over, from the DO's handoff some 2.5 s into the 10 s stop.
+        await bucket.setFaults([
+          {
+            method: 'GET',
+            via: 'node1',
+            prefix: `${objectPrefix(first.body.id)}/`,
+            except: '/own.json',
+            delayMs: 4500,
+            times: 1,
+          },
+        ]);
+        const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        await nodes[0].waitForStderr(/cluster: stopping: handing off/, 10_000);
+        // Through the peer, with a 6 s retry timeout: once it waited for the
+        // handoff, its caller retries for some 3 s, which the takeover
+        // outlasts, while node 0 still has 6.5 s before it exits. So node 0
+        // sends it on to node 1 rather than answer it moved.
+        const peer = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=brief-retry&retryTimeoutMs=6000',
+          { timeoutMs: 30_000 }
+        );
+        assert.strictEqual(peer.status, 200, JSON.stringify(peer.body));
+        assert.deepStrictEqual(
+          [peer.body.nodeId, peer.body.count],
+          [nodes[1].nodeId, 4]
+        );
+        assert.doesNotMatch(nodes[0].stderr, MOVED_AFTER_HANDOFF);
+        const done = await held;
+        assert.strictEqual(done.status, 200, JSON.stringify(done.body));
+        assert.deepStrictEqual(
+          [done.body.nodeId, done.body.count],
+          [nodes[0].nodeId, 3]
+        );
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        assert.deepStrictEqual(
+          await bucket.faultHits(),
+          [1],
+          'node 1 read nothing of the DO back'
+        );
+      },
+      {
+        nodeEnv: (bucket, i) =>
+          i === 1 ? { AWS_ENDPOINT_URL: bucket.endpointVia('node1') } : {},
+      }
     );
   }
 );
