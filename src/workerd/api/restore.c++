@@ -8,6 +8,7 @@
 #include "http.h"
 #include "worker-rpc.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/completion-membrane.h>
 

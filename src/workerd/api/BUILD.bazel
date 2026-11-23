@@ -81,6 +81,7 @@ filegroup(
         "event-target-bootstrap.h",
         "events.h",
         "export-loopback.h",
+        "exported-handler-ctx.h",
         "filesystem.h",
         "filesystem-bootstrap.h",
         "form-data.h",

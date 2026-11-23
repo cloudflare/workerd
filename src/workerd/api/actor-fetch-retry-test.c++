@@ -5,6 +5,7 @@
 #include "actor.h"
 #include "global-scope.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/script.h>
