@@ -62,6 +62,18 @@ crate.annotation(
     gen_binaries = ["capnpc-rust"],
 )
 
+# Per-call allocations in capnp-rust, for capnp-kj's calls between Rust and KJ: a message being
+# built keeps its first segment's entry inline rather than in a Vec, and Request::send() retypes
+# its response promise without boxing another future. Both are proposed upstream.
+crate.annotation(
+    crate = "capnp",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/rust/crates/capnp/inline-first-segment.patch",
+        "//:patches/rust/crates/capnp/retype-response-without-boxing.patch",
+    ],
+)
+
 # Header-value leniency patches for the Rust HTTP path (kj-hyper / hyper): KJ, following the
 # browsers' lead, forbids only NUL, CR, and LF in header values, while the `http` crate's
 # HeaderValue constructors and `httparse`'s wire parser additionally reject the other C0
