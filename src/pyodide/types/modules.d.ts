@@ -12,13 +12,6 @@ declare module 'pyodide-internal:setup_python_search_path.py' {
   export default value;
 }
 
-declare module 'pyodideRuntime-internal:emscriptenSetup' {
-  function instantiateEmscriptenModule(
-    pyodideWasmModule: WebAssembly.Module
-  ): Promise<Module>;
-  export { instantiateEmscriptenModule };
-}
-
 declare module 'pyodideRuntime-internal:pyodide.asm.wasm' {
   const value: WebAssembly.Module;
   export default value;

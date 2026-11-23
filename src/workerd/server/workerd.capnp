@@ -97,6 +97,9 @@ struct Config {
 
   cluster @7 :ClusterConfig;
   # Set when this instance should join a cluster. Requires `--experimental`.
+
+  tracing @8 :TracingOptions;
+  # Where the spans of Worker invocations are exported.
 }
 
 struct ClusterConfig {
@@ -191,7 +194,13 @@ struct ClusterConfig {
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
-  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage. Give the
+  # bucket a lifecycle rule that aborts incomplete multipart uploads: a `bucket` service's upload
+  # that is never completed or aborted, such as an R2 put cut off mid-stream, otherwise keeps its
+  # parts, and their storage, forever.
+  #
+  # When empty, `serve` takes it from the environment variable `WORKERD_CLUSTER_BUCKET`, ignoring
+  # trailing whitespace. A bucket set nowhere is an error.
   #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
@@ -252,11 +261,18 @@ struct ClusterConfig {
 
   key @3 :Text;
   # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
-  # of `openssl rand -hex 32`. Each connection between instances opens with
-  # a MAC keyed by it, over the target, a timestamp and a nonce, so a header seen on the wire
-  # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
-  # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
-  # the cluster on a private network (a VPC, WireGuard, Tailscale).
+  # of `openssl rand -hex 32`. Each connection between instances opens with a MAC keyed by it,
+  # over the instance it is for, the target address, a timestamp and a nonce: a header seen on
+  # the wire cannot be replayed, and no other instance accepts it, such as one that took the
+  # address since or shares it. The instances' clocks must agree within 30 seconds. It also keys
+  # channel tokens, which pass service and Durable Object stubs over RPC. Traffic is not
+  # encrypted: run the cluster on a private network (a VPC, WireGuard, Tailscale).
+  #
+  # When empty, `serve` takes the key from the environment variable `WORKERD_CLUSTER_KEY`, or reads
+  # it at startup from the file that `WORKERD_CLUSTER_KEY_FILE` names, such as a mounted secret,
+  # ignoring trailing whitespace. Set only one of the two. The key is text, so the file must be
+  # UTF-8. A config, or a binary that `workerd compile` builds, then holds no key. A key set
+  # nowhere is an error.
   #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 
@@ -275,8 +291,11 @@ struct ClusterConfig {
   # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
   # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
   # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
-  # stops its containers' Docker containers.
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, its
+  # peers' last, and then stops its containers' Docker containers. Once its other connections have
+  # finished, it starts none of its peers' requests, and closes each peer's connection once the
+  # requests it started on that connection have ended, so that the peer sends those it did not
+  # start where their Durable Objects run next.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
@@ -287,6 +306,11 @@ struct ClusterConfig {
   # than from a Durable Object, waits like any other request, so a call from the object back to
   # itself that way ends only with the requests in flight. Stopping an object's Docker container
   # takes one of the few handoffs that run at once.
+  #
+  # A request to a Durable Object stays in flight until the body of its response is read, so a
+  # caller that checks `res.ok` and drops the response keeps the object busy, and its handoff waits
+  # for half of this timeout before it cancels the request. Read or cancel a body you don't use
+  # (`await res.body?.cancel()`).
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
@@ -315,6 +339,32 @@ struct ClusterConfig {
   # `stopTimeoutMs` is not divided. A divisor of 0, or one that rounds a time down to 0 (above
   # 1000), fails the config. Bucket requests that stall past the shortened bounds fence the
   # instance, so leave this at 1 outside tests.
+}
+
+struct TracingOptions {
+  otlp @0 :ServiceDesignator;
+  # Export spans to an OpenTelemetry collector. Every Worker invocation produces a trace: a span
+  # for the invocation itself, one for each subrequest and binding operation it performs, and any
+  # the Worker opens with `ctx.tracing.enterSpan()`. They are POSTed to `/v1/traces` on this
+  # service in the OTLP/HTTP protobuf encoding, so the service is typically an `ExternalServer`
+  # pointing at a collector's OTLP/HTTP port. For example, to see traces in a local Jaeger:
+  #
+  #     services = [
+  #       ...,
+  #       (name = "jaeger", external = (address = "localhost:4318", http = ())),
+  #     ],
+  #     tracing = (otlp = "jaeger"),
+  #
+  # Use `HttpOptions.injectRequestHeaders` to send credentials along. The `service.name` resource
+  # attribute is the name of the Worker's service. A request arriving on a socket starts its trace
+  # with the Worker's invocation span. Traces without an upstream sampling decision are sampled.
+  # Invocations of the designated service itself are not traced. While this is set, user spans are
+  # exported over OTLP instead of being delivered to streaming tail workers.
+  #
+  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. Queued
+  # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
+  # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
+  # no retries.
 }
 
 struct LoggingOptions {
@@ -448,7 +498,14 @@ struct Service {
     # a Worker that adds logic for setting Content-Type and the like.
 
     bucket @6 :ClusterBucket;
-    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
+    # A directory of objects, served over HTTP: in the cluster's bucket, or without a cluster
+    # in a `disk` service's directory.
+
+    assets @7 :AssetsService;
+    # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
+    cache @8 :CacheDirectory;
+    # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
+    # directory on disk.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -458,14 +515,83 @@ struct Service {
 }
 
 struct ClusterBucket {
-  # GET, PUT and DELETE on `/<file>` read, write and remove the object
-  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
-  # that every instance sees the same files. The cluster keeps its own state outside
-  # `services/`, where this service cannot reach it. A binding to this service grants only its
-  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+  # A directory of objects served over a small HTTP API (the one workerd's R2 Worker
+  # uses): `/<key>` is the object `<key>`, the path percent-decoded whole, so keys may hold `/`
+  # and empty segments, but not a `.` or `..` segment, which is refused. HEAD, GET (with one
+  # `Range`), PUT (content headers, `x-meta-<name>` user metadata, `If-Match: <x-version>`,
+  # `If-None-Match: *`) and DELETE;
+  # `GET /?list&prefix=&start-after=&delimiter=&max=&token=`; multipart uploads with
+  # `POST /<key>?uploads`, `PUT /<key>?part=<n>&upload=<id>`, and `GET` (parts), `POST`
+  # (complete) and `DELETE` (abort) on `/<key>?upload=<id>`. Errors answer `{code, message}`
+  # JSON with the object store's error code, such as `NoSuchKey`.
+  #
+  # In a cluster (`Config.cluster`) the objects are `<cluster prefix>services/<path>/<key>` in
+  # the cluster's bucket, so that every instance sees the same ones. The cluster keeps its own
+  # state outside `services/`, where this service cannot reach it. Without a cluster they are
+  # in `localDisk`. A binding to this service grants only its directory, as a writable `disk`
+  # does. Experimental: requires `--experimental`.
 
   path @0 :Text;
   # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
+
+  localDisk @1 :Text;
+  # Without `Config.cluster`, the name of a writable `disk` service whose directory
+  # `<disk>/<path>/` holds the objects: a JSON file per object under `objects/`, and its bytes
+  # under `blobs/`. Processes may share it, as `wrangler dev` and `wrangler r2 object put
+  # --local` do. Ignored in a cluster.
+
+  minPartSize @2 :UInt64 = 5242880;
+  # The least size of a multipart upload's part but the last, checked at completion by the
+  # `localDisk` store; for tests, which use small parts. Ignored in a cluster, whose store has
+  # its own rule.
+}
+
+struct AssetsService {
+  # Static assets, as Cloudflare serves a Worker's `assets` (wrangler's `assets` config): each
+  # request goes to the user Worker or to a file of the directory, as `run_worker_first` and the
+  # files ask. Files are looked up as each request arrives, so a change to the directory is seen
+  # at once. A directory is never an asset, nor is a file `.assetsignore` ignores, which by
+  # default are `_headers`, `_redirects` and `.assetsignore` themselves. Experimental: requires
+  # `--experimental`.
+  #
+  # A designator with no entrypoint names the router; one with the entrypoint `AssetWorker`
+  # serves files only, and is what a Worker's assets binding names.
+
+  path @0 :Text;
+  # The directory. Relative paths are interpreted relative to the current directory, as a
+  # `disk` service's are.
+
+  config @1 :Text;
+  # JSON, every field optional: `html_handling`, `not_found_handling`, `base_path` and
+  # `run_worker_first`, as in wrangler's `assets`; `headers`, `redirects` and `ignore`, the text
+  # of the directory's `_headers`, `_redirects` and `.assetsignore`; `debug`, for Miniflare, which
+  # logs and removes the header it adds to a navigation that `not_found_handling` answered.
+
+  userWorker @2 :ServiceDesignator;
+  # The user Worker, if any. Events other than HTTP requests go to it, and its compatibility flags
+  # select assets behavior, as they do on Cloudflare.
+
+  compatibilityDate @3 :Text;
+  compatibilityFlags @4 :List(Text);
+  # Without a user Worker, the compatibility date and flags that select assets behavior, compiled
+  # as a Worker's are.
+}
+
+struct CacheDirectory {
+  # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
+  # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
+  # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
+  # file, so entries survive a restart, in a directory per cache: `default/` for `caches.default`,
+  # and for `caches.open(name)` the SHA-256 of `name` in lowercase hex, so that one cache can be
+  # removed by itself. With `Config.cluster`, the instances share one cache instead, which every
+  # instance must name the same: an entry lives on one instance, and the directory holds this
+  # instance's in `cluster-<instance>/`, emptied as it starts. While an instance drains, the keys
+  # it is home to, about 1/N, miss, and puts to them are not stored. Experimental: requires
+  # `--experimental`.
+
+  path @0 :Text;
+  # The directory, as in `DiskDirectory`: relative to the current directory, and if not
+  # specified, given on the command line with `--directory-path <service-name>=<path>`.
 }
 
 struct ServiceDesignator {
@@ -613,9 +739,12 @@ struct Worker {
 
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
-      # Worker, `/workerd/cron.js`, cron triggers, or `/workerd/queues.js`, the Queues Worker
-      # (see each one's header for the config it takes). Unlike built-in modules such as
-      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
+      # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
+      # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine,
+      # `/workerd/d1.js`, D1 databases, `/workerd/ratelimit.js`, rate limiting, or
+      # `/workerd/secrets-store.js`, Secrets Store secrets (see each one's header for the config
+      # it takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is
+      # a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

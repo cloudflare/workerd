@@ -1,0 +1,114 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "d1-rpc-test", worker = .rpcTest ),
+    ( name = "d1-http-test", worker = .httpTest ),
+    ( name = "d1",
+      worker = (
+        modules = [ ( name = "d1.js", bundled = "/workerd/d1.js" ) ],
+        compatibilityFlags = ["rpc"],
+        durableObjectNamespaces = [
+          ( className = "D1Database", uniqueKey = "D1Database", enableSql = true ) ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+        bindings = [ ( name = "DATABASE", durableObjectNamespace = "D1Database" ) ],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  ( name = "worker", esModule = embed "d1-test.js" ),
+  ( name = "d1-miniflare-test", esModule = embed "d1-miniflare-test.js" ),
+  ( name = "d1-export-test", esModule = embed "d1-export-test.js" ),
+  ( name = "d1-api-test-common",
+    esModule = embed "../../../../cloudflare/internal/test/d1/d1-api-test-common.js" ),
+];
+
+const rpcTest :Workerd.Worker = (
+  modules = .modules,
+  compatibilityFlags = ["nodejs_compat", "d1_binding_jsrpc"],
+  bindings = [
+    ( name = "DB", wrapped = .rpcDb ),
+    ( name = "OTHER", wrapped = .rpcOther ),
+    ( name = "STRANGE", wrapped = .rpcStrange ),
+    ( name = "EMPTY", wrapped = .rpcEmpty ),
+    ( name = "GOLDEN", wrapped = .rpcGolden ),
+    ( name = "RESTORE", wrapped = .rpcRestore ),
+  ],
+);
+
+const httpTest :Workerd.Worker = (
+  modules = .modules,
+  compatibilityFlags = ["nodejs_compat"],
+  bindings = [
+    ( name = "DB", wrapped = .httpDb ),
+    ( name = "OTHER", wrapped = .httpOther ),
+    ( name = "STRANGE", wrapped = .httpStrange ),
+    ( name = "EMPTY", wrapped = .httpEmpty ),
+    ( name = "GOLDEN", wrapped = .httpGolden ),
+    ( name = "RESTORE", wrapped = .httpRestore ),
+  ],
+);
+
+const rpcDb :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc\"}" ) ) ) ],
+);
+const rpcOther :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc-other\"}" ) ) ) ],
+);
+const httpDb :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http\"}" ) ) ) ],
+);
+const httpOther :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http-other\"}" ) ) ) ],
+);
+const rpcStrange :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc-my/ Database\"}" ) ) ) ],
+);
+const rpcEmpty :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc-empty\"}" ) ) ) ],
+);
+const httpStrange :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http-my/ Database\"}" ) ) ) ],
+);
+const httpEmpty :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http-empty\"}" ) ) ) ],
+);
+const rpcGolden :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc-golden\"}" ) ) ) ],
+);
+const rpcRestore :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"rpc-restore\"}" ) ) ) ],
+);
+const httpGolden :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http-golden\"}" ) ) ) ],
+);
+const httpRestore :Workerd.Worker.Binding.WrappedBinding = (
+  moduleName = "cloudflare-internal:d1-api",
+  innerBindings = [ ( name = "fetcher",
+    service = ( name = "d1", props = ( json = "{\"database\": \"http-restore\"}" ) ) ) ],
+);

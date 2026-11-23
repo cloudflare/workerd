@@ -212,6 +212,15 @@ function addNumericalSeparator(val: string): string {
   return `${val.slice(0, i)}${res}`;
 }
 
+export class ERR_CONSOLE_WRITABLE_STREAM extends NodeTypeError {
+  constructor(name: string) {
+    super(
+      'ERR_CONSOLE_WRITABLE_STREAM',
+      `Console expects a writable stream instance for ${name}`
+    );
+  }
+}
+
 export class ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY extends NodeError {
   constructor() {
     super(
@@ -621,22 +630,26 @@ export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
   }
 }
 
-export class ERR_INVALID_URL extends NodeError {
+export class ERR_INVALID_URL extends NodeTypeError {
   input: string;
+  base?: string;
 
-  constructor(url: string) {
+  constructor(url: string, base?: string) {
     super('ERR_INVALID_URL', 'Invalid URL');
     this.input = url;
+    if (base != null) {
+      this.base = base;
+    }
   }
 }
 
-export class ERR_INVALID_URL_SCHEME extends NodeError {
+export class ERR_INVALID_URL_SCHEME extends NodeTypeError {
   constructor(scheme: string) {
     super('ERR_INVALID_URL_SCHEME', `The URL must be of scheme ${scheme}`);
   }
 }
 
-export class ERR_INVALID_FILE_URL_HOST extends NodeError {
+export class ERR_INVALID_FILE_URL_HOST extends NodeTypeError {
   constructor(input: string) {
     super(
       'ERR_INVALID_FILE_URL_HOST',
@@ -645,7 +658,7 @@ export class ERR_INVALID_FILE_URL_HOST extends NodeError {
   }
 }
 
-export class ERR_INVALID_FILE_URL_PATH extends NodeError {
+export class ERR_INVALID_FILE_URL_PATH extends NodeTypeError {
   constructor(input: string) {
     super('ERR_INVALID_FILE_URL_PATH', `File URL path ${input}`);
   }
@@ -793,6 +806,27 @@ export class GetAddrInfoException extends Error {
     this.code = code;
     this.errno = GETADDRINFO_ERRNO[code];
     this.hostname = hostname;
+  }
+}
+
+// The ICU errors buffer.transcode() reports, with ICU's numbers.
+const ICU_ERRNO = {
+  U_ILLEGAL_ARGUMENT_ERROR: 1,
+  U_INVALID_CHAR_FOUND: 10,
+} as const;
+
+export type TranscodeErrorCode = keyof typeof ICU_ERRNO;
+
+// A failed buffer.transcode(), as Node reports it: a plain Error with ICU's
+// error name in `code` and its number in `errno`.
+export class TranscodeException extends Error {
+  code: TranscodeErrorCode;
+  errno: number;
+
+  constructor(code: TranscodeErrorCode) {
+    super(`Unable to transcode Buffer [${code}]`);
+    this.code = code;
+    this.errno = ICU_ERRNO[code];
   }
 }
 
@@ -1040,13 +1074,19 @@ export class ERR_EINVAL extends NodeSyscallError {
 
 export class ERR_EEXIST extends NodeSyscallError {
   path?: string;
-  constructor(options: { syscall: string; path?: string }) {
-    const message = options.path
-      ? `file already exists, ${options.syscall} '${options.path}'`
-      : 'file already exists';
+  dest?: string;
+  constructor(options: { syscall: string; path?: string; dest?: string }) {
+    let message = 'file already exists';
+    if (options.path !== undefined) {
+      message += `, ${options.syscall} '${options.path}'`;
+      if (options.dest !== undefined) message += ` -> '${options.dest}'`;
+    }
     super('EEXIST', message, options.syscall);
     if (options.path !== undefined) {
       this.path = options.path;
+    }
+    if (options.dest !== undefined) {
+      this.dest = options.dest;
     }
     this.errno = -17; // EEXIST
   }

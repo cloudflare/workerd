@@ -18,9 +18,9 @@ wd_rust_crate(
     deps = [
         "//src/rust/jsg",
         "//src/workerd/io/io-context",
-        "@crates_vendor//:encoding_rs",
-        "@crates_vendor//:futures",
-        "@crates_vendor//:lol_html",
+        "@crates_vendor//encoding_rs",
+        "@crates_vendor//futures",
+        "@crates_vendor//lol_html",
     ],
 )
 

@@ -8,8 +8,6 @@
 #include <workerd/api/streams/transform.h>
 #include <workerd/jsg/jsg.h>
 
-#include <zlib.h>
-
 namespace workerd::api {
 
 class CompressionStream: public TransformStream {
@@ -22,7 +20,7 @@ class CompressionStream: public TransformStream {
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
-                                 : "gzip" | "deflate" | "deflate-raw");
+                                 : "gzip" | "deflate" | "deflate-raw" | "brotli");
     });
   }
 };
@@ -37,7 +35,7 @@ class DecompressionStream: public TransformStream {
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
-                                 : "gzip" | "deflate" | "deflate-raw");
+                                 : "gzip" | "deflate" | "deflate-raw" | "brotli");
     });
   }
 };

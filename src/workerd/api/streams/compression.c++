@@ -8,6 +8,8 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/state-machine.h>
 
+#include <zlib.h>
+
 namespace workerd::api {
 
 namespace {
@@ -379,8 +381,7 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 // NOLINTBEGIN(workerd-legacy-stream-alloc)
 
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+  requireWebCompressionFormat(format);
 
   auto impl = kj::rc<CompressionStreamImpl>(CodecStage::Mode::COMPRESS, kj::mv(format),
       CodecStage::Flags::NONE, js.getExternalMemoryTarget());
@@ -398,8 +399,7 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+  requireWebCompressionFormat(format);
 
   auto impl = kj::rc<CompressionStreamImpl>(CodecStage::Mode::DECOMPRESS, kj::mv(format),
       FeatureFlags::get(js).getStrictCompression() ? CodecStage::Flags::STRICT

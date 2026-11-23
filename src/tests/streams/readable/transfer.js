@@ -34,8 +34,8 @@ export const structuredCloneReadable = {
       new ReadableStream({ type: 'bytes' }),
     ]) {
       throws(() => structuredClone(rs, { transfer: [rs] }), {
-        name: 'TypeError',
-        message: 'Object is not transferable',
+        name: 'DataCloneError',
+        message: 'Object is not transferable.',
       });
       throws(
         () => structuredClone(rs),

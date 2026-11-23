@@ -363,7 +363,7 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
 KJ_TEST("request on an aborted shared context completes cleanup after cancellation throws") {
   TestFixture fixture;
   auto& waitScope = fixture.getWaitScope();
-  bool callbackCanceled = false;
+  kj::Pin<bool> callbackCanceled;  // Value-initialized to false.
   bool taskCanceled = false;
   bool waitUntilCanceled = false;
   // The fixture's own reference keeps the context shared after the request is destroyed.
@@ -374,9 +374,10 @@ KJ_TEST("request on an aborted shared context completes cleanup after cancellati
   kj::Function<kj::Promise<void>()> throwingCallback;
   context
       ->run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackCanceled = true;
+    callback = context.makeReentryCallback(
+        [canceled = callbackCanceled.addWeak()](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") = true;
       }));
     });
     throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
@@ -396,7 +397,7 @@ KJ_TEST("request on an aborted shared context completes cleanup after cancellati
   context->abort(KJ_EXCEPTION(FAILED, "test abort reason"));
   request = nullptr;
 
-  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(*callbackCanceled);
   KJ_EXPECT(taskCanceled);
   KJ_EXPECT(waitUntilCanceled);
 }
@@ -435,6 +436,66 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
 
   // Tidy up the still-live front request so its destructor doesn't warn about undrained tasks.
   fixture.drainAndDestroy(kj::mv(second));
+}
+
+// An IoChannelFactory numbered in the order the fixture's incoming requests were created.
+struct NumberedChannelFactory final: public TestFixture::DummyIoChannelFactory {
+  NumberedChannelFactory(TimerChannel& timer, uint number)
+      : DummyIoChannelFactory(timer),
+        number(number) {}
+  uint number;
+};
+
+uint channelFactoryNumber(IoContext& context) {
+  return kj::downcast<NumberedChannelFactory>(context.getIoChannelFactory()).number;
+}
+
+// Delivers two requests to one actor, the older numbered 0 and the newer 1, and has the newer
+// return while the actor has background work, so that it stays current. Calls `body` with the
+// actor's context and a function that has the older request return too.
+void withReturnedNewerRequest(TestFixture::SetupParams params,
+    kj::FunctionParam<void(IoContext&, kj::FunctionParam<void()> returnOlder)> body) {
+  uint created = 0;
+  params.actorId = Worker::Actor::Id(kj::str("io-channels-test"));
+  params.ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+      [&created](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<NumberedChannelFactory>(timer, created++);
+  });
+  TestFixture fixture(kj::mv(params));
+  auto context = fixture.newIoContext();
+  auto older = fixture.newIncomingRequest(*context);
+  auto newer = fixture.newIncomingRequest(*context);
+  context->addWaitUntil(kj::NEVER_DONE);
+
+  ErrorHandlerImpl errorHandler;
+  kj::TaskSet waitUntilTasks(errorHandler);
+  newer->drain(waitUntilTasks, kj::mv(newer));
+
+  auto returnOlder = [&]() {
+    if (older.get() != nullptr) older->drain(waitUntilTasks, kj::mv(older));
+  };
+  body(*context, returnOlder);
+  returnOlder();
+}
+
+KJ_TEST("an actor's calls use the channels of its newest running request") {
+  withReturnedNewerRequest(
+      {.autogateKeys = kj::arr(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)},
+      [](IoContext& context, kj::FunctionParam<void()> returnOlder) {
+    KJ_EXPECT(channelFactoryNumber(context) == 0);
+
+    // Once every request has returned, the calls use the current request's channels.
+    returnOlder();
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
+}
+
+KJ_TEST("without IO_CHANNELS_FROM_RUNNING_REQUEST, an actor's calls use its current request's "
+        "channels") {
+  withReturnedNewerRequest(
+      {.ignoreAllAutogatesEnv = true}, [](IoContext& context, kj::FunctionParam<void()>) {
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
 }
 
 KJ_TEST("cancelPendingWorkForHibernation() cancels pending work but keeps abort watchers armed") {
@@ -494,7 +555,7 @@ KJ_TEST("cancelPendingWorkForHibernation() drops cross-context actions") {
 KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps canceling") {
   TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-throw-test"))});
   auto& waitScope = fixture.getWaitScope();
-  bool callbackCanceled = false;
+  kj::Pin<bool> callbackCanceled;  // Value-initialized to false.
   bool waitUntilCanceled = false;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -503,9 +564,10 @@ KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps 
   kj::Function<kj::Promise<void>()> throwingCallback;
   context
       ->run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackCanceled = true;
+    callback = context.makeReentryCallback(
+        [canceled = callbackCanceled.addWeak()](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") = true;
       }));
     });
     throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
@@ -524,7 +586,7 @@ KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps 
   KJ_EXPECT_LOG(ERROR, "test cancellation failure");
   request->cancelPendingWorkForHibernation();
 
-  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(*callbackCanceled);
   KJ_EXPECT(waitUntilCanceled);
 }
 
@@ -885,10 +947,13 @@ KJ_TEST("run() fails without running its callback when there is no current reque
   TestFixture fixture;
   auto context = fixture.newIoContext();
 
-  bool ran = false;
-  expectThrowsForNoCurrentIncomingRequest(
-      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }); });
-  KJ_EXPECT(!ran);
+  kj::Pin<bool> ran;  // Value-initialized to false.
+  expectThrowsForNoCurrentIncomingRequest([&]() {
+    return context->run([weakRan = ran.addWeak()](Worker::Lock&) {
+      KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before run() settled") = true;
+    });
+  });
+  KJ_EXPECT(!*ran);
 }
 
 KJ_TEST("run() in a critical section fails when there is no current request") {
@@ -899,10 +964,13 @@ KJ_TEST("run() in a critical section fails when there is no current request") {
   auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
   auto criticalSection = inputLock.startCriticalSection();
   kj::Maybe<kj::Rc<InputGate::CriticalSection>> runIn = criticalSection->clone();
-  bool ran = false;
-  expectThrowsForNoCurrentIncomingRequest(
-      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)); });
-  KJ_EXPECT(!ran);
+  kj::Pin<bool> ran;  // Value-initialized to false.
+  expectThrowsForNoCurrentIncomingRequest([&]() {
+    return context->run([weakRan = ran.addWeak()](Worker::Lock&) {
+      KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before run() settled") = true;
+    }, kj::mv(runIn));
+  });
+  KJ_EXPECT(!*ran);
 }
 
 KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
@@ -912,14 +980,16 @@ KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
   auto request = fixture.newIncomingRequest(*context);
 
   auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
-  bool ran = false;
-  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  kj::Pin<bool> ran;  // Value-initialized to false.
+  auto run = context->run([weakRan = ran.addWeak()](Worker::Lock&) {
+    KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before run() settled") = true;
+  });
   KJ_EXPECT(!run.poll(waitScope));
 
   fixture.drainAndDestroy(kj::mv(request));
   { auto released = kj::mv(inputLock); }
   expectRejectsForNoCurrentIncomingRequest(waitScope, kj::mv(run));
-  KJ_EXPECT(!ran);
+  KJ_EXPECT(!*ran);
 }
 
 KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
@@ -931,14 +1001,16 @@ KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") 
 
   // Holding another isolate's lock holds up the run, since a thread takes one at a time.
   auto asyncLock = other.takeAsyncLock();
-  bool ran = false;
-  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  kj::Pin<bool> ran;  // Value-initialized to false.
+  auto run = context->run([weakRan = ran.addWeak()](Worker::Lock&) {
+    KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before run() settled") = true;
+  });
   KJ_EXPECT(!run.poll(io.waitScope));
 
   fixture.drainAndDestroy(kj::mv(request));
   { auto released = kj::mv(asyncLock); }
   expectRejectsForNoCurrentIncomingRequest(io.waitScope, kj::mv(run));
-  KJ_EXPECT(!ran);
+  KJ_EXPECT(!*ran);
 }
 
 KJ_TEST("run() in a critical section fails with the abort reason of an aborted context") {

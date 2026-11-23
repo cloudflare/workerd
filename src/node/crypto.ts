@@ -560,6 +560,7 @@ export default {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  diffieHellman,
   ECDH,
   createECDH,
   // Keys,

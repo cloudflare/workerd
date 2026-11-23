@@ -810,10 +810,14 @@ jsg::JsUint8Array CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::JsBufferS
     JSG_REQUIRE(data.size() <= max, Error, "Invalid message length");
   }
 
-  if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
-    authTagPassed = true;
-    auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
-    JSG_REQUIRE(passAuthTagToOpenSSL(ctx, tagRef.asPtr()), Error, "Failed to set auth tag");
+  // CCM needs the auth tag before any data; other authenticated modes only need it before final().
+  if (mode == CipherMode::DECIPHER && !authTagPassed && isAuthenticatedMode(ctx)) {
+    KJ_IF_SOME(tag, maybeAuthTag) {
+      authTagPassed = true;
+      JSG_REQUIRE(passAuthTagToOpenSSL(ctx, tag.asPtr()), Error, "Failed to set auth tag");
+    } else {
+      JSG_REQUIRE(ctxMode != EVP_CIPH_CCM_MODE, Error, "No auth tag provided");
+    }
   }
 
   const int block_size = ctx.getBlockSize();

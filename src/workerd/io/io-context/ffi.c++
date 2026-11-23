@@ -4,8 +4,12 @@
 
 #include "ffi.h"
 
+#include <workerd/io/io-context/current-with-id.h>
 #include <workerd/io/io-context/ffi.rs.h>
+#include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+
+#include <v8-inspector.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -20,14 +24,6 @@ namespace {
 // IoContext::Id holds only the process-unique uint64_t that Rust stores.
 static_assert(sizeof(IoContext::Id) == sizeof(uint64_t));
 static_assert(std::is_trivially_copyable_v<IoContext::Id>);
-
-// The current IoContext, which must be the one `id` identifies.
-IoContext& currentWithId(uint64_t id) {
-  auto& context = KJ_REQUIRE_NONNULL(IoContext::tryCurrent(), "there is no current request");
-  KJ_REQUIRE(context.getId() == std::bit_cast<IoContext::Id>(id),
-      "the IoContext is not the one of the current request");
-  return context;
-}
 
 // Wraps a `Literal` (see ffi.h) without copying it.
 kj::ConstString wrapLiteral(Literal bytes) {
@@ -57,6 +53,67 @@ void setTag(Span& span, Literal key, Value value) {
 
 ::rust::Str io_context_no_request_message() {
   return IoContext::NO_REQUEST_MESSAGE.cStr();
+}
+
+kj::Exception io_context_never_settled_exception() {
+  return IoContext::neverSettledException();
+}
+
+kj::Exception io_context_memory_limit_exception() {
+  return IoContext::memoryLimitException();
+}
+
+kj::Own<IsolateWeakRef> io_context_isolate_weak_ref(uint64_t id) {
+  return kj::heap<IsolateWeakRef>(currentWithId(id).getWorker().getIsolate().getWeakRef());
+}
+
+bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& weakRef) {
+  // Rust calls this when it drops the half of an await_js() wait that settles it: in a cppgc
+  // finalizer or the GC epilogue, or without the isolate lock, where ~AwaitJsFulfiller() runs
+  // rejectNeverSettled(). It enters no V8: tryAddStrongRef() takes the weak reference's mutex and
+  // an atomic reference, and hasExcessivelyExceededHeapLimit() must not (see its declaration).
+  return weakRef.ref->tryAddStrongRef()
+      .map([](kj::Own<const Worker::Isolate> isolate) {
+    return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
+  }).orDefault(false);
+}
+
+kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id) {
+  auto resource = currentWithId(id).makeAwaitJsResource();
+  // An inert resource, whose id is 0, reports nothing.
+  if (resource.getId() == 0) return kj::none;
+  return kj::heap(kj::mv(resource));
+}
+
+AbortWatcher::AbortWatcher(IoContext& context, ::rust::Box<AbortCallback> callback)
+    : context(context),
+      abortedAtStart(context.getAbortReason() != kj::none),
+      // onAbort() never resolves: the IoContext only rejects its abort flag. The callback only
+      // settles Rust's state and wakes its future, so it runs no JavaScript and needs no lock.
+      watch(context.onAbort()
+                .catch_([callback = kj::mv(callback)](
+                            kj::Exception&& e) { callback->aborted(kj::mv(e)); })
+                .eagerlyEvaluate(nullptr)) {}
+
+AbortWatcher::~AbortWatcher() noexcept(false) {}
+
+kj::Maybe<kj::Exception> AbortWatcher::abortedSinceStart() const {
+  if (abortedAtStart) {
+    return kj::none;
+  }
+  return context.getAbortReason();
+}
+
+bool abort_watcher_has_pending_abort(const AbortWatcher& watcher) {
+  return watcher.abortedSinceStart() != kj::none;
+}
+
+kj::Exception abort_watcher_pending_abort(const AbortWatcher& watcher) {
+  return KJ_REQUIRE_NONNULL(watcher.abortedSinceStart(), "the IoContext was not aborted since");
+}
+
+kj::Own<AbortWatcher> io_context_watch_abort(uint64_t id, ::rust::Box<AbortCallback> callback) {
+  return kj::heap<AbortWatcher>(currentWithId(id), kj::mv(callback));
 }
 
 kj::Maybe<uint64_t> io_context_try_current_id() {
@@ -109,6 +166,22 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
   }
 }
 
+void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future) {
+  currentWithId(id).addWaitUntil(wait_until_future_wait(kj::mv(future)));
+}
+
+namespace {
+
+// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This
+// function is the reviewed exception: it throws JsExceptionThrown, which is how IoContext::run()
+// learns of an exception, or a termination, that Rust left pending in V8, as for C++ code it runs.
+// That use is counted in src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function.
+[[noreturn]] void throwPendingToRun() {
+  throw jsg::JsExceptionThrown();
+}
+
+}  // namespace
+
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
@@ -120,10 +193,9 @@ void io_context_await_io_and_run(
       case IoCallbackOutcome::Succeeded:
         return;
       case IoCallbackOutcome::Failed:
-        // The exception, or termination, is pending in V8. JsExceptionThrown is how
-        // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
-        // stack, and fails the task with it, as for C++ code it runs. See "C++ JSG" below.
-        throw jsg::JsExceptionThrown();
+        // The exception, or termination, is pending in V8. run() then logs the exception as
+        // uncaught, with its stack, and fails the task with it.
+        throwPendingToRun();
       case IoCallbackOutcome::Panicked:
         // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
         // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
@@ -132,6 +204,47 @@ void io_context_await_io_and_run(
     }
     KJ_UNREACHABLE;
   });
+}
+
+ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)
+    : callback(context.makeReentryCallbackWeak([function = kj::mv(function)](Worker::Lock& lock,
+                                                   IoContext&,
+                                                   ::rust::Box<ReentryCall> call) mutable
+          -> kj::Promise<void> {
+        switch (reentry_fn_run(reinterpret_cast<uintptr_t>(lock.getIsolate()), *function, *call)) {
+          case ReentryOutcome::Started:
+            return reentry_call_wait(kj::mv(call));
+          case ReentryOutcome::Terminated:
+            // The termination is pending in V8. run() then handles it as for C++ code it runs: it
+            // leaves the scope of the limit enforcer, fails with the exceeded limit or the
+            // exception the request was aborted with, and has its microtask checkpoint cancel the
+            // microtasks queued meanwhile.
+            throwPendingToRun();
+          case ReentryOutcome::Panicked:
+            // jsg::catch_panic() threw an internal error and requested a termination, which run()'s
+            // microtask checkpoint delivers. run() would convert a JsExceptionThrown, running
+            // JavaScript first, so the call fails with a KJ exception instead.
+            KJ_FAIL_ASSERT("the function of IoContext::make_reentry_callback_weak() panicked");
+        }
+        KJ_UNREACHABLE;
+      })) {}
+
+kj::Promise<void> ReentryCallback::call(::rust::Box<ReentryCall> call) const {
+  return callback(kj::mv(call));
+}
+
+kj::Own<ReentryCallback> io_context_make_reentry_callback_weak(
+    uint64_t id, ::rust::Box<ReentryFn> function) {
+  return kj::heap<ReentryCallback>(currentWithId(id), kj::mv(function));
+}
+
+kj::Own<ReentryPromise> reentry_callback_call(
+    const ReentryCallback& callback, ::rust::Box<ReentryCall> call) {
+  return kj::heap<ReentryPromise>(callback.call(kj::mv(call)));
+}
+
+kj::Promise<void> reentry_promise_wait(kj::Own<ReentryPromise> promise) {
+  return kj::mv(promise->promise);
 }
 
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {
@@ -200,55 +313,49 @@ void io_context_set_fail_open(uint64_t id) {
   currentWithId(id).setFailOpen();
 }
 
-// C++ JSG
-//
-// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This file
-// has reviewed exceptions. io_context_await_io_and_run(), above, throws JsExceptionThrown, which
-// is how IoContext::run() learns of an exception. The two functions below call
-// IoContext::awaitJs() and jsg::Lock::exceptionToKj(), which ctx.waitUntil() and ctx.abort()
-// call, so that a Rust implementation matches C++ exactly rather than reimplementing them over
-// V8. Each use of C++ JSG, including getCurrentLock(), is counted in
-// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within these three functions.
-//
-// They rely on this invariant: once currentWithId() has passed, the IoContext is current, which
-// it is only inside IoContext::run() or a call from the JavaScript it runs, under the
-// Worker::Lock that getCurrentLock() returns. That is the isolate lock the caller's Rust
-// jsg::Lock stands for, so C++ JSG may use it, and the handles Rust passes belong to the
-// caller's open HandleScope, in the IoContext's context.
-//
-// When C++ JSG throws JsExceptionThrown, the JavaScript exception, or termination, is pending in
-// V8, where C++ JSG left it; the functions return false, and Rust passes the exception on.
-
-bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise) {
-  auto& context = currentWithId(id);
-  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Promise>(kj::mv(promise));
-  try {
-    jsg::Lock& js = context.getCurrentLock();
-    // As PromiseWrapper::tryUnwrap() does for a kj::Promise<void> argument once it has
-    // converted it to a jsg::Promise<void>, which Rust's VoidPromise has done.
-    context.addWaitUntil(context.awaitJs(js, jsg::Promise<void>(js.v8Isolate, handle)));
-    return true;
-  } catch (jsg::JsExceptionThrown&) {
-    return false;
-  }
+void io_context_check_current(uint64_t id) {
+  currentWithId(id);
 }
 
-bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason) {
+void io_context_abort(uint64_t id, kj::Exception reason) {
+  currentWithId(id).abort(kj::mv(reason));
+}
+
+void io_context_abort_without_reason(uint64_t id) {
+  currentWithId(id).abort(IoContext::abortWithoutReasonException());
+}
+
+bool io_context_should_log_uncaught_exceptions() {
+  return kj::_::Debug::shouldLog(kj::LogSeverity::INFO);
+}
+
+void io_context_log_uncaught_exception_stack(UncaughtExceptionSource source, ::rust::Str text) {
+  // Named as in Worker::Lock::logUncaughtException(), since KJ_LOG writes the names.
+  auto stack = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, stack);
+}
+
+void io_context_log_uncaught_exception_value(UncaughtExceptionSource source, ::rust::Str text) {
+  auto exception = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, exception);
+}
+
+bool io_context_send_exception_to_inspector(uint64_t id,
+    ::workerd::rust::jsg::Isolate* isolate,
+    UncaughtExceptionSource source,
+    ::workerd::rust::jsg::Local exception) {
   auto& context = currentWithId(id);
-  auto maybeReason = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(reason));
-  try {
-    // As ExecutionContext::abort() does, before it terminates execution.
-    v8::Local<v8::Value> handle;
-    if (maybeReason.ToLocal(&handle)) {
-      jsg::Lock& js = context.getCurrentLock();
-      context.abort(js.exceptionToKj(jsg::JsValue(handle)));
-    } else {
-      context.abort(IoContext::abortWithoutReasonException());
-    }
-    return true;
-  } catch (jsg::JsExceptionThrown&) {
-    return false;
+  KJ_IF_SOME(inspector, context.getWorker().getIsolate().tryGetV8Inspector()) {
+    // The calls below take the context.
+    if (::workerd::rust::jsg::exceptionPending(isolate)) return false;
+    auto value = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(exception));
+    // As jsg::sendExceptionToInspector() does for an exception without a v8::Message, such as one
+    // a promise rejected with. V8 creates a message from the current stack trace, or the one the
+    // error captured.
+    auto message = v8::Exception::CreateMessage(isolate, value);
+    return jsg::sendExceptionToInspector(isolate, inspector, kj::str(source), value, message);
   }
+  return true;
 }
 
 void io_context_log_error(::rust::Str message) {

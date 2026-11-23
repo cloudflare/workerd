@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-sqlite.h>
 #include <workerd/io/io-context.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/workerd-api.h>
@@ -293,53 +294,6 @@ void actor_storage_set_alarm(
   scheduler.setAlarm(key, time);
 }
 
-namespace {
-// An alarm whose object another instance owns now: that instance runs it. Retried if `again`.
-class AlarmOwnedElsewhere final: public WorkerInterface {
- public:
-  explicit AlarmOwnedElsewhere(AlarmElsewhere then): again(then == AlarmElsewhere::Retry) {}
-  kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
-    return AlarmResult{.retry = again,
-      .retryCountsAgainstLimit = false,
-      .outcome = again ? EventOutcome::CANCELED : EventOutcome::OK};
-  }
-  // The owning instance holds the alarm state, so there is nothing to clear here.
-  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date) override {
-    return kj::Maybe<kj::Date>(kj::none);
-  }
-  kj::Promise<void> request(kj::HttpMethod,
-      kj::StringPtr,
-      const kj::HttpHeaders&,
-      kj::AsyncInputStream&,
-      kj::HttpService::Response&) override {
-    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
-  }
-  kj::Promise<void> connect(kj::StringPtr,
-      const kj::HttpHeaders&,
-      kj::AsyncIoStream&,
-      ConnectResponse&,
-      kj::HttpConnectSettings) override {
-    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
-  }
-  kj::Promise<void> prewarm(kj::StringPtr) override {
-    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
-  }
-  kj::Promise<ScheduledResult> runScheduled(kj::Date, kj::StringPtr) override {
-    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
-  }
-  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent>) override {
-    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
-  }
-
- private:
-  bool again;
-};
-}  // namespace
-
-kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then) {
-  return kj::heap<AlarmOwnedElsewhere>(then);
-}
-
 void actor_storage_delete_all(const ActorStorage& storage) {
   storage.getImpl().alarmScheduler->deleteAll();
 }
@@ -487,7 +441,7 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
     if (!storage->actors->replicated()) return kj::READY_NOW;
     // A new or earlier alarm is in the cluster's index before the commit setting it starts, so
     // that a peer wakes the object if this instance dies once it is durable, acknowledged or not.
-    auto name = kj::str(actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj));
+    auto name = kj::str(kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj));
     return priorTask.then(
         [storage = kj::addRef(*storage), id = kj::str(actor.actorId), name = kj::mv(name), atMs]() {
       return result_task_run(storage->actors->alarm_set(toRust(id), toRust(name), atMs));
@@ -498,7 +452,7 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
   // index write is written again by the index's next tidy.
   void opened(kj::Date time) {
     storage->alarmScheduler->setAlarm(actor, time);
-    auto name = actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj);
+    auto name = kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj);
     auto atMs = (time - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     result_task_run(storage->actors->alarm_opened(toRust(actor.actorId), toRust(name), atMs))
         .detach([](kj::Exception&& e) {
@@ -634,9 +588,10 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
   auto previousCleanup = state.cleanup.addBranch();
   state.canceler.cancel("a new container client took the container over"_kj);
   auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
-      factory.network, kj::str(docker.getSocketPath()), kj::mv(id), kj::mv(imageName),
-      kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId), factory.tasks,
-      kj::mv(previousCleanup), [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
+      factory.network, factory.weakNetwork.addWeak(), kj::str(docker.getSocketPath()), kj::mv(id),
+      kj::mv(imageName), kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId),
+      factory.tasks, kj::mv(previousCleanup),
+      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
     // The client's shutdown began: the next incarnation of the actor gets a new client.
     state.client = kj::none;
     state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();
@@ -729,8 +684,8 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   auto actor = kj::refcounted<Worker::Actor>(impl.getWorker(), *requestTracker, kj::mv(actorId),
       true, kj::mv(makeActorCache), classNameStr.asPtr(), kj::mv(propsValue), kj::mv(makeStorage),
       kj::addRef(*actorHooks), impl.timerChannel, kj::refcounted<ActorObserver>(),
-      hibernationManager.map([](kj::Rc<HibernationManager>& m) { return m.toOwn(); }),
-      hibernationEventTypeId, kj::mv(containerClient), kj::mv(images), *actorHooks);
+      kj::mv(hibernationManager), hibernationEventTypeId, kj::mv(containerClient), kj::mv(images),
+      *actorHooks);
   return kj::heap<ActorHandle>(kj::mv(actorHooks), kj::mv(requestTracker), kj::mv(actor));
 }
 
@@ -742,13 +697,12 @@ kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken) {
   return kj::mv(*broken);
 }
 
-void actor_abort(const ActorHandle& actor, const AbortReason& reason) {
-  // Raising the reason across the bridge is the bridge's own KjError -> kj::Exception conversion.
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { reason.raise(); })) {
-    actor.getActor().abort(exception);
-  } else {
-    actor.getActor().shutdown(0, kj::none);
-  }
+void actor_abort(const ActorHandle& actor, kj::Exception reason) {
+  actor.getActor().abort(reason);
+}
+
+void actor_stop(const ActorHandle& actor) {
+  actor.getActor().shutdown(0, kj::none);
 }
 
 bool actor_has_on_hibernate_handler(const ActorHandle& actor) {
@@ -771,7 +725,7 @@ bool actor_shutdown(
   KJ_IF_SOME(asyncLock, lock) {
     KJ_IF_SOME(manager, actor.getHibernationManager()) {
       actor.getWorker().runInLockScope(
-          *asyncLock, [&](Worker::Lock& lock) { manager.hibernateWebSockets(lock); });
+          *asyncLock, [&](Worker::Lock& lock) { manager->hibernateWebSockets(lock); });
     }
   }
   actor.shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
@@ -795,8 +749,7 @@ void actor_close_storage(const ActorHandle& actor) {
 }
 
 kj::Maybe<kj::Rc<HibernationManager>> actor_hibernation_manager(const ActorHandle& actor) {
-  return actor.getActor().getHibernationManager().map(
-      [](HibernationManager& m) { return kj::Rc<HibernationManager>(m.addRef()); });
+  return actor.getActor().getHibernationManager();
 }
 
 kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start) {

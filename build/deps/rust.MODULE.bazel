@@ -15,10 +15,13 @@ rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",
     edition = "2024",
     extra_rustc_flags_triples = {
-        # Enable ISA extensions matching the ones used for C++.
-        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
-        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
-        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
+        # Enable ISA extensions matching the ones used for C++. clang's -msse4.2 implies popcnt and
+        # rustc's sse4.2 does not; LLVM inlines a function only into a caller that has all of its
+        # target features, so without popcnt no C++ would be inlined into Rust under cross-language
+        # LTO.
+        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2,+pclmulqdq,+popcnt"],
+        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2,+pclmulqdq,+popcnt"],
+        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2,+pclmulqdq,+popcnt"],
         "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
         # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
     },
@@ -137,7 +140,16 @@ crate.from_cargo(
     manifests = ["//deps/rust:Cargo.toml"],
     supported_platform_triples = RUST_TARGET_TRIPLES,
 )
+
+# Skip the root alias package (@crates_vendor//:<crate>); depending on it forces analysis of every
+# crate. Reference crates as @crates_vendor//<crate> instead.
+crate.render_config(
+    incompatible_no_root_alias_targets = True,
+)
 use_repo(
     crate,
     "crates_vendor",
+    # Binaries are not aliased from the hub repo with incompatible_no_root_alias_targets, so
+    # capnpc-rust is referenced from its crate repo directly.
+    "crates_vendor__capnpc-0.27.0",
 )

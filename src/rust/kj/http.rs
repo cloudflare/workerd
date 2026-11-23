@@ -59,6 +59,7 @@ pub mod ffi {
         UNSUBSCRIBE,
         QUERY,
         BAN,
+        CONNECT,
     }
     unsafe extern "C++" {
         type HttpMethod;
@@ -105,8 +106,17 @@ pub mod ffi {
         type HttpHeaderTable;
         type HttpHeaders;
         fn new_http_header_table() -> KjOwn<HttpHeaderTable>;
-        fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
-        fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
+        /// # Safety
+        ///
+        /// The headers keep a reference to `table`, which the `KjOwn` does not carry: the caller
+        /// keeps `table` alive for as long as they exist (`Headers::new` does).
+        unsafe fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
+        /// # Safety
+        ///
+        /// The clone keeps references to the table of `this_` and to the names and values it
+        /// holds, which the `KjOwn` does not carry: the caller keeps `this_` alive and unchanged
+        /// for as long as the clone exists (`HeadersRef::clone_shallow` does).
+        unsafe fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
         fn clear_headers(this_: Pin<&mut HttpHeaders>);
         fn set_header(this_: Pin<&mut HttpHeaders>, id: BuiltinIndicesEnum, value: &str);
         unsafe fn get_header<'a>(
@@ -295,7 +305,8 @@ impl HeadersRef<'_> {
     #[must_use]
     pub fn clone_shallow(&self) -> Headers<'_> {
         Headers {
-            own: ffi::clone_shallow(self.0),
+            // SAFETY: the clone borrows `self`, and so the headers it refers to.
+            own: unsafe { ffi::clone_shallow(self.0) },
             _marker: PhantomData,
         }
     }
@@ -338,7 +349,8 @@ impl<'a> Headers<'a> {
     #[must_use]
     pub fn new(table: &'a HeaderTable) -> Self {
         Self {
-            own: ffi::new_http_headers(table),
+            // SAFETY: the headers borrow `table` for `'a`.
+            own: unsafe { ffi::new_http_headers(table) },
             _marker: PhantomData,
         }
     }
@@ -457,6 +469,12 @@ impl<'a> From<Pin<&'a mut ffi::ConnectResponse>> for ConnectResponse<'a> {
     }
 }
 
+/// What a [`Service`] call ends with.
+///
+/// Its error is the `kj::Exception` itself, so an exception that passes through a service reaches
+/// the caller with everything it holds: context, remote trace and stack trace included.
+pub type ServiceResult = core::result::Result<(), cxx::KjException>;
+
 #[async_trait::async_trait(?Send)]
 pub trait Service {
     /// Make an HTTP request.
@@ -467,7 +485,7 @@ pub trait Service {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()>;
+    ) -> ServiceResult;
 
     /// Make a CONNECT request
     ///
@@ -483,7 +501,7 @@ pub trait Service {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()>;
+    ) -> ServiceResult;
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
     /// To obtain `kj::HttpService` on C++ side finish wrapping with `fromRust()`
@@ -506,7 +524,7 @@ impl Service for CxxService<'_> {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let service = self.0.as_mut();
         ffi::request(
             service,
@@ -527,7 +545,7 @@ impl Service for CxxService<'_> {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
+    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = ServiceResult> + 'b>>
     where
         'a: 'b,
         Self: 'b,
@@ -563,7 +581,7 @@ impl DynHttpService {
         headers: &'a ffi::HttpHeaders,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: Pin<&'a mut ffi::HttpServiceResponse>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let response = ServiceResponse::from(response);
         self.0
             .request(method, url, HeadersRef(headers), request_body, response)
@@ -578,7 +596,7 @@ impl DynHttpService {
         connection: Pin<&'a mut AsyncIoStream>,
         response: Pin<&'a mut ffi::ConnectResponse>,
         settings: ConnectSettings<'a>,
-    ) -> impl Future<Output = Result<()>> {
+    ) -> impl Future<Output = ServiceResult> {
         let headers = HeadersRef(headers);
         let response = ConnectResponse::from(response);
         self.0

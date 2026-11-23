@@ -4493,6 +4493,27 @@ export const utilFormat = {
   },
 };
 
+// An error whose stack can't be read, because reading its name throws, is
+// rendered as an object, as Node renders it.
+export const utilInspectErrorWithThrowingName = {
+  test() {
+    class ThrowingName extends Error {
+      get name() {
+        throw new TypeError('Illegal invocation');
+      }
+    }
+    assert.strictEqual(util.inspect(ThrowingName.prototype), '[object Object]');
+    const withKey = Object.create(ThrowingName.prototype, {
+      tag: { value: 1, enumerable: true },
+    });
+    assert.strictEqual(util.inspect(withKey), '[object Object] { tag: 1 }');
+    assert.strictEqual(
+      util.inspect({ p: ThrowingName.prototype }),
+      '{ p: [object Object] }'
+    );
+  },
+};
+
 export const utilInspectError = {
   // message/util_inspect_error.js
   async test(ctrl, env, ctx) {
@@ -5595,21 +5616,25 @@ export const testPromisify = {
       });
     }
 
-    // TODO(soon): customPromisifyArgs unsupported
-    // {
-    //   const firstValue = 5;
-    //   const secondValue = 17;
+    {
+      const firstValue = 5;
+      const secondValue = 17;
 
-    //   function fn(callback) {
-    //     callback(null, firstValue, secondValue);
-    //   }
+      function fn(callback) {
+        callback(null, firstValue, secondValue);
+      }
 
-    //   fn[customPromisifyArgs] = ['first', 'second'];
+      fn[Symbol.for('nodejs.util.promisify.custom.args')] = ['first', 'second'];
 
-    //   promisify(fn)().then(mustCall((obj) => {
-    //     assert.deepStrictEqual(obj, { first: firstValue, second: secondValue });
-    //   }));
-    // }
+      promisify(fn)().then(
+        commonMustCall((obj) => {
+          assert.deepStrictEqual(obj, {
+            first: firstValue,
+            second: secondValue,
+          });
+        })
+      );
+    }
 
     // vm unsupported
     // {

@@ -61,6 +61,7 @@ impl ToTokens for Type {
             Self::Fn(f) => f.to_tokens(tokens),
             Self::Void(span) => tokens.extend(quote_spanned!(*span=> ())),
             Self::KjDate(span) => tokens.extend(quote_spanned!(*span=> ::kj_rs::KjDate)),
+            Self::KjException(span) => tokens.extend(quote_spanned!(*span=> ::cxx::KjException)),
             Self::SliceRef(r) => r.to_tokens(tokens),
             Self::Future(f) => f.to_tokens(tokens),
         }

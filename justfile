@@ -31,6 +31,16 @@ compile-commands:
   rm -f compile_commands.json
   gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
 
+# Downloads the generated headers and Rust sources of the targets (Cap'n Proto, cxx bridges,
+# _virtual_includes) that editors read from bazel-bin and bazelflare builds leave remote; builds
+# only the output group of --config=bazelflare-generated, so nothing else is compiled or
+# downloaded. e.g. just fetch-generated //src/workerd/io/...
+# A fallback for builds without the config: there's no need to run it when the config is enabled
+# for every bazelflare build (see docs/development.md), and then it fails, since Bazel rejects the
+# config's aspect when it is added twice.
+fetch-generated *args="//src/...":
+  bazel build --config=bazelflare --config=bazelflare-generated --output_groups=generated_srcs --norun_validations --keep_going {{args}}
+
 clean:
   rm -f compile_commands.json
 
@@ -141,14 +151,17 @@ update-deps prefix="":
 update-rust package="":
   bazel fetch --repo_env=CARGO_BAZEL_REPIN="{{ if package == "" { "all" } else { package } }}" --repo=@crates_vendor
 
+# Rust joins ThinLTO where lld links; see build:cross-lto in .bazelrc.
+benchmark_config := if os() == "linux" { "--config=benchmark --config=cross-lto" } else { "--config=benchmark" }
+
 # example: just bench mimetype
 bench path:
-  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
+  bazel run //src/workerd/tests:bench-{{path}} {{benchmark_config}}
 
 # example: just wd-bench //src/workerd/api/tests:text-encoder-bench@ '*/encode ascii*'
 # Runs a wd_bench() target in an optimized build; arguments after the target go to `workerd bench`.
 wd-bench target *args:
-  bazel run {{target}} --config=benchmark -- {{args}}
+  bazel run {{target}} {{benchmark_config}} -- {{args}}
 
 # example: just clippy dns
 # example: just clippy //src/workerd/server:workerd-cli
@@ -180,7 +193,7 @@ create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run {{benchmark_config}} {}
 
 lint: eslint
 
@@ -190,7 +203,7 @@ eslint:
     //src/node:node@eslint \
     //src/per_isolate:per_isolate@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/pyodide/tools:patch_pyodide_asm_lib@eslint \
+    //src/pyodide/bundle:patch_pyodide_asm_lib@eslint \
     //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 
@@ -201,7 +214,7 @@ coverage path="//...":
   open coverage/index.html
 
 profile path:
-  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark --run_under="perf record -F max --call-graph lbr"
+  bazel run //src/workerd/tests:bench-{{path}} {{benchmark_config}} --run_under="perf record -F max --call-graph lbr"
   PERF_FILE=$(fdfind perf.data bazel-bin | grep "{{path}}" | head -1); \
   if [ -n "$PERF_FILE" ] && [ -s "$PERF_FILE" ]; then \
     cp $PERF_FILE perf.data; \

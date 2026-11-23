@@ -2,7 +2,6 @@
 
 #include "actor-state.h"
 #include "blob.h"
-#include "messagechannel.h"
 
 #include <workerd/io/io-context.h>
 
@@ -20,11 +19,6 @@ constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
 namespace messageevent {
 
 kj::Maybe<MessagePort> MessagePort::tryFrom(jsg::Lock& js, jsg::JsValue value) {
-  KJ_IF_SOME(handler, js.tryGetTypeHandler<jsg::Ref<api::MessagePort>>()) {
-    KJ_IF_SOME(port, handler.tryUnwrap(js, value)) {
-      return MessagePort(kj::mv(port));
-    }
-  }
   KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
     // A private symbol is invisible to user code, so the brand cannot be copied onto an
     // impostor, and reading it runs no JS, even on a proxy.
@@ -33,44 +27,6 @@ kj::Maybe<MessagePort> MessagePort::tryFrom(jsg::Lock& js, jsg::JsValue value) {
     }
   }
   return kj::none;
-}
-
-MessagePort MessagePort::addRef(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(port) {
-    KJ_CASE_ONEOF(ref, jsg::Ref<api::MessagePort>) {
-      return MessagePort(ref.addRef());
-    }
-    KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return MessagePort(object.addRef(js));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-jsg::JsValue MessagePort::getHandle(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(port) {
-    KJ_CASE_ONEOF(ref, jsg::Ref<api::MessagePort>) {
-      // Only reachable once a C++ MessagePort exists, which requires the type to be registered.
-      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<api::MessagePort>>(),
-          "MessagePort is missing from the isolate type list");
-      return jsg::JsValue(handler.wrap(js, ref.addRef()));
-    }
-    KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return object.getHandle(js);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-void MessagePort::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(port) {
-    KJ_CASE_ONEOF(ref, jsg::Ref<api::MessagePort>) {
-      visitor.visit(ref);
-    }
-    KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      visitor.visit(object);
-    }
-  }
 }
 
 }  // namespace messageevent
@@ -105,9 +61,9 @@ jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
 
 CustomEvent::CustomEventInit::operator Event::Init() {
   return {
-    .bubbles = this->bubbles.map([](auto& val) { return val; }),
-    .cancelable = this->cancelable.map([](auto& val) { return val; }),
-    .composed = this->composed.map([](auto& val) { return val; }),
+    .bubbles = this->bubbles,
+    .cancelable = this->cancelable,
+    .composed = this->composed,
   };
 }
 
@@ -192,9 +148,7 @@ MessageEvent::MessageEvent(jsg::Lock& js, kj::String type, Initializer initializ
       lastEventId(kj::mv(initializer.lastEventId).orDefault(kj::String())),
       maybeSource(kj::mv(initializer.source).orDefault(kj::none)),
       // Per the spec, origin defaults to the empty string for user-constructed events.
-      maybeOrigin(kj::mv(initializer.origin)
-                      .map([](jsg::USVString&& origin) -> kj::String { return kj::mv(origin); })
-                      .orDefault(kj::String())),
+      maybeOrigin(kj::Maybe<kj::String>(kj::mv(initializer.origin)).orDefault(kj::String())),
       ports(kj::mv(initializer.ports).orDefault([] {
         return kj::Array<messageevent::MessagePort>();
       })) {}
@@ -217,7 +171,7 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
 }
 
 kj::Maybe<kj::StringPtr> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](kj::String& origin) -> kj::StringPtr { return origin; });
+  return maybeOrigin;
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {

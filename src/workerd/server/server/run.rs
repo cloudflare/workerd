@@ -52,6 +52,9 @@ use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
 use crate::worker::WorkerService;
 
+/// Where `serve` prints a line for a person.
+pub type Announce = Box<dyn Fn(&str)>;
+
 /// The command line's choices for a run.
 #[derive(Default)]
 pub struct RunOptions {
@@ -68,6 +71,8 @@ pub struct RunOptions {
     pub control: Option<std::fs::File>,
     /// `--debug-port`.
     pub debug_port: Option<String>,
+    /// Where `serve` tells a person each socket's URL, unless a tool reads `--control-fd`.
+    pub announce: Option<Announce>,
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
@@ -79,7 +84,8 @@ pub struct RunOptions {
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
 /// events are formatted by hand to keep their fields in a fixed order, `port` last: consumers
 /// include shell scripts that cut the port off the end of the line.
-struct Control(Option<std::fs::File>);
+/// Without a control channel, the socket URLs go to `RunOptions::announce`.
+struct Control(Option<std::fs::File>, Option<Announce>);
 
 impl Control {
     fn write(&mut self, line: &str) {
@@ -90,7 +96,10 @@ impl Control {
         }
     }
 
-    fn listen(&mut self, socket: &str, port: u16) {
+    fn listen(&mut self, socket: &str, port: u16, url: Option<String>) {
+        if let (None, Some(announce), Some(url)) = (&self.0, &self.1, url) {
+            announce(&format!("Listening on {url}"));
+        }
         let socket = serde_json::Value::from(socket);
         self.write(&format!(
             "{{\"event\":\"listen\",\"socket\":{socket},\"port\":{port}}}\n"
@@ -136,7 +145,7 @@ async fn start(
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
-    let mut control = Control(options.control.take());
+    let mut control = Control(options.control.take(), options.announce.take());
 
     let bound = listen::bind_sockets(
         config,
@@ -207,7 +216,8 @@ async fn start(
             server.report().error(error);
         }
         let channel = server.lookup(&designator);
-        ports.push((name, listen::bound_port(&bound)?));
+        let port = listen::bound_port(&bound)?;
+        ports.push((name, port, listen::url(sock, &address, port)));
         if let Some(listener) =
             listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
         {
@@ -221,17 +231,16 @@ async fn start(
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        control.listen_cluster(&listener)?;
-        start_cluster(&factory, node, listener);
+        start_cluster(&factory, node, listener, &mut control)?;
     }
-    for (name, port) in ports {
-        control.listen(&name, port);
+    for (name, port, url) in ports {
+        control.listen(&name, port, url);
     }
     listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
-        control.listen("debug-port", listener.port()?);
+        control.listen("debug-port", listener.port()?, None);
         listeners.push(Box::pin(listen::listen_debug_port(
             Rc::clone(&context),
             listener,
@@ -245,22 +254,24 @@ async fn start(
     }))
 }
 
-/// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for
-/// the life of the process; a lease the instance cannot keep ends it.
-fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio::net::TcpListener) {
+/// Runs this instance's part in the cluster: the peer port, the peer listing, and compaction. They
+/// run for the life of the process, as does the lease, which the lease thread keeps from `join` on;
+/// a lease the instance cannot keep ends it (`ClusterNode::new`).
+fn start_cluster(
+    factory: &Rc<Factory>,
+    node: &Rc<ClusterNode>,
+    listener: tokio::net::TcpListener,
+    control: &mut Control,
+) -> Result<()> {
+    control.listen_cluster(&listener)?;
     factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
     let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move {
-        let reason = cluster.maintain().await;
-        // Peers may take this instance's objects over once its lease lapses: it must stop
-        // serving first.
-        tracing::error!("leaving the cluster: {reason}");
-        std::process::exit(1);
-    });
+    factory.spawn_detached(async move { cluster.list_loop().await });
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move { cluster.tier_loop().await });
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
+    Ok(())
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -376,7 +387,9 @@ fn report_unmatched_overrides(
         }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
-            Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
+            Ok(service::Which::Disk(_) | service::Which::Cache(_)) => {
+                directories.retain(|n| *n != name);
+            }
             _ => {}
         }
     }
@@ -433,7 +446,8 @@ pub async fn run(
         return Ok(());
     };
 
-    // Whatever way this returns, the cluster port answers that this instance is not ready.
+    // From here on the lease thread watches the event loop. Whatever way this returns, the
+    // cluster port answers that this instance is not ready.
     let _serving = server.cluster().map(ClusterNode::serving);
     let drain = std::pin::pin!(drain);
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
@@ -446,7 +460,8 @@ pub async fn run(
             // `preventEviction` or not, while it serves on: a request for one waits for it and
             // then goes where it runs next. Then it leaves the cluster, so peers take over what
             // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
+            // balancers may still send some, and lets its connections finish, its peers' sessions
+            // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
@@ -465,14 +480,18 @@ pub async fn run(
                     }
                     Either::Right((stopped, _)) => stopped,
                 };
-                // Released before the lease goes, so nothing is served after it. Until the
-                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again. With
-                // objects still running, which stopping very many can leave, it stays a member:
-                // peers take over every object it did not hand off once its lease expires, after
-                // this process exited.
+                // Released before the lease goes, so nothing is served after it, and gone no
+                // sooner than `leave`, so no cache copy outlives it either. Until the
+                // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
+                // a peer that reads this node's record still finds it live and routes here again.
+                // With objects still running, which stopping very many can leave, it stays a
+                // member: peers take over every object it did not hand off once its lease
+                // expires, after this process exited.
                 if stopped {
-                    let deregister = node.cluster.deregister();
+                    let deregister = async {
+                        tokio::time::sleep_until(deadlines.leave).await;
+                        node.cluster.deregister().await
+                    };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
@@ -499,7 +518,7 @@ pub async fn run(
                     if !serving.is_terminated() {
                         serving.as_mut().await?;
                     }
-                    node.peer_requests_done().await;
+                    node.stop_peer_sessions().await;
                     Ok::<_, crate::Error>(())
                 };
                 let finished = tokio::time::timeout_at(deadlines.connections, finished);

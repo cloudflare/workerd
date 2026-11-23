@@ -8,9 +8,8 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
 
 #include <kj/function.h>
 #include <kj/memory.h>
@@ -24,9 +23,12 @@ using Isolate = v8::Isolate;
 
 struct EvalResult;
 
+class TestBootstrapModules;
+
 class EvalContext {
  public:
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
+  ~EvalContext() noexcept(false);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
   // Catches an exception with a `v8::TryCatch` and then, without resetting it, evaluates `code`,
@@ -38,9 +40,16 @@ class EvalContext {
       ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
       ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
+  // Makes `exports` the exports of the loaded bootstrap module named `specifier`, among which the
+  // deserializer looks up classes implemented in JavaScript (jsg::BootstrapModules), until the
+  // context's callback returns.
+  void set_bootstrap_module(::rust::Str specifier, ::workerd::rust::jsg::Local exports) const;
 
   v8::Isolate* v8Isolate;
   v8::Global<v8::Context> v8Context;
+
+ private:
+  mutable kj::Maybe<kj::Own<TestBootstrapModules>> bootstrapModules;
 };
 
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
@@ -63,6 +72,10 @@ class TestHarness {
   // may use the harness afterwards.
   void drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const;
 
+  // Takes the realm's cached templates and resets them, under the isolate lock, as the
+  // PREPARE_SNAPSHOT pipeline does before CreateBlob().
+  void take_realm_templates() const;
+
  private:
   mutable kj::Own<TestIsolate> isolate;
   mutable v8::Locker locker;
@@ -73,6 +86,16 @@ class TestHarness {
 // `flags` is a canonical `CompatibilityFlags` message. It sets the Rust realm's flags and, as
 // `Worker::Isolate` does, the isolate-level JSG switches derived from them.
 kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api);
+
+// Builds a startup snapshot the way a Worker's zygote does and starts an isolate from it. Calls
+// `topLevel` in a context of the zygote, with its Rust realm created from `flags`, and then, if the
+// snapshot was created, `restored` in the context of a new isolate started from it. Returns why the
+// zygote failed, or an empty string if it did not.
+::rust::String snapshot_round_trip(::rust::Slice<const uint8_t> flags,
+    size_t topLevelData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> topLevel,
+    size_t restoredData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> restored);
 
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
 enum class GcType : uint8_t;
@@ -91,8 +114,23 @@ void run_microtasks(Isolate* isolate);
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
+// Calls `callback` with KJ logging at every severity, from INFO up, and returns what it logged on
+// this thread, each as "<severity>: <text>", without writing it to stderr. Logging is restored to
+// its previous severity afterwards.
+::rust::Vec<::rust::String> capture_kj_logs(size_t data, ::rust::Fn<void(size_t)> callback);
+
+// Throws a FAILED kj::Exception with `description`.
+void fail_with_kj_exception(::rust::Str description);
+
 // v8::HeapStatistics::used_global_handles_size() of the isolate.
 size_t used_global_handles_size(Isolate* isolate);
+
+// v8::HandleScope::NumberOfHandles() of the isolate.
+int number_of_handles(Isolate* isolate);
+
+// The external memory that embedders have attributed to the isolate: the total V8 keeps of
+// AdjustAmountOfExternalAllocatedMemory() calls, which v8::HeapStatistics does not report.
+int64_t external_memory(Isolate* isolate);
 
 // Takes a heap snapshot of the isolate and returns it serialized as JSON.
 ::rust::String take_heap_snapshot(Isolate* isolate);
@@ -115,23 +153,54 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
-// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
-// exception if serialization throws.
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
-// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
-// deserialization throws.
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Serializes `value` into `result` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's.
+// Returns false if serialization throws, leaving the exception pending.
+bool cpp_serialize(
+    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Returns none if deserialization throws,
+// leaving the exception pending: a KJ exception becomes a JavaScript one, as a JSG method's glue
+// makes it one.
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
+// comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
+bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 
 // Converts `exception` to a kj::Exception and back, as C++ JSG does. Returns none if converting it
 // threw, leaving that exception pending.
 ::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
     Isolate* isolate, ::workerd::rust::jsg::Local exception);
 
-// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which is its
-// class's descriptor if it is cloneable (see jsg::Serializer). Throws a KJ exception if it is not
+// The key of the V8 private property `name`, as the per-isolate bootstrap's
+// utils.getPrivateSymbol() gives it to JavaScript.
+::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name);
+
+// Disallows JavaScript execution, as jsg::DisallowJavaScriptScope does for JSG code, without V8's
+// own guard, or allows it again.
+void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
+
+// Allows or disallows eval() and WebAssembly compilation, as jsg::Lock::setAllowEval() does.
+void set_allow_eval(Isolate* isolate, bool allow);
+
+// Makes a WebAssembly.Module from `module` without recompiling it, as C++ code that Rust hands a
+// compiled module to does. Throws a KJ exception if V8 creates none.
+::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
+    Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module);
+
+// Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
+// error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not
 // an object.
-void mark_js_serializable(
-    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark);
+void set_error_slots(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message);
+
+// Creates an instance of the per-isolate bootstrap's DOMException, as
+// jsg::newBootstrapDomException() does, whose prototype is `prototype`, with `name`, `message` and
+// `stack`. Throws a KJ exception if `prototype` is not an object.
+::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
+    ::workerd::rust::jsg::Local prototype,
+    ::rust::Str name,
+    ::rust::Str message,
+    ::rust::Str stack);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);

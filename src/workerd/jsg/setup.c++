@@ -10,6 +10,7 @@
 #include "setup.h"
 
 #include "libplatform/libplatform.h"
+#include "modules-new.h"
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
@@ -259,8 +260,7 @@ void IsolateBase::registerTypeHandler(const std::type_info& type, const void* ha
 }
 
 kj::Maybe<const void*> IsolateBase::tryGetTypeHandlerErased(const std::type_info& type) const {
-  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type})
-      .map([](const void* const& handler) { return handler; });
+  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type});
 }
 
 kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type) {
@@ -324,6 +324,7 @@ void IsolateBase::applyDeferredActions() {
   }
 
   externalMemoryTarget->applyDeferredMemoryUpdate();
+  heapTracer.flushExternalMemory();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -527,6 +528,7 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+    ptr->SetIsJSApiWrapperNativeErrorCallback(&isJsApiWrapperNativeErrorCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -568,15 +570,29 @@ IsolateBase::IsolateBase(V8System& system,
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+      // Opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable check does
+      // Get(value, "then"). This shadowing property ends that lookup before Object.prototype, so
+      // application code can't intercept it. It lives on the prototype rather than the instance
+      // so that instances keep the constructor's initial map, which V8 requires before it drops
+      // an unreachable wrapper in a scavenge; see Wrappable::attachOpaqueWrapper().
+      opaqueTemplate->PrototypeTemplate()->Set(v8StrIntern(ptr, "then"), v8::Undefined(ptr),
+          static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum | v8::DontDelete));
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
 
       jsSerializeModeKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
 
+      domExceptionBrandKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_BRAND_KEY)));
+
       auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
       errorPrototypeTemplate->SetIntrinsicDataProperty(
           v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
       this->errorPrototypeTemplate.Reset(ptr, errorPrototypeTemplate);
+
+      auto domExceptionTemplate = v8::FunctionTemplate::New(ptr, &constructDomException);
+      registerExternalReference(reinterpret_cast<intptr_t>(&constructDomException));
+      this->domExceptionTemplate.Reset(ptr, domExceptionTemplate);
     }
   });
 }
@@ -607,10 +623,14 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
 }
 
 void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle) {
-  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
   auto& artifact = mutableSnapshotArtifact();
   v8::HandleScope scope(ptr);
   auto context = contextHandle.Get(ptr);
+  if (usingNewModuleRegistry) {
+    artifact.newModuleRegistryRecords =
+        modules::recordIsolateModuleRegistryForSnapshot(context, *getSnapshotCreator());
+    return;
+  }
   auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
       context, ContextPointerSlot::MODULE_REGISTRY));
   moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
@@ -746,8 +766,10 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
+  domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
+  domExceptionBrandKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -784,6 +806,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
       "workerd wrapper markers",
       *badTagFieldsCount);
 
+  wrappablesMetadata->checkCallbackFindings();
   wrappablesMetadata->dropUnreachableWrappables(artifact);
 }
 
@@ -802,12 +825,7 @@ void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
           "START_FROM_SNAPSHOT: more template slots than recorded at PREPARE_SNAPSHOT");
       size_t snapshotIndex = indices[cursor++];
       if (snapshotIndex == SnapshotArtifact::kNoConstructorTemplate) return;
-      v8::Local<v8::FunctionTemplate> functionTemplate;
-      KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(snapshotIndex)
-                     .ToLocal(&functionTemplate),
-          "START_FROM_SNAPSHOT: constructor template missing from snapshot", snapshotIndex,
-          cursor - 1);
-      slot.Reset(ptr, functionTemplate);
+      slot.Reset(ptr, extractOnceFromIsolateSnapshot<v8::FunctionTemplate>(snapshotIndex));
     });
     KJ_REQUIRE(cursor == indices.size(),
         "START_FROM_SNAPSHOT: template slot enumeration drifted vs PREPARE_SNAPSHOT", cursor,
@@ -1122,6 +1140,12 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
   zygoteRestoreTimeHolders = kj::none;
 }
 
+void IsolateBase::notifySnapshotContextReady(Lock& js) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  heapTracer.forEachLiveWrapper([&js](Wrappable& wrappable, v8::Object::Wrappable&,
+                                    v8::CppHeapPointerTag) { wrappable.snapshotContextReady(js); });
+}
+
 void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context) {
   KJ_REQUIRE(isStartingFromSnapshot());
   KJ_IF_SOME(index, finalizedSnapshotArtifact().restoreTimeGlobalsIndex) {
@@ -1166,46 +1190,6 @@ void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Cont
   }
 }
 
-void IsolateBase::prepareWrappableDeserializeMetadata(
-    Lock& js, WrappableDeserializeMetadata& metadata) {
-  KJ_REQUIRE(isStartingFromSnapshot());
-  auto& artifact = finalizedSnapshotArtifact();
-
-  // Resolve every slot into the object its restored wrapper is attached to: a stateless type's
-  // fresh instance (its recreate function), or a clone of a stateful type's stored clone. The
-  // artifact is shared by every worker started from it, so the instances live in this worker's
-  // own array; a dropped slot stays null. Nothing on this path catches an exception from a
-  // recreate function or a snapshotClone(): it propagates out of newContext() and the Worker
-  // fails to start, which is why the contracts on Object::jsgSnapshotStateless and
-  // Wrappable::snapshotClone() forbid throwing.
-  auto instances = kj::heapArrayBuilder<kj::Own<Wrappable>>(artifact.liveWrappables.size());
-  for (auto& stored: artifact.liveWrappables) {
-    kj::Own<Wrappable> instance;
-    if (stored.transfer != nullptr) {
-      KJ_SWITCH_ONEOF(stored.transfer) {
-        KJ_CASE_ONEOF(stateless, SnapshotArtifact::LiveWrappable::Stateless) {
-          auto recreate = KJ_ASSERT_NONNULL(snapshotRecreateFnFor(stored.tag),
-              "a stateless slot's tag has no snapshot recreate function",
-              static_cast<uint16_t>(stored.tag));
-          instance = recreate(js);
-        }
-        KJ_CASE_ONEOF(clone, kj::Own<Wrappable>) {
-          instance = KJ_ASSERT_NONNULL(clone->snapshotClone(),
-              "snapshot clone failed to clone again", clone->jsgGetMemoryName());
-        }
-      }
-    }
-    instances.add(kj::mv(instance));
-  }
-  metadata.preallocateCppgcShims(ptr, heapTracer, artifact, instances.finish());
-}
-
-void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
-  KJ_REQUIRE(isStartingFromSnapshot());
-  metadata.relinkReferences(finalizedSnapshotArtifact());
-  metadata.releaseSlotsWithChecks();
-}
-
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
@@ -1236,16 +1220,26 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
+v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate* isolate) {
+  return from(isolate).domExceptionTemplate.Get(isolate);
+}
+
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->jsSerializeModeKey.Get(isolate);
 }
 
-v8::Local<v8::Value> IsolateBase::getErrorPrototype(
+v8::MaybeLocal<v8::Value> IsolateBase::getErrorPrototype(
     v8::Isolate* isolate, v8::Local<v8::Context> context) {
   auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  auto holder = check(self.errorPrototypeTemplate.Get(isolate)->NewInstance(context));
-  return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
+  v8::Local<v8::Object> holder;
+  if (!self.errorPrototypeTemplate.Get(isolate)->NewInstance(context).ToLocal(&holder)) return {};
+  return holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY));
+}
+
+v8::Local<v8::Private> IsolateBase::getDomExceptionBrandKey(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->domExceptionBrandKey.Get(isolate);
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
@@ -1274,8 +1268,10 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
+    KJ_DEFER(domExceptionBrandKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
     KJ_DEFER(zygoteRestoreTimeHolders = kj::none);
@@ -1364,6 +1360,19 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 
+// The constructor of getDomExceptionTemplate(), which does nothing: the bootstrap's DOMException
+// constructs it with its own new.target, and native code instantiates its instance template.
+void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args) {}
+
+// V8 asks whether an API wrapper object is a native error for Error.isError(), as WebIDL
+// requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its
+// brand.
+bool IsolateBase::isJsApiWrapperNativeErrorCallback(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionBrandKey(isolate))
+      .FromMaybe(false);
+}
+
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
   // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self =
@@ -1414,6 +1423,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
 
     case v8::JitCodeEvent::CODE_MOVED:
       KJ_IF_SOME(entry, codeMap.findEntry(startAddr)) {
+        self->recordCodeMoved(entry.value.type);
         auto info = kj::mv(entry.value);
         codeMap.erase(entry);
         codeMap.upsert(reinterpret_cast<uintptr_t>(event->new_code_start), kj::mv(info),
@@ -1503,6 +1513,14 @@ void IsolateBase::recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size) 
   }
 }
 
+void IsolateBase::recordCodeMoved(kj::Maybe<v8::JitCodeEvent::CodeType> type) {
+  KJ_IF_SOME(t, type) {
+    if (t != v8::JitCodeEvent::BYTE_CODE) {
+      codeStatistics.machineCodeMoveCount.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+}
+
 IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
   return {
     .bytecodeCount = codeStatistics.bytecodeCount.load(std::memory_order_relaxed),
@@ -1511,6 +1529,7 @@ IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
     .jitCodeBytes = codeStatistics.jitCodeBytes.load(std::memory_order_relaxed),
     .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
     .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
+    .machineCodeMoveCount = codeStatistics.machineCodeMoveCount.load(std::memory_order_relaxed),
   };
 }
 
@@ -1698,5 +1717,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   return kj::StringPtr(scratch.begin(), pos - scratch.begin());
 }
 #endif
+
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
+  IsolateBase::from(isolate).registerExternalReference(addr);
+}
 
 }  // namespace workerd::jsg

@@ -168,11 +168,11 @@ build:unix --cxxopt=-D_LIBCPP_NO_ABI_TAG --host_cxxopt=-D_LIBCPP_NO_ABI_TAG
 # downstream, this reduces the include overhead for <algorithm>.
 build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL
 
-# V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
-# a global define for this, we need to apply it for everything.
-# TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
-build:windows --copt='-Wno-macro-redefined'
-build:windows --host_copt='-Wno-macro-redefined'
+# Set _WIN32_WINNT to request Windows 10-level features. The Windows SDK only declares APIs such
+# as htonll when it is at least 0x0602, Bazel defaults to 0x0601 (Windows 7). V8 already defines
+# this value itself, but we want to have the same value used consistently including for code that
+# doesn't depend on V8, and we want to avoid warnings about redefining _WIN32_WINNT.
+build:windows --repo_env=BAZEL_WIN32_WINNT=/D_WIN32_WINNT=0x0A00
 
 # typescript configuration
 # do more correct type checking
@@ -230,6 +230,12 @@ build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
+# Enable Rust pipelining so dependent crates can start building without needing to fully compile a
+# crate resulting in a shorter critical path. This should be a bit faster and reliable once
+# https://github.com/bazelbuild/rules_rust/issues/3977 is implemented. Appears to be unstable on
+# Windows, perhaps due to missing sandbox support.
+build:unix --@rules_rust//rust/settings:pipelined_compilation=True
+
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
@@ -238,9 +244,14 @@ build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebuginfo=1
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 
-# Adding -C lto=thin here would improve binary size significantly – disable it for now due to
-# compile errors and wrong code generation when bazel and rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
+
+# Cross-language LTO, thin-lto extended to Rust: Rust crates emit LLVM bitcode instead of machine
+# code, so lld's ThinLTO optimizes Rust and C++ together. Linux only, as it needs lld to link and
+# to read rustc's bitcode: rustc's LLVM (`rustc -vV`) must share lld's major version and not be
+# newer. macOS and Windows link with the host's linker, which does not track rustc's LLVM.
+build:cross-lto --config=thin-lto
+build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 # common sanitizers options
 build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
@@ -278,6 +289,9 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# Keep kj's stack traces on backtrace(). Under ASan kj defaults to _Unwind_Backtrace(), which with
+# our statically linked LLVM libunwind is much slower; exception-heavy tests time out.
+build:asan --per_file_copt='external/.*capnp-cpp/src/kj/exception\.c\+\+@-DKJ_BACKTRACE_WITH_UNWINDER=0'
 # One toolchain per host, plus its cargo toolchain; resolution picks the one matching the
 # (host-parented) asan platform.
 build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64
@@ -487,8 +501,52 @@ build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 build:release_unix --copt='-O3'
 build:release_unix --config=release
 
-build:release_linux --config=release_unix
-build:release_linux --linkopt="-Wl,-O2"
+# The Linux release build is optimized with ThinLTO and Clang's instrumentation-based PGO, with a
+# profile that Bazel downloads (build/pgo/README.md). release_linux-without-pgo is the same build
+# without either, for comparisons.
+build:release_linux-without-pgo --config=release_unix
+build:release_linux-without-pgo --linkopt="-Wl,-O2"
+build:release_linux --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:release_linux --config=pgo-use
+
+# pgo-instrument builds the binary that build/pgo/train.sh runs to train the profile. V8 is
+# compiled in this build, so the same profile covers it.
+build:pgo-instrument --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
+# The instrumented tests run slower and also merge their profiles (build/pgo/profile-env.sh). In
+# training, the serving workload takes about a minute against its 15 s limit, and the eventsource
+# tests 10-12 s. A test that times out loses its profile.
+build:pgo-instrument --test_timeout=30,240,600,1200
+# Instrument the Rust code too. Its counters go into the same profile, written by the profile
+# runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
+# only accepts -Zno-profiler-runtime with RUSTC_BOOTSTRAP. extra_rustc_env and extra_rustc_flag
+# apply to target-config rustc actions only, so build scripts and proc macros aren't instrumented.
+build:pgo-instrument --@rules_rust//rust/settings:extra_rustc_env=RUSTC_BOOTSTRAP=1
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Cprofile-generate
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Zno-profiler-runtime
+
+# rules_cc's fdo_optimize feature adds -fprofile-use and silences Clang's warnings about files the
+# profile doesn't cover.
+build:pgo-use --fdo_optimize=//build/pgo:profile
+# Functions changed since the profile was trained compile without profile data. Don't warn about
+# each of them.
+build:pgo-use --copt=-mllvm=-no-pgo-warn-mismatch
+# Under PGO, LoopIdiomRecognize can take the address of a coroutine frame variable before
+# coro.begin, which CoroSplit doesn't rewrite (https://github.com/llvm/llvm-project/pull/240036).
+# A ThinLTO compile leaves coroutines unsplit, so the linker's LTO backends need it too.
+build:pgo-use --copt=-mllvm=-disable-loop-idiom-all --linkopt=-Wl,-mllvm,-disable-loop-idiom-all
+# The Rust code is optimized with the same profile. extra_rustc_inputs makes it an input of every
+# Rustc action, and ${extra_rustc_inputs} stands for its path.
+build:pgo-use --@rules_rust//rust/settings:extra_rustc_inputs=//build/pgo:profdata
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cprofile-use=${extra_rustc_inputs}
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
+
+# Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
+# Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
+# major version (build/deps/rust.MODULE.bazel). rules_rust's lto setting isn't used: it also passes
+# -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
+# expects.
+build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
@@ -530,6 +588,8 @@ build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-in
 build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
 # Work around Windows test failures in rpc-related tests
 build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
+# Work around clang-cl crashes with LLVM 22
+build:windows --per_file_copt=src/workerd/io/worker@/clang:-fno-inline
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
@@ -627,9 +687,8 @@ startup --experimental_remote_repo_contents_cache
 # define, are build's. Bazel expands a config's common lines before its build lines, which none of
 # them override.
 # TODO(soon): move with the deployment to a production account.
-common:bazelflare --remote_executor=grpcs://bazelflare.workers-runtime-playground.cloudflareworkers.com:8980
-common:bazelflare --tls_certificate=build/bazelflare/ca.pem
-common:bazelflare --credential_helper=bazelflare.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
+common:bazelflare --remote_executor=grpcs://remote.workers-runtime-playground.cloudflareworkers.com:8980
+common:bazelflare --credential_helper=remote.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
 # Long enough to approve a login in the browser, which the helper opens without a saved token.
 common:bazelflare --credential_helper_timeout=2m
 common:bazelflare --noremote_upload_local_results
@@ -685,6 +744,12 @@ coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no
 # a second spawn per test, with the same inputs, and needs every coverage output fetched.
 build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
 build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
+# Generated headers and Rust sources that editors read from bazel-bin, which
+# --remote_download_minimal otherwise leaves remote. The aspect (build/generated_srcs.bzl) generates
+# those of the built C++ and Rust targets and their dependencies, and the regex downloads them.
+build:bazelflare-generated --aspects=//:build/generated_srcs.bzl%generated_srcs_aspect
+build:bazelflare-generated --output_groups=+generated_srcs
+common:bazelflare-generated --remote_download_regex=bazel-out/(?![^/]*-exec)[^/]+/bin/(?!node_modules/).*[.](h|hh|hpp|hxx|h[+][+]|inc|rs)
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc

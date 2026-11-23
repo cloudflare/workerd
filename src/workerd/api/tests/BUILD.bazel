@@ -24,6 +24,26 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "weakref-test.wd-test",
+    data = [
+        "weakref-target.js",
+        "weakref-test.js",
+    ],
+)
+
+wd_test(
+    src = "streams-pending-gc-test.wd-test",
+    data = ["streams-pending-gc-test.js"],
+)
+
+wd_test(
+    src = "streams-pending-gc-gate-off-test.wd-test",
+    data = ["streams-pending-gc-test.js"],
+    # Every gate is on in that variant.
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
     src = "streams-byob-progress-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -238,6 +258,12 @@ wd_test(
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
+wd_test(
+    src = "durable-object-restore-kvdata-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-restore-kvdata-test.js"],
+)
+
 # The TCP sockets of connect-handler-test and tail-worker-test, each listening on a port assigned
 # when the test runs (see listen_port_bindings in build/wd_test.bzl).
 CONNECT_HANDLER_PORT_BINDINGS = {
@@ -250,16 +276,26 @@ wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
     data = [
+        "connect-handler-immediate-tls-test.js",
         "connect-handler-server.key",
         "connect-handler-server.pem",
         "connect-handler-starttls-test.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {"connect-starttls": "STARTTLS_PORT"},
-    # The STARTTLS listener's certificate names 127.0.0.1, not the random loopback address the
-    # supervisor would otherwise pick.
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {
+        "connect-starttls": "STARTTLS_PORT",
+        "connect-tls": "TLS_PORT",
+    },
+    # The TLS listeners' certificate names 127.0.0.1, not the random loopback address the supervisor
+    # would otherwise pick.
     sidecar_randomize_ip = False,
+)
+
+wd_test(
+    src = "connect-handler-starttls-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-handler-starttls-lifetime-test.js"],
 )
 
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
@@ -438,6 +474,15 @@ wd_test(
 wd_test(
     src = "actor-exception-attribution-tail-test.wd-test",
     data = ["actor-exception-attribution-tail-test.js"],
+)
+
+wd_test(
+    src = "otlp-tracing-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "otlp-tracing-test.js",
+        "otlp-tracing-test-collector.js",
+    ],
 )
 
 wd_test(
@@ -697,6 +742,20 @@ wd_test(
     src = "sql-resizable-arraybuffer-test.wd-test",
     args = ["--experimental"],
     data = ["sql-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
+    src = "sql-cursor-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+)
+
+wd_test(
+    src = "sql-cursor-gc-gate-off-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+    # Every gate is on in that variant.
+    generate_all_autogates_variant = False,
 )
 
 wd_test(
@@ -1347,8 +1406,8 @@ wd_test(
     data = ["url-test.js"],
 )
 
-# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
-# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# The @all-compat-flags variant would turn the temporal flag on, which the cases without that flag
+# expect to be off.
 wd_test(
     # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
     # timeout in loaded debug builds.
@@ -1360,18 +1419,14 @@ wd_test(
 )
 
 # Top-level event listeners across a startup snapshot. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
-# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# pipeline.
 wd_test(
     src = "startup-snapshot-listeners-test.wd-test",
     args = ["--experimental"],
     data = ["startup-snapshot-listeners-test.js"],
-    generate_all_compat_flags_variant = False,
 )
 
 # Module identity across a startup snapshot. Only the @all-autogates variant runs the pipeline.
-# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
-# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
 wd_test(
     src = "startup-snapshot-modules-test.wd-test",
     args = ["--experimental"],
@@ -1379,21 +1434,22 @@ wd_test(
         "startup-snapshot-modules-cjs-test.js",
         "startup-snapshot-modules-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
-# Live API objects (Headers, URL, TextEncoder, crypto, navigator, node:fs, bindings) across a
-# startup snapshot, and the cases that must fall back. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
-# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# Live API objects (Headers, URL, TextEncoder, crypto, navigator, performance, tracing spans,
+# node:fs, file system handles, bindings) across a startup snapshot, and the cases that must fall
+# back. Only the @all-autogates variant runs the pipeline.
 wd_test(
+    # About 25 startup snapshots are built before any case runs, which takes over 15 seconds in
+    # an arm64 debug build.
+    size = "large",
     src = "startup-snapshot-wrappables-test.wd-test",
     args = ["--experimental"],
     data = [
         "startup-snapshot-wrappables-fs-test.js",
         "startup-snapshot-wrappables-test.js",
+        "startup-snapshot-wrappables-webfs-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
 # The TypeScript HTMLRewriter across a startup snapshot. The config turns the pipeline and the
@@ -1407,19 +1463,16 @@ wd_test(
 )
 
 # Capability bindings captured at module scope and used at request time, and the kinds that keep
-# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline. The
-# @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of the
-# startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-bindings-test.wd-test",
     args = ["--experimental"],
     data = ["startup-snapshot-bindings-test.js"],
-    generate_all_compat_flags_variant = False,
 )
 
 # Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the
-# Worker out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, under which the
+# function createRequire('/worker.js') returns does not find ./lib.cjs.
 wd_test(
     src = "startup-snapshot-functions-test.wd-test",
     args = ["--experimental"],
@@ -1430,18 +1483,27 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# Module identity and import.meta across a startup snapshot with the new module registry. Only
+# the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-new-module-registry-case-test.js",
+        "startup-snapshot-new-module-registry-test.js",
+    ],
+)
+
 # Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
-# Only the @all-autogates variant runs the pipeline. The @all-compat-flags variant would turn
-# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline and so would
-# quietly test only the plain-Worker half.
+# Only the @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-node-test.wd-test",
     args = ["--experimental"],
     data = [
         "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-rust-case-test.js",
         "startup-snapshot-node-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -1473,8 +1535,15 @@ wd_test(
 )
 
 wd_test(
+    # Accepting over 32768 WebSockets needs the same budget as the limit test above.
+    size = "large",
     src = "websocket-accept-limit-killswitch-test.wd-test",
     data = ["websocket-accept-limit-killswitch-test.js"],
+)
+
+wd_test(
+    src = "websocket-buffered-amount-test.wd-test",
+    data = ["websocket-buffered-amount-test.js"],
 )
 
 wd_test(
@@ -1484,9 +1553,35 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-standard-url-test.wd-test",
+    data = [
+        "websocket-standard-url-server.js",
+        "websocket-standard-url-test.js",
+    ],
+    # One service tests the behaviour without websocket_standard_url_and_extensions.
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = [
+        "INVALID_RESPONSE_SERVER_PORT",
+        "UNTRUSTED_TLS_SERVER_PORT",
+    ],
 )
 
 js_binary(
@@ -1626,6 +1721,16 @@ wd_test(
     args = ["--experimental"],
     data = [
         "new-module-registry-stack-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-lazy-globals-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-lazy-globals-request-test.js",
+        "new-module-registry-lazy-globals-top-level-test.js",
+        "new-module-registry-lazy-globals-warning-test.js",
     ],
 )
 
@@ -1782,7 +1887,7 @@ wd_test(
 )
 
 # Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+# on average. Tagged `python` like the tests under //src/pyodide/tests.
 wd_test(
     size = "enormous",
     src = "worker-loader-python-test.wd-test",
@@ -1807,6 +1912,17 @@ wd_test(
         ":js-string-builtins.wasm",
     ],
     # The test uses `import source` syntax, which eslint's parser does not yet support.
+    lint = False,
+)
+
+wd_test(
+    src = "worker-loader-liftoff-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-liftoff-test.js",
+    ],
+    # The test uses V8 natives syntax, which eslint can't parse.
     lint = False,
 )
 

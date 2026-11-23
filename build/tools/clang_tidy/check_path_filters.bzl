@@ -17,9 +17,17 @@ Once a check is fully rolled out, remove its entry to run everywhere.
 """
 
 CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
-        # Add paths here as they are cleaned up:
-        # "src/workerd/io",
-        # "src/workerd/api",
+    # Runs where it reports nothing today. Elsewhere, run it with --config=clang-tidy-js-reentry,
+    # and add a directory here once its reports are fixed or suppressed.
+    "jsg-js-reentry": [
+        "src/workerd/tools",
+        "src/workerd/util",
     ],
 }
+
+# clang-tidy checks that should only be applied on C++ headers and not source files
+HEADER_ONLY_CHECKS = [
+    # Enabling misc-include-cleaner on headers means having to clean up much
+    # fewer includes while still getting rid of superfluous transitive includes.
+    "misc-include-cleaner",
+]

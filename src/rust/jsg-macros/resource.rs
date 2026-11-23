@@ -23,6 +23,7 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
+use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -50,6 +51,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
+    let snapshot_stateless = has_flag(&attr, "snapshot_stateless");
     let typescript = typescript_options(attr.clone());
     let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
         Ok(generated) => generated,
@@ -74,23 +76,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
     let trace_statements = generate_trace_statements(&fields);
     let name_str = name.to_string();
 
-    let traced_impl = if custom_trace {
-        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
-        quote! {}
-    } else {
-        quote! {
-            #[automatically_derived]
-            impl jsg::Traced for #name {
-                fn trace(&self, visitor: &mut jsg::GcVisitor) {
-                    // Suppress unused warning when there are no traceable fields.
-                    let _ = visitor;
-                    #(#trace_statements)*
-                }
-            }
-        }
-    };
+    let traced_impl = generate_traced_impl(&name, &trace_statements, custom_trace);
 
     let gc_impl = generate_gc_impl(&name, &name_str, &memory_info.gc_fn);
+    let drop_check = generate_drop_check(&name, &fields);
+    let snapshot_transfer_impl = snapshot_stateless_impl(&name, snapshot_stateless);
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
@@ -102,10 +92,6 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
                 &[concat!(module_path!(), "::", #name_str)];
 
             fn class_name() -> &'static str { #class_name }
-
-            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                value.is_object()
-            }
         }
 
         #[automatically_derived]
@@ -158,6 +144,9 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #drop_check
+
+        #snapshot_transfer_impl
         #visit_for_memory_info_impl
     }
     .into()
@@ -469,7 +458,7 @@ pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
 /// registrations and the compile errors of those that are invalid.
 ///
 /// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
-/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// property: its callback expects the type's `v8::Signature`, which those are registered without. A
 /// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
 /// registration a second one of a kind is an error too; custom registration may choose between
 /// several by compatibility flag, and registering two of a kind at once panics when the template
@@ -592,6 +581,87 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
+/// The `jsg::Traced` impl of a resource named `name` that visits its fields with
+/// `trace_statements`, or nothing for a `custom_trace` resource.
+fn generate_traced_impl(
+    name: &syn::Ident,
+    trace_statements: &[proc_macro2::TokenStream],
+    custom_trace: bool,
+) -> proc_macro2::TokenStream {
+    if custom_trace {
+        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
+        quote! {}
+    } else {
+        quote! {
+            #[automatically_derived]
+            impl jsg::Traced for #name {
+                fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                    // Suppress unused warning when there are no traceable fields.
+                    let _ = visitor;
+                    #(#trace_statements)*
+                }
+            }
+        }
+    }
+}
+
+/// A check, evaluated at compile time, that a resource named `name` with `fields` implements
+/// `Drop` only if every field's type is `jsg::HoldsNoGcReferences`. `Drop` has `&mut self`, so it
+/// could move a `jsg::Rc` or `TracedGlobal` out of a field that the garbage collector made weak,
+/// and nothing would make it strong again. Only the resource's own `Drop` is checked: `Vec`,
+/// `Box` and `jsg::Rc` implement `Drop` too, so asking the fields' types would reject almost
+/// every resource.
+fn generate_drop_check(
+    name: &syn::Ident,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let field_types = fields.iter().map(|field| &field.ty);
+    let message = format!(
+        "`{name}` may hold GC references (a field's type isn't `jsg::HoldsNoGcReferences`), \
+         so it must not implement `Drop`; see src/rust/jsg/README.md, \"Safety rules\""
+    );
+    // An associated const, so that a field's type may name `Self`, which the `const _` item
+    // evaluates.
+    quote! {
+        #[automatically_derived]
+        impl #name {
+            #[doc(hidden)]
+            const __JSG_DROP_CHECK: () = {
+                use jsg::DropCheckFallback as _;
+                let holds_gc_references =
+                    false #(|| !jsg::DropCheck::<#field_types>::HOLDS_NO_GC_REFERENCES)*;
+                ::std::assert!(!(jsg::DropCheck::<Self>::HAS_DROP && holds_gc_references), #message);
+            };
+        }
+
+        const _: () = #name::__JSG_DROP_CHECK;
+    }
+}
+
+/// The `jsg::SnapshotTransfer` impl of a `#[jsg_resource(snapshot_stateless)]` type, whose
+/// snapshot is empty and whose every restored instance is its `Default`; nothing for any other
+/// type.
+fn snapshot_stateless_impl(
+    name: &syn::Ident,
+    snapshot_stateless: bool,
+) -> proc_macro2::TokenStream {
+    if !snapshot_stateless {
+        return quote! {};
+    }
+    quote! {
+        #[automatically_derived]
+        impl jsg::SnapshotTransfer for #name {
+            type Snapshot = ();
+
+            fn snapshot(&self) {}
+
+            fn restore((): &()) -> Self {
+                <Self as ::core::default::Default>::default()
+            }
+        }
+    }
+}
+
 /// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
 /// `memory_info` method or nothing.
 fn generate_gc_impl(
@@ -613,19 +683,39 @@ fn generate_gc_impl(
             }
 
             #memory_info_fn
+
+            fn snapshot_transfer(&self) -> ::std::option::Option<&dyn jsg::ErasedSnapshotTransfer> {
+                // A method of an inherent impl whose bound holds is picked over a trait's, so the
+                // inherent method applies exactly when the resource implements
+                // `jsg::SnapshotTransfer`.
+                struct Probe<'a, T>(&'a T);
+                trait NoSnapshotTransfer<'a> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::None
+                    }
+                }
+                impl<'a, T> NoSnapshotTransfer<'a> for Probe<'a, T> {}
+                impl<'a, T: jsg::SnapshotTransfer> Probe<'a, T> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::Some(self.0)
+                    }
+                }
+                Probe(self).snapshot_transfer()
+            }
         }
     }
 }
 
 /// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
-/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
-/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
-/// the impl block.
+/// `custom_trace`, `memory_info`, `custom_memory_info`, `snapshot_stateless` and `ts_root`, so
+/// that a misspelled flag does not compile instead of being ignored. `nested_types(...)` and
+/// `custom_members` belong on the impl block.
 fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
-                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `custom_memory_info`, `snapshot_stateless`, `ts_root`, \
+                            `ts_override = \"...\"` or \
                             `ts_define = \"...\"` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
@@ -658,6 +748,7 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
                     "custom_trace",
                     "memory_info",
                     "custom_memory_info",
+                    "snapshot_stateless",
                     "ts_root",
                 ]
                 .iter()

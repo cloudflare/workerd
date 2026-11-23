@@ -34,9 +34,7 @@ class WrappableFunctionBase: public Wrappable {
     Wrappable::jsgGetMemoryInfo(tracker);
     visitForMemoryInfo(tracker);
   }
-  virtual void visitForMemoryInfo(MemoryTracker& tracker) const {
-    // TODO(soon): Implement tracking for WrappableFunction.
-  }
+  virtual void visitForMemoryInfo(MemoryTracker& tracker) const {}
 };
 
 template <typename Ret, typename... Args>
@@ -95,6 +93,18 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
       }
     }
     return kj::none;
+  }
+
+  // Reports the function and what it captures. The self size counts only the base class, so the
+  // captures are counted once, here.
+  void visitForMemoryInfo(MemoryTracker& tracker) const override {
+    KJ_IF_SOME(f, func) {
+      if constexpr (MemoryRetainer<Impl>) {
+        tracker.trackField("func", f);
+      } else {
+        tracker.trackFieldWithSize("func", sizeof(Impl));
+      }
+    }
   }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
@@ -221,7 +231,7 @@ class Function<Ret(Args...)> {
   Function& operator=(Function&&) = default;
   KJ_DISALLOW_COPY(Function);
 
-  Ret operator()(jsg::Lock& jsl, Args... args) {
+  JSG_MAY_RUN_JS Ret operator()(jsg::Lock& jsl, Args... args) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         // Hold our own reference for the duration of the call. A native function can run
@@ -297,7 +307,7 @@ class Function<Ret(Args...)> {
     __builtin_unreachable();
   }
 
-  inline Function<Ret(Args...)> addRef(Lock& js) {
+  JSG_NO_JS inline Function<Ret(Args...)> addRef(Lock& js) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         return Function<Ret(Args...)>(native.addRef());

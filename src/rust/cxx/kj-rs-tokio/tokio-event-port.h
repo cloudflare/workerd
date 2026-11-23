@@ -8,8 +8,11 @@
 // Notes on the kj::EventPort contract (see kj/async.h):
 //  - wait()/poll() return true iff wake() latched. This is load-bearing: kj::Executor's
 //    executeAsync and kj::newPromiseAndCrossThreadFulfiller only get drained on `true`.
-//  - The kj::TimerImpl is advanced after every wait()/poll(). Timer precision is tokio's timer
-//    wheel (~1 ms), the same granularity KJ's own epoll-based port has.
+//  - The kj::TimerImpl is advanced after every wait()/poll(). A due timer fires without the
+//    thread sleeping. A pending one fires on tokio's timer wheel, which rounds the deadline up
+//    to the end of a 1 ms tick and sleeps whole ticks, so up to 2 ms late. (KJ's own port is
+//    less than 1 ms late on Linux, where epoll_wait() takes milliseconds, and close to exact on
+//    macOS, where kevent() takes nanoseconds.)
 //  - One TokioEventPort (and hence one runtime, one kj::EventLoop) per thread, matching KJ's
 //    one-loop-per-thread model. The port owns its EventLoop: the loop is constructed on the port
 //    and destroyed before any of the port's other members, so the port can always ask the loop
@@ -47,6 +50,11 @@
 //                                                because LocalSet is !Send; dropped by
 //                                                TokioEventPort's destructor
 //       activePort                            -- enforces one port per thread
+//
+//   Progress (`kj_rs_tokio::Progress`, progress.rs), once started:
+//       TokioEventPort::ProgressProbe         -- a KJ event that counts once per pass through a
+//                                                busy run queue, re-armed by wait() and poll()
+//       a beat task on LOOP_LOCAL_SET         -- counts while the loop sleeps
 //
 //   Wake sources -> SharedState.notify: wake() from any thread (kj::Executor,
 //   CrossThreadPromiseFulfiller); on the loop thread setRunnable(true) and the SleepHooks timer
@@ -110,7 +118,16 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
   // while its WaitScope is still alive. This terminal operation is a no-op when repeated.
   void cancelSpawnedTasks();
 
+  // Starts the progress probe behind `kj_rs_tokio::Progress` (progress.rs, which says why it is
+  // a KJ event), and arms it. Later calls only arm it.
+  void startProgressProbe();
+
  private:
+  class ProgressProbe;
+
+  // Arms the progress probe, if it was started.
+  void armProgressProbe();
+
   // kj::TimerImpl::SleepHooks, installed by wait() for the duration of the park (KJ clears them
   // in advanceTo()). KJ calls updateNextTimerEvent() whenever the earliest deadline changes; a
   // deadline sooner than the one this wait() was planned against ends the park. While installed,
@@ -125,12 +142,14 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 
   const kj::ThreadId ownerThread;
   const kj::MonotonicClock &clock;
-  // Declaration order is destruction order in reverse, and it matters: `loop` is destroyed
-  // first, then `rustPort` (the runtime), then `timerImpl`. The destructor body cancels spawned
-  // tasks before any of them go.
+  // Declaration order is destruction order in reverse, and it matters: the progress probe, an
+  // event in the loop's queue, is destroyed before `loop`, `loop` before `rustPort` (the
+  // runtime), and that before `timerImpl`. The destructor body cancels spawned tasks before any
+  // of them go.
   kj::TimerImpl timerImpl;
   ::rust::Box<TokioPort> rustPort;
   kj::Own<kj::EventLoop> loop;
+  kj::Maybe<kj::Own<ProgressProbe>> progressProbe;
 
   // The earliest timer deadline wait() computed its sleep from (none = no timer; sleep forever).
   // updateNextTimerEvent() compares against it so only a *sooner* deadline ends the park. Loop
@@ -183,5 +202,9 @@ TokioAsyncIoContext setupTokioAsyncIo();
 
 // The same on the heap, for the Rust `kj_rs_tokio::Runtime` to own.
 kj::Own<TokioAsyncIoContext> newTokioAsyncIoContext();
+
+// `TokioEventPort::startProgressProbe()` on the port that drives this thread, for Rust
+// (`kj_rs_tokio::watch_progress`). Fails if there is none.
+void startProgressProbe();
 
 }  // namespace kj_rs_tokio

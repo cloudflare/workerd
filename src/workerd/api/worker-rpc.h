@@ -21,9 +21,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/jsg/url.h>
 
 #include <capnp/message.h>
 
@@ -128,6 +126,25 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
     return kj::mv(stubDisposers);
   }
 
+  // Returns a capability to write into an external whose channel token isn't available yet. When
+  // `token` resolves, the token is pushed to the recipient's ExternalPusher and the capability
+  // resolves to the result. If `token` rejects, for example because the channel's owner refused
+  // to let the channel be transferred, the capability breaks with the same error, so the
+  // recipient sees the owner's error rather than a generic one. The capability owns the push, so
+  // it continues for as long as the recipient holds the capability, even if the sending request
+  // ends first. The push is also tracked as a pending external, see releasePendingExternals().
+  rpc::JsValue::ExternalPusher::DelayedChannelToken::Client pushDelayedChannelToken(
+      kj::Promise<kj::Array<byte>> token);
+
+  // Each promise resolves once an external that is completed after the message is sent, such as a
+  // delayed channel token, has been delivered, and rejects with the reason it could not be. The
+  // caller must keep them running until they settle, and should report their failure to whoever
+  // sent the value, because the recipient can't use the external. Dropping them cancels the
+  // deliveries.
+  kj::Array<kj::Promise<void>> releasePendingExternals() {
+    return pendingExternals.releaseAsArray();
+  }
+
   // We serialize functions by turning them into RPC stubs.
   void serializeFunction(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
@@ -151,6 +168,7 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
+  kj::Vector<kj::Promise<void>> pendingExternals;
   Replayability replayability = Replayability::REPLAYABLE;
 };
 

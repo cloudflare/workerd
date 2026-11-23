@@ -10,6 +10,9 @@ namespace {
 constexpr size_t MAX_WRAPPER_MODULE_NAME_SIZE = 128;
 }
 
+Frankenvalue::CapTableReader::~CapTableReader() noexcept(false) {}
+Frankenvalue::CapTableBuilder::~CapTableBuilder() noexcept(false) {}
+
 Frankenvalue Frankenvalue::cloneImpl() const {
   Frankenvalue result;
 
@@ -80,6 +83,16 @@ Frankenvalue Frankenvalue::threadSafeClone() const {
 
 kj::Own<Frankenvalue::CapTableEntry> Frankenvalue::CapTableEntry::threadSafeClone() const {
   KJ_FAIL_REQUIRE("a capability in the Frankenvalue does not implement threadSafeClone()");
+}
+
+kj::Promise<Frankenvalue> Frankenvalue::fillCaps(Frankenvalue value,
+    kj::Array<size_t> slots,
+    kj::Array<kj::Promise<kj::Own<CapTableEntry>>> caps) {
+  auto resolved = co_await kj::joinPromisesFailFast(kj::mv(caps));
+  for (auto i: kj::indices(slots)) {
+    value.capTable[slots[i]] = kj::mv(resolved[i]);
+  }
+  co_return kj::mv(value);
 }
 
 void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) {

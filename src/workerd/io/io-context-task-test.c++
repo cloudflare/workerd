@@ -124,20 +124,22 @@ KJ_TEST("actor wait-until task runs without a tracker") {
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
-  bool taskRan = false;
-  context->addWaitUntil(kj::evalLater([&taskRan]() { taskRan = true; }));
+  kj::Pin<bool> taskRan;  // Value-initialized to false.
+  context->addWaitUntil(kj::evalLater([weakRan = taskRan.addWeak()]() {
+    KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before the task ran") = true;
+  }));
   fixture.pollEventLoop();
-  KJ_EXPECT(taskRan);
+  KJ_EXPECT(*taskRan);
 
-  bool taskCanceled = false;
+  kj::Pin<bool> taskCanceled;  // Value-initialized to false.
   kj::Canceler canceler;
-  context->addWaitUntil(
-      canceler.wrap(kj::Promise<void>(kj::NEVER_DONE)).catch_([&taskCanceled](kj::Exception&&) {
-    taskCanceled = true;
+  context->addWaitUntil(canceler.wrap(kj::Promise<void>(kj::NEVER_DONE))
+                            .catch_([weakCanceled = taskCanceled.addWeak()](kj::Exception&&) {
+    KJ_REQUIRE_NONNULL(weakCanceled.tryGet(), "test ended before the task was canceled") = true;
   }));
   canceler.cancel("expected task cancellation");
   fixture.pollEventLoop();
-  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT(*taskCanceled);
 
   context->addWaitUntil(kj::evalLater([]() {
     kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(FAILED, "expected base task failure"));
@@ -162,28 +164,30 @@ KJ_TEST("tracking failure does not affect actor wait-until task") {
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
-  bool taskRan = false;
+  kj::Pin<bool> taskRan;  // Value-initialized to false.
   {
     KJ_EXPECT_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception");
-    context->addWaitUntil(kj::evalLater([&taskRan]() { taskRan = true; }));
+    context->addWaitUntil(kj::evalLater([weakRan = taskRan.addWeak()]() {
+      KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before the task ran") = true;
+    }));
   }
   fixture.pollEventLoop();
 
   KJ_EXPECT(state->attempts == 1);
-  KJ_EXPECT(taskRan);
+  KJ_EXPECT(*taskRan);
 
-  bool taskCanceled = false;
+  kj::Pin<bool> taskCanceled;  // Value-initialized to false.
   kj::Canceler canceler;
   {
     KJ_EXPECT_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception");
-    context->addWaitUntil(
-        canceler.wrap(kj::Promise<void>(kj::NEVER_DONE)).catch_([&taskCanceled](kj::Exception&&) {
-      taskCanceled = true;
+    context->addWaitUntil(canceler.wrap(kj::Promise<void>(kj::NEVER_DONE))
+                              .catch_([weakCanceled = taskCanceled.addWeak()](kj::Exception&&) {
+      KJ_REQUIRE_NONNULL(weakCanceled.tryGet(), "test ended before the task was canceled") = true;
     }));
   }
   canceler.cancel("expected task cancellation");
   fixture.pollEventLoop();
-  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT(*taskCanceled);
 
   {
     KJ_EXPECT_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception");

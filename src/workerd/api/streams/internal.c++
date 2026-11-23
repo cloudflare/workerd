@@ -202,8 +202,7 @@ class AllReader final {
         // to a rejected tryRead() promise here since both reject this coroutine's promise.
         uint64_t amount = 0;
         kj::Maybe<size_t> maybeSyncAmount;
-        if (syncBytes < MAX_SYNC_BYTES &&
-            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        if (syncBytes < MAX_SYNC_BYTES) {
           maybeSyncAmount = input->tryReadSync(bytes.asBytes(), amountToRead);
         }
         KJ_IF_SOME(syncAmount, maybeSyncAmount) {
@@ -742,20 +741,18 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // event loop when the data is already available (e.g. buffered decompressed data or a
         // pending write on an identity transform).
         kj::Maybe<size_t> maybeSyncAmount;
-        if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-          KJ_TRY {
-            maybeSyncAmount = readable->tryReadSync(bytes, atLeast);
+        KJ_TRY {
+          maybeSyncAmount = readable->tryReadSync(bytes, atLeast);
+        }
+        KJ_CATCH(exception) {
+          // tryReadSync() may throw when a synchronous read is possible but fails. Handle the
+          // failure exactly like the asynchronous error path below.
+          readPending = false;
+          auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+          if (!state.is<StreamStates::Errored>()) {
+            doError(js, error);
           }
-          KJ_CATCH(exception) {
-            // tryReadSync() may throw when a synchronous read is possible but fails. Handle the
-            // failure exactly like the asynchronous error path below.
-            readPending = false;
-            auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
-            if (!state.is<StreamStates::Errored>()) {
-              doError(js, error);
-            }
-            return js.rejectedPromise<ReadResult>(error);
-          }
+          return js.rejectedPromise<ReadResult>(error);
         }
 
         KJ_IF_SOME(amount, maybeSyncAmount) {
@@ -992,18 +989,16 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       // single synchronous read of everything the source has buffered is exactly the
       // draining behavior this method approximates.
       kj::Maybe<size_t> maybeSyncAmount;
-      if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-        KJ_TRY {
-          maybeSyncAmount = readable->tryReadSync(bytes, kAtLeast);
+      KJ_TRY {
+        maybeSyncAmount = readable->tryReadSync(bytes, kAtLeast);
+      }
+      KJ_CATCH(exception) {
+        readPending = false;
+        auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+        if (!state.is<StreamStates::Errored>()) {
+          doError(js, error);
         }
-        KJ_CATCH(exception) {
-          readPending = false;
-          auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
-          if (!state.is<StreamStates::Errored>()) {
-            doError(js, error);
-          }
-          return js.rejectedPromise<DrainingReadResult>(error);
-        }
+        return js.rejectedPromise<DrainingReadResult>(error);
       }
 
       KJ_IF_SOME(amount, maybeSyncAmount) {
@@ -1393,8 +1388,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
         // TODO(perf): Consider adding a synchronous "output gate is open" check so that actors
         // can also take this fast path when no storage writes are pending.
         if (len > 0 && queue.empty() && maybePendingAbort == kj::none &&
-            maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none &&
-            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+            maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none) {
           bool syncSuccess = false;
           KJ_TRY {
             syncSuccess = writable->sink->tryWriteSync(ptr);
@@ -1753,8 +1747,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   }
   queue.push_back(WriteEvent{
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = kj::heap<Pipe>(*this, kj::mv(source), kj::mv(sourceLock), kj::mv(prp.resolver),
-        preventAbort, preventClose, preventCancel, kj::mv(options.signal)),
+    .event = jsg::TracedOwn(kj::heap<Pipe>(*this, kj::mv(source), kj::mv(sourceLock),
+        kj::mv(prp.resolver), preventAbort, preventClose, preventCancel, kj::mv(options.signal))),
   });
   ensureWriting(js);
   return kj::mv(prp.promise);
@@ -1990,7 +1984,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           KJ_CASE_ONEOF(close, Close) {
             events.add(kj::str("Close"));
           }
-          KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
+          KJ_CASE_ONEOF(pipe, jsg::TracedOwn<Pipe>) {
             events.add(kj::str("Pipe"));
           }
         }
@@ -2019,7 +2013,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       if constexpr (kj::isSameType<Request, Close>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
-      } else if constexpr (kj::isSameType<Request, kj::Own<Pipe>>()) {
+      } else if constexpr (kj::isSameType<Request, jsg::TracedOwn<Pipe>>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
       }
@@ -2061,8 +2055,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       // Fast path: try to complete the write synchronously, avoiding a trip through the KJ
       // event loop when the sink can accept data immediately.
-      if (syncDepth < kMaxSyncWriteDepth &&
-          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+      if (syncDepth < kMaxSyncWriteDepth) {
         auto ptr = request.bytes;
         bool syncSuccess = false;
         KJ_TRY {
@@ -2167,7 +2160,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }));
     }
-    KJ_CASE_ONEOF(request, kj::Own<Pipe>) {
+    KJ_CASE_ONEOF(request, jsg::TracedOwn<Pipe>) {
       if (request->checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
         return js.resolvedPromise();
@@ -2247,7 +2240,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // teardown, so we track the Pipe itself via its weak ref.
           if (pipeState->isAborted()) return js.resolvedPromise();
 
-          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
+          auto& request = check.template operator()<jsg::TracedOwn<Pipe>>(controller);
 
           // KJ_IF_SOME on request.source(): if pipeLoop already released the
           // source (via Pipe::State::releaseSource()), source is now
@@ -2316,7 +2309,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
           auto handle = jsg::JsValue(reason.getHandle(js));
 
-          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
+          auto& request = check.template operator()<jsg::TracedOwn<Pipe>>(controller);
 
           auto fulfiller = request->takePromise();
           maybeRejectPromise<void>(js, fulfiller, handle);
@@ -2518,20 +2511,18 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
   //
   auto writeBytes = [&](kj::Array<const kj::byte> data) {
     // Fast path: complete the write synchronously when the sink can accept data immediately.
-    if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-      bool syncSuccess = false;
-      KJ_TRY {
-        syncSuccess = KJ_ASSERT_NONNULL(parent.state.whenActive(
-            [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(data); }));
-      }
-      KJ_CATCH(exception) {
-        // A sync throw is equivalent to a rejected write() promise; surface it as one so the
-        // caller's rejection continuation handles it identically to an async write failure.
-        return js.rejectedPromise<void>(js.exceptionToJs(kj::mv(exception)));
-      }
-      if (syncSuccess) {
-        return js.resolvedPromise();
-      }
+    bool syncSuccess = false;
+    KJ_TRY {
+      syncSuccess = KJ_ASSERT_NONNULL(parent.state.whenActive(
+          [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(data); }));
+    }
+    KJ_CATCH(exception) {
+      // A sync throw is equivalent to a rejected write() promise; surface it as one so the
+      // caller's rejection continuation handles it identically to an async write failure.
+      return js.rejectedPromise<void>(js.exceptionToJs(kj::mv(exception)));
+    }
+    if (syncSuccess) {
+      return js.resolvedPromise();
     }
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
@@ -2865,14 +2856,12 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         maybeRejectPromise<void>(js, promise, reason);
         queue.pop_front();
       }
-      KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
-        // The Pipe lives on the heap and cannot be moved, so moving the kj::Own out of the
-        // queue would not re-strengthen its handles. It therefore stays in `queue`, where
-        // visitForGc() keeps reaching it, until it has been settled. The promise is taken
-        // first (the move makes it strong), and only a weak reference is held across
-        // releaseSource(): with a cancel reason, it runs the source's cancel algorithm
-        // (arbitrary user JS), which may re-enter this controller and tear the Pipe down.
-        // `pipeRequest` must not be used after that call.
+      KJ_CASE_ONEOF(pipeRequest, jsg::TracedOwn<Pipe>) {
+        // The Pipe stays in `queue`, where visitForGc() keeps reaching it, until it has been
+        // settled. The promise is taken first (the move makes it strong), and only a weak
+        // reference is held across releaseSource(): with a cancel reason, it runs the source's
+        // cancel algorithm (arbitrary user JS), which may re-enter this controller and tear the
+        // Pipe down. `pipeRequest` must not be used after that call.
         auto promise = pipeRequest->takePromise();
         auto weakPipe = pipeRequest->addWeakRef();
         // Cancel (unless preventCancel) and unlock the source. Note that the unlock
@@ -2917,8 +2906,8 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       KJ_CASE_ONEOF(flush, Flush) {
         visitor.visit(flush.promise);
       }
-      KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
-        pipe->visitForGc(visitor);
+      KJ_CASE_ONEOF(pipe, jsg::TracedOwn<Pipe>) {
+        visitor.visit(pipe);
       }
     }
   }

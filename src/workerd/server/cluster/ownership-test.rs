@@ -4,6 +4,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use futures::executor::block_on;
@@ -13,6 +14,8 @@ use crate::Claim;
 use crate::Error;
 use crate::Ownership;
 use crate::Registry;
+use crate::bucket::memory::Memory;
+use crate::ownership::Owned;
 use crate::ownership::OwnerRecord;
 use crate::ownership::owner_key;
 
@@ -518,5 +521,164 @@ fn a_draining_node_sends_what_it_cannot_release_to_a_peer() {
             a_own.acquire_or_route("ns", "y", 2).await.unwrap(),
             route_to("b")
         );
+    });
+}
+
+/// Handles on a memory store's faults: `Memory::unknown`,
+/// `Memory::interloper`.
+type Faults = (
+    Rc<RefCell<Vec<String>>>,
+    Rc<RefCell<Vec<(String, Vec<u8>)>>>,
+);
+
+/// A memory store and handles on its faults.
+fn faulty() -> (Bucket, Faults) {
+    let store = Memory::default();
+    let faults = (store.unknown.clone(), store.interloper.clone());
+    (Bucket::new(store, ""), faults)
+}
+
+/// The key of object `name`'s owner record in the store, as `node` lays it
+/// out.
+fn key_of(name: &str) -> String {
+    format!("cluster/{}", owner_key("ns", name))
+}
+
+fn record(node: &str, epoch: u64, from: u64) -> OwnerRecord {
+    OwnerRecord {
+        node: node.into(),
+        epoch,
+        from,
+    }
+}
+
+async fn record_of(store: &Bucket, name: &str) -> OwnerRecord {
+    let (body, _) = store.get(&key_of(name)).await.unwrap().unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// A write of the owner record whose outcome is unknown: landed, it is
+/// this node's, and another writer's is not.
+#[test]
+fn a_claim_of_unknown_outcome_is_settled_by_reading_the_record() {
+    block_on(async {
+        let (store, (unknown, interloper)) = faulty();
+        let (a, a_own) = node(&store, "a");
+        let (b, b_own) = node(&store, "b");
+        let (c, _) = node(&store, "c");
+        a.renew(0).await.unwrap();
+        for name in ["x", "y"] {
+            assert_eq!(
+                a_own.acquire_or_route("ns", name, 0).await.unwrap(),
+                owned(1)
+            );
+            assert!(a_own.open("ns", name, 1).await.unwrap());
+        }
+        // a's lease ran out at 10s.
+        b.renew(11_000).await.unwrap();
+        c.renew(11_000).await.unwrap();
+
+        unknown.borrow_mut().push(key_of("x"));
+        let claim = b_own.acquire_or_route("ns", "x", 11_000).await;
+        assert_eq!(claim.unwrap(), owned(2));
+        assert!(unknown.borrow().is_empty());
+        // Settled as written: the claim keeps the version read back, which
+        // the open guards on.
+        assert!(b_own.claimed.borrow().contains_key(&owner_key("ns", "x")));
+        assert!(b_own.open("ns", "x", 2).await.unwrap());
+        assert_eq!(record_of(&store, "x").await, record("b", 2, 2));
+
+        // c's claim lands first.
+        let theirs = serde_json::to_vec(&record("c", 2, 1)).unwrap();
+        interloper.borrow_mut().push((key_of("y"), theirs));
+        unknown.borrow_mut().push(key_of("y"));
+        let claim = b_own.acquire_or_route("ns", "y", 11_000).await;
+        assert_eq!(claim.unwrap(), route_to("c"));
+        assert!(unknown.borrow().is_empty());
+        assert_eq!(record_of(&store, "y").await, record("c", 2, 1));
+    });
+}
+
+#[test]
+fn an_open_of_unknown_outcome_is_settled_by_reading_the_record() {
+    block_on(async {
+        let (store, (unknown, interloper)) = faulty();
+        let (a, a_own) = node(&store, "a");
+        a.renew(0).await.unwrap();
+        assert_eq!(
+            a_own.acquire_or_route("ns", "x", 0).await.unwrap(),
+            owned(1)
+        );
+        unknown.borrow_mut().push(key_of("x"));
+        assert!(a_own.open("ns", "x", 1).await.unwrap());
+        assert_eq!(record_of(&store, "x").await, record("a", 1, 1));
+
+        // b opened the new object first.
+        assert_eq!(
+            a_own.acquire_or_route("ns", "y", 0).await.unwrap(),
+            owned(1)
+        );
+        let theirs = serde_json::to_vec(&record("b", 1, 1)).unwrap();
+        interloper.borrow_mut().push((key_of("y"), theirs));
+        unknown.borrow_mut().push(key_of("y"));
+        assert!(!a_own.open("ns", "y", 1).await.unwrap());
+        assert_eq!(record_of(&store, "y").await, record("b", 1, 1));
+    });
+}
+
+#[test]
+fn an_advance_of_unknown_outcome_is_settled_by_reading_the_record() {
+    block_on(async {
+        let (store, (unknown, interloper)) = faulty();
+        let (a, a_own) = node(&store, "a");
+        a.renew(0).await.unwrap();
+        for name in ["x", "y"] {
+            assert_eq!(
+                a_own.acquire_or_route("ns", name, 0).await.unwrap(),
+                owned(1)
+            );
+            assert!(a_own.open("ns", name, 1).await.unwrap());
+        }
+        unknown.borrow_mut().push(key_of("x"));
+        let next = a_own.advance("ns", "x", 1).await.unwrap();
+        assert_eq!(
+            next,
+            Some(Owned {
+                epoch: 2,
+                recover: Some(1),
+            })
+        );
+        assert_eq!(record_of(&store, "x").await, record("a", 2, 1));
+
+        let theirs = serde_json::to_vec(&record("b", 2, 1)).unwrap();
+        interloper.borrow_mut().push((key_of("y"), theirs));
+        unknown.borrow_mut().push(key_of("y"));
+        assert_eq!(a_own.advance("ns", "y", 1).await.unwrap(), None);
+        assert_eq!(record_of(&store, "y").await, record("b", 2, 1));
+    });
+}
+
+#[test]
+fn a_release_of_unknown_outcome_is_settled_by_reading_the_record() {
+    block_on(async {
+        let (store, (unknown, interloper)) = faulty();
+        let (a, a_own) = node(&store, "a");
+        a.renew(0).await.unwrap();
+        for name in ["x", "y"] {
+            assert_eq!(
+                a_own.acquire_or_route("ns", name, 0).await.unwrap(),
+                owned(1)
+            );
+            assert!(a_own.open("ns", name, 1).await.unwrap());
+        }
+        unknown.borrow_mut().push(key_of("x"));
+        assert!(a_own.release("ns", "x", 1).await.unwrap());
+        assert_eq!(record_of(&store, "x").await, record("", 1, 1));
+
+        let theirs = serde_json::to_vec(&record("b", 2, 1)).unwrap();
+        interloper.borrow_mut().push((key_of("y"), theirs));
+        unknown.borrow_mut().push(key_of("y"));
+        assert!(!a_own.release("ns", "y", 1).await.unwrap());
+        assert_eq!(record_of(&store, "y").await, record("b", 2, 1));
     });
 }

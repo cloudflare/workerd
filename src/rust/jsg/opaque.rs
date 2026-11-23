@@ -16,9 +16,6 @@
     reason = "reads the value of a Wrappable that the FFI hands back"
 )]
 
-use std::any::TypeId;
-use std::rc::Rc;
-
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::RefCell;
@@ -26,7 +23,6 @@ use crate::Traced;
 use crate::v8::Local;
 use crate::v8::Value;
 use crate::v8::WrappableRc;
-use crate::v8::ffi;
 
 /// The value of an opaque wrapper, until [`unwrap_opaque`] takes it.
 struct Opaque<T>(RefCell<Option<T>>);
@@ -54,12 +50,7 @@ pub fn wrap_opaque<'s, T: Traced + 'static>(
     lock: &Lock<'s>,
     value: T,
 ) -> crate::Result<Local<'s, Value>> {
-    // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the value, released when the
-    // Wrappable is destroyed.
-    let raw: *const Opaque<T> = Rc::into_raw(Rc::new(Opaque(RefCell::new(Some(value)))));
-    let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
-    let mut wrappable: WrappableRc =
-        ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<Opaque<T>>()).into();
+    let (mut wrappable, _) = WrappableRc::new(Opaque(RefCell::new(Some(value))));
     let wrapper = wrappable.attach_opaque_wrapper(lock);
     // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only the
     // wrapper owns it, so the reference is dropped and the garbage collector decides.

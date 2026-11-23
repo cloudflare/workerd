@@ -87,15 +87,21 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
 // Isolates on different threads may call getOrCompile() concurrently. Isolates that find the
 // slot for their setting empty at the same time each compile, and the holder keeps the first
 // result.
+//
+// An embedder may subclass the holder and override getOrCompile() to keep the compiled code
+// elsewhere, e.g. in a process-wide store shared with other modules. An override must keep the
+// contract above: it may be called concurrently from any thread, and it returns a module compiled
+// with the calling isolate's setting.
 class CompiledWasmModuleHolder {
  public:
   CompiledWasmModuleHolder() = default;
+  virtual ~CompiledWasmModuleHolder() noexcept(false) = default;
   KJ_DISALLOW_COPY_AND_MOVE(CompiledWasmModuleHolder);
 
   // Returns a module object for `wireBytes` in the current isolate, compiling them only if no
   // module compiled with this isolate's setting is held yet. Every call on one holder must pass
   // the same bytes.
-  v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
+  virtual v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> wireBytes,
       const CompilationObserver& observer) const;
 
@@ -114,9 +120,15 @@ class ModuleRegistry {
 
   using Type = ModuleType;
 
-  JSG_MEMORY_INFO(ModuleRegistry) {
-    // TODO(soon): Implement memory tracking for ModuleRegistry
+  // Virtual so that ContextGlobal, which knows only this base class, reports the entries of the
+  // ModuleRegistryImpl it holds.
+  virtual kj::StringPtr jsgGetMemoryName() const {
+    return "ModuleRegistry"_kjc;
   }
+  virtual size_t jsgGetMemorySelfSize() const {
+    return sizeof(ModuleRegistry);
+  }
+  virtual void jsgGetMemoryInfo(MemoryTracker& tracker) const {}
 
   enum class ResolveOption {
     // Default resolution. Check the worker bundle first, then builtins.
@@ -139,6 +151,13 @@ class ModuleRegistry {
     CapnpModuleInfo(Value fileScope, kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls);
     CapnpModuleInfo(CapnpModuleInfo&&) = default;
     CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
+
+    JSG_MEMORY_INFO(CapnpModuleInfo) {
+      tracker.trackField("fileScope", fileScope);
+      for (const auto& decl: topLevelDecls) {
+        tracker.trackField("topLevelDecl", decl.value);
+      }
+    }
   };
 
   struct CommonJsModuleInfo {
@@ -161,6 +180,10 @@ class ModuleRegistry {
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
 
+    JSG_MEMORY_INFO(CommonJsModuleInfo) {
+      tracker.trackField("evalFunc", evalFunc);
+    }
+
     jsg::JsValue getExports(jsg::Lock& js);
 
     static jsg::Function<void()> initEvalFunc(
@@ -181,6 +204,10 @@ class ModuleRegistry {
 
     ValueModuleInfo(ValueModuleInfo&&) = default;
     ValueModuleInfo& operator=(ValueModuleInfo&&) = default;
+
+    JSG_MEMORY_INFO(ValueModuleInfo) {
+      tracker.trackField("value", value);
+    }
   };
 
   using DataModuleInfo = ValueModuleInfo<v8::ArrayBuffer>;
@@ -272,6 +299,20 @@ class ModuleRegistry {
 
     uint hashCode() const {
       return module.hashCode();
+    }
+
+    JSG_MEMORY_INFO(ModuleInfo) {
+      tracker.trackField("module", module);
+      tracker.trackField("synthetic", maybeSynthetic);
+      KJ_IF_SOME(namedExports, maybeNamedExports) {
+        size_t size = namedExports.size() * sizeof(kj::String);
+        for (const auto& name: namedExports) {
+          size += name.size();
+        }
+        tracker.trackFieldWithSize("namedExports", size);
+      }
+      tracker.trackField("moduleSourceObject", maybeModuleSourceObject);
+      tracker.trackField("mutableExports", maybeMutableExports);
     }
 
     // Set the module source object for source phase imports
@@ -454,6 +495,23 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(ModuleRegistryImpl);
+  }
+
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    if (entries.size() > 0) {
+      tracker.pushContainer("entries"_kjc, entries.size() * sizeof(kj::Own<Entry>), "entries"_kjc);
+      for (const auto& entry: entries) {
+        tracker.trackField(nullptr, entry);
+      }
+      tracker.popNode();
+    }
+    tracker.trackFieldWithSize(
+        "snapshotSeeds", snapshotSeeds.size() * sizeof(*snapshotSeeds.begin()));
+    tracker.trackField("fallbackServiceRedirects", fallbackServiceRedirects);
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
@@ -645,6 +703,20 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       ResolveOption option = ResolveOption::DEFAULT,
       ResolveMethod method = ResolveMethod::IMPORT,
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
+    kj::Vector<kj::String> visited;
+    return resolveImpl(js, specifier, referrer, option, method, rawSpecifier, visited);
+  }
+
+ private:
+  static constexpr size_t kMaxFallbackServiceRedirects = 32;
+
+  kj::Maybe<ModuleInfo&> resolveImpl(jsg::Lock& js,
+      const kj::Path& specifier,
+      kj::Maybe<const kj::Path&> referrer,
+      ResolveOption option,
+      ResolveMethod method,
+      kj::Maybe<kj::StringPtr> rawSpecifier,
+      kj::Vector<kj::String>& visited) {
     using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
@@ -674,12 +746,23 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // If the module is not found and we have a module fallback service configured,
     // let's try that as a means of looking it up.
     auto str = specifier.toString(true);
+    // visited holds the specifiers this resolution has already looked up through the fallback
+    // service. Reaching one of them again means fallback service redirects form a cycle (possibly
+    // a specifier redirecting to itself), so the module cannot resolve. A redirect chain can also
+    // grow without repeating, for example when a relative redirect resolves one directory deeper
+    // on every hop, so its length is bounded too.
+    if (visited.size() > kMaxFallbackServiceRedirects ||
+        visited.asPtr().findFirst(str) != kj::none) {
+      return kj::none;
+    }
+    visited.add(kj::str(str));
     KJ_IF_SOME(found, fallbackServiceRedirects.find(str)) {
       // The fallback service has already given us a redirect response for this specifier.
       // let's use it to try to resolve. Make sure we're using DEFAULT resolution so BUNDLE-typed
       // modules from the fallback service can be used.
       option = ResolveOption::DEFAULT;
-      return resolve(js, specifier.parent().eval(found), referrer, option, method, rawSpecifier);
+      return resolveImpl(
+          js, specifier.parent().eval(found), referrer, option, method, rawSpecifier, visited);
     }
     KJ_IF_SOME(info,
         tryResolveFromFallbackService(js, specifier, referrer, observer, method, rawSpecifier)) {
@@ -707,7 +790,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // Make sure we're using DEFAULT resolution so BUNDLE-typed modules from the fallback
           // service can be used.
           option = ResolveOption::DEFAULT;
-          return resolve(js, specifier.parent().eval(s), referrer, option, method, rawSpecifier);
+          return resolveImpl(
+              js, specifier.parent().eval(s), referrer, option, method, rawSpecifier, visited);
         }
       }
     }
@@ -715,6 +799,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     return kj::none;
   }
 
+ public:
   kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
     for (const kj::Own<Entry>& entry: entries) {
       // Unfortunately we cannot use entries.find(...) in here because the module info can
@@ -1007,6 +1092,30 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
+
+    JSG_MEMORY_INFO(Entry) {
+      size_t specifierSize = 0;
+      for (const auto& part: specifier) {
+        specifierSize += sizeof(kj::String) + part.size();
+      }
+      tracker.trackFieldWithSize("specifier", specifierSize, "kj::Path"_kjc);
+      KJ_SWITCH_ONEOF(info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          tracker.trackField("module", moduleInfo);
+        }
+        KJ_CASE_ONEOF(src, StaticSource) {
+          // The source and compile cache are static data, not owned by the entry.
+        }
+        KJ_CASE_ONEOF(src, SharedSource) {
+          // The source is shared with the V8 strings created from it, so only the compile cache
+          // belongs to the entry.
+          tracker.trackFieldWithSize("compileCache", src.compileCache.size());
+        }
+        KJ_CASE_ONEOF(callback, ModuleCallback) {
+          tracker.trackFieldWithSize("callback", sizeof(ModuleCallback));
+        }
+      }
+    }
 
     // Lazily instantiate module from source code if needed
     kj::Maybe<ModuleInfo&> module(jsg::Lock& js,

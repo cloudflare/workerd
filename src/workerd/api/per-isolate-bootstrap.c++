@@ -509,6 +509,47 @@ static void QueueReaction(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The getter of a property defined by DefineLazyDataProperty(): requires the bootstrap module
+// named by the callback's data and returns its export of the property's name. V8 then replaces
+// the property with a data property holding the result, so a read that returns runs this once.
+static void LazyDataPropertyGetter(
+    v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto specifier = jsg::JsString(info.DataV2().As<v8::Value>().As<v8::String>()).toString(js);
+    auto exports =
+        KJ_ASSERT_NONNULL(requireBootstrapExport(js, specifier).tryCast<jsg::JsObject>());
+    return exports.get(js, jsg::JsValue(name));
+  });
+}
+
+// Defines the property `key` (a string or symbol) of `target` as a writable, configurable data
+// property, enumerable if `enumerable` is true, whose value is the `key` export of the bootstrap
+// module `specifier`, which is required when the property is first read; reading its descriptor
+// counts. Until then nothing is loaded, and nothing but the timing of the load distinguishes it
+// from an ordinary data property: it is V8's lazy data property, as JSG_LAZY_INSTANCE_PROPERTY
+// defines. A read that throws leaves the property lazy, so the next read tries again.
+static void DefineLazyDataProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto target = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>(), TypeError,
+        "defineLazyDataProperty() expects an object");
+    JSG_REQUIRE(args[1]->IsName(), TypeError, "defineLazyDataProperty() expects a property key");
+    JSG_REQUIRE(
+        args[2]->IsString(), TypeError, "defineLazyDataProperty() expects a module specifier");
+    auto attributes = args[3]->IsTrue() ? v8::PropertyAttribute::None : v8::DontEnum;
+    // A property still lazy when a zygote takes its snapshot keeps this getter, and its data, in
+    // the heap. V8 serializes an accessor's data into the isolate snapshot, which is shared by
+    // every context restored from it and so cannot hold a function of this one: the data is the
+    // specifier, and the getter requires the module in the context it is read in.
+    jsg::isolateRegisterExternalReference(
+        js.v8Isolate, reinterpret_cast<intptr_t>(&LazyDataPropertyGetter));
+    KJ_ASSERT(jsg::check(v8::Local<v8::Object>(target)->SetLazyDataProperty(
+        js.v8Context(), args[1].As<v8::Name>(), &LazyDataPropertyGetter, args[2], attributes)));
+    return js.v8Undefined();
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -548,6 +589,27 @@ static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto holder = v8::ObjectTemplate::New(js.v8Isolate);
     holder->Set(slot, v8::Private::ForApi(js.v8Isolate, name));
     return jsg::check(jsg::check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot));
+  });
+}
+
+// The structured clone of a value, backing the TypeScript structuredClone(). The
+// caller has already converted the options, so the second argument is undefined
+// or a dense array it built itself, whose elements are objects to transfer;
+// reading them cannot run user code. Serialization can run user code (getters)
+// and throws a DataCloneError for an uncloneable value. Plain method: it
+// allocates and can throw.
+static void StructuredClone(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    kj::Maybe<kj::Array<jsg::JsValue>> transfer;
+    KJ_IF_SOME(list, jsg::JsValue(args[1]).tryCast<jsg::JsArray>()) {
+      auto builder = kj::heapArrayBuilder<jsg::JsValue>(list.size());
+      for (auto i: kj::zeroTo(list.size())) {
+        builder.add(list.get(js, i));
+      }
+      transfer = builder.finish();
+    }
+    return jsg::JsValue(args[0]).structuredClone(js, kj::mv(transfer));
   });
 }
 
@@ -613,6 +675,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
     "createTrustedEvent",
     "cloneMessageData",
     "queueReaction",
+    "defineLazyDataProperty",
     "createTrustedOpenEvent",
     "createTrustedErrorEvent",
     "createRequestIo",
@@ -636,6 +699,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
     "readableStreamState",
     // A value, not a method; see Worker::Api::newHtmlRewriterUtils().
     "htmlRewriter",
+    "DOMExceptionBase",
+    "structuredClone",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -660,6 +725,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
     getMethod(js, QueueReaction),
+    getMethod(js, DefineLazyDataProperty),
     getMethod(js, CreateTrustedOpenEvent),
     getMethod(js, CreateTrustedErrorEvent),
     getMethod(js, CreateRequestIo),
@@ -685,6 +751,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
         .map([](jsg::JsObject utils) -> v8::Local<v8::Value> {
     return v8::Local<v8::Object>(utils);
   }).orDefault(js.v8Undefined()),
+    v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
+    getMethod(js, StructuredClone),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -1196,6 +1264,14 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
 
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
   return getBootstrapState(js).tryGetLoadedExports(js, specifier);
+}
+
+jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
+  auto& state = getBootstrapState(js);
+  KJ_IF_SOME(exports, state.tryGetLoadedExports(js, specifier)) {
+    return exports;
+  }
+  return state.requireFn.getHandle(js).call(js, js.undefined(), js.strIntern(specifier));
 }
 
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(

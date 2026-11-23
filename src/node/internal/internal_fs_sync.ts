@@ -85,13 +85,13 @@ import {
   COPYFILE_FICLONE,
   COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
-import { Dir, Dirent } from 'node-internal:internal_fs';
+import { Dir, Dirent, direntName } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import { expandBraces } from 'node-internal:internal_glob_pattern';
 import {
-  expandBraces,
   normalizePattern,
   walkGlob,
   compileExcludePatterns,
@@ -209,7 +209,8 @@ export function copyFileSync(
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizePath(dest).pathname,
+      path: normalizePath(src).pathname,
+      dest: normalizePath(dest).pathname,
     });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
@@ -269,11 +270,10 @@ export function cpSync(
   // it here just to use it so the compiler doesn't complain.
   validateBoolean(exclusive, '');
 
-  // We're not currently implementing verbatimSymlinks in any meaningful way.
-  // Our symlinks are always fully qualfied. That is, they always point to
-  // an absolute path and never to a relative path, so there is no distinction
-  // between verbatimSymlinks and non-verbatimSymlinks. We validate the option
-  // value above but otherwise we ignore it.
+  // We're not currently implementing verbatimSymlinks. A copied symlink
+  // always points at the source link's absolute target, as Node.js does
+  // without verbatimSymlinks. We validate the option value above but
+  // otherwise we ignore it.
 
   // We're also not currently implementing the preserveTimestamps option.
   // Timestamps in our virtual filesystem aren't super meaningful given
@@ -552,14 +552,14 @@ export function readdirSync(
     if ((encoding as string) === 'buffer') {
       return handles.map((handle) => {
         return new Dirent(
-          Buffer.from(handle.name),
+          Buffer.from(direntName(handle)),
           handle.type,
           handle.parentPath
         );
       });
     }
     return handles.map((handle) => {
-      return new Dirent(handle.name, handle.type, handle.parentPath);
+      return new Dirent(direntName(handle), handle.type, handle.parentPath);
     });
   }
 
@@ -784,7 +784,15 @@ export function symlinkSync(
 ): void {
   // We don't implement type in any meaningful way but we do validate it.
   validateOneOf(type, 'type', ['dir', 'file', 'junction', null]);
-  cffs.link(normalizePath(path), normalizePath(target), { symbolic: true });
+  // A relative target resolves from the directory that holds the link.
+  const raw = Buffer.isBuffer(target) ? target.toString() : target;
+  const linkUrl = normalizePath(path);
+  cffs.link(
+    linkUrl,
+    normalizePath(raw, 'utf8', linkUrl),
+    { symbolic: true },
+    raw instanceof URL ? undefined : raw
+  );
 }
 
 export function truncateSync(path: FilePath, len: number = 0): void {

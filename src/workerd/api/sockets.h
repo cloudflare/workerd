@@ -12,6 +12,7 @@
 #include <workerd/jsg/url.h>
 
 #include <kj/refcount.h>
+#include <kj/sticky-flag.h>
 
 namespace workerd {
 
@@ -143,6 +144,59 @@ struct SocketStreamErrnos final: public kj::Refcounted {
   kj::Maybe<kj::StringPtr> write;
 };
 
+// The answer to a CONNECT delivered to a connect() handler, when the peer asked for TLS from the
+// start. The handler can't run that handshake, so the runtime doesn't accept such a connection on
+// delivery. The handler accepts it with Socket::accept() once it has made the connection secure
+// further along. Until then the peer's `opened` stays pending, and nothing crosses the connection
+// in either direction: see whenAccepted().
+//
+// ServiceWorkerGlobalScope::connect() creates one and abandons it when the handler finishes, since
+// `response` lives only that long.
+class ConnectAcceptance final {
+ public:
+  ConnectAcceptance(kj::HttpService::ConnectResponse& response, const kj::HttpHeaderTable& table)
+      : state(Pending{response}),
+        headers(table) {}
+
+  // Accepts the connection. Accepting it again does nothing, and accepting a connection that has
+  // already failed throws the reason it failed.
+  void accept();
+
+  // Fails the connection with `reason`, if it hasn't been accepted or failed already.
+  void fail(kj::StringPtr reason);
+
+  // Gives up `response` without answering it, because it is about to go away: the handler has
+  // finished, and whatever finishes the request answers the peer instead. Returns whether the
+  // connection was still waiting to be accepted. A later accept() throws `reason`.
+  bool abandon(kj::StringPtr reason);
+
+  bool isPending() const {
+    return state.is<Pending>();
+  }
+
+  // Resolves once the connection is accepted, and rejects once it has failed or been abandoned.
+  // The handler's socket reads and writes through a stream that waits for this, so that the
+  // peer's early writes stay in the transport, under backpressure, until there is somewhere secure
+  // for them to go, and are never read at all if the connection fails.
+  kj::Promise<void> whenAccepted() {
+    return accepted.whenSignaled();
+  }
+
+ private:
+  struct Pending {
+    kj::HttpService::ConnectResponse& response;
+  };
+  struct Accepted {};
+  struct Failed {
+    kj::String reason;
+  };
+  kj::OneOf<Pending, Accepted, Failed> state;
+  kj::HttpHeaders headers;
+  kj::StickyFlag accepted;
+
+  void setFailed(kj::StringPtr reason);
+};
+
 class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
@@ -239,6 +293,15 @@ class Socket: public jsg::Object {
     KJ_UNREACHABLE;
   }
 
+  // Marks this socket as the one passed to a connect() handler whose peer asked for TLS from the
+  // start, so that the connection waits for accept().
+  void setAcceptance(IoOwn<ConnectAcceptance> acceptance);
+
+  // Accepts a connection whose peer asked for TLS from the start, which the handler sees as
+  // `secureTransport` 'on'. The handler calls it once it has made the connection secure, after
+  // which the peer's `opened` resolves. Accepting again does nothing.
+  void accept();
+
   // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
   // This is a destructive operation that renders the Socket unusable for further I/O operations.
   kj::Own<kj::AsyncIoStream> takeConnectionStream(jsg::Lock& js);
@@ -324,6 +387,9 @@ class Socket: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(proxyTo);
     }
+    if (flags.getConnectHandlerImmediateTls()) {
+      JSG_METHOD(accept);
+    }
   }
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
@@ -378,6 +444,9 @@ class Socket: public jsg::Object {
   SocketProtocol protocol;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::Maybe<kj::String> domain;
+  // Set on the socket passed to a connect() handler whose peer asked for TLS from the start: the
+  // pending answer to the peer, which the handler gives with accept().
+  kj::Maybe<IoOwn<ConnectAcceptance>> acceptance;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   kj::Maybe<kj::StringPtr> connectErrno;

@@ -55,7 +55,8 @@
     "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.3.3/MODULE.bazel": "37c764292861c2f70314efa9846bb6dbb44fc0308903b3285da6528305450183",
     "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.4.2/MODULE.bazel": "f31aa84151d31e98cffd43eb7217ccff5ec52bdd5f2d10db8f053aeb23342eca",
     "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.5.1/MODULE.bazel": "9d94e5c22c0019995c0a3216a6abb1717dc3f35acccf4e6267a55d6df38367aa",
-    "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.5.1/source.json": "dbe0a75bf1f741b18c7b72dd4d205fa5a45c8c135fee15f7fdd1a2b50ba0fdde",
+    "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.5.2/MODULE.bazel": "c715a5fb6b13a0086c061618f00d033a4ab6d76cbd1083e38d7ca953b5e547f4",
+    "https://bcr.bazel.build/modules/aspect_tools_telemetry/0.5.2/source.json": "4dd300d44767ad4860098b006dda614e67ab0409ae6ec6e133faad303fe9ede8",
     "https://bcr.bazel.build/modules/bazel_features/1.1.0/MODULE.bazel": "cfd42ff3b815a5f39554d97182657f8c4b9719568eb7fded2b9135f084bf760b",
     "https://bcr.bazel.build/modules/bazel_features/1.1.1/MODULE.bazel": "27b8c79ef57efe08efccbd9dd6ef70d61b4798320b8d3c134fd571f78963dbcd",
     "https://bcr.bazel.build/modules/bazel_features/1.10.0/MODULE.bazel": "f75e8807570484a99be90abcd52b5e1f390362c258bcb73106f4544957a48101",
@@ -141,8 +142,8 @@
     "https://bcr.bazel.build/modules/googletest/1.17.0/MODULE.bazel": "dbec758171594a705933a29fcf69293d2468c49ec1f2ebca65c36f504d72df46",
     "https://bcr.bazel.build/modules/googletest/1.18.0/MODULE.bazel": "00f855225d5746ca0d59965b09762e278b7259a6dfb7840d1b034ab60e72921e",
     "https://bcr.bazel.build/modules/googletest/1.18.0/source.json": "cbf8951f03dcff3750c0265b431bb6245e91cf327a2c7284e896acefd1b87b68",
-    "https://bcr.bazel.build/modules/hermetic_launcher/0.0.17/MODULE.bazel": "afa67883ae04001c93578f80c39e5ec9231ae670978bc380778baf66e1936ad5",
-    "https://bcr.bazel.build/modules/hermetic_launcher/0.0.17/source.json": "46ee01ccb275e46f59a3c070f91be52eb113405efe577a99365dd69f168713ef",
+    "https://bcr.bazel.build/modules/hermetic_launcher/0.0.16/MODULE.bazel": "ac8a135156c67b45fff31ca11db0faced1d61890654b96d2c0ea6e8a532a3d9c",
+    "https://bcr.bazel.build/modules/hermetic_launcher/0.0.16/source.json": "1f96a028cec7ca86995f6ec6f50e410a235528d93216ad8144e98a7f8a4d204c",
     "https://bcr.bazel.build/modules/jq.bzl/0.1.0/MODULE.bazel": "2ce69b1af49952cd4121a9c3055faa679e748ce774c7f1fda9657f936cae902f",
     "https://bcr.bazel.build/modules/jq.bzl/0.4.0/MODULE.bazel": "a7b39b37589f2b0dad53fd6c1ccaabbdb290330caa920d7ef3e6aad068cd4ab2",
     "https://bcr.bazel.build/modules/jq.bzl/0.4.0/source.json": "52ec7530c4618e03f634b30ff719814a68d7d39c235938b7aa2abbfe1eb1c52c",
@@ -204,7 +205,8 @@
     "https://bcr.bazel.build/modules/protobuf/33.4/MODULE.bazel": "114775b816b38b6d0ca620450d6b02550c60ceedfdc8d9a229833b34a223dc42",
     "https://bcr.bazel.build/modules/protobuf/34.0/MODULE.bazel": "53228107ee46829f290bf86c3542ea5af579f3a4fdb8bc323cd6a67ef4fc0396",
     "https://bcr.bazel.build/modules/protobuf/35.0/MODULE.bazel": "ee97170c013d94c366bbb5fe8a97b0650477cbc00e5e0f6a2c297484bc34d81b",
-    "https://bcr.bazel.build/modules/protobuf/35.0/source.json": "2162e80adef862606ba85ae42e0df85eb519376fd6ab49caddee6fb776a1281e",
+    "https://bcr.bazel.build/modules/protobuf/37.0-rc3/MODULE.bazel": "a06e875ef86cf2c380f702d900a5c6351c2e8858883a07a2b7c8055fad353c19",
+    "https://bcr.bazel.build/modules/protobuf/37.0-rc3/source.json": "8a62d15c95ede5c19a3388a7b2be1db65e6acaeef1441552cd02e95238ab4bb5",
     "https://bcr.bazel.build/modules/pybind11_bazel/2.11.1.bzl.1/MODULE.bazel": "1ef2994c097ee88f8f7ae8fbf991aaefb0603b2540fe575eca14943bc9f220a6",
     "https://bcr.bazel.build/modules/pybind11_bazel/2.11.1/MODULE.bazel": "88af1c246226d87e65be78ed49ecd1e6f5e98648558c14ce99176da041dc378e",
     "https://bcr.bazel.build/modules/pybind11_bazel/2.12.0/MODULE.bazel": "e6f4c20442eaa7c90d7190d8dc539d0ab422f95c65a57cc59562170c58ae3d34",
@@ -347,6 +349,7 @@
     "https://bcr.bazel.build/modules/rules_python/1.6.3/MODULE.bazel": "a7b80c42cb3de5ee2a5fa1abc119684593704fcd2fec83165ebe615dec76574f",
     "https://bcr.bazel.build/modules/rules_python/1.7.0/MODULE.bazel": "d01f995ecd137abf30238ad9ce97f8fc3ac57289c8b24bd0bf53324d937a14f8",
     "https://bcr.bazel.build/modules/rules_python/1.9.0/MODULE.bazel": "afc3a05f29f09f2d3ee95ad99a145250dab41a2b2d8d6f82cc91936b3213282c",
+    "https://bcr.bazel.build/modules/rules_python/2.3.0/MODULE.bazel": "45379a115e826bdd98f1b959d181acccedce8de70d9448ecc0b26640c8e49ec4",
     "https://bcr.bazel.build/modules/rules_python/2.4.6/MODULE.bazel": "edd87d5af3d4cc3c6e233c4450209bad2f4d6124d24c647670ee8062cfdf822e",
     "https://bcr.bazel.build/modules/rules_python/2.4.6/source.json": "2e5154205999e263cdee7399111b09acfb9361a205f29e95af93f9423be674d6",
     "https://bcr.bazel.build/modules/rules_robolectric/4.14.1.2/MODULE.bazel": "d44fec647d0aeb67b9f3b980cf68ba634976f3ae7ccd6c07d790b59b87a4f251",
@@ -402,7 +405,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "dHrWWG8nGZXPqMpSrjS5MjhYmIRagJms0HaCeOuP2j0=",
+        "usagesDigest": "KGrz2+yqH893MBBmYqlA3xdy0oDqwYE0GZFt1reKQWk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -430,10 +433,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "98b457765a7b99c0002732dc7984d42bfcb20f38ce975ae7db6bf1f9b3488dfd",
-              "strip_prefix": "capnproto-capnproto-ad77201/c++",
+              "sha256": "72d7f413abaa4ee7233063033b5d9afe7f76b7754ab04eedaad65b5e8f31ec2b",
+              "strip_prefix": "capnproto-capnproto-7d3db37/c++",
               "type": "tgz",
-              "url": "https://github.com/capnproto/capnproto/tarball/ad772016362aa6a1fad91c038fc702d778a134ba",
+              "url": "https://github.com/capnproto/capnproto/tarball/7d3db3760068ec6a5214a0c3509da398e71dc668",
               "urls": [],
               "workspace_file_content": ""
             }
@@ -863,6 +866,44 @@
               "workspace_file_content": ""
             }
           },
+          "sqlite3": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "add_prefix": "",
+              "auth_patterns": {},
+              "build_file": "@@//:build/BUILD.sqlite3",
+              "build_file_content": "",
+              "canonical_id": "",
+              "files": {},
+              "integrity": "",
+              "netrc": "",
+              "patch_args": [],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_strip": 1,
+              "patch_tool": "",
+              "patches": [
+                "@@//:patches/sqlite/0001-row-counts-plain.patch",
+                "@@//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+                "@@//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+                "@@//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+                "@@//:patches/sqlite/0005-legacy-subquery-subtypes.patch",
+                "@@//:patches/sqlite/0006-cte-nesting-depth.patch"
+              ],
+              "remote_file_integrity": {},
+              "remote_file_urls": {},
+              "remote_module_file_integrity": "",
+              "remote_module_file_urls": [],
+              "remote_patch_strip": 0,
+              "remote_patches": {},
+              "sha256": "e5e6d096b07b0b7316b10d847afdd5b248b1c78724a4e21ac6c0f768d7619326",
+              "strip_prefix": "sqlite-sqlite-5752022",
+              "type": "tgz",
+              "url": "https://github.com/sqlite/sqlite/tarball/refs/tags/version-3.54.1",
+              "urls": [],
+              "workspace_file_content": ""
+            }
+          },
           "wpt": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
             "attributes": {
@@ -888,10 +929,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "13178cd609d76494a3f04a7a6c3ab13d4b9c07b519b70b7b1388e6acf1e58636",
-              "strip_prefix": "wpt-2e4dc257c",
+              "sha256": "6357537fa2c19a3c00b9504810d0b466e991ae4a6b8523e14fae6365fef18fa6",
+              "strip_prefix": "wpt-8ae17e423",
               "type": "tgz",
-              "url": "https://github.com/cloudflare/workerd-tools/releases/download/wpt-2e4dc257c/wpt-2e4dc257c.tar.gz",
+              "url": "https://github.com/cloudflare/workerd-tools/releases/download/wpt-8ae17e423/wpt-8ae17e423.tar.gz",
               "urls": [],
               "workspace_file_content": ""
             }
@@ -1055,7 +1096,7 @@
     },
     "//build/deps:pyodide.bzl%pyodide": {
       "general": {
-        "bzlTransitiveDigest": "x0hizSFn3RuZD5g2sVAROCrLWqgtQ4LudX4OZourhCk=",
+        "bzlTransitiveDigest": "nl/GnfqbGjWopk3jN2oKNXL542nAH5Amw+0fsMPnLdI=",
         "usagesDigest": "D34wPmZYfmECvOxNBPDzjLSxn305F92xp6ZX7mjGPnk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_lib bazel_lib+",
@@ -1103,11 +1144,11 @@
               ]
             }
           },
-          "pyodide_0.26.0a2_2024-03-01_89.capnp.bin": {
+          "pyodide_0.26.0a2_2024-03-01_91.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-c4pm9KBbdeAdfW2UkdU24aE3MadpzGHgbyNG+tEoorM=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.26.0a2_2024-03-01_89.capnp.bin"
+              "integrity": "sha256-Nyc8wolZnX/EzS6zUuUNM8cP1fAuOR0C4F0pV+pK/IM=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.26.0a2_2024-03-01_91.capnp.bin"
             }
           },
           "beautifulsoup4_src_0.26.0a2": {
@@ -1150,11 +1191,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/scipy-312-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_0.28.2_2025-01-16_20.capnp.bin": {
+          "pyodide_0.28.2_2025-01-16_22.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-Mw1A5bs3Ys1UiQ0JEi4XP8ponsQgqYod1HUhVyTj330=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.28.2_2025-01-16_20.capnp.bin"
+              "integrity": "sha256-rQ2vqR3Q6Y+EXM1imNkrlp5swgi5ZIFwtZb6t7vpyNo=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.28.2_2025-01-16_22.capnp.bin"
             }
           },
           "beautifulsoup4_src_0.28.2": {
@@ -1221,11 +1262,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/pywavelets-313-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_314.0.4_2026-06-10_20.capnp.bin": {
+          "pyodide_314.0.4_2026-06-10_22.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-IOPP3ValHq+VYLu0HNODqmB+YXN4lTp25LPXOLmCaGs=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.4_2026-06-10_20.capnp.bin"
+              "integrity": "sha256-0byIBQ0JSAbJLcF6WywE7j+rTo2OuEWXqDpT1sNgvs8=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.4_2026-06-10_22.capnp.bin"
             }
           },
           "beautifulsoup4_src_314.0.4": {
@@ -1260,11 +1301,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/numpy-314-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_314.0.6_2026-08-17_8.capnp.bin": {
+          "pyodide_314.0.6_2026-08-17_12.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-E80D9pADATNzTefFRcyJYbgn5knXbyccy+cKbkdpz0A=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_8.capnp.bin"
+              "integrity": "sha256-uVRpvFwiPOiEaG5PsFR6OpCaBRNwb1wdxllxdVAoSgQ=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_12.capnp.bin"
             }
           },
           "beautifulsoup4_src_314.0.6": {
@@ -1326,7 +1367,7 @@
           "pyodide_dev.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-E80D9pADATNzTefFRcyJYbgn5knXbyccy+cKbkdpz0A=",
+              "integrity": "sha256-uVRpvFwiPOiEaG5PsFR6OpCaBRNwb1wdxllxdVAoSgQ=",
               "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_dev.capnp.bin"
             }
           },
@@ -1390,14 +1431,14 @@
             "repoRuleId": "@@//build/deps:dep_pyodide.bzl%_stdlib_wheels_repo",
             "attributes": {
               "tag": "20240829.4",
-              "lockfile": "@@//src/pyodide:python-lock/pyodide-lock_20240829.4.json"
+              "lockfile": "@@//src/pyodide/bundle:python-lock/pyodide-lock_20240829.4.json"
             }
           },
           "all_pyodide_wheels_20250808": {
             "repoRuleId": "@@//build/deps:dep_pyodide.bzl%_stdlib_wheels_repo",
             "attributes": {
               "tag": "20250808",
-              "lockfile": "@@//src/pyodide:python-lock/pyodide-lock_20250808.json"
+              "lockfile": "@@//src/pyodide/bundle:python-lock/pyodide-lock_20250808.json"
             }
           },
           "pyodide-snapshot-baseline-7177ed710.bin": {
@@ -1463,13 +1504,13 @@
             "pyodide-0.28.2",
             "pyodide-314.0.4",
             "pyodide-314.0.6",
-            "pyodide_0.26.0a2_2024-03-01_89.capnp.bin",
+            "pyodide_0.26.0a2_2024-03-01_91.capnp.bin",
             "beautifulsoup4_src_0.26.0a2",
             "pytest-asyncio_src_0.26.0a2",
             "python-workers-runtime-sdk_src_0.26.0a2",
             "fastapi_src_0.26.0a2",
             "scipy_src_0.26.0a2",
-            "pyodide_0.28.2_2025-01-16_20.capnp.bin",
+            "pyodide_0.28.2_2025-01-16_22.capnp.bin",
             "beautifulsoup4_src_0.28.2",
             "pytest-asyncio_src_0.28.2",
             "python-workers-runtime-sdk_src_0.28.2",
@@ -1478,12 +1519,12 @@
             "shapely_src_0.28.2",
             "Pillow_src_0.28.2",
             "pywavelets_src_0.28.2",
-            "pyodide_314.0.4_2026-06-10_20.capnp.bin",
+            "pyodide_314.0.4_2026-06-10_22.capnp.bin",
             "beautifulsoup4_src_314.0.4",
             "pytest-asyncio_src_314.0.4",
             "python-workers-runtime-sdk_src_314.0.4",
             "numpy_src_314.0.4",
-            "pyodide_314.0.6_2026-08-17_8.capnp.bin",
+            "pyodide_314.0.6_2026-08-17_12.capnp.bin",
             "beautifulsoup4_src_314.0.6",
             "pytest-asyncio_src_314.0.6",
             "python-workers-runtime-sdk_src_314.0.6",
@@ -1558,7 +1599,7 @@
     },
     "@@aspect_rules_esbuild+//esbuild:extensions.bzl%esbuild": {
       "general": {
-        "bzlTransitiveDigest": "Q3c2vhEDKvrcz5RyrVz/J1Yo+PcIGHv5YYuxCP7mKCU=",
+        "bzlTransitiveDigest": "UoW7cMohaAAg3drK2qh/dM/ITp1lltJv1ObHARP6r94=",
         "usagesDigest": "ZqBbSnzAi8ZyBL3PXnAGtDMIdC2pcuieJWMY3/94lvA=",
         "recordedInputs": [
           "REPO_MAPPING:aspect_rules_esbuild+,aspect_rules_js aspect_rules_js+",
@@ -1578,8 +1619,7 @@
           "REPO_MAPPING:bazel_lib+,bazel_lib bazel_lib+",
           "REPO_MAPPING:bazel_lib+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:bazel_lib+,bazel_tools bazel_tools",
-          "REPO_MAPPING:protobuf+,bazel_skylib bazel_skylib+",
-          "REPO_MAPPING:protobuf+,proto_bazel_features bazel_features+",
+          "REPO_MAPPING:protobuf+,proto_bazel_features protobuf++proto_bazel_features+proto_bazel_features",
           "REPO_MAPPING:tar.bzl+,bazel_lib bazel_lib+",
           "REPO_MAPPING:tar.bzl+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:tar.bzl+,tar.bzl tar.bzl+"
@@ -1751,7 +1791,7 @@
     "@@yq.bzl+//yq:extensions.bzl%yq": {
       "general": {
         "bzlTransitiveDigest": "tDqk+ntWTdxNAWPDjRY1uITgHbti2jcXR5ZdinltBs0=",
-        "usagesDigest": "TXziXMF8b9mjF9VRrkqbFLTZRnoT/GEK9fJnBr3Lk+U=",
+        "usagesDigest": "l04VBQxewO6/rWQU9IrkcQKPP2wnAFRZFADnIFMryjE=",
         "recordedInputs": [],
         "generatedRepoSpecs": {
           "yq_darwin_amd64": {

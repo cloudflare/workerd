@@ -295,6 +295,13 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 const ReflectConstruct = Reflect.construct;
 const ReflectOwnKeys = Reflect.ownKeys;
 
+// Error
+const ErrorCaptureStackTrace = (
+  Error as unknown as {
+    captureStackTrace(target: object, constructorOpt?: unknown): void;
+  }
+).captureStackTrace;
+
 // Math / Number (statics - plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
@@ -648,6 +655,7 @@ const AbortSignalReasonGet = captureJsgGetter<(signal: AbortSignal) => unknown>(
 );
 
 const EventTargetCtor = globalThis.EventTarget;
+const EventTargetPrototype = EventTargetCtor.prototype;
 const EventTargetAddEventListener = uncurryThis(
   EventTargetCtor.prototype.addEventListener
 ) as (target: object, type: string, listener: () => void) => void;
@@ -664,7 +672,6 @@ const BlobPrototypeSlice = uncurryThis(globalThis.Blob.prototype.slice) as (
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
-const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -797,9 +804,6 @@ module.exports = ObjectFreeze({
   // Blob
   BlobPrototypeSlice,
 
-  // DOMException
-  DOMException,
-
   // Map
   MapPrototypeGet,
   MapPrototypeSet,
@@ -843,6 +847,9 @@ module.exports = ObjectFreeze({
   // Reflect
   ReflectConstruct,
   ReflectOwnKeys,
+
+  // Error
+  ErrorCaptureStackTrace,
 
   // Math / Number
   MathMax,
@@ -895,6 +902,7 @@ module.exports = ObjectFreeze({
   JSONStringify,
 
   // EventTarget
+  EventTargetPrototype,
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
 

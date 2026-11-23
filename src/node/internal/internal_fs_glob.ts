@@ -5,87 +5,17 @@
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import type { DirEntryHandle } from 'cloudflare-internal:filesystem';
 import { normalizePath } from 'node-internal:internal_fs_utils';
+import {
+  expandBraces,
+  segmentToRegex,
+  segmentToRegexStr,
+} from 'node-internal:internal_glob_pattern';
 
 // UV_DIRENT_DIR constant from internal_fs_constants
 const UV_DIRENT_DIR = 2;
 
 // Maximum recursion depth to prevent stack overflow on deeply nested VFS
 const MAX_WALK_DEPTH = 256;
-
-// ============================================================================
-// Brace Expansion
-// ============================================================================
-
-// Splits a string by top-level occurrences of a separator character,
-// respecting nested braces/parens and backslash escapes.
-function splitTopLevel(str: string, sep: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = '';
-
-  for (let i = 0; i < str.length; i++) {
-    const c = str.charAt(i);
-    if (c === '\\' && i + 1 < str.length) {
-      current += c + str.charAt(i + 1);
-      i++;
-    } else if (c === '{' || c === '(') {
-      depth++;
-      current += c;
-    } else if (c === '}' || c === ')') {
-      depth--;
-      current += c;
-    } else if (c === sep && depth === 0) {
-      parts.push(current);
-      current = '';
-    } else {
-      current += c;
-    }
-  }
-
-  parts.push(current);
-  return parts;
-}
-
-// Expands brace expressions in a glob pattern into multiple patterns.
-export function expandBraces(pattern: string): string[] {
-  let depth = 0;
-  let braceStart = -1;
-
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === '\\' && i + 1 < pattern.length) {
-      i++;
-      continue;
-    }
-    if (c === '{') {
-      if (depth === 0) braceStart = i;
-      depth++;
-    } else if (c === '}') {
-      depth--;
-      if (depth === 0 && braceStart !== -1) {
-        const prefix = pattern.slice(0, braceStart);
-        const body = pattern.slice(braceStart + 1, i);
-        const suffix = pattern.slice(i + 1);
-
-        const alternatives = splitTopLevel(body, ',');
-
-        if (alternatives.length === 1) {
-          return [pattern];
-        }
-
-        const results: string[] = [];
-        for (const alt of alternatives) {
-          for (const expanded of expandBraces(prefix + alt + suffix)) {
-            results.push(expanded);
-          }
-        }
-        return results;
-      }
-    }
-  }
-
-  return [pattern];
-}
 
 // ============================================================================
 // Pattern Normalization
@@ -103,144 +33,6 @@ export function normalizePattern(pattern: string): string {
     pattern = pattern.slice(0, -1);
   }
   return pattern;
-}
-
-// ============================================================================
-// Segment-Level Regex (with extglob support)
-// ============================================================================
-
-// Converts a single path segment pattern to a RegExp.
-// Supports: *, ?, [...], [!...], @(...), *(...), +(...), ?(...), !(...)
-export function segmentToRegex(segment: string): RegExp {
-  const regex = segmentToRegexStr(segment);
-  return new RegExp('^' + regex + '$');
-}
-
-function segmentToRegexStr(segment: string): string {
-  let regex = '';
-  let i = 0;
-  let inCharClass = false;
-
-  while (i < segment.length) {
-    const c = segment[i] ?? '';
-
-    // Handle escape sequences
-    if (c === '\\' && i + 1 < segment.length) {
-      regex += '\\' + escapeRegexChar(segment[i + 1] ?? '');
-      i += 2;
-      continue;
-    }
-
-    // Inside character classes, most chars are literal
-    if (inCharClass) {
-      if (c === ']') {
-        regex += ']';
-        inCharClass = false;
-      } else {
-        regex += c;
-      }
-      i++;
-      continue;
-    }
-
-    // Check for extglob: @(...), *(...), +(...), ?(...), !(...)
-    if (
-      (c === '@' || c === '*' || c === '+' || c === '?' || c === '!') &&
-      i + 1 < segment.length &&
-      segment[i + 1] === '('
-    ) {
-      const closeIdx = findMatchingParen(segment, i + 1);
-      if (closeIdx !== -1) {
-        const inner = segment.slice(i + 2, closeIdx);
-        // Convert pipe-separated alternatives, each may contain glob chars
-        const alts = splitTopLevel(inner, '|');
-        const altRegexes = alts.map((a) => segmentToRegexStr(a));
-        const group = altRegexes.join('|');
-
-        switch (c) {
-          case '@': // exactly one
-            regex += '(?:' + group + ')';
-            break;
-          case '*': // zero or more
-            regex += '(?:' + group + ')*';
-            break;
-          case '+': // one or more
-            regex += '(?:' + group + ')+';
-            break;
-          case '?': // zero or one
-            regex += '(?:' + group + ')?';
-            break;
-          case '!': // none of (negative lookahead)
-            regex += '(?!(?:' + group + ')$)[^/]*';
-            break;
-        }
-
-        i = closeIdx + 1;
-        continue;
-      }
-    }
-
-    switch (c) {
-      case '[':
-        inCharClass = true;
-        regex += '[';
-        if (i + 1 < segment.length && segment[i + 1] === '!') {
-          regex += '^';
-          i++;
-        }
-        break;
-
-      case '*':
-        regex += '[^/]*';
-        break;
-
-      case '?':
-        regex += '[^/]';
-        break;
-
-      case '.':
-      case '+':
-      case '^':
-      case '$':
-      case '|':
-      case '(':
-      case ')':
-      case '{':
-      case '}':
-        regex += '\\' + c;
-        break;
-
-      default:
-        regex += c;
-        break;
-    }
-    i++;
-  }
-
-  return regex;
-}
-
-function findMatchingParen(str: string, openIdx: number): number {
-  let depth = 0;
-  for (let i = openIdx; i < str.length; i++) {
-    if (str[i] === '\\' && i + 1 < str.length) {
-      i++;
-      continue;
-    }
-    if (str[i] === '(') depth++;
-    else if (str[i] === ')') {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function escapeRegexChar(c: string): string {
-  if ('.+*?^$|()[]{}\\'.includes(c)) {
-    return '\\' + c;
-  }
-  return c;
 }
 
 // ============================================================================

@@ -8,7 +8,6 @@
  * Bindings for trace worker (ie. to support running wrangler tail).
  */
 
-#include <workerd/api/basics.h>
 #include <workerd/api/events.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
@@ -325,7 +324,8 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   // uncollectable. Detail is shared only between Request instances, all of
   // which visit it here, so the handle is re-traced on every GC cycle.
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(detail->cf);  // NOLINT(jsg-shared-visit): every owner of Detail visits it.
+    // NOLINTNEXTLINE(jsg-traced-own, jsg-shared-visit): every owner visits Detail; none moves it.
+    visitor.visit(detail->cf);
   }
 
  private:
@@ -768,6 +768,9 @@ class TraceMetrics final: public jsg::Object {
 
 class UnsafeTraceMetrics final: public jsg::Object {
  public:
+  // Holds no state, so a startup snapshot recreates it.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::Ref<TraceMetrics> fromTrace(jsg::Lock& js, jsg::Ref<TraceItem> item);
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {

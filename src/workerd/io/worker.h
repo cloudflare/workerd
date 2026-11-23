@@ -51,7 +51,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-struct BenchExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class CacheContext;
@@ -309,6 +308,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   kj::Own<Impl> impl;
 
   kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
+
+  // Creates a context for this script's code, with its module registry and schema loader.
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const;
 
   friend class Worker;
 
@@ -724,9 +726,16 @@ class Worker::Api {
       jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
-  // Only `workerd bench` delivers the bench event, so the default implementation throws.
-  virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
-      jsg::Lock& lock) const;
+  // Runs the `bench()` handler of `handler`, an exported handler object, with `env` and `ctx`
+  // (undefined if it has none), then the cases it registers: see `bench_run()` in
+  // api/bench-api/ffi.rs. `params` is an encoded `BenchParams` message. Returns a promise for an
+  // ArrayBuffer that holds the group's `BenchReport.Group`, without its name, as an encoded
+  // message. Only `workerd bench` delivers the bench event, so the default implementation throws.
+  virtual v8::Local<v8::Promise> runBench(jsg::Lock& lock,
+      v8::Local<v8::Value> handler,
+      v8::Local<v8::Value> env,
+      v8::Local<v8::Value> ctx,
+      kj::ArrayPtr<const capnp::word> params) const;
 
   // An event listener's callback (api::EventTarget::HandlerFunction).
   using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
@@ -1033,7 +1042,7 @@ class Worker::Actor final: public kj::Refcounted {
     // the manager leaves its holder for a holder that cannot be named yet, which is what handing it
     // to a replacement generation in another cart does. The adopting actor sets a new token.
     virtual void forgetOwningHolder() = 0;
-    virtual kj::Own<HibernationManager> addRef() = 0;
+
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
   };
@@ -1103,7 +1112,7 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metrics,
-      kj::Maybe<kj::Own<HibernationManager>> manager,
+      kj::Maybe<kj::Rc<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
       kj::Maybe<rpc::Container::Client> container = kj::none,
       jsg::Dict<kj::String> containerImages = jsg::Dict<kj::String>{},
@@ -1229,7 +1238,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
   // setHibernationManager() hasn't been called yet.
-  kj::Maybe<HibernationManager&> getHibernationManager();
+  kj::Maybe<kj::Rc<HibernationManager>> getHibernationManager();
 
   // Names the holder this actor belongs to, or null if the embedder supplies no such name.
   kj::Maybe<uint64_t> getHolderToken();
@@ -1241,7 +1250,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   // Set the HibernationManager for this actor. This is called once, on the first call to
   // `acceptWebSocket`.
-  void setHibernationManager(kj::Own<HibernationManager> manager);
+  void setHibernationManager(kj::Rc<HibernationManager> manager);
 
   // Gets the event type ID of the hibernation event, which is defined outside of workerd.
   // Only needs to be called when allocating a HibernationManager!
@@ -1259,6 +1268,9 @@ class Worker::Actor final: public kj::Refcounted {
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
   kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> getAlarm(kj::Date scheduledTime);
+
+  // If an alarm is running, return the time it was scheduled for.
+  kj::Maybe<kj::Date> getRunningAlarmTime();
 
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or

@@ -1,53 +1,42 @@
 'use strict';
 
-// EventSource, under the TS_EVENT_SOURCE autogate. It replaces the C++ class
-// in api/eventsource.h, keeping its Workers-specific behaviors: the
-// EventSourceInit `fetcher` extension, EventSource.from(), disposal through
-// close(), absolute URLs only (there is no document base URL), a reconnection
-// time clamped to between 1 and 10 seconds, failing rather than reconnecting
-// when fetch() rejects, and one reconnection attempt after a response without
-// a body. src/tests/events/eventsource/ runs one suite against both
-// implementations, and its AGENTS.md records where each difference below is
-// pinned.
+// EventSource, which parses the event stream as the HTML standard specifies,
+// with these Workers-specific behaviors:
 //
-// DIFFERENCES FROM THE C++ IMPLEMENTATION
-//
-// - The constructor inherits from EventTarget's, as WebIDL requires, and its
-//   `prototype` is non-writable. Calling it without `new` throws the
-//   language's TypeError rather than JSG's.
-// - The event stream is parsed as the HTML standard specifies, where the C++
-//   parser departs from it: an empty `event` field dispatches a 'message'
-//   (C++: an event of type ''); a BOM is stripped however the first chunks
-//   split it; an `id` field containing U+0000 is ignored; a `retry` field
-//   counts only if it is all ASCII digits; a `data` field with an empty value
-//   dispatches a message with empty data (C++: nothing); a CRLF split across
-//   chunks ends one line (C++: two, dispatching early); and the last event ID
-//   that a reconnection sends is the one of the last dispatched event, not
-//   the last `id` field parsed.
-// - Each message is dispatched only while the EventSource is not closed, so
-//   closing it from a listener drops the rest of the messages read with it.
-// - close(), and an error that closes it, cancel the stream of an
-//   EventSource.from() source. The C++ one goes on reading it.
-// - Messages are dispatched from the reaction to the read that produced
-//   them, rather than from a task the C++ sink queues for each write. Both
-//   are held back by a Durable Object's input gate: a native body's read
-//   resumes through IoContext::run(), which takes the input lock, and a
-//   JavaScript stream's chunks are enqueued under it already.
+// - The EventSourceInit `fetcher` extension connects through a Fetcher
+//   rather than the global fetch(). withCredentials is not supported: a
+//   truthy value throws.
+// - EventSource.from() reads a ReadableStream rather than connecting, and
+//   never reconnects. close(), and an error that closes the EventSource,
+//   cancel the stream.
+// - Disposal goes through close().
+// - URLs must be absolute: there is no document base URL.
+// - The reconnection time is clamped to between 1 and 10 seconds.
+// - A rejected fetch() fails the EventSource rather than reconnecting, and a
+//   response without a body is retried only once.
 // - A reconnection's Last-Event-ID header is set through Headers, which
-//   trims HTTP whitespace from the ID; the C++ one sends the ID as parsed.
+//   trims HTTP whitespace from the ID.
+//
+// src/tests/events/eventsource/AGENTS.md specifies the class, and indexes
+// where the suite pins each of these.
 //
 // HOW IT FITS TOGETHER
 //
 // The EventSource extends the C++ EventTarget through
-// events/event-target-internals, and dispatches the events the C++ one does
-// with the same exception policies: an 'open' or 'message' listener
-// exception errors the EventSource out (fail fast) and an 'error' listener's
-// is only reported. Its I/O goes through a RequestIo (utils), bound to the
-// request that created it: every continuation first checks that it runs
-// in that request, and throws as the C++ one does if not. The stream is read
-// with a reader of whichever streams implementation is installed, captured
-// below, and decoded with a streaming TextDecoder before it is parsed.
+// events/event-target-internals. An 'open' or 'message' listener exception
+// errors the EventSource out (fail fast) and an 'error' listener's is only
+// reported. Its I/O goes through a RequestIo (utils), bound to the request
+// that created it: every continuation first checks that it runs in that
+// request, and throws if not. The stream is read with a reader of whichever
+// streams implementation is installed, captured below, and decoded with a
+// streaming TextDecoder before it is parsed. Messages are dispatched from the
+// reaction to the read that produced them, each only while the EventSource
+// is not closed, so closing it from a listener drops the rest of the messages
+// read with that one. A Durable Object's input gate holds them back: a native
+// body's read resumes through IoContext::run(), which takes the input lock,
+// and a JavaScript stream's chunks are enqueued under it already.
 
+import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
 import type { RuntimeClassHelpers } from '../runtime-class';
 
@@ -56,7 +45,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayPrototypePush,
-  DOMException,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
@@ -112,6 +100,8 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
+const { DOMException } = require('dom-exception') as DomExceptionModule;
+
 // Whichever streams implementation main.ts installed before loading this
 // module; a Response body and anything EventSource.from() accepts are its
 // streams.
@@ -155,7 +145,7 @@ const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
   name: string
 ) => string | null;
 
-// JSG's messages, so that misuse reads the same as with the C++ class.
+// JSG's messages, so that misuse reads as it does for a JSG class.
 const kIllegalInvocation =
   'Illegal invocation: function called with incorrect `this` reference. ' +
   'See https://developers.cloudflare.com/workers/observability/errors/' +
@@ -182,8 +172,8 @@ const kStreamOption = ObjectFreeze({ __proto__: null, stream: true });
 
 const kEventStreamMimeType = 'text/event-stream';
 
-// What the C++ implementation's read of each streams implementation throws
-// for a chunk that is not bytes.
+// What a draining read of each streams implementation throws for a chunk
+// that is not bytes; a non-byte chunk fails the EventSource with it.
 const kNotBytes =
   compatFlags['typescript_implemented_streams'] === true
     ? 'This ReadableStream did not return bytes.'
@@ -333,9 +323,8 @@ class EventStreamParser {
 
 const encoder = new TextEncoder();
 
-// A chunk as bytes, as the C++ implementation's draining read converts it:
-// a string as its UTF-8, any buffer or view as its bytes. Undefined for
-// anything else.
+// A chunk as bytes, as a draining read converts it: a string as its UTF-8,
+// any buffer or view as its bytes. Undefined for anything else.
 function chunkBytes(chunk: unknown): Uint8Array | undefined {
   if (typeof chunk === 'string') return TextEncoderEncode(encoder, chunk);
   if (isAnyArrayBuffer(chunk)) return new Uint8Array(chunk);
@@ -358,7 +347,7 @@ function chunkBytes(chunk: unknown): Uint8Array | undefined {
 
 // Whether a read failure is a disconnection, as JSG classifies a JavaScript
 // exception it converts (DISCONNECTED: `retryable` but not `overloaded`),
-// which the C++ implementation treats as the end of the stream.
+// which ends the stream rather than failing the EventSource.
 function isDisconnection(error: unknown): boolean {
   if (
     (typeof error !== 'object' && typeof error !== 'function') ||
@@ -416,8 +405,8 @@ class EventSource extends EventTarget {
       return;
     }
 
-    // Converted as JSG converts the C++ constructor's arguments, before
-    // anything is checked.
+    // Converted as JSG converts a constructor's arguments, before anything
+    // is checked.
     if (url === undefined) {
       throw new TypeError(
         "Failed to construct 'EventSource': constructor parameter 1 is not " +

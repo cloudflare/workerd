@@ -747,16 +747,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite.notifyWrite();
 
-    uint depth = transactionSyncDepth++;
-    KJ_DEFER(--transactionSyncDepth);
-
-    // TODO(perf): SQLite actually allows multiple savepoints with the same name. The name refers
-    //   to the most-recent of these savepoints. This means we don't actually have to append the
-    //   depth to each savepoint name like I originally thought. We should refactor this -- and use
-    //   prepared statements.
-
-    sqlite.run(
-        {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+    // SQLite resolves a savepoint name to the most recent savepoint with that name, so a
+    // constant name works at any nesting depth.
+    //
+    // These statements stay unprepared: a prepared statement must be destroyed with its
+    // database (see SqliteDatabase's ResetListener), but this object can outlive the actor's
+    // database, which is destroyed and recreated when the actor is reset. Preparing them would
+    // require managing their lifetime elsewhere, e.g. attached to the IoContext the way
+    // SqlStorage::execMemoized() caches its statements.
+    sqlite.run("SAVEPOINT _cf_sync_savepoint");
 
     StoredExternalHandler::SyncNestedTransaction syncExternalTxn(
         context.getActorOrThrow().getOrCreateStoredExternalHandler());
@@ -769,18 +768,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
       JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
           "Cannot commit transaction due to an earlier SQL critical error");
 
-      sqlite.run(
-          {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      sqlite.run("RELEASE _cf_sync_savepoint");
       syncExternalTxn.commit();
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       // If a critical error forced an automatic rollback, we skip the rollback and release
       // attempt, because savepoints should already be released.
       if (!sqlite.observedCriticalError()) {
-        sqlite.run({.regulator = SqliteDatabase::TRUSTED},
-            kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-        sqlite.run(
-            {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+        sqlite.run("ROLLBACK TO _cf_sync_savepoint");
+        sqlite.run("RELEASE _cf_sync_savepoint");
       }
       js.throwException(kj::mv(exception));
     });
@@ -927,13 +923,36 @@ jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
   });
 }
 
-kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(
+    jsg::Lock& js, RestoreTarget target, jsg::Optional<RestoreOptions> options) {
   requireNotFacet("onNextSessionRestore"_kj);
+  kj::Vector<ActorCacheInterface::RestoreKvEntry> kvData;
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(data, o.kvData) {
+      JSG_REQUIRE(data.fields.size() <= MAX_RESTORE_KV_ENTRIES, RangeError,
+          "kvData can contain at most ", MAX_RESTORE_KV_ENTRIES, " keys.");
+      size_t totalBytes = 0;
+      for (auto& field: data.fields) {
+        auto value = serializeV8Value(js, field.name, field.value.getHandle(js));
+        totalBytes += field.name.size() + value.size();
+        JSG_REQUIRE(totalBytes <= MAX_RESTORE_KV_BYTES, RangeError, "kvData can contain at most ",
+            MAX_RESTORE_KV_BYTES, " bytes of keys and serialized values.");
+        kvData.add(ActorCacheInterface::RestoreKvEntry{
+          .key = kj::mv(field.name),
+          .value = kj::mv(value),
+        });
+      }
+    }
+  }
+
   KJ_SWITCH_ONEOF(target) {
     KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
-      return cache->onNextSessionRestore(snapshot->getClient());
+      return cache->onNextSessionRestore(snapshot->getClient(), kvData.releaseAsArray());
     }
     KJ_CASE_ONEOF(bookmark, jsg::NonCoercible<kj::String>) {
+      // TODO(soon): Support kvData when restoring from a bookmark.
+      JSG_REQUIRE(
+          kvData.empty(), TypeError, "kvData is only supported when restoring from a snapshot.");
       return cache->onNextSessionRestoreBookmark(bookmark.value);
     }
   }
@@ -1266,7 +1285,7 @@ void DurableObjectState::abort(
   js.terminateExecutionNow();
 }
 
-Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(
+kj::Rc<Worker::Actor::HibernationManager> DurableObjectState::maybeInitHibernationManager(
     Worker::Actor& actor) {
   if (actor.getHibernationManager() == kj::none) {
     // TODO(EW-10817): When the new HibernationManagerImpl path is functional, gate this
@@ -1274,7 +1293,7 @@ Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManag
     // and dispatch to either LegacyHibernationManagerImpl (autogate off) or the new
     // HibernationManagerImpl (autogate on). For now the autogate is unconsulted and only the
     // legacy path is reachable.
-    actor.setHibernationManager(kj::refcounted<LegacyHibernationManagerImpl>(
+    actor.setHibernationManager(kj::rc<LegacyHibernationManagerImpl>(
         actor.getLoopback(), KJ_REQUIRE_NONNULL(actor.getHibernationEventType())));
   }
   return KJ_REQUIRE_NONNULL(actor.getHibernationManager());
@@ -1312,14 +1331,14 @@ void DurableObjectState::acceptWebSocket(
     }
     return kj::Array<kj::String>();
   }();
-  maybeInitHibernationManager(a).acceptWebSocket(kj::mv(ws), distinctTags);
+  maybeInitHibernationManager(a)->acceptWebSocket(kj::mv(ws), distinctTags);
 }
 
 kj::Array<jsg::Ref<api::WebSocket>> DurableObjectState::getWebSockets(
     jsg::Lock& js, jsg::Optional<kj::String> tag) {
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
   KJ_IF_SOME(manager, a.getHibernationManager()) {
-    return manager.getWebSockets(js, tag.map([](kj::StringPtr t) { return t; })).releaseAsArray();
+    return manager->getWebSockets(js, tag).releaseAsArray();
   }
   return kj::Array<jsg::Ref<api::WebSocket>>();
 }
@@ -1332,7 +1351,7 @@ void DurableObjectState::setWebSocketAutoResponse(
     // If there's no request/response pair, we unset any current set auto response configuration.
     KJ_IF_SOME(manager, a.getHibernationManager()) {
       // If there's no hibernation manager created yet, there's nothing to do here.
-      manager.setWebSocketAutoResponse(kj::none, kj::none);
+      manager->setWebSocketAutoResponse(kj::none, kj::none);
     }
     return;
   }
@@ -1348,7 +1367,7 @@ void DurableObjectState::setWebSocketAutoResponse(
       kj::str("Response cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
           "A response of size ", reqResp->getResponse().size(), " was provided."));
 
-  maybeInitHibernationManager(a).setWebSocketAutoResponse(
+  maybeInitHibernationManager(a)->setWebSocketAutoResponse(
       reqResp->getRequest(), reqResp->getResponse());
 }
 
@@ -1357,7 +1376,7 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWe
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
   KJ_IF_SOME(manager, a.getHibernationManager()) {
     // If there's no hibernation manager created yet, there's nothing to do here.
-    return manager.getWebSocketAutoResponse(js);
+    return manager->getWebSocketAutoResponse(js);
   }
   return kj::none;
 }
@@ -1373,7 +1392,7 @@ void DurableObjectState::setHibernatableWebSocketEventTimeout(jsg::Optional<uint
   // If there's no hibernation manager instantiated, we can skip the event timeout unsetting.
   if (timeoutMs == kj::none || KJ_REQUIRE_NONNULL(timeoutMs) == 0) {
     KJ_IF_SOME(hibernationManager, a.getHibernationManager()) {
-      hibernationManager.setEventTimeout(kj::none);
+      hibernationManager->setEventTimeout(kj::none);
     }
     return;
   }
@@ -1383,13 +1402,13 @@ void DurableObjectState::setHibernatableWebSocketEventTimeout(jsg::Optional<uint
   // We want to limit the duration of an event to a maximum of 7 days (604800 * 1000 millis).
   JSG_REQUIRE(t <= 604800 * 1000, Error, "Event timeout should not exceed 604800000 ms.");
 
-  maybeInitHibernationManager(a).setEventTimeout(t);
+  maybeInitHibernationManager(a)->setEventTimeout(t);
 }
 
 kj::Maybe<uint32_t> DurableObjectState::getHibernatableWebSocketEventTimeout() {
   KJ_IF_SOME(a, IoContext::current().getActor()) {
     KJ_IF_SOME(manager, a.getHibernationManager()) {
-      return manager.getEventTimeout();
+      return manager->getEventTimeout();
     }
   }
   return kj::none;

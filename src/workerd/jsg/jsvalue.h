@@ -141,9 +141,9 @@ class JsValue final {
   bool operator==(const JsValue& other) const;
   bool strictEquals(const JsValue& other) const;
 
-  bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
   JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
@@ -154,7 +154,7 @@ class JsValue final {
   static JsValue fromJson(Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
   static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
-  JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<JsValue> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
   JsValue structuredClone(
@@ -204,7 +204,7 @@ class JsBase {
   explicit JsBase(v8::Local<T> inner): inner(inner) {
     requireOnStack(this);
   }
-  JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<Self> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
  private:
@@ -611,8 +611,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
 
 class JsString final: public JsBase<v8::String, JsString> {
  public:
-  int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
@@ -620,7 +620,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
-  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -651,9 +651,21 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   // Copy string contents into a provided buffer (off-heap memory).
   //
+  // Only the first `written` elements of the buffer are written, and the rest is left as it was.
+  // With NULL_TERMINATION, the last of those elements is the terminator, so it needs room in the
+  // buffer like any other element.
+  //
+  // A caller that sizes the buffer from length() must still use `written`: in a V8 sandbox build,
+  // a corrupted string can report a different length here.
+  //
   // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
   // copies data out of V8's heap into your buffer. This makes it safe to use before calling
   // GC-triggering operations like Lock::allocBackingStore().
+  //
+  // For the byte and uint16_t buffers V8 does not report how much it copied, and for a string
+  // corrupted inside the V8 sandbox it can leave any of the `written` elements untouched. A
+  // buffer of native memory must therefore be initialized before it is passed here, or its
+  // previous contents are read as string data.
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
@@ -698,7 +710,7 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
 
-  void markAsHandled(Lock& js);
+  JSG_NO_JS void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
@@ -915,10 +927,13 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
+    // Zeroed because V8 may not fill it; see writeInto().
+    buf.asPtr().fill(0);
     inner->WriteOneByte(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   } else {
     auto buf = kj::heapArray<uint16_t>(inner->Length());
+    buf.asPtr().fill(0);
     inner->Write(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   }
@@ -976,11 +991,12 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   }
 
   // Calls the function with the given receiver and arguments.
-  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue call(
+      Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function with a null receiver and arguments. When null is passed
   // as the receiver, the global object is used instead.
-  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function as a constructor with the given arguments, returning the
   // new object.
@@ -995,7 +1011,8 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // new object.
   JsObject newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
-  // Gets the function's length property.
+  // Gets the function's length property, truncated and clamped to the range of size_t. A
+  // length that isn't a number, or is NaN, gives 0.
   size_t length(Lock& js) const;
 
   // Gets the function's name property.
@@ -1046,12 +1063,12 @@ class JsRef final {
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 
-  T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
     JsValue handle(value.getHandle(js));
     return KJ_ASSERT_NONNULL(handle.tryCast<T>());
   }
 
-  JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
     return JsRef<T>(js, getHandle(js));
   }
 
@@ -1130,7 +1147,7 @@ class WeakJsRef final {
     });
   }
 
-  T getHandle(Lock& js) const {
+  JSG_NO_JS T getHandle(Lock& js) const {
     return KJ_ASSERT_NONNULL(tryGetHandle(js), "attempt to access collected jsg::WeakJsRef target");
   }
 

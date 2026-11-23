@@ -7,6 +7,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace A {
 struct AShared;
@@ -113,6 +114,18 @@ struct D {
   uint64_t d;
   void c_take_trivial_ref_method() const;
   void c_take_trivial_mut_ref_method();
+};
+
+// Trivially relocatable, with a copy constructor that throws when `value` is zero.
+struct ThrowingCopy {
+  uint64_t value;
+  ThrowingCopy(const ThrowingCopy &other);
+  ThrowingCopy(ThrowingCopy &&) = default;
+};
+
+// Aligned more strictly than `operator new(std::size_t)` guarantees.
+struct alignas(64) OverAligned {
+  uint64_t value;
 };
 
 struct E {
@@ -259,6 +272,7 @@ void c_take_ref_rust_vec(const rust::Vec<uint8_t> &v);
 void c_take_ref_rust_vec_string(const rust::Vec<rust::String> &v);
 void c_take_ref_rust_vec_index(const rust::Vec<uint8_t> &v);
 void c_take_ref_rust_vec_copy(const rust::Vec<uint8_t> &v);
+void c_copy_assign_rust_vec(rust::Vec<ThrowingCopy> &dst, const rust::Vec<ThrowingCopy> &src);
 const SharedString &c_take_ref_shared_string(const SharedString &s);
 void c_take_callback(rust::Fn<size_t(rust::String)> callback);
 void c_take_callback_ref(rust::Fn<void(const rust::String &)> callback);
@@ -279,6 +293,15 @@ size_t c_fail_kj_exception_with_empty_detail_return_primitive();
 size_t c_cancel_return_primitive();
 size_t c_cancel_via_rust_return_primitive();
 size_t c_cancel_roundtrip_return_primitive();
+
+rust::String c_describe_kj_exception(kj::Exception exception);
+kj::Exception c_return_kj_exception();
+kj::Exception c_try_return_kj_exception();
+kj::Exception c_roundtrip_kj_exception(kj::Exception exception);
+void c_drop_kj_exception(kj::Exception exception);
+void c_throw_before_consuming_kj_exception(kj::Exception exception);
+kj::Exception c_return_tracked_kj_exception();
+size_t c_tracked_kj_exception_disposals();
 
 // Functions which throw even though their bridge signature is infallible. Their
 // exceptions must turn into Rust panics rather than terminating the process.

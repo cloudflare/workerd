@@ -101,50 +101,53 @@ struct NormalizedFilePath {
   }
 };
 
-[[noreturn]] void throwFsError(
-    jsg::Lock& js, workerd::FsError error, kj::StringPtr syscall, kj::StringPtr path = nullptr) {
+[[noreturn]] void throwFsError(jsg::Lock& js,
+    workerd::FsError error,
+    kj::StringPtr syscall,
+    kj::StringPtr path = nullptr,
+    kj::StringPtr dest = nullptr) {
   switch (error) {
     case workerd::FsError::NOT_DIRECTORY: {
-      node::THROW_ERR_UV_ENOTDIR(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_ENOTDIR(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::NOT_EMPTY: {
-      node::THROW_ERR_UV_ENOTEMPTY(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_ENOTEMPTY(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::READ_ONLY: {
-      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::TOO_MANY_OPEN_FILES: {
-      node::THROW_ERR_UV_EMFILE(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EMFILE(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::ALREADY_EXISTS: {
-      node::THROW_ERR_UV_EEXIST(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EEXIST(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::NOT_SUPPORTED: {
-      node::THROW_ERR_UV_ENOSYS(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_ENOSYS(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::NOT_PERMITTED: {
-      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::NOT_PERMITTED_ON_DIRECTORY: {
-      node::THROW_ERR_UV_EISDIR(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EISDIR(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::FAILED: {
-      node::THROW_ERR_UV_EIO(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EIO(js, syscall, nullptr, path, dest);
     }
     case workerd::FsError::INVALID_PATH: {
-      node::THROW_ERR_UV_EINVAL(js, syscall, "Invalid path"_kj, path);
+      node::THROW_ERR_UV_EINVAL(js, syscall, "Invalid path"_kj, path, dest);
     }
     case workerd::FsError::FILE_SIZE_LIMIT_EXCEEDED: {
-      node::THROW_ERR_UV_EPERM(js, syscall, "File size limit exceeded"_kj, path);
+      node::THROW_ERR_UV_EPERM(js, syscall, "File size limit exceeded"_kj, path, dest);
     }
     case workerd::FsError::SYMLINK_DEPTH_EXCEEDED: {
-      node::THROW_ERR_UV_ELOOP(js, syscall, "symlink depth exceeded"_kj, path);
+      node::THROW_ERR_UV_ELOOP(js, syscall, "symlink depth exceeded"_kj, path, dest);
     }
     case workerd::FsError::NOT_FOUND: {
-      node::THROW_ERR_UV_ENOENT(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_ENOENT(js, syscall, nullptr, path, dest);
     }
     default: {
-      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path);
+      node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path, dest);
     }
   }
   KJ_UNREACHABLE;
@@ -350,6 +353,9 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
         return path.toString(true);
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        if (options.failIfNotSymlink) {
+          return link->getRawTarget();
+        }
         return link->getTargetPath().toString(true);
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -364,7 +370,11 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
   }
 }
 
-void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options) {
+void FileSystemModule::link(jsg::Lock& js,
+    FilePath from,
+    FilePath to,
+    LinkOptions options,
+    jsg::Optional<kj::String> rawTarget) {
   // The from argument is where we are creating the link, while the to is the target.
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedFrom(js, kj::mv(from));
@@ -373,13 +383,21 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
   // First, let's make sure the destination (from) does not already exist.
   const jsg::Url& fromUrl = normalizedFrom;
   const jsg::Url& toUrl = normalizedTo;
+  // Node.js reports the link target as the error's path and the new link as its dest.
+  auto errPath = [&] {
+    KJ_IF_SOME(raw, rawTarget) {
+      return kj::str(raw);
+    }
+    return kj::str(toUrl.getPathname());
+  };
+  auto errDest = [&] { return kj::str(fromUrl.getPathname()); };
 
   KJ_IF_SOME(maybeNode, vfs.resolve(js, fromUrl)) {
     KJ_IF_SOME(err, maybeNode.tryGet<workerd::FsError>()) {
-      throwFsError(js, err, "link"_kj);
+      throwFsError(js, err, "link"_kj, errPath(), errDest());
     }
     // If we got here, then the destination already exists.
-    node::THROW_ERR_UV_EEXIST(js, "link"_kj, "File already exists"_kj);
+    node::THROW_ERR_UV_EEXIST(js, "link"_kj, nullptr, errPath(), errDest());
   }
 
   // Now, let's split the fromUrl into a base directory URL and a file name so
@@ -387,7 +405,7 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
   jsg::Url::Relative fromRelative = fromUrl.getRelative();
 
   if (fromRelative.name.size() == 0) {
-    node::THROW_ERR_UV_EINVAL(js, "link"_kj, "Invalid filename"_kj);
+    node::THROW_ERR_UV_EINVAL(js, "link"_kj, "Invalid filename"_kj, errPath(), errDest());
   }
 
   KJ_IF_SOME(parent, vfs.resolve(js, fromRelative.base)) {
@@ -397,8 +415,9 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
 
       // If we are creating a symbolic link, we do not need to check if the target exists.
       if (options.symbolic) {
-        KJ_IF_SOME(err, dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl))) {
-          throwFsError(js, err, "link"_kj);
+        auto symlink = vfs.newSymbolicLink(js, toUrl, kj::mv(rawTarget));
+        KJ_IF_SOME(err, dir->add(js, fromRelative.name, symlink.addRef())) {
+          throwFsError(js, err, "link"_kj, symlink->getRawTarget(), errDest());
         }
         return;
       }
@@ -408,32 +427,32 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
         KJ_SWITCH_ONEOF(target) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
             KJ_IF_SOME(err, dir->add(js, fromRelative.name, file.addRef())) {
-              throwFsError(js, err, "link"_kj);
+              throwFsError(js, err, "link"_kj, errPath(), errDest());
             }
           }
           KJ_CASE_ONEOF(tdir, kj::Rc<workerd::Directory>) {
             // It is not permitted to hardlink to a directory.
-            node::THROW_ERR_UV_EPERM(js, "link"_kj, "Cannot hardlink to a directory"_kj);
+            node::THROW_ERR_UV_EPERM(
+                js, "link"_kj, "Cannot hardlink to a directory"_kj, errPath(), errDest());
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             KJ_IF_SOME(err, dir->add(js, fromRelative.name, link.addRef())) {
-              throwFsError(js, err, "link"_kj);
+              throwFsError(js, err, "link"_kj, errPath(), errDest());
             }
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             // If we got here, then the target path was not found.
-            throwFsError(js, err, "link"_kj);
+            throwFsError(js, err, "link"_kj, errPath(), errDest());
           }
         }
       } else {
-        node::THROW_ERR_UV_ENOENT(js, "link"_kj, "File not found"_kj, kj::str(toUrl.getPathname()));
+        node::THROW_ERR_UV_ENOENT(js, "link"_kj, nullptr, errPath(), errDest());
       }
     } else {
-      node::THROW_ERR_UV_EINVAL(js, "link"_kj, "Not a directory"_kj);
+      node::THROW_ERR_UV_EINVAL(js, "link"_kj, "Not a directory"_kj, errPath(), errDest());
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(
-        js, "link"_kj, "Directory does not exist"_kj, kj::str(toUrl.getPathname()));
+    node::THROW_ERR_UV_ENOENT(js, "link"_kj, nullptr, errPath(), errDest());
   }
 }
 
@@ -442,6 +461,7 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
   NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
+  auto errPath = [&] { return kj::str(url.getPathname()); };
 
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
     KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
@@ -450,15 +470,15 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
         KJ_SWITCH_ONEOF(stat) {
           KJ_CASE_ONEOF(stat, workerd::Stat) {
             if (stat.type == FsType::DIRECTORY) {
-              node::THROW_ERR_UV_EISDIR(js, "unlink"_kj, "Cannot unlink a directory"_kj);
+              node::THROW_ERR_UV_EISDIR(js, "unlink"_kj, nullptr, errPath());
             }
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            throwFsError(js, err, "unlink"_kj);
+            throwFsError(js, err, "unlink"_kj, errPath());
           }
         }
       } else {
-        node::THROW_ERR_UV_ENOENT(js, "unlink"_kj, "File not found"_kj, relative.name);
+        node::THROW_ERR_UV_ENOENT(js, "unlink"_kj, nullptr, errPath());
       }
 
       KJ_SWITCH_ONEOF(dir->remove(js, fpath)) {
@@ -466,14 +486,14 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
           // Ignore the return.
         }
         KJ_CASE_ONEOF(err, workerd::FsError) {
-          throwFsError(js, err, "unlink"_kj);
+          throwFsError(js, err, "unlink"_kj, errPath());
         }
       }
     } else {
-      node::THROW_ERR_UV_ENOTDIR(js, "unlink"_kj, "Parent path is not a directory"_kj);
+      node::THROW_ERR_UV_ENOTDIR(js, "unlink"_kj, nullptr, errPath());
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(js, "unlink"_kj, "File not found"_kj, relative.name);
+    node::THROW_ERR_UV_ENOENT(js, "unlink"_kj, nullptr, errPath());
   }
 }
 
@@ -621,6 +641,7 @@ jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalized(js, kj::mv(path));
+      auto errPath = [&] { return kj::str(normalized.url.getPathname()); };
       KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
         KJ_SWITCH_ONEOF(node) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -629,24 +650,24 @@ jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
                 return kj::mv(data);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
-                throwFsError(js, err, "readAll"_kj);
+                throwFsError(js, err, "readAll"_kj, errPath());
               }
             }
             KJ_UNREACHABLE;
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-            node::THROW_ERR_UV_EISDIR(js, "readAll"_kj);
+            node::THROW_ERR_UV_EISDIR(js, "readAll"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             // We shouldn't be able to get here since we are following symlinks.
             KJ_UNREACHABLE;
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            throwFsError(js, err, "readAll"_kj);
+            throwFsError(js, err, "readAll"_kj, errPath());
           }
         }
       } else {
-        node::THROW_ERR_UV_ENOENT(js, "readAll"_kj, nullptr, kj::str(normalized.url.getPathname()));
+        node::THROW_ERR_UV_ENOENT(js, "readAll"_kj, nullptr, errPath());
       }
     }
     KJ_CASE_ONEOF(fd, int) {
@@ -695,10 +716,11 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalized(js, kj::mv(path));
+      auto errPath = [&] { return kj::str(normalized.url.getPathname()); };
       KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
         // If the exclusive option is set, the file must not already exist.
         if (options.exclusive) {
-          node::THROW_ERR_UV_EEXIST(js, "writeAll"_kj, "file already exists"_kj);
+          node::THROW_ERR_UV_EEXIST(js, "writeAll"_kj, nullptr, errPath());
         }
         // The file exists, we can write to it.
         KJ_SWITCH_ONEOF(node) {
@@ -706,7 +728,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
             // First let's check that the file is writable.
             auto stat = file->stat(js);
             if (!stat.writable) {
-              node::THROW_ERR_UV_EPERM(js, "writeAll"_kj);
+              node::THROW_ERR_UV_EPERM(js, "writeAll"_kj, nullptr, errPath());
             }
 
             // If the append option is set, we will write to the end of the file
@@ -717,7 +739,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
                   return written;
                 }
                 KJ_CASE_ONEOF(err, workerd::FsError) {
-                  throwFsError(js, err, "writeAll"_kj);
+                  throwFsError(js, err, "writeAll"_kj, errPath());
                 }
               }
               KJ_UNREACHABLE;
@@ -729,21 +751,21 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
                 return written;
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
-                throwFsError(js, err, "writeAll"_kj);
+                throwFsError(js, err, "writeAll"_kj, errPath());
               }
             }
             KJ_UNREACHABLE;
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-            node::THROW_ERR_UV_EISDIR(js, "writeAll"_kj);
+            node::THROW_ERR_UV_EISDIR(js, "writeAll"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             // If we get here, then followSymLinks was set to false when open was called.
             // We can't write to a symbolic link.
-            node::THROW_ERR_UV_EINVAL(js, "writeAll"_kj);
+            node::THROW_ERR_UV_EINVAL(js, "writeAll"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            throwFsError(js, err, "writeAll"_kj);
+            throwFsError(js, err, "writeAll"_kj, errPath());
           }
         }
         KJ_UNREACHABLE;
@@ -757,40 +779,39 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
         // Let's make sure the parent is a directory.
         KJ_SWITCH_ONEOF(parent) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-            node::THROW_ERR_UV_ENOTDIR(js, "writeAll"_kj);
+            node::THROW_ERR_UV_ENOTDIR(js, "writeAll"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
             auto stat = dir->stat(js);
             if (!stat.writable) {
-              node::THROW_ERR_UV_EPERM(js, "writeAll"_kj);
+              node::THROW_ERR_UV_EPERM(js, "writeAll"_kj, nullptr, errPath());
             }
             auto file = workerd::File::newWritable(js, static_cast<uint32_t>(data.size()));
             KJ_SWITCH_ONEOF(file->writeAll(js, data.asArrayPtr())) {
               KJ_CASE_ONEOF(written, uint32_t) {
                 KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
-                  throwFsError(js, err, "writeAll"_kj);
+                  throwFsError(js, err, "writeAll"_kj, errPath());
                 }
                 return written;
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
-                throwFsError(js, err, "writeAll"_kj);
+                throwFsError(js, err, "writeAll"_kj, errPath());
               }
             }
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             // If we get here, then followSymLinks was set to false when open was called.
             // We can't write to a symbolic link.
-            node::THROW_ERR_UV_EINVAL(js, "writeAll"_kj);
+            node::THROW_ERR_UV_EINVAL(js, "writeAll"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             // If we got here, then the parent path was not found.
-            throwFsError(js, err, "writeAll"_kj);
+            throwFsError(js, err, "writeAll"_kj, errPath());
           }
         }
         KJ_UNREACHABLE;
       } else {
-        node::THROW_ERR_UV_ENOENT(
-            js, "writeAll"_kj, nullptr, kj::str(normalized.url.getPathname()));
+        node::THROW_ERR_UV_ENOENT(js, "writeAll"_kj, nullptr, errPath());
       }
     }
     KJ_CASE_ONEOF(fd, int) {
@@ -854,6 +875,8 @@ void FileSystemModule::renameOrCopy(
 
   const jsg::Url& destUrl = normalizedDest;
   const jsg::Url& srcUrl = normalizedSrc;
+  auto errPath = [&] { return kj::str(srcUrl.getPathname()); };
+  auto errDest = [&] { return kj::str(destUrl.getPathname()); };
 
   auto opName = options.copy ? "copy"_kj : "rename"_kj;
 
@@ -866,7 +889,7 @@ void FileSystemModule::renameOrCopy(
   KJ_IF_SOME(maybeDestNode, vfs.resolve(js, destUrl, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(maybeDestNode) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        throwFsError(js, err, opName);
+        throwFsError(js, err, opName, errPath(), errDest());
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         destType = workerd::FsType::FILE;
@@ -888,10 +911,10 @@ void FileSystemModule::renameOrCopy(
   auto checkReplace = [&](jsg::Lock& js, bool srcIsDir) {
     KJ_IF_SOME(type, destType) {
       if (srcIsDir && type != workerd::FsType::DIRECTORY) {
-        node::THROW_ERR_UV_ENOTDIR(js, opName);
+        node::THROW_ERR_UV_ENOTDIR(js, opName, nullptr, errPath(), errDest());
       }
       if (!srcIsDir && type == workerd::FsType::DIRECTORY) {
-        node::THROW_ERR_UV_EISDIR(js, opName);
+        node::THROW_ERR_UV_EISDIR(js, opName, nullptr, errPath(), errDest());
       }
     }
   };
@@ -900,7 +923,7 @@ void FileSystemModule::renameOrCopy(
     KJ_SWITCH_ONEOF(parent->remove(js, kj::Path({relative.name}), {})) {
       KJ_CASE_ONEOF(_, bool) {}
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        throwFsError(js, err, opName);
+        throwFsError(js, err, opName, errPath(), errDest());
       }
     }
   };
@@ -908,7 +931,7 @@ void FileSystemModule::renameOrCopy(
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
     KJ_SWITCH_ONEOF(parent) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        node::THROW_ERR_UV_ENOTDIR(js, opName);
+        node::THROW_ERR_UV_ENOTDIR(js, opName, nullptr, errPath(), errDest());
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Maybe<kj::Rc<Directory>> srcParent;
@@ -919,27 +942,27 @@ void FileSystemModule::renameOrCopy(
           KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
             KJ_SWITCH_ONEOF(parent) {
               KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-                node::THROW_ERR_UV_ENOTDIR(js, opName);
+                node::THROW_ERR_UV_ENOTDIR(js, opName, nullptr, errPath(), errDest());
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
                 // We can only rename a file or directory if the parent is writable.
                 // If the parent is not writable, we throw an error.
                 auto stat = dir->stat(js);
                 if (!stat.writable) {
-                  node::THROW_ERR_UV_EPERM(js, opName);
+                  node::THROW_ERR_UV_EPERM(js, opName, nullptr, errPath(), errDest());
                 }
                 srcParent = dir.addRef();
               }
               KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-                node::THROW_ERR_UV_ENOTDIR(js, opName);
+                node::THROW_ERR_UV_ENOTDIR(js, opName, nullptr, errPath(), errDest());
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 // If we got here, then the parent path was not found.
-                throwFsError(js, err, opName);
+                throwFsError(js, err, opName, errPath(), errDest());
               }
             }
           } else {
-            node::THROW_ERR_UV_ENOENT(js, opName, nullptr, relative.name);
+            node::THROW_ERR_UV_ENOENT(js, opName, nullptr, errPath(), errDest());
           }
         }
 
@@ -953,47 +976,47 @@ void FileSystemModule::renameOrCopy(
                   options.copy ? file->clone(js) : file.addRef();
               KJ_SWITCH_ONEOF(errOrFile) {
                 KJ_CASE_ONEOF(err, workerd::FsError) {
-                  throwFsError(js, err, "cp"_kj);
+                  throwFsError(js, err, "cp"_kj, errPath(), errDest());
                 }
                 KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
                   removeDest(js, dir);
                   KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
-                    throwFsError(js, err, opName);
+                    throwFsError(js, err, opName, errPath(), errDest());
                   }
                 }
               }
             }
             KJ_CASE_ONEOF(srcDir, kj::Rc<workerd::Directory>) {
               if (options.copy) {
-                node::THROW_ERR_UV_EISDIR(js, opName);
+                node::THROW_ERR_UV_EISDIR(js, opName, nullptr, errPath(), errDest());
               }
               // A directory cannot be moved into itself or a descendant.
               auto srcPath = srcUrl.getPathname();
               auto destPath = destUrl.getPathname();
               auto srcPrefix = srcPath.back() == '/' ? kj::str(srcPath) : kj::str(srcPath, "/");
               if (destPath.size() > srcPrefix.size() && destPath.startsWith(srcPrefix.asArray())) {
-                node::THROW_ERR_UV_EINVAL(js, opName);
+                node::THROW_ERR_UV_EINVAL(js, opName, nullptr, errPath(), errDest());
               }
               checkReplace(js, true);
               KJ_IF_SOME(destDir, maybeDestDir) {
                 if (destDir->count(js) > 0) {
-                  node::THROW_ERR_UV_ENOTEMPTY(js, opName);
+                  node::THROW_ERR_UV_ENOTEMPTY(js, opName, nullptr, errPath(), errDest());
                 }
               }
               removeDest(js, dir);
               KJ_IF_SOME(err, dir->add(js, relative.name, srcDir.addRef())) {
-                throwFsError(js, err, opName);
+                throwFsError(js, err, opName, errPath(), errDest());
               }
             }
             KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
               checkReplace(js, false);
               removeDest(js, dir);
               KJ_IF_SOME(err, dir->add(js, relative.name, link.addRef())) {
-                throwFsError(js, err, opName);
+                throwFsError(js, err, opName, errPath(), errDest());
               }
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
-              throwFsError(js, err, opName);
+              throwFsError(js, err, opName, errPath(), errDest());
             }
           }
 
@@ -1005,25 +1028,25 @@ void FileSystemModule::renameOrCopy(
                 return;
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
-                throwFsError(js, err, "rename"_kj);
+                throwFsError(js, err, "rename"_kj, errPath(), errDest());
               }
             }
             KJ_UNREACHABLE;
           }
         } else {
-          node::THROW_ERR_UV_ENOENT(js, opName, nullptr, kj::str(normalizedSrc.url.getPathname()));
+          node::THROW_ERR_UV_ENOENT(js, opName, nullptr, errPath(), errDest());
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        node::THROW_ERR_UV_ENOTDIR(js, opName);
+        node::THROW_ERR_UV_ENOTDIR(js, opName, nullptr, errPath(), errDest());
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
         // If we got here, then the parent path was not found.
-        throwFsError(js, err, opName);
+        throwFsError(js, err, opName, errPath(), errDest());
       }
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(js, opName, nullptr, relative.name);
+    node::THROW_ERR_UV_ENOENT(js, opName, nullptr, errPath(), errDest());
   }
 }
 
@@ -1032,23 +1055,24 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
+  auto errPath = [&] { return kj::str(url.getPathname()); };
 
   // The path must not already exist. However, if the path is a directory, we
   // will just return rather than throwing an error.
   KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
+        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj, nullptr, errPath());
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         // The directory already exists. We will just return.
         return kj::none;
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
+        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj, nullptr, errPath());
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        throwFsError(js, err, "mkdir"_kj);
+        throwFsError(js, err, "mkdir"_kj, errPath());
       }
     }
     KJ_UNREACHABLE;
@@ -1078,10 +1102,10 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
         // Let's make sure the node is a directory.
         KJ_SWITCH_ONEOF(node) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-            node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj);
+            node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-            node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj);
+            node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj, nullptr, errPath());
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
             // The node is a directory, we can continue.
@@ -1089,7 +1113,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
             moveToNext = true;
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            throwFsError(js, err, "mkdir"_kj);
+            throwFsError(js, err, "mkdir"_kj, errPath());
           }
         }
       }
@@ -1099,11 +1123,11 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
       // directory is writable.
       auto stat = current->stat(js);
       if (!stat.writable) {
-        node::THROW_ERR_UV_EPERM(js, "mkdir"_kj);
+        node::THROW_ERR_UV_EPERM(js, "mkdir"_kj, nullptr, errPath());
       }
       auto dir = workerd::Directory::newWritable(js);
       KJ_IF_SOME(err, current->add(js, part, dir.addRef())) {
-        throwFsError(js, err, "mkdir"_kj);
+        throwFsError(js, err, "mkdir"_kj, errPath());
       }
       current = kj::mv(dir);
       if (createdPath == kj::none) {
@@ -1114,7 +1138,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
     // Now that we have the parent directory, let's try creating the new directory.
     auto newDir = workerd::Directory::newWritable(js);
     KJ_IF_SOME(err, current->add(js, name.toString(false), kj::mv(newDir))) {
-      throwFsError(js, err, "mkdir"_kj);
+      throwFsError(js, err, "mkdir"_kj, errPath());
     }
 
     return kj::mv(createdPath);
@@ -1128,47 +1152,49 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
     KJ_SWITCH_ONEOF(parent) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj);
+        node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj, nullptr, errPath());
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto stat = dir->stat(js);
         if (!stat.writable) {
-          node::THROW_ERR_UV_EPERM(js, "mkdir"_kj);
+          node::THROW_ERR_UV_EPERM(js, "mkdir"_kj, nullptr, errPath());
         }
         auto newDir = workerd::Directory::newWritable(js);
         if (options.tmp) {
           if (tmpFileCounter >= kMax) {
-            node::THROW_ERR_UV_EPERM(js, "mkdir"_kj, "Too many temporary directories created"_kj);
+            node::THROW_ERR_UV_EPERM(
+                js, "mkdir"_kj, "Too many temporary directories created"_kj, errPath());
           }
           auto name = kj::str(relative.name, tmpFileCounter++);
           KJ_IF_SOME(err, dir->add(js, name, kj::mv(newDir))) {
-            throwFsError(js, err, "mkdir"_kj);
+            throwFsError(js, err, "mkdir"_kj, errPath());
           }
           KJ_IF_SOME(newUrl, relative.base.resolve(name)) {
             // If we are creating a temporary directory, we return the URL of the
             // new directory.
             return kj::str(newUrl.getPathname());
           } else {
-            node::THROW_ERR_UV_EINVAL(js, "mkdir"_kj, "Invalid name for temporary directory"_kj);
+            node::THROW_ERR_UV_EINVAL(
+                js, "mkdir"_kj, "Invalid name for temporary directory"_kj, errPath());
           }
         }
 
         KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(newDir))) {
-          throwFsError(js, err, "mkdir"_kj);
+          throwFsError(js, err, "mkdir"_kj, errPath());
         }
 
         return kj::none;
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj);
+        node::THROW_ERR_UV_ENOTDIR(js, "mkdir"_kj, nullptr, errPath());
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        throwFsError(js, err, "mkdir"_kj, relative.name);
+        throwFsError(js, err, "mkdir"_kj, errPath());
       }
     }
     KJ_UNREACHABLE;
   } else {
-    node::THROW_ERR_UV_ENOENT(js, "mkdir"_kj, nullptr, relative.name);
+    node::THROW_ERR_UV_ENOENT(js, "mkdir"_kj, nullptr, errPath());
   }
 }
 
@@ -1177,13 +1203,14 @@ void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
+  auto errPath = [&] { return kj::str(url.getPathname()); };
   jsg::Url::Relative relative = url.getRelative();
 
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
     KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
       auto stat = dir->stat(js);
       if (!stat.writable) {
-        node::THROW_ERR_UV_EPERM(js, "rm"_kj);
+        node::THROW_ERR_UV_EPERM(js, "rm"_kj, nullptr, errPath());
       }
 
       kj::Path name(relative.name);
@@ -1194,15 +1221,15 @@ void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
           KJ_SWITCH_ONEOF(stat) {
             KJ_CASE_ONEOF(stat, workerd::Stat) {
               if (stat.type != workerd::FsType::DIRECTORY) {
-                node::THROW_ERR_UV_ENOTDIR(js, "rm"_kj);
+                node::THROW_ERR_UV_ENOTDIR(js, "rm"_kj, nullptr, errPath());
               }
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
-              throwFsError(js, err, "rm"_kj);
+              throwFsError(js, err, "rm"_kj, errPath());
             }
           }
         } else {
-          node::THROW_ERR_UV_ENOENT(js, "rm"_kj, nullptr, relative.name);
+          node::THROW_ERR_UV_ENOENT(js, "rm"_kj, nullptr, errPath());
         }
       }
 
@@ -1211,14 +1238,14 @@ void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
           // Ignore the return.
         }
         KJ_CASE_ONEOF(err, workerd::FsError) {
-          throwFsError(js, err, "rm"_kj, relative.name);
+          throwFsError(js, err, "rm"_kj, errPath());
         }
       }
     } else {
-      node::THROW_ERR_UV_ENOTDIR(js, "rm"_kj, nullptr, relative.name);
+      node::THROW_ERR_UV_ENOTDIR(js, "rm"_kj, nullptr, errPath());
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(js, "rm"_kj, nullptr, relative.name);
+    node::THROW_ERR_UV_ENOENT(js, "rm"_kj, nullptr, errPath());
   }
 }
 
@@ -1231,10 +1258,11 @@ void readdirImpl(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::Directory> dir,
     const kj::Path& path,
+    const kj::Path& relative,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
   for (auto& entry: *dir) {
-    auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
+    auto name = options.recursive ? relative.append(entry.key).toString(false) : kj::str(entry.key);
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
@@ -1252,7 +1280,8 @@ void readdirImpl(jsg::Lock& js,
         });
 
         if (options.recursive) {
-          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), relative.append(entry.key),
+              options, entries);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1273,7 +1302,8 @@ void readdirImpl(jsg::Lock& js,
                 // Do nothing
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key),
+                    relative.append(entry.key), options, entries);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 throwFsError(js, err, "readdir"_kj);
@@ -1296,7 +1326,7 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Vector<DirEntHandle> entries;
-        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, options, entries);
+        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, kj::Path(nullptr), options, entries);
         return entries.releaseAsArray();
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -1360,9 +1390,11 @@ void handleCpLink(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::SymbolicLink> srcLink,
     const jsg::Url& destUrl) {
-  // Here, we are going to essentially create a hard link (new refcount)
-  // of srcLink and destUrl, if we are allowed to do so.
-  // We need to check if the destination exists and is writable.
+  // Here, we are going to create a new symbolic link at destUrl to the
+  // absolute target of srcLink, if we are allowed to do so. Like Node.js
+  // without verbatimSymlinks, a relative target is not kept, since the copy
+  // can live in a different directory. We need to check if the destination
+  // exists and is writable.
   auto relative = destUrl.getRelative();
   // relative.base is the parent directory path.
   // relative.name is the name of the link we are creating in the parent.
@@ -1400,7 +1432,13 @@ void handleCpLink(jsg::Lock& js,
           }
         }
         // Now, we can add the symbolic link to the directory.
-        KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(srcLink))) {
+        auto rawTarget = srcLink->getRawTarget();
+        kj::Maybe<kj::String> keptTarget;
+        if (rawTarget.startsWith("/"_kj)) {
+          keptTarget = kj::mv(rawTarget);
+        }
+        auto copy = vfs.newSymbolicLink(js, srcLink->getTargetUrl(), kj::mv(keptTarget));
+        KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(copy))) {
           // If we got here, an error was reported
           throwFsError(js, err, "cp"_kj);
         }
@@ -2087,7 +2125,7 @@ constexpr bool isValidFileName(kj::StringPtr name) {
       name.find("\\"_kj) == kj::none;
 }
 
-jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsError error) {
+jsg::JsObject fsErrorToDomException(jsg::Lock& js, workerd::FsError error) {
   switch (error) {
     case workerd::FsError::NOT_DIRECTORY: {
       return js.domException(kj::str("NotSupportedError"), kj::str("Not a directory"));
@@ -2139,14 +2177,13 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
 }  // namespace
 
 FileSystemHandle::FileSystemHandle(
-    const workerd::VirtualFileSystem& vfs, jsg::Url&& locator, jsg::USVString name)
+    kj::Maybe<const workerd::VirtualFileSystem&> vfs, jsg::Url&& locator, jsg::USVString name)
     : vfs(vfs),
       locator(kj::mv(locator)),
       name(kj::mv(name)) {}
 
-jsg::Promise<kj::StringPtr> FileSystemHandle::getUniqueId(
-    jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  KJ_IF_SOME(item, vfs.resolve(js, getLocator(), {})) {
+jsg::Promise<kj::StringPtr> FileSystemHandle::getUniqueId(jsg::Lock& js) {
+  KJ_IF_SOME(item, getVfs().resolve(js, getLocator(), {})) {
     KJ_SWITCH_ONEOF(item) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         return js.resolvedPromise(file->getUniqueId(js));
@@ -2158,14 +2195,13 @@ jsg::Promise<kj::StringPtr> FileSystemHandle::getUniqueId(
         return js.resolvedPromise(link->getUniqueId(js));
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<kj::StringPtr>(
-            deHandler.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<kj::StringPtr>(fsErrorToDomException(js, err));
       }
     }
     KJ_UNREACHABLE;
   }
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("The entry was not found."));
-  return js.rejectedPromise<kj::StringPtr>(deHandler.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<kj::StringPtr>(kj::mv(ex));
 }
 
 jsg::Promise<bool> FileSystemHandle::isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
@@ -2180,59 +2216,56 @@ jsg::Promise<bool> FileSystemHandle::isSameEntry(jsg::Lock& js, jsg::Ref<FileSys
       : js.resolvedPromise(false);
 }
 
-jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
-    jsg::Optional<RemoveOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js, jsg::Optional<RemoveOptions> options) {
 
   if (!canBeModifiedCurrently(js)) {
     auto ex = js.domException(kj::str("NoModificationAllowedError"),
         kj::str("Cannot remove a handle that is not writable or not a directory."));
-    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<void>(kj::mv(ex));
   }
 
   auto relative = getLocator().getRelative(jsg::Url::RelativeOption::STRIP_TAILING_SLASHES);
   auto opts = options.orDefault(RemoveOptions{});
   auto recursive = opts.recursive.orDefault(false);
-  KJ_IF_SOME(parent, vfs.resolve(js, relative.base, workerd::VirtualFileSystem::ResolveOptions{})) {
+  KJ_IF_SOME(parent,
+      getVfs().resolve(js, relative.base, workerd::VirtualFileSystem::ResolveOptions{})) {
     KJ_SWITCH_ONEOF(parent) {
       KJ_CASE_ONEOF(parentDir, kj::Rc<workerd::Directory>) {
         // Webfs requires that the entry exists before we try to remove it.
         kj::Path path({name});
         if (parentDir->stat(js, path) == kj::none) {
           auto ex = js.domException(kj::str("NotFoundError"), kj::str("The entry was not found."));
-          return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+          return js.rejectedPromise<void>(kj::mv(ex));
         }
 
         KJ_SWITCH_ONEOF(parentDir->remove(js, path, {.recursive = recursive})) {
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+            return js.rejectedPromise<void>(fsErrorToDomException(js, err));
           }
           KJ_CASE_ONEOF(removed, bool) {
             if (!removed) {
               auto ex =
                   js.domException(kj::str("NotFoundError"), kj::str("The entry was not found."));
-              return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+              return js.rejectedPromise<void>(kj::mv(ex));
             }
             return js.resolvedPromise();
           }
         }
       }
       KJ_CASE_ONEOF(_, kj::Rc<workerd::File>) {
-        return js.rejectedPromise<void>(
-            deHandler.wrap(js, fsErrorToDomException(js, workerd::FsError::NOT_DIRECTORY)));
+        return js.rejectedPromise<void>(fsErrorToDomException(js, workerd::FsError::NOT_DIRECTORY));
       }
       KJ_CASE_ONEOF(_, kj::Rc<workerd::SymbolicLink>) {
-        return js.rejectedPromise<void>(
-            deHandler.wrap(js, fsErrorToDomException(js, workerd::FsError::NOT_DIRECTORY)));
+        return js.rejectedPromise<void>(fsErrorToDomException(js, workerd::FsError::NOT_DIRECTORY));
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
       }
     }
     KJ_UNREACHABLE;
   }
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("The entry was not found."));
-  return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<void>(kj::mv(ex));
 }
 
 bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
@@ -2245,21 +2278,18 @@ bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
   return !getVfs().isLocked(js, getLocator());
 }
 
-jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
-    jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
+jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(jsg::Lock& js) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(
       vfs, KJ_ASSERT_NONNULL(jsg::Url::tryParse("file:///"_kj)), jsg::USVString()));
 }
 
 FileSystemDirectoryHandle::FileSystemDirectoryHandle(
-    const workerd::VirtualFileSystem& vfs, jsg::Url locator, jsg::USVString name)
+    kj::Maybe<const workerd::VirtualFileSystem&> vfs, jsg::Url locator, jsg::USVString name)
     : FileSystemHandle(vfs, kj::mv(locator), kj::mv(name)) {}
 
-jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileHandle(jsg::Lock& js,
-    jsg::USVString name,
-    jsg::Optional<FileSystemGetFileOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
+jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileHandle(
+    jsg::Lock& js, jsg::USVString name, jsg::Optional<FileSystemGetFileOptions> options) {
   if (!isValidFileName(name)) {
     return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(js.typeError("Invalid file name"));
   }
@@ -2271,8 +2301,7 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
   KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(
-            exception.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto locator = KJ_ASSERT_NONNULL(getLocator().tryResolve(name));
@@ -2290,46 +2319,41 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
               auto ex = js.domException(
                   kj::str("TypeMismatchError"), kj::str("File name is a directory"));
-              return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(
-                  exception.wrap(js, kj::mv(ex)));
+              return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
             }
             KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
               auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a file"));
-              return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(
-                  exception.wrap(js, kj::mv(ex)));
+              return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(
-                  exception.wrap(js, fsErrorToDomException(js, err)));
+                  fsErrorToDomException(js, err));
             }
           }
           KJ_UNREACHABLE;
         }
 
         auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
       }
     }
     KJ_UNREACHABLE;
   }
 
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("Directory not found"));
-  return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(kj::mv(ex));
 }
 
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::getDirectoryHandle(
-    jsg::Lock& js,
-    jsg::USVString name,
-    jsg::Optional<FileSystemGetDirectoryOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
+    jsg::Lock& js, jsg::USVString name, jsg::Optional<FileSystemGetDirectoryOptions> options) {
   if (!isValidFileName(name)) {
     return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
         js.typeError("Invalid directory name"));
@@ -2344,7 +2368,7 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-            exception.wrap(js, fsErrorToDomException(js, err)));
+            fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto locator = KJ_ASSERT_NONNULL(getLocator().tryResolve(name));
@@ -2363,17 +2387,15 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::File>) {
               auto ex =
                   js.domException(kj::str("TypeMismatchError"), kj::str("File name is a file"));
-              return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-                  exception.wrap(js, kj::mv(ex)));
+              return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
             }
             KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
               auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-              return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-                  exception.wrap(js, kj::mv(ex)));
+              return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-                  exception.wrap(js, fsErrorToDomException(js, err)));
+                  fsErrorToDomException(js, err));
             }
           }
           KJ_UNREACHABLE;
@@ -2381,31 +2403,26 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
         // Could not open or create the directory.
         auto ex =
             js.domException(kj::str("NotFoundError"), kj::str("Directory not opened or created"));
-        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-            exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-            exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
-            exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
       }
     }
     KJ_UNREACHABLE;
   }
 
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("Directory not found"));
-  return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(exception.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(kj::mv(ex));
 }
 
-jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
-    jsg::USVString name,
-    jsg::Optional<FileSystemRemoveOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
+jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(
+    jsg::Lock& js, jsg::USVString name, jsg::Optional<FileSystemRemoveOptions> options) {
   if (!isValidFileName(name)) {
     return js.rejectedPromise<void>(js.typeError("Invalid name"));
   }
@@ -2414,7 +2431,7 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
   KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<void>(exception.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Path item({name});
@@ -2423,7 +2440,7 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
           // If the file is locked, we cannot remove it.
           auto ex = js.domException(kj::str("NoModificationAllowedError"),
               kj::str("Cannot remove an entry that is currently locked."));
-          return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+          return js.rejectedPromise<void>(kj::mv(ex));
         }
 
         KJ_SWITCH_ONEOF(dir->remove(js, item,
@@ -2436,28 +2453,28 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
             }
             // If the entry was not found, we throw a NotFoundError.
             auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
-            return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+            return js.rejectedPromise<void>(kj::mv(ex));
           }
           KJ_CASE_ONEOF(error, workerd::FsError) {
-            return js.rejectedPromise<void>(exception.wrap(js, fsErrorToDomException(js, error)));
+            return js.rejectedPromise<void>(fsErrorToDomException(js, error));
           }
         }
         KJ_UNREACHABLE;
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<void>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Not a directory"));
-        return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<void>(kj::mv(ex));
       }
     }
     KJ_UNREACHABLE;
   }
 
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<void>(kj::mv(ex));
 }
 
 jsg::Promise<kj::Array<jsg::USVString>> FileSystemDirectoryHandle::resolve(
@@ -2549,8 +2566,7 @@ jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::en
   // The directory was not found. However, for some weird reason the spec requires that
   // we still return an iterator here but it needs to throw a NotFoundError when next
   // is actually called.
-  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  jsg::JsValue handle = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
   return js.alloc<EntryIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
@@ -2577,8 +2593,7 @@ jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys
   // The directory was not found. However, for some weird reason the spec requires that
   // we still return an iterator here but it needs to throw a NotFoundError when next
   // is actually called.
-  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  jsg::JsValue handle = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
   return js.alloc<KeyIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
@@ -2606,21 +2621,19 @@ jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::va
   // The directory was not found. However, for some weird reason the spec requires that
   // we still return an iterator here but it needs to throw a NotFoundError when next
   // is actually called.
-  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  jsg::JsValue handle = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
   return js.alloc<ValueIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
     jsg::Function<void(
         jsg::USVString, jsg::Ref<FileSystemHandle>, jsg::Ref<FileSystemDirectoryHandle>)> callback,
-    jsg::Optional<jsg::Value> thisArg,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
+    jsg::Optional<jsg::Value> thisArg) {
 
   KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        js.throwException(js.v8Ref(exception.wrap(js, fsErrorToDomException(js, err))));
+        js.throwException(fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto receiver = js.v8Undefined();
@@ -2651,11 +2664,10 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
 }
 
 FileSystemFileHandle::FileSystemFileHandle(
-    const workerd::VirtualFileSystem& vfs, jsg::Url locator, jsg::USVString name)
+    kj::Maybe<const workerd::VirtualFileSystem&> vfs, jsg::Url locator, jsg::USVString name)
     : FileSystemHandle(vfs, kj::mv(locator), kj::mv(name)) {}
 
-jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
-    jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(jsg::Lock& js) {
   // TODO(node-fs): Currently this copies the file data into the new File object.
   // Alternatively, File/Blob can be modified to allow it to be backed by a
   // workerd::File such that it does not need to create a separate in-memory
@@ -2665,8 +2677,7 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
   KJ_IF_SOME(item, getVfs().resolve(js, getLocator(), {})) {
     KJ_SWITCH_ONEOF(item) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<jsg::Ref<File>>(
-            deHandler.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<jsg::Ref<File>>(fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
@@ -2677,19 +2688,18 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
                 (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            return js.rejectedPromise<jsg::Ref<File>>(
-                deHandler.wrap(js, fsErrorToDomException(js, err)));
+            return js.rejectedPromise<jsg::Ref<File>>(fsErrorToDomException(js, err));
           }
         }
         KJ_UNREACHABLE;
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-        return js.rejectedPromise<jsg::Ref<File>>(deHandler.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-        return js.rejectedPromise<jsg::Ref<File>>(deHandler.wrap(js, kj::mv(ex)));
+        return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
       }
     }
     KJ_UNREACHABLE;
@@ -2697,22 +2707,20 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
 
   // If the file does not exist, we reject the promise with a NotFoundError.
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  return js.rejectedPromise<jsg::Ref<File>>(deHandler.wrap(js, kj::mv(ex)));
+  return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
 }
 
 jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::createWritable(
     jsg::Lock& js,
     jsg::Optional<FileSystemCreateWritableOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
     const jsg::TypeHandler<FileSystemWritableData>& dataHandler) {
 
   auto opts = options.orDefault(FileSystemCreateWritableOptions{});
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
   auto opened = FileSystemWriteContextHandle::open(js, JSG_THIS, keepExistingData);
-  KJ_IF_SOME(ex, opened.tryGet<jsg::Ref<jsg::DOMException>>()) {
-    return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-        deHandler.wrap(js, kj::mv(ex)));
+  KJ_IF_SOME(ex, opened.tryGet<jsg::JsObject>()) {
+    return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(kj::mv(ex));
   }
   auto context = kj::mv(opened.get<jsg::Ref<FileSystemWriteContextHandle>>());
 
@@ -2729,11 +2737,11 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   // Each closure holds its own ref to the context. These are separate jsg::Refs from the
   // one the stream holds, so each has its own tracing-parent slot; they stay strong and
   // untraced, while the stream's is what the GC traces.
-  sink.write = [context = context.addRef(), &deHandler, &dataHandler](
+  sink.write = [context = context.addRef(), &dataHandler](
                    jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
-        return context->write(js, kj::mv(unwrapped), deHandler);
+        return context->write(js, kj::mv(unwrapped));
       }
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
@@ -2743,8 +2751,7 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
     context->discard(js);
     return js.resolvedPromise();
   };
-  sink.close = [context = context.addRef(), &deHandler](
-                   jsg::Lock& js) mutable { return context->commit(js, deHandler); };
+  sink.close = [context = context.addRef()](jsg::Lock& js) mutable { return context->commit(js); };
   stream->getController().setup(js, kj::mv(sink), kj::none);
 
   return js.resolvedPromise(kj::mv(stream));
@@ -2759,8 +2766,7 @@ FileSystemWriteContextHandle::FileSystemWriteContextHandle(jsg::Lock& js,
       file(kj::mv(file)),
       lock(vfs.lock(js, this->file->getLocator())) {}
 
-kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>>
-FileSystemWriteContextHandle::open(
+kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::JsObject> FileSystemWriteContextHandle::open(
     jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData) {
   auto& vfs = file->getVfs();
 
@@ -2814,8 +2820,7 @@ void FileSystemWriteContextHandle::discard(jsg::Lock& js) {
   clear();
 }
 
-jsg::Promise<void> FileSystemWriteContextHandle::commit(
-    jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemWriteContextHandle::commit(jsg::Lock& js) {
   KJ_DEFER(clear());
   return js.tryCatch([&] {
     KJ_IF_SOME(inner, temp) {
@@ -2830,28 +2835,28 @@ jsg::Promise<void> FileSystemWriteContextHandle::commit(
               })) {
         KJ_SWITCH_ONEOF(existing) {
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+            return js.rejectedPromise<void>(fsErrorToDomException(js, err));
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
             auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-            return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+            return js.rejectedPromise<void>(kj::mv(ex));
           }
           KJ_CASE_ONEOF(target, kj::Rc<workerd::File>) {
             KJ_IF_SOME(err, target->replace(js, inner.addRef())) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              return js.rejectedPromise<void>(fsErrorToDomException(js, err));
             }
             return js.resolvedPromise();
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-            return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+            return js.rejectedPromise<void>(kj::mv(ex));
           }
         }
         KJ_UNREACHABLE;
       }
       auto ex =
           js.domException(kj::str("InvalidStateError"), kj::str("Failed to open or create file"));
-      return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+      return js.rejectedPromise<void>(kj::mv(ex));
     }
     return js.resolvedPromise();
   }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
@@ -2862,30 +2867,23 @@ FileSystemWritableFileStream::FileSystemWritableFileStream(
     : WritableStream(kj::mv(controller)),
       context(kj::mv(context)) {}
 
-jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
-    FileSystemWritableData data,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js, FileSystemWritableData data) {
   JSG_REQUIRE(!getController().isLockedToWriter(), TypeError,
       "Cannot write to a stream that is locked to a reader");
   auto writer = getWriter(js);
   KJ_DEFER(writer->releaseLock(js));
-  return context->write(js, kj::mv(data), deHandler);
+  return context->write(js, kj::mv(data));
 }
 
-jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js,
-    uint32_t position,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  return context->seek(js, position, deHandler);
+jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js, uint32_t position) {
+  return context->seek(js, position);
 }
 
-jsg::Promise<void> FileSystemWritableFileStream::truncate(
-    jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  return context->truncate(js, size, deHandler);
+jsg::Promise<void> FileSystemWritableFileStream::truncate(jsg::Lock& js, uint32_t size) {
+  return context->truncate(js, size);
 }
 
-jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
-    FileSystemWritableData data,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js, FileSystemWritableData data) {
   KJ_IF_SOME(inner, temp) {
     return js.tryCatch([&] {
       KJ_SWITCH_ONEOF(data) {
@@ -2895,7 +2893,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              return js.rejectedPromise<void>(fsErrorToDomException(js, err));
             }
           }
         }
@@ -2906,7 +2904,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              return js.rejectedPromise<void>(fsErrorToDomException(js, err));
             }
           }
         }
@@ -2916,7 +2914,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              return js.rejectedPromise<void>(fsErrorToDomException(js, err));
             }
           }
         }
@@ -2929,7 +2927,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               // the end is implementation-defined (File::write may resize or throw).
               // Growing zero-fills, which is what the spec requires for a gap.
               KJ_IF_SOME(err, inner->resize(js, pos)) {
-                return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+                return js.rejectedPromise<void>(fsErrorToDomException(js, err));
               }
             }
             offset = pos;
@@ -2946,8 +2944,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
-                        return js.rejectedPromise<void>(
-                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
                       }
                     }
                     KJ_UNREACHABLE;
@@ -2960,8 +2957,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
-                        return js.rejectedPromise<void>(
-                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
                       }
                     }
                     KJ_UNREACHABLE;
@@ -2973,8 +2969,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
-                        return js.rejectedPromise<void>(
-                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
                       }
                     }
                   }
@@ -2986,24 +2981,22 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               }
             }
 
-            return js.rejectedPromise<void>(deHandler.wrap(js,
-                js.domException(kj::str("SyntaxError"),
-                    kj::str("write() requires a non-null data parameter"))));
+            return js.rejectedPromise<void>(js.domException(
+                kj::str("SyntaxError"), kj::str("write() requires a non-null data parameter")));
 
           } else if (params.type == "seek"_kj) {
             uint32_t pos;
             KJ_IF_SOME(s, params.position) {
               pos = s;
             } else {
-              return js.rejectedPromise<void>(deHandler.wrap(js,
-                  js.domException(
-                      kj::str("SyntaxError"), kj::str("seek() requires a position parameter"))));
+              return js.rejectedPromise<void>(js.domException(
+                  kj::str("SyntaxError"), kj::str("seek() requires a position parameter")));
             }
             position = pos;
             auto stat = inner->stat(js);
             if (position > stat.size) {
               KJ_IF_SOME(err, inner->resize(js, position)) {
-                return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+                return js.rejectedPromise<void>(fsErrorToDomException(js, err));
               }
             }
           } else if (params.type == "truncate"_kj) {
@@ -3011,12 +3004,11 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
             KJ_IF_SOME(s, params.size) {
               size = s;
             } else {
-              return js.rejectedPromise<void>(deHandler.wrap(js,
-                  js.domException(
-                      kj::str("SyntaxError"), kj::str("truncate() requires a size parameter"))));
+              return js.rejectedPromise<void>(js.domException(
+                  kj::str("SyntaxError"), kj::str("truncate() requires a size parameter")));
             }
             KJ_IF_SOME(err, inner->resize(js, size)) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              return js.rejectedPromise<void>(fsErrorToDomException(js, err));
             }
             auto stat = inner->stat(js);
             if (position > stat.size) {
@@ -3036,14 +3028,12 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
   return js.rejectedPromise<void>(js.typeError("write() after closed"));
 }
 
-jsg::Promise<void> FileSystemWriteContextHandle::seek(jsg::Lock& js,
-    uint32_t newPosition,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemWriteContextHandle::seek(jsg::Lock& js, uint32_t newPosition) {
   KJ_IF_SOME(inner, temp) {
     auto stat = inner->stat(js);
     if (newPosition > stat.size) {
       KJ_IF_SOME(err, inner->resize(js, newPosition)) {
-        return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+        return js.rejectedPromise<void>(fsErrorToDomException(js, err));
       }
     }
     position = newPosition;
@@ -3053,11 +3043,10 @@ jsg::Promise<void> FileSystemWriteContextHandle::seek(jsg::Lock& js,
   return js.rejectedPromise<void>(js.typeError("seek() after closed"));
 }
 
-jsg::Promise<void> FileSystemWriteContextHandle::truncate(
-    jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+jsg::Promise<void> FileSystemWriteContextHandle::truncate(jsg::Lock& js, uint32_t size) {
   KJ_IF_SOME(inner, temp) {
     KJ_IF_SOME(err, inner->resize(js, size)) {
-      return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+      return js.rejectedPromise<void>(fsErrorToDomException(js, err));
     }
     auto stat = inner->stat(js);
     if (position > stat.size) {

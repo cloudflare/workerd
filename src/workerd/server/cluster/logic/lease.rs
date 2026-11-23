@@ -7,7 +7,8 @@
 //!
 //! The executor runs one round every `interval_ms` (`retry_ms` after a
 //! failed renewal): it asks `before_renew`, renews if told to and reports
-//! the result to `renewed`.
+//! the result to `renewed`. It runs on a thread of its own, so a round
+//! waits on the bucket alone, never on the server's event loop.
 
 /// A lease's times, in ms. Each is sized against the others, so a test
 /// that waits out leases divides them all by one number (`divided`).
@@ -26,9 +27,51 @@ pub struct Timing {
     pub renew_timeout_ms: u64,
     pub list_timeout_ms: u64,
     pub retry_ms: u64,
+    /// A round's bucket request that has not answered within its round's
+    /// bound is sent once more, the first copy kept in flight
+    /// (`http::prompt`). About one request in 8,000 to a bucket stalls for
+    /// seconds, and the same request sent again answers in its usual time;
+    /// a bucket slow to answer every request answers the first copy
+    /// soonest. A listing's LIST answers in 32 ms at the median and 241 ms
+    /// at the 99.9th percentile, and R2's usual answers take up to a
+    /// second, which no bound cuts short. Each bound is below its round's
+    /// deadline.
+    ///
+    /// The bounds are a request's wall time, so a slowdown of the whole
+    /// bucket doubles a round's requests. A listing runs on the server's
+    /// event loop, so a stall of the loop past its bound looks like a
+    /// stalled bucket and costs a resend.
+    ///
+    /// A renewal is a write, and after a refusal a reread and a write
+    /// again. A stalled write, its copy's answer, the reread and the
+    /// write take 1.5 s and three usual answers, within 4 s while those
+    /// take under 830 ms. A copy refused while the first is out waits up to
+    /// another 1.5 s for the first's answer, the round's success if the
+    /// first landed; if it never answers, the reread and the write have
+    /// what is left of the 4 s, about 1 s.
+    pub renew_attempt_ms: u64,
+    /// A listing is a LIST, a request for each page past the first, and
+    /// the records' reads side by side. One stalled request among them
+    /// takes 1 s and its copy's answer, within the listing's 2 s. Two in a
+    /// row, a stalled LIST and then a stalled read or page, take 2 s and
+    /// more: the listing times out, which only delays routing to a new
+    /// peer until the next.
+    pub list_attempt_ms: u64,
+    /// How long a renewal waits to write again when its guard failed on a
+    /// version that is still current: a write of ours to it is in
+    /// progress. R2 refuses more than about one write a second to one key.
+    pub contended_pause_ms: u64,
     /// Peers judge this node's lease by their own clocks; one off from the
     /// bucket's clock by more than this exits.
     pub max_skew_ms: u64,
+    /// A node whose event loop makes no progress for this long fences
+    /// (`watchdog`). The lease is kept on a thread of its own, so a turn of
+    /// the loop longer than a lease does not lose it; a loop stuck for good
+    /// would keep it, and the node's objects unreachable, for good. Three
+    /// leases leaves room for turns longer than a lease, which the lease
+    /// thread rides out, and is short enough that peers take a stuck node's
+    /// objects over within a few leases more.
+    pub stall_ms: u64,
 }
 
 impl Timing {
@@ -38,7 +81,11 @@ impl Timing {
         renew_timeout_ms: 4_000,
         list_timeout_ms: 2_000,
         retry_ms: 1_000,
+        renew_attempt_ms: 1_500,
+        list_attempt_ms: 1_000,
+        contended_pause_ms: 1_000,
         max_skew_ms: 2_000,
+        stall_ms: 60_000,
     };
 
     /// `DEFAULT` with every time divided by `divisor`: for tests, which
@@ -54,19 +101,27 @@ impl Timing {
             renew_timeout_ms: t.renew_timeout_ms / divisor,
             list_timeout_ms: t.list_timeout_ms / divisor,
             retry_ms: t.retry_ms / divisor,
+            renew_attempt_ms: t.renew_attempt_ms / divisor,
+            list_attempt_ms: t.list_attempt_ms / divisor,
+            contended_pause_ms: t.contended_pause_ms / divisor,
             max_skew_ms: t.max_skew_ms / divisor,
+            stall_ms: t.stall_ms / divisor,
         };
         (!divided.times().contains(&0)).then_some(divided)
     }
 
-    const fn times(self) -> [u64; 6] {
+    const fn times(self) -> [u64; 10] {
         [
             self.lease_ms,
             self.interval_ms,
             self.renew_timeout_ms,
             self.list_timeout_ms,
             self.retry_ms,
+            self.renew_attempt_ms,
+            self.list_attempt_ms,
+            self.contended_pause_ms,
             self.max_skew_ms,
+            self.stall_ms,
         ]
     }
 
@@ -75,6 +130,27 @@ impl Timing {
     /// expires.
     const fn safety_ms(&self) -> u64 {
         2 * self.max_skew_ms
+    }
+
+    /// Whether a lease that expires at `until_ms` holds at `now_ms`, with
+    /// peers' clocks allowed for.
+    #[must_use]
+    pub const fn holds(&self, until_ms: u64, now_ms: u64) -> bool {
+        now_ms + self.safety_ms() < until_ms
+    }
+
+    /// How much longer than `now_ms` a lease that expires at `until_ms`
+    /// holds (`holds`), in ms: 0 once it does not.
+    #[must_use]
+    pub const fn remaining_ms(&self, until_ms: u64, now_ms: u64) -> u64 {
+        until_ms.saturating_sub(now_ms + self.safety_ms())
+    }
+
+    /// When peers, by clocks up to `safety_ms` ahead, may judge a lease that
+    /// expires at `until_ms` expired: it `holds` before.
+    #[must_use]
+    pub const fn holds_until(&self, until_ms: u64) -> u64 {
+        until_ms.saturating_sub(self.safety_ms())
     }
 }
 
@@ -123,8 +199,9 @@ impl Lease {
         if o.skew_ms.unsigned_abs() > self.timing.max_skew_ms {
             return Step::Fence(format!("clock off from the bucket's by {} ms", o.skew_ms));
         }
-        // A node stalled past its lease (a paused process, a blocked loop)
-        // may have been taken over: it must not renew and serve on.
+        // A node stalled past its lease (a paused process, a lease thread
+        // that got no time) may have been taken over: it must not renew
+        // and serve on.
         if self.until_ms != 0 && !self.holds(o.now_ms + self.timing.renew_timeout_ms) {
             return Step::Fence("the lease lapsed before it could be renewed".into());
         }
@@ -149,99 +226,20 @@ impl Lease {
     /// Whether the lease holds at `now_ms`, with peers' clocks allowed
     /// for: an actor serves only while it does.
     pub fn holds(&self, now_ms: u64) -> bool {
-        now_ms + self.timing.safety_ms() < self.until_ms
+        self.timing.holds(self.until_ms, now_ms)
+    }
+
+    /// When peers, by clocks up to `safety_ms` ahead, may judge this lease expired: it
+    /// [`Lease::holds`] before. 0 once it left.
+    #[must_use]
+    pub fn holds_until(&self) -> u64 {
+        if self.left {
+            return 0;
+        }
+        self.timing.holds_until(self.until_ms)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 1 for production's times; the others as tests divide them.
-    const DIVISORS: [u64; 4] = [1, 2, 4, 10];
-
-    fn timings() -> [Timing; 4] {
-        DIVISORS.map(|d| Timing::divided(d).unwrap())
-    }
-
-    fn seen(now_ms: u64) -> Observed {
-        Observed { now_ms, skew_ms: 0 }
-    }
-
-    #[test]
-    fn divided_times_keep_their_proportions() {
-        let t = Timing::DEFAULT;
-        for (d, divided) in DIVISORS.into_iter().zip(timings()) {
-            assert_eq!(divided.times().map(|ms| ms * d), t.times(), "{divided:?}");
-            // A round renews before the lease needs to fence.
-            let round = divided.interval_ms + divided.renew_timeout_ms;
-            assert!(
-                round + divided.safety_ms() < divided.lease_ms,
-                "{divided:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_divisor_that_rounds_a_time_to_zero_is_refused() {
-        let shortest = Timing::DEFAULT.times().into_iter().min().unwrap();
-        assert_eq!(Timing::divided(0), None);
-        assert!(Timing::divided(shortest).is_some());
-        assert_eq!(Timing::divided(shortest + 1), None);
-    }
-
-    #[test]
-    fn renews_and_holds_until_the_safety_margin() {
-        for t in timings() {
-            let mut lease = Lease::new(t);
-            assert_eq!(lease.before_renew(&seen(0)), Step::Renew);
-            assert_eq!(lease.renewed(0, Ok(t.lease_ms)), Step::Renew);
-            let last = t.lease_ms - t.safety_ms();
-            assert!(lease.holds(last - 1) && !lease.holds(last), "{t:?}");
-        }
-    }
-
-    #[test]
-    fn a_failed_renewal_retries_until_the_lease_nearly_lapses() {
-        for t in timings() {
-            let mut lease = Lease::new(t);
-            lease.renewed(0, Ok(t.lease_ms));
-            assert!(matches!(
-                lease.renewed(t.lease_ms / 4, Err("x".into())),
-                Step::Retry(_)
-            ));
-            let last = t.lease_ms - t.safety_ms() - t.renew_timeout_ms;
-            assert!(matches!(
-                lease.renewed(last - 1, Err("x".into())),
-                Step::Retry(_)
-            ));
-            assert!(matches!(
-                lease.renewed(last, Err("x".into())),
-                Step::Fence(_)
-            ));
-        }
-    }
-
-    #[test]
-    fn a_node_stalled_past_its_lease_fences_instead_of_renewing() {
-        for t in timings() {
-            let mut lease = Lease::new(t);
-            lease.renewed(0, Ok(t.lease_ms));
-            assert_eq!(lease.before_renew(&seen(t.interval_ms)), Step::Renew);
-            let step = lease.before_renew(&seen(t.lease_ms + 1));
-            assert!(matches!(step, Step::Fence(_)));
-        }
-    }
-
-    #[test]
-    fn skew_fences_at_once() {
-        for t in timings() {
-            let lease = Lease::new(t);
-            let max = i64::try_from(t.max_skew_ms).unwrap();
-            let skewed = |skew_ms| lease.before_renew(&Observed { skew_ms, ..seen(0) });
-            assert_eq!(skewed(-max), Step::Renew);
-            assert!(matches!(skewed(max + 1), Step::Fence(_)));
-            assert!(matches!(skewed(-max - 1), Step::Fence(_)));
-        }
-    }
-}
+#[path = "lease-test.rs"]
+mod tests;

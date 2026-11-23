@@ -20,6 +20,7 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
     link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = ["//src/rust/jsg"],
@@ -30,10 +31,22 @@ wd_cc_library(
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
     deps = [
+        ":current-with-id",
         ":ffi.rs@cxx",
         "//src/rust/jsg:ffi",
         "//src/workerd/io",
+        "//src/workerd/jsg:inspector",
     ],
+)
+
+# The IoContext that an `io_context::IoContext` stands for, by its id. A library of its own so that
+# the per-type and per-method shims of API crates, which take that id, need not depend on :ffi.
+wd_cc_library(
+    name = "current-with-id",
+    srcs = ["current-with-id.c++"],
+    hdrs = ["current-with-id.h"],
+    visibility = ["//src/workerd/api:__subpackages__"],
+    deps = ["//src/workerd/io"],
 )
 
 # Snippets that must not compile against io-context (each annotates the errors it expects) and
@@ -60,7 +73,10 @@ wd_rust_crate(
     testonly = True,
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
-    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/api/channel-interop:ffi.rs@cxx",
+    ],
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     link_deps = [":test-bridge"],
@@ -68,7 +84,9 @@ wd_rust_crate(
     deps = [
         ":io-context",
         "//src/rust/jsg",
-        "@crates_vendor//:futures",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
+        "@crates_vendor//futures",
     ],
 )
 
@@ -86,15 +104,18 @@ wd_cc_library(
 )
 
 # io-context inside a request of a real worker and in a Durable Object, and the IoContext that
-# Rust builtin modules see when a request resolves them.
+# Rust builtin modules see when a request resolves them. Large: most of its cases start a worker
+# of their own, which with every autogate on adds up to more than the moderate timeout in a debug
+# build.
 kj_test(
+    size = "large",
     src = "io-context-test.c++",
     deps = [
         ":ffi",
         ":io-context-test-bridge",
         ":test-bridge",
         "//src/rust/jsg:bridge",
-        "//src/workerd/tests:test-fixture",
+        "//src/workerd/tests:test-fixture-expose-gc",
     ],
 )
 

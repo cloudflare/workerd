@@ -256,8 +256,7 @@ class EsModule final: public Module {
     },
         {.embeddedCache = staticCompileCache,
           .compileHints = compileHints,
-          .bundleModuleName =
-              bundleModuleName.map([](const kj::String& name) -> kj::StringPtr { return name; }),
+          .bundleModuleName = bundleModuleName,
           .sharedCache = sharedCompileCache});
   }
 
@@ -382,6 +381,11 @@ class SyntheticModule final: public Module {
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(id().getHref()),
         std::span<const v8::Local<v8::String>>(exports.data(), exports.size()), evaluationSteps);
+  }
+
+  // See getSyntheticModuleEvaluationStepsRef().
+  static intptr_t evaluationStepsRef() {
+    return reinterpret_cast<intptr_t>(&evaluationSteps);
   }
 
  private:
@@ -648,14 +652,37 @@ class IsolateModuleRegistry final {
     // Note: Takes v8::Local<v8::Module> and const Module& directly rather than
     // Entry& for the same reason as require()'s evaluate lambda — the lookupCache
     // table may rehash during evaluate(), invalidating Entry& references.
-    static constexpr auto evaluate =
-        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
-            const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate) {
+    static constexpr auto evaluate = [](Lock& js, v8::Local<v8::Module> module,
+                                         const Module& moduleDef,
+                                         const CompilationObserver& observer,
+                                         const Module::Evaluator& maybeEvaluate) -> Promise<Value> {
+      // A module is still kEvaluating when it is reached from its own evaluation, as when a
+      // chain of dynamic imports in top-level code imports an ancestor back. V8 aborts the
+      // process if asked to evaluate it again, so resolve to its namespace now, as the original
+      // registry does. Its bindings are read later, once the evaluation in progress has unwound,
+      // since nested evaluation never drains the microtask queue.
+      if (module->GetStatus() == v8::Module::kEvaluating) {
+        return js.resolvedPromise(js.v8Ref(module->GetModuleNamespace()));
+      }
       return js
           .toPromise(
               check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
           .then(js, [module = js.v8Ref(module)](Lock& js, Value) mutable -> Promise<Value> {
         return js.resolvedPromise(js.v8Ref(module.getHandle(js)->GetModuleNamespace()));
+      });
+    };
+
+    // Retries a failed link after the current evaluation stack unwinds. Nested evaluation
+    // never drains the microtask queue. Capture only the module handle: nothing borrowed
+    // from the registry may outlive this call.
+    static constexpr auto evaluateDeferred = [](Lock& js, v8::Local<v8::Module> module) {
+      return js.resolvedPromise().then(
+          js, [module = js.v8Ref(module)](Lock& js) mutable -> Promise<Value> {
+        auto handle = module.getHandle(js);
+        auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
+        auto& entry = KJ_ASSERT_NONNULL(registry.lookup(js, handle));
+        return evaluate(
+            js, handle, entry.module, registry.getObserver(), registry.inner.getEvaluator());
       });
     };
 
@@ -727,8 +754,24 @@ class IsolateModuleRegistry final {
           return js.rejectedPromise<Value>(v8Module->GetException());
         }
 
-        auto evaluatePromise =
-            evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
+        bool deferEvaluation = false;
+        if (v8Module->GetStatus() == v8::Module::kUninstantiated && js.isEvaluatingModule()) {
+          // Linking can reach an evaluating dependency even when the target is not evaluating.
+          // Preserve inline evaluation for graphs that link now. Retry failed links once from
+          // a microtask; permanent link errors then reject the import with their own exception.
+          JSG_TRY(js) {
+            if (!moduleDef.instantiate(js, v8Module, getObserver())) {
+              throw JsExceptionThrown();
+            }
+          }
+          JSG_CATCH(exception KJ_UNUSED) {
+            // JSG_CATCH rethrows termination rather than deferring it.
+            deferEvaluation = true;
+          }
+        }
+        auto evaluatePromise = deferEvaluation
+            ? evaluateDeferred(js, v8Module)
+            : evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
         auto isWasm = moduleDef.isWasm();
 
         if (!sourcePhase) {
@@ -1074,13 +1117,93 @@ class IsolateModuleRegistry final {
 
   // Lookup a module that may have already been previously resolved and cached.
   kj::Maybe<Entry&> lookup(Lock& js, v8::Local<v8::Module> module) {
-    return instantiations
-        .find<kj::HashIndex<EntryCallbacks>>(HashableV8Ref<v8::Module>(js.v8Isolate, module))
-        .map([](Entry& entry) -> Entry& { return entry; });
+    return instantiations.find<kj::HashIndex<EntryCallbacks>>(
+        HashableV8Ref<v8::Module>(js.v8Isolate, module));
   }
 
   const jsg::Url& getBundleBase() const {
     return inner.getBundleBase();
+  }
+
+  // See recordIsolateModuleRegistryForSnapshot().
+  kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordForSnapshot(
+      v8::Local<v8::Context> context, v8::SnapshotCreator& creator) {
+    auto isolate = v8::Isolate::GetCurrent();
+    kj::HashMap<const Entry*, size_t> dataIndices;
+    kj::Vector<SnapshotArtifact::NewModuleRegistryRecord> records(resolutions.size());
+    for (auto& resolution: resolutions) {
+      // Every resolution has its instantiation row (see resolveWithCaching).
+      Entry& entry = KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+          resolution.key.id, resolution.value));
+      size_t dataIndex = dataIndices.findOrCreate(&entry, [&]() {
+        return kj::HashMap<const Entry*, size_t>::Entry{
+          &entry, creator.AddData(context, entry.key.getHandle(isolate))};
+      });
+      records.add(SnapshotArtifact::NewModuleRegistryRecord{
+        .contextType = static_cast<uint8_t>(resolution.key.type),
+        .specifier = kj::str(resolution.key.id.getHref()),
+        .moduleDataIndex = dataIndex,
+      });
+    }
+    // The v8::Globals of the modules, which CreateBlob() refuses. Nothing resolves in the zygote
+    // after this.
+    instantiations.clear();
+    return records.releaseAsArray();
+  }
+
+  // The inverse of recordForSnapshot(), for a registry attached to an isolate restored from the
+  // snapshot: takes each recorded v8::Module out of the blob and re-creates the resolution and
+  // instantiation rows it had in the zygote, so import.meta, the dynamic-import referrer lookup
+  // and repeated imports find the module the heap already holds rather than a fresh compilation.
+  void restoreFromSnapshot(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::ArrayPtr<const SnapshotArtifact::NewModuleRegistryRecord> records) {
+    kj::HashMap<size_t, v8::Local<v8::Module>> taken;
+    for (auto& record: records) {
+      Url id = KJ_ASSERT_NONNULL(Url::tryParse(record.specifier.asPtr()),
+          "snapshot records an unparseable module specifier", record.specifier);
+      Url definitionId = id.clone(
+          Url::EquivalenceOption::IGNORE_FRAGMENTS | Url::EquivalenceOption::IGNORE_SEARCH);
+      ResolveContext resolveContext{
+        .type = static_cast<ResolveContext::Type>(record.contextType),
+        .source = ResolveContext::Source::INTERNAL,
+        .normalizedSpecifier = id,
+        .referrerNormalizedSpecifier = id,
+      };
+      ResolveContext definitionContext{
+        .type = resolveContext.type,
+        .source = resolveContext.source,
+        .normalizedSpecifier = definitionId,
+        .referrerNormalizedSpecifier = definitionId,
+      };
+      const Module& definition =
+          KJ_ASSERT_NONNULL(inner.lookup(definitionContext, noopResolveObserver),
+              "snapshot records a module the registry does not define", record.specifier);
+
+      v8::Local<v8::Module> module = taken.findOrCreate(record.moduleDataIndex, [&]() {
+        v8::Local<v8::Module> module;
+        KJ_REQUIRE(
+            context->GetDataFromSnapshotOnce<v8::Module>(record.moduleDataIndex).ToLocal(&module),
+            "snapshot does not hold the module it was recorded to hold", record.specifier);
+        return kj::HashMap<size_t, v8::Local<v8::Module>>::Entry{record.moduleDataIndex, module};
+      });
+
+      if (instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, &definition) == kj::none) {
+        instantiations.insert(Entry{
+          .key = HashableV8Ref<v8::Module>(js.v8Isolate, module),
+          .id = id.clone(),
+          .module = definition,
+        });
+      }
+      resolutions.upsert(SpecifierContext(resolveContext), &definition,
+          [](const Module*& existing, const Module* replacement) {
+        KJ_ASSERT(existing == replacement);
+      });
+      if (id != definition.id()) {
+        redirectedCanonicalIds.upsert(
+            definition.id().clone(), id.clone(), [](Url& existing, Url&& replacement) {});
+      }
+    }
   }
 
  private:
@@ -1104,7 +1227,7 @@ class IsolateModuleRegistry final {
   };
 
   struct InstanceCallbacks final {
-    const Entry& keyForRow(const Entry& entry) const {
+    const Entry& keyForRow(const Entry& entry KJ_LIFETIMEBOUND) const {
       return entry;
     }
     bool matches(const Entry& entry, const Url& id, const Module* def) const {
@@ -1234,7 +1357,7 @@ class IsolateModuleRegistry final {
 v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
-  KJ_TRY {
+  return liftKj<v8::MaybeLocal<v8::Promise>>(js.v8Isolate, [&]() -> v8::MaybeLocal<v8::Promise> {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
     KJ_IF_SOME(found, registry.lookup(js, module)) {
       auto result = found.module.actuallyEvaluate(js, module, registry.getObserver());
@@ -1245,13 +1368,61 @@ v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
     return {};
-  }
-  KJ_CATCH(exception) {
-    auto ex = js.exceptionToJsValue(kj::mv(exception));
-    js.v8Isolate->ThrowException(ex.getHandle(js));
-    return {};
-  }
+  });
 }
+
+// The import.meta.resolve(...) function is effectively a shortcut for
+// new URL(specifier, import.meta.url).href. The idea is that it allows
+// resolving import specifiers relative to the current modules base URL.
+// Note that we do not validate that the resolved URL actually matches
+// anything in the registry. A functor with a clone() rather than a lambda, so
+// that a startup snapshot can carry the function of a module whose top level
+// touched import.meta (jsg::WrappableFunctionImpl's snapshotClone()).
+struct ImportMetaResolve {
+  kj::String href;
+
+  ImportMetaResolve clone() const {
+    return {kj::str(href)};
+  }
+
+  JsValue operator()(Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+    // Node.js and the HTML spec both require import.meta.resolve to be called
+    // with a specifier argument; calling it with none is a TypeError rather
+    // than silently resolving the string "undefined".
+    JSG_REQUIRE(args.Length() >= 1, TypeError, "import.meta.resolve requires a specifier argument");
+    // Note that we intentionally use ToString here to coerce whatever value is given
+    // into a string or throw if it cannot be coerced.
+    auto specifier = js.toString(args[0]);
+    // If Node.js Compat mode is enabled, a bare specifier naming a Node.js
+    // built-in (e.g. "fs") — or any "node:"-prefixed specifier — must resolve
+    // to the canonical "node:" URL, exactly as import() and require() do.
+    // Without this, import.meta.resolve("fs") would incorrectly resolve the
+    // bare specifier against the module's base URL (e.g. "file:///bundle/fs").
+    if (isNodeJsCompatEnabled(js)) {
+      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
+        specifier = kj::mv(nodeSpec);
+      }
+    }
+    KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href.asArray())) {
+      // import.meta.resolve is specified to be equivalent to
+      // `new URL(specifier, import.meta.url).href` (see the comment above).
+      // The WHATWG URL parser already collapses dot segments (including the
+      // percent-encoded "%2e"/"%2E" forms) during tryParse, so we can return
+      // the resolved href directly.
+      //
+      // We must NOT apply NORMALIZE_PATH here: normalizePathEncoding
+      // percent-decodes every escape whose byte is not in the path
+      // percent-encode set (e.g. "%66" -> "f"), which is not what
+      // `new URL(...).href` produces. Doing so silently rewrites an
+      // already-encoded specifier and diverges from Node.js/HTML, which
+      // leave such percent-encoding intact.
+      return js.str(resolved.getHref());
+    }
+    // Node.js/HTML import.meta.resolve throws when the specifier cannot be
+    // resolved to a URL; it must not return null.
+    js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
+  }
+};
 
 // Set up the special `import.meta` property for the module.
 void importMeta(
@@ -1307,51 +1478,7 @@ void importMeta(
           }
         }
 
-        // The import.meta.resolve(...) function is effectively a shortcut for
-        // new URL(specifier, import.meta.url).href. The idea is that it allows
-        // resolving import specifiers relative to the current modules base URL.
-        // Note that we do not validate that the resolved URL actually matches
-        // anything in the registry.
-        auto resolve = js.wrapReturningFunction(js.v8Context(),
-            [href = kj::mv(href)](
-                Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> JsValue {
-          // Node.js and the HTML spec both require import.meta.resolve to be called
-          // with a specifier argument; calling it with none is a TypeError rather
-          // than silently resolving the string "undefined".
-          JSG_REQUIRE(
-              args.Length() >= 1, TypeError, "import.meta.resolve requires a specifier argument");
-          // Note that we intentionally use ToString here to coerce whatever value is given
-          // into a string or throw if it cannot be coerced.
-          auto specifier = js.toString(args[0]);
-          // If Node.js Compat mode is enabled, a bare specifier naming a Node.js
-          // built-in (e.g. "fs") — or any "node:"-prefixed specifier — must resolve
-          // to the canonical "node:" URL, exactly as import() and require() do.
-          // Without this, import.meta.resolve("fs") would incorrectly resolve the
-          // bare specifier against the module's base URL (e.g. "file:///bundle/fs").
-          if (isNodeJsCompatEnabled(js)) {
-            KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
-              specifier = kj::mv(nodeSpec);
-            }
-          }
-          KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href)) {
-            // import.meta.resolve is specified to be equivalent to
-            // `new URL(specifier, import.meta.url).href` (see the comment above).
-            // The WHATWG URL parser already collapses dot segments (including the
-            // percent-encoded "%2e"/"%2E" forms) during tryParse, so we can return
-            // the resolved href directly.
-            //
-            // We must NOT apply NORMALIZE_PATH here: normalizePathEncoding
-            // percent-decodes every escape whose byte is not in the path
-            // percent-encode set (e.g. "%66" -> "f"), which is not what
-            // `new URL(...).href` produces. Doing so silently rewrites an
-            // already-encoded specifier and diverges from Node.js/HTML, which
-            // leave such percent-encoding intact.
-            return js.str(resolved.getHref());
-          }
-          // Node.js/HTML import.meta.resolve throws when the specifier cannot be
-          // resolved to a URL; it must not return null.
-          js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
-        });
+        auto resolve = js.wrapReturningFunction(js.v8Context(), ImportMetaResolve{kj::str(href)});
 
         if (meta->CreateDataProperty(
                     js.v8Context(), v8::Local<v8::String>(js.strIntern("resolve"_kj)), resolve)
@@ -2188,11 +2315,29 @@ kj::Maybe<jsg::JsPromise> ModuleRegistry::evaluateImpl(jsg::Lock& js,
   return kj::none;
 }
 
+intptr_t getSyntheticModuleEvaluationStepsRef() {
+  return SyntheticModule::evaluationStepsRef();
+}
+
+kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordIsolateModuleRegistryForSnapshot(
+    v8::Local<v8::Context> context, v8::SnapshotCreator& creator) {
+  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<IsolateModuleRegistry>(
+                               context, jsg::ContextPointerSlot::MODULE_REGISTRY))
+      .recordForSnapshot(context, creator);
+}
+
 kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserver& observer) const {
   // The IsolateModuleRegistry is attached to the isolate as an embedder data slot.
   // We have to keep it alive for the duration of the v8::Context so we return a
   // kj::Own and store that in the jsg::JsContext
-  return kj::heap<IsolateModuleRegistry>(js, *this, observer);
+  auto registry = kj::heap<IsolateModuleRegistry>(js, *this, observer);
+  if (js.isStartingFromSnapshot()) {
+    // The context holds the zygote's evaluated module graph; the registry must know those modules
+    // (see SnapshotArtifact::newModuleRegistryRecords) rather than compile the bundle a second time.
+    registry->restoreFromSnapshot(js, js.v8Context(),
+        IsolateBase::from(js.v8Isolate).finalizedSnapshotArtifact().newModuleRegistryRecords);
+  }
+  return kj::mv(registry);
 }
 
 kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundle(
@@ -2245,8 +2390,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
           .source = context.source,                                                                \
           .normalizedSpecifier = url,                                                              \
           .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,                      \
-          .rawSpecifier =                                                                          \
-              context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
+          .rawSpecifier = context.rawSpecifier,                                                    \
           .importType = context.importType,                                                        \
         };                                                                                         \
         return lookupImpl(impl, ctx, seen);                                                        \
@@ -2595,8 +2739,7 @@ Function<void()> Module::compileEvalFunction(Lock& js,
     const CompilationObserver& observer) {
   auto metrics = observer.onScriptCompilationStart(js.v8Isolate, name);
   v8::ScriptOrigin origin(js.str(name));
-  auto fn = check(compileFunction(js, code, origin,
-      compileExtensions.map([](JsObject ext) -> v8::Local<v8::Object> { return ext; }), observer));
+  auto fn = check(compileFunction(js, code, origin, compileExtensions, observer));
 
   return [ref = js.v8Ref(fn)](Lock& js) mutable {
     js.withinHandleScope([&] {

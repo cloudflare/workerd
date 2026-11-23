@@ -33,6 +33,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::io_kj_error;
@@ -61,7 +62,7 @@ use crate::services::unsupported;
 
 /// Whether `segment` names one entry of a directory: a single normal path component, so nothing
 /// a separator would split, no `.`, `..`, root or drive, and (on Windows) no stream of a file.
-fn is_entry_name(segment: &str) -> bool {
+pub(crate) fn is_entry_name(segment: &str) -> bool {
     let mut components = Path::new(segment).components();
     matches!(components.next(), Some(Component::Normal(name)) if name == segment)
         && components.next().is_none()
@@ -239,14 +240,14 @@ pub fn make_disk_directory_service(
 // =======================================================================================
 // Requests
 
-fn kj_headers<'t>(
+pub(crate) fn kj_headers<'t>(
     table: &'t HeaderTable,
     map: &http::HeaderMap,
 ) -> Result<kj_hyper::ffi::Borrowing<'t, kj::http::ffi::HttpHeaders>> {
     kj_hyper::HeaderBlock::new(map, &http::Extensions::new()).to_kj(table)
 }
 
-fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
+pub(crate) fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
     http::HeaderValue::from_str(value.as_ref())
         .map_err(|_| kj::failed!("invalid header value: {}", value.as_ref()))
 }
@@ -255,18 +256,15 @@ fn len_u64(len: usize) -> u64 {
     u64::try_from(len).unwrap_or(u64::MAX)
 }
 
-/// Copies `length` bytes of the file from `start` into `out`.
-async fn copy_file(
-    path: &Path,
+/// Copies `length` bytes of `file` from `start` into `out`.
+pub(crate) async fn copy_file(
+    file: &mut std::fs::File,
     start: u64,
     length: u64,
     out: &mut kj::io::AsyncOutputStream<'_>,
 ) -> Result<()> {
-    let mut file = std::fs::File::open(path).map_err(|e| io_kj_error(&e))?;
-    if start > 0 {
-        file.seek(std::io::SeekFrom::Start(start))
-            .map_err(|e| io_kj_error(&e))?;
-    }
+    file.seek(std::io::SeekFrom::Start(start))
+        .map_err(|e| io_kj_error(&e))?;
     let mut buffer = vec![0; 64 * 1024];
     let mut remaining = length;
     while remaining > 0 {
@@ -286,7 +284,38 @@ async fn copy_file(
 }
 
 /// A file that is removed when dropped, unless it was renamed away first.
-struct Temporary(PathBuf);
+pub struct Temporary(PathBuf);
+
+impl Temporary {
+    /// A new file beside `path`, to be renamed into place once written, so that a reader never
+    /// sees a partial file. A write that fails or is abandoned leaves nothing behind.
+    pub fn beside(path: &Path) -> Result<(Self, std::fs::File)> {
+        static NONCE: AtomicU64 = AtomicU64::new(0);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io_kj_error(&e))?;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let temp = Self(path.with_file_name(format!(
+            ".{}.{}.{}.tmp",
+            name.unwrap_or_default(),
+            std::process::id(),
+            NONCE.fetch_add(1, Ordering::Relaxed)
+        )));
+        let file = std::fs::File::create(&temp.0).map_err(|e| io_kj_error(&e))?;
+        Ok((temp, file))
+    }
+
+    /// This file, opened to read.
+    pub fn open(&self) -> Result<std::fs::File> {
+        std::fs::File::open(&self.0).map_err(|e| io_kj_error(&e))
+    }
+
+    /// Closes `file`, this file's handle, and renames this file to `path`.
+    pub fn rename(self, file: std::fs::File, path: &Path) -> Result<()> {
+        drop(file);
+        std::fs::rename(&self.0, path).map_err(|e| io_kj_error(&e))
+    }
+}
 
 impl Drop for Temporary {
     fn drop(&mut self) {
@@ -294,21 +323,9 @@ impl Drop for Temporary {
     }
 }
 
-/// Writes the body to a temporary file beside `path`, then renames it into place, so that a
-/// reader never sees a partial file. A write that fails or is abandoned leaves nothing behind.
+/// Writes the body to a temporary file beside `path`, then renames it into place.
 async fn write_replacing(path: &Path, mut body: Pin<&mut AsyncInputStream>) -> Result<()> {
-    static NONCE: AtomicU64 = AtomicU64::new(0);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| io_kj_error(&e))?;
-    }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-    let temp = Temporary(path.with_file_name(format!(
-        ".{}.{}.{}.tmp",
-        name.unwrap_or_default(),
-        std::process::id(),
-        NONCE.fetch_add(1, Ordering::Relaxed)
-    )));
-    let mut file = std::fs::File::create(&temp.0).map_err(|e| io_kj_error(&e))?;
+    let (temp, mut file) = Temporary::beside(path)?;
     let mut buffer = vec![0; 64 * 1024];
     loop {
         let read = body.as_mut().try_read(&mut buffer, 1).await?;
@@ -318,8 +335,7 @@ async fn write_replacing(path: &Path, mut body: Pin<&mut AsyncInputStream>) -> R
         file.write_all(&buffer[..read])
             .map_err(|e| io_kj_error(&e))?;
     }
-    drop(file);
-    std::fs::rename(&temp.0, path).map_err(|e| io_kj_error(&e))
+    temp.rename(file, path)
 }
 
 /// Removes a file, or a directory and everything in it; false when there was nothing there.
@@ -403,7 +419,8 @@ impl DiskRequest {
         if method == Method::HEAD {
             return Ok(());
         }
-        copy_file(path, start, length, &mut out).await
+        let mut file = std::fs::File::open(path).map_err(|e| io_kj_error(&e))?;
+        copy_file(&mut file, start, length, &mut out).await
     }
 
     async fn directory(
@@ -449,12 +466,10 @@ impl DiskRequest {
         let json = serde_json::to_string(&listing).map_err(|e| kj::failed!("{e}"))?;
         out.write(json.as_bytes()).await
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl Service for DiskRequest {
-    async fn request<'a>(
-        &'a mut self,
+    /// Serves a request on the directory.
+    async fn serve<'a>(
+        &'a self,
         method: Method,
         url: &'a [u8],
         headers: HeadersRef<'a>,
@@ -504,6 +519,22 @@ impl Service for DiskRequest {
             _ => send_error(response, 501, "Not Implemented", &none).await,
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for DiskRequest {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        request_body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> ServiceResult {
+        Ok(self
+            .serve(method, url, headers, request_body, response)
+            .await?)
+    }
 
     async fn connect<'a>(
         &'a mut self,
@@ -512,19 +543,27 @@ impl Service for DiskRequest {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
-        Err(unsupported("Disk directory services"))
+    ) -> ServiceResult {
+        Err(unsupported("Disk directory services").into())
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Interface for DiskRequest {
-    async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
-        Err(unsupported("Disk directory services"))
+    async fn run_scheduled(
+        &mut self,
+        _time: &SystemTime,
+        _cron: &str,
+    ) -> worker::Result<ScheduledResult> {
+        Err(unsupported("Disk directory services").into())
     }
 
-    async fn run_alarm(&mut self, _time: &SystemTime, _retry_count: u32) -> Result<AlarmResult> {
-        Err(unsupported("Disk directory services"))
+    async fn run_alarm(
+        &mut self,
+        _time: &SystemTime,
+        _retry_count: u32,
+    ) -> worker::Result<AlarmResult> {
+        Err(unsupported("Disk directory services").into())
     }
 }
 

@@ -18,7 +18,13 @@ kj::String recordedAsyncContext = kj::str("not recorded");
 kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY =
     kj::arc<jsg::AsyncContextFrame::StorageKey>();
 kj::Maybe<uint64_t> awaitContextId;
+kj::Maybe<kj::Maybe<uint64_t>> reactionDataDropContextId;
 kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
+kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> keptChannel;
+
+void keep_channel(kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
+  keptChannel = kj::mv(channel);
+}
 
 void record_await_context() {
   awaitContextId = IoContext::tryGetCurrentId().map(
@@ -26,6 +32,11 @@ void record_await_context() {
   KJ_IF_SOME(fulfiller, onAwaitCallback) {
     fulfiller->fulfill();
   }
+}
+
+void record_drop_context() {
+  reactionDataDropContextId = IoContext::tryGetCurrentId().map(
+      [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
 }
 
 void record_async_context(uintptr_t isolate) {

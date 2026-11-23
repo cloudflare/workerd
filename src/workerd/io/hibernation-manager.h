@@ -36,7 +36,6 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   kj::Maybe<const Worker::Actor::Id&> getOwningActorId() override;
   kj::Maybe<uint64_t> getOwningHolderToken() override;
   void forgetOwningHolder() override;
-  kj::Own<HibernationManager> addRef() override;
   void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) override;
   kj::Maybe<uint32_t> getEventTimeout() override;
 };

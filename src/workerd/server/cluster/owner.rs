@@ -199,9 +199,7 @@ impl Owners {
             // the retry recovers at the next epoch.
             let dormant = self.dormant.borrow_mut().remove(&key);
             let Some(object) = dormant.filter(|o| o.epoch == owned.epoch && path.exists()) else {
-                return Err(Error::Contended(format!(
-                    "{key}: not open here, nor dormant"
-                )));
+                return Err(Error::Replica(format!("{key}: not open here, nor dormant")));
             };
             let capture = Capture::resume(object.cursor.clone(), &object.databases);
             tracing::info!(
@@ -340,7 +338,7 @@ impl Owners {
             object.files.push(upload(&object.replica, snapshot).await?);
         }
         if !ownership.open(ns, actor, owned.epoch).await? {
-            return Err(Error::Contended(format!(
+            return Err(Error::Replica(format!(
                 "{ns}/{actor}: epoch {} was superseded before it opened",
                 owned.epoch
             )));
@@ -395,7 +393,7 @@ impl Owners {
             }
         }
         if ownership.current_epoch(&ns, &actor).await? != Some(epoch) {
-            return Err(Error::Contended(format!(
+            return Err(Error::Replica(format!(
                 "{ns}/{actor}: epoch {epoch} was superseded"
             )));
         }
@@ -613,7 +611,7 @@ impl Owners {
 
     fn slot(&self, ns: &str, actor: &str) -> Result<Rc<Slot>> {
         let slot = self.objects.borrow().get(&object_key(ns, actor)).cloned();
-        slot.ok_or_else(|| Error::Contended(format!("{ns}/{actor} is not open here")))
+        slot.ok_or_else(|| Error::Replica(format!("{ns}/{actor} is not open here")))
     }
 
     /// Capture the database at `path`, lane `lane` of an owned object, too.

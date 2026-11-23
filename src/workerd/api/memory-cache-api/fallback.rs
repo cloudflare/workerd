@@ -13,6 +13,7 @@ use io_context::IoOwnedSpan;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::v8;
+use jsg_macros::jsg_traced;
 use memory_cache::CacheError;
 use memory_cache::FallbackPermit;
 
@@ -154,8 +155,9 @@ fn reject<'s>(
 /// only when it collects them if the promise never settles. A span reports to its request's
 /// observer, whose state belongs to the request's thread, so the request owns the spans, as in
 /// memory-cache.c++: they end when the reactions drop them, or with the request.
+#[jsg_traced]
 struct Fill {
-    permit: IoOwned<FallbackPermit>,
+    permit: IoOwned<Permit>,
     /// The key, for the span of the write.
     key: String,
     /// Before its parent, so that it is released first, and ends first.
@@ -165,9 +167,13 @@ struct Fill {
 
 /// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
 /// its callback and spans. It holds no JavaScript values, so sharing it is sound.
+#[jsg_traced]
 struct SharedFill(Arc<Fill>);
 
-jsg::jsg_traced!(Fill, SharedFill);
+/// A fallback's permit, which holds no JavaScript values, for the request to own.
+struct Permit(FallbackPermit);
+
+jsg::jsg_traced_unchecked!(Permit);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
@@ -187,7 +193,7 @@ impl Fill {
         // ends the child first.
         let read_span = context.add_span(read_span)?;
         Ok(Self {
-            permit: context.add_object(permit)?,
+            permit: context.add_object(Permit(permit))?,
             key,
             fallback_span: context.add_span(fallback_span)?,
             _read_span: read_span,
@@ -238,7 +244,7 @@ impl Fill {
         bytes: Vec<u8>,
         expiration: Option<f64>,
     ) -> jsg::Result<()> {
-        let Some(permit) = self.permit.take(lock)? else {
+        let Some(Permit(permit)) = self.permit.take(lock)? else {
             return Ok(());
         };
         let result = IoContext::current(lock).and_then(|context| {
@@ -377,15 +383,18 @@ fn serialize<'a>(
 }
 
 /// What memory-cache.c++ makes of what serializing `value` threw, which it throws on as a
-/// `kj::Exception`: an exception with an empty detail string, such as the `DataCloneError` that
-/// the serializer throws, becomes a `DataCloneError` that says only what type failed, and any
-/// other exception becomes the copy that tunnelling it through the `kj::Exception` makes.
+/// `kj::Exception`: a `DOMException`, such as the `DataCloneError` that the serializer throws,
+/// or an exception with an empty detail string becomes a `DataCloneError` that says only what
+/// type failed, and any other exception becomes the copy that tunnelling it through the
+/// `kj::Exception` makes.
 fn serialization_error<'a>(
     lock: &mut jsg::Lock<'a>,
     value: v8::Local<'a, v8::Value>,
     exception: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-    if exception.to_detail_string(lock)?.is_empty() {
+    if jsg::try_unwrap_dom_exception(lock, exception)?.is_some()
+        || exception.to_detail_string(lock)?.is_empty()
+    {
         let err = jsg::Error::new_data_clone_error(format!(
             "failed to serialize {}",
             value.type_of(lock)

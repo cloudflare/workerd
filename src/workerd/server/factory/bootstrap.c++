@@ -36,6 +36,7 @@
 #include <cstdlib>
 
 #if !_WIN32
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -245,11 +246,6 @@ class Bootstrap {
     options.asyncTracePromises = serveOrTest.async_trace_promises;
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
-    KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {
-      // The command line checked that the directory exists.
-      python.packageDiskCacheRoot = KJ_REQUIRE_NONNULL(
-          openWritableDirectory(kj::str(path)), "package disk cache dir must exist");
-    }
     KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
       // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
       // directory).
@@ -392,10 +388,29 @@ void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str messa
   kj::_::Debug::log(fileStr.cStr(), static_cast<int>(line), kjSeverity, "", kj::str(message));
 }
 
+kj::Own<ThreadLogger> thread_logger() {
+  return kj::heap<ThreadLogger>(kj::getExceptionCallback().getThreadInitializer());
+}
+
+void run_with_logger(kj::Own<ThreadLogger> logger, ::rust::Box<ThreadBody> body) {
+  logger->initializer([&body]() { thread_body_run(kj::mv(body)); });
+}
+
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message) {
   auto json = buildJsonLogMessage(static_cast<kj::LogSeverity>(severity), kj::str(file).cStr(),
       static_cast<int>(line), 0, kj::str(message));
   kj::FdOutputStream(STDERR_FILENO).write({json.asBytes(), "\n"_kj.asBytes()});
+}
+
+void write_stderr_nonblocking(::rust::Str text) {
+#if !_WIN32
+  int flags = fcntl(STDERR_FILENO, F_GETFL);
+  if (flags < 0 || fcntl(STDERR_FILENO, F_SETFL, flags | O_NONBLOCK) < 0) return;
+  [[maybe_unused]] auto written = write(STDERR_FILENO, text.data(), text.size());
+  // The open file description may be shared with other processes, such as the supervisor's
+  // terminal or pipe, which expect it to block.
+  fcntl(STDERR_FILENO, F_SETFL, flags);
+#endif
 }
 
 }  // namespace workerd::server::cli

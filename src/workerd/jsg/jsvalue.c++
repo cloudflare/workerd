@@ -406,27 +406,27 @@ JsString::WriteIntoStatus JsString::writeInto(
   return result;
 }
 
+// The length is read once: in a V8 sandbox build it lives in sandbox memory, so a second read may
+// disagree with the count V8 is asked to copy.
+//
+// Write() and WriteOneByte() put a requested terminator at buffer[count] whatever the buffer's
+// size, so one element is reserved for it. As in WriteUtf8(), the terminator counts as written.
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options) const {
-  WriteIntoStatus result = {0, 0};
-  if (buffer.size() > 0) {
-    result.written = kj::min(buffer.size(), length(js));
-    inner->Write(js.v8Isolate, 0, result.written, buffer.begin(), options);
-    result.read = length(js);
-  }
-  return result;
+  if (buffer.size() == 0) return {};
+  size_t terminator = (options & NULL_TERMINATION) ? 1 : 0;
+  size_t count = kj::min(buffer.size() - terminator, length(js));
+  inner->Write(js.v8Isolate, 0, count, buffer.begin(), options);
+  return {.read = count, .written = count + terminator};
 }
 
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options) const {
-  WriteIntoStatus result = {0, 0};
-  if (buffer.size() > 0) {
-    result.written = kj::min(buffer.size(), length(js));
-    inner->WriteOneByte(
-        js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
-    result.read = length(js);
-  }
-  return result;
+  if (buffer.size() == 0) return {};
+  size_t terminator = (options & NULL_TERMINATION) ? 1 : 0;
+  size_t count = kj::min(buffer.size() - terminator, length(js));
+  inner->WriteOneByte(js.v8Isolate, 0, count, buffer.begin(), options);
+  return {.read = count, .written = count + terminator};
 }
 
 bool JsString::isFlat() const {
@@ -469,7 +469,7 @@ kj::String JsDate::toISOString(jsg::Lock& js) const {
 }
 
 JsDate::operator kj::Date() const {
-  return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
+  return kj::UNIX_EPOCH + (static_cast<int64_t>(inner->ValueOf()) * kj::MILLISECONDS);
 }
 
 JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) {
@@ -654,7 +654,11 @@ size_t JsFunction::length(Lock& js) const {
   JsObject obj = *this;
   auto lengthVal = obj.get(js, "length"_kj);
   KJ_IF_SOME(num, lengthVal.tryCast<jsg::JsNumber>()) {
-    return static_cast<size_t>(num.value(js).orDefault(0));
+    double value = num.value(js).orDefault(0);
+    // `!(value > 0)` also catches NaN. SIZE_MAX is not a double: it rounds up to 2^64.
+    if (!(value > 0)) return 0;
+    if (value >= 0x1p64) return kj::maxValue;
+    return static_cast<size_t>(value);
   }
   return 0;
 }
@@ -746,7 +750,7 @@ kj::ArrayPtr<const kj::byte> JsArrayBuffer::asArrayPtr() const {
 JsArrayBuffer JsArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 
@@ -936,7 +940,7 @@ kj::ArrayPtr<const kj::byte> JsSharedArrayBuffer::asArrayPtr() const {
 JsSharedArrayBuffer JsSharedArrayBuffer::slice(Lock& js, size_t newLength) const {
   JSG_REQUIRE(newLength <= size(), RangeError, "New length exceeds buffer length");
   auto dest = create(js, newLength);
-  dest.asArrayPtr().copyFrom(asArrayPtr().slice(0, newLength));
+  dest.asArrayPtr().copyFrom(asArrayPtr().first(newLength));
   return dest;
 }
 

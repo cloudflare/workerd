@@ -13,14 +13,12 @@ filegroup(
         "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
-        "bench.c++",
         "blob.c++",
         "bootstrap-utils.c++",
         "cache.c++",
         "container.c++",
         "event-target-bootstrap.c++",
         "events.c++",
-        "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
         "filesystem-bootstrap.c++",
@@ -52,7 +50,6 @@ filegroup(
         "url-standard.c++",
         "web-socket.c++",
         "worker-rpc.c++",
-        "wrapped-binding.c++",
     ] + glob(
         [
             "crypto/*.c++",
@@ -61,6 +58,7 @@ filegroup(
         exclude = [
             "**/*test*.c++",
             "crypto/crc-impl.c++",
+            "crypto/endianness.c++",
             "streams/compression.c++",
             "streams/encoding.c++",
         ],
@@ -76,14 +74,12 @@ filegroup(
         "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
-        "bench.h",
         "blob.h",
         "bootstrap-utils.h",
         "cache.h",
         "container.h",
         "event-target-bootstrap.h",
         "events.h",
-        "eventsource.h",
         "export-loopback.h",
         "filesystem.h",
         "filesystem-bootstrap.h",
@@ -115,7 +111,6 @@ filegroup(
         "url-standard.h",
         "web-socket.h",
         "worker-rpc.h",
-        "wrapped-binding.h",
     ] + glob(
         [
             "crypto/*.h",
@@ -123,6 +118,7 @@ filegroup(
         ],
         exclude = [
             "crypto/crc-impl.h",
+            "crypto/endianness.h",
             "streams/compression.h",
             "streams/encoding.h",
         ],
@@ -134,6 +130,7 @@ wd_cc_library(
     name = "analytics-engine",
     srcs = [
         "analytics-engine.c++",
+        "analytics-engine-impl.c++",
     ],
     hdrs = [
         "analytics-engine.h",
@@ -241,6 +238,34 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "crypto-endianness",
+    srcs = [
+        "crypto/endianness.c++",
+    ],
+    hdrs = [
+        "crypto/endianness.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "wrapped-binding",
+    srcs = [
+        "wrapped-binding.c++",
+    ],
+    hdrs = [
+        "wrapped-binding.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface_capnp",
+        "//src/workerd/jsg",
+        "//src/workerd/jsg:url",
+    ],
+)
+
+wd_cc_library(
     name = "fuzzilli",
     srcs = [
         "fuzzilli.c++",
@@ -264,6 +289,7 @@ wd_cc_library(
         "kv.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:http-util",
         "//src/workerd/util:mimetype",
     ],
     visibility = ["//visibility:public"],
@@ -410,6 +436,7 @@ wd_cc_library(
         ":memory-cache",
         ":r2",
         ":workers-module",
+        ":wrapped-binding",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
@@ -463,7 +490,7 @@ wd_cc_library(
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
         "//src/pyodide:pyodide_static",
-        "//src/pyodide:python_packages_capnp",
+        "//src/pyodide/bundle:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj:kj-async-io",
@@ -500,6 +527,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -515,6 +543,7 @@ wd_cc_library(
         "encoding-shared.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:autogate",
         "//src/workerd/util:strings",
         "@simdutf",
     ],
@@ -571,6 +600,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -656,7 +686,6 @@ wd_cc_library(
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
         "alarm-retry-test.c++",
-        "bench-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
@@ -723,6 +752,7 @@ kj_test(
         "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:thread-scopes",
     ],
 )
@@ -748,14 +778,6 @@ kj_test(
 
 kj_test(
     src = "streams/internal-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
-kj_test(
-    src = "eventsource-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -798,6 +820,22 @@ kj_test(
 
 kj_test(
     src = "serialization-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "dom-exception-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "messagechannel-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -871,6 +909,7 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:stream-utils",
     ],
 )
 
@@ -898,6 +937,14 @@ wd_cc_benchmark(
 
 kj_test(
     src = "sql-toarray-oom-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "string-sandbox-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -952,6 +999,15 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "binding-snapshot-test.c++",
+    deps = [
+        ":wrapped-binding",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(
@@ -1024,4 +1080,13 @@ wd_test(
     src = "streams/body-read-operation-test.wd-test",
     args = ["--experimental"],
     data = ["streams/body-read-operation-test.js"],
+)
+
+kj_test(
+    src = "worker-loader-source-test.c++",
+    deps = [
+        ":worker-loader",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )

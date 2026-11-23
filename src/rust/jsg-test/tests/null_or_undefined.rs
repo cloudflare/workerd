@@ -119,17 +119,31 @@ fn conversion_preserves_all_states() {
     });
 }
 
+/// Without `dont_substitute_null_on_type_error`, a value that `T` does not take is null, as for
+/// C++ `jsg::Optional<kj::Maybe<T>>`; with it, it is a type error.
 #[test]
 fn methods_accept_omission_and_report_inner_type_errors() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(lock, Args {}).to_js(lock)?;
-        ctx.set_global(lock, "args", args);
-        assert!(ctx.eval::<bool>(lock, "args.echo() === undefined && args.echo(undefined) === undefined && args.echo(null) === null && args.echo('x') === 'x'").unwrap());
-        assert_eq!(ctx.eval::<String>(lock, "try { args.strict(123) } catch(e) { e.message }").unwrap(),
-            "Failed to execute 'strict' on 'Args': parameter 1 is not of type 'string'.");
-        Ok(())
-    });
+    for no_substitute_null in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| {
+            flags.set_no_substitute_null(no_substitute_null);
+        });
+        harness.run_in_context(|lock, ctx| {
+            let args = jsg::Rc::new(lock, Args {}).to_js(lock)?;
+            ctx.set_global(lock, "args", args);
+            assert!(ctx.eval::<bool>(lock, "args.echo() === undefined && args.echo(undefined) === undefined && args.echo(null) === null && args.echo('x') === 'x'").unwrap());
+            let expected = if no_substitute_null {
+                "Failed to execute 'strict' on 'Args': parameter 1 is not of type 'string'."
+            } else {
+                "false"
+            };
+            assert_eq!(
+                ctx.eval::<String>(lock, "try { String(args.strict(123)) } catch(e) { e.message }")
+                    .unwrap(),
+                expected
+            );
+            Ok(())
+        });
+    }
 }
 
 #[test]
@@ -194,22 +208,23 @@ fn struct_fields_preserve_states_with_both_wrapping_modes() {
 
 #[test]
 fn lenient_conversion_only_swallows_shallow_mismatches() {
-    let harness = crate::Harness::new();
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_no_substitute_null(true));
     harness.run_in_context(|lock, ctx| {
         type Strict = NullOrUndefined<jsg::NonCoercible<String>>;
         let input = ctx.eval_raw(lock, "123").unwrap();
         assert!(Strict::from_js(lock, input).is_err());
         assert!(Strict::try_from_js(lock, input)?.is_none());
 
-        let lenient = jsg::Lenient::<Strict>::from_js(lock, input)?;
-        let (value, original) = lenient.to_parts();
-        assert!(value.is_undefined());
-        assert!(original.is_some());
-        let lenient = jsg::Lenient::<Strict>::from_js(lock, input)?;
-        assert!(NullOrUndefined::from(lenient).is_undefined());
+        assert!(jsg::LenientOption::<Strict>::from_js(lock, input)?.is_none());
+        // `null` goes through `T`, which here keeps it.
+        let null = lock.null();
+        let lenient = jsg::LenientOption::<Strict>::from_js(lock, null)?;
+        assert!(lenient.0.is_some_and(|value| value.is_null()));
 
         let malformed = ctx.eval_raw(lock, "[123]").unwrap();
-        assert!(jsg::Lenient::<NullOrUndefined<Vec<Fields>>>::from_js(lock, malformed).is_err());
+        assert!(
+            jsg::LenientOption::<NullOrUndefined<Vec<Fields>>>::from_js(lock, malformed).is_err()
+        );
         let throwing = ctx
             .eval_raw(lock, "({ toString() { throw new Error('coercion'); } })")
             .unwrap();

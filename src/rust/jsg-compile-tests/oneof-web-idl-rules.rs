@@ -90,7 +90,7 @@ pub enum TwoNullables {
     Integer(Nullable<String>),
 }
 
-#[jsg_oneof] //~ ERROR E0080: may not contain Option<T> or Lenient<T>
+#[jsg_oneof] //~ ERROR E0080: may not contain Option<T> or LenientOption<T>
 pub enum Optional {
     Number(Option<f64>),
     String(String),

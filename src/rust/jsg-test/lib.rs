@@ -4,6 +4,7 @@
 
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
@@ -24,6 +25,7 @@ mod ffi {
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
+        type CompiledWasmModule = jsg::v8::ffi::CompiledWasmModule;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -56,6 +58,15 @@ mod ffi {
             flags: &[u8],
             fast_api: FastApi,
         ) -> Result<KjOwn<TestHarness>>;
+
+        /// See [`crate::snapshot_round_trip`].
+        pub unsafe fn snapshot_round_trip(
+            flags: &[u8],
+            top_level_data: usize,
+            top_level: unsafe fn(usize, *mut Isolate, Pin<&mut EvalContext>),
+            restored_data: usize,
+            restored: unsafe fn(usize, *mut Isolate, Pin<&mut EvalContext>),
+        ) -> String;
         pub unsafe fn run_in_context(
             self: &TestHarness,
             data: usize, /* callback */
@@ -71,6 +82,11 @@ mod ffi {
             callback: unsafe fn(usize /* callback */),
         );
 
+        /// Takes the realm's cached templates and resets them, as the snapshot pipeline does.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn take_realm_templates(self: &TestHarness);
+
         pub unsafe fn eval(
             self: &EvalContext,
             code: &str,
@@ -82,6 +98,11 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn eval_with_caught_exception(self: &EvalContext, code: &str) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Makes `exports` the exports of the loaded bootstrap module named `specifier`. See
+        /// `set_bootstrap_module` in `ffi.h`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_bootstrap_module(self: &EvalContext, specifier: &str, exports: Local);
         /// Has `register_modules` add builtin modules, then calls the callback of the one named
         /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
         pub unsafe fn call_builtin_module(
@@ -114,11 +135,29 @@ mod ffi {
             callback: unsafe fn(usize /* callback */),
         );
 
+        /// Calls `callback` with KJ logging at every severity and returns what it logged, each
+        /// as `"<severity>: <text>"`. See `capture_kj_logs` in `ffi.h`.
+        pub unsafe fn capture_kj_logs(
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        ) -> Vec<String>;
+
+        /// Fails with a `FAILED` KJ exception with `description`.
+        pub fn fail_with_kj_exception(description: &str) -> Result<()>;
+
         /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
         /// global and traced handle nodes in use.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
+
+        /// `v8::HandleScope::NumberOfHandles()`: the local handles alive in the isolate's
+        /// handle scopes.
+        pub unsafe fn number_of_handles(isolate: *mut Isolate) -> i32;
+
+        /// The external memory that embedders have attributed to the isolate; see
+        /// `external_memory` in `ffi.h`.
+        pub unsafe fn external_memory(isolate: *mut Isolate) -> i64;
 
         /// Takes a heap snapshot of the isolate, which includes what `jsg::MemoryTracker`
         /// reports, and returns it serialized as JSON.
@@ -149,16 +188,28 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
-        /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
+        /// Serializes `value` into `result` with C++ JSG's `jsg::Serializer`. Returns false if
+        /// serialization throws, leaving the exception pending.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+        pub unsafe fn cpp_serialize(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
 
-        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
-        /// throws.
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Returns none if
+        /// deserialization throws, leaving the exception pending, which is a JavaScript exception
+        /// even where C++ JSG throws a KJ exception, as a JSG method's glue makes it one.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+
+        /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
+        /// `value`, or returns false if creating it threw, leaving the exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_exception_to_kj(isolate: *mut Isolate, value: Local) -> Result<bool>;
 
         /// Converts `exception` to a `kj::Exception` and back, as C++ JSG does with
         /// `jsg::Lock::exceptionToKj()` and `jsg::Lock::exceptionToJsValue()`. Fails if
@@ -167,15 +218,58 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
 
-        /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which
-        /// is its class's descriptor if it is cloneable. Fails if it is not an object.
+        /// The key of the V8 private property `name`, as the per-isolate bootstrap gives it to
+        /// JavaScript.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn mark_js_serializable(
+        pub unsafe fn private_symbol(isolate: *mut Isolate, name: &str) -> Result<Local>;
+
+        /// Disallows JavaScript execution as JSG code sees it, or allows it again. Fails if it
+        /// allows it more often than it disallowed it.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_javascript_execution_disallowed(
+            isolate: *mut Isolate,
+            disallowed: bool,
+        ) -> Result<()>;
+
+        /// Allows or disallows dynamic code evaluation, WebAssembly compilation included.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_allow_eval(isolate: *mut Isolate, allow: bool);
+
+        /// Makes a `WebAssembly.Module` from `module` without recompiling it, as C++ code
+        /// that the module is handed to does. Fails if V8 creates none.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn wasm_module_object_from_compiled_module(
+            isolate: *mut Isolate,
+            module: KjOwn<CompiledWasmModule>,
+        ) -> Result<Local>;
+
+        /// Gives `object` `name` and `message` as an error implemented in the per-isolate
+        /// bootstrap holds them. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_error_slots(
             isolate: *mut Isolate,
             object: Local,
-            mark: Local,
+            name: &str,
+            message: &str,
         ) -> Result<()>;
+
+        /// Creates an instance of the per-isolate bootstrap's `DOMException`, as
+        /// `jsg::newBootstrapDomException()` does, whose prototype is `prototype`, with `name`,
+        /// `message` and `stack`. Fails if `prototype` is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn new_bootstrap_dom_exception(
+            isolate: *mut Isolate,
+            prototype: Local,
+            name: &str,
+            message: &str,
+            stack: &str,
+        ) -> Result<Local>;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
@@ -216,6 +310,108 @@ mod ffi {
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+/// A canonical `CompatibilityFlags` message that `set_flags` filled in.
+fn flags_words(set_flags: impl FnOnce(compatibility_flags::Builder<'_>)) -> Vec<capnp::Word> {
+    let mut message = capnp::message::Builder::new_default();
+    set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
+    message
+        .into_reader()
+        .canonicalize()
+        .expect("canonicalizing a freshly built message cannot fail")
+}
+
+/// A callback that a harness runs in a context, and the panic it raised.
+struct ContextCall<F> {
+    callback: Option<F>,
+    panic: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl<F> ContextCall<F>
+where
+    F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+{
+    fn new(callback: F) -> Self {
+        Self {
+            callback: Some(callback),
+            panic: None,
+        }
+    }
+
+    /// Runs the callback for C++, which passes the address of a `ContextCall<F>` as `data`.
+    #[expect(clippy::needless_pass_by_value)]
+    fn trampoline(
+        data: usize,
+        isolate: *mut v8::ffi::Isolate,
+        context: Pin<&mut ffi::EvalContext>,
+    ) {
+        // SAFETY: C++ passes back the address of the `ContextCall<F>` it was given.
+        let call = unsafe { &mut *(data as *mut Self) };
+        let Some(callback) = call.callback.take() else {
+            return;
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut eval_context = EvalContext { inner: &context };
+            // SAFETY: C++ calls this with the isolate locked, a context entered and a
+            // HandleScope open for the duration of the call.
+            jsg::callback_scope!(unsafe let lock, isolate);
+            if let Err(e) = callback(lock, &mut eval_context) {
+                panic!("Test failed: {}: {}", e.name, e.message);
+            }
+        }));
+        if let Err(payload) = result {
+            call.panic = Some(payload);
+        }
+    }
+
+    fn resume_panic(&mut self) {
+        if let Some(payload) = self.panic.take() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
+/// Builds a startup snapshot with `top_level`, and runs `restored` in an isolate started from it.
+///
+/// The zygote runs `top_level` in its context, as a Worker's does. The isolate started from the
+/// snapshot runs `restored` in its context, which the snapshot carried over with the objects
+/// `top_level` left reachable. Both isolates have all compatibility flags off. Returns why the
+/// zygote failed, in which case `restored` does not run.
+///
+/// # Errors
+///
+/// The description of the KJ exception that failed the zygote.
+///
+/// # Panics
+///
+/// Panics if either callback panics or fails.
+pub fn snapshot_round_trip<T, R>(top_level: T, restored: R) -> Result<(), String>
+where
+    T: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+    R: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+{
+    let words = flags_words(|_| {});
+    let mut top_level = ContextCall::new(top_level);
+    let mut restored = ContextCall::new(restored);
+    // SAFETY: both calls are valid for the duration of snapshot_round_trip, and each trampoline
+    // is given the address of its own.
+    let failure = unsafe {
+        ffi::snapshot_round_trip(
+            capnp::Word::words_to_bytes(&words),
+            &raw mut top_level as usize,
+            ContextCall::<T>::trampoline,
+            &raw mut restored as usize,
+            ContextCall::<R>::trampoline,
+        )
+    };
+    top_level.resume_panic();
+    restored.resume_panic();
+    if failure.is_empty() {
+        Ok(())
+    } else {
+        Err(failure)
+    }
+}
 
 /// The process's autogate configuration that [`set_autogates`] made.
 ///
@@ -384,6 +580,23 @@ impl EvalContext<'_> {
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
+
+    /// Makes `exports` the exports of the loaded bootstrap module named `specifier`, among which
+    /// Rust JSG's and C++ JSG's deserializers look up classes implemented in JavaScript by their
+    /// `deserializeInfo`, `"specifier:Export"`. The harness runs no bootstrap, so this stands in
+    /// for its modules until the callback of [`Harness::run_in_context`] returns.
+    pub fn set_bootstrap_module<'s>(
+        &self,
+        _lock: &mut jsg::Lock<'s>,
+        specifier: &str,
+        exports: v8::Local<'s, v8::Value>,
+    ) {
+        // SAFETY: self.inner is a valid EvalContext, and `exports` belongs to the lock's scope.
+        unsafe {
+            self.inner
+                .set_bootstrap_module(specifier, exports.into_ffi());
+        }
+    }
 }
 
 impl Harness {
@@ -422,12 +635,7 @@ impl Harness {
         set_flags: impl FnOnce(compatibility_flags::Builder<'_>),
         fast_api: ffi::FastApi,
     ) -> Self {
-        let mut message = capnp::message::Builder::new_default();
-        set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
-        let words = message
-            .into_reader()
-            .canonicalize()
-            .expect("canonicalizing a freshly built message cannot fail");
+        let words = flags_words(set_flags);
         let bytes = capnp::Word::words_to_bytes(&words);
         // SAFETY: create_test_harness initializes the V8 platform and returns a valid harness.
         Self(
@@ -452,50 +660,14 @@ impl Harness {
     where
         F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
     {
-        struct Call<F> {
-            callback: Option<F>,
-            panic: Option<Box<dyn std::any::Any + Send>>,
-        }
-
-        #[expect(clippy::needless_pass_by_value)]
-        fn trampoline<F>(
-            data: usize,
-            isolate: *mut v8::ffi::Isolate,
-            context: Pin<&mut ffi::EvalContext>,
-        ) where
-            F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
-        {
-            // SAFETY: data was cast from &raw mut Call<F> in run_in_context below.
-            let call = unsafe { &mut *(data as *mut Call<F>) };
-            let Some(callback) = call.callback.take() else {
-                return;
-            };
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut eval_context = EvalContext { inner: &context };
-                // SAFETY: the C++ harness calls this with the isolate locked, a context
-                // entered and a HandleScope open for the duration of the call.
-                jsg::callback_scope!(unsafe let lock, isolate);
-                if let Err(e) = callback(lock, &mut eval_context) {
-                    panic!("Test failed: {}: {}", e.name, e.message);
-                }
-            }));
-            if let Err(payload) = result {
-                call.panic = Some(payload);
-            }
-        }
-
-        let mut call = Call {
-            callback: Some(callback),
-            panic: None,
-        };
-        // SAFETY: `call` is valid for the duration of run_in_context.
+        let mut call = ContextCall::new(callback);
+        // SAFETY: `call` is valid for the duration of run_in_context, and the trampoline is
+        // given its address.
         unsafe {
             self.0
-                .run_in_context(&raw mut call as usize, trampoline::<F>);
+                .run_in_context(&raw mut call as usize, ContextCall::<F>::trampoline);
         }
-        if let Some(payload) = call.panic {
-            std::panic::resume_unwind(payload);
-        }
+        call.resume_panic();
     }
 
     /// Drops the realm, as the isolate's teardown does before it disposes the isolate, then runs
@@ -535,6 +707,13 @@ impl Harness {
         if let Some(payload) = call.panic {
             std::panic::resume_unwind(payload);
         }
+    }
+
+    /// Takes the realm's cached templates and resets their handles, under the isolate lock, as
+    /// the startup snapshot pipeline does before it creates the snapshot.
+    pub fn take_realm_templates(&self) {
+        // SAFETY: the harness is valid, and no Rust `Lock` is in use outside a callback.
+        unsafe { self.0.take_realm_templates() };
     }
 
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
@@ -623,6 +802,23 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
+    /// counts taken earlier.
+    #[must_use]
+    pub fn number_of_handles(lock: &mut jsg::Lock<'_>) -> i32 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::number_of_handles(lock.isolate().as_ffi()) }
+    }
+
+    /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have
+    /// attributed to the isolate and that has reached V8. Tests compare it with amounts taken
+    /// earlier.
+    #[must_use]
+    pub fn external_memory(lock: &mut jsg::Lock<'_>) -> i64 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::external_memory(lock.isolate().as_ffi()) }
+    }
+
     /// Takes a heap snapshot, as the inspector's `HeapProfiler.takeHeapSnapshot` does, and
     /// returns it in V8's JSON format.
     ///
@@ -653,24 +849,120 @@ impl Harness {
         }
     }
 
-    /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which C++
-    /// JSG's `jsg::Serializer` serializes it through if `mark` is its class's descriptor (see
-    /// `jsg/ser.h`).
+    /// The key of the V8 private property `name`, as the per-isolate bootstrap's
+    /// `utils.getPrivateSymbol()` gives it to JavaScript, which can use it as a property key that
+    /// no reflection reveals. The names of the serialization protocol's properties are those of
+    /// C++ JSG's `JS_SERIALIZE_MODE_KEY`, `JS_CLONEABLE_KEY` and `DOM_EXCEPTION_PROTOTYPE_KEY`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if creating it throws.
+    pub fn private_symbol<'s>(lock: &mut jsg::Lock<'s>, name: &str) -> v8::Local<'s, v8::Value> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which the result belongs to.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::private_symbol(lock.isolate().as_ffi(), name)
+                    .expect("creating the symbol should not throw"),
+            )
+        }
+    }
+
+    /// Disallows JavaScript execution as JSG code sees it, as `jsg::DisallowJavaScriptScope`
+    /// does without V8's own guard, or allows it again.
+    ///
+    /// # Panics
+    ///
+    /// Panics if it allows it more often than it disallowed it.
+    pub fn set_javascript_execution_disallowed(lock: &mut jsg::Lock<'_>, disallowed: bool) {
+        // SAFETY: `lock` proves the isolate is locked.
+        unsafe { ffi::set_javascript_execution_disallowed(lock.isolate().as_ffi(), disallowed) }
+            .expect("JavaScript execution should have been disallowed");
+    }
+
+    /// Allows or disallows dynamic code evaluation (`eval()`, `new Function()` and WebAssembly
+    /// compilation), as C++ JSG's `jsg::Lock::setAllowEval()` does. The harness disallows it.
+    pub fn set_allow_eval(lock: &mut jsg::Lock<'_>, allow: bool) {
+        // SAFETY: `lock` proves the isolate is locked.
+        unsafe { ffi::set_allow_eval(lock.isolate().as_ffi(), allow) }
+    }
+
+    /// Makes a `WebAssembly.Module` from `module` in C++, without recompiling it, as C++ code
+    /// that Rust hands a [`v8::CompiledWasmModule`] to does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 creates no module object.
+    pub fn wasm_module_object_from_compiled_module<'s>(
+        lock: &mut jsg::Lock<'s>,
+        module: v8::CompiledWasmModule,
+    ) -> v8::Local<'s, v8::WasmModuleObject> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which the result belongs to.
+        let local = unsafe {
+            v8::Local::<v8::Value>::from_ffi(
+                ffi::wasm_module_object_from_compiled_module(
+                    lock.isolate().as_ffi(),
+                    module.into_ffi(),
+                )
+                .expect("V8 should create the module object"),
+            )
+        };
+        local
+            .try_into()
+            .expect("the result should be a WebAssembly.Module")
+    }
+
+    /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,
+    /// whose `name` and `message` are accessors, holds them: under the private symbols that C++
+    /// JSG's `ERROR_NAME_KEY` and `ERROR_MESSAGE_KEY` name, which
+    /// [`v8::Local::<v8::Value>::to_detail_string`] reads.
     ///
     /// # Panics
     ///
     /// Panics if `object` is not an object.
-    pub fn mark_js_serializable<'s>(
+    pub fn set_error_slots<'s>(
         lock: &mut jsg::Lock<'s>,
         object: v8::Local<'s, v8::Value>,
-        mark: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
     ) {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which `object` and `mark` belong to.
+        // open, which `object` belongs to.
+        unsafe { ffi::set_error_slots(lock.isolate().as_ffi(), object.into_ffi(), name, message) }
+            .expect("the value should be an object");
+    }
+
+    /// An instance of the per-isolate bootstrap's `DOMException`, as C++ JSG's
+    /// `jsg::newBootstrapDomException()` creates one: an API wrapper object without internal
+    /// fields, which holds its brand, `name` and `message` under private symbols, with `stack` as
+    /// an own data property. Its prototype is `prototype`. The harness has no bootstrap, so this
+    /// stands in for one, and C++ JSG reads a serialized one as its own `DOMException`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `prototype` is not an object.
+    pub fn new_bootstrap_dom_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        prototype: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
+        stack: &str,
+    ) -> v8::Local<'s, v8::Value> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `prototype` and the result belong to.
         unsafe {
-            ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
+            v8::Local::from_ffi(
+                ffi::new_bootstrap_dom_exception(
+                    lock.isolate().as_ffi(),
+                    prototype.into_ffi(),
+                    name,
+                    message,
+                    stack,
+                )
+                .expect("the prototype should be an object"),
+            )
         }
-        .expect("the value should be an object");
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
@@ -688,10 +980,33 @@ impl Harness {
     ///
     /// Panics if serialization throws.
     pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
+        Self::cpp_try_serialize(lock, value).expect("C++ JSG should serialize the value")
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer`, as [`Self::cpp_serialize`] does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if serialization throws.
+    ///
+    /// # Panics
+    ///
+    /// Panics if C++ JSG throws a KJ exception.
+    pub fn cpp_try_serialize<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Vec<u8>, jsg::Error> {
+        let mut data = Vec::new();
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open, which `value` belongs to.
-        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi()) }
-            .expect("C++ JSG should serialize the value")
+        let ok =
+            unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi(), &mut data) }
+                .expect("C++ JSG should throw only JavaScript exceptions");
+        if ok {
+            Ok(data)
+        } else {
+            Err(jsg::Error::pending())
+        }
     }
 
     /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
@@ -701,12 +1016,50 @@ impl Harness {
     ///
     /// Panics if deserialization throws.
     pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        Self::cpp_try_deserialize(lock, data).expect("C++ JSG should deserialize the data")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, as [`Self::cpp_deserialize`]
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if deserialization throws. A KJ exception, such as
+    /// the internal error for a missing header, becomes a JavaScript one, as a JSG method's glue
+    /// makes it one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the harness throws anything but a JavaScript exception.
+    pub fn cpp_try_deserialize<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
         // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
         unsafe {
-            v8::Local::from_ffi(
+            v8::Local::from_ffi_maybe(
                 ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
-                    .expect("C++ JSG should deserialize the data"),
+                    .expect("the harness should throw only JavaScript exceptions"),
             )
+        }
+        .ok_or_else(jsg::Error::pending)
+    }
+
+    /// The KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for `value`, to compare
+    /// with [`jsg::Lock::exception_to_kj`].
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`jsg::Error::is_pending`] is true if creating it threw,
+    /// leaving the exception pending.
+    pub fn cpp_exception_to_kj<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<cxx::KjError> {
+        // SAFETY: as for `cpp_serialize`.
+        match unsafe { ffi::cpp_exception_to_kj(lock.isolate().as_ffi(), value.into_ffi()) } {
+            Ok(_) => Err(jsg::Error::pending()),
+            Err(exception) => Ok(exception.into()),
         }
     }
 
@@ -812,11 +1165,68 @@ impl Harness {
     }
 }
 
+/// A field that adds one to its counter when it is dropped, for a test resource that counts its
+/// drops. A resource that holds GC references can't implement `Drop` itself.
+#[jsg_macros::jsg_traced]
+pub struct DropCounter(pub &'static AtomicUsize);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// Whether `a` and `b` belong to the same `v8::IsolateGroup`.
 pub fn isolates_share_group(a: &jsg::Isolate, b: &jsg::Isolate) -> bool {
     // SAFETY: both references keep their isolates alive; reading an isolate's group needs no
     // lock.
     unsafe { ffi::isolates_share_group(a.as_ffi(), b.as_ffi()) }
+}
+
+/// Runs `f` and returns what it returns, with what KJ logged on this thread while it ran.
+///
+/// Every severity from `info` up is captured, each message as `"<severity>: <text>"`, as C++
+/// tests observe logging with `KJ_EXPECT_LOG`. What is captured is not written to stderr.
+///
+/// # Panics
+///
+/// Panics if `f` panics, once logging is restored.
+pub fn capture_kj_logs<F: FnOnce() -> R, R>(f: F) -> (R, Vec<String>) {
+    struct Call<F, R> {
+        f: Option<F>,
+        result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+    }
+
+    fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+        // SAFETY: data was cast from &raw mut Call<F, R> in capture_kj_logs below.
+        let call = unsafe { &mut *(data as *mut Call<F, R>) };
+        let Some(f) = call.f.take() else {
+            return;
+        };
+        // A panic must not unwind into C++.
+        call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)));
+    }
+
+    let mut call = Call::<F, R> {
+        f: Some(f),
+        result: None,
+    };
+    // SAFETY: `call` is valid for the duration of capture_kj_logs.
+    let logs = unsafe { ffi::capture_kj_logs(&raw mut call as usize, trampoline::<F, R>) };
+    match call.result.expect("the callback ran") {
+        Ok(result) => (result, logs),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Fails with a `FAILED` KJ exception with `description`, as a C++ function that a cxx bridge
+/// calls fails.
+///
+/// # Errors
+///
+/// Always.
+pub fn fail_with_kj_exception(description: &str) -> Result<(), cxx::KjException> {
+    ffi::fail_with_kj_exception(description)
 }
 
 impl Default for Harness {

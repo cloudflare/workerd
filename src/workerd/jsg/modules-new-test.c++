@@ -1203,6 +1203,58 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
 
 // ======================================================================================
 
+KJ_TEST("Importing a jsg::Object module throws the error its factory threw") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addSyntheticModule("factory",
+        Module::newJsgObjectModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            [](Lock& js) -> Ref<TestType> {
+      js.throwException(js.typeError("the factory failed"));
+    }));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "file:///factory");
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      auto thrown = kj::str(JsValue(exception.getHandle(js)));
+      KJ_ASSERT(thrown == "TypeError: the factory failed", thrown);
+    });
+  });
+}
+
+KJ_TEST("A termination in a jsg::Object module's factory stays a termination") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addSyntheticModule("factory",
+        Module::newJsgObjectModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            [](Lock& js) -> Ref<TestType> { js.terminateExecutionNow(); }));
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+    v8::TryCatch tryCatch(js.v8Isolate);
+    bool threw = false;
+    try {
+      ModuleRegistry::resolve(js, "file:///factory");
+    } catch (JsExceptionThrown&) {
+      threw = true;
+    }
+    KJ_ASSERT(threw);
+    KJ_ASSERT(tryCatch.HasTerminated());
+    js.v8Isolate->CancelTerminateExecution();
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("import.meta works as expected") {
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
@@ -1866,6 +1918,28 @@ KJ_TEST("Recursive import works or fails as expected") {
 
 // ======================================================================================
 
+KJ_TEST("Dynamic import of a module that is still evaluating resolves to its namespace") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // foo is still evaluating when bar, which foo imports dynamically from its top-level code,
+    // dynamically imports foo back. V8 aborts the process if asked to evaluate foo again.
+    bundleBuilder.addEsmModule("foo", "export const bar = import('bar'); export default 1;"_kjc);
+    bundleBuilder.addEsmModule("bar", "export const foo = import('foo'); export default 2;"_kjc);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    auto val = ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
+    KJ_ASSERT(val.isNumber());
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (dynamic import)") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;
@@ -2103,6 +2177,39 @@ KJ_TEST("A throwing module evaluation does not leak the evaluation depth") {
       auto num = KJ_ASSERT_NONNULL(val.tryCast<JsNumber>());
       KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 1.0);
     }, [&](Value exception) { KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js))); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic imports retry linking after their dependency finishes evaluating") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addEsmModule("entry",
+        "export const a = 1;\n"
+        "export const p = Promise.all([import('chunk'), import('chunk')]).then(([a, b]) => {\n"
+        "  if (a !== b) throw new Error('different module instances');\n"
+        "  return a.b;\n"
+        "});\n"_kjc,
+        Module::Flags::MAIN);
+    bundleBuilder.addEsmModule(
+        "chunk", "import { a } from 'entry';\nawait 0;\nexport const b = a + 1;\n"_kjc);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // The depth-0 drain must finish both the retried link and its top-level await.
+      auto p = ModuleRegistry::resolve(js, "file:///entry", "p"_kjc);
+      auto promise = KJ_ASSERT_NONNULL(p.tryCast<JsPromise>());
+      KJ_ASSERT(promise.state() == PromiseState::FULFILLED, kj::str(promise.result()));
+      auto num = KJ_ASSERT_NONNULL(promise.result().tryCast<JsNumber>());
+      KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 2.0);
+    }
+    JSG_CATCH(exception) {
+      KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js)));
+    }
   });
 }
 
@@ -2602,31 +2709,30 @@ KJ_TEST("ESM compile cache is reused across isolates") {
   bundleBuilder.addEsmModule("foo", "export default 123;"_kjc);
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
-  {
+  auto compileInNewIsolate = [&]() {
     PREAMBLE([&](Lock& js) {
       auto attached = registry->attachToIsolate(js, observer);
       KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
     });
-  }
+  };
 
+  // The first isolate does not serialize: no other isolate may ever compile the module.
+  compileInNewIsolate();
   auto first = observer.getCounts();
-  KJ_ASSERT(first.cacheGenerated == 1);
+  KJ_ASSERT(first.cacheGenerated == 0);
   KJ_ASSERT(first.cacheFound == 0);
-  KJ_ASSERT(first.cacheRejected == 0);
-  KJ_ASSERT(first.cacheGenerationFailed == 0);
 
-  {
-    PREAMBLE([&](Lock& js) {
-      auto attached = registry->attachToIsolate(js, observer);
-      KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
-    });
-  }
-
+  compileInNewIsolate();
   auto second = observer.getCounts();
   KJ_ASSERT(second.cacheGenerated == 1);
-  KJ_ASSERT(second.cacheFound == 1);
-  KJ_ASSERT(second.cacheRejected == 0);
-  KJ_ASSERT(second.cacheGenerationFailed == 0);
+  KJ_ASSERT(second.cacheFound == 0);
+
+  compileInNewIsolate();
+  auto third = observer.getCounts();
+  KJ_ASSERT(third.cacheGenerated == 1);
+  KJ_ASSERT(third.cacheFound == 1);
+  KJ_ASSERT(third.cacheRejected == 0);
+  KJ_ASSERT(third.cacheGenerationFailed == 0);
 }
 
 // ======================================================================================

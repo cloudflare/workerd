@@ -178,6 +178,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
+- **`src/opentelemetry/`** - OTLP schemas vendored from opentelemetry-proto, for tests that decode the spans and logs workerd exports; see `src/opentelemetry/AGENTS.md` for how they are updated
 
 ### Configuration System
 
@@ -204,9 +205,9 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
-| JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
+| JS benchmarks          | `src/workerd/api/bench-api/`, `bench-core/`, `build/wd_bench.bzl` | Rust `BenchController` and runner (`bench-api`); report building, clocks (`bench-core`); schema `io/bench.capnp`; driver `server/server/bench.rs` |
 | Streams benchmarks     | `src/bench/streams/`                                          | C++ vs TS streams: the same modules under a cell per implementation; see its `AGENTS.md`                     |
-| Clone benchmarks       | `src/bench/serialization/`                                    | `structuredClone()` of object graphs, class instances, arrays and strings                                    |
+| Clone benchmarks       | `src/bench/serialization/`                                    | `structuredClone()`, C++ vs TS (`TS_STRUCTURED_CLONE`): object graphs, arrays, strings, options, cold calls  |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | See `docs/v8-updates.md`                                                                                     |
 | Startup snapshot       | `src/workerd/jsg/snapshot.{h,c++}`, `setup.{h,c++}`           | Zygote bakes the top level into a V8 snapshot; `STARTUP_SNAPSHOT` autogate; see `docs/startup-snapshot.md`   |
@@ -222,6 +223,11 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
   `HEAD~`
 - **Pre-commit hook**: `githooks/pre-commit`, enabled with `git config core.hooksPath githooks`;
   blocks `KJ_DBG` in staged code and runs a format check (see `docs/development.md`)
+- **Includes**: Don't include headers that a file doesn't use. clang-tidy enforces this for
+  headers with `misc-include-cleaner` (see `HEADER_ONLY_CHECKS` in
+  `build/tools/clang_tidy/check_path_filters.bzl`), which ignores KJ headers and doesn't
+  report missing includes. Remove unused includes from `.c++` files too, though nothing
+  enforces it there.
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 

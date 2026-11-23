@@ -625,3 +625,107 @@ export const make_sure_posix_win32_works = {
     }
   },
 };
+
+// Expected values match Node.js 26.12 path.matchesGlob() on Linux. The first ten
+// rows of each table are test/parallel/test-path-glob.js.
+export const test_path_matches_glob = {
+  test() {
+    const globs = {
+      win32: [
+        ['foo\\bar\\baz', 'foo\\[bcr]ar\\baz', true],
+        ['foo\\bar\\baz', 'foo\\[!bcr]ar\\baz', false],
+        ['foo\\bar\\baz', 'foo\\[bc-r]ar\\baz', true],
+        ['foo\\bar\\baz', 'foo\\*\\!bar\\*\\baz', false],
+        ['foo\\bar1\\baz', 'foo\\bar[0-9]\\baz', true],
+        ['foo\\bar5\\baz', 'foo\\bar[0-9]\\baz', true],
+        ['foo\\barx\\baz', 'foo\\bar[a-z]\\baz', true],
+        ['foo\\bar\\baz\\boo', 'foo\\[bc-r]ar\\baz\\*', true],
+        ['foo\\bar\\baz', 'foo/**', true],
+        ['foo\\bar\\baz', '*', false],
+        ['foo/bar', 'foo\\bar', true],
+        ['C:\\foo\\bar.txt', 'C:\\foo\\*.txt', true],
+        ['C:\\foo\\bar.txt', 'C:/**/*.txt', true],
+        ['foo\\.git', 'foo\\*', false],
+        ['Foo', 'foo', false],
+        ['c:\\foo\\bar', 'C:/foo/*', true],
+        ['//host/share/x', '//host/share/*', true],
+      ],
+      posix: [
+        ['foo/bar/baz', 'foo/[bcr]ar/baz', true],
+        ['foo/bar/baz', 'foo/[!bcr]ar/baz', false],
+        ['foo/bar/baz', 'foo/[bc-r]ar/baz', true],
+        ['foo/bar/baz', 'foo/*/!bar/*/baz', false],
+        ['foo/bar1/baz', 'foo/bar[0-9]/baz', true],
+        ['foo/bar5/baz', 'foo/bar[0-9]/baz', true],
+        ['foo/barx/baz', 'foo/bar[a-z]/baz', true],
+        ['foo/bar/baz/boo', 'foo/[bc-r]ar/baz/*', true],
+        ['foo/bar/baz', 'foo/**', true],
+        ['foo/bar/baz', '*', false],
+        ['foo/.git', 'foo/*', false],
+        ['.x/y', '**/y', false],
+        ['foo/.bar', 'foo/.*', true],
+        ['/a/b', '/a/*', true],
+        ['a/b', '/a/*', false],
+        ['a/../b', 'b', true],
+        ['foo/bar', 'foo/{bar,baz}', true],
+        ['a1', 'a{1..3}', true],
+        ['a4', 'a{1..3}', false],
+        ['foo/bar', '!foo/bar', false],
+        ['#foo', '#foo', true],
+        ['a*b', 'a\\*b', false],
+        ['foo/bar.js', 'foo/@(bar|baz).js', true],
+        ['foo/qux.js', 'foo/!(bar).js', true],
+        ['foo/bar.js', 'foo/!(bar).js', false],
+        ['foo/bar.js', 'foo/!(bar)', true],
+        [']', '[]]', true],
+        ['a', '[z-a]', false],
+        ['b', '[a-cz-a]', true],
+        ['a[', 'a[', true],
+        ['a05', 'a{01..10}', true],
+        ['c', '{a..e..2}', true],
+        ['ab', 'a{b,}', true],
+        ['', '*', false],
+        ['foo/', 'foo/*', false],
+        ['foo', 'foo/**', false],
+        ['foo/a/.b/c', 'foo/**/c', false],
+        ['a/b/c', 'a/*/../b/c', true],
+        ['Foo', 'foo', false],
+        ['', '', true],
+        ['foo', '', false],
+      ],
+    };
+
+    // Matchers for the same pattern must not be shared across platforms.
+    strictEqual(
+      path.posix.matchesGlob('platform-cache/file', 'platform-cache/**'),
+      true
+    );
+    strictEqual(
+      path.win32.matchesGlob('platform-cache\\file', 'platform-cache/**'),
+      true
+    );
+
+    for (const [platform, platformGlobs] of Object.entries(globs)) {
+      for (const [pathStr, glob, expected] of platformGlobs) {
+        strictEqual(
+          path[platform].matchesGlob(pathStr, glob),
+          expected,
+          `${platform}.matchesGlob(${pathStr}, ${glob})`
+        );
+      }
+    }
+
+    for (const fn of [
+      path.matchesGlob,
+      path.posix.matchesGlob,
+      path.win32.matchesGlob,
+    ]) {
+      throws(() => fn(123, 'foo/bar/baz'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => fn('foo/bar/baz', 123), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+  },
+};

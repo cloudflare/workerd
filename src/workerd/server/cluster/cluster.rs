@@ -2,9 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! One instance's view of the cluster: what the server calls. Runs on the
-//! server's loop thread, inside its tokio `current_thread` runtime.
+//! One instance's view of the cluster: what the server calls.
+//!
+//! Runs on the server's loop thread, inside its tokio `current_thread`
+//! runtime, but for the lease, which a thread of its own keeps
+//! (`keeper.rs`).
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -13,9 +17,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use cluster_logic::lease;
-use cluster_logic::lease::Lease;
-use cluster_logic::lease::Step;
+use cluster_logic::Membership;
 use cluster_logic::lease::Timing;
 use tokio::time::timeout;
 
@@ -30,6 +32,15 @@ use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::gcs::Gcs;
 use crate::hmac_sha256;
+use crate::http::Repeat;
+use crate::http::prompt;
+use crate::keeper;
+use crate::keeper::Fence;
+#[cfg(test)]
+use crate::keeper::Keeper;
+use crate::keeper::Lessee;
+use crate::keeper::Progress;
+use crate::keeper::Within;
 use crate::namespace_hash;
 use crate::owner::Layout;
 use crate::owner::Owners;
@@ -84,23 +95,69 @@ pub struct Cluster {
     claims: RefCell<HashMap<String, Owned>>,
     bucket: Bucket,
     key: Vec<u8>,
-    lease: RefCell<Lease>,
+    lessee: Lessee,
+    timing: Timing,
+    /// When the registration, `join`'s renewal, answered.
+    registered: Cell<Option<u64>>,
     alarms: Index,
 }
 
 impl Cluster {
-    pub fn new(setup: Setup) -> Result<Rc<Self>> {
-        Ok(Self::over(open_bucket(&setup.url, &setup.options)?, setup))
+    /// This instance's part in the cluster `setup` names, its lease kept on
+    /// a thread of its own, which runs `within` the process's setup for its
+    /// threads. `fence` ends the process once the lease cannot be kept, or
+    /// once the loop it watches (`watch`) makes no progress.
+    pub fn new(setup: Setup, fence: Fence, within: Within) -> Result<Rc<Self>> {
+        let bucket = open_bucket(&setup.url, &setup.options)?;
+        // The lease thread's client is its own: a bucket's client belongs
+        // to the thread that made it.
+        let (url, options) = (setup.url.clone(), setup.options.clone());
+        let open = move || open_bucket(&url, &options);
+        Self::threaded(bucket, open, setup, fence, within)
     }
 
-    /// Over `bucket`, not the one `setup` names.
+    /// Over `bucket`, its lease kept on a thread of its own over the bucket
+    /// `open` opens there.
+    fn threaded(
+        bucket: Bucket,
+        open: impl FnOnce() -> Result<Bucket> + Send + 'static,
+        setup: Setup,
+        fence: Fence,
+        within: Within,
+    ) -> Result<Rc<Self>> {
+        let lessee = Lessee::Thread(keeper::Thread::spawn(
+            open,
+            setup.node.clone(),
+            setup.address.clone(),
+            setup.timing,
+            fence,
+            within,
+        )?);
+        Ok(Self::with(bucket, setup, |_| lessee))
+    }
+
+    /// Over `bucket`, not the one `setup` names, its lease kept by whoever
+    /// calls `renew`.
+    #[cfg(test)]
     pub(crate) fn over(bucket: Bucket, setup: Setup) -> Rc<Self> {
-        let registry = Rc::new(Registry::new(
+        let timing = setup.timing;
+        Self::with(bucket.clone(), setup, |registry| {
+            Lessee::Here(Keeper::new(bucket, Rc::clone(registry), timing))
+        })
+    }
+
+    fn with(
+        bucket: Bucket,
+        setup: Setup,
+        lessee: impl FnOnce(&Rc<Registry>) -> Lessee,
+    ) -> Rc<Self> {
+        let registry = Registry::new(
             bucket.clone(),
             &setup.node,
             &setup.address,
             setup.timing.lease_ms,
-        ));
+        );
+        let registry = Rc::new(registry.contended_pause(ms(setup.timing.contended_pause_ms)));
         Rc::new(Self {
             alarms: Index::new(
                 bucket.clone(),
@@ -110,11 +167,13 @@ impl Cluster {
             ),
             owners: Owners::new(bucket.clone()),
             ownership: Ownership::new(bucket.clone(), registry.clone()),
+            lessee: lessee(&registry),
             bucket,
             registry,
             claims: RefCell::new(HashMap::new()),
             key: setup.key,
-            lease: RefCell::new(Lease::new(setup.timing)),
+            timing: setup.timing,
+            registered: Cell::new(None),
         })
     }
 
@@ -129,26 +188,29 @@ impl Cluster {
         self.registry.node()
     }
 
-    pub async fn renew(&self, now_ms: u64) -> Result<u64> {
+    /// Renews this node's record as of `now_ms`, on this thread.
+    #[cfg(test)]
+    pub(crate) async fn renew(&self, now_ms: u64) -> Result<u64> {
         self.registry.renew(now_ms).await
-    }
-
-    /// How far this node's wall clock is outside the bucket's, in ms; 0
-    /// before any response.
-    pub fn clock_skew_ms(&self) -> i64 {
-        self.bucket.clock_skew_ms().unwrap_or(0)
     }
 
     /// Expires this instance's membership: it renews its lease no more,
     /// and peers take over what it still owns and adopt its alarms.
     pub async fn deregister(&self) -> Result<()> {
-        self.lease.borrow_mut().left = true;
-        self.registry.deregister().await
+        self.registry.leave();
+        self.lessee.deregister().await
     }
 
     /// Live peers' records, as the bucket lists them now.
     pub async fn peers(&self, now_ms: u64) -> Result<Vec<crate::NodeRecord>> {
         self.registry.peers(now_ms).await
+    }
+
+    /// Where `node` listens, while the listing has it live.
+    pub fn address(&self, node: &str, now_ms: u64) -> Option<String> {
+        self.registry
+            .listed_live(node, now_ms)
+            .then(|| self.registry.address(node))?
     }
 
     pub async fn acquire_or_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<Route> {
@@ -384,49 +446,33 @@ impl Cluster {
 }
 
 impl Cluster {
-    /// Keeps this node's lease, until the node must stop
-    /// serving: answers why. Runs for the life of the process.
-    pub async fn maintain(&self) -> String {
-        let timing = self.lease.borrow().timing;
+    /// Starts keeping this node's lease, for the life of the process: the
+    /// lease thread renews it from here on, and ends the process once it
+    /// cannot (`keeper::Fence`).
+    fn keep_lease(&self) {
+        match &self.lessee {
+            Lessee::Thread(thread) => thread.maintain(),
+            #[cfg(test)]
+            Lessee::Here(_) => {}
+        }
+    }
+
+    /// Lists the peers every `Timing::interval_ms` until this instance
+    /// leaves the cluster. A stale listing only delays routing to a new
+    /// peer, so the listing shares the loop with everything else, and its
+    /// failure is logged, never fatal. Never returns.
+    pub async fn list_loop(&self) {
+        let timing = self.timing;
         loop {
-            if self.lease.borrow().left {
+            if self.registry.left() {
                 std::future::pending::<()>().await;
             }
-            let observed = lease::Observed {
-                now_ms: now_ms(),
-                skew_ms: self.clock_skew_ms(),
-            };
-            let mut step = self.lease.borrow().before_renew(&observed);
-            if step == Step::Renew {
-                let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
-                let result = match renew.await {
-                    Ok(Ok(until)) => Ok(until),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err("renewal timed out".into()),
-                };
-                // The instance left meanwhile, which may have failed this
-                // renewal: what it found no longer matters.
-                if self.lease.borrow().left {
-                    continue;
-                }
-                step = self.lease.borrow_mut().renewed(now_ms(), result);
-            }
-            let delay = match step {
-                Step::Fence(reason) => return reason,
-                Step::Retry(reason) => {
-                    tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
-                    timing.retry_ms
-                }
-                Step::Renew => timing.interval_ms,
-            };
-            // A stale listing only delays routing to a new peer: its
-            // failure is logged, never fatal.
-            match timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await {
+            match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
                 Err(_) => tracing::warn!("listing the cluster timed out"),
             }
-            tokio::time::sleep(ms(delay)).await;
+            tokio::time::sleep(ms(timing.interval_ms)).await;
         }
     }
 
@@ -443,19 +489,25 @@ impl Cluster {
     /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
         self.ownership.may_claim.set(false);
-        self.registry.start_draining();
+        self.lessee.start_draining();
     }
 
     /// Publishes that this instance drains, so that peers choose it for no
     /// object or alarm, and lists the peers, so that it chooses none that
     /// drains too. Peers that list it before learn of it from its answers.
     pub async fn announce_draining(&self) {
-        let timing = self.lease.borrow().timing;
-        let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
-        if !matches!(renew.await, Ok(Ok(_))) {
-            tracing::warn!("cluster: publishing the drain failed");
-        }
-        let _ = timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await;
+        self.lessee.announce_draining().await;
+        let timing = self.timing;
+        let _ = timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await;
+    }
+
+    /// A listing of the peers, its stalled requests sent again as a lease
+    /// round's renewal's are (`Keeper::renew_round`), after a shorter wait.
+    /// Its deletions may be: it deletes only long-dead node records, whose
+    /// node ids no process takes again (`Registry::fetch`).
+    async fn list_round(&self, timing: &Timing) -> Result<Vec<crate::NodeRecord>> {
+        let repeat = &[Repeat::Read, Repeat::Delete];
+        prompt(ms(timing.list_attempt_ms), repeat, self.peers(now_ms())).await
     }
 
     /// Whether `start_draining` ran: this node claims nothing more.
@@ -463,19 +515,42 @@ impl Cluster {
         !self.ownership.may_claim.get()
     }
 
-    /// The first renewal, before the node serves.
+    /// The first renewal, before the node links its services, and the
+    /// start of the rounds that keep the lease (`keep_lease`). Linking opens
+    /// every namespace's storage, which opens only under a lease, and on a
+    /// slow disk takes longer than one: the lease thread renews it
+    /// meanwhile, whatever turns linking takes.
     pub async fn join(&self) -> Result<()> {
         let probe = format!("nodes/{}.probe", self.node());
         check_conditional_writes(&self.bucket, &probe).await?;
-        let until = self.renew(now_ms()).await?;
-        self.lease.borrow_mut().renewed(now_ms(), Ok(until));
+        self.lessee.take_lease().await?;
+        self.registered.set(Some(now_ms()));
+        self.keep_lease();
         Ok(())
+    }
+
+    /// From here on, the lease thread watches the event loop that
+    /// `progress` counts, and fences the node once it makes no progress for
+    /// `Timing::stall_ms`. For once the node serves: linking, after `join`,
+    /// runs in turns as long as itself.
+    pub fn watch(&self, progress: Progress) {
+        self.lessee.watch(progress);
     }
 
     /// Whether this node's lease holds now: an actor database opens only
     /// while it does.
     pub fn lease_holds(&self) -> bool {
-        self.lease.borrow().holds(now_ms())
+        self.lessee.held().holds(now_ms())
+    }
+
+    /// What this node knows of the membership, for what routes by it.
+    pub fn membership(&self) -> Membership {
+        Membership {
+            listing: self.registry.listing(),
+            registered: self.registered.get(),
+            lease_until: self.lessee.held().holds_until(),
+            draining: self.is_draining(),
+        }
     }
 }
 
@@ -529,16 +604,18 @@ pub fn now_ms() -> u64 {
 /// Refuse a store that ignores write preconditions: fencing and the
 /// deployment catalog rest on them. GCS's S3 API, for one, ignores
 /// `If-Match` on a PUT. `key` is an object only this check writes. Each
-/// write's body differs, so that no two writes could share an S3 `ETag`.
+/// write's body differs, so that no two writes could share an S3 `ETag`,
+/// and so that what the object holds says which write an unknown outcome
+/// was (`Bucket::put_if_settled`).
 pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
-    let created = bucket.put_if(key, b"1".to_vec(), Guard::Absent).await?;
-    let again = bucket.put_if(key, b"2".to_vec(), Guard::Absent).await?;
+    let put = |body: &[u8], guard| bucket.put_if_settled(key, body.to_vec(), guard);
+    let created = put(b"1", Guard::Absent).await?;
+    let again = put(b"2", Guard::Absent).await?;
     let (replaced, stale) = match &created {
         Some(first) => {
-            let replaced = bucket.put_if(key, b"3".to_vec(), Guard::Match(first.clone()));
-            let replaced = replaced.await?;
-            let stale = bucket.put_if(key, b"4".to_vec(), Guard::Match(first.clone()));
-            (replaced, stale.await?)
+            let replaced = put(b"3", Guard::Match(first.clone())).await?;
+            let stale = put(b"4", Guard::Match(first.clone())).await?;
+            (replaced, stale)
         }
         None => (None, None),
     };
@@ -564,43 +641,5 @@ pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Resu
 }
 
 #[cfg(test)]
-mod tests {
-    use futures::executor::block_on;
-
-    use super::check_conditional_writes;
-    use crate::Bucket;
-    use crate::Error;
-    use crate::bucket::memory::Memory;
-
-    #[test]
-    fn a_bucket_that_ignores_preconditions_is_refused() {
-        block_on(async {
-            assert!(
-                check_conditional_writes(&Bucket::memory(""), "n.probe")
-                    .await
-                    .is_ok()
-            );
-            let message = |store: Memory| async {
-                let bucket = Bucket::new(store, "");
-                match check_conditional_writes(&bucket, "n.probe").await {
-                    Err(Error::Config(message)) => message,
-                    other => panic!("expected a config error, not {other:?}"),
-                }
-            };
-            let lax = Memory::default();
-            lax.ignores_guards.set(true);
-            assert!(
-                message(lax)
-                    .await
-                    .starts_with("the bucket ignores conditional writes")
-            );
-            let weak = Memory::default();
-            weak.never_matches.set(true);
-            assert!(
-                message(weak)
-                    .await
-                    .starts_with("the bucket refused a conditional write whose condition held")
-            );
-        });
-    }
-}
+#[path = "cluster-test.rs"]
+mod tests;

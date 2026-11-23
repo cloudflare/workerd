@@ -6,7 +6,7 @@
 //! `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`)
 //! through the cxx bridge in [`ffi`]. [`dispatch`] picks the conversion for
 //! each encoding pair, sizes the destination, and checks the result; [`ffi`]
-//! wraps the ICU and simdutf functions that perform the conversions.
+//! wraps the simdutf functions behind most of the conversions.
 
 use jsg::Lock;
 use jsg::v8;
@@ -14,9 +14,11 @@ use jsg::v8;
 mod dispatch;
 mod error;
 mod ffi;
+mod scalar;
 
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;
+pub use crate::ffi::Encoding;
 
 /// Transcodes `source` into a freshly allocated `Uint8Array`.
 ///
@@ -24,11 +26,16 @@ use crate::error::TranscodeError;
 /// There is no intermediate `Vec` and no copy: [`Transcoder`] reports the
 /// destination size up front, the buffer is allocated at exactly that size,
 /// and the returned view is narrowed to the bytes actually written.
-fn transcode_impl<'s>(
+///
+/// # Errors
+///
+/// Returns an `Error` if `source` cannot be transcoded, or a `RangeError` if the result
+/// cannot be allocated.
+pub fn transcode<'s>(
     lock: &mut Lock<'s>,
     source: &[u8],
-    from_encoding: ffi::Encoding,
-    to_encoding: ffi::Encoding,
+    from_encoding: Encoding,
+    to_encoding: Encoding,
 ) -> jsg::Result<v8::Local<'s, v8::Uint8Array>> {
     let transcoder = Transcoder::new(source, from_encoding, to_encoding)?;
     let (buffer, written) = v8::ArrayBuffer::new_zeroed_with(lock, transcoder.dest_len(), |dest| {

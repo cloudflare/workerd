@@ -61,6 +61,16 @@ capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler:
   return result;
 }
 
+rpc::JsValue::ExternalPusher::DelayedChannelToken::Client RpcSerializerExternalHandler::
+    pushDelayedChannelToken(kj::Promise<kj::Array<byte>> token) {
+  // The capability owns the push, so a returned stub stays usable after the sending request ends.
+  // The pending event keeps hang detection from canceling the request while the token is produced.
+  auto cap = sendDelayedChannelToken(
+      getExternalPusher(), token.attach(IoContext::current().registerPendingEvent()));
+  pendingExternals.add(cap.whenResolved());
+  return cap;
+}
+
 namespace {
 
 // Whether one external-table entry could be sent again unchanged on a later attempt. No current
@@ -85,6 +95,7 @@ RpcSerializerExternalHandler::Replayability classifyExternalReplayability(
     case External::DELAYED_ACTOR_CLASS_CHANNEL_TOKEN:
     case External::SOCKET:
     case External::DURABLE_OBJECT_SNAPSHOT:
+    case External::EMAIL_FWDR:
       return Replayability::INELIGIBLE;
   }
   // A discriminant outside the known range, e.g. from a newer schema.
@@ -1031,9 +1042,8 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
   attemptCanceler = kj::mv(oneCall.attemptCanceler);
   kj::Vector<kj::StringPtr> pathViews;
   parent->appendPath(pathViews);
-  auto nameRef = name.map([](kj::String& value) -> const kj::String& { return value; });
   auto callSpan =
-      prepareJsRpcCallAttempt(ioContext, *parent, nameRef, pathViews.asPtr(), operation, oneCall);
+      prepareJsRpcCallAttempt(ioContext, *parent, name, pathViews.asPtr(), operation, oneCall);
 
   auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(oneCall.client), KJ_ASSERT_NONNULL(callPlan),
       callSpan, parent->getActorTargetRetryability(), DeferActorRpcFailure::YES);
@@ -1193,6 +1203,23 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallA
   }
 }
 
+// Settles like `call`, except that it rejects as soon as one of `pendingExternals` does, with its
+// error, and resolves only after they have all been delivered. An argument whose external could
+// not be delivered, such as a stub whose channel's owner refused to issue a token for it, is
+// unusable on the other side, so the caller gets the reason instead of the call's result. The
+// call is canceled in that case.
+kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> awaitCallAndPendingExternals(
+    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> call,
+    kj::Array<kj::Promise<void>> pendingExternals) {
+  auto delivered = kj::joinPromisesFailFast(kj::mv(pendingExternals)).fork();
+  auto response = co_await call.exclusiveJoin(delivered.addBranch().then(
+      []() -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
+    return kj::NEVER_DONE;
+  }));
+  co_await delivered.addBranch();
+  co_return kj::mv(response);
+}
+
 // Core implementation of making an RPC call, reusable for many cases below.
 JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     jsg::Ref<JsRpcClientProvider> parent,
@@ -1280,6 +1307,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       kj::Array<const byte> serializedData;
       size_t serializedDataCapacity = 0;
       auto serializerReplayability = RpcSerializerExternalHandler::Replayability::REPLAYABLE;
+      kj::Array<kj::Promise<void>> pendingExternals;
       KJ_IF_SOME(args, maybeArgs) {
         // If we have arguments, serialize them.
         // Note that we may fail to serialize some element, in which case this will throw back to
@@ -1309,6 +1337,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           serializedData = kj::mv(serialized.data);
           serializedDataCapacity = serialized.dataCapacity;
           serializerReplayability = externalHandler.getReplayability();
+          pendingExternals = externalHandler.releasePendingExternals();
         }
       } else {
         // This is a property access.
@@ -1328,6 +1357,12 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(resolveOneCall().client), callPlan,
           jsRpcCallSpan, actorTargetRetryability, DeferActorRpcFailure(retriesEnabled));
       auto resultPromise = kj::mv(dispatch.promise);
+      if (pendingExternals.size() > 0) {
+        // Pending externals make the call ineligible for replay (see JsRpcCallPlan), so this
+        // wraps the only attempt.
+        resultPromise =
+            awaitCallAndPendingExternals(kj::mv(resultPromise), kj::mv(pendingExternals));
+      }
 
       // A follow-up call through this result's pending pipeline still targets the actor, but cannot
       // create a fresh attempt without replaying the call that produced the pipeline.
@@ -1883,24 +1918,13 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
           }
           KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
             // Token isn't available synchronously, so we have to send a promise.
-            auto paf = kj::newPromiseAndFulfiller<
-                rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-
-            // Arrange to send the token when it's ready.
-            ioctx.addTask(
-                promise.then([pusher = externalHandler.getExternalPusher(),
-                                 fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
-              auto req = pusher.pushDelayedChannelTokenRequest(
-                  capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
-              req.setToken(token);
-              fulfiller->fulfill(req.send().getCap());
-            }));
-
-            externalHandler.write([cap = kj::mv(cap), promise = kj::mv(paf.promise)](
-                                      rpc::JsValue::External::Builder builder) mutable {
+            externalHandler.write(
+                [cap = kj::mv(cap),
+                    delayed = externalHandler.pushDelayedChannelToken(kj::mv(promise))](
+                    rpc::JsValue::External::Builder builder) mutable {
               auto target = builder.initRpcTarget();
               target.setCap(kj::mv(cap));
-              target.setDelayedChannelToken(kj::mv(promise));
+              target.setDelayedChannelToken(kj::mv(delayed));
             });
           }
         }
@@ -2051,10 +2075,7 @@ struct JsRpcCallResultTarget {
 };
 
 // Serializes `value` into the results of `target`'s call, setting the call's pipeline.
-void writeJsRpcCallResult(jsg::Lock& js,
-    jsg::JsValue value,
-    JsRpcCallResultTarget& target,
-    kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>>& callPipelineFulfiller) {
+void writeJsRpcCallResult(jsg::Lock& js, jsg::JsValue value, JsRpcCallResultTarget& target) {
   rpc::JsRpcTarget::CallResults::Builder results = nullptr;
   auto maybePipeline = serializeJsValueWithPipeline(js, value, [&](capnp::MessageSize hint) {
     hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
@@ -2084,10 +2105,6 @@ void writeJsRpcCallResult(jsg::Lock& js,
       results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
       // leave hasDisposer false
     }
-  }
-
-  KJ_IF_SOME(cpf, callPipelineFulfiller) {
-    cpf->fulfill(results.getCallPipeline());
   }
 }
 
@@ -2198,8 +2215,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
 
     // Try to execute the requested method.
     co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
-      maybeAddDurableObjectId(
-          e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+      maybeAddDurableObjectId(e, durableObjectId);
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -2330,12 +2346,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         }
       }();
 
-      kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>> callPipelineFulfiller;
-
-      // We need another ref to this fulfiller for the error callback. It can rely on being
-      // destroyed at the same time as the success callback.
-      kj::Maybe<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>&> callPipelineFulfillerRef;
-
       // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the
       // backing object's lifetime is that of the RPC call, but in reality they are refcounted
       // under the hood. Since we'll be executing the call in the JS microtask queue, we have no
@@ -2369,13 +2379,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
                       // this continuation will still execute, sice it's a JS promise continuation.
                       // But `this` could have been destroyed in the meantime. So all our captures
                       // must take full ownership.
-                      [weakResultTarget = kj::mv(weakResultTarget), paramStubs = kj::mv(paramStubs),
-                          callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
+                      [weakResultTarget = kj::mv(weakResultTarget),
+                          paramStubs = kj::mv(paramStubs)](
                           jsg::Lock& js, jsg::Value value) mutable {
         jsg::JsValue resultValue(value.getHandle(js));
 
         KJ_IF_SOME(target, weakResultTarget.tryGet()) {
-          writeJsRpcCallResult(js, resultValue, target.get(), callPipelineFulfiller);
+          writeJsRpcCallResult(js, resultValue, target.get());
         } else {
           // The call was canceled, so nobody will receive the result. Dispose it as the
           // caller would have.
@@ -2385,16 +2395,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         // paramStubs will be destroyed when we return (or when this lambda is destroyed as a
         // result of the promise being rejected). This will implicitly dispose the param stubs.
       }),
-                  ctx.addFunctor(
-                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
-                          jsg::Lock& js, jsg::Value&& error) {
-        maybeAddDurableObjectId(
-            js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
-        // If we set up a `callPipeline` early, we have to make sure it propagates the error.
-        // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
-        KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
-          cpf.reject(js.exceptionToKj(error.addRef(js)));
-        }
+                  ctx.addFunctor([durableObjectId = getCurrentDurableObjectId()](
+                                     jsg::Lock& js, jsg::Value&& error) {
+        maybeAddDurableObjectId(js, error, durableObjectId);
         js.throwException(kj::mv(error));
       })));
       result = awaitCancelableIncomingCall(
@@ -2963,6 +2966,12 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   buildJsValueExternals(builder, externalHandler);
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
+
+  // There is no call left to fail when a returned external can't be delivered. The recipient gets
+  // the error when it uses the external, and the IoContext reports it as an uncaught exception.
+  for (auto& pending: externalHandler.releasePendingExternals()) {
+    IoContext::current().addTask(kj::mv(pending));
+  }
 
   return js.withinHandleScope([&]() -> MakeCallPipeline::Result {
     jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {

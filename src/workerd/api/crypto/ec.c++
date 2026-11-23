@@ -568,16 +568,14 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
         keyDataJwk.kty, "\") equal to \"OKP\".");
     auto& crv = JSG_REQUIRE_NONNULL(
         keyDataJwk.crv, DOMDataError, "Missing field \"crv\" for ", curveName, " key.");
-    JSG_REQUIRE(crv == curveName, DOMNotSupportedError, "Only ", curveName, " is supported but \"",
-        crv, "\" was requested.");
+    JSG_REQUIRE(crv == curveName, DOMDataError, "Only ", curveName, " is supported but \"", crv,
+        "\" was requested.");
     KJ_IF_SOME(alg, keyDataJwk.alg) {
-      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-      // importKey().
+      // Web Crypto accepts both the algorithm name and the older JOSE name "EdDSA".
       if (curveId == NID_ED25519) {
-        JSG_REQUIRE(alg == "EdDSA", DOMDataError, "JSON Web Key Algorithm parameter \"alg\" (\"",
-            alg,
-            "\") does not match requested "
-            "Ed25519 curve.");
+        JSG_REQUIRE(alg == "Ed25519" || alg == "EdDSA", DOMDataError,
+            "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
+            "\") does not match requested Ed25519 curve.");
       }
     }
 
@@ -652,9 +650,9 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
 
   auto point = OSSL_NEW(EC_POINT, group);
   JSG_REQUIRE(1 == EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr),
-      DOMOperationError, "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      DOMDataError, "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
       tryDescribeOpensslErrors());
-  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey, point), DOMOperationError,
+  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey, point), DOMDataError,
       "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
       tryDescribeOpensslErrors());
 
@@ -667,7 +665,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     auto bigD = JSG_REQUIRE_NONNULL(toBignum(d), InternalDOMOperationError,
         "Error importing EC key", internalDescribeOpensslErrors());
 
-    JSG_REQUIRE(1 == EC_KEY_set_private_key(ecKey, bigD), DOMOperationError,
+    JSG_REQUIRE(1 == EC_KEY_set_private_key(ecKey, bigD), DOMDataError,
         "Invalid EC key; "
         "private key component \"d\" is invalid",
         tryDescribeOpensslErrors());

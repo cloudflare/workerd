@@ -952,6 +952,8 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   // matches the mapped spelling.
   kj::Maybe<kj::String> mappedOverrideKey;
 
+  // node:net reports every TypeError below whose message starts with "Specified address" as
+  // ENOTFOUND, so such a message must only mean that the address can't be used.
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.
@@ -1024,12 +1026,16 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     secureTransport = parseSecureTransport(opts);
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
-  kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
+  // Whoever serves the CONNECT can fill the slot in for as long as its call is pending. The
+  // connection owns that call, so the connection keeps the slot alive along with the Socket: a
+  // request can end, taking its Socket with it, while the connection is still in use, by a
+  // response body for instance.
+  auto tlsStarter = kj::rc<kj::TlsStarterCallback>();
   if (secureTransport == SecureTransportKind::STARTTLS) {
     // Offer the slot only on a socket that can actually act on it: startTls() insists on
     // 'starttls'. Whoever serves the CONNECT reads the slot's presence as a promise that this
     // socket is prepared to upgrade, and may wait to be told that it has.
-    httpConnectSettings.tlsStarter = tlsStarter;
+    httpConnectSettings.tlsStarter = *tlsStarter;
   }
 
   KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
@@ -1041,9 +1047,9 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 
   auto httpClient = asHttpClient(kj::mv(client));
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
-  request.connection = request.connection.attach(kj::mv(httpClient));
+  request.connection = request.connection.attach(kj::mv(httpClient), tlsStarter.addRef());
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr),
-      kj::none /* localAddress */, kj::mv(options), kj::mv(tlsStarter), secureTransport,
+      kj::none /* localAddress */, kj::mv(options), tlsStarter.toOwn(), secureTransport,
       SocketProtocol::TCP, kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
@@ -1058,6 +1064,9 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }
 
   isClosing = true;
+  KJ_IF_SOME(a, acceptance) {
+    a->fail("The connect() handler's socket closed before it accepted the connection."_kj);
+  }
   writable.setPendingClosure(js);
   readable.setPendingClosure(js);
 
@@ -1097,6 +1106,53 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
     self->errorHandler(js, kj::mv(err));
   });
+}
+
+void ConnectAcceptance::accept() {
+  KJ_IF_SOME(failed, state.tryGet<Failed>()) {
+    JSG_FAIL_REQUIRE(Error, failed.reason);
+  }
+  KJ_IF_SOME(pending, state.tryGet<Pending>()) {
+    // Settle the state before answering, so that nothing the answer sets off can answer again.
+    auto& response = pending.response;
+    state = Accepted{};
+    response.accept(200, "OK", headers);
+    accepted.signal();
+  }
+}
+
+void ConnectAcceptance::setFailed(kj::StringPtr reason) {
+  state = Failed{kj::str(reason)};
+  accepted.reject(JSG_KJ_EXCEPTION(DISCONNECTED, Error, reason));
+}
+
+void ConnectAcceptance::fail(kj::StringPtr reason) {
+  KJ_IF_SOME(pending, state.tryGet<Pending>()) {
+    auto& response = pending.response;
+    setFailed(reason);
+    // The peer learns only that the connection failed: Socket::handleProxyStatus() reports every
+    // unsuccessful status the same way.
+    response.reject(502, "Bad Gateway", headers, static_cast<uint64_t>(0));
+  }
+}
+
+bool ConnectAcceptance::abandon(kj::StringPtr reason) {
+  if (isPending()) {
+    setFailed(reason);
+    return true;
+  }
+  return false;
+}
+
+void Socket::setAcceptance(IoOwn<ConnectAcceptance> pendingAcceptance) {
+  acceptance = kj::mv(pendingAcceptance);
+}
+
+void Socket::accept() {
+  auto& a = JSG_REQUIRE_NONNULL(acceptance, TypeError,
+      "accept() can only be called on the socket passed to a connect() handler whose peer "
+      "requested secureTransport 'on'.");
+  a->accept();
 }
 
 jsg::Promise<void> Socket::proxyTo(
@@ -1614,6 +1670,12 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       JSG_FAIL_REQUIRE(DOMDataCloneError, "A Socket whose connection failed cannot be serialized.");
     case OpenedState::OPENED:
       break;
+  }
+  // Only the handler that received the connection can answer its peer.
+  KJ_IF_SOME(a, acceptance) {
+    JSG_REQUIRE(!a->isPending(), DOMDataCloneError,
+        "A Socket can only be serialized after its connection has been accepted. Call "
+        "`socket.accept()` before transferring the socket over RPC.");
   }
 
   // Serialize the socket metadata, referencing the stream externals

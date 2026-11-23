@@ -10,37 +10,69 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `triggers` (`crons`), `queues`, `no_bundle` and `$schema`. Any other field is an error rather
-//! than silently ignored.
+//! `r2_buckets`, `triggers` (`crons`), `queues`, `workflows`, `d1_databases`,
+//! `secrets_store_secrets`, `ratelimits`, `assets`, `no_bundle` and `$schema`. Any other field is
+//! an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
 //! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
 //! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
-//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `triggers.crons`,
+//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `r2_buckets`, also
+//! `--experimental`, are bindings to the Worker `<name>-r2` (the bundled module `/workerd/r2.js`)
+//! in the same way, with the bucket's `bucket_name` (else its binding name) in its props;
+//! `preview_bucket_name`, `jurisdiction` and `remote` are ignored. Its objects are in
+//! `.wrangler/state/workerd/r2/`, one store object per R2 object. `triggers.crons`,
 //! also `--experimental`, are the schedule of the Worker `<name>-cron` (the bundled module
 //! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. `queues`, also
 //! `--experimental`, are served by the Worker `<name>-queues` (the bundled module
 //! `/workerd/queues.js`): each producer is a `queue` binding to it, and each consumer delivers to
-//! this Worker; its messages are in `.wrangler/state/workerd/queues/`. The server listens
-//! on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//! this Worker; its messages are in `.wrangler/state/workerd/queues/`. `workflows`, also
+//! `--experimental`, run on the Worker `<name>-workflows` (the bundled module
+//! `/workerd/workflows.js`), the engine of this Worker's `workflowsEngine`; each binding is the
+//! Workflow API over it, and its instances are in `.wrangler/state/workerd/workflows/`.
+//! `limits.steps` and `default_retention` apply; `concurrency` and `jurisdiction` are ignored;
+//! `schedules`, and a `script_name` other than this Worker, are errors. `d1_databases`, also
+//! `--experimental`, are served by the Worker `<name>-d1` (the bundled module `/workerd/d1.js`):
+//! each binding is the D1 API over it, with the database's `preview_database_id`, else its
+//! `database_id`, else its binding name in its props, as `wrangler dev` names local databases;
+//! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`.
+//! `secrets_store_secrets`, also `--experimental`, are the entrypoint `SecretsStoreSecret` of the
+//! Worker `<name>-secrets-store` (the bundled module `/workerd/secrets-store.js`), the store and
+//! secret name in its props. A secret's value is the variable [`secret_variable`] names after its
+//! `secret_name`, read when the server starts and never stored; a Worker can only `get()` it, as on
+//! Cloudflare. `ratelimits`, also `--experimental`, are the entrypoint `RateLimit` of the Worker
+//! `<name>-ratelimit` (the bundled module `/workerd/ratelimit.js`), its settings in its props, so
+//! they are called over JS RPC; it keeps its counts in memory. `assets`, also `--experimental`, are
+//! the files in `directory`, served by the assets service `<name>-assets`, which routes each
+//! request to this Worker or to a file as Cloudflare does; `binding` is its `AssetWorker`
+//! entrypoint. Without `main` it serves only the files. Under `--experimental` the Worker's
+//! `caches` are served by the cache service `<name>-cache`, its entries in
+//! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured". The
+//! server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if there are
+//! assets, else to the worker; `--socket-addr http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
-//! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`
-//! or `queues` yet.
+//! each node's own config defines. A deployment cannot have `kv_namespaces`, `r2_buckets`,
+//! `triggers.crons`, `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits`
+//! or `assets` yet.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use cluster::compose::workflow_namespace_key;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use workerd_capnp::config;
 use workerd_capnp::service;
+use workerd_capnp::service_designator;
 use workerd_capnp::worker;
 
 use crate::config::Config;
@@ -60,7 +92,7 @@ struct Wrangler {
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     name: Option<String>,
-    main: String,
+    main: Option<String>,
     compatibility_date: String,
     #[serde(default)]
     compatibility_flags: Vec<String>,
@@ -74,11 +106,130 @@ struct Wrangler {
     #[serde(default)]
     kv_namespaces: Vec<KvNamespace>,
     #[serde(default)]
+    r2_buckets: Vec<R2Bucket>,
+    #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
     queues: Queues,
     #[serde(default)]
+    workflows: Vec<Workflow>,
+    #[serde(default)]
+    d1_databases: Vec<D1Database>,
+    #[serde(default)]
+    secrets_store_secrets: Vec<SecretsStoreSecret>,
+    #[serde(default)]
+    ratelimits: Vec<Ratelimit>,
+    #[serde(default)]
     no_bundle: bool,
+    assets: Option<Assets>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SecretsStoreSecret {
+    binding: String,
+    store_id: String,
+    secret_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ratelimit {
+    name: String,
+    namespace_id: String,
+    simple: SimpleLimit,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimpleLimit {
+    limit: u64,
+    period: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Assets {
+    directory: String,
+    binding: Option<String>,
+    html_handling: Option<HtmlHandling>,
+    not_found_handling: Option<NotFoundHandling>,
+    base_path: Option<String>,
+    run_worker_first: Option<RunWorkerFirst>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum HtmlHandling {
+    AutoTrailingSlash,
+    ForceTrailingSlash,
+    DropTrailingSlash,
+    None,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum NotFoundHandling {
+    SinglePageApplication,
+    #[serde(rename = "404-page")]
+    Page404,
+    None,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum RunWorkerFirst {
+    All(bool),
+    Rules(Vec<String>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct D1Database {
+    binding: String,
+    database_id: Option<String>,
+    preview_database_id: Option<String>,
+    #[serde(rename = "database_name")]
+    _database_name: Option<String>,
+    #[serde(rename = "migrations_table")]
+    _migrations_table: Option<String>,
+    #[serde(rename = "migrations_dir")]
+    _migrations_dir: Option<String>,
+    #[serde(rename = "migrations_pattern")]
+    _migrations_pattern: Option<String>,
+    #[serde(rename = "database_internal_env")]
+    _database_internal_env: Option<String>,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Workflow {
+    binding: String,
+    name: String,
+    class_name: String,
+    script_name: Option<String>,
+    limits: Option<WorkflowLimits>,
+    #[serde(rename = "concurrency")]
+    _concurrency: Option<serde_json::Value>,
+    schedules: Option<serde_json::Value>,
+    default_retention: Option<WorkflowRetention>,
+    #[serde(rename = "jurisdiction")]
+    _jurisdiction: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowLimits {
+    steps: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowRetention {
+    success_retention: Option<serde_json::Value>,
+    error_retention: Option<serde_json::Value>,
 }
 
 #[derive(Default, Deserialize)]
@@ -131,6 +282,19 @@ struct KvNamespace {
     id: Option<String>,
     #[serde(rename = "preview_id")]
     _preview_id: Option<String>,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct R2Bucket {
+    binding: String,
+    bucket_name: Option<String>,
+    #[serde(rename = "preview_bucket_name")]
+    _preview_bucket_name: Option<String>,
+    #[serde(rename = "jurisdiction")]
+    _jurisdiction: Option<String>,
     #[serde(rename = "remote")]
     _remote: Option<bool>,
 }
@@ -275,6 +439,7 @@ pub fn load_deployment(
     translate(path, process, &Target::Deployment { name })
 }
 
+#[expect(clippy::too_many_lines, reason = "a service per wrangler field")]
 fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, Config), String> {
     let watch = |p: &Path| {
         process
@@ -288,6 +453,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     check_experimental(&wrangler, target)?;
+    check_bindings(&wrangler)?;
     let root = file.parent().unwrap_or(&file);
 
     let name = match target {
@@ -301,11 +467,18 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     };
     let classes = do_classes(&wrangler)?;
 
-    let sources = if wrangler.no_bundle {
-        unbundled(root, &wrangler.main, &watch)?
-    } else {
-        bundle(&esbuild(root), root, &wrangler.main, &watch)?
+    let sources = match &wrangler.main {
+        None if wrangler.assets.is_some() => {
+            assets_only(&wrangler)?;
+            vec![]
+        }
+        None => {
+            return Err("Missing entry-point to Worker script or to assets directory".to_owned());
+        }
+        Some(main) if wrangler.no_bundle => unbundled(root, main, &watch)?,
+        Some(main) => bundle(&esbuild(root), root, main, &watch)?,
     };
+    let workers = u32::from(wrangler.main.is_some());
 
     let serving = matches!(target, Target::Serve { .. });
     let storage = root.join(".wrangler/state/workerd");
@@ -315,26 +488,109 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
+    let cache = u32::from(workers == 1 && matches!(target, Target::Serve { experimental: true }));
     let mut services = conf.reborrow().init_services(
-        1 + do_storage
+        workers
+            + do_storage
+            + cache
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
+            + 3 * u32::from(!wrangler.r2_buckets.is_empty())
+            + u32::from(!wrangler.secrets_store_secrets.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
-            + 2 * u32::from(!wrangler.queues.is_empty()),
+            + 2 * u32::from(!wrangler.queues.is_empty())
+            + 2 * u32::from(!wrangler.workflows.is_empty())
+            + 2 * u32::from(!wrangler.d1_databases.is_empty())
+            + u32::from(!wrangler.ratelimits.is_empty())
+            + u32::from(wrangler.assets.is_some()),
     );
-    let (kv_service, queues_service) =
-        bundled_services(&mut services, 1 + do_storage, &name, &storage, &wrangler)?;
+    let at = workers + do_storage;
+    bundled_services(&mut services, at, &name, root, &storage, &wrangler, &watch)?;
 
-    let mut service = services.reborrow().get(0);
-    service.set_name(&name);
-    let mut worker = service.init_worker();
-    worker.set_compatibility_date(&wrangler.compatibility_date);
-    worker
-        .set_compatibility_flags(&wrangler.compatibility_flags[..])
-        .map_err(|e| e.to_string())?;
+    if workers == 1 {
+        let mut service = services.reborrow().get(0);
+        service.set_name(&name);
+        let mut worker = service.init_worker();
+        worker.set_compatibility_date(&wrangler.compatibility_date);
+        worker
+            .set_compatibility_flags(&wrangler.compatibility_flags[..])
+            .map_err(|e| e.to_string())?;
+        set_modules(worker.reborrow(), &sources)?;
+        set_bindings(worker.reborrow(), &wrangler, &name);
+        if !wrangler.workflows.is_empty() {
+            set_workflows_engine(worker.reborrow(), &name, &wrangler.workflows);
+        }
+        set_durable_objects(worker, &classes, &name, serving);
+    }
+    if cache == 1 {
+        cache_service(&mut services, &name, &storage)?;
+    }
+    if do_storage == 1 {
+        disk_service(
+            services.get(workers),
+            &format!("{name}-do-storage"),
+            &storage,
+        );
+    }
 
-    set_modules(worker.reborrow(), &sources)?;
-    set_bindings(worker.reborrow(), &wrangler, &kv_service, &queues_service);
+    if serving {
+        let mut socket = conf.init_sockets(1).get(0);
+        socket.set_name("http");
+        socket.set_address(DEFAULT_ADDRESS);
+        socket.reborrow().init_http();
+        let target = match &wrangler.assets {
+            Some(_) => format!("{name}-assets"),
+            None => name.clone(),
+        };
+        socket.init_service().set_name(target);
+    }
 
+    let config = Config::from_words(&words_from_bytes(
+        &capnp::serialize::write_message_to_words(&message),
+    ))
+    .map_err(|e| e.to_string())?;
+    Ok((name, config))
+}
+
+/// Assets without `main` have no Worker for Worker-only fields to configure.
+fn assets_only(wrangler: &Wrangler) -> Result<(), String> {
+    let worker_only = [
+        ("vars", !wrangler.vars.is_empty()),
+        ("durable_objects", wrangler.durable_objects.is_some()),
+        ("exports", !wrangler.exports.is_empty()),
+        ("migrations", !wrangler.migrations.is_empty()),
+        ("kv_namespaces", !wrangler.kv_namespaces.is_empty()),
+        ("r2_buckets", !wrangler.r2_buckets.is_empty()),
+        ("triggers.crons", !wrangler.triggers.crons.is_empty()),
+        ("queues", !wrangler.queues.is_empty()),
+        ("workflows", !wrangler.workflows.is_empty()),
+        ("d1_databases", !wrangler.d1_databases.is_empty()),
+        (
+            "secrets_store_secrets",
+            !wrangler.secrets_store_secrets.is_empty(),
+        ),
+        ("ratelimits", !wrangler.ratelimits.is_empty()),
+        (
+            "assets.binding",
+            wrangler
+                .assets
+                .as_ref()
+                .is_some_and(|a| a.binding.is_some()),
+        ),
+    ];
+    match worker_only.iter().find(|(_, used)| *used) {
+        Some((field, _)) => Err(format!("{field} needs a Worker, but there is no main")),
+        None => Ok(()),
+    }
+}
+
+/// The Durable Object namespaces of `classes`, stored on `<name>-do-storage` when `serving`, else
+/// on [`DEPLOYMENT_STORAGE`].
+fn set_durable_objects(
+    mut worker: worker::Builder<'_>,
+    classes: &[(String, String, bool)],
+    name: &str,
+    serving: bool,
+) {
     if !classes.is_empty() {
         let mut ns = worker
             .reborrow()
@@ -345,33 +601,14 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             n.set_unique_key(format!("{name}-{key}"));
             n.set_enable_sql(*sql);
         }
-        if serving {
-            // Named after the worker, so it cannot collide with it.
-            let storage_service = format!("{name}-do-storage");
-            worker
-                .init_durable_object_storage()
-                .set_local_disk(&storage_service);
-            disk_service(services.get(1), &storage_service, &storage);
+        // Named after the worker, so it cannot collide with it.
+        let storage = if serving {
+            format!("{name}-do-storage")
         } else {
-            worker
-                .init_durable_object_storage()
-                .set_local_disk(DEPLOYMENT_STORAGE);
-        }
+            DEPLOYMENT_STORAGE.to_owned()
+        };
+        worker.init_durable_object_storage().set_local_disk(storage);
     }
-
-    if serving {
-        let mut socket = conf.init_sockets(1).get(0);
-        socket.set_name("http");
-        socket.set_address(DEFAULT_ADDRESS);
-        socket.reborrow().init_http();
-        socket.init_service().set_name(&name);
-    }
-
-    let config = Config::from_words(&words_from_bytes(
-        &capnp::serialize::write_message_to_words(&message),
-    ))
-    .map_err(|e| e.to_string())?;
-    Ok((name, config))
 }
 
 fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), String> {
@@ -391,13 +628,23 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces`, `triggers.crons` and `queues` need `--experimental`, and a deployment cannot
-/// have them yet.
+/// `kv_namespaces`, `r2_buckets`, `triggers.crons`, `queues`, `workflows`, `d1_databases`,
+/// `secrets_store_secrets`, `ratelimits` and `assets` need `--experimental`, and a deployment
+/// cannot have them yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
+        (!wrangler.r2_buckets.is_empty(), "r2_buckets"),
         (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
         (!wrangler.queues.is_empty(), "queues"),
+        (!wrangler.workflows.is_empty(), "workflows"),
+        (!wrangler.d1_databases.is_empty(), "d1_databases"),
+        (
+            !wrangler.secrets_store_secrets.is_empty(),
+            "secrets_store_secrets",
+        ),
+        (!wrangler.ratelimits.is_empty(), "ratelimits"),
+        (wrangler.assets.is_some(), "assets"),
     ] {
         match target {
             _ if !used => {}
@@ -416,20 +663,75 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
     Ok(())
 }
 
-/// The KV, cron and Queues Workers `wrangler` asks for, with their disks under `storage`, from
-/// `services[at]`; returns the names of the KV and Queues services.
+/// The environment variable holding the secret `secret_name`: `WORKERD_SECRET_` and the name
+/// upper-cased, other characters than letters and digits as `_`. The prefix keeps every other
+/// variable, the node's own credentials included, out of a Worker's reach.
+fn secret_variable(secret_name: &str) -> String {
+    let name: String = (secret_name.chars())
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => c.to_ascii_uppercase(),
+            _ => '_',
+        })
+        .collect();
+    format!("WORKERD_SECRET_{name}")
+}
+
+/// A rate limit's period is 10 or 60 seconds, as on Cloudflare. Two secrets of different names
+/// cannot read the same variable, and a variable that is not set is a warning.
+fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
+    let periods = [10, 60];
+    if let Some(r) = (wrangler.ratelimits.iter()).find(|r| !periods.contains(&r.simple.period)) {
+        return Err(format!(
+            "ratelimits: {}: simple.period must be 10 or 60",
+            r.name
+        ));
+    }
+    let mut names = BTreeMap::new();
+    for s in &wrangler.secrets_store_secrets {
+        let variable = secret_variable(&s.secret_name);
+        if std::env::var_os(&variable).is_none() {
+            eprintln!(
+                "secrets_store_secrets: {variable} is not set; \"{}\" is not found",
+                s.secret_name
+            );
+        }
+        match names.insert(variable.clone(), &s.secret_name) {
+            Some(other) if *other != s.secret_name => {
+                return Err(format!(
+                    "secrets_store_secrets: \"{other}\" and \"{}\" would both read {variable}",
+                    s.secret_name
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// The KV, R2, Secrets Store, cron, Queues, Workflows, D1, rate-limiting and assets services
+/// `wrangler` asks for, with their disks under `storage`, from `services[at]`. Each is named after
+/// the worker, `<name>-<kind>`, so it cannot collide with it.
 fn bundled_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     mut at: u32,
     name: &str,
+    root: &Path,
     storage: &Path,
     wrangler: &Wrangler,
-) -> Result<(String, String), String> {
-    // Named after the worker, so they cannot collide with it.
-    let kv = format!("{name}-kv");
+    watch: Watch,
+) -> Result<(), String> {
     if !wrangler.kv_namespaces.is_empty() {
-        kv_services(services, at, &kv, &storage.join("kv"))?;
+        kv_services(services, at, &format!("{name}-kv"), &storage.join("kv"))?;
         at += 3;
+    }
+    if !wrangler.r2_buckets.is_empty() {
+        r2_services(services, at, &format!("{name}-r2"), storage)?;
+        at += 3;
+    }
+    let secrets = &wrangler.secrets_store_secrets;
+    if !secrets.is_empty() {
+        secrets_service(services.reborrow().get(at), name, secrets);
+        at += 1;
     }
     let crons = &wrangler.triggers.crons;
     if !crons.is_empty() {
@@ -439,8 +741,98 @@ fn bundled_services(
     if !wrangler.queues.is_empty() {
         let dir = storage.join("queues");
         queues_services(services, at, name, &dir, &wrangler.queues)?;
+        at += 2;
     }
-    Ok((kv, format!("{name}-queues")))
+    if !wrangler.workflows.is_empty() {
+        let dir = storage.join("workflows");
+        workflows_services(services, at, name, &dir, wrangler)?;
+        at += 2;
+    }
+    if !wrangler.d1_databases.is_empty() {
+        d1_services(services, at, &format!("{name}-d1"), &storage.join("d1"))?;
+        at += 2;
+    }
+    if !wrangler.ratelimits.is_empty() {
+        let service = services.reborrow().get(at);
+        stateless_worker(service, &format!("{name}-ratelimit"), "ratelimit.js", 0);
+        at += 1;
+    }
+    if let Some(assets) = &wrangler.assets {
+        assets_services(services, at, name, root, assets, wrangler, watch)?;
+    }
+    Ok(())
+}
+
+/// The assets service `<target>-assets` at `services[at]`, which the socket serves: the files
+/// of `assets.directory`, and `target` if there is a `main`. Its config holds the text of the
+/// directory's `_headers`, `_redirects` and `.assetsignore`, which are watched.
+fn assets_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    target: &str,
+    root: &Path,
+    assets: &Assets,
+    wrangler: &Wrangler,
+    watch: Watch,
+) -> Result<(), String> {
+    let dir = root.join(&assets.directory);
+    if !dir.is_dir() {
+        return Err(format!(
+            "assets.directory: {}: not a directory",
+            dir.display()
+        ));
+    }
+    let text = |file| {
+        let path = dir.join(file);
+        watch(&path)?;
+        match fs::read_to_string(&path) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("{}: {e}", path.display())),
+        }
+    };
+    let config = serde_json::json!({
+        "html_handling": assets.html_handling,
+        "not_found_handling": assets.not_found_handling,
+        "base_path": assets.base_path,
+        "run_worker_first": assets.run_worker_first,
+        "headers": text("_headers")?,
+        "redirects": text("_redirects")?,
+        "ignore": text(".assetsignore")?,
+    });
+    let mut service = services.reborrow().get(at);
+    service.set_name(format!("{target}-assets"));
+    let mut service = service.init_assets();
+    service.set_path(dir.to_string_lossy());
+    service.set_config(config.to_string());
+    if wrangler.main.is_some() {
+        service.init_user_worker().set_name(target);
+    } else {
+        service.set_compatibility_date(&wrangler.compatibility_date);
+        service
+            .set_compatibility_flags(&wrangler.compatibility_flags[..])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The D1 Worker `name` at `services[at]`, then its disk `dir`.
+fn d1_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    dir: &Path,
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    let service = services.reborrow().get(at);
+    let class = Some(("DATABASE", "D1Database"));
+    bundled_worker(service, name, "d1.js", &[], class, 1);
+    Ok(())
 }
 
 /// The KV Worker `name` at `services[at]`, then its disks under `dir`.
@@ -463,8 +855,69 @@ fn kv_services(
         &blobs,
     );
     let service = services.reborrow().get(at);
-    let bindings = bundled_worker(service, name, "kv.js", &[], ("SHARD", "KVNamespace"), 2);
+    let bindings = bundled_worker(
+        service,
+        name,
+        "kv.js",
+        &[],
+        Some(("SHARD", "KVNamespace")),
+        2,
+    );
     let mut blobs = bindings.get(1);
+    blobs.set_name("BLOBS");
+    blobs.init_service().set_name(format!("{name}-blobs"));
+    Ok(())
+}
+
+/// The Worker `name` of the bundled module `/workerd/<module>`, without Durable Objects or a
+/// disk, and `n` bindings, returned.
+fn stateless_worker<'a>(
+    mut service: service::Builder<'a>,
+    name: &str,
+    module: &str,
+    n: u32,
+) -> capnp::struct_list::Builder<'a, worker::binding::Owned> {
+    service.set_name(name);
+    let mut w = service.init_worker();
+    let mut m = w.reborrow().init_modules(1).get(0);
+    m.set_name(module);
+    m.set_bundled(format!("/workerd/{module}"));
+    w.set_compatibility_date("2026-01-01");
+    w.init_bindings(n)
+}
+
+/// The Secrets Store Worker `<name>-secrets-store`, each secret's variable bound as
+/// `env:<secret_name>`.
+fn secrets_service(service: service::Builder<'_>, name: &str, secrets: &[SecretsStoreSecret]) {
+    let names: BTreeSet<_> = secrets.iter().map(|s| &s.secret_name).collect();
+    let name = format!("{name}-secrets-store");
+    let n = names.len() as u32;
+    let mut bindings = stateless_worker(service, &name, "secrets-store.js", n);
+    for (i, secret) in (0u32..).zip(names) {
+        let mut b = bindings.reborrow().get(i);
+        b.set_name(format!("env:{secret}"));
+        b.set_from_environment(secret_variable(secret));
+    }
+}
+
+/// The R2 Worker `name` at `services[at]`, then its disk, `storage`, and its `BLOBS`, a bucket
+/// service storing the objects in `storage/r2/`.
+fn r2_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    storage: &Path,
+) -> Result<(), String> {
+    fs::create_dir_all(storage).map_err(|e| format!("{}: {e}", storage.display()))?;
+    let disk = format!("{name}-storage");
+    disk_service(services.reborrow().get(at + 1), &disk, storage);
+    let mut service = services.reborrow().get(at + 2);
+    service.set_name(format!("{name}-blobs"));
+    let mut bucket = service.init_bucket();
+    bucket.set_path("r2");
+    bucket.set_local_disk(disk);
+    let service = services.reborrow().get(at);
+    let mut blobs = bundled_worker(service, name, "r2.js", &[], None, 1).get(0);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(format!("{name}-blobs"));
     Ok(())
@@ -478,15 +931,36 @@ fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     disk.set_writable(true);
 }
 
-/// The Worker `name` of the bundled module `/workerd/<module>`, with `flags` and the
-/// SQLite-backed Durable Object class `class` on the disk `<name>-storage`, bound as `binding`:
-/// the first of its `n` bindings, all returned.
+/// The cache service `<name>-cache`, last in `services`, its entries under `storage`, as the Cache
+/// API backend of the Worker, `services[0]`.
+fn cache_service(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    name: &str,
+    storage: &Path,
+) -> Result<(), String> {
+    let dir = storage.join("cache");
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let cache = format!("{name}-cache");
+    let last = services.len() - 1;
+    let mut service = services.reborrow().get(last);
+    service.set_name(&cache);
+    service.init_cache().set_path(dir.to_string_lossy());
+    let Ok(service::Which::Worker(Ok(worker))) = services.reborrow().get(0).which() else {
+        unreachable!("services[0] is the Worker");
+    };
+    worker.init_cache_api_outbound().set_name(&cache);
+    Ok(())
+}
+
+/// The Worker `name` of the bundled module `/workerd/<module>`, with `flags`, its Durable Objects
+/// on the disk `<name>-storage`, and `n` bindings, returned. With `class`, the SQLite-backed
+/// Durable Object class `class` is the first binding, `binding`.
 fn bundled_worker<'a>(
     mut service: service::Builder<'a>,
     name: &str,
     module: &str,
     flags: &[&str],
-    (binding, class): (&str, &str),
+    class: Option<(&str, &str)>,
     n: u32,
 ) -> capnp::struct_list::Builder<'a, worker::binding::Owned> {
     service.set_name(name);
@@ -499,17 +973,21 @@ fn bundled_worker<'a>(
     for (i, flag) in (0u32..).zip(flags) {
         list.set(i, flag);
     }
-    let mut ns = w.reborrow().init_durable_object_namespaces(1).get(0);
-    ns.set_class_name(class);
-    ns.set_unique_key(class);
-    ns.set_enable_sql(true);
+    if let Some((_, class)) = class {
+        let mut ns = w.reborrow().init_durable_object_namespaces(1).get(0);
+        ns.set_class_name(class);
+        ns.set_unique_key(class);
+        ns.set_enable_sql(true);
+    }
     w.reborrow()
         .init_durable_object_storage()
         .set_local_disk(format!("{name}-storage"));
     let mut bindings = w.init_bindings(n);
-    let mut b = bindings.reborrow().get(0);
-    b.set_name(binding);
-    b.init_durable_object_namespace().set_class_name(class);
+    if let Some((binding, class)) = class {
+        let mut b = bindings.reborrow().get(0);
+        b.set_name(binding);
+        b.init_durable_object_namespace().set_class_name(class);
+    }
     bindings
 }
 
@@ -537,7 +1015,7 @@ fn cron_services(
     );
     let flags = ["service_binding_extra_handlers"];
     let service = services.reborrow().get(at);
-    let class = ("SCHEDULE", "Schedule");
+    let class = Some(("SCHEDULE", "Schedule"));
     let mut bindings = bundled_worker(service, &name, "cron.js", &flags, class, 3);
     let mut list = bindings.reborrow().get(1);
     list.set_name("CRONS");
@@ -548,20 +1026,27 @@ fn cron_services(
     Ok(())
 }
 
-fn set_bindings(
-    worker: worker::Builder<'_>,
-    wrangler: &Wrangler,
-    kv_service: &str,
-    queues_service: &str,
-) {
+/// The bindings of the worker `name`: `vars`, Durable Objects, those to the bundled Workers
+/// [`bundled_services`] names after it, Secrets Store secrets, and rate limits.
+fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let kv = &wrangler.kv_namespaces;
+    let r2 = &wrangler.r2_buckets;
     let producers = &wrangler.queues.producers;
+    let workflows = &wrangler.workflows;
+    let d1 = &wrangler.d1_databases;
+    let secrets = &wrangler.secrets_store_secrets;
+    let limits = &wrangler.ratelimits;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
-    let n = wrangler.vars.len() + do_bindings.len() + kv.len();
-    let mut bs = worker.init_bindings((n + producers.len()) as u32);
+    let n = wrangler.vars.len() + do_bindings.len() + kv.len() + r2.len();
+    let assets = wrangler.assets.as_ref().and_then(|a| a.binding.as_ref());
+    let m = n + producers.len() + workflows.len();
+    let at = m + d1.len();
+    let limits_at = at + secrets.len();
+    let mut bs =
+        worker.init_bindings((limits_at + limits.len() + usize::from(assets.is_some())) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -583,18 +1068,198 @@ fn set_bindings(
         b.set_name(&k.binding);
         let id = k.id.as_ref().unwrap_or(&k.binding);
         let mut designator = b.init_kv_namespace();
-        designator.set_name(kv_service);
+        designator.set_name(format!("{name}-kv"));
         let props = serde_json::json!({ "namespace": id });
+        designator.init_props().set_json(props.to_string());
+    }
+    for (i, r) in r2.iter().enumerate() {
+        let at = wrangler.vars.len() + do_bindings.len() + kv.len() + i;
+        let mut b = bs.reborrow().get(at as u32);
+        b.set_name(&r.binding);
+        let bucket = r.bucket_name.as_ref().unwrap_or(&r.binding);
+        let mut designator = b.init_r2_bucket();
+        designator.set_name(format!("{name}-r2"));
+        let props = serde_json::json!({ "bucket": bucket });
         designator.init_props().set_json(props.to_string());
     }
     for (i, p) in producers.iter().enumerate() {
         let mut b = bs.reborrow().get((n + i) as u32);
         b.set_name(&p.binding);
         let mut designator = b.init_queue();
-        designator.set_name(queues_service);
+        designator.set_name(format!("{name}-queues"));
         let props = serde_json::json!({ "queue": p.queue });
         designator.init_props().set_json(props.to_string());
     }
+    for (i, w) in workflows.iter().enumerate() {
+        let mut b = bs.reborrow().get((n + producers.len() + i) as u32);
+        b.set_name(&w.binding);
+        let mut wrapped = b.init_wrapped();
+        wrapped.set_module_name("cloudflare-internal:workflows-api");
+        let mut fetcher = wrapped.init_inner_bindings(1).get(0);
+        fetcher.set_name("fetcher");
+        workflow_binding(fetcher.init_service(), name, &w.name);
+    }
+    for (i, d) in d1.iter().enumerate() {
+        let mut b = bs.reborrow().get((m + i) as u32);
+        b.set_name(&d.binding);
+        let mut wrapped = b.init_wrapped();
+        wrapped.set_module_name("cloudflare-internal:d1-api");
+        let mut fetcher = wrapped.init_inner_bindings(1).get(0);
+        fetcher.set_name("fetcher");
+        let mut designator = fetcher.init_service();
+        designator.set_name(format!("{name}-d1"));
+        let id = (d.preview_database_id.as_ref())
+            .or(d.database_id.as_ref())
+            .unwrap_or(&d.binding);
+        let props = serde_json::json!({ "database": id });
+        designator.init_props().set_json(props.to_string());
+    }
+    for (i, secret) in secrets.iter().enumerate() {
+        set_secret(bs.reborrow().get((at + i) as u32), secret, name);
+    }
+    for (i, r) in limits.iter().enumerate() {
+        set_ratelimit(bs.reborrow().get((limits_at + i) as u32), r, name);
+    }
+    if let Some(binding) = assets {
+        let mut b = bs.get((limits_at + limits.len()) as u32);
+        b.set_name(binding);
+        let mut designator = b.init_service();
+        designator.set_name(format!("{name}-assets"));
+        designator.set_entrypoint("AssetWorker");
+    }
+}
+
+/// The Secrets Store secret `secret` of the worker `name`: the entrypoint `SecretsStoreSecret` of
+/// `<name>-secrets-store`, the store and the secret's name in its props.
+fn set_secret(mut b: worker::binding::Builder<'_>, secret: &SecretsStoreSecret, name: &str) {
+    b.set_name(&secret.binding);
+    let mut designator = b.init_service();
+    designator.set_name(format!("{name}-secrets-store"));
+    designator.set_entrypoint("SecretsStoreSecret");
+    let props = serde_json::json!({
+        "store_id": secret.store_id,
+        "secret_name": secret.secret_name,
+    });
+    designator.init_props().set_json(props.to_string());
+}
+
+/// The rate limit `r` of the worker `name`: the entrypoint `RateLimit` of
+/// `<name>-ratelimit`, its settings in its props.
+fn set_ratelimit(mut b: worker::binding::Builder<'_>, r: &Ratelimit, name: &str) {
+    b.set_name(&r.name);
+    let mut designator = b.init_service();
+    designator.set_name(format!("{name}-ratelimit"));
+    designator.set_entrypoint("RateLimit");
+    let props = serde_json::json!({
+        "namespace": r.namespace_id,
+        "limit": r.simple.limit,
+        "period": r.simple.period,
+    });
+    designator.init_props().set_json(props.to_string());
+}
+
+/// The Workflow API of the Workflow `workflow` of the worker `name`: the entrypoint
+/// `WorkflowBinding` of `<name>-workflows`, the Workflow in its props.
+fn workflow_binding(mut designator: service_designator::Builder<'_>, name: &str, workflow: &str) {
+    designator.set_name(format!("{name}-workflows"));
+    designator.set_entrypoint("WorkflowBinding");
+    let props = serde_json::json!({ "workflow": workflow });
+    designator.init_props().set_json(props.to_string());
+}
+
+/// The worker `name`'s `workflowsEngine`: the class `Engine` of `<name>-workflows` runs each of
+/// `workflows`.
+fn set_workflows_engine(worker: worker::Builder<'_>, name: &str, workflows: &[Workflow]) {
+    let mut engine = worker.init_workflows_engine();
+    let mut class = engine.reborrow().init_actor_class();
+    class.set_name(format!("{name}-workflows"));
+    class.set_entrypoint("Engine");
+    let mut list = engine.init_workflows(workflows.len() as u32);
+    for (i, w) in (0u32..).zip(workflows) {
+        let mut workflow = list.reborrow().get(i);
+        workflow.set_class_name(&w.class_name);
+        workflow.set_name(&w.name);
+        workflow_binding(workflow.init_binding_service(), name, &w.name);
+    }
+}
+
+const PRESERVE_NON_RETRYABLE: &str = "workflows_preserve_non_retryable_error_message";
+
+/// The Workflows Worker `<target>-workflows` at `services[at]`, then its disk under `dir`, which
+/// holds the instances: a namespace binding to each Workflow's instances, named after it.
+fn workflows_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    target: &str,
+    dir: &Path,
+    wrangler: &Wrangler,
+) -> Result<(), String> {
+    let workflows = &wrangler.workflows;
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let name = format!("{target}-workflows");
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    let mut config = serde_json::Map::new();
+    for w in workflows {
+        let unsupported = |field| {
+            Err(format!(
+                "workflows: \"{}\": {field} is not supported",
+                w.name
+            ))
+        };
+        let ok = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut chars = w.name.chars();
+        if w.name.len() > 64 || !chars.next().is_some_and(ok) || !chars.all(|c| ok(c) || c == '-') {
+            return Err(format!(
+                "workflows: \"{}\": Workflow names must be 1-64 characters \
+                 long, start with a letter, number, or underscore, and may \
+                 only contain letters, numbers, underscores, or hyphens.",
+                w.name
+            ));
+        }
+        if w.script_name.as_ref().is_some_and(|s| s != target) {
+            return unsupported("script_name");
+        }
+        if w.schedules.is_some() {
+            return unsupported("schedules");
+        }
+        let mut settings = serde_json::json!({});
+        if let Some(steps) = w.limits.as_ref().and_then(|l| l.steps) {
+            settings["steps"] = steps.into();
+        }
+        if let Some(r) = &w.default_retention {
+            settings["retention"] =
+                serde_json::json!({ "success": r.success_retention, "error": r.error_retention });
+        }
+        config.insert(w.name.clone(), settings);
+    }
+    let service = services.reborrow().get(at);
+    let n = workflows.len() as u32;
+    // The engine reports a step's NonRetryableError as the Worker's flags ask.
+    let flag = |f: &str| wrangler.compatibility_flags.iter().any(|g| g == f);
+    let preserve = flag(PRESERVE_NON_RETRYABLE)
+        || (wrangler.compatibility_date.as_str() >= "2026-05-14"
+            && !flag("workflows_replace_non_retryable_error_message"));
+    let flags: &[&str] = if preserve {
+        &[PRESERVE_NON_RETRYABLE]
+    } else {
+        &[]
+    };
+    let mut bindings = bundled_worker(service, &name, "workflows.js", flags, None, n + 1);
+    for (i, w) in (0u32..).zip(workflows) {
+        let mut b = bindings.reborrow().get(i);
+        b.set_name(format!("workflow:{}", w.name));
+        let mut ns = b.init_durable_object_namespace();
+        ns.set_class_name(workflow_namespace_key(&w.name));
+        ns.set_service_name(target);
+    }
+    let mut b = bindings.get(n);
+    b.set_name("WORKFLOWS");
+    b.set_json(serde_json::Value::Object(config).to_string());
+    Ok(())
 }
 
 /// The Queues Worker `<target>-queues` at `services[at]`, then its disk under `dir`. Its
@@ -640,7 +1305,7 @@ fn queues_services(
     let consumed = !consumers.is_empty();
     let flags = ["service_binding_extra_handlers"];
     let service = services.reborrow().get(at);
-    let class = ("SHARD", "QueueShard");
+    let class = Some(("SHARD", "QueueShard"));
     let n = 2 + u32::from(consumed);
     let mut bindings = bundled_worker(service, &name, "queues.js", &flags, class, n);
     let mut list = bindings.reborrow().get(1);

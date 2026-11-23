@@ -33,6 +33,7 @@ impl<'a> Types<'a> {
             | Type::KjDate(_)
             | Type::SliceRef(_) => Definite(true),
             Type::UniquePtr(_)
+            | Type::KjException(_)
             | Type::KjOwn(_)
             | Type::KjRc(_)
             | Type::KjArc(_)

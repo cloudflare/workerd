@@ -1,6 +1,5 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::error::Error as StdError;
 use core::ffi::CStr;
 use core::fmt::Display;
 use core::fmt::{self};
@@ -75,6 +74,9 @@ pub mod repr {
             max_count: usize,
         );
 
+        #[link_name = "cxxbridge1$kjException$clone"]
+        pub fn kj_exception_clone(err: *const KjException) -> *mut KjException;
+
         #[link_name = "cxxbridge1$kjException$dropInPlace"]
         pub fn kj_exception_drop_in_place(err: *mut KjException);
 
@@ -103,7 +105,13 @@ impl Display for CanceledException {
 }
 
 /// Fully owned wrapper around kj::Exception* allocated with new.
-/// Represents kj::Exception thrown from an `extern "C++"` function.
+///
+/// Represents kj::Exception thrown from an `extern "C++"` function, and is also a bridge type of
+/// its own: a bridge function can take or return a `KjException` by value, and C++ sees a
+/// `kj::Exception` by value. Ownership of the exception passes with the call: the receiving side
+/// takes over the `kj::Exception*` before the callee runs, so the exception is destroyed exactly
+/// once whether the callee consumes it, drops it or throws. Build one from a [`KjError`] with
+/// [`KjException::from`].
 #[derive(Debug)]
 pub struct KjException {
     pub(crate) err: NonNull<repr::KjException>,
@@ -119,8 +127,6 @@ impl Display for KjException {
         f.write_str(self.what())
     }
 }
-
-impl StdError for KjException {}
 
 impl KjException {
     /// Allocate new kj::Exception instance.
@@ -257,6 +263,18 @@ impl KjException {
     }
 }
 
+/// Copies the `kj::Exception` with `kj::Exception::clone()`, which keeps everything it holds:
+/// context, remote trace and stack trace included.
+impl Clone for KjException {
+    fn clone(&self) -> Self {
+        // Safety: `self.err` is a live `kj::Exception*` that `self` owns.
+        let exception = unsafe { repr::kj_exception_clone(self.err.as_ptr()) };
+        Self {
+            err: NonNull::new(exception).expect("can't allocate new kj::Exception"),
+        }
+    }
+}
+
 impl Drop for KjException {
     fn drop(&mut self) {
         // Safety: the bridge representation and ownership invariants satisfy this operation.
@@ -276,6 +294,17 @@ impl<T: core::error::Error> IntoKjException for T {
     fn into_kj_exception(self, file: &str, line: u32) -> KjException {
         let msg = self.to_string();
         KjException::new(repr::KjExceptionType::Failed, &msg, file, line, None)
+    }
+}
+
+/// A `KjException` is already the `kj::Exception` it stands for, so a bridge function that fails
+/// with one, or a bridge future that resolves to one, hands C++ that exception as it is, with its
+/// stack trace and everything else C++ recorded in it. `KjException` is therefore not a
+/// [`std::error::Error`], which would make it convert as any other error does, as a new `FAILED`
+/// exception with only its description.
+impl IntoKjException for KjException {
+    fn into_kj_exception(self, _file: &str, _line: u32) -> KjException {
+        self
     }
 }
 
@@ -351,6 +380,38 @@ impl IntoKjException for KjError {
         let details = self.details.as_ref();
 
         KjException::new(exception_type, &msg, file, line, details)
+    }
+}
+
+impl From<KjError> for KjException {
+    /// Creates the `kj::Exception` for `error`, with its type, description, location and
+    /// details. An error without a location gets the location of the caller of `from`.
+    #[track_caller]
+    fn from(error: KjError) -> Self {
+        let location = core::panic::Location::caller();
+        error.into_kj_exception(location.file(), location.line())
+    }
+}
+
+/// Hands a `KjException` to C++, which takes over the `kj::Exception*`. Called by generated code.
+pub fn kj_exception_into_raw(exception: KjException) -> *mut repr::KjException {
+    ManuallyDrop::new(exception).err.as_ptr()
+}
+
+/// Takes over a `kj::Exception*` that C++ allocated with `new` and handed to Rust. Called by
+/// generated code.
+///
+/// # Safety
+///
+/// `exception` must be a non-null `kj::Exception*` allocated with `new` that nothing else owns.
+pub unsafe fn kj_exception_from_raw(exception: *mut repr::KjException) -> KjException {
+    debug_assert!(
+        !exception.is_null(),
+        "C++ handed Rust a null kj::Exception*"
+    );
+    KjException {
+        // Safety: the caller guarantees that the pointer is non-null.
+        err: unsafe { NonNull::new_unchecked(exception) },
     }
 }
 

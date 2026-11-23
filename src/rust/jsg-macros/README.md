@@ -10,6 +10,7 @@ boilerplate when implementing the JSG type system for Rust-backed JavaScript API
 | `lib.rs`      | Public macro entry points — thin dispatchers only                              |
 | `resource.rs` | Code generation for `#[jsg_resource]` on structs and impl blocks               |
 | `trace.rs`    | GC trace code generation — field classification and `trace()` body emission    |
+| `traced.rs`   | Code generation for `#[jsg_traced]`                                            |
 | `utils.rs`    | Shared helpers: `extract_named_fields`, `snake_to_camel`, `is_lock_ref`, etc.  |
 
 ---
@@ -25,12 +26,14 @@ it, the fields are defined as data properties, an absent optional field as `unde
 JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
 setter on `Object.prototype` runs, and what it throws is passed on.
 
-Optional fields can use `Option<T>` (`None` is absent) or `jsg::NullOrUndefined<T>`
-(`Undefined` is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>`
-when a field must distinguish `null` from `undefined`; its `Null` state always
-produces a property whose value is `null`. An absent input property becomes `None`
-or `Undefined`, respectively. If all public fields are optional, a `null` or
-`undefined` input is accepted as an empty dictionary.
+A field is optional when its type is one that a method may omit as an argument
+(`FromJS::is_optional`), whatever name or alias it is spelled with: `Option<T>` (`None` is
+absent), `jsg::LenientOption<T>` (`None` is absent) or `jsg::NullOrUndefined<T>` (`Undefined`
+is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` when a field must
+distinguish `null` from `undefined`; its `Null` state always produces a property whose value is
+`null`. An absent input property converts from `undefined`, so it becomes the absent state. If
+all public fields are optional, a `null` or `undefined` input is accepted as an empty
+dictionary.
 
 A field that holds a JavaScript value, as a C++ `jsg::JsRef<jsg::JsValue>` field does, is a
 `jsg::v8::TracedGlobal<M>`. It converts as a `Local<'s, M>` does: `TracedGlobal<Value>` takes any
@@ -95,9 +98,12 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
-- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
-  as the creator for an instance method and `None` for a static one, as C++ JSG passes
-  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A return of `()`, `bool` or one of the numeric types a Fast API callback returns, directly or
+  as the `Ok` type of a `Result`, is set directly in V8: a `bool` with `set_return_boolean`, a
+  number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return
+  value converts with `jsg::ToJS::to_js_with_creator`. Instance methods pass the resource's
+  wrapper as the creator, and static methods pass `None`. A returned `jsg::Promise` keeps its
+  creator resource alive until it settles, as in C++ JSG.
 - A method, property or call handler that returns a promise (`jsg::Promise<T>` or
   `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
   conversion error included, when the isolate captures throws as rejections (the
@@ -108,7 +114,7 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
   `this`, the lock comes right after `this`.
-- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::Lenient<T>` arguments may be omitted.
+- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::LenientOption<T>` arguments may be omitted.
   Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` for three distinct
   `Some(T)`, `Null`, and `Undefined` states; omission produces `Undefined`.
   A `jsg::Nullable<T>` argument remains required, although explicitly passing
@@ -123,7 +129,7 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
   Web IDL count of leading required arguments: `this`, the lock and a `jsg::Arguments` are not
   counted, and counting stops at the first type whose `FromJS::is_optional()` returns true (such
-  as `Option<T>` or `jsg::Lenient<T>`). Otherwise `.length` is `0`.
+  as `Option<T>` or `jsg::LenientOption<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -658,8 +664,15 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to inner values.
-`Traced::trace` has no default, so a hand-written impl must spell out its visits.
+use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced_unchecked!`); containers/wrappers
+recurse to inner values. `Traced::trace` has no default, so a hand-written impl must spell out
+its visits.
+
+`#[jsg_traced]` on a struct or enum implements a no-op `Traced` and `jsg::HoldsNoGcReferences`,
+bounding each field's type (in every variant, for an enum) by `HoldsNoGcReferences`, so a field
+that holds a `jsg::Rc` or a `TracedGlobal` fails to compile. `jsg::jsg_traced_unchecked!(Foo)`
+makes the same claim without checking it; it is for a type whose fields can't implement the
+marker, such as a wrapper of a type from outside JSG.
 
 ### Supported field shapes
 
@@ -669,8 +682,7 @@ use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to in
 | `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
-| `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
-| `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
+| `Option<T>` / `jsg::LenientOption<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values; map keys are not visited, so they must be `jsg::HoldsNoGcReferences`, which the bounds require |
 | `std::rc::Rc<T>` | **Not allowed** — no `Traced` impl, since a clone could reach the resource's state without the isolate lock; share a resource through `jsg::Rc` or `jsg::Weak`, and plain data with a future through `Arc<T: Send + Sync>` |
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
@@ -682,6 +694,14 @@ use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to in
 A cell is required whenever a traced field needs to be mutated after construction,
 because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 `TracedGlobal` uses the `jsg::` cells.
+
+### Stateless resources and startup snapshots
+
+`#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is
+interchangeable with any other, so a live instance can transfer through a V8 startup snapshot:
+the macro implements `jsg::SnapshotTransfer` with an empty snapshot, restoring every instance
+as the type's `Default`. The type must implement `Default`. See
+`jsg/README.md` §Startup snapshots.
 
 ### Manual tracing with `custom_trace`
 
@@ -843,7 +863,7 @@ jsg::jsg_memory_retainer!(Cache);
 ```
 
 A retainer held as a field of a resource without `custom_trace` is traced too, so it also needs a
-`Traced` impl: `jsg::jsg_traced!(Cache);` for one that holds no GC references.
+`Traced` impl: `#[jsg_traced]` on `Cache` for one that holds no GC references.
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
 capacity. A retainer reached twice is one node, and so is an allocation that several

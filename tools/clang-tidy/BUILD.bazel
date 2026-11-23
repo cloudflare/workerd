@@ -6,6 +6,8 @@
     owner (kj::Rc, kj::Arc, or a kj::Own of a refcounted type).
   - `jsg-visit-for-gc`: validates JSG resource types correctly visit their
     GC roots.
+  - `jsg-js-reentry`: flags borrows into JSG-owned state used after a call
+    that can run JavaScript.
   - `workerd-angled-includes` - requires includes of workers/capnproto code from
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
@@ -16,6 +18,9 @@
     ReadableStream / WritableStream (`js.alloc<ReadableStream>(...)`) outside
     JsReadableStream::create() / JsWritableStream::create(), the dispatch
     points that select the stream implementation by compatibility flag.
+  - `jsg-traced-own`: flags visitForGc() bodies that visit through a kj::Own,
+    and moves of whole containers of jsg::TracedOwn, which leave handles traced
+    with nothing visiting them.
   - `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()`
     calls: on promises that are immediately `co_await`ed, and on
     `capnp::Request::send()` results, which should use `sendIgnoringResult()`
@@ -46,9 +51,11 @@ filegroup(
         "angled-includes.c++",
         "consume.c++",
         "coroutine-hostile-raii.c++",
+        "js-reentry.c++",
         "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "shared-visit.c++",
+        "traced-own.c++",
         "unsafe-continuation-capture.c++",
         "use-after-move.c++",
         "use-after-move-analysis.c++",
@@ -64,9 +71,11 @@ filegroup(
         "angled-includes.h",
         "consume.h",
         "coroutine-hostile-raii.h",
+        "js-reentry.h",
         "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "shared-visit.h",
+        "traced-own.h",
         "unsafe-continuation-capture.h",
         "use-after-move.h",
         "use-after-move-analysis.h",
@@ -169,6 +178,22 @@ sh_test(
 )
 
 sh_test(
+    name = "js-reentry-test",
+    srcs = ["js-reentry-test.sh"],
+    data = [
+        ":js-reentry-negative-test.c++",
+        ":js-reentry-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
     name = "legacy-stream-alloc-test",
     srcs = ["legacy-stream-alloc-test.sh"],
     data = [
@@ -190,6 +215,22 @@ sh_test(
     data = [
         ":shared-visit-negative-test.c++",
         ":shared-visit-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "traced-own-test",
+    srcs = ["traced-own-test.sh"],
+    data = [
+        ":traced-own-negative-test.c++",
+        ":traced-own-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],

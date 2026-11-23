@@ -11,7 +11,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_cc_library.bzl`                        | Wraps `cc_library`; `strip_include_prefix="/src"`, arch-specific CPU flags (CRC32C)               |
 | `wd_cc_binary.bzl`                         | Wraps `cc_binary`; macOS dead-strip linkopts                                                      |
 | `wd_cc_embed.bzl`                          | Binary/text data -> C++ via C23 `#embed`; auto-detects text vs binary by extension                |
-| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; generates CSV report genrule                                            |
+| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; dry run under `bazel test`; generates CSV report genrule                |
 | `wd_test.bzl`                              | `.wd-test` config test runner; generates up to 3 variants per test                                |
 | `kj_test.bzl`                              | C++ unit test wrapper; also generates test variants                                               |
 | `wpt_test.bzl`                             | Web Platform Tests; generates JS runner + `.wd-test` config from WPT tree; delegates to `wd_test` |
@@ -40,10 +40,22 @@ that adds workerd-specific static checks:
   depending on which visited last. Suppress a deliberate shared visit with
   `// NOLINT(jsg-shared-visit)` plus the reason. Test:
   `//tools/clang-tidy:shared-visit-test`.
+- `jsg-js-reentry`: flags a local reference, pointer, iterator, or view into
+  JSG-owned state that is used after, or is the receiver of, a call that can run
+  JavaScript. A call can run JavaScript when its callee takes a `jsg::Lock&`, is
+  marked `JSG_MAY_RUN_JS`, is a V8 entry point that runs script, or has a body
+  in the translation unit that makes such a call; callees marked `JSG_NO_JS`
+  never do. Enabled for the directories listed in
+  `check_path_filters.bzl`; run it elsewhere with `--config=clang-tidy-js-reentry`.
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
   `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
+- `jsg-traced-own`: flags visiting through a `kj::Own` from a function handed
+  the `jsg::GcVisitor`, and moving or swapping a whole container whose elements
+  hold a `jsg::TracedOwn`, or a struct holding one; either leaves visited
+  handles traced with nothing visiting them. Moving a non-reference local isn't
+  flagged. Test: `//tools/clang-tidy:traced-own-test`.
 - `workerd-angled-includes` - requires includes of workers/capnproto code from
     different directories to use angled brackets
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
@@ -102,7 +114,7 @@ Example:
 
 ```python
 CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
+    "workerd-new-check": [
         "src/workerd/io",
         "src/workerd/api",
     ],
@@ -129,4 +141,4 @@ Lives in `deps/`. Uses jsonc manifests + codegen:
 - `workerd-v8/` — separate Bazel module wrapping V8 dependency
 
 Pyodide package metadata lives in `build/python_metadata.bzl`; the checked-in, pre-filtered
-package lock files live in `src/pyodide/python-lock/`.
+package lock files live in `src/pyodide/bundle/python-lock/`.

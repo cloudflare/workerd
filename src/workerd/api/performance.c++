@@ -6,10 +6,23 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/worker.h>
 
 #include <kj/encoding.h>
 
 namespace workerd::api {
+
+kj::Maybe<kj::Own<jsg::Wrappable>> Performance::snapshotClone() const {
+  if (!entries.empty() || hasEventListeners()) return kj::none;
+  // The current isolate's limit enforcer, not `isolateLimitEnforcer`: this runs in the zygote, to
+  // produce the copy stored in the SnapshotArtifact, and again in every Worker started from that
+  // snapshot, on the stored copy, to produce the instance attached to the restored wrapper. The
+  // member would hand each Worker the zygote's enforcer, destroyed with the zygote's isolate. For
+  // the same reason the stored copy refers to a dead enforcer, and nothing but this method may be
+  // called on it.
+  auto& js = jsg::Lock::current();
+  return ownAsWrappable(kj::refcounted<Performance>(Worker::Isolate::from(js).getLimitEnforcer()));
+}
 
 double Performance::now(jsg::Lock& js) {
   // We define performance.now() for compatibility purposes, but due to Spectre concerns it
@@ -210,6 +223,15 @@ jsg::Ref<PerformanceMark> Performance::mark(
   return mark;
 }
 
+kj::Maybe<double> Performance::findMarkTime(kj::StringPtr name) {
+  for (auto& entry: entries) {
+    if (entry->getName() == name && entry->getEntryType() == "mark"_kj) {
+      return entry->getStartTime();
+    }
+  }
+  return kj::none;
+}
+
 jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark,
@@ -219,22 +241,28 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
   double startTime = 0;
   double endTime = dateNow();
 
+  // A mark that does not exist leaves the default time in place.
+  auto useEndMark = [&]() {
+    KJ_IF_SOME(endMark, maybeEndMark) {
+      KJ_IF_SOME(time, findMarkTime(endMark)) {
+        endTime = time;
+      }
+    }
+  };
+
   KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
     KJ_SWITCH_ONEOF(startOrOptions) {
       KJ_CASE_ONEOF(startMark, kj::String) {
-        auto startMarks = getEntriesByName(kj::str(startMark), kj::str("mark"));
-        if (startMarks.size() > 0) {
-          startTime = startMarks[0]->getStartTime();
+        KJ_IF_SOME(time, findMarkTime(startMark)) {
+          startTime = time;
         }
-
-        KJ_IF_SOME(endMark, maybeEndMark) {
-          auto endMarks = getEntriesByName(kj::str(endMark), kj::str("mark"));
-          if (endMarks.size() > 0) {
-            endTime = endMarks[0]->getStartTime();
-          }
-        }
+        useEndMark();
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+        if (options.start == kj::none && options.end == kj::none && options.duration == kj::none) {
+          useEndMark();
+        }
+
         KJ_IF_SOME(start, options.start) {
           startTime = start;
         }
@@ -246,6 +274,8 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
         }
       }
     }
+  } else {
+    useEndMark();
   }
 
   double duration = endTime >= startTime ? endTime - startTime : 0;
@@ -259,7 +289,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
         KJ_IF_SOME(d, options.detail) {
-          measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
+          measure->detail = kj::mv(d);
         }
         // If options.detail is not provided, detail remains null
       }

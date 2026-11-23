@@ -25,9 +25,6 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
 
-#include <kj-rs/kj-rs.h>
-#include <rust/cxx.h>
-
 #include <kj/memory.h>
 
 namespace workerd::rust::jsg_cpp {
@@ -42,7 +39,9 @@ using GcVisitor = ::workerd::rust::jsg::GcVisitor;
 // It is a `jsg::Ref` at a stable address, so that GC tracing can record its parent and strength
 // as for a `jsg::Ref` field of a C++ resource. `object` is the `T*` the reference was made for,
 // which Rust dereferences as its opaque `T`; it is kept beside the type-erased `jsg::Ref<Object>`
-// so that neither Rust nor this class needs to know `T`.
+// so that neither Rust nor this class needs to know `T`. It must be made from a `jsg::Ref` of
+// exactly the class that Rust's `T` stands for, since a base class may be at an offset in a
+// subclass.
 class CppRef final {
  public:
   template <typename T>
@@ -147,7 +146,8 @@ bool callCpp(Isolate* isolate, Func&& func) noexcept {
 
 // callCpp() for a shim that returns a C++ resource to Rust: `func(jsg::Lock&)` returns a
 // `jsg::Ref<T>` or a `kj::Maybe<jsg::Ref<T>>` (`jsg::Optional`), which is stored in `out` for
-// `jsg_cpp::call_cpp_for_ref::<T>()`.
+// `jsg_cpp::call_cpp_for_ref::<T>()`. `T` is exactly the class that Rust's `T` stands for (see
+// CppRef); `func` may return a `jsg::Ref` of a subclass, which is converted to a `jsg::Ref<T>`.
 template <typename T, typename Func>
 bool callCppForRef(Isolate* isolate, kj::Maybe<kj::Own<CppRef>>& out, Func&& func) noexcept {
   return callCpp(isolate, [&](::workerd::jsg::Lock& js) {

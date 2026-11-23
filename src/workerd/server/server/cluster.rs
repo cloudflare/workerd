@@ -15,6 +15,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -52,11 +53,18 @@ use workerd_capnp::cluster_config;
 use crate::Result;
 use crate::actor::ActorNamespace;
 use crate::bridge::ffi;
+use crate::channels::Channel;
+use crate::channels::PendingToken;
+use crate::channels::RequestMetadata;
+use crate::channels::TokenUsage;
+use crate::channels::WorkerInterface;
+use crate::channels::attach;
 use crate::config::Factory;
 use crate::services::header_table;
+use crate::services::not_transferable;
 use crate::services::send_error;
 
-/// A session's CONNECT carries `<ms>.<nonce>.<mac>`: see `connect_mac`.
+/// A session's CONNECT carries `<node>.<ms>.<nonce>.<mac>`: see `connect_mac`.
 const AUTH_HEADER: &str = "cf-cluster-auth";
 /// How far a CONNECT's timestamp may be from this instance's clock.
 const AUTH_WINDOW_MS: u64 = 30_000;
@@ -66,8 +74,11 @@ const TUNNEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// This instance's cluster: the crate's state and the factory sessions to owners start from.
 pub struct ClusterNode {
     pub cluster: Rc<Cluster>,
+    /// `unsafeTimeDivisor`: what the lease's times are divided by.
+    pub time_divisor: u64,
     factory: Rc<Factory>,
-    /// One session per peer address, dropped when it disconnects.
+    /// One session per peer instance at its address, dropped when it disconnects. A peer that
+    /// vanishes without its session noticing keeps its entry for the life of the process.
     sessions: Rc<Sessions<Rc<RpcConnection>>>,
     /// The address peers dial, which their CONNECTs are bound to.
     advertise: String,
@@ -81,10 +92,24 @@ pub struct ClusterNode {
     alarms_interval: Duration,
     /// Set once this instance drains.
     deadlines: Cell<Option<Deadlines>>,
-    /// The requests peers have in flight here.
-    peer_requests: Rc<PeerRequests>,
+    /// The requests the debug port has in flight here; a peer's are its session's.
+    peer_requests: Rc<Count>,
+    /// The sessions peers have open here (`PeerConnection::connect`).
+    peer_sessions: Rc<Count>,
+    /// Set once this instance stops its peers' sessions (`stop_peer_sessions`): from then on it
+    /// starts none of their requests, and accepts no session.
+    refusing_peers: Rc<Signal>,
     /// Whether the application's listeners are being served (`Serving`).
     serving: Cell<bool>,
+    /// How long a stop waits from its drain's start to leave: the leases a service granted
+    /// here (the cache's), else 0.
+    pub leave_wait_ms: Cell<u64>,
+    /// The `cache` services a peer's session reaches here (`ServerHandle::resolve_peer_cache`).
+    pub caches: RefCell<HashSet<String>>,
+    /// Whether the lease thread watches this thread's event loop (`serving`).
+    watched: Cell<bool>,
+    /// How often the event loop counts its progress while it sleeps: once a lease round.
+    beat: Duration,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -93,14 +118,18 @@ pub struct Deadlines {
     pub in_flight: Instant,
     pub handoff: Instant,
     pub release: Instant,
+    /// Leaving the cluster waits for this: a peer that lists this instance gone serves its cache
+    /// keys at once, so the read leases it granted until it drained must have run out. Now,
+    /// without a `cache` service.
+    pub leave: Instant,
     pub grace: Instant,
     pub connections: Instant,
     pub stop: Instant,
 }
 
-/// A count of requests, and its waiters for it to reach zero.
+/// A count, and its waiters for it to reach zero.
 #[derive(Default)]
-struct PeerRequests {
+pub struct Count {
     count: Cell<usize>,
     none: Notify,
 }
@@ -114,15 +143,62 @@ impl Drop for Serving {
     }
 }
 
-/// A request a peer has in flight here, from its start until its interface is dropped.
-pub struct PeerRequest(Rc<PeerRequests>);
+/// One of a `Count`, until it is dropped.
+pub struct Counted(Rc<Count>);
 
-impl Drop for PeerRequest {
+impl Drop for Counted {
     fn drop(&mut self) {
         let count = self.0.count.get() - 1;
         self.0.count.set(count);
         if count == 0 {
             self.0.none.notify_waiters();
+        }
+    }
+}
+
+impl Count {
+    /// Counts one until the guard is dropped.
+    fn add(self: &Rc<Self>) -> Counted {
+        self.count.set(self.count.get() + 1);
+        Counted(Rc::clone(self))
+    }
+
+    /// Resolves once the count is zero.
+    async fn none(&self) {
+        loop {
+            let none = self.none.notified();
+            if self.count.get() == 0 {
+                return;
+            }
+            none.await;
+        }
+    }
+}
+
+/// A flag that is set once, and its waiters for it.
+#[derive(Default)]
+struct Signal {
+    set: Cell<bool>,
+    notify: Notify,
+}
+
+impl Signal {
+    fn is_set(&self) -> bool {
+        self.set.get()
+    }
+
+    fn set(&self) {
+        self.set.set(true);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            let set = self.notify.notified();
+            if self.set.get() {
+                return;
+            }
+            set.await;
         }
     }
 }
@@ -138,11 +214,18 @@ pub struct RpcConnection {
 
 type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
 
-/// One value per key, a peer's session: the callers that arrive while it is
-/// being made share the attempt, and a failed attempt is forgotten, so the
-/// next caller makes another.
+/// A peer instance's id and the address it is dialed at.
+type Peer = (String, String);
+
+/// One value per peer instance and its address, a session.
+///
+/// The callers that arrive while it is being made share the attempt, and a
+/// failed attempt is forgotten, so the next caller makes another. Each
+/// instance has a session of its own, also where instances share an address:
+/// a session dialed to one passed its CONNECT, which another must pass for
+/// itself.
 pub struct Sessions<V> {
-    map: RefCell<HashMap<String, Shared<Dial<V>>>>,
+    map: RefCell<HashMap<Peer, Shared<Dial<V>>>>,
 }
 
 impl<V> Default for Sessions<V> {
@@ -154,35 +237,40 @@ impl<V> Default for Sessions<V> {
 }
 
 impl<V: Clone + 'static> Sessions<V> {
-    /// `key`'s value: the one made, the one being made, or one `make` makes.
+    /// The value for instance `node` at `address`: the one made, the one being
+    /// made, or one `make(node, address)` makes.
     pub async fn get(
         &self,
-        key: &str,
-        make: impl FnOnce() -> Dial<V>,
+        node: &str,
+        address: &str,
+        make: impl FnOnce(&str, &str) -> Dial<V>,
     ) -> std::result::Result<V, String> {
-        let attempt = self.map.borrow().get(key).cloned();
+        let key: Peer = (node.to_owned(), address.to_owned());
+        let attempt = self.map.borrow().get(&key).cloned();
         let attempt = attempt.unwrap_or_else(|| {
-            let attempt = make().shared();
+            let attempt = make(node, address).shared();
             let mut map = self.map.borrow_mut();
-            map.insert(key.to_owned(), attempt.clone());
+            map.insert(key.clone(), attempt.clone());
             attempt
         });
         let result = attempt.clone().await;
         if result.is_err() {
             let mut map = self.map.borrow_mut();
-            if map.get(key).is_some_and(|a| a.ptr_eq(&attempt)) {
-                map.remove(key);
+            if map.get(&key).is_some_and(|a| a.ptr_eq(&attempt)) {
+                map.remove(&key);
             }
         }
         result
     }
 
-    /// Forgets `key`'s value if it is the one `is` matches.
-    pub fn forget(&self, key: &str, is: impl Fn(&V) -> bool) {
+    /// Forgets the value for instance `node` at `address` if it is the one `is`
+    /// matches.
+    pub fn forget(&self, node: &str, address: &str, is: impl Fn(&V) -> bool) {
+        let key: Peer = (node.to_owned(), address.to_owned());
         let mut map = self.map.borrow_mut();
-        let made = map.get(key).and_then(|a| a.peek());
+        let made = map.get(&key).and_then(|a| a.peek());
         if made.is_some_and(|r| r.as_ref().is_ok_and(&is)) {
-            map.remove(key);
+            map.remove(&key);
         }
     }
 }
@@ -302,10 +390,104 @@ fn is_public(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// The MAC a CONNECT to `target` carries, at `ms` with `nonce`: a header seen on the wire is
-/// refused at any other target, once used, or once stale.
-fn connect_mac(cluster: &Cluster, target: &str, ms: u64, nonce: &str) -> Vec<u8> {
-    cluster.mac(format!("workerd cluster connect v1\n{target}\n{ms}\n{nonce}").as_bytes())
+/// A new instance's id (`NodeRecord::node`): 16 random bytes in lowercase hex.
+fn new_node_id() -> String {
+    cluster::hex(&rand::random::<[u8; 16]>())
+}
+
+/// Whether `node` has the form of an instance's id (`new_node_id`).
+fn is_node_id(node: &str) -> bool {
+    node.len() == 32 && node.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The cluster key's MAC of some bytes (`Cluster::mac`).
+type Mac<'a> = dyn Fn(&[u8]) -> Vec<u8> + 'a;
+
+/// The MAC a CONNECT to instance `node` at `target` carries, at `ms` with `nonce`: a header seen
+/// on the wire is refused by any other instance, at any other target, once used, or once stale.
+///
+/// An address outlives its instance. A peer that dials a dead owner's address reaches whatever
+/// took the port since: another instance of the cluster, or of another cluster with the same key
+/// and a bucket of its own, which would serve the object from that bucket's state.
+fn connect_mac(mac: &Mac<'_>, node: &str, target: &str, ms: u64, nonce: &str) -> Vec<u8> {
+    mac(format!("workerd cluster connect v2\n{node}\n{target}\n{ms}\n{nonce}").as_bytes())
+}
+
+/// The `AUTH_HEADER` of a CONNECT to instance `node` at `target`. `node` comes from a record in
+/// the bucket: one that is no instance id is refused, so that the signed text has one reading.
+fn connect_auth(
+    mac: &Mac<'_>,
+    node: &str,
+    target: &str,
+    ms: u64,
+    nonce: &str,
+) -> std::io::Result<String> {
+    if !is_node_id(node) {
+        return Err(std::io::Error::other(format!(
+            "a peer's record in the bucket names {node:?}, which is not an instance id"
+        )));
+    }
+    let tag = cluster::hex(&connect_mac(mac, node, target, ms, nonce));
+    Ok(format!("{node}.{ms}.{nonce}.{tag}"))
+}
+
+/// Checks a CONNECT's `AUTH_HEADER` at instance `me`, which peers dial at `advertise`: its MAC,
+/// that it is for `me`, its clock against `now`, and that its nonce is not in `nonces`, which
+/// then holds it.
+fn check_connect_auth(
+    mac: &Mac<'_>,
+    me: &str,
+    advertise: &str,
+    header: Option<&[u8]>,
+    now: u64,
+    nonces: &mut HashMap<String, u64>,
+) -> Result<()> {
+    let bad = || kj::failed!("cluster CONNECT without a valid {AUTH_HEADER}");
+    let header = header
+        .and_then(|h| std::str::from_utf8(h).ok())
+        .ok_or_else(bad)?;
+    let [node, ms, nonce, tag] = header.split('.').collect::<Vec<_>>()[..] else {
+        return Err(bad());
+    };
+    if !is_node_id(node) {
+        return Err(bad());
+    }
+    let ms: u64 = ms.parse().map_err(|_| bad())?;
+    let tag = cluster::unhex(tag).ok_or_else(bad)?;
+    if !constant_time_eq(&connect_mac(mac, node, advertise, ms, nonce), &tag) {
+        return Err(bad());
+    }
+    if node != me {
+        return Err(kj::failed!(
+            "cluster CONNECT for instance {node}, which this one ({me}) is not"
+        ));
+    }
+    if now.abs_diff(ms) > AUTH_WINDOW_MS {
+        return Err(kj::failed!(
+            "cluster CONNECT {}ms off this clock",
+            now.abs_diff(ms)
+        ));
+    }
+    nonces.retain(|_, t| now.abs_diff(*t) <= 2 * AUTH_WINDOW_MS);
+    if nonces.insert(nonce.to_owned(), ms).is_some() {
+        return Err(kj::failed!("cluster CONNECT replayed"));
+    }
+    Ok(())
+}
+
+/// How long a fenced instance waits for the line that says why before it exits, at most. A lease
+/// fences seconds before a peer may take over (a quarter of that with a test's
+/// `unsafeTimeDivisor` of 4).
+const FENCE_LOG_WAIT: Duration = Duration::from_millis(200);
+/// What a fenced instance keeps of the time its lease still holds, for its exit to be late by.
+const FENCE_SLACK: Duration = Duration::from_millis(20);
+
+/// How long a fenced instance whose lease holds for `remaining` more may wait for the line that
+/// says why before it exits: `None` if it must exit at once, with no more of that line than
+/// stderr takes without blocking.
+fn fence_log_wait(remaining: Duration) -> Option<Duration> {
+    let wait = remaining.checked_sub(FENCE_SLACK)?.min(FENCE_LOG_WAIT);
+    (!wait.is_zero()).then_some(wait)
 }
 
 impl ClusterNode {
@@ -317,20 +499,50 @@ impl ClusterNode {
     ) -> Result<Rc<Self>> {
         let options = conf.get_bucket_options().map_err(|e| capnp(&e))?;
         let divisor = conf.get_unsafe_time_divisor();
-        let timing = Timing::divided(divisor.into()).ok_or_else(|| {
-            kj::failed!("cluster: unsafeTimeDivisor {divisor} rounds a lease time down to 0 ms")
-        })?;
+        let Some(timing) = Timing::divided(divisor.into()) else {
+            return Err(kj::failed!(
+                "cluster: unsafeTimeDivisor {divisor} rounds a lease time down to 0 ms"
+            ));
+        };
         let setup = cluster::Setup {
             url: text(conf.get_bucket())?,
             options: options.iter().map(text).collect::<Result<_>>()?,
-            node: cluster::hex(&rand::random::<[u8; 16]>()),
+            node: new_node_id(),
             address: address.clone(),
             timing,
             key: text(conf.get_key())?.into_bytes(),
         };
-        let cluster = Cluster::new(setup).map_err(|e| kj::failed!("cluster: {e}"))?;
+        // Called on the lease thread, whatever the loop thread is doing. Peers may take this
+        // instance's objects over once its lease lapses, so it stops serving first: at once,
+        // without the destructors that would wait for the loop. The reason's line may block (on
+        // a stalled pipe, or a lock of the logger's), so the exit is armed before it is written,
+        // for while the lease still holds. With no time for that, the line goes to stderr as far
+        // as a write that does not block takes it.
+        let fence = Box::new(|reason: String, remaining: Duration| {
+            let message = format!("leaving the cluster: {reason}");
+            let Some(wait) = fence_log_wait(remaining) else {
+                crate::log::fatal_nonblocking(&message);
+                ffi::cli_exit(1);
+                return;
+            };
+            let armed = std::thread::Builder::new()
+                .name("cluster-fence".into())
+                .spawn(move || {
+                    std::thread::sleep(wait);
+                    ffi::cli_exit(1);
+                });
+            if armed.is_ok() {
+                crate::log::fatal(&message);
+            } else {
+                crate::log::fatal_nonblocking(&message);
+            }
+            ffi::cli_exit(1);
+        });
+        let cluster = Cluster::new(setup, fence, crate::log::within_thread())
+            .map_err(|e| kj::failed!("cluster: {e}"))?;
         Ok(Rc::new(Self {
             cluster,
+            time_divisor: divisor.into(),
             factory,
             sessions: Rc::default(),
             advertise: address,
@@ -343,12 +555,33 @@ impl ClusterNode {
             alarms_interval: ALARMS_INTERVAL / divisor,
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
+            peer_sessions: Rc::default(),
+            refusing_peers: Rc::default(),
             serving: Cell::new(false),
+            leave_wait_ms: Cell::new(0),
+            caches: RefCell::default(),
+            watched: Cell::new(false),
+            beat: Duration::from_millis(timing.interval_ms),
         }))
     }
 
     /// Marks the application's listeners as served until the guard is dropped.
+    ///
+    /// The first time, the lease thread starts watching this thread's event loop
+    /// (`Cluster::watch`). Not before: linking runs in turns as long as itself.
     pub fn serving(self: &Rc<Self>) -> Serving {
+        if !self.watched.replace(true) {
+            // The loop beats once a round while it sleeps. A loop that cannot be watched serves
+            // on, and says that it does; what stops it from being watched lasts, so it is not
+            // tried again.
+            match kj_rs_tokio::watch_progress(self.beat) {
+                Ok(progress) => self.cluster.watch(Box::new(move || progress.count())),
+                Err(e) => tracing::warn!(
+                    "cluster: the lease thread cannot watch the event loop, so a loop that makes \
+                     no progress will not fence this node: {e}"
+                ),
+            }
+        }
         self.serving.set(true);
         Serving(Rc::clone(self))
     }
@@ -361,6 +594,7 @@ impl ClusterNode {
             in_flight: at(self.budget.in_flight_ms()),
             handoff: at(self.budget.handoff_ms()),
             release: at(self.budget.release_ms()),
+            leave: at(self.leave_wait_ms.get()),
             grace: at(self.budget.grace_ms()),
             connections: at(self.budget.connections_ms()),
             stop: at(self.budget.stop_ms),
@@ -395,22 +629,37 @@ impl ClusterNode {
         released
     }
 
-    /// Counts a request a peer makes here until the guard is dropped.
-    pub fn peer_request(&self) -> PeerRequest {
-        let requests = Rc::clone(&self.peer_requests);
-        requests.count.set(requests.count.get() + 1);
-        PeerRequest(requests)
+    /// When a relay of a peer's request that waited here for its object's handoff must start by,
+    /// once this instance stops; none before. Sent on, the request does not outlast its caller's
+    /// retries; but a call this instance relays when its connections deadline comes is cut off as
+    /// one that may have run, which the peer cannot send again. So it relays only while the call
+    /// has the time work in flight on an object being handed off has had, until the `in_flight`
+    /// deadline; from then on it answers `moved`, and the peer sends the request where the object
+    /// went itself.
+    pub fn handed_off_relay_deadline(&self) -> Option<Instant> {
+        self.deadlines.get().map(|deadlines| deadlines.in_flight)
     }
 
-    /// Resolves once no peer has a request in flight here.
-    pub async fn peer_requests_done(&self) {
-        loop {
-            let none = self.peer_requests.none.notified();
-            if self.peer_requests.count.get() == 0 {
-                return;
-            }
-            none.await;
+    /// Starts a request a peer makes here, or the debug port: counted on the peer's `session`,
+    /// or else on this instance, until the guard is dropped. Once this instance stops its peers'
+    /// sessions it answers a peer's `moved` instead, before anything runs, and the peer sends the
+    /// request where the object runs now. The debug port's requests are served as before.
+    pub fn peer_request(&self, session: Option<&Rc<Count>>) -> Result<Counted> {
+        match session {
+            Some(_) if self.refusing_peers.is_set() => Err(moved("this instance is stopping")),
+            Some(session) => Ok(session.add()),
+            None => Ok(self.peer_requests.add()),
         }
+    }
+
+    /// Ends its peers' sessions, once it serves nothing else. It starts none of their requests
+    /// from now on, and closes each session once the requests it started on it have ended: the
+    /// peer reads `moved` as its reason, which fails every call it still has out on the session,
+    /// none of which started here, as `moved` too, so it sends them again where the objects run
+    /// now. Resolves once every session has closed, and the debug port's requests have ended.
+    pub async fn stop_peer_sessions(&self) {
+        self.refusing_peers.set();
+        futures::join!(self.peer_requests.none(), self.peer_sessions.none());
     }
 
     pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
@@ -489,7 +738,7 @@ impl ClusterNode {
                 let _ = cluster.refresh_route(&namespace, &actor, now).await;
             });
         }
-        let session = self.session(&address).await.map_err(|e| {
+        let session = self.session(&node, &address).await.map_err(|e| {
             // Unreachable: its own record, not the listing, tells whether it still owns the
             // object (`forget_route`).
             self.cluster.forget_route(namespace, actor, &node);
@@ -497,28 +746,47 @@ impl ClusterNode {
         })?;
         // A channel per stub, so a stub stays with the instance it reached.
         let connection = RpcConnection {
-            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor),
+            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor)?,
             down: Rc::clone(&session.down),
         };
         Ok(Owner::Remote(Rc::new(connection), node))
     }
 
-    /// The session to the peer at `address`: the open one, the one being
-    /// dialed, or a new one.
-    async fn session(&self, address: &str) -> std::io::Result<Rc<RpcConnection>> {
-        let dial = || self.dial(address);
-        let session = self.sessions.get(address, dial).await;
+    /// Service `service` on node `node`, over this instance's session to it: an HTTP channel to
+    /// what that node's config names so (`WorkerdDebugPort.getEntrypoint`). Fails at once for a
+    /// node the listing does not have live, and for one that cannot be reached; its requests
+    /// fail as soon as the session does.
+    pub async fn peer_service(&self, node: &str, service: &str) -> Result<Rc<dyn Channel>> {
+        let address = self
+            .cluster
+            .address(node, cluster::now_ms())
+            .ok_or_else(|| kj::disconnected!("cluster node {node} is not live"))?;
+        let session = self
+            .session(node, &address)
+            .await
+            .map_err(|e| kj::disconnected!("cluster node {node}: {e}"))?;
+        Ok(Rc::new(PeerService(Rc::new(RpcConnection {
+            client: ffi::rpc_client_debug_entrypoint(&session.client, service)?,
+            down: Rc::clone(&session.down),
+        }))))
+    }
+
+    /// The session to instance `node` at `address`: the open one, the one
+    /// being dialed, or a new one.
+    async fn session(&self, node: &str, address: &str) -> std::io::Result<Rc<RpcConnection>> {
+        let dial = |node: &str, address: &str| self.dial(node, address);
+        let session = self.sessions.get(node, address, dial).await;
         session.map_err(std::io::Error::other)
     }
 
-    fn dial(&self, address: &str) -> Dial<Rc<RpcConnection>> {
+    fn dial(&self, node: &str, address: &str) -> Dial<Rc<RpcConnection>> {
         let cluster = Rc::clone(&self.cluster);
         let factory = Rc::clone(&self.factory);
         let sessions = Rc::clone(&self.sessions);
-        let address = address.to_owned();
+        let (node, address) = (node.to_owned(), address.to_owned());
         async move {
             // A stalled peer accepts the connection and never answers.
-            let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, tunnel(&cluster, &address));
+            let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, tunnel(&cluster, &node, &address));
             let stream = tunnel
                 .await
                 .map_err(|_| "no answer to CONNECT".to_owned())?
@@ -531,7 +799,7 @@ impl ClusterNode {
             factory.spawn_detached(async move {
                 let _ = ffi::rpc_client_on_disconnect(&watched.client).await;
                 watched.down.set(true);
-                sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
+                sessions.forget(&node, &address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
         }
@@ -539,13 +807,14 @@ impl ClusterNode {
     }
 }
 
-async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
+/// A tunnel to instance `node` at `address`, refused by anything else there.
+async fn tunnel(cluster: &Cluster, node: &str, address: &str) -> std::io::Result<TcpStream> {
     let mut stream = TcpStream::connect(address).await?;
     stream.set_nodelay(true)?;
     let ms = cluster::now_ms();
     let nonce = cluster::hex(&rand::random::<[u8; 16]>());
-    let mac = cluster::hex(&connect_mac(node, address, ms, &nonce));
-    let auth = format!("{AUTH_HEADER}: {ms}.{nonce}.{mac}");
+    let auth = connect_auth(&|data| cluster.mac(data), node, address, ms, &nonce)?;
+    let auth = format!("{AUTH_HEADER}: {auth}");
     let request = format!("CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\n{auth}\r\n\r\n");
     stream.write_all(request.as_bytes()).await?;
     // The response head, read a byte at a time so that nothing past it is consumed.
@@ -561,6 +830,38 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
         return Err(std::io::Error::other(format!("refused: {status}")));
     }
     Ok(stream)
+}
+
+/// A service on a peer (`ClusterNode::peer_service`).
+struct PeerService(Rc<RpcConnection>);
+
+impl Channel for PeerService {
+    fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        Ok(attach(self.0.start_request(metadata), Rc::clone(&self.0)))
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(not_transferable("A peer's service"))
+    }
+}
+
+/// A service here that a peer's session reaches (`ServerHandle::resolve_peer_cache`): each
+/// request is counted on the session, and refused once this instance stops its peers' sessions.
+pub(crate) struct SessionService {
+    pub(crate) node: Rc<ClusterNode>,
+    pub(crate) session: Rc<Count>,
+    pub(crate) service: Rc<dyn Channel>,
+}
+
+impl Channel for SessionService {
+    fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        let counted = self.node.peer_request(Some(&self.session))?;
+        Ok(attach(self.service.start_request(metadata)?, counted))
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(not_transferable("A peer's service"))
+    }
 }
 
 /// Where a Durable Object runs, for a request about to start on it: here at
@@ -661,37 +962,17 @@ struct PeerConnection {
 }
 
 impl PeerConnection {
-    /// Checks a CONNECT's `AUTH_HEADER`: its MAC, its clock, and that its nonce is new.
+    /// Checks a CONNECT's `AUTH_HEADER` (`check_connect_auth`).
     fn verify(&self, header: Option<&[u8]>) -> Result<()> {
-        let bad = || kj::failed!("cluster CONNECT without a valid {AUTH_HEADER}");
-        let header = header
-            .and_then(|h| std::str::from_utf8(h).ok())
-            .ok_or_else(bad)?;
-        let [ms, nonce, mac] = header.split('.').collect::<Vec<_>>()[..] else {
-            return Err(bad());
-        };
-        let ms: u64 = ms.parse().map_err(|_| bad())?;
-        let mac = cluster::unhex(mac).ok_or_else(bad)?;
         let node = &self.node;
-        if !constant_time_eq(
-            &connect_mac(&node.cluster, &node.advertise, ms, nonce),
-            &mac,
-        ) {
-            return Err(bad());
-        }
-        let now = cluster::now_ms();
-        if now.abs_diff(ms) > AUTH_WINDOW_MS {
-            return Err(kj::failed!(
-                "cluster CONNECT {}ms off this clock",
-                now.abs_diff(ms)
-            ));
-        }
-        let mut nonces = node.nonces.borrow_mut();
-        nonces.retain(|_, t| now.abs_diff(*t) <= 2 * AUTH_WINDOW_MS);
-        if nonces.insert(nonce.to_owned(), ms).is_some() {
-            return Err(kj::failed!("cluster CONNECT replayed"));
-        }
-        Ok(())
+        check_connect_auth(
+            &|data| node.cluster.mac(data),
+            node.cluster.node(),
+            &node.advertise,
+            header,
+            cluster::now_ms(),
+            &mut node.nonces.borrow_mut(),
+        )
     }
 }
 
@@ -731,9 +1012,34 @@ impl Handler for PeerConnection {
             connect.reject(403, "Forbidden", HeadersRef::from(&empty), Some(0))?;
             return Ok(());
         }
+        let node = &self.node;
+        // A stopping instance's sessions close (`ClusterNode::stop_peer_sessions`). Refused, the
+        // peer sends its requests elsewhere: none were sent.
+        if node.refusing_peers.is_set() {
+            let headers = HeadersRef::from(&empty);
+            connect.reject(503, "Service Unavailable", headers, Some(0))?;
+            return Ok(());
+        }
+        let _open = node.peer_sessions.add();
         let tunnel = connect.accept(200, "OK", HeadersRef::from(&empty))?;
-        // A peer holds the cluster key, so it gets the debug port's interface.
-        Ok(ffi::factory_accept_debug_port(self.node.factory.raw(), tunnel.into_kj()).await?)
+        let requests = Rc::<Count>::default();
+        let session = Box::new(PeerSession {
+            requests: Rc::clone(&requests),
+        });
+        // Closes once the instance stops its peers' sessions and no request started on this one
+        // is in flight.
+        let refusing = Rc::clone(&node.refusing_peers);
+        let closing = Box::new(ResultTask(
+            async move {
+                refusing.wait().await;
+                requests.none().await;
+                Err(moved("this instance stopped"))
+            }
+            .boxed_local(),
+        ));
+        // A peer holds the cluster key, so it reaches the clustered objects here.
+        let factory = node.factory.raw();
+        Ok(ffi::factory_accept_cluster_peer(factory, tunnel.into_kj(), session, closing).await?)
     }
 }
 
@@ -750,6 +1056,11 @@ fn text(reader: capnp::Result<capnp::text::Reader<'_>>) -> Result<String> {
 
 fn capnp(e: &capnp::Error) -> crate::Error {
     kj::failed!("{e}")
+}
+
+/// A session a peer has open here: the requests started on it, each counted until it ends.
+pub struct PeerSession {
+    pub(crate) requests: Rc<Count>,
 }
 
 /// A Rust future C++ awaits (`result_task_run`).

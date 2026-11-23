@@ -21,6 +21,7 @@ use std::time::Duration;
 use http::Uri;
 use http_body::Body as _;
 use http_body::Frame;
+use hyper::body::Incoming;
 use hyper_util::client::legacy;
 use hyper_util::client::legacy::connect::Connected;
 use hyper_util::client::legacy::connect::Connection;
@@ -36,7 +37,9 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-/// A bucket response: only the parts the bucket clients read.
+/// A bucket response: the parts the bucket clients read, and every header
+/// for the calls that read more.
+#[derive(Default)]
 pub struct HttpResponse {
     pub status: u16,
     pub etag: String,
@@ -47,9 +50,15 @@ pub struct HttpResponse {
     /// The `Metadata-Flavor` header, which Google's metadata server sets to
     /// `Google`.
     pub metadata_flavor: String,
-    /// Empty when a 2xx body went to a file.
+    pub headers: http::HeaderMap,
+    /// Empty when a 2xx body went to a file or is left to read (`stream`).
     pub body: Vec<u8>,
+    /// The 2xx body `Http::open` left to read.
+    pub stream: Option<Chunks>,
 }
+
+/// A body read chunk by chunk as the caller asks for them.
+pub type Chunks = Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>;
 
 /// What a request sends: bytes, or a file read in chunks on the blocking
 /// pool.
@@ -93,6 +102,41 @@ impl Http {
         to: Option<&Path>,
         (head, idle): (Duration, Duration),
     ) -> Result<HttpResponse, String> {
+        let response = self.request(method, url, headers, payload, head).await?;
+        collect(response, to, idle).await
+    }
+
+    /// As `send`, but a 2xx body is left to read (`HttpResponse::stream`),
+    /// however large; `idle` bounds each wait for its next chunk. Any other
+    /// body is read as `send` reads it.
+    pub async fn open(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        payload: Payload,
+        (head, idle): (Duration, Duration),
+    ) -> Result<HttpResponse, String> {
+        let response = self.request(method, url, headers, payload, head).await?;
+        if !response.status().is_success() {
+            return collect(response, None, idle).await;
+        }
+        let (parts, incoming) = response.into_parts();
+        Ok(HttpResponse {
+            stream: Some(chunks(incoming, idle)),
+            ..head_of(parts.status.as_u16(), parts.headers)
+        })
+    }
+
+    /// Sends the request and waits up to `head` for the response's head.
+    async fn request(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        payload: Payload,
+        head: Duration,
+    ) -> Result<http::Response<Incoming>, String> {
         let mut request = http::Request::builder().method(method.as_str()).uri(url);
         for pair in headers.chunks(2) {
             request = request.header(&pair[0], &pair[1]);
@@ -102,68 +146,249 @@ impl Http {
             Payload::File(path) => Body::file(&path).map_err(|e| e.to_string())?,
         };
         let request = request.body(body).map_err(|e| e.to_string())?;
-        let response = tokio::time::timeout(head, self.client.request(request))
+        tokio::time::timeout(head, self.client.request(request))
             .await
             .map_err(|_| "timed out".to_owned())?
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// A response without its body.
+fn head_of(status: u16, headers: http::HeaderMap) -> HttpResponse {
+    let header = |name| {
+        let value = headers.get(name);
+        value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
+    };
+    HttpResponse {
+        status,
+        etag: header("etag"),
+        generation: header("x-goog-generation"),
+        date: header("date"),
+        metadata_flavor: header("metadata-flavor"),
+        headers,
+        body: Vec::new(),
+        stream: None,
+    }
+}
+
+/// `response` with its body read, to the file `to` if 2xx and given.
+async fn collect(
+    response: http::Response<Incoming>,
+    to: Option<&Path>,
+    idle: Duration,
+) -> Result<HttpResponse, String> {
+    let (parts, mut incoming) = response.into_parts();
+    let mut response = head_of(parts.status.as_u16(), parts.headers);
+    let to = to
+        .filter(|_| (200..300).contains(&response.status))
+        .map(Path::to_owned);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
+    let writer = to.map(|path| {
+        tokio::task::spawn_blocking(move || -> io::Result<()> {
+            let mut file = io::BufWriter::new(std::fs::File::create(path)?);
+            while let Some(chunk) = rx.blocking_recv() {
+                file.write_all(&chunk)?;
+            }
+            file.flush()
+        })
+    });
+    let body = &mut response.body;
+    loop {
+        let frame = poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx));
+        let frame = tokio::time::timeout(idle, frame)
+            .await
+            .map_err(|_| "timed out reading the body".to_owned())?;
+        let Some(frame) = frame else { break };
+        let chunk = frame
+            .map_err(|e| e.to_string())?
+            .into_data()
+            .unwrap_or_default();
+        if writer.is_none() {
+            // Records, listings, deployments and errors: an endpoint sending more is broken.
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err(TOO_LARGE.to_owned());
+            }
+            body.extend(chunk);
+        } else if tx.send(chunk).await.is_err() {
+            break;
+        }
+    }
+    drop(tx);
+    if let Some(writer) = writer {
+        writer
+            .await
+            .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        let header = |name| {
-            let value = response.headers().get(name);
-            value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
-        };
-        let (status, etag, date) = (response.status().as_u16(), header("etag"), header("date"));
-        let generation = header("x-goog-generation");
-        let metadata_flavor = header("metadata-flavor");
-        let mut incoming = response.into_body();
-        let to = to
-            .filter(|_| (200..300).contains(&status))
-            .map(Path::to_owned);
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
-        let writer = to.map(|path| {
-            tokio::task::spawn_blocking(move || -> io::Result<()> {
-                let mut file = io::BufWriter::new(std::fs::File::create(path)?);
-                while let Some(chunk) = rx.blocking_recv() {
-                    file.write_all(&chunk)?;
-                }
-                file.flush()
-            })
-        });
-        let mut body = Vec::new();
+    }
+    Ok(response)
+}
+
+/// `incoming`'s data as `Chunks`, each wait for the next bounded by `idle`.
+/// The stream ends after an error.
+fn chunks(incoming: Incoming, idle: Duration) -> Chunks {
+    let chunks = futures::stream::unfold(Some(incoming), move |incoming| async move {
+        let mut incoming = incoming?;
         loop {
             let frame = poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx));
-            let frame = tokio::time::timeout(idle, frame)
-                .await
-                .map_err(|_| "timed out reading the body".to_owned())?;
-            let Some(frame) = frame else { break };
-            let chunk = frame
-                .map_err(|e| e.to_string())?
-                .into_data()
-                .unwrap_or_default();
-            if writer.is_none() {
-                // Records, listings, deployments and errors: an endpoint sending more is broken.
-                if body.len() + chunk.len() > MAX_BODY {
-                    return Err(TOO_LARGE.to_owned());
-                }
-                body.extend(chunk);
-            } else if tx.send(chunk).await.is_err() {
-                break;
-            }
+            let error = match tokio::time::timeout(idle, frame).await {
+                Err(_) => "timed out reading the body".to_owned(),
+                Ok(None) => return None,
+                Ok(Some(Err(e))) => e.to_string(),
+                Ok(Some(Ok(frame))) => match frame.into_data() {
+                    Ok(data) => return Some((Ok(data), Some(incoming))),
+                    // Trailers, which carry no data.
+                    Err(_) => continue,
+                },
+            };
+            return Some((Err(error), None));
         }
-        drop(tx);
-        if let Some(writer) = writer {
-            writer
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())?;
+    });
+    Box::pin(chunks)
+}
+
+tokio::task_local! {
+    /// What `prompt` set: the bound, and what it may send twice.
+    static ATTEMPT: (Duration, &'static [Repeat]);
+}
+
+/// What a request sent twice may be, as `prompt` names it. Two copies of
+/// one request may both take effect, in either order, or one may take
+/// effect after the other answered: each kind but `Read` is safe only by
+/// what the caller does with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Repeat {
+    /// A GET or a HEAD: a read or a listing, which changes nothing.
+    Read,
+    /// A DELETE, safe only where no key the calls delete is written again:
+    /// a late copy then deletes nothing written since.
+    Delete,
+    /// A PUT with a precondition, of which at most one copy lands. The
+    /// bucket client reports a refusal of one sent twice as of unknown
+    /// outcome (`Attempt::sent_twice`, `Error::OutcomeUnknown`). Safe only
+    /// where the caller's answer to that holds when the other copy lands
+    /// later still, as a renewal's reread does: a read back, as
+    /// `Bucket::put_if_settled` makes, may come before it lands.
+    GuardedWrite,
+}
+
+/// Runs `calls` with each bucket request they make that is of a kind in
+/// `repeat` sent once more when it has not answered within `attempt`, the
+/// first copy kept in flight: a bucket's slow answers are single requests,
+/// and the same request sent again answers in its usual time, but a slow
+/// bucket answers every request late, the copy sent first soonest. The
+/// caller's deadline bounds the whole. A pause between retries of a refused
+/// request is not part of any request's wait.
+///
+/// The copy that loses is dropped, and its connection closes, never to be
+/// reused: the client speaks only HTTP/1.1, and hyper closes a connection
+/// whose request's caller is gone rather than return it to the pool. The
+/// dropped copy may still take effect, before or after the other.
+pub async fn prompt<F: Future>(
+    attempt: Duration,
+    repeat: &'static [Repeat],
+    calls: F,
+) -> F::Output {
+    ATTEMPT.scope((attempt, repeat), calls).await
+}
+
+/// A request, as `attempt` judges it.
+pub struct Call<'a> {
+    pub method: &'a str,
+    /// A write with a precondition.
+    pub guarded: bool,
+    pub body: &'a Payload,
+    /// Where the answer's body goes instead of memory.
+    pub to: Option<&'a Path>,
+    /// Whether a 2xx answer's body is left to read (`Http::open`). Only the
+    /// wait for the head is bounded and sent again: a copy that answers
+    /// streams the body alone.
+    pub stream: bool,
+}
+
+/// The largest body a request sent again may have: a larger one's own bound
+/// grows with its size, which `prompt`'s does not.
+const REPEATABLE_BODY: usize = 1 << 20;
+
+impl Call<'_> {
+    /// The kind of request this is if it could be sent twice: one with a
+    /// small body in memory and its answer kept in memory, other than an
+    /// unguarded write. Anything else goes once, whatever `prompt` names.
+    pub fn repeat(&self) -> Option<Repeat> {
+        let small = matches!(self.body, Payload::Bytes(bytes) if bytes.len() < REPEATABLE_BODY);
+        if !small || self.to.is_some() {
+            return None;
         }
-        Ok(HttpResponse {
-            status,
-            etag,
-            generation,
-            date,
-            metadata_flavor,
-            body,
-        })
+        match self.method {
+            "GET" | "HEAD" => Some(Repeat::Read),
+            "DELETE" => Some(Repeat::Delete),
+            "PUT" if self.guarded => Some(Repeat::GuardedWrite),
+            _ => None,
+        }
     }
+}
+
+/// What `attempt` answered.
+pub struct Attempt<T> {
+    pub answer: T,
+    /// Whether the request went twice. The copy `answer` is not of may have
+    /// taken effect before it, or may yet, its own answer dropped: a guarded
+    /// write refused may have been refused against that copy's write.
+    pub sent_twice: bool,
+}
+
+/// `call`, sent with `send`, and once more if `prompt` bounds it, names its
+/// kind, and it has not answered in time. The first answer that `settles`
+/// is the call's. An answer that does not (an error, or a status the
+/// caller would rather the other copy's answer replaced) waits up to one
+/// more bound for the other copy's; when neither settles, the first answer
+/// that is not an error is the call's. `what` names it in the log.
+pub async fn attempt<T, E, F: Future<Output = Result<T, E>>>(
+    call: &Call<'_>,
+    what: impl FnOnce() -> String,
+    settles: impl Fn(&T) -> bool,
+    mut send: impl FnMut() -> F,
+) -> Attempt<Result<T, E>> {
+    let once = |answer| Attempt {
+        answer,
+        sent_twice: false,
+    };
+    let twice = |answer| Attempt {
+        answer,
+        sent_twice: true,
+    };
+    let scope = ATTEMPT.try_with(|scope| *scope).ok();
+    let bound = scope.and_then(|(bound, repeat)| {
+        call.repeat()
+            .filter(|kind| repeat.contains(kind))
+            .map(|_| bound)
+    });
+    let Some(bound) = bound else {
+        return once(send().await);
+    };
+    let first = send();
+    tokio::pin!(first);
+    if let Ok(answer) = tokio::time::timeout(bound, &mut first).await {
+        return once(answer);
+    }
+    tracing::warn!(
+        "cluster: {} had no answer in {} ms; sending it again",
+        what(),
+        bound.as_millis()
+    );
+    let second = send();
+    tokio::pin!(second);
+    let (answer, other) = match futures::future::select(first, second).await {
+        futures::future::Either::Left(answered) | futures::future::Either::Right(answered) => {
+            answered
+        }
+    };
+    if answer.as_ref().is_ok_and(&settles) {
+        return twice(answer);
+    }
+    twice(match tokio::time::timeout(bound, other).await {
+        Ok(later) if answer.is_err() || later.as_ref().is_ok_and(&settles) => later,
+        _ => answer,
+    })
 }
 
 /// A request body: bytes in one piece, or a file's chunks as a blocking
@@ -243,6 +468,10 @@ impl tower_service::Service<Uri> for Connector {
             let host = uri.host().ok_or_else(invalid)?.to_owned();
             let https = uri.scheme_str() == Some("https");
             let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
+            #[cfg(test)]
+            if let Some(stream) = crate::fake_http::connect(&format!("{host}:{port}")) {
+                return Ok(TokioIo::new(Stream::Memory(stream)));
+            }
             let tcp = TcpStream::connect((host.as_str(), port)).await?;
             tcp.set_nodelay(true)?;
             if !https {
@@ -258,6 +487,9 @@ impl tower_service::Service<Uri> for Connector {
 enum Stream {
     Tcp(TcpStream),
     Tls(Box<TlsStream<TcpStream>>),
+    /// To a test's `fake_http::Server`.
+    #[cfg(test)]
+    Memory(tokio::io::DuplexStream),
 }
 
 impl Connection for Stream {
@@ -275,6 +507,8 @@ impl AsyncRead for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
@@ -288,6 +522,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
@@ -295,6 +531,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_flush(cx),
             Self::Tls(s) => Pin::new(s).poll_flush(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
@@ -302,6 +540,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
             Self::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }

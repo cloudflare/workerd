@@ -121,9 +121,7 @@ fn versions_are_generations() {
         status: 200,
         etag: "\"e\"".into(),
         generation: generation.into(),
-        date: String::new(),
-        metadata_flavor: String::new(),
-        body: Vec::new(),
+        ..HttpResponse::default()
     };
     assert_eq!(Google::version(&response("17")), "17");
     // None, which the client refuses.
@@ -133,12 +131,13 @@ fn versions_are_generations() {
 
 /// A bucket `bkt` behind tokens from the metadata server: each request for
 /// one answers `t<n>`, and the bucket takes the tokens in `accepted`, unless
-/// it `refuse`s all.
+/// it `refuse`s all. It answers a request it takes with `status`, 404 if 0.
 #[derive(Default)]
 struct Fake {
     issued: usize,
     accepted: BTreeSet<String>,
     refuse: bool,
+    status: u16,
 }
 
 const METADATA: &str = "/computeMetadata/v1/instance/service-accounts/default/token";
@@ -159,7 +158,7 @@ async fn client(fake: &Arc<Mutex<Fake>>) -> (Bucket, Server) {
             .header("authorization")
             .and_then(|v| v.strip_prefix("Bearer "));
         if !fake.refuse && token.is_some_and(|token| fake.accepted.contains(token)) {
-            reply(404, "")
+            reply(if fake.status == 0 { 404 } else { fake.status }, "")
         } else {
             reply(401, "")
         }
@@ -249,5 +248,79 @@ fn a_replacement_refused_in_the_same_call_is_not_sent_again() {
             "{message}"
         );
         assert!(sent(&server).is_empty());
+    });
+}
+
+/// A 401 refuses a request before anything applies it: a guard that fails
+/// once the request is sent again with another token failed against what
+/// another writer wrote.
+#[test]
+fn a_guard_that_fails_after_a_refused_token_failed() {
+    runtime().block_on(async {
+        let fake = Arc::new(Mutex::new(Fake::default()));
+        let (bucket, server) = client(&fake).await;
+        assert!(bucket.get("k").await.unwrap().is_none());
+        server.take();
+        {
+            let mut state = fake.lock().unwrap();
+            state.accepted.clear();
+            state.status = 412;
+        }
+        let put = bucket.put_if("k", Vec::new(), crate::Guard::Absent).await;
+        assert!(matches!(put, Ok(None)), "{put:?}");
+        let object = "/bkt/pre/k".to_owned();
+        assert_eq!(
+            sent(&server),
+            [
+                (object.clone(), bearer("t1")),
+                (METADATA.into(), String::new()),
+                (object, bearer("t2")),
+            ]
+        );
+    });
+}
+
+#[test]
+fn r2s_calls_carry_the_token() {
+    runtime().block_on(async {
+        let fake = Arc::new(Mutex::new(Fake::default()));
+        let (bucket, server) = client(&fake).await;
+        let gone = |result: Result<()>| match result {
+            Err(Error::Refused { status, .. }) => status,
+            other => panic!("not refused: {other:?}"),
+        };
+        let none = crate::bucket::Headers::default();
+        assert!(bucket.head("k").await.unwrap().is_none());
+        assert!(bucket.read("k", None).await.unwrap().is_none());
+        assert_eq!(
+            gone(bucket.page("", None, None, 1, None).await.map(drop)),
+            404
+        );
+        // A multipart call refused its token goes again with another.
+        fake.lock().unwrap().accepted.clear();
+        assert_eq!(gone(bucket.begin("k", &none, &[]).await.map(drop)), 404);
+        assert_eq!(
+            gone(bucket.part("k", "u", 1, "x".into()).await.map(drop)),
+            404
+        );
+        assert_eq!(gone(bucket.complete("k", "u", &[]).await.map(drop)), 404);
+        assert_eq!(gone(bucket.abort("k", "u").await), 404);
+        let (object, list) = ("/bkt/pre/k".to_owned(), "/bkt/".to_owned());
+        let t = |n| (object.clone(), bearer(n));
+        assert_eq!(
+            sent(&server),
+            [
+                (METADATA.into(), String::new()),
+                t("t1"),
+                t("t1"),
+                (list, bearer("t1")),
+                t("t1"),
+                (METADATA.into(), String::new()),
+                t("t2"),
+                t("t2"),
+                t("t2"),
+                t("t2"),
+            ]
+        );
     });
 }

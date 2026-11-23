@@ -238,6 +238,78 @@ fn string_write_one_byte_into_buffer() {
 }
 
 #[test]
+fn string_write_null_terminate() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        let mut wide = vec![1u16; 3];
+        s.write(lock, 0, 2, &mut wide, WriteFlags::NullTerminate);
+        assert_eq!(wide, vec!['h' as u16, 'i' as u16, 0]);
+        let mut narrow = vec![1u8; 3];
+        s.write_one_byte(lock, 0, 2, &mut narrow, WriteFlags::NullTerminate);
+        assert_eq!(narrow, b"hi\0");
+        Ok(())
+    });
+}
+
+/// The terminator needs a buffer element of its own, and the range must lie within the string.
+#[test]
+fn string_write_out_of_bounds_panics() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        let cases: [(u32, u32, usize, WriteFlags); 5] = [
+            (0, 2, 2, WriteFlags::NullTerminate),
+            (0, 2, 2, WriteFlags::NullTerminateAndReplaceInvalidUtf8),
+            (0, 0, 0, WriteFlags::NullTerminate),
+            (1, 2, 2, WriteFlags::None),
+            (u32::MAX, 2, 2, WriteFlags::None),
+        ];
+        for (offset, length, buffer_len, flags) in cases {
+            let mut wide = vec![0u16; buffer_len];
+            let wide_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write(lock, offset, length, &mut wide, flags);
+            }));
+            assert!(
+                wide_result.is_err(),
+                "write({offset}, {length}) into {buffer_len} with {flags:?} must panic"
+            );
+            let mut narrow = vec![0u8; buffer_len];
+            let narrow_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write_one_byte(lock, offset, length, &mut narrow, flags);
+            }));
+            assert!(
+                narrow_result.is_err(),
+                "write_one_byte({offset}, {length}) into {buffer_len} with {flags:?} must panic"
+            );
+        }
+        Ok(())
+    });
+}
+
+/// A terminator needs room in the buffer, as for `write` and `write_one_byte`.
+#[test]
+fn string_write_utf8_null_terminate_into_empty_buffer_panics() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        for flags in [
+            WriteFlags::NullTerminate,
+            WriteFlags::NullTerminateAndReplaceInvalidUtf8,
+        ] {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write_utf8(lock, &mut [], flags);
+            }));
+            assert!(
+                result.is_err(),
+                "write_utf8 into an empty buffer with {flags:?} must panic"
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
 fn string_write_utf8_into_buffer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
@@ -768,6 +840,73 @@ fn method_returning_an_overlong_string_throws_a_range_error() {
             )
             .unwrap()
         );
+        Ok(())
+    });
+}
+
+/// Two-byte strings, unpaired surrogates included, convert to the same `String` as std's
+/// `String::from_utf16_lossy`. The surrogates land on both sides of SIMD block boundaries.
+#[test]
+fn string_from_two_byte_matches_from_utf16_lossy() {
+    const UNITS: [u16; 10] = [
+        0x61, 0xe9, 0x6c34, 0x7ff, 0x800, 0xd83d, 0xde00, 0xdbff, 0xdfff, 0xfffd,
+    ];
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        for len in (0..=72).chain([127, 128, 129, 255, 256, 257, 1024]) {
+            for _ in 0..16 {
+                let units: Vec<u16> = (0..len)
+                    .map(|_| {
+                        state ^= state << 13;
+                        state ^= state >> 7;
+                        state ^= state << 17;
+                        UNITS[(state % UNITS.len() as u64) as usize]
+                    })
+                    .collect();
+                let s = JsString::new_from_two_byte(lock, &units).unwrap();
+                let expected = String::from_utf16_lossy(&units);
+                let value: Local<Value> = s.into();
+                assert_eq!(
+                    <String as FromJS>::from_js(lock, value)?,
+                    expected,
+                    "{units:x?}"
+                );
+            }
+        }
+        Ok(())
+    });
+}
+
+/// A single surrogate or pair swept across every position of an otherwise clean two-byte string,
+/// so the SIMD paths see it at each block edge.
+#[test]
+fn string_from_two_byte_with_one_surrogate_matches_from_utf16_lossy() {
+    let inserts: [&[u16]; 4] = [&[0xd83d], &[0xde00], &[0xd83d, 0xde00], &[0xde00, 0xd83d]];
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        for filler in [0x61_u16, 0x7ff, 0x6c34] {
+            for len in (1..=80).chain([127, 128, 129, 255, 256, 257]) {
+                for pos in 0..len {
+                    for insert in inserts {
+                        let mut units = vec![filler; len];
+                        // Keeps the string two-byte when the filler is ASCII.
+                        units[0] = 0x6c34;
+                        for (unit, &value) in units[pos..].iter_mut().zip(insert) {
+                            *unit = value;
+                        }
+                        let expected = String::from_utf16_lossy(&units);
+                        let value: Local<Value> =
+                            JsString::new_from_two_byte(lock, &units).unwrap().into();
+                        assert_eq!(
+                            <String as FromJS>::from_js(lock, value)?,
+                            expected,
+                            "{units:x?}"
+                        );
+                    }
+                }
+            }
+        }
         Ok(())
     });
 }

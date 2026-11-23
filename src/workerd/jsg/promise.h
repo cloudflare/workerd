@@ -235,7 +235,7 @@ class Promise {
   Promise(decltype(nullptr)): v8Promise(kj::none) {}
   // For use when you're declaring a local variable that will be initialized later.
 
-  void markAsHandled(Lock& js) {
+  JSG_NO_JS void markAsHandled(Lock& js) {
     auto promise = getInner(js);
     promise->MarkAsHandled();
     markedAsHandled = true;
@@ -252,7 +252,7 @@ class Promise {
   // is fulfilled. It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func, typename ErrorFunc>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
+  JSG_NO_JS PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
     using Output = ReturnType<Func, T, true>;
     static_assert(kj::isSameType<Output, ReturnType<ErrorFunc, Value, true>>(),
         "functions passed to .then() must return exactly the same type");
@@ -267,7 +267,7 @@ class Promise {
   // It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
+  JSG_NO_JS PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
     using Output = ReturnType<Func, T, true>;
 
     // HACK: The error function is never called, so it need not actually be a functor.
@@ -278,7 +278,7 @@ class Promise {
   }
 
   template <typename ErrorFunc>
-  Promise<T> catch_(Lock& js, ErrorFunc&& errorFunc) {
+  JSG_NO_JS Promise<T> catch_(Lock& js, ErrorFunc&& errorFunc) {
     static_assert(kj::isSameType<T, ReturnType<ErrorFunc, Value, true>>(),
         "function passed to .catch_() must return exactly the promise's type");
 
@@ -295,7 +295,7 @@ class Promise {
   // with each call creating a new branch off the original promise. Another key difference
   // with whenResolved() is that the markAsHandled status will propagate to the new Promise<void>
   // returned by whenResolved().
-  Promise<void> whenResolved(Lock& js) {
+  JSG_NO_JS Promise<void> whenResolved(Lock& js) {
     auto promise = Promise<void>(js.v8Isolate, getInner(js));
     if (markedAsHandled) {
       promise.markAsHandled(js);
@@ -366,7 +366,7 @@ class Promise {
       reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
-    Resolver addRef(Lock& js) {
+    JSG_NO_JS Resolver addRef(Lock& js) {
       return {js.v8Isolate, v8Resolver.getHandle(js)};
     }
     void visitForGc(GcVisitor& visitor) {
@@ -453,6 +453,19 @@ class Promise {
       v8::FunctionCallback errCallback) {
     return js.withinHandleScope([&] {
       auto context = js.v8Context();
+
+      if (js.isPreparingSnapshot()) {
+        // The continuation functions are API functions whose callbacks are template
+        // instantiations, one pair per continuation type, so the zygote's external reference
+        // table cannot list them up front. A continuation still pending when top-level
+        // evaluation ends (a C++ stream whose pull() returned a pending promise, say) stays
+        // reachable from the context; with its callbacks registered, CreateBlob() serializes
+        // the function and reaches `funcPairHandle`, an opaque wrapper with no snapshot
+        // transfer, which the serializer callback reports and the zygote fails on. Without the
+        // registration V8 aborts the process on the unknown address instead.
+        isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(thenCallback));
+        isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(errCallback));
+      }
 
       auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
 
@@ -623,6 +636,13 @@ class PromiseWrapper {
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
+    if (js.isPreparingSnapshot()) {
+      // A template instantiation per T, which the zygote's external reference table cannot list
+      // up front; see Promise::thenImpl(). The function stays reachable while `promise` is
+      // pending, and `creator` is an ordinary object the serializer transfers or reports.
+      isolateRegisterExternalReference(
+          js.v8Isolate, reinterpret_cast<intptr_t>(&thenWrap<TypeWrapper, T>));
+    }
     auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
         1, v8::ConstructorBehavior::kThrow));
     auto ret = check(promise.consumeHandle(js)->Then(context, then));
@@ -660,6 +680,11 @@ class PromiseWrapper {
         // TODO(perf): We could in theory check if promise->State() is kFulfilled and, in that
         //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
         //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
+        if (js.isPreparingSnapshot()) {
+          // As in wrap() above: reachable from `promise` while it is pending.
+          isolateRegisterExternalReference(
+              js.v8Isolate, reinterpret_cast<intptr_t>(&thenUnwrap<TypeWrapper, T>));
+        }
         auto then = check(v8::Function::New(
             context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));

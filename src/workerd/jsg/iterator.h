@@ -6,8 +6,8 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/memory.h>
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/struct.h>
-#include <workerd/util/weak-refs.h>
 
 #include <list>
 
@@ -736,10 +736,14 @@ class IteratorBase: public Object {
   void visitForGc(GcVisitor& visitor) {
     if constexpr (hasPublicVisitForGc<State>()) {
       visitor.visit(state);
+    } else {
+      static_assert(holdsNoGcHandles<State>,
+          "A JSG_ITERATOR State must have a public visitForGc(), or be marked "
+          "JSG_HOLDS_NO_GC_HANDLES if it holds no GC handles.");
     }
   }
 
-  JSG_MEMORY_INFO(IteratorBase) {
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
     if constexpr (MemoryRetainer<State>) {
       tracker.trackField("state", state);
     } else {
@@ -785,7 +789,13 @@ class AsyncIteratorImpl {
   };
 
   JSG_MEMORY_INFO(AsyncIteratorImpl) {
-    // TODO(soon): Implement memory tracking
+    if (!pendingStack.empty()) {
+      tracker.pushContainer("pendingStack"_kjc, sizeof(pendingStack), "pendingStack"_kjc);
+      for (const auto& promise: pendingStack) {
+        tracker.trackField(nullptr, promise);
+      }
+      tracker.popNode();
+    }
   }
 
  private:
@@ -859,12 +869,16 @@ class AsyncIteratorBase: public Object {
     KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
       if constexpr (hasPublicVisitForGc<State>()) {
         visitor.visit(inner.state);
+      } else {
+        static_assert(holdsNoGcHandles<State>,
+            "A JSG_ASYNC_ITERATOR State must have a public visitForGc(), or be marked "
+            "JSG_HOLDS_NO_GC_HANDLES if it holds no GC handles.");
       }
       visitor.visit(inner.impl);
     }
   }
 
-  JSG_MEMORY_INFO(AsyncIteratorBase) {
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(fin, Finished) {
         tracker.trackFieldWithSize("state", sizeof(Finished));
@@ -894,14 +908,14 @@ class AsyncIteratorBase: public Object {
 
   void pushCurrent(Lock& js, Promise<void> promise) {
     auto& inner = state.template get<InnerState>();
-    auto result = promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
+    auto result = promise.whenResolved(js).then(js, [self = JSG_THIS](Lock& js) mutable {
       // If state is Finished, then there's nothing we need to do here.
-      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+      KJ_IF_SOME(inner, self->state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
       }
       return js.resolvedPromise();
-    }, [this, self = JSG_THIS](Lock& js, Value value) {
-      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+    }, [self = JSG_THIS](Lock& js, Value value) mutable {
+      KJ_IF_SOME(inner, self->state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
       }
       return js.rejectedPromise<void>(kj::mv(value));
@@ -925,20 +939,20 @@ class AsyncIteratorBase: public Object {
           return js.resolvedPromise(Next{.done = true});
         }
 
-        auto callNext = [this, self = JSG_THIS, nextFunc = kj::mv(nextFunc)](Lock& js) mutable {
-          KJ_SWITCH_ONEOF(state) {
+        auto callNext = [self = JSG_THIS, nextFunc = kj::mv(nextFunc)](Lock& js) mutable {
+          KJ_SWITCH_ONEOF(self->state) {
             KJ_CASE_ONEOF(finished, Finished) {
               return js.resolvedPromise(Next{.done = true});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               auto promise = nextFunc(js, inner.state);
-              pushCurrent(js, promise.whenResolved(js));
+              self->pushCurrent(js, promise.whenResolved(js));
               return promise.then(
-                  js, [this, self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
+                  js, [self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
                 KJ_IF_SOME(result, maybeResult) {
                   return js.resolvedPromise(Next{.done = false, .value = kj::mv(result)});
                 } else {
-                  state.template init<Finished>();
+                  self->state.template init<Finished>();
                   return js.resolvedPromise(Next{.done = true});
                 }
               });
@@ -977,16 +991,16 @@ class AsyncIteratorBase: public Object {
 
         inner.impl.returning = true;
 
-        auto callReturn = [this, self = JSG_THIS, value = kj::mv(value),
-                              returnFunc = kj::mv(returnFunc)](Lock& js) mutable {
-          KJ_SWITCH_ONEOF(state) {
+        auto callReturn = [self = JSG_THIS, value = kj::mv(value), returnFunc = kj::mv(returnFunc)](
+                              Lock& js) mutable {
+          KJ_SWITCH_ONEOF(self->state) {
             KJ_CASE_ONEOF(finished, Finished) {
               return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               return returnFunc(js, inner.state, value)
-                  .then(js, [this, self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
-                state.template init<Finished>();
+                  .then(js, [self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
+                self->state.template init<Finished>();
                 return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
               });
             }
@@ -1019,7 +1033,9 @@ class AsyncIteratorBase: public Object {
 // private:
 //   struct IteratorState {
 //     // The iterator's internal state.
-//     // Implement visitForGc here if the state stores any visitable references.
+//     // Implement a public visitForGc() here if the state stores any visitable references,
+//     // otherwise declare:
+//     JSG_HOLDS_NO_GC_HANDLES;
 //   };
 //
 //   static kj::Maybe<kj::String> nextFunction(jsg::Lock& js, IteratorState& state) {
@@ -1113,7 +1129,9 @@ class AsyncIteratorBase: public Object {
 // private:
 //   struct IteratorState {
 //     // The iterator's internal state.
-//     // Implement visitForGc here if the state stores any visitable references.
+//     // Implement a public visitForGc() here if the state stores any visitable references,
+//     // otherwise declare:
+//     JSG_HOLDS_NO_GC_HANDLES;
 //   };
 //
 //   static jsg::Promise<kj::Maybe<kj::String>> nextFunction(

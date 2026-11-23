@@ -9,31 +9,42 @@
 /// need to participate in GC tracing. This macro produces a `Traced` impl whose
 /// `trace` method is a no-op, and a
 /// [`HoldsNoGcReferences`](crate::HoldsNoGcReferences) implementation. A generic type takes a
-/// call of its own, with its parameters first, each with at most one bound.
+/// call of its own, with its parameters first, each with at most one bound of its own. Every
+/// parameter is also bound by `HoldsNoGcReferences`, so that `X<T>` claims no GC references only
+/// where its `T` holds none.
 ///
 /// `Traced` requires `Send`, so a generic type implements it only where it is `Send`.
+///
+/// For a concrete type the claim is not checked: `jsg_traced_unchecked!(Foo)` compiles even if
+/// `Foo` holds a `TracedGlobal`. It is for a type whose fields can't implement
+/// `HoldsNoGcReferences`, such as one from outside JSG. A struct or enum whose fields all can
+/// uses `#[jsg_macros::jsg_traced]`, which checks them.
 ///
 /// # Example
 ///
 /// ```ignore
-/// use jsg::jsg_traced;
+/// use jsg::jsg_traced_unchecked;
 ///
 /// struct Id(u64);
 /// struct Slot<T>(std::sync::Arc<T>);
-/// jsg_traced!(Id);
-/// jsg_traced!(<T: jsg::HoldsNoGcReferences> Slot<T>);
+/// jsg_traced_unchecked!(Id);
+/// jsg_traced_unchecked!(<T> Slot<T>);
 /// ```
 #[macro_export]
-macro_rules! jsg_traced {
+macro_rules! jsg_traced_unchecked {
     (<$($g:ident $(: $b:path)?),+ $(,)?> $t:ty) => {
-        impl<$($g $(: $b)?),+> $crate::Traced for $t
+        impl<$($g: $crate::HoldsNoGcReferences $(+ $b)?),+> $crate::Traced for $t
         where
             $t: Send,
         {
             fn trace(&self, _visitor: &mut $crate::v8::GcVisitor) {}
         }
 
-        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t where $t: Send {}
+        impl<$($g: $crate::HoldsNoGcReferences $(+ $b)?),+> $crate::HoldsNoGcReferences for $t
+        where
+            $t: Send,
+        {
+        }
     };
     ($($t:ty),* $(,)?) => {
         $(impl $crate::Traced for $t {

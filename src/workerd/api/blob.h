@@ -32,9 +32,13 @@ class Blob: public jsg::Object {
 
   struct Options {
     jsg::Optional<kj::String> type;
-    jsg::Unimplemented endings;
+    jsg::Optional<kj::String> endings;
 
     JSG_STRUCT(type, endings);
+    JSG_STRUCT_TS_OVERRIDE(BlobOptions {
+      type?: string;
+      endings?: "transparent" | "native";
+    });
   };
 
   using BitsValue = kj::OneOf<jsg::JsBufferSource, kj::String, jsg::Ref<Blob>>;
@@ -51,8 +55,8 @@ class Blob: public jsg::Object {
   }
 
   jsg::Ref<Blob> slice(jsg::Lock& js,
-      jsg::Optional<int> start,
-      jsg::Optional<int> end,
+      jsg::Optional<double> start,
+      jsg::Optional<double> end,
       jsg::Optional<kj::String> type);
 
   // Each of the consumption methods (arrayBuffer, bytes, text) create copies of
@@ -146,9 +150,14 @@ class File: public Blob {
   struct Options {
     jsg::Optional<kj::String> type;
     jsg::Optional<double> lastModified;
-    jsg::Unimplemented endings;
+    jsg::Optional<kj::String> endings;
 
     JSG_STRUCT(type, lastModified, endings);
+    JSG_STRUCT_TS_OVERRIDE(FileOptions {
+      type?: string;
+      lastModified?: number;
+      endings?: "transparent" | "native";
+    });
   };
 
   static jsg::Ref<File> constructor(

@@ -43,7 +43,7 @@ struct TestFixture {
     kj::Array<util::AutogateKey> autogateKeys;
     // If true, only the autogates above are enabled, even under WORKERD_ALL_AUTOGATES (as in the
     // @all-autogates test variant), e.g. to test the behavior with a gate disabled.
-    bool ignoreAllAutogatesEnv;
+    bool ignoreAllAutogatesEnv = false;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -52,10 +52,10 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> actorClassName;
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
-    bool useRealTimers;
+    bool useRealTimers = false;
     // If true, the actor's storage cache flushes writes to its stage, which is read-only, so a
     // write fails at flush time. Otherwise writes stay in the cache, as in a preview session.
-    bool flushActorStorage;
+    bool flushActorStorage = false;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
@@ -68,7 +68,7 @@ struct TestFixture {
     // If set, supplied to the actor's constructor, as whatever holds a manager across generations
     // does in production. What an actor does with a manager it is handed differs from what
     // setHibernationManager() does with one it adopts.
-    kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> hibernationManager;
+    kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> hibernationManager;
     // If set, supplied to the actor's constructor as its holder token. Actors of one holder share a
     // token; sibling facets do not.
     kj::Maybe<uint64_t> holderToken;
@@ -101,7 +101,10 @@ struct TestFixture {
     kj::Maybe<kj::Date> fixedNow;
   };
 
-  TestFixture(SetupParams&& params = {.useRealTimers = false});
+  // A default argument here would need SetupParams' member initializers before TestFixture is
+  // complete, so the parameterless constructor delegates instead.
+  TestFixture(): TestFixture(SetupParams()) {}
+  TestFixture(SetupParams&& params);
 
   struct V8Environment {
     v8::Isolate* isolate;
@@ -285,6 +288,11 @@ struct TestFixture {
   void setLimitsExceeded(EventOutcome outcome) {
     limitsExceeded = outcome;
   }
+  // Like setLimitsExceeded(), but the limit enforcer records `outcome` only when the next scope of
+  // its enterJs() ends, as an enforcer that measures CPU time over that scope does.
+  void setLimitsExceededOnLeavingJs(EventOutcome outcome) {
+    limitsExceededOnLeavingJs = outcome;
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -322,7 +330,7 @@ struct TestFixture {
   kj::Maybe<kj::Own<Worker::Actor::Loopback>> savedActorLoopback;
   // Saved for the same reason as savedActorLoopback: resetActor() hands a fresh ref to each actor
   // it constructs.
-  kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
+  kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
   kj::Maybe<kj::String> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
@@ -350,6 +358,7 @@ struct TestFixture {
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
   kj::Maybe<EventOutcome> limitsExceeded;
+  kj::Maybe<EventOutcome> limitsExceededOnLeavingJs;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

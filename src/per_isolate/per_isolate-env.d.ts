@@ -116,6 +116,9 @@ declare const utils: {
   // name (jsg::JsObject::getPrivate() and setPrivate()). V8-private
   // properties are neither reflected by JavaScript nor inherited.
   getPrivateSymbol(name: string): symbol;
+  // The constructor the TypeScript DOMException constructs its instances with
+  // (jsg::getBootstrapDomExceptionBase()).
+  DOMExceptionBase: new () => object;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
@@ -174,6 +177,16 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // Defines key on target as a writable, configurable data property,
+  // enumerable if enumerable is true, whose value is the key export of the
+  // bootstrap module specifier, required when the property is first read (V8's
+  // lazy data property). A read that throws leaves it lazy.
+  defineLazyDataProperty(
+    target: object,
+    key: string | symbol,
+    specifier: string,
+    enumerable: boolean
+  ): void;
   // The request-bound I/O handle (api/request-io.h), bound to the current
   // request, or undefined outside of one.
   createRequestIo(): RequestIo | undefined;
@@ -256,6 +269,12 @@ declare const utils: {
   // The native HTMLRewriter (Worker::Api::newHtmlRewriterUtils()), under the
   // ts-html-rewriter autogate, if the embedder provides it.
   htmlRewriter: HtmlRewriterUtils | undefined;
+  // The structured clone of `value` (jsg::structuredClone), transferring the
+  // objects in `transfer`, a dense array the caller built. The native
+  // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
+  // any other object throws a TypeError, and an uncloneable value a
+  // DataCloneError. Consumed by structured-clone.
+  structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
 // What utils.pumpTo() writes to.
