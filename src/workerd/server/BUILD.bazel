@@ -225,6 +225,8 @@ wd_cc_library(
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
         "//src/workerd/api:wrapped-binding",
+        "//src/workerd/api/bench-api",
+        "//src/workerd/api/bench-api:ffi.rs@cxx",
         "//src/workerd/api/memory-cache-api",
         "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:promise-wrapper",

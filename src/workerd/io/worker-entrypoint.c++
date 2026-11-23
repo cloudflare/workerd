@@ -20,6 +20,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
@@ -1169,7 +1170,18 @@ kj::Promise<void> WorkerEntrypoint::bench(
                 asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
             params));
   });
-  api::fillBenchReport(result, report);
+  // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
+  // default traversal limit.
+  capnp::FlatArrayMessageReader message(
+      result, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
+  auto group = message.getRoot<bench::BenchReport::Group>();
+  if (group.hasError()) {
+    report.setError(group.getError());
+  }
+  if (group.hasOverhead()) {
+    report.setOverhead(group.getOverhead());
+  }
+  report.setCases(group.getCases());
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
