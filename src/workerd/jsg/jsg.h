@@ -3485,6 +3485,9 @@ class Lock {
   JS_V8_SYMBOLS(V)
 #undef V
 
+  // Runs a microtask checkpoint, then the extra checkpoints requested by
+  // requestExtraMicrotaskCheckpoint() until none is requested or execution terminates.
+  //
   // V8 drops the queue when a microtask terminates execution. When an unhandledrejection listener
   // does, the microtasks queued since the last checkpoint stay queued: the caller cancels them
   // with terminateNextExecution() and another call, as IoContext does.

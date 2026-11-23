@@ -4,7 +4,7 @@
 
 import { rejects, strictEqual } from 'node:assert';
 
-const ABORT_AT = 10;
+const ABORT_AT = 100;
 
 // Runs, in a Durable Object, a chain of unhandled rejections that only ends when the object
 // aborts. Returns how many rounds of the chain ran, as seen by the next instance of the object.

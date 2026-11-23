@@ -438,22 +438,13 @@ void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
 
   auto& isolate = IsolateBase::from(v8Isolate);
-  // We only expect at most a handful of extra checkpoints. Keep a generous cap
-  // to flush cascaded microtasks but prevent a potential busy loop.
-  static constexpr uint MAX_EXTRA_MICROTASK_CHECKPOINTS = 64;
-  for (uint i = 0; i < MAX_EXTRA_MICROTASK_CHECKPOINTS; ++i) {
-    if (!isolate.takeExtraMicrotaskCheckpointRequested({})) {
-      return;
-    }
-    // A checkpoint with the termination pending would run the microtasks still queued.
-    if (v8Isolate->IsExecutionTerminating()) {
-      return;
-    }
+  // Runs every extra checkpoint requested: microtasks left in the queue would run in whatever
+  // enters the isolate next, which can be another request. A chain that never ends is a busy loop,
+  // like `while (true) {}`, that ends when execution terminates, for example when the CPU limit is
+  // exceeded. A checkpoint with the termination pending would run the microtasks still queued.
+  while (isolate.takeExtraMicrotaskCheckpointRequested({})) {
+    if (v8Isolate->IsExecutionTerminating()) break;
     v8Isolate->PerformMicrotaskCheckpoint();
-  }
-
-  if (isolate.takeExtraMicrotaskCheckpointRequested({})) {
-    KJ_LOG(WARNING, "extra microtask checkpoint limit reached", MAX_EXTRA_MICROTASK_CHECKPOINTS);
   }
 }
 

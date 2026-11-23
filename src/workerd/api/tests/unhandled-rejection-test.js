@@ -197,6 +197,29 @@ export const handlerTriggeredUnhandledRejection = {
   },
 };
 
+// Verifies a long chain of unhandled rejections, each one rejected from a microtask queued by the
+// listener of the previous one, runs to its end in the task that started it.
+export const longHandlerTriggeredChainRunsInOneTask = {
+  async test() {
+    const ROUNDS = 200;
+    let rounds = 0;
+    const handler = () => {
+      if (++rounds < ROUNDS) {
+        queueMicrotask(() => Promise.reject(new Error('next')));
+      }
+    };
+    addEventListener('unhandledrejection', handler);
+    try {
+      Promise.reject(new Error('first'));
+      // The timer callback runs in a later task.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      strictEqual(rounds, ROUNDS);
+    } finally {
+      removeEventListener('unhandledrejection', handler);
+    }
+  },
+};
+
 // Rejects two promises, one after the other, with `handler` as the listener of unhandledrejection.
 // Returns the reasons of the events, as strings.
 async function reasonsOfTwoRejections(handler) {

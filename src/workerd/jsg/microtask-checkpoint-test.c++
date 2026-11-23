@@ -67,7 +67,7 @@ KJ_TEST("an unhandled rejection handler that terminates execution ends a chain o
   // Each round of the chain takes an extra microtask checkpoint: the handler queues a microtask
   // that rejects the next promise. At the last round it then terminates execution, as a listener
   // that exceeds the CPU limit or aborts its Durable Object does.
-  static constexpr uint ROUNDS = 10;
+  static constexpr uint ROUNDS = 100;
   Evaluator<CheckpointContext, CheckpointIsolate> e(v8System);
   e.run([](Lock& js) {
     auto reject = compileFunction(js, "(function() { Promise.reject(new Error('rejected')); })");
