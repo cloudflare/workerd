@@ -3424,16 +3424,24 @@ interface QueuingStrategyInit {
   highWaterMark: number;
 }
 declare class AwsChunkedDecoderStream {
-  constructor(options?: AwsChunkedDecoderStreamOptions);
+  constructor(options: AwsChunkedDecoderStreamOptions);
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
   readonly trailers: Promise<Headers>;
 }
 interface AwsChunkedDecoderStreamOptions {
-  decodedLength?: number;
+  decodedLength: number;
   allowedTrailers?: string[];
   maxTrailerBytes?: number;
   drainOnError?: boolean;
+  signing?: AwsChunkedDecoderStreamSigningOptions;
+}
+interface AwsChunkedDecoderStreamSigningOptions {
+  secretAccessKey: string;
+  amzDate: string;
+  region: string;
+  service: string;
+  seedSignature: string;
 }
 interface TracePreviewInfo {
   id: string;

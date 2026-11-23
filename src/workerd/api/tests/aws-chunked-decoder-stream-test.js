@@ -20,7 +20,7 @@ function concat(chunks) {
   return result;
 }
 
-// Encodes `data` as aws-chunked, in chunks of `chunkSize`, with the given trailer lines.
+// Encodes `data` as unsigned aws-chunked, in chunks of `chunkSize`, with the given trailer lines.
 function encode(data, { chunkSize = 7, trailer = [], extension = '' } = {}) {
   const parts = [];
   for (let i = 0; i < data.byteLength; i += chunkSize) {
@@ -61,7 +61,9 @@ export const decodes = {
     const input = encode(BODY, { trailer: [CHECKSUM] });
     // Every split of the input into writes decodes the same way.
     for (const writeSize of [1, 2, 3, 5, 13, input.byteLength]) {
-      const stream = new AwsChunkedDecoderStream();
+      const stream = new AwsChunkedDecoderStream({
+        decodedLength: BODY.byteLength,
+      });
       deepStrictEqual(await run(stream, input, writeSize), BODY);
       const trailers = await stream.trailers;
       strictEqual(trailers.get('x-amz-checksum-crc32'), 'sOO8/Q==');
@@ -83,26 +85,30 @@ export const noTrailers = {
       await run(empty, encoder.encode('0\r\n\r\n')),
       new Uint8Array()
     );
+
+    // The body may end right after its final chunk.
+    const ended = new AwsChunkedDecoderStream({ decodedLength: 0 });
+    deepStrictEqual(
+      await run(ended, encoder.encode('0\r\n')),
+      new Uint8Array()
+    );
+    strictEqual([...(await ended.trailers)].length, 0);
   },
 };
 
-export const extensionsAndTrailerFields = {
+export const trailerFields = {
   async test() {
     const stream = new AwsChunkedDecoderStream({
+      decodedLength: BODY.byteLength,
       allowedTrailers: ['X-Amz-Checksum-CRC32'],
     });
     const input = encode(BODY, {
       chunkSize: 16,
-      extension: ';chunk-signature=' + 'a'.repeat(64),
-      trailer: [
-        'x-amz-checksum-crc32:  sOO8/Q==  ',
-        'x-amz-trailer-signature:' + 'b'.repeat(64),
-      ],
+      trailer: ['X-Amz-Checksum-CRC32:  sOO8/Q==  ', 'x-amz-other:b'],
     });
     deepStrictEqual(await run(stream, input, 10), BODY);
     const trailers = await stream.trailers;
-    strictEqual(trailers.get('x-amz-checksum-crc32'), 'sOO8/Q==');
-    strictEqual(trailers.get('x-amz-trailer-signature'), null);
+    deepStrictEqual([...trailers], [['x-amz-checksum-crc32', 'sOO8/Q==']]);
   },
 };
 
@@ -117,15 +123,69 @@ export const hexSizes = {
       data.subarray(255),
       encoder.encode('\r\n0\r\n\r\n'),
     ]);
-    deepStrictEqual(await run(new AwsChunkedDecoderStream(), input, 64), data);
+    deepStrictEqual(
+      await run(new AwsChunkedDecoderStream({ decodedLength: 300 }), input, 64),
+      data
+    );
   },
 };
 
-// Wire bytes written out by hand, rather than by encode(), in the forms S3 clients send.
-const SIGNATURE =
-  'ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648';
+// The example in AWS's "Signature Calculations for the Authorization Header: Transferring
+// Payload in Multiple Chunks": 66560 bytes of "a", sent as a 64 KiB chunk and a 1 KiB chunk.
+const SIGNING = {
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  amzDate: '20130524T000000Z',
+  region: 'us-east-1',
+  service: 's3',
+  seedSignature:
+    '4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9',
+};
+const EXAMPLE_SIGNATURES = [
+  'ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648',
+  '0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497',
+  'b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9',
+];
+const EXAMPLE_BODY = new Uint8Array(66560).fill(97);
+const EXAMPLE_WIRE = concat([
+  encoder.encode(`10000;chunk-signature=${EXAMPLE_SIGNATURES[0]}\r\n`),
+  EXAMPLE_BODY.subarray(0, 65536),
+  encoder.encode(`\r\n400;chunk-signature=${EXAMPLE_SIGNATURES[1]}\r\n`),
+  EXAMPLE_BODY.subarray(65536),
+  encoder.encode(`\r\n0;chunk-signature=${EXAMPLE_SIGNATURES[2]}\r\n\r\n`),
+]);
+
+// The same credentials signing other bodies: "hello " and "world" as two chunks, with a trailer
+// section of `x-amz-checksum-crc32:DUoRhQ==`; and "hello world" as one chunk, with no trailer.
+const TRAILER_SIGNATURES = [
+  '36a9919e5e855a54fc5e137c919e524764c71ade46792d228f7ebaade71602ab',
+  '927d7061508e51b79d4e40eb55aed9033cd0c471859241fb0355ca3c9ff53a92',
+  'ae13d294fc309f1858acb23b717c250dc572e78820dfd4bf5bae1dcb2055298f',
+  'bf13d348abc27fe00099cbe7080e9a425fe4d33ec9a9225e6cc86a0a8bc2099a',
+];
+const PLAIN_SIGNATURES = [
+  '658a49ee7b49af44c11311d3461346a5688fb3ce5daa61dd95377587f0149255',
+  '1172018d76cd25eb7956fc92d1935d976024a1d96841533ea7b72efe5e8d7463',
+];
+
 const WIRE_BODY = encoder.encode('hello world');
 
+// STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER: every chunk, the final one included, carries a
+// signature, and the trailer has its own.
+function signedTrailerWire(
+  signatures = TRAILER_SIGNATURES,
+  checksumLine = 'x-amz-checksum-crc32:DUoRhQ==\r\n'
+) {
+  return encoder.encode(
+    `6;chunk-signature=${signatures[0]}\r\nhello \r\n` +
+      `5;chunk-signature=${signatures[1]}\r\nworld\r\n` +
+      `0;chunk-signature=${signatures[2]}\r\n` +
+      checksumLine +
+      `x-amz-trailer-signature:${signatures[3]}\r\n` +
+      '\r\n'
+  );
+}
+
+// Wire bytes written out by hand, rather than by encode(), in the forms S3 clients send.
 export const wireFixtures = {
   async test() {
     // STREAMING-UNSIGNED-PAYLOAD-TRAILER, with and without the LF some clients send after the
@@ -145,82 +205,60 @@ export const wireFixtures = {
       );
     }
 
-    // STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER: every chunk, the final one included, carries a
-    // signature, and the trailer has its own.
     const signed = new AwsChunkedDecoderStream({
       decodedLength: 11,
       allowedTrailers: ['x-amz-checksum-crc32'],
+      signing: SIGNING,
     });
-    const signedWire = encoder.encode(
-      `6;chunk-signature=${SIGNATURE}\r\nhello \r\n` +
-        `5;chunk-signature=${SIGNATURE}\r\nworld\r\n` +
-        `0;chunk-signature=${SIGNATURE}\r\n` +
-        'x-amz-checksum-crc32:DUoRhQ==\n\r\n' +
-        `x-amz-trailer-signature:${SIGNATURE}\r\n` +
-        '\r\n'
-    );
-    deepStrictEqual(await run(signed, signedWire, 7), WIRE_BODY);
+    deepStrictEqual(await run(signed, signedTrailerWire(), 7), WIRE_BODY);
     const trailers = await signed.trailers;
     strictEqual(trailers.get('x-amz-checksum-crc32'), 'DUoRhQ==');
     strictEqual([...trailers].length, 1);
 
     // STREAMING-AWS4-HMAC-SHA256-PAYLOAD, with no trailer.
-    const plain = new AwsChunkedDecoderStream({ decodedLength: 11 });
+    const plain = new AwsChunkedDecoderStream({
+      decodedLength: 11,
+      signing: SIGNING,
+    });
     const plainWire = encoder.encode(
-      `b;chunk-signature=${SIGNATURE}\r\nhello world\r\n` +
-        `0;chunk-signature=${SIGNATURE}\r\n\r\n`
+      `b;chunk-signature=${PLAIN_SIGNATURES[0]}\r\nhello world\r\n` +
+        `0;chunk-signature=${PLAIN_SIGNATURES[1]}\r\n\r\n`
     );
     deepStrictEqual(await run(plain, plainWire, 5), WIRE_BODY);
     strictEqual([...(await plain.trailers)].length, 0);
   },
 };
 
-// Chunk extensions follow RFC 9112: whitespace around ";" and "=", names without values, and
-// quoted values with escapes.
-export const extensionGrammar = {
+export const signedAwsExample = {
   async test() {
-    for (const extension of [
-      ';a',
-      ';a=b',
-      ';a;b=c',
-      ' ;a',
-      '\t; a = b ;c',
-      ';a="quoted ; value"',
-      ';a="escaped \\" quote"',
-      ';a=""',
-      ';a = "x"\t; b',
-    ]) {
-      const stream = new AwsChunkedDecoderStream();
-      deepStrictEqual(
-        await run(stream, encode(BODY, { extension }), 3),
-        BODY,
-        JSON.stringify(extension)
-      );
+    for (const writeSize of [1000, 4096, 65536, EXAMPLE_WIRE.byteLength]) {
+      const stream = new AwsChunkedDecoderStream({
+        decodedLength: EXAMPLE_BODY.byteLength,
+        signing: SIGNING,
+      });
+      deepStrictEqual(await run(stream, EXAMPLE_WIRE, writeSize), EXAMPLE_BODY);
+      strictEqual([...(await stream.trailers)].length, 0);
     }
-    for (const extension of [
-      ';',
-      ';;a',
-      ';a=',
-      ';a b',
-      ';a=b c',
-      ';a="unterminated',
-      ';a="x"y',
-      ';a=b ',
-      ' ',
-      ';a ',
-      ';@',
-      ';a=@',
-      ';a="\x01"',
-    ]) {
-      await rejectsMalformed(
-        encode(BODY, { extension }),
-        /Malformed aws-chunked chunk extension/
-      );
-    }
+
+    // Piped between native streams.
+    const piped = new AwsChunkedDecoderStream({
+      decodedLength: EXAMPLE_BODY.byteLength,
+      signing: SIGNING,
+    });
+    const output = new Uint8Array(
+      await new Response(
+        new Response(EXAMPLE_WIRE).body.pipeThrough(piped)
+      ).arrayBuffer()
+    );
+    deepStrictEqual(output, EXAMPLE_BODY);
   },
 };
 
-async function rejectsMalformed(input, message, options = {}) {
+async function rejectsWith(
+  input,
+  message,
+  options = { decodedLength: BODY.byteLength }
+) {
   const stream = new AwsChunkedDecoderStream(options);
   await rejects(run(stream, input), (e) => {
     ok(e instanceof TypeError, `${e}`);
@@ -230,78 +268,210 @@ async function rejectsMalformed(input, message, options = {}) {
   await rejects(stream.trailers, TypeError);
 }
 
+const MISMATCH = /An aws-chunked chunk or trailer signature does not match/;
+const MALFORMED = /Malformed aws-chunked body/;
+
+export const signatureMismatch = {
+  async test() {
+    const options = {
+      decodedLength: EXAMPLE_BODY.byteLength,
+      signing: SIGNING,
+    };
+
+    // One changed byte in the second chunk.
+    const tampered = EXAMPLE_WIRE.slice();
+    tampered[tampered.byteLength - 200] = 98;
+    await rejectsWith(tampered, MISMATCH, options);
+
+    // A verified chunk is output, and the one after it never is.
+    const stream = new AwsChunkedDecoderStream(options);
+    const writer = stream.writable.getWriter();
+    writer.closed.catch(() => {});
+    const reader = stream.readable.getReader();
+    const writing = writer.write(tampered).then(() => writer.close());
+    let read = 0;
+    await rejects(
+      (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          read += value.byteLength;
+        }
+      })(),
+      MISMATCH
+    );
+    await rejects(writing, MISMATCH);
+    strictEqual(read, 65536);
+
+    // Other credentials.
+    await rejectsWith(EXAMPLE_WIRE, MISMATCH, {
+      ...options,
+      signing: { ...SIGNING, secretAccessKey: 'another key' },
+    });
+    await rejectsWith(EXAMPLE_WIRE, MISMATCH, {
+      ...options,
+      signing: { ...SIGNING, region: 'eu-west-1' },
+    });
+    await rejectsWith(EXAMPLE_WIRE, MISMATCH, {
+      ...options,
+      signing: { ...SIGNING, seedSignature: '0'.repeat(64) },
+    });
+
+    // A trailer signature that does not match, or a checksum changed under it.
+    const trailerOptions = { decodedLength: 11, signing: SIGNING };
+    await rejectsWith(
+      signedTrailerWire([...TRAILER_SIGNATURES.slice(0, 3), '0'.repeat(64)]),
+      MISMATCH,
+      trailerOptions
+    );
+    await rejectsWith(
+      signedTrailerWire(
+        TRAILER_SIGNATURES,
+        'x-amz-checksum-crc32:AAAAAA==\r\n'
+      ),
+      MISMATCH,
+      trailerOptions
+    );
+  },
+};
+
+// A signed body must sign every chunk and its trailer; an unsigned one may carry no signatures.
+export const signaturePresence = {
+  async test() {
+    await rejectsWith(
+      encoder.encode(
+        `6\r\nhello \r\n0;chunk-signature=${TRAILER_SIGNATURES[2]}\r\n\r\n`
+      ),
+      MALFORMED,
+      { decodedLength: 6, signing: SIGNING }
+    );
+    await rejectsWith(
+      encoder.encode(
+        `6;chunk-signature=${TRAILER_SIGNATURES[0]}\r\nhello \r\n` +
+          `5;chunk-signature=${TRAILER_SIGNATURES[1]}\r\nworld\r\n` +
+          `0;chunk-signature=${TRAILER_SIGNATURES[2]}\r\n` +
+          'x-amz-checksum-crc32:DUoRhQ==\r\n\r\n'
+      ),
+      MALFORMED,
+      { decodedLength: 11, signing: SIGNING }
+    );
+
+    await rejectsWith(EXAMPLE_WIRE, MALFORMED, {
+      decodedLength: EXAMPLE_BODY.byteLength,
+    });
+    await rejectsWith(signedTrailerWire(), MALFORMED, { decodedLength: 11 });
+  },
+};
+
+export const signingOptions = {
+  test() {
+    const create = (signing) =>
+      new AwsChunkedDecoderStream({ decodedLength: 0, signing });
+    create(SIGNING);
+    throws(() => create({ ...SIGNING, amzDate: '2013-05-24' }), {
+      name: 'TypeError',
+      message: /signing.amzDate must be an x-amz-date/,
+    });
+    throws(() => create({ ...SIGNING, seedSignature: 'abc' }), {
+      name: 'TypeError',
+      message: /signing.seedSignature must be 64 hex digits/,
+    });
+  },
+};
+
+// The only chunk extension is a chunk signature.
+export const extensions = {
+  async test() {
+    for (const extension of [
+      ';a',
+      ';a=b',
+      ' ;a',
+      ';a="quoted ; value"',
+      ';chunk-signature=abc',
+      ';chunk-signature=' + 'a'.repeat(64) + ';a',
+    ]) {
+      await rejectsWith(encode(BODY, { extension }), MALFORMED);
+    }
+  },
+};
+
 export const malformed = {
   async test() {
     const good = encode(BODY, { trailer: [CHECKSUM] });
-    await rejectsMalformed(
-      encoder.encode('zz\r\n'),
-      /Malformed aws-chunked chunk size/
-    );
-    await rejectsMalformed(
-      encoder.encode('\r\n'),
-      /Malformed aws-chunked chunk size/
-    );
-    await rejectsMalformed(
-      encoder.encode('5\n'),
-      /Malformed aws-chunked chunk size/
-    );
-    await rejectsMalformed(encoder.encode('5\r\rhello'), /chunk size line/);
-    await rejectsMalformed(
-      encoder.encode('1'.repeat(17) + '\r\n'),
-      /more than 16 digits/
-    );
-    await rejectsMalformed(
-      encoder.encode('5\r\nhelloX\r\n'),
-      /longer than its declared size/
-    );
-    await rejectsMalformed(encoder.encode('5\r\nhello\rX'), /chunk ending/);
-    await rejectsMalformed(
+    for (const input of [
+      'zz\r\n',
+      '\r\n',
+      '5\n',
+      '5\r\rhello\r\n',
+      // A size of more than 32 bits.
+      '1'.repeat(17) + '\r\n',
+      '5\r\nhelloX\r\n',
+      '5\r\nhello\rX',
+    ]) {
+      await rejectsWith(encoder.encode(input), MALFORMED);
+    }
+    await rejectsWith(
       good.subarray(0, 20),
+      /ended after 12 of its 44 decoded bytes/
+    );
+    await rejectsWith(
+      good.subarray(0, good.byteLength - CHECKSUM.length - 7),
       /ended before its final chunk/
     );
-    await rejectsMalformed(
-      good.subarray(0, good.byteLength - 1),
-      /ended before its final chunk/
+    // Anything after the final chunk is its trailer section.
+    await rejectsWith(concat([good, encoder.encode('x')]), MALFORMED);
+    await rejectsWith(encode(BODY, { trailer: ['no colon here'] }), MALFORMED);
+    await rejectsWith(encode(BODY, { trailer: ['bad name: x'] }), MALFORMED);
+    await rejectsWith(
+      encode(BODY, { trailer: ['x-a: \x01'] }),
+      /Malformed aws-chunked trailer field value/
     );
-    await rejectsMalformed(
-      concat([good, encoder.encode('x')]),
-      /continues past its trailer/
-    );
-    await rejectsMalformed(
-      encode(BODY, { trailer: ['no colon here'] }),
-      /Malformed aws-chunked trailer field/
-    );
-    await rejectsMalformed(
-      encode(BODY, { trailer: ['bad name: x'] }),
-      /trailer field name/
-    );
-    await rejectsMalformed(
+    await rejectsWith(
       encode(BODY, { extension: ';' + 'e'.repeat(5000) }),
-      /chunk extension is longer/
+      /chunk size line is longer than 1024 bytes/
     );
+  },
+};
+
+// The end of the trailer section is not checked: the stream ends it.
+export const unterminatedTrailer = {
+  async test() {
+    const good = encode(BODY, { trailer: [CHECKSUM] });
+    for (const missing of [1, 2, 3]) {
+      const stream = new AwsChunkedDecoderStream({
+        decodedLength: BODY.byteLength,
+      });
+      deepStrictEqual(
+        await run(stream, good.subarray(0, good.byteLength - missing)),
+        BODY
+      );
+      strictEqual(
+        (await stream.trailers).get('x-amz-checksum-crc32'),
+        'sOO8/Q=='
+      );
+    }
   },
 };
 
 export const lengthsAndLimits = {
   async test() {
     const input = encode(BODY, { trailer: [CHECKSUM] });
-    await rejectsMalformed(input, /decodes to more than its decoded length/, {
+    await rejectsWith(input, /decodes to more than its decoded length/, {
       decodedLength: BODY.byteLength - 1,
     });
-    await rejectsMalformed(
-      input,
-      /decoded to 44 bytes, but its decoded length is 45/,
-      {
-        decodedLength: BODY.byteLength + 1,
-      }
-    );
-    await rejectsMalformed(
+    await rejectsWith(input, /ended after 44 of its 45 decoded bytes/, {
+      decodedLength: BODY.byteLength + 1,
+    });
+    await rejectsWith(
       encode(BODY, { trailer: ['x-a:' + 'v'.repeat(100)] }),
       /trailer is longer than 64 bytes/,
-      { maxTrailerBytes: 64 }
+      { decodedLength: BODY.byteLength, maxTrailerBytes: 64 }
     );
     // Exactly at the limit is fine: the section, with its final CRLF, is 64 bytes.
-    const atLimit = new AwsChunkedDecoderStream({ maxTrailerBytes: 64 });
+    const atLimit = new AwsChunkedDecoderStream({
+      decodedLength: BODY.byteLength,
+      maxTrailerBytes: 64,
+    });
     deepStrictEqual(
       await run(
         atLimit,
@@ -310,12 +480,19 @@ export const lengthsAndLimits = {
       ),
       BODY
     );
+    // The options are required, and so is the decoded length in them: a missing one is NaN.
+    throws(() => new AwsChunkedDecoderStream(), TypeError);
+    throws(() => new AwsChunkedDecoderStream({}), {
+      name: 'RangeError',
+      message: /decodedLength must be a non-negative integer/,
+    });
     throws(
       () => new AwsChunkedDecoderStream({ decodedLength: -1 }),
       RangeError
     );
     throws(
-      () => new AwsChunkedDecoderStream({ maxTrailerBytes: 0.5 }),
+      () =>
+        new AwsChunkedDecoderStream({ decodedLength: 0, maxTrailerBytes: 0.5 }),
       RangeError
     );
   },
@@ -326,24 +503,30 @@ export const lengthsAndLimits = {
 // failed before the consumer started reading or fails while it waits.
 export const lateFailureWholeBody = {
   async test() {
+    const truncated = encode(BODY);
     const cases = [
       [
         { decodedLength: BODY.byteLength },
         encode(BODY, { trailer: ['bad name: x'] }),
-        /trailer field name/,
+        MALFORMED,
       ],
       [
         { decodedLength: BODY.byteLength, drainOnError: false },
         encode(BODY, { trailer: ['bad name: x'] }),
-        /trailer field name/,
+        MALFORMED,
       ],
       [
         { decodedLength: BODY.byteLength },
-        encode(BODY).subarray(0, encode(BODY).byteLength - 1),
+        truncated.subarray(0, truncated.byteLength - 3),
         /ended before its final chunk/,
       ],
-      [{ decodedLength: 0 }, encoder.encode('0\r\n'), /ended before/],
-      [{ decodedLength: 0 }, encoder.encode('0\r\nx\r\n'), /ended before/],
+      [{ decodedLength: 0 }, encoder.encode('0\r'), /ended before/],
+      [{ decodedLength: 0 }, encoder.encode('0\r\nx\r\n'), MALFORMED],
+      [
+        { decodedLength: 11, signing: SIGNING },
+        signedTrailerWire([...TRAILER_SIGNATURES.slice(0, 3), '0'.repeat(64)]),
+        MISMATCH,
+      ],
     ];
     for (const [options, input, message] of cases) {
       // Failed before reading began.
@@ -397,7 +580,7 @@ export const drainOnError = {
   async test() {
     const bad = concat([encoder.encode('zz\r\n'), new Uint8Array(1000)]);
 
-    const draining = new AwsChunkedDecoderStream();
+    const draining = new AwsChunkedDecoderStream({ decodedLength: 0 });
     const writer = draining.writable.getWriter();
     writer.closed.catch(() => {});
     const reading = new Response(draining.readable).arrayBuffer();
@@ -407,16 +590,19 @@ export const drainOnError = {
     }
     const closing = writer.close();
     writer.ready.catch(() => {});
-    await rejects(closing, /Malformed aws-chunked chunk size/);
-    await rejects(reading, /Malformed aws-chunked chunk size/);
-    await rejects(draining.trailers, /Malformed aws-chunked chunk size/);
+    await rejects(closing, MALFORMED);
+    await rejects(reading, MALFORMED);
+    await rejects(draining.trailers, MALFORMED);
 
-    const strict = new AwsChunkedDecoderStream({ drainOnError: false });
+    const strict = new AwsChunkedDecoderStream({
+      decodedLength: 0,
+      drainOnError: false,
+    });
     const strictWriter = strict.writable.getWriter();
     strictWriter.closed.catch(() => {});
     new Response(strict.readable).arrayBuffer().catch(() => {});
-    await rejects(strictWriter.write(bad), /Malformed aws-chunked chunk size/);
-    await rejects(strict.trailers, /Malformed aws-chunked chunk size/);
+    await rejects(strictWriter.write(bad), MALFORMED);
+    await rejects(strict.trailers, MALFORMED);
   },
 };
 
@@ -445,7 +631,7 @@ export const nativePipe = {
 // Abandoning the stream rejects the trailers.
 export const abandoned = {
   async test() {
-    const stream = new AwsChunkedDecoderStream();
+    const stream = new AwsChunkedDecoderStream({ decodedLength: 5 });
     const writer = stream.writable.getWriter();
     await writer.write(encoder.encode('5\r\nhel'));
     await writer.abort(new Error('client went away'));

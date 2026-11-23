@@ -5,4 +5,10 @@ wd_rust_crate(
     cxx_bridge_src = "lib.rs",
     cxx_bridge_visibility = ["//src/workerd/io:__pkg__"],
     visibility = ["//src/workerd/io:__pkg__"],
+    deps = [
+        "@crates_vendor//bytes",
+        "@crates_vendor//futures",
+        "@crates_vendor//s3s-chunked",
+        "@crates_vendor//s3s-sigv4",
+    ],
 )

@@ -41,7 +41,8 @@ namespace workerd::api {
       api::TextDecoderStream, api::TextDecoderStream::TextDecoderStreamInit,                       \
       api::ByteLengthQueuingStrategy, api::CountQueuingStrategy, api::QueuingStrategyInit,         \
       api::ReadableStreamNativeSource, api::WritableStreamNativeSink,                              \
-      api::AwsChunkedDecoderStream, api::AwsChunkedDecoderStream::Options
+      api::AwsChunkedDecoderStream, api::AwsChunkedDecoderStream::Options,                         \
+      api::AwsChunkedDecoderStream::SigningOptions
 // The list of streams.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

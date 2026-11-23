@@ -36,7 +36,7 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
     auto maybeException =
         kj::runCatchingExceptions([&]() { decoder->push(input.as<kj_rs::Rust>()); });
     // The data decoded before a failure is still output.
-    output.add(fromRustBytes(decoder->take_output()));
+    takeOutput(output);
     KJ_IF_SOME(exception, maybeException) {
       trailersFulfiller->reject(exception.clone());
       kj::throwFatalException(kj::mv(exception));
@@ -66,22 +66,48 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
  private:
   RustDecoder decoder;
   kj::Own<kj::PromiseFulfiller<Trailers>> trailersFulfiller;
+
+  // Outputs the decoded data without copying it: each piece stays in the Rust buffer it views
+  // until the stream is done with it.
+  void takeOutput(Output& output) {
+    while (decoder->has_output()) {
+      auto piece = decoder->pop_output();
+      auto data = piece->data();
+      // The readable side never writes to its chunks.
+      auto view = kj::arrayPtr(const_cast<kj::byte*>(data.data()), data.size());
+      output.add(view.attach(kj::mv(piece)));
+    }
+  }
 };
+
+::rust::String toRust(kj::StringPtr text) {
+  return ::rust::String(text.begin(), text.size());
+}
 
 aws_chunked::DecoderOptions toRustOptions(AwsChunkedDecoderStream::Options& options) {
   aws_chunked::DecoderOptions result{
-    .has_decoded_length = options.decodedLength != kj::none,
-    .decoded_length = options.decodedLength.orDefault(0),
+    .decoded_length = options.decodedLength,
     .has_allowed_trailers = options.allowedTrailers != kj::none,
     .allowed_trailers = {},
     .has_max_trailer_bytes = options.maxTrailerBytes != kj::none,
     .max_trailer_bytes = options.maxTrailerBytes.orDefault(0),
     .drain_on_error = options.drainOnError.orDefault(true),
+    .has_signing = options.signing != kj::none,
+    .signing = {},
   };
   KJ_IF_SOME(allowed, options.allowedTrailers) {
     for (auto& name: allowed) {
-      result.allowed_trailers.push_back(::rust::String(name.begin(), name.size()));
+      result.allowed_trailers.push_back(toRust(name));
     }
+  }
+  KJ_IF_SOME(signing, options.signing) {
+    result.signing = aws_chunked::SigningOptions{
+      .secret_access_key = toRust(signing.secretAccessKey),
+      .amz_date = toRust(signing.amzDate),
+      .region = toRust(signing.region),
+      .service = toRust(signing.service),
+      .seed_signature = toRust(signing.seedSignature),
+    };
   }
   return result;
 }
@@ -89,8 +115,7 @@ aws_chunked::DecoderOptions toRustOptions(AwsChunkedDecoderStream::Options& opti
 }  // namespace
 
 jsg::Ref<AwsChunkedDecoderStream> AwsChunkedDecoderStream::constructor(
-    jsg::Lock& js, jsg::Optional<Options> maybeOptions) {
-  auto options = kj::mv(maybeOptions).orDefault({});
+    jsg::Lock& js, Options options) {
   auto decoder = aws_chunked::new_decoder(toRustOptions(options));
 
   auto& ioContext = IoContext::current();
