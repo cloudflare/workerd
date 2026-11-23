@@ -345,6 +345,12 @@ impl Upgrading {
         }
     }
 
+    /// The connection's hang-up, for serving HTTP again over the transport (inside a CONNECT
+    /// tunnel).
+    pub fn hangup(&self) -> Shared<Hangup> {
+        self.hangup.clone()
+    }
+
     fn ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<&mut TokioIo<Upgraded>>> {
         if let UpgradeState::Pending(upgrade) = &mut self.state {
             let Poll::Ready(result) = upgrade.poll_unpin(cx) else {

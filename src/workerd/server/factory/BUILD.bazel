@@ -48,6 +48,7 @@ wd_cc_library(
     srcs = [
         "worker-factory.c++",
         "worker-factory-actor.c++",
+        "worker-factory-container.c++",
         "worker-factory-impl.h",
         "worker-factory-listen.c++",
         "worker-factory-otlp.c++",
@@ -72,7 +73,6 @@ wd_cc_library(
         "//src/workerd/server:alarm-scheduler",
         "//src/workerd/server:channel-token",
         "//src/workerd/server:compiled-bindings_capnp",
-        "//src/workerd/server:container-client",
         "//src/workerd/server:facet-tree-index",
         "//src/workerd/server:fallback-service",
         "//src/workerd/server:workerd-api",

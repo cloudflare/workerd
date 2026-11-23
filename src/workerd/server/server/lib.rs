@@ -18,6 +18,7 @@ pub mod bridge;
 pub mod channels;
 pub mod cluster;
 pub mod config;
+pub mod container;
 pub mod cron;
 pub mod entry;
 pub mod in_process;

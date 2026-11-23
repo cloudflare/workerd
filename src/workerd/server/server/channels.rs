@@ -145,6 +145,8 @@ pub struct NewActor<'a> {
     pub hooks: Box<ActorHooks>,
     /// Where the config has the class's `container` options, if it has any.
     pub container: Option<&'a ffi::ContainerRef>,
+    /// The client of the actor's container, with `container`.
+    pub container_client: Option<KjOwn<ffi::ContainerCapability>>,
     /// The hibernation manager of the actor this one replaces after an eviction, with the
     /// WebSockets it kept alive.
     pub hibernation_manager: Option<kj_rs::KjRc<ffi::HibernationManager>>,

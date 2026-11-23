@@ -755,6 +755,12 @@ class TestServer final: private kj::EntropySource {
       if (service.isExternal()) {
         auto external = service.getExternal();
         external.setAddress(kj::str("loopback:", external.getAddress()));
+      } else if (service.isWorker()) {
+        auto engine = service.getWorker().getContainerEngine();
+        if (engine.isLocalDocker()) {
+          auto docker = engine.getLocalDocker();
+          docker.setSocketPath(kj::str("loopback:", docker.getSocketPath()));
+        }
       }
     }
     return capnp::clone(conf.asReader());
@@ -767,7 +773,7 @@ class TestServer final: private kj::EntropySource {
   // ---------------------------------------------------------------------------
   // implements Network
   //
-  // The network the factory's own clients dial through (Docker, the debug port): every address
+  // The network the factory's own clients dial through (the debug port): every address
   // is a name the server or the test listens on.
 
   class MockAddress final: public kj::NetworkAddress {

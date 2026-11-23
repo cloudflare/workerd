@@ -285,8 +285,6 @@ wd_cc_library(
     ],
 )
 
-wd_capnp_library(src = "docker-api.capnp")
-
 wd_capnp_library(
     src = "compiled-bindings.capnp",
     deps = [":workerd_capnp"],
@@ -310,32 +308,6 @@ wd_cc_library(
         ":log-schema_capnp",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-    ],
-)
-
-wd_cc_library(
-    name = "container-client",
-    srcs = ["container-client.c++"],
-    hdrs = ["container-client.h"],
-    implementation_deps = [
-        "//src/workerd/util:stream-utils",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":channel-token",
-        ":docker-api_capnp",
-        "//src/workerd/io",
-        "//src/workerd/io:container_capnp",
-        "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:sentry",
-        "//src/workerd/util:strings",
-        "//src/workerd/util:uuid",
-        "@ada-url",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -453,14 +425,6 @@ copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin",
     out = "pyodide.capnp.bin",
-)
-
-kj_test(
-    src = "container-client-test.c++",
-    deps = [
-        ":container-client",
-        "@capnp-cpp//src/kj",
-    ],
 )
 
 kj_test(

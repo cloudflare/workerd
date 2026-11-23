@@ -972,6 +972,7 @@ impl ActorClass for ActorClassImpl {
             request.hooks,
             request.hibernation_manager.into(),
             request.container.into(),
+            request.container_client.into(),
         )
         .map_err(Into::into)
     }

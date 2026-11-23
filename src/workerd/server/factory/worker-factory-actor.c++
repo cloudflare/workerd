@@ -539,68 +539,6 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
   };
 }
 
-// The Docker client of the container for the actor `actorKey` (`<uniqueKey>-<actorId>`): the live
-// one, if an earlier incarnation of the actor left it running (a `setInactivityTimeout()` timer
-// holds it), else a new one for the class's `container` options on its worker's `containerEngine`.
-kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
-    kj::StringPtr actorKey,
-    config::Worker::ContainerEngine::Reader engine,
-    config::Worker::DurableObjectNamespace::ContainerOptions::Reader options) {
-  KJ_REQUIRE(!factory.containerShutdownStarted,
-      "cannot acquire a container client after graceful shutdown has begun");
-  KJ_REQUIRE(engine.isLocalDocker(),
-      "dockerPath must be defined to enable containers on this Durable Object.");
-  auto docker = engine.getLocalDocker();
-  // Unique per namespace and actor across the machine, and per session if there is one.
-  auto session = docker.getSessionId();
-  auto id = session.size() > 0 ? kj::str("workerd-", session, "-", actorKey)
-                               : kj::str("workerd-", actorKey);
-  auto& state = *factory.containers.findOrCreate(id, [&]() {
-    return decltype(factory.containers)::Entry{
-      kj::str(id), kj::heap<WorkerFactory::Impl::Container>()};
-  });
-  KJ_IF_SOME(client, state.client) {
-    return client.addRef();
-  }
-
-  KJ_REQUIRE(docker.hasContainerEgressInterceptorImage(),
-      "containerEgressInterceptorImage must be configured for containers.");
-  kj::Maybe<kj::String> imageName;
-  if (options.getImageName().size() > 0) imageName = kj::str(options.getImageName());
-  kj::Maybe<kj::String> sessionId;
-  if (session.size() > 0) sessionId = kj::str(session);
-  auto privilegeConf = options.getPrivileges();
-  ContainerPrivileges privileges{
-    .capabilities = KJ_MAP(c, privilegeConf.getCapabilities()) { return kj::str(c); },
-    .devices =
-        KJ_MAP(device, privilegeConf.getDevices()) {
-    return ContainerPrivileges::Device{
-      .pathOnHost = kj::str(device.getPathOnHost()),
-      .pathInContainer = kj::str(device.getPathInContainer()),
-      .cgroupPermissions = kj::str(device.getCgroupPermissions()),
-    };
-  },
-    .securityOpt = KJ_MAP(o, privilegeConf.getSecurityOpt()) { return kj::str(o); },
-  };
-
-  // Docker may still be removing the container for the client before this one, which would race
-  // this client: that removal is cancelled, and this client waits for it to have ended.
-  auto previousCleanup = state.cleanup.addBranch();
-  state.canceler.cancel("a new container client took the container over"_kj);
-  auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
-      factory.network, factory.weakNetwork.addWeak(), kj::str(docker.getSocketPath()), kj::mv(id),
-      kj::mv(imageName), kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId),
-      factory.tasks, kj::mv(previousCleanup),
-      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
-    // The client's shutdown began: the next incarnation of the actor gets a new client.
-    state.client = kj::none;
-    state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();
-    tasks.add(state.cleanup.addBranch());
-  }, factory.channelTokenHandler, kj::mv(privileges));
-  state.client = *client;
-  return client;
-}
-
 }  // namespace
 
 void stamp_current_actor_cause(RequestMetadata& metadata) {
@@ -637,7 +575,8 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
     const ActorStorageSpec& spec,
     ::rust::Box<ActorHooks> hooks,
     kj::Maybe<kj::Rc<HibernationManager>> hibernationManager,
-    kj::Maybe<const ContainerRef&> container) {
+    kj::Maybe<const ContainerRef&> container,
+    kj::Maybe<kj::Own<ContainerCapability>> containerClient) {
   auto& impl = worker.getImpl();
   auto actorId = Worker::Actor::cloneId(*id);
 
@@ -662,7 +601,6 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   KJ_IF_SOME(p, props) propsValue = kj::mv(*p);
 
   jsg::Dict<kj::String> images;
-  kj::Maybe<rpc::Container::Client> containerClient;
   KJ_IF_SOME(ref, container) {
     auto& factory = impl.factory.getImpl();
     auto workerConf = factory.config.getServices()[ref.service_index].getWorker();
@@ -671,9 +609,10 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
       return jsg::Dict<kj::String>::Field{
         .name = kj::str(image.getName()), .value = kj::str(image.getImage())};
     };
-    auto actorKey = kj::str(storage.getImpl().uniqueKey, "-", actor_id_key(*id));
-    containerClient = rpc::Container::Client(
-        getContainerClient(factory, actorKey, workerConf.getContainerEngine(), options));
+  }
+  kj::Maybe<rpc::Container::Client> containerCap;
+  KJ_IF_SOME(client, containerClient) {
+    containerCap = kj::mv(client->client);
   }
 
   auto actorHooks = kj::refcounted<ActorHooksImpl>(kj::mv(hooks));
@@ -684,7 +623,7 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   auto actor = kj::refcounted<Worker::Actor>(impl.getWorker(), *requestTracker, kj::mv(actorId),
       true, kj::mv(makeActorCache), classNameStr.asPtr(), kj::mv(propsValue), kj::mv(makeStorage),
       kj::addRef(*actorHooks), impl.timerChannel, kj::refcounted<ActorObserver>(),
-      kj::mv(hibernationManager), hibernationEventTypeId, kj::mv(containerClient), kj::mv(images),
+      kj::mv(hibernationManager), hibernationEventTypeId, kj::mv(containerCap), kj::mv(images),
       *actorHooks);
   return kj::heap<ActorHandle>(kj::mv(actorHooks), kj::mv(requestTracker), kj::mv(actor));
 }
@@ -760,35 +699,6 @@ kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start) {
     .actor_class = KJ_REQUIRE_NONNULL(ActorClassChannelHandle::tryUnwrap(*info.actorClass),
         "a facet's class must be one the server made"),
   };
-}
-
-// =======================================================================================
-// Containers
-
-kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory) {
-  auto& impl = factory.getImpl();
-  impl.containerShutdownStarted = true;
-  kj::Vector<kj::Promise<void>> cleanups(impl.containers.size());
-  for (auto& entry: impl.containers) {
-    // A client's shutdown replaces its entry's `cleanup`.
-    KJ_IF_SOME(client, entry.value->client) client.shutdown();
-    cleanups.add(entry.value->cleanup.addBranch());
-  }
-  return kj::joinPromises(cleanups.releaseAsArray());
-}
-
-kj::Promise<void> factory_stop_container(
-    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor) {
-  auto& impl = factory.getImpl();
-  // Container ids end in `<uniqueKey>-<actorId>` (getContainerClient).
-  auto suffix = kj::str("-", uniqueKey, "-", actor);
-  kj::Vector<kj::Promise<void>> cleanups;
-  for (auto& entry: impl.containers) {
-    if (!entry.key.endsWith(suffix)) continue;
-    KJ_IF_SOME(client, entry.value->client) client.shutdown();
-    cleanups.add(entry.value->cleanup.addBranch());
-  }
-  return kj::joinPromises(cleanups.releaseAsArray());
 }
 
 }  // namespace workerd::server
