@@ -21,6 +21,22 @@ function concat(chunks) {
   return result;
 }
 
+// Compares bytes directly: deepStrictEqual compares typed arrays element by element through
+// generic code, which is slow on large arrays in debug builds.
+function bytesEqual(actual, expected, message) {
+  ok(actual instanceof Uint8Array, message);
+  strictEqual(actual.byteLength, expected.byteLength, message);
+  for (let i = 0; i < actual.byteLength; i++) {
+    if (actual[i] !== expected[i]) {
+      strictEqual(
+        actual[i],
+        expected[i],
+        `${message ?? 'bytes'} differ at ${i}`
+      );
+    }
+  }
+}
+
 // Encodes `data` as aws-chunked, in chunks of `chunkSize`, with the given trailer lines.
 function encode(data, { chunkSize = 7, trailer = [], extension = '' } = {}) {
   const parts = [];
@@ -118,7 +134,7 @@ export const hexSizes = {
       data.subarray(255),
       encoder.encode('\r\n0\r\n\r\n'),
     ]);
-    deepStrictEqual(await run(new AwsChunkedDecoderStream(), input, 64), data);
+    bytesEqual(await run(new AwsChunkedDecoderStream(), input, 64), data);
   },
 };
 
@@ -215,24 +231,18 @@ export const sdkFixtures = {
     for (const fixture of FIXTURES) {
       const input = fixtureBody(fixture);
       const payload = fixturePayload(fixture.decodedLength);
+      const expectedTrailers = fixture.trailer
+        ? [[fixture.trailer, await checksum(fixture.trailer, payload)]]
+        : [];
       for (const writeSize of [input.byteLength || 1, 65539, 1000]) {
         const where = `${fixture.name}, writes of ${writeSize}`;
         const stream = new AwsChunkedDecoderStream({
           decodedLength: fixture.decodedLength,
           ...(fixture.trailer && { allowedTrailers: [fixture.trailer] }),
         });
-        deepStrictEqual(await run(stream, input, writeSize), payload, where);
-        const trailers = [...(await stream.trailers)];
-        if (!fixture.trailer) {
-          deepStrictEqual(trailers, [], where);
-          continue;
-        }
+        bytesEqual(await run(stream, input, writeSize), payload, where);
         // The decoded bytes are what the client checksummed.
-        deepStrictEqual(
-          trailers,
-          [[fixture.trailer, await checksum(fixture.trailer, payload)]],
-          where
-        );
+        deepStrictEqual([...(await stream.trailers)], expectedTrailers, where);
       }
 
       // With no filter, a signed trailer's signature is kept too.
@@ -539,7 +549,7 @@ export const nativePipe = {
         new Response(input).body.pipeThrough(stream)
       ).arrayBuffer()
     );
-    deepStrictEqual(output, body);
+    bytesEqual(output, body);
     strictEqual(
       (await stream.trailers).get('x-amz-checksum-crc32'),
       'sOO8/Q=='
