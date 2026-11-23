@@ -8,9 +8,11 @@
 //! (`io/worker-modules.h`) installs it in that class's place when the `RUST_PYODIDE_BRIDGE`
 //! autogate is on.
 
+mod fatal_reporter;
 mod ffi;
 mod jaeger;
 mod limiter;
 
+pub use fatal_reporter::WorkerFatalReporter;
 pub use jaeger::DisabledInternalJaeger;
 pub use limiter::SimplePythonLimiter;

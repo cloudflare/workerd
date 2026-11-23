@@ -1,3 +1,5 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # Resources of the Pyodide runtime's internal modules, in Rust. registerPythonCommonModules()
@@ -6,11 +8,44 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 wd_rust_crate(
     name = "pyodide-api",
     cxx_bridge_deps = ["//src/rust/jsg"],
-    cxx_bridge_hdrs = [],
+    cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
     cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
     proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
-    deps = ["//src/rust/jsg"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+# The C++ that the bridge calls. Separate from the bridge's :ffi.rs@cxx, which only includes
+# ffi.h, so that a C++ library that depends on the crate never closes a cycle through it.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io/io-context:current-with-id",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
+exports_files([
+    "ffi.c++",
+    "ffi.h",
+])
+
+# The Rust WorkerFatalReporter inside a request, recording its reports in the request's metrics.
+kj_test(
+    src = "fatal-reporter-test.c++",
+    deps = [
+        ":ffi.rs@cxx",
+        ":pyodide-api",
+        "//src/rust/jsg:bridge",
+        "//src/workerd/tests:test-fixture",
+    ],
 )

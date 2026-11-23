@@ -580,8 +580,12 @@ void registerPythonCommonModules(jsg::Lock& lock,
   }
 
   // Inject a WorkerFatalReporter for reporting fatal errors to Runtime Analytics.
-  modules.addBuiltinModule("pyodide-internal:fatal-reporter",
-      lock.alloc<api::pyodide::WorkerFatalReporter>(), jsg::ModuleRegistry::Type::INTERNAL);
+  if (rustBridge) {
+    register_fatal_reporter(rustModules);
+  } else {
+    modules.addBuiltinModule("pyodide-internal:fatal-reporter",
+        lock.alloc<api::pyodide::WorkerFatalReporter>(), jsg::ModuleRegistry::Type::INTERNAL);
+  }
 
   // Inject a SimplePythonLimiter
   KJ_IF_SOME(limiter, maybeLimiter) {

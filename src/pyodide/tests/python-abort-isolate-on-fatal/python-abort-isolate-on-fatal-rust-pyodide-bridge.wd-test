@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# python-abort-isolate-on-fatal.wd-test under the RUST_PYODIDE_BRIDGE autogate, with which the
+# fatal error is reported through the Rust WorkerFatalReporter of src/workerd/api/pyodide-api.
+const config :Workerd.Config = (
+  services = [
+    ( name = "python-abort-isolate-on-fatal",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+        ],
+        compatibilityFlags = [
+          "python_workers",
+          "python_workers_development",
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-rust-pyodide-bridge"],
+);

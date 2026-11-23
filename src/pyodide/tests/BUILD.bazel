@@ -30,8 +30,10 @@ py_test(
     args = [
         "$(location //src/workerd/util:autogate.h)",
         "$(location rust-pyodide-bridge/rust-pyodide-bridge.wd-test)",
+        "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal-rust-pyodide-bridge.wd-test)",
     ],
     data = [
+        "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal-rust-pyodide-bridge.wd-test",
         "rust-pyodide-bridge/rust-pyodide-bridge.wd-test",
         "//src/workerd/util:autogate.h",
     ],
@@ -184,6 +186,33 @@ sh_test(
     ],
     data = [
         "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
+        "python-abort-isolate-on-fatal/worker.py",
+        "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
+        "//src/workerd/server:workerd",
+    ],
+    tags = [
+        "no-coverage",
+        "python",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+# The same under the RUST_PYODIDE_BRIDGE autogate. It passes with the C++ WorkerFatalReporter too;
+# rust-pyodide-bridge-autogate-test checks that its config names the gate.
+sh_test(
+    name = "python-abort-isolate-on-fatal-rust-pyodide-bridge-test",
+    size = "enormous",
+    srcs = ["python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal-rust-pyodide-bridge.wd-test)",
+        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)",
+    ],
+    data = [
+        "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal-rust-pyodide-bridge.wd-test",
         "python-abort-isolate-on-fatal/worker.py",
         "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
         "//src/workerd/server:workerd",
