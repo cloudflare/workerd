@@ -231,8 +231,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     }
   }
 
-  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message),
-      error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message), error.stack);
 }
 
 void addExceptionToTrace(jsg::Lock& js,

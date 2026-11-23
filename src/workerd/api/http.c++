@@ -283,10 +283,9 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](auto&& b) -> kj::String {
-      return kj::mv(b);
-    }).orDefault(nullptr);
+    kj::String contentType =
+        kj::Maybe<kj::String>(self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE))
+            .orDefault(nullptr);
 
     if (FeatureFlags::get(js).getBlobStandardMimeType()) {
       contentType = MimeType::extract(contentType)
@@ -2794,8 +2793,7 @@ static jsg::Promise<void> throwOnError(
 
 static jsg::Promise<Fetcher::GetResult> parseResponse(
     jsg::Lock& js, jsg::Ref<Response> response, jsg::Optional<kj::String> type) {
-  auto typeName =
-      type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+  auto typeName = kj::Maybe<kj::StringPtr>(type).orDefault("text");
   if (typeName == "stream") {
     KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));

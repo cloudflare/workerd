@@ -68,7 +68,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/secrets-store.js"_kj, SECRETS_STORE_JS);
     return map;
   }();
-  return bundled.find(name).map([](auto& source) { return source; });
+  return bundled.find(name);
 }
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

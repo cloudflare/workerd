@@ -1130,7 +1130,7 @@ void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip
 }
 
 kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
-  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+  return dnsOverrides.find(hostname);
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {

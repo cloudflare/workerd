@@ -481,8 +481,7 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-      /*hasTransient=*/false, actorCacheFactory,
-      savedActorClassName.map([](kj::String& name) { return name.asPtr(); }),
+      /*hasTransient=*/false, actorCacheFactory, savedActorClassName,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
