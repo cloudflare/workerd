@@ -1643,6 +1643,19 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   return js.v8Ref(contextHandle);
 }
 
+IoContext::IncomingRequest& IoContext::getIncomingRequestForIoChannels() {
+  auto& current = getCurrentIncomingRequest();
+  if (!util::Autogate::isEnabled(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)) {
+    return current;
+  }
+  for (auto& request: incomingRequests) {
+    if (!request.waitedForWaitUntil) {
+      return request;
+    }
+  }
+  return current;
+}
+
 SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_SOME(lock, currentLock) {

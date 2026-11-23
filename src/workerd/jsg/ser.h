@@ -162,6 +162,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // appropriate exception should be thrown.
   class ExternalHandler {
    public:
+    virtual ~ExternalHandler() noexcept(false);
+
     // Tries to serialize a function as an external. The default implementation throws
     // DataCloneError.
     virtual void serializeFunction(

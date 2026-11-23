@@ -501,8 +501,52 @@ build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 build:release_unix --copt='-O3'
 build:release_unix --config=release
 
-build:release_linux --config=release_unix
-build:release_linux --linkopt="-Wl,-O2"
+# The Linux release build is optimized with ThinLTO and Clang's instrumentation-based PGO, with a
+# profile that Bazel downloads (build/pgo/README.md). release_linux-without-pgo is the same build
+# without either, for comparisons.
+build:release_linux-without-pgo --config=release_unix
+build:release_linux-without-pgo --linkopt="-Wl,-O2"
+build:release_linux --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:release_linux --config=pgo-use
+
+# pgo-instrument builds the binary that build/pgo/train.sh runs to train the profile. V8 is
+# compiled in this build, so the same profile covers it.
+build:pgo-instrument --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
+# The instrumented tests run slower and also merge their profiles (build/pgo/profile-env.sh). In
+# training, the serving workload takes about a minute against its 15 s limit, and the eventsource
+# tests 10-12 s. A test that times out loses its profile.
+build:pgo-instrument --test_timeout=30,240,600,1200
+# Instrument the Rust code too. Its counters go into the same profile, written by the profile
+# runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
+# only accepts -Zno-profiler-runtime with RUSTC_BOOTSTRAP. extra_rustc_env and extra_rustc_flag
+# apply to target-config rustc actions only, so build scripts and proc macros aren't instrumented.
+build:pgo-instrument --@rules_rust//rust/settings:extra_rustc_env=RUSTC_BOOTSTRAP=1
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Cprofile-generate
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Zno-profiler-runtime
+
+# rules_cc's fdo_optimize feature adds -fprofile-use and silences Clang's warnings about files the
+# profile doesn't cover.
+build:pgo-use --fdo_optimize=//build/pgo:profile
+# Functions changed since the profile was trained compile without profile data. Don't warn about
+# each of them.
+build:pgo-use --copt=-mllvm=-no-pgo-warn-mismatch
+# Under PGO, LoopIdiomRecognize can take the address of a coroutine frame variable before
+# coro.begin, which CoroSplit doesn't rewrite (https://github.com/llvm/llvm-project/pull/240036).
+# A ThinLTO compile leaves coroutines unsplit, so the linker's LTO backends need it too.
+build:pgo-use --copt=-mllvm=-disable-loop-idiom-all --linkopt=-Wl,-mllvm,-disable-loop-idiom-all
+# The Rust code is optimized with the same profile. extra_rustc_inputs makes it an input of every
+# Rustc action, and ${extra_rustc_inputs} stands for its path.
+build:pgo-use --@rules_rust//rust/settings:extra_rustc_inputs=//build/pgo:profdata
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cprofile-use=${extra_rustc_inputs}
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
+
+# Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
+# Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
+# major version (build/deps/rust.MODULE.bazel). rules_rust's lto setting isn't used: it also passes
+# -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
+# expects.
+build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
