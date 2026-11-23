@@ -115,7 +115,7 @@ kj_test(
         ":io-context-test-bridge",
         ":test-bridge",
         "//src/rust/jsg:bridge",
-        "//src/workerd/tests:test-fixture",
+        "//src/workerd/tests:test-fixture-expose-gc",
     ],
 )
 

@@ -1003,6 +1003,58 @@ export const testTlsSocketAllowHalfOpenOption = {
   },
 };
 
+// A TLSSocket over a Duplex closes cleanly when the Duplex ends first, and
+// drops its ssl handle as Node does.
+export const testTlsDuplexEndsFirst = {
+  async test() {
+    const errors = [];
+    const onError = (event) => errors.push(event.error);
+    globalThis.addEventListener('error', onError);
+    try {
+      const [a] = stream.duplexPair();
+      const client = tls.connect({ socket: a });
+      client.on('error', () => {});
+      const closed = once(client, 'close');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      a.push(null);
+      a.end();
+      await closed;
+      strictEqual(client.ssl, null);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      globalThis.removeEventListener('error', onError);
+    }
+    deepStrictEqual(errors, []);
+  },
+};
+
+// A TLSSocket over a Duplex closes without an error when the Duplex is
+// destroyed first, as in Node.
+export const testTlsDuplexDestroyedFirst = {
+  async test() {
+    // Collects the socket's 'error' events and the global ones. An exception
+    // thrown inside the socket's own callbacks (a listener or a microtask)
+    // reaches no socket listener: the runtime reports it as an 'error' event
+    // on globalThis instead.
+    const errors = [];
+    const onError = (event) => errors.push(event.error);
+    globalThis.addEventListener('error', onError);
+    try {
+      const [a] = stream.duplexPair();
+      const client = tls.connect({ socket: a });
+      client.on('error', (err) => errors.push(err));
+      const closed = new Promise((resolve) => client.once('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      a.destroy();
+      strictEqual(await closed, false);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      globalThis.removeEventListener('error', onError);
+    }
+    deepStrictEqual(errors, []);
+  },
+};
+
 // Tests are taken from:
 // https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-streamwrap-buffersize.js
 export const testTlsStreamwrapBuffersize = {
@@ -1031,8 +1083,7 @@ export const testTlsStreamwrapBuffersize = {
     const socket = await createDuplex();
     const { promise, resolve } = Promise.withResolvers();
     const onCloseFn = mock.fn(() => {
-      // TODO(soon): This should be undefined, not 0.
-      strictEqual(client.bufferSize, 0);
+      strictEqual(client.bufferSize, undefined);
       resolve();
     });
     const client = tls.connect({ socket }, () => {

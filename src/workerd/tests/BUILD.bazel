@@ -3,6 +3,17 @@ load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
+TEST_FIXTURE_DEPS = [
+    "//src/workerd/io",
+    "//src/workerd/io:worker-entrypoint",
+    "//src/workerd/jsg",
+    "//src/workerd/server:workerd-api",
+    "//src/workerd/util:autogate",
+    "//src/workerd/util:setup-async-io",
+    "@capnp-cpp//src/kj:kj-async-core",
+    "@capnp-cpp//src/kj:kj-async-io",
+]
+
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
@@ -57,17 +68,25 @@ wd_cc_library(
     name = "test-fixture",
     srcs = ["test-fixture.c++"],
     hdrs = ["test-fixture.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/io:worker-entrypoint",
-        "//src/workerd/jsg",
-        "//src/workerd/server:workerd-api",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:setup-async-io",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj:kj-async-io",
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
     ],
+    visibility = ["//visibility:public"],
+    deps = TEST_FIXTURE_DEPS,
+)
+
+# The fixture with V8's --expose-gc, for tests that need RequestGarbageCollectionForTesting(). A
+# binary must link only one of the two.
+wd_cc_library(
+    name = "test-fixture-expose-gc",
+    srcs = ["test-fixture.c++"],
+    hdrs = ["test-fixture.h"],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
+    ],
+    local_defines = ["WORKERD_TEST_FIXTURE_EXPOSE_GC"],
+    visibility = ["//visibility:public"],
+    deps = TEST_FIXTURE_DEPS,
 )
 
 kj_test(

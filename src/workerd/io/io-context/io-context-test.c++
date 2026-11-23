@@ -941,11 +941,278 @@ KJ_TEST("an add_object() value can be used in place only while its IoContext is 
   fixture.drainAndDestroy(kj::mv(owner));
 }
 
+// A full garbage collection that doesn't scan the native stack. By default cppgc scans the stack
+// conservatively, so a stale pointer left there can keep an unreachable JSG object alive,
+// depending on how the compiler laid out the frames.
+void collectGarbageIgnoringStack(v8::Isolate* isolate) {
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
+}
+
 // A full garbage collection, in the request that `request` runs. It runs in an enterContext() of
 // its own, so that no handle in the frames of the one that created the objects keeps them alive.
 void collectGarbage(TestFixture& fixture, IoContext::IncomingRequest& request) {
+  fixture.enterContext(request,
+      [&](const TestFixture::Environment& env) { collectGarbageIgnoringStack(env.isolate); });
+}
+
+// In `request`, registers reactions with `kind` on a promise that the script `settle.resolve(v)` or
+// `settle.reject(e)` settles, with the value of the script `held` as their data, and has
+// `globalThis.outcome` record how the promise they return settles: "fulfilled: <value>", or the
+// value's `marker` for an object, or "rejected: <message>". The promise is created in `createdIn`,
+// if given, and otherwise in `request`.
+void registerReaction(TestFixture& fixture,
+    IoContext::IncomingRequest& request,
+    ReactionKind kind,
+    kj::StringPtr held = "41"_kj,
+    kj::Maybe<IoContext::IncomingRequest&> createdIn = kj::none) {
+  reactionDataDropContextId = kj::none;
+  auto create = [](const TestFixture::Environment& env) {
+    runScript(env,
+        "globalThis.outcome = 'pending';"
+        "globalThis.settle = {};"
+        "globalThis.created = new Promise((resolve, reject) => {"
+        "  settle.resolve = resolve; settle.reject = reject;"
+        "})");
+  };
+  KJ_IF_SOME(creator, createdIn) {
+    fixture.enterContext(creator, create);
+  } else {
+    fixture.enterContext(request, create);
+  }
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    // Taken out of the global, which would otherwise keep the promise alive.
+    auto promise =
+        runScript(env, "(() => { const p = created; delete globalThis.created; return p; })()")
+            .As<v8::Promise>();
+    auto heldValue = runScript(env, held);
+    v8::Local<v8::Value> returned =
+        ::workerd::rust::jsg::local_from_ffi<v8::Promise>(::workerd::rust::jsg::Local{
+          register_reaction(isolateOf(env), kind, ::workerd::rust::jsg::to_ffi(kj::mv(promise)),
+              ::workerd::rust::jsg::to_ffi(kj::mv(heldValue)))});
+    auto track = runScript(env,
+        "(function (promise) {"
+        "  promise.then("
+        "      v => { globalThis.outcome = 'fulfilled: ' + (typeof v === 'object' ? v.marker : v); },"
+        "      e => { globalThis.outcome = 'rejected: ' + e.message; });"
+        "})")
+                     .As<v8::Function>();
+    jsg::check(
+        track->Call(env.isolate->GetCurrentContext(), v8::Undefined(env.isolate), 1, &returned));
+  });
+}
+
+// Runs the script `source` in `request`, whose microtasks run the reactions it queues.
+void settleIn(TestFixture& fixture, IoContext::IncomingRequest& request, kj::StringPtr source) {
+  awaitContextId = kj::none;
   fixture.enterContext(
-      request, [&](const TestFixture::Environment& env) { env.isolate->LowMemoryNotification(); });
+      request, [&](const TestFixture::Environment& env) { runScript(env, source); });
+}
+
+// How the promise that the reactions of the last registerReaction() return has settled.
+kj::String reactionOutcome(TestFixture& fixture) {
+  return evaluate(fixture, "outcome");
+}
+
+// The IoContext that was current when the data of the last registerReaction() was dropped.
+kj::Maybe<uint64_t> reactionDataDroppedIn() {
+  return KJ_ASSERT_NONNULL(reactionDataDropContextId, "the reaction data has not been dropped");
+}
+
+constexpr kj::StringPtr OTHER_REQUEST_MESSAGE =
+    "Cannot perform I/O on behalf of a different request"_kj;
+
+void expectFailedInOtherRequest(TestFixture& fixture) {
+  auto outcome = reactionOutcome(fixture);
+  KJ_EXPECT(outcome.startsWith("rejected: ") && outcome.contains(OTHER_REQUEST_MESSAGE), outcome);
+  // The reaction's callback did not run.
+  KJ_EXPECT(awaitContextId == kj::none);
+}
+
+KJ_TEST("then() runs its reaction in the IoContext that registered it, which the reaction gets") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  settleIn(fixture, *owner, "settle.resolve(1)");
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 41");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+  KJ_EXPECT(reactionDataDroppedIn() == idOf(*context));
+
+  // A rejection passes through, in any IoContext, without running the reaction, and the data is
+  // dropped in the IoContext it passes through in.
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  settleIn(fixture, *other, "settle.reject(new Error('the reason'))");
+  KJ_EXPECT(reactionOutcome(fixture) == "rejected: the reason");
+  KJ_EXPECT(awaitContextId == kj::none);
+  KJ_EXPECT(reactionDataDroppedIn() == idOf(*otherContext));
+
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
+KJ_TEST("catch() runs its reaction in the IoContext that registered it, and passes a fulfillment "
+        "through") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+
+  registerReaction(fixture, *owner, ReactionKind::Catch);
+  settleIn(fixture, *owner, "settle.reject(new Error('the reason'))");
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: caught");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  registerReaction(fixture, *owner, ReactionKind::Catch);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 1");
+  KJ_EXPECT(awaitContextId == kj::none);
+  KJ_EXPECT(reactionDataDroppedIn() == idOf(*otherContext));
+
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
+KJ_TEST("then_or_catch() runs either reaction in the IoContext that registered it") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+
+  registerReaction(fixture, *owner, ReactionKind::ThenOrCatch);
+  settleIn(fixture, *owner, "settle.resolve(1)");
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 41");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  registerReaction(fixture, *owner, ReactionKind::ThenOrCatch);
+  settleIn(fixture, *owner, "settle.reject(new Error('the reason'))");
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: caught");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
+KJ_TEST("a reaction of then(), catch() or then_or_catch() fails without running in another "
+        "IoContext") {
+  TestFixture fixture;
+  auto owner = fixture.newIncomingRequest();
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  expectFailedInOtherRequest(fixture);
+  // The data is dropped in the IoContext the reaction failed in.
+  KJ_EXPECT(reactionDataDroppedIn() == idOf(*otherContext));
+
+  registerReaction(fixture, *owner, ReactionKind::Catch);
+  settleIn(fixture, *other, "settle.reject(new Error('the reason'))");
+  expectFailedInOtherRequest(fixture);
+
+  registerReaction(fixture, *owner, ReactionKind::ThenOrCatch);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  expectFailedInOtherRequest(fixture);
+
+  registerReaction(fixture, *owner, ReactionKind::ThenOrCatch);
+  settleIn(fixture, *other, "settle.reject(new Error('the reason'))");
+  expectFailedInOtherRequest(fixture);
+
+  // An IoContext that is destroyed never becomes current again, so its reactions fail in any other.
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  fixture.drainAndDestroy(kj::mv(owner));
+  settleIn(fixture, *other, "settle.resolve(1)");
+  expectFailedInOtherRequest(fixture);
+
+  fixture.drainAndDestroy(kj::mv(other));
+}
+
+KJ_TEST("the data of then()'s reaction is traced, so a cycle through it can be collected") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setJsWeakRef(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+  auto request = fixture.newIncomingRequest();
+
+  // The data holds the functions that settle the promise, which hold the promise, which holds the
+  // reaction, which holds the data. Nothing else holds any of them, so only tracing the data lets
+  // the garbage collector find that the cycle is unreachable; a strong handle would keep it.
+  registerReaction(fixture, *request, ReactionKind::Then,
+      "(() => {"
+      "  const held = { marker: 'held', settle: globalThis.settle };"
+      "  delete globalThis.settle;"
+      "  globalThis.heldRef = new WeakRef(held);"
+      "  return held;"
+      "})()");
+  KJ_EXPECT(evaluate(fixture, "String(heldRef.deref() !== undefined)") == "true");
+  collectGarbage(fixture, *request);
+  KJ_EXPECT(evaluate(fixture, "String(heldRef.deref() === undefined)") == "true");
+  KJ_EXPECT(reactionOutcome(fixture) == "pending");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+// The parameters of a fixture with handle_cross_request_promise_resolution, which is on by default
+// for compatibility dates since 2024-10-14.
+TestFixture::SetupParams crossRequestResolutionParams(capnp::MallocMessageBuilder& flagsMessage) {
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setHandleCrossRequestPromiseResolution(true);
+  return {.featureFlags = flags.asReader()};
+}
+
+KJ_TEST("with handle_cross_request_promise_resolution, a reaction that another request queues runs "
+        "in the IoContext that registered it, or never once it is gone") {
+  capnp::MallocMessageBuilder flagsMessage;
+  TestFixture fixture(crossRequestResolutionParams(flagsMessage));
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+  // Neither request is treated as hung while the event loop runs the queued reaction.
+  auto ownerPending = context->registerPendingEvent();
+  auto otherPending = otherContext->registerPendingEvent();
+
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  fixture.pollEventLoop();
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 41");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  registerReaction(fixture, *owner, ReactionKind::Then);
+  { auto released = kj::mv(ownerPending); }
+  fixture.drainAndDestroy(kj::mv(owner));
+  settleIn(fixture, *other, "settle.resolve(1)");
+  fixture.pollEventLoop();
+  KJ_EXPECT(reactionOutcome(fixture) == "pending");
+  KJ_EXPECT(awaitContextId == kj::none);
+
+  { auto released = kj::mv(otherPending); }
+  fixture.drainAndDestroy(kj::mv(other));
+}
+
+KJ_TEST(
+    "with handle_cross_request_promise_resolution, a reaction on a promise that another request "
+    "creates and settles runs in the IoContext that registered it") {
+  capnp::MallocMessageBuilder flagsMessage;
+  TestFixture fixture(crossRequestResolutionParams(flagsMessage));
+  auto context = fixture.newIoContext();
+  auto owner = fixture.newIncomingRequest(*context);
+  auto otherContext = fixture.newIoContext();
+  auto other = fixture.newIncomingRequest(*otherContext);
+  auto ownerPending = context->registerPendingEvent();
+  auto otherPending = otherContext->registerPendingEvent();
+
+  registerReaction(fixture, *owner, ReactionKind::Then, "41"_kj, *other);
+  settleIn(fixture, *other, "settle.resolve(1)");
+  fixture.pollEventLoop();
+  KJ_EXPECT(reactionOutcome(fixture) == "fulfilled: 41");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+
+  { auto released = kj::mv(ownerPending); }
+  { auto released = kj::mv(otherPending); }
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
 }
 
 // How the wait of the last await_js_start() ended.
@@ -2317,7 +2584,7 @@ AbortedWaitOutcome abortWait(AbortedWait scenario, Implementation implementation
         fixture.pollEventLoop();
         fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
           abort();
-          env.isolate->LowMemoryNotification();
+          collectGarbageIgnoringStack(env.isolate);
           // GC collected the reactions, and with them the sender, which holds the watcher and
           // destroys the unsettled resource as it is dropped.
           if (rust) {
@@ -2648,6 +2915,7 @@ KJ_TEST("an await_js() whose promise GC collects in another request releases its
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
 constexpr kj::StringPtr FAILING_SPECIFIER = "test:io-context-failing"_kj;
+constexpr kj::StringPtr TERMINATING_SPECIFIER = "test:io-context-terminating"_kj;
 
 // Has `registerModules` add Rust modules to a legacy registry, then calls `body` with the
 // registry inside a request.
@@ -2688,6 +2956,20 @@ void withNewRustRegistry(auto&& registerModules, auto&& body) {
     .newModuleRegistry = registryBuilder.finish(),
   });
   fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env); });
+}
+
+// Whether calling `fn` throws `JsExceptionThrown` with execution terminating. Cancels the
+// termination.
+bool terminates(const TestFixture::Environment& env, auto&& fn) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+  v8::TryCatch tryCatch(env.isolate);
+  KJ_DEFER(env.isolate->CancelTerminateExecution());
+  try {
+    fn();
+    return false;
+  } catch (jsg::JsExceptionThrown&) {
+    return tryCatch.HasTerminated();
+  }
 }
 
 // What calling `fn` throws, as a string.
@@ -2774,6 +3056,32 @@ KJ_TEST("a reentry callback runs its function from KJ, in the IoContext that cre
   KJ_EXPECT(!reentry_function_dropped());
 
   { auto dropped = kj::mv(callback); }
+  KJ_EXPECT(reentry_function_dropped());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a reentry callback can be dropped while a call is in flight, which still completes") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  kj::Maybe<::rust::Box<HeldReentryCallback>> callback;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto handle =
+        runScript(env, "(function () { return Promise.resolve('the code'); })").As<v8::Function>();
+    callback = make_reentry_callback(
+        isolateOf(env), ReentryBehavior::CallJs, ::workerd::rust::jsg::to_ffi(kj::mv(handle)));
+  });
+
+  auto outcome = call_and_drop_reentry_callback(KJ_ASSERT_NONNULL(kj::mv(callback)))
+                     .then([](::rust::String value) {
+    return kj::str("fulfilled: ", kj::arrayPtr(value.data(), value.size()));
+  }, [](kj::Exception&& e) {
+    return kj::str("rejected: ", e.getDescription());
+  }).wait(fixture.getWaitScope());
+  KJ_EXPECT(outcome == "fulfilled: the code", outcome);
+  KJ_EXPECT(reentry_function_runs() == 1);
+  // The call kept the function alive past the callback, and dropped it once it finished.
+  KJ_EXPECT(!reentry_function_dropped_with_callback());
   KJ_EXPECT(reentry_function_dropped());
   fixture.drainAndDestroy(kj::mv(request));
 }
@@ -3040,6 +3348,21 @@ KJ_TEST("the new registry throws the error of a failing Rust module callback") {
       auto thrown = thrownBy(env.js, [&] { env.js.resolveInternalModule(FAILING_SPECIFIER); });
       KJ_EXPECT(thrown == "TypeError: the module failed", thrown);
     }
+  });
+}
+
+KJ_TEST("the legacy registry keeps the termination of a terminating Rust module callback") {
+  withLegacyRustRegistry(register_terminating_module, [](const auto& env, auto& registry) {
+    KJ_EXPECT(terminates(env, [&] {
+      registry.resolve(env.js, kj::Path::parse(TERMINATING_SPECIFIER), kj::none,
+          jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY);
+    }));
+  });
+}
+
+KJ_TEST("the new registry keeps the termination of a terminating Rust module callback") {
+  withNewRustRegistry(register_terminating_module, [](const auto& env) {
+    KJ_EXPECT(terminates(env, [&] { env.js.resolveInternalModule(TERMINATING_SPECIFIER); }));
   });
 }
 

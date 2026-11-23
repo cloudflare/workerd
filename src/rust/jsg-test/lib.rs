@@ -4,6 +4,7 @@
 
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
@@ -149,6 +150,10 @@ mod ffi {
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
+
+        /// `v8::HandleScope::NumberOfHandles()`: the local handles alive in the isolate's
+        /// handle scopes.
+        pub unsafe fn number_of_handles(isolate: *mut Isolate) -> i32;
 
         /// The external memory that embedders have attributed to the isolate; see
         /// `external_memory` in `ffi.h`.
@@ -797,6 +802,14 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
+    /// counts taken earlier.
+    #[must_use]
+    pub fn number_of_handles(lock: &mut jsg::Lock<'_>) -> i32 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::number_of_handles(lock.isolate().as_ffi()) }
+    }
+
     /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have
     /// attributed to the isolate and that has reached V8. Tests compare it with amounts taken
     /// earlier.
@@ -1149,6 +1162,17 @@ impl Harness {
     pub fn cpp_sees_root_frame(lock: &mut jsg::Lock<'_>) -> bool {
         // SAFETY: the lock keeps the isolate locked.
         unsafe { ffi::cpp_sees_root_frame(lock.isolate().as_ffi()) }
+    }
+}
+
+/// A field that adds one to its counter when it is dropped, for a test resource that counts its
+/// drops. A resource that holds GC references can't implement `Drop` itself.
+#[jsg_macros::jsg_traced]
+pub struct DropCounter(pub &'static AtomicUsize);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 

@@ -12,6 +12,7 @@ use channel_interop::DurableObjectClass;
 use channel_interop::Fetcher;
 use channel_interop::InHouse;
 use channel_interop::RequiresHostAndProtocol;
+use channel_interop::ScopedChannel;
 use channel_interop::SubrequestChannel;
 use io_context::IoContext;
 use jsg::ToJS;
@@ -46,7 +47,8 @@ mod ffi {
 }
 
 /// What `Probe.stash()` holds outside any resource, as Rust code that holds a `Fetcher` and its
-/// channel past the request does. A channel belongs to its thread, so this is thread-local.
+/// channel past the request does, once the channel's transfer is allowed. A channel belongs to its
+/// thread, so this is thread-local.
 #[derive(Default)]
 struct Stash {
     fetchers: Vec<jsg_cpp::Ref<Fetcher>>,
@@ -140,7 +142,8 @@ impl Probe {
         Fetcher::from_channel(lock, &io_context, channel)
     }
 
-    /// `rewrap()`, for a channel that must be transferable.
+    /// `rewrap()`, for a channel that must be transferable, made from the channel as kept past
+    /// its request.
     #[jsg_method]
     pub fn rewrap_transferable<'s>(
         &self,
@@ -149,8 +152,8 @@ impl Probe {
     ) -> Result<jsg_cpp::Ref<Fetcher>, jsg::Error> {
         let io_context = IoContext::current(lock)?;
         let channel = fetcher.get(lock).subrequest_channel(lock, &io_context)?;
-        channel.require_allows_transfer(lock)?;
-        Fetcher::from_channel(lock, &io_context, channel)
+        let kept = channel.require_allows_transfer(lock)?;
+        Fetcher::from_channel(lock, &io_context, ScopedChannel::new(&io_context, kept))
     }
 
     /// A new `DurableObjectClass` for the channel of `class`, as Worker Loader's
@@ -211,7 +214,8 @@ impl Probe {
             .map(|fetcher| fetcher.clone(lock))
     }
 
-    /// Keeps `fetcher` and its channel outside any resource, for `drop_stashed()`.
+    /// Keeps `fetcher` and its channel outside any resource, for `drop_stashed()`. The channel must
+    /// be transferable.
     #[jsg_method]
     pub fn stash<'s>(
         &self,
@@ -219,7 +223,10 @@ impl Probe {
         fetcher: jsg_cpp::Ref<Fetcher>,
     ) -> Result<(), jsg::Error> {
         let io_context = IoContext::current(lock)?;
-        let channel = fetcher.get(lock).subrequest_channel(lock, &io_context)?;
+        let channel = fetcher
+            .get(lock)
+            .subrequest_channel(lock, &io_context)?
+            .require_allows_transfer(lock)?;
         STASH.with_borrow_mut(|stash| {
             stash.fetchers.push(fetcher);
             stash.channels.push(channel);

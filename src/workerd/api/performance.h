@@ -85,14 +85,13 @@ class PerformanceMark: public PerformanceEntry {
   friend class Performance;
 
   struct Options {
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
     jsg::Optional<double> startTime;
 
     JSG_STRUCT(detail, startTime);
   };
 
-  PerformanceMark(
-      kj::String name, jsg::Optional<jsg::JsRef<jsg::JsObject>> detail, double startTime)
+  PerformanceMark(kj::String name, jsg::Optional<jsg::JsRef<jsg::JsValue>> detail, double startTime)
       : PerformanceEntry(kj::mv(name), "mark"_kjc, startTime, 0),
         detail(kj::mv(detail)) {}
 
@@ -119,7 +118,7 @@ class PerformanceMark: public PerformanceEntry {
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(detail);
@@ -218,13 +217,13 @@ class PerformanceMeasure: public PerformanceEntry {
     kj::String name;
     kj::OneOf<kj::Date, double> startTime;
     double duration;
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
     JSG_STRUCT(entryType, name, startTime, duration, detail);
   };
 
   struct Options {
-    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
     jsg::Optional<double> start;
     jsg::Optional<double> duration;
     jsg::Optional<double> end;
@@ -252,7 +251,7 @@ class PerformanceMeasure: public PerformanceEntry {
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(detail);
@@ -631,6 +630,9 @@ class Performance: public EventTarget {
  private:
   const IsolateLimitEnforcer& isolateLimitEnforcer;
   kj::Vector<jsg::Ref<PerformanceEntry>> entries;
+
+  // Returns the start time of the first mark named `name`.
+  kj::Maybe<double> findMarkTime(kj::StringPtr name);
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(entries);

@@ -10,6 +10,9 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
+use cxx::IntoKjException;
+use cxx::KjException;
+use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
@@ -17,6 +20,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjOwn;
@@ -34,7 +38,7 @@ enum State {
     Starting(LocalBoxFuture<'static, Result<KjOwn<bridge::WorkerInterface>>>),
     Started(CxxWorkerInterface),
     /// The target failed to start. Every event fails with this error.
-    Failed(cxx::KjError),
+    Failed(KjException),
 }
 
 pub struct PromisedInterface {
@@ -44,11 +48,20 @@ pub struct PromisedInterface {
 impl PromisedInterface {
     /// `target` is not polled until the first event arrives. That event and every later one
     /// wait for it to finish.
-    pub fn new(
-        target: impl Future<Output = Result<KjOwn<bridge::WorkerInterface>>> + 'static,
+    ///
+    /// `target` may fail with a `KjException`, which is kept as it is, or with any other error
+    /// that converts to one, such as a `KjError`. An error without a location of its own gets the
+    /// location of the call to `new`. Since the error type is a parameter, an `async` block that
+    /// only fails through `?` needs it spelled out, for example as `Ok::<_, KjError>(target)`.
+    #[track_caller]
+    pub fn new<E: IntoKjException + 'static>(
+        target: impl Future<Output = std::result::Result<KjOwn<bridge::WorkerInterface>, E>> + 'static,
     ) -> Self {
+        let location = core::panic::Location::caller();
         Self {
-            state: State::Starting(Box::pin(target)),
+            state: State::Starting(Box::pin(
+                target.map_err(|error| error.into_kj_exception(location.file(), location.line())),
+            )),
         }
     }
 
@@ -62,7 +75,7 @@ impl PromisedInterface {
         match &mut self.state {
             State::Started(target) => Ok(target),
             State::Failed(error) => Err(error.clone()),
-            State::Starting(_) => Err(kj::failed!("the worker did not start")),
+            State::Starting(_) => Err(kj::failed!("the worker did not start").into()),
         }
     }
 }
@@ -76,7 +89,7 @@ impl Service for PromisedInterface {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let target = self.target().await?;
         target
             .request(method, url, headers, request_body, response)
@@ -90,7 +103,7 @@ impl Service for PromisedInterface {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         let target = self.target().await?;
         target
             .connect(host, headers, connection, response, settings)
@@ -133,6 +146,11 @@ impl Interface for PromisedInterface {
         target.test().await
     }
 
+    async fn bench(&mut self, params: &[u64]) -> Result<Vec<u64>> {
+        let target = self.target().await?;
+        target.bench(params).await
+    }
+
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
         let target = match self.target().await {
             Ok(target) => target,
@@ -141,7 +159,7 @@ impl Interface for PromisedInterface {
                 // client with this error instead of reporting that the event was destroyed
                 // before it completed. If `failed()` itself throws, that exception is returned
                 // instead.
-                bridge::custom_event_failed(event, cxx::KjException::from(error.clone()))?;
+                bridge::custom_event_failed(event, error.clone())?;
                 return Err(error);
             }
         };

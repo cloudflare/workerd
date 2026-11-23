@@ -49,13 +49,11 @@ bool fetcher_new(v8::Isolate* isolate,
 
 bool fetcher_new_for_channel_number(v8::Isolate* isolate,
     uint32_t channel,
-    bool requiresHostAndProtocol,
-    bool isInHouse,
+    RequiresHostAndProtocol requiresHostAndProtocol,
+    InHouse inHouse,
     kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result) {
   return jsg_cpp::callCppForRef<Fetcher>(isolate, result, [&](jsg::Lock& js) -> jsg::Ref<Fetcher> {
-    auto requiresHost = requiresHostAndProtocol ? Fetcher::RequiresHostAndProtocol::YES
-                                                : Fetcher::RequiresHostAndProtocol::NO;
-    return js.alloc<Fetcher>(channel, requiresHost, isInHouse);
+    return js.alloc<Fetcher>(channel, requiresHostAndProtocol, inHouse == InHouse::YES);
   });
 }
 

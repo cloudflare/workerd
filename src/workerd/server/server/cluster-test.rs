@@ -194,3 +194,14 @@ fn a_connect_names_an_instance_id() {
         assert!(refused.contains("without a valid"), "{refused}");
     }
 }
+
+#[test]
+fn a_fenced_instance_exits_while_its_lease_holds() {
+    let ms = Duration::from_millis;
+    assert_eq!(fence_log_wait(ms(5_000)), Some(FENCE_LOG_WAIT));
+    assert_eq!(fence_log_wait(ms(100)), Some(ms(80)));
+    assert_eq!(fence_log_wait(FENCE_SLACK + ms(1)), Some(ms(1)));
+    assert_eq!(fence_log_wait(FENCE_SLACK), None);
+    assert_eq!(fence_log_wait(ms(5)), None);
+    assert_eq!(fence_log_wait(Duration::ZERO), None);
+}

@@ -215,15 +215,16 @@ fn lenient_conversion_only_swallows_shallow_mismatches() {
         assert!(Strict::from_js(lock, input).is_err());
         assert!(Strict::try_from_js(lock, input)?.is_none());
 
-        let lenient = jsg::Lenient::<Strict>::from_js(lock, input)?;
-        let (value, original) = lenient.to_parts();
-        assert!(value.is_undefined());
-        assert!(original.is_some());
-        let lenient = jsg::Lenient::<Strict>::from_js(lock, input)?;
-        assert!(NullOrUndefined::from(lenient).is_undefined());
+        assert!(jsg::LenientOption::<Strict>::from_js(lock, input)?.is_none());
+        // `null` goes through `T`, which here keeps it.
+        let null = lock.null();
+        let lenient = jsg::LenientOption::<Strict>::from_js(lock, null)?;
+        assert!(lenient.0.is_some_and(|value| value.is_null()));
 
         let malformed = ctx.eval_raw(lock, "[123]").unwrap();
-        assert!(jsg::Lenient::<NullOrUndefined<Vec<Fields>>>::from_js(lock, malformed).is_err());
+        assert!(
+            jsg::LenientOption::<NullOrUndefined<Vec<Fields>>>::from_js(lock, malformed).is_err()
+        );
         let throwing = ctx
             .eval_raw(lock, "({ toString() { throw new Error('coercion'); } })")
             .unwrap();

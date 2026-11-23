@@ -28,7 +28,15 @@ namespace workerd {
 
 namespace {
 
+// :test-fixture-expose-gc passes --expose-gc, which lets tests request a GC that skips
+// conservative stack scanning (`RequestGarbageCollectionForTesting()` with a `StackState`). The
+// default fixture has no flags: V8 rejects code caches built under other flags, and
+// per-isolate-compile-cache-test checks that the embedded ones are consumed.
+#ifdef WORKERD_TEST_FIXTURE_EXPOSE_GC
+jsg::V8System testV8System({"--expose-gc"_kj});
+#else
 jsg::V8System testV8System;
+#endif
 
 class MockCacheClient final: public CacheClient {
   kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {

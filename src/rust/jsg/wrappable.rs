@@ -29,7 +29,7 @@
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
 //! | `NullOrUndefined<T>` | `T`, `null`, or `undefined` |
-//! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
+//! | `LenientOption<T>` | `T` or `undefined` (`null` goes to `T`; shallow type mismatches become `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
@@ -41,7 +41,7 @@
 //! | `v8::Local<'s, M>` | the value itself, of `M`'s type |
 //! | `v8::TracedGlobal<M>` | as `v8::Local<'s, M>`, held past the scope (C++ JSG's `jsg::JsRef<T>`) |
 //!
-//! [`Option`], [`NullOrUndefined`], and [`Lenient`] method arguments may be omitted.
+//! [`Option`], [`NullOrUndefined`], and [`LenientOption`] method arguments may be omitted.
 //! [`Nullable`] arguments remain required even though explicitly passing `undefined` converts to `Null`.
 //! Prefer [`NullOrUndefined<T>`] to `Option<Nullable<T>>` to preserve all three states.
 //!
@@ -83,7 +83,7 @@
 use crate::Coercible;
 use crate::Dict;
 use crate::Error;
-use crate::Lenient;
+use crate::LenientOption;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::NullOrUndefined;
@@ -152,21 +152,6 @@ pub trait Traced: Send {
     /// anything that holds it: a [`crate::Cell`] visits its value in place, so writing into any
     /// `jsg::Cell` during a visit panics.
     fn trace(&self, visitor: &mut crate::v8::GcVisitor);
-
-    /// Whether a `Drop` impl of this type, or of a type it holds, may move a GC reference out of
-    /// a field, so that a resource that holds it in a field makes its references strong and
-    /// parentless before it is dropped (see `GcVisitor::detach_for_drop`). A hand-written impl
-    /// for a type with its own `Drop` that may do so returns `true`; a generic impl can't tell
-    /// whether its contents implement `Drop`. Wrappers and collections return their contents'.
-    /// A `#[jsg_resource]` type, for one held inline in another, returns whether it implements
-    /// `Drop` itself. `#[jsg_struct]` and `#[jsg_oneof]` types can't implement `Drop` and return
-    /// `false`. None of them looks at its fields, which a recursive type would make loop forever.
-    fn needs_drop_detach() -> bool
-    where
-        Self: Sized,
-    {
-        false
-    }
 }
 
 /// Marks a `Traced` type that holds no GC references: no `jsg::Rc` and no `TracedGlobal` that
@@ -182,13 +167,38 @@ pub trait Traced: Send {
 /// after construction is a [`crate::Cell`] or [`crate::RefCell`], which take any `Traced` type.
 ///
 /// Every built-in `Traced` type implements it, except those that can hold GC references:
-/// `jsg::Rc`, `TracedGlobal`, `Lenient`, `TracedPromise`, `TracedPromiseResolver` and
+/// `jsg::Rc`, `TracedGlobal`, `TracedPromise`, `TracedPromiseResolver` and
 /// `TracedAsyncContextFrame`. Wrappers and collections implement it when their contents do.
 /// `jsg_traced_unchecked!` implements it for the types it covers, and `#[jsg_traced]`,
 /// `#[jsg_struct]` and `#[jsg_oneof]` implement it when every field or variant does, so for those
 /// types it is derived rather than claimed, and an impl by hand conflicts with it. Implement it
 /// for a hand-written `Traced` type only if its `trace` visits nothing.
 pub trait HoldsNoGcReferences: Traced {}
+
+/// What `#[jsg_resource]`'s compile-time check that a resource holding GC references has no
+/// `Drop` impl asks about a type `T`. An inherent associated const whose impl's bound holds is
+/// picked over the one of [`DropCheckFallback`], which must be in scope, so each const is true
+/// exactly when its bound holds.
+#[doc(hidden)]
+pub struct DropCheck<T>(std::marker::PhantomData<T>);
+
+/// The answers of [`DropCheck`] for a type that doesn't meet a bound.
+#[doc(hidden)]
+pub trait DropCheckFallback {
+    const HAS_DROP: bool = false;
+    const HOLDS_NO_GC_REFERENCES: bool = false;
+}
+
+impl<T> DropCheckFallback for DropCheck<T> {}
+
+#[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
+impl<T: Drop> DropCheck<T> {
+    pub const HAS_DROP: bool = true;
+}
+
+impl<T: HoldsNoGcReferences> DropCheck<T> {
+    pub const HOLDS_NO_GC_REFERENCES: bool = true;
+}
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
@@ -241,38 +251,23 @@ impl<T: Traced> Traced for Option<T> {
             inner.trace(visitor);
         }
     }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
-    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
 
-impl<T: Traced> Traced for Lenient<T> {
+impl<T: Traced> Traced for LenientOption<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        if let Self::Some(inner) = self {
-            inner.trace(visitor);
-        }
-        if let Self::Unconvertable(inner) = self {
-            inner.trace(visitor);
-        }
-    }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
+        self.0.trace(visitor);
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for LenientOption<T> {}
 
 impl<T: Traced> Traced for Nullable<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
         }
-    }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
     }
 }
 
@@ -284,10 +279,6 @@ impl<T: Traced> Traced for NullOrUndefined<T> {
             inner.trace(visitor);
         }
     }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
-    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
@@ -295,10 +286,6 @@ impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
 impl<T: Traced> Traced for NonCoercible<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
-    }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
     }
 }
 
@@ -310,10 +297,6 @@ impl<T: Traced> Traced for Vec<T> {
             item.trace(visitor);
         }
     }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
-    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Vec<T> {}
@@ -323,10 +306,6 @@ impl<V: Traced> Traced for Dict<V> {
         for (_, value) in self.iter() {
             value.trace(visitor);
         }
-    }
-
-    fn needs_drop_detach() -> bool {
-        V::needs_drop_detach()
     }
 }
 
@@ -339,10 +318,6 @@ impl<K: HoldsNoGcReferences, V: Traced, S: std::hash::BuildHasher + Send> Traced
         for value in self.values() {
             value.trace(visitor);
         }
-    }
-
-    fn needs_drop_detach() -> bool {
-        V::needs_drop_detach()
     }
 }
 
@@ -357,10 +332,6 @@ impl<K: HoldsNoGcReferences, V: Traced> Traced for std::collections::BTreeMap<K,
             value.trace(visitor);
         }
     }
-
-    fn needs_drop_detach() -> bool {
-        V::needs_drop_detach()
-    }
 }
 
 impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences> HoldsNoGcReferences
@@ -374,10 +345,6 @@ impl<T: Traced, S: std::hash::BuildHasher + Send> Traced for std::collections::H
             item.trace(visitor);
         }
     }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
-    }
 }
 
 impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher + Send> HoldsNoGcReferences
@@ -390,10 +357,6 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
         for item in self {
             item.trace(visitor);
         }
-    }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
     }
 }
 
@@ -486,6 +449,14 @@ pub trait ToJS<'s>: Sized {
         let _ = creator;
         self.to_js(lock)
     }
+
+    /// Whether this is an absent optional value, such as `None`, which a `#[jsg_struct]` leaves
+    /// out of the object it converts to, as C++ JSG's `JSG_STRUCT` leaves out an absent
+    /// `jsg::Optional<T>`. A type that overrides it also overrides [`FromJS::is_optional`].
+    #[doc(hidden)]
+    fn is_absent(&self) -> bool {
+        false
+    }
 }
 
 // =============================================================================
@@ -495,7 +466,7 @@ pub trait ToJS<'s>: Sized {
 /// Trait for converting JavaScript values to Rust.
 ///
 /// `from_js()` is the normal, required conversion path. `try_from_js()` is an
-/// internal shallow-probing path used by [`Lenient`] and by `#[jsg_oneof]`
+/// internal shallow-probing path used by [`LenientOption`] and by `#[jsg_oneof]`
 /// unions. Implementations only need to override `try_from_js()` when their
 /// top-level type can fail to match, and the override must return `Ok(None)`
 /// rather than an error for a value of the wrong type, so that a union can go
@@ -518,7 +489,9 @@ pub trait FromJS<'s>: Sized {
         name.rsplit("::").next().unwrap_or(name).to_owned()
     }
 
-    /// Whether a method may omit this argument, like C++ JSG's optional types.
+    /// Whether a method may omit this argument, like C++ JSG's optional types. It also makes a
+    /// `#[jsg_struct]` field optional; a type that overrides it also overrides
+    /// [`ToJS::is_absent`].
     #[doc(hidden)]
     fn is_optional() -> bool {
         false
@@ -578,10 +551,6 @@ impl Type for bool {
     fn class_name() -> &'static str {
         "boolean"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_boolean()
-    }
 }
 
 impl<'s> ToJS<'s> for bool {
@@ -617,10 +586,6 @@ impl Type for std::string::String {
 
     fn class_name() -> &'static str {
         "string"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_string()
     }
 }
 
@@ -666,10 +631,6 @@ impl Type for f64 {
     fn class_name() -> &'static str {
         "number"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_number()
-    }
 }
 
 impl<'s> ToJS<'s> for f64 {
@@ -712,10 +673,6 @@ impl Type for &str {
 
     fn class_name() -> &'static str {
         "string"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_string()
     }
 }
 
@@ -777,10 +734,6 @@ impl<T: Type> Type for &[T] {
     fn class_name() -> &'static str {
         "Array"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_array()
-    }
 }
 
 impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
@@ -825,10 +778,6 @@ macro_rules! impl_integer {
 
                 fn class_name() -> &'static str {
                     "number"
-                }
-
-                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                    value.is_number()
                 }
             }
 
@@ -942,10 +891,6 @@ impl Type for i64 {
     fn class_name() -> &'static str {
         "bigint"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_big_int()
-    }
 }
 
 // Like C++ JSG's int64_t (jsg/value.h), an i64 is a BigInt.
@@ -995,10 +940,6 @@ impl Type for u64 {
 
     fn class_name() -> &'static str {
         "bigint"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_big_int()
     }
 }
 
@@ -1059,10 +1000,6 @@ impl Type for std::time::SystemTime {
 
     fn class_name() -> &'static str {
         "Date"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_date()
     }
 }
 
@@ -1170,6 +1107,10 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
             None => Ok(lock.undefined()),
         }
     }
+
+    fn is_absent(&self) -> bool {
+        self.is_none()
+    }
 }
 
 impl<'s, T: Coercible + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
@@ -1219,9 +1160,13 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
             Self::Undefined => Ok(lock.undefined()),
         }
     }
+
+    fn is_absent(&self) -> bool {
+        self.is_undefined()
+    }
 }
 
-impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
+impl<'s, T: ToJS<'s>> ToJS<'s> for LenientOption<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         self.to_js_with_creator(lock, None)
     }
@@ -1231,11 +1176,11 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
         lock: &mut Lock<'s>,
         creator: Option<v8::Local<'s, v8::Object>>,
     ) -> Result<v8::Local<'s, v8::Value>, Error> {
-        match self {
-            Self::Some(value) => value.to_js_with_creator(lock, creator),
-            Self::Null => Ok(lock.null()),
-            Self::Undefined | Self::Unconvertable(_) => Ok(lock.undefined()),
-        }
+        self.0.to_js_with_creator(lock, creator)
+    }
+
+    fn is_absent(&self) -> bool {
+        self.is_none()
     }
 }
 
@@ -1280,10 +1225,6 @@ impl<T: Coercible> Type for NonCoercible<T> {
     fn class_name() -> &'static str {
         T::class_name()
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        T::is_exact(value)
-    }
 }
 
 // Like C++ `NonCoercible<T>` (jsg/web-idl.h), this is the same kind of union
@@ -1292,7 +1233,7 @@ impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
 
     const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
-    // Converts only a value that `T::is_exact()` accepts, which is never an object.
+    // Converts only a value that `Coercible::is_exact()` accepts, which is never an object.
     const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
     fn type_name() -> String {
@@ -1332,10 +1273,6 @@ impl<T: Type> Type for Nullable<T> {
 
     fn class_name() -> &'static str {
         T::class_name()
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_null_or_undefined() || T::is_exact(value)
     }
 }
 
@@ -1414,8 +1351,10 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
     }
 }
 
-impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
-    type ResultType = Lenient<T::ResultType>;
+// Like C++ `jsg::LenientOptional<T>`, only `undefined` and a top-level type mismatch are absent;
+// `null` goes to `T`.
+impl<'s, T: FromJS<'s>> FromJS<'s> for LenientOption<T> {
+    type ResultType = LenientOption<T::ResultType>;
 
     const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
@@ -1431,15 +1370,10 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            Ok(Lenient::Null)
-        } else if value.is_undefined() {
-            Ok(Lenient::Undefined)
+        if value.is_undefined() {
+            Ok(LenientOption(None))
         } else {
-            match T::try_from_js(lock, value)? {
-                Some(v) => Ok(Lenient::Some(v)),
-                None => Ok(Lenient::Unconvertable(v8::TracedGlobal::new(lock, value))),
-            }
+            Ok(LenientOption(T::try_from_js(lock, value)?))
         }
     }
 }
@@ -1453,10 +1387,6 @@ impl<T: Type> Type for Vec<T> {
 
     fn class_name() -> &'static str {
         "Array"
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_array()
     }
 }
 
@@ -1579,10 +1509,6 @@ impl<V> Type for Dict<V> {
     fn class_name() -> &'static str {
         "object"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_object() && !value.is_array()
-    }
 }
 
 impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
@@ -1673,7 +1599,7 @@ impl<'s, V: FromJS<'s, ResultType = V>> FromJS<'s> for Dict<V> {
 // marker types implement `Type`, which names their JavaScript class.
 
 macro_rules! impl_typed_array_type {
-    ($($marker:ident => $is_check:ident),* $(,)?) => {
+    ($($marker:ident),* $(,)?) => {
         $(
             impl Type for v8::$marker {
                 const UNION_NAMES: &'static [&'static str] = &[concat!("v8::", stringify!($marker))];
@@ -1681,26 +1607,23 @@ macro_rules! impl_typed_array_type {
                 fn class_name() -> &'static str {
                     stringify!($marker)
                 }
-                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                    value.$is_check()
-                }
             }
         )*
     };
 }
 
 impl_typed_array_type!(
-    Uint8Array => is_uint8_array,
-    Uint8ClampedArray => is_uint8clamped_array,
-    Uint16Array => is_uint16_array,
-    Uint32Array => is_uint32_array,
-    Int8Array => is_int8_array,
-    Int16Array => is_int16_array,
-    Int32Array => is_int32_array,
-    Float32Array => is_float32_array,
-    Float64Array => is_float64_array,
-    BigInt64Array => is_bigint64_array,
-    BigUint64Array => is_biguint64_array,
+    Uint8Array,
+    Uint8ClampedArray,
+    Uint16Array,
+    Uint32Array,
+    Int8Array,
+    Int16Array,
+    Int32Array,
+    Float32Array,
+    Float64Array,
+    BigInt64Array,
+    BigUint64Array,
 );
 
 // =============================================================================
@@ -1716,9 +1639,6 @@ impl Type for v8::ArrayBuffer {
     fn class_name() -> &'static str {
         "ArrayBuffer"
     }
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_array_buffer()
-    }
 }
 
 impl Type for v8::ArrayBufferView {
@@ -1726,9 +1646,6 @@ impl Type for v8::ArrayBufferView {
 
     fn class_name() -> &'static str {
         "ArrayBufferView"
-    }
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_array_buffer_view()
     }
 }
 
@@ -1768,16 +1685,12 @@ impl<M: Type> Type for v8::Local<'_, M> {
     fn class_name() -> &'static str {
         M::class_name()
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        M::is_exact(value)
-    }
 }
 
 /// Implements `Type` for handle markers. Their Web IDL categories are those that C++ JSG's
 /// `webidl` traits (jsg/web-idl.h) give the corresponding `v8::Local<T>`.
 macro_rules! impl_marker_type {
-    ($($marker:ident: $name:literal, $is_exact:ident, $types:expr;)*) => {
+    ($($marker:ident: $name:literal, $types:expr;)*) => {
         $(impl Type for v8::$marker {
             const UNION_TYPES: UnionTypes = $types;
             const UNION_NAMES: &'static [&'static str] = &[concat!("v8::", stringify!($marker))];
@@ -1785,22 +1698,18 @@ macro_rules! impl_marker_type {
             fn class_name() -> &'static str {
                 $name
             }
-
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_exact()
-            }
         })*
     };
 }
 
 impl_marker_type! {
-    String: "String", is_string, UnionTypes::STRING;
-    BigInt: "BigInt", is_big_int, UnionTypes::NUMERIC;
-    Object: "Object", is_object, UnionTypes::OBJECT;
-    Function: "Function", is_function, UnionTypes::OTHER;
-    Promise: "Promise", is_promise, UnionTypes::OTHER;
-    TypedArray: "TypedArray", is_typed_array, UnionTypes::OTHER;
-    WasmModuleObject: "WasmModuleObject", is_wasm_module_object, UnionTypes::OTHER;
+    String: "String", UnionTypes::STRING;
+    BigInt: "BigInt", UnionTypes::NUMERIC;
+    Object: "Object", UnionTypes::OBJECT;
+    Function: "Function", UnionTypes::OTHER;
+    Promise: "Promise", UnionTypes::OTHER;
+    TypedArray: "TypedArray", UnionTypes::OTHER;
+    WasmModuleObject: "WasmModuleObject", UnionTypes::OTHER;
 }
 
 // Any value is a `v8::Value`.
@@ -1809,10 +1718,6 @@ impl Type for v8::Value {
 
     fn class_name() -> &'static str {
         "Value"
-    }
-
-    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
-        true
     }
 }
 
@@ -1874,10 +1779,6 @@ impl<M: Type> Type for v8::TracedGlobal<M> {
 
     fn class_name() -> &'static str {
         M::class_name()
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        M::is_exact(value)
     }
 }
 

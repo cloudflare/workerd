@@ -326,23 +326,29 @@ fn to_source<'s>(
             .inherit_global_outbound(lock, io_context)?,
         jsg::NullOrUndefined::Null => {}
         jsg::NullOrUndefined::Some(fetcher) => {
-            let channel = fetcher.get(lock).subrequest_channel(lock, io_context)?;
-            channel.require_allows_transfer(lock)?;
+            let channel = fetcher
+                .get(lock)
+                .subrequest_channel(lock, io_context)?
+                .require_allows_transfer(lock)?;
             builder.pin_mut().set_global_outbound(channel);
         }
     }
 
     for tail in tails.unwrap_or_default() {
-        let channel = tail.get(lock).subrequest_channel(lock, io_context)?;
-        channel.require_allows_transfer(lock)?;
+        let channel = tail
+            .get(lock)
+            .subrequest_channel(lock, io_context)?
+            .require_allows_transfer(lock)?;
         builder.pin_mut().add_tail(channel);
     }
 
     if let Some(streaming_tails) = streaming_tails {
         validate::check_streaming_tails(allow_experimental).map_err(js_error)?;
         for tail in streaming_tails {
-            let channel = tail.get(lock).subrequest_channel(lock, io_context)?;
-            channel.require_allows_transfer(lock)?;
+            let channel = tail
+                .get(lock)
+                .subrequest_channel(lock, io_context)?
+                .require_allows_transfer(lock)?;
             builder.pin_mut().add_streaming_tail(channel);
         }
     }

@@ -17,14 +17,15 @@ fn unused_visitor() -> v8::GcVisitor {
     }
 }
 
-/// `HoldsNoGcReferences` follows the contents. (That a `jsg::Rc`, a `TracedGlobal` or a
-/// `Lenient` does not qualify is checked by the `gc-reference-in-std-cell-is-not-traced`
+/// `HoldsNoGcReferences` follows the contents. (That a `jsg::Rc` or a `TracedGlobal` does not
+/// qualify is checked by the `gc-reference-in-std-cell-is-not-traced`
 /// compile test.)
 #[test]
 fn holds_no_gc_references_follows_the_contents() {
     fn holds_no_gc_references<T: HoldsNoGcReferences>() {}
     holds_no_gc_references::<String>();
     holds_no_gc_references::<Option<String>>();
+    holds_no_gc_references::<crate::LenientOption<String>>();
     holds_no_gc_references::<Cell<Option<String>>>();
     holds_no_gc_references::<RefCell<Vec<String>>>();
     holds_no_gc_references::<HashMap<String, Nullable<String>>>();

@@ -13,7 +13,6 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -778,8 +777,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     });
   }
 
-  // TODO(soon): Implement basic TLS support for connect handler.
-  JSG_REQUIRE(!settings.useTls, Error, "Incoming CONNECT with TLS not supported");
+  // The handler can't run a handshake on this connection, so a peer that wants TLS from the start
+  // is served only by a handler that has opted in to making it secure further along. See
+  // ServiceWorkerGlobalScope::connect().
+  JSG_REQUIRE(!settings.useTls || featureFlags.getConnectHandlerImmediateTls(), Error,
+      "Incoming CONNECT with TLS not supported");
   // Capture workerTracer, see request() for rationale.
   kj::Maybe<BaseTracer&> workerTracer;
 

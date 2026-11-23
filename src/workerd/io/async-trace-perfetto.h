@@ -18,7 +18,10 @@
 // - Flows: from a `create` instant on the creating callback's track to the new resource, and from
 //   a resource's settlement to its next callback (the scheduling delay).
 
-#include <workerd/io/async-trace.h>
+#include <workerd/rust/async-trace/listener.h>
+
+#include <kj/memory.h>
+#include <kj/string.h>
 
 namespace workerd {
 

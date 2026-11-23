@@ -85,6 +85,9 @@ git_repository(
 # platforms
 bazel_dep(name = "platforms", version = "1.1.0")
 
+# protobuf
+bazel_dep(name = "protobuf", version = "37.0-rc3")
+
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.28")
 
@@ -112,6 +115,7 @@ single_version_override(
         "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
         "//:patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch",
         "//:patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch",
+        "//:patches/rules_rust/0004-Add-a-flag-that-adds-inputs-to-every-Rustc-action.patch",
     ],
 )
 

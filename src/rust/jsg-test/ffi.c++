@@ -432,6 +432,10 @@ size_t used_global_handles_size(Isolate* isolate) {
   return stats.used_global_handles_size();
 }
 
+int number_of_handles(Isolate* isolate) {
+  return v8::HandleScope::NumberOfHandles(isolate);
+}
+
 int64_t external_memory(Isolate* isolate) {
   return isolate->GetExternalMemory();
 }

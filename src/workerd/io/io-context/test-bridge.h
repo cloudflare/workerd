@@ -17,6 +17,9 @@ void record_async_context(uintptr_t isolate);
 // Records the IoContext that is current, from the callback of an await_io_and_run().
 void record_await_context();
 
+// Records the IoContext that is current, if any, when the data of register_reaction() is dropped.
+void record_drop_context();
+
 // Keeps `channel`, which Rust took from a Fetcher in a reentry callback, for the test to check
 // (keptChannel in test-bridge-state.h).
 void keep_channel(kj::Rc<IoChannelFactory::SubrequestChannel> channel);

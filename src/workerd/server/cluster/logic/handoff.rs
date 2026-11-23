@@ -141,7 +141,7 @@ pub fn successor<'a>(object: &str, peers: impl IntoIterator<Item = &'a str>) -> 
 
 /// FNV-1a over the object and the peer, then the finalizer of `SplitMix64`,
 /// which FNV's weak mixing of the last bytes needs.
-fn weight(object: &str, peer: &str) -> u64 {
+pub fn weight(object: &str, peer: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let bytes = object.bytes().chain([0xff]).chain(peer.bytes());
     for byte in bytes {

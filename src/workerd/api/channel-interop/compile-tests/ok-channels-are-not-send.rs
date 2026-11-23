@@ -11,9 +11,12 @@
 // rustc reports one error for each field of `KjRc` that is not `Send`, and a snippet's
 // annotations must not depend on how many errors rustc reports.
 use channel_interop::ActorClassChannel;
+use channel_interop::ScopedChannel;
 use channel_interop::SubrequestChannel;
 use kj_rs::KjRc;
 use static_assertions::assert_not_impl_any;
 
 assert_not_impl_any!(KjRc<SubrequestChannel>: Send, Sync);
 assert_not_impl_any!(KjRc<ActorClassChannel>: Send, Sync);
+assert_not_impl_any!(ScopedChannel<'static, SubrequestChannel>: Send, Sync);
+assert_not_impl_any!(ScopedChannel<'static, ActorClassChannel>: Send, Sync);

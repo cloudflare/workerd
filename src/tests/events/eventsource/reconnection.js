@@ -4,15 +4,12 @@
 
 // Reconnection after the end of a connected EventSource's stream: the
 // 'error' event that announces it, the Last-Event-ID it sends, and the
-// reconnection time a `retry` field sets. Divergences (see AGENTS.md):
-// - #9: the TypeScript implementation sends the ID of the last dispatched
-//   event, as the standard says; C++ sends the last `id` field parsed.
-// - #16: the TypeScript implementation trims HTTP whitespace from the ID it
-//   sends; C++ sends it as parsed.
+// reconnection time a `retry` field sets. The ID sent is the last
+// dispatched event's, as the standard says, with HTTP whitespace trimmed, as
+// Headers trims any value.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { connect, nextEvent, record } from 'helpers';
-import { usingTsImpl } from 'which-impl';
 
 export const endOfStreamReconnects = {
   async test(ctrl, env) {
@@ -44,7 +41,6 @@ export const lastEventIdIsSent = {
   },
 };
 
-// #16.
 export const lastEventIdWhitespace = {
   async test(ctrl, env) {
     const source = connect(env, '/padded-last-event-id');
@@ -52,11 +48,11 @@ export const lastEventIdWhitespace = {
     source.onmessage = (event) => data.push(event.data);
     while (data.length < 2) await nextEvent(source, 'message');
     source.close();
-    deepStrictEqual(data, ['first', usingTsImpl ? '[padded]' : '[ padded \t]']);
+    deepStrictEqual(data, ['first', '[padded]']);
   },
 };
 
-// #9. WPT format-data-before-final-empty-line.any.js: the reconnection's
+// WPT format-data-before-final-empty-line.any.js: the reconnection's
 // message carries the last dispatched event's ID.
 export const formatDataBeforeFinalEmptyLine = {
   async test(ctrl, env) {
@@ -69,7 +65,7 @@ export const formatDataBeforeFinalEmptyLine = {
     source.close();
     deepStrictEqual(messages, [
       ['test1', ''],
-      ['test1', usingTsImpl ? '' : 'test'],
+      ['test1', ''],
     ]);
   },
 };

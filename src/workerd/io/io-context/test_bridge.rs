@@ -139,6 +139,17 @@ mod ffi {
         Held,
     }
 
+    /// What `register_reaction()` registers with.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ReactionKind {
+        /// `IoContext::then()`.
+        Then,
+        /// `IoContext::catch()`.
+        Catch,
+        /// `IoContext::then_or_catch()`.
+        ThenOrCatch,
+    }
+
     /// The `UncaughtExceptionSource` that `log_uncaught_exception()` logs from.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum LogSource {
@@ -176,6 +187,7 @@ mod ffi {
 
         fn record_async_context(isolate: usize);
         fn record_await_context();
+        fn record_drop_context();
         fn keep_channel(channel: KjRc<SubrequestChannel>);
     }
 
@@ -183,6 +195,7 @@ mod ffi {
         unsafe fn await_and_record_async_context(isolate: usize) -> Result<()>;
         fn register_probe_module(registry: Pin<&mut ModuleRegistry>);
         fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
+        fn register_terminating_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn release_await(value: i32);
@@ -200,6 +213,12 @@ mod ffi {
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
         unsafe fn use_owned_value(isolate: usize) -> Result<i32>;
+        unsafe fn register_reaction(
+            isolate: usize,
+            kind: ReactionKind,
+            promise: Local,
+            held: Local,
+        ) -> Result<usize>;
         unsafe fn add_owned_span(isolate: usize) -> Result<()>;
         unsafe fn tag_owned_span(isolate: usize) -> Result<bool>;
         fn drop_owned_span_handle();
@@ -246,8 +265,12 @@ mod ffi {
         async unsafe fn call_reentry_callback<'a>(
             callback: &'a HeldReentryCallback,
         ) -> Result<String>;
+        async unsafe fn call_and_drop_reentry_callback(
+            callback: Box<HeldReentryCallback>,
+        ) -> Result<String>;
         fn reentry_function_runs() -> u32;
         fn reentry_function_dropped() -> bool;
+        fn reentry_function_dropped_with_callback() -> bool;
 
         /// A `ReentryCallback` whose output, a channel, is not `Send`.
         type HeldChannelReentryCallback;
@@ -381,6 +404,17 @@ fn register_failing_module(registry: Pin<&mut ffi::ModuleRegistry>) {
         |_lock| -> jsg::Result<jsg::Rc<probe::Probe>> {
             Err(jsg::Error::new_type_error("the module failed"))
         },
+        jsg::modules::ModuleType::Internal,
+    );
+}
+
+/// Registers the internal module `test:io-context-terminating`, whose callback terminates
+/// execution.
+fn register_terminating_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "test:io-context-terminating",
+        |lock| -> jsg::Result<jsg::Rc<probe::Probe>> { Err(lock.terminate_execution_now()) },
         jsg::modules::ModuleType::Internal,
     );
 }
@@ -768,6 +802,79 @@ unsafe fn use_owned_value(isolate: usize) -> Result<i32> {
             .map_err(|err| to_io(&err))?;
         Ok(uses.unwrap_or(-1))
     })
+}
+
+/// The data of the reactions `register_reaction()` registers: a value they return, which only
+/// they hold, so the garbage collector keeps it only by tracing them. Dropping it records the
+/// `IoContext` that is current then.
+struct HeldValue(v8::TracedGlobal<v8::Value>);
+
+impl Drop for HeldValue {
+    fn drop(&mut self) {
+        ffi::record_drop_context();
+    }
+}
+
+impl jsg::Traced for HeldValue {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+/// In a request, registers reactions on `promise`, a promise in the caller's `HandleScope`, with
+/// `IoContext::then()`, `catch()` or `then_or_catch()` as `kind` says, and returns the promise
+/// they return, in that scope. Their data holds `held`, a value in that scope. Each reaction
+/// records the `IoContext` it runs in, as C++ sees it, and checks that the one it gets can be
+/// used. The fulfillment reaction returns `held`; the rejection reaction returns "caught".
+unsafe fn register_reaction(
+    isolate: usize,
+    kind: ffi::ReactionKind,
+    promise: v8::ffi::Local,
+    held: v8::ffi::Local,
+) -> Result<usize> {
+    fn on_fulfilled<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        held: &HeldValue,
+        _value: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        Ok(held.0.as_local(lock))
+    }
+    fn on_rejected<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        _held: &HeldValue,
+        _exception: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        "caught".to_owned().to_js(lock)
+    }
+
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a promise handle and a value handle of the scope `lock` stands for.
+    let (promise, held) = unsafe {
+        (
+            v8::Local::<v8::Promise>::from_ffi(promise),
+            v8::Local::<v8::Value>::from_ffi(held),
+        )
+    };
+    let held = HeldValue(held.to_traced_global(lock));
+    let returned = IoContext::current(lock)
+        .and_then(|context| match kind {
+            ffi::ReactionKind::Then => context.then(lock, promise, held, on_fulfilled),
+            ffi::ReactionKind::Catch => context.catch(lock, promise, held, on_rejected),
+            ffi::ReactionKind::ThenOrCatch => {
+                context.then_or_catch(lock, promise, held, on_fulfilled, on_rejected)
+            }
+            _ => unreachable!(),
+        })
+        .map_err(|err| to_io(&err))?;
+    // SAFETY: the handle is the caller's to use in its `HandleScope`, which outlives this call.
+    Ok(unsafe { returned.into_ffi() }.ptr)
 }
 
 /// In a request, starts the span `owned_span` and gives it to the request, keeping the handle
@@ -1268,6 +1375,27 @@ async unsafe fn call_reentry_callback(
     callback.0.call().await
 }
 
+/// Whether the function of the callback that `call_and_drop_reentry_callback()` dropped had been
+/// dropped by the time the callback was.
+static REENTRY_FUNCTION_DROPPED_WITH_CALLBACK: AtomicBool = AtomicBool::new(false);
+
+/// Calls `callback`, then drops it while the call is in flight, then waits for the call.
+async unsafe fn call_and_drop_reentry_callback(
+    callback: Box<HeldReentryCallback>,
+) -> std::result::Result<String, cxx::KjException> {
+    let call = callback.0.call();
+    drop(callback);
+    REENTRY_FUNCTION_DROPPED_WITH_CALLBACK.store(
+        REENTRY_FUNCTION_DROPPED.load(Ordering::SeqCst),
+        Ordering::SeqCst,
+    );
+    call.await
+}
+
+fn reentry_function_dropped_with_callback() -> bool {
+    REENTRY_FUNCTION_DROPPED_WITH_CALLBACK.load(Ordering::SeqCst)
+}
+
 fn reentry_function_runs() -> u32 {
     REENTRY_FUNCTION_RUNS.load(Ordering::SeqCst)
 }
@@ -1289,8 +1417,8 @@ static CHANNEL_CONVERSION_CONTEXT: AtomicU64 = AtomicU64::new(0);
 
 /// In a request, makes a reentry callback whose function calls `function`, a JavaScript function
 /// in the caller's scope, and converts the value of the promise it returns with
-/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, recording the `IoContext` the
-/// conversion runs in.
+/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, taken to keep past the
+/// request, recording the `IoContext` the conversion runs in.
 unsafe fn make_channel_reentry_callback(
     isolate: usize,
     function: v8::ffi::Local,
@@ -1311,7 +1439,9 @@ unsafe fn make_channel_reentry_callback(
                     CHANNEL_CONVERSION_CONTEXT.store(context.as_ffi(), Ordering::SeqCst);
                     CHANNEL_CONVERSION_RUNS.fetch_add(1, Ordering::SeqCst);
                     let fetcher = jsg_cpp::Ref::<Fetcher>::from_js(lock, value)?;
-                    fetcher.get(lock).subrequest_channel(lock, context)
+                    let channel = fetcher.get(lock).subrequest_channel(lock, context)?;
+                    // Kept past the request, as Worker Loader keeps a dynamic Worker's outbound.
+                    channel.require_allows_transfer(lock)
                 })
             })
         })

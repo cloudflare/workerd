@@ -39,16 +39,6 @@ fn call(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, expr: &str) -> Strin
     ctx.eval(lock, &code).unwrap()
 }
 
-/// Converts `expr` through a `Lenient` to an `Option<Nullable<String>>`.
-fn lenient_to_optional_nullable(
-    lock: &mut jsg::Lock,
-    ctx: &crate::EvalContext<'_>,
-    expr: &str,
-) -> Option<Nullable<String>> {
-    let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, expr).unwrap();
-    Option::<Nullable<_>>::from(lenient).map(|n| n.map(jsg::NonCoercible::into_inner))
-}
-
 #[jsg_resource]
 struct Args {}
 
@@ -225,33 +215,6 @@ fn nullable_struct_fields() {
         .to_js(lock)?;
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(obj.get(lock, "optional")?.is_null());
-        Ok(())
-    });
-}
-
-#[test]
-fn lenient_converts_to_optional_nullable() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        assert_eq!(lenient_to_optional_nullable(lock, ctx, "undefined"), None);
-        assert_eq!(
-            lenient_to_optional_nullable(lock, ctx, "null"),
-            Some(Nullable::Null)
-        );
-        assert_eq!(
-            lenient_to_optional_nullable(lock, ctx, "'x'"),
-            Some(Nullable::Some("x".to_owned()))
-        );
-        // An unconvertable value reads as undefined.
-        assert_eq!(lenient_to_optional_nullable(lock, ctx, "1"), None);
-
-        let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, "1")?;
-        let (value, unconvertable) = lenient.to_parts();
-        assert!(value.is_undefined());
-        assert!(unconvertable.is_some());
-
-        assert!(jsg::Lenient::<String>::from(None::<Nullable<String>>).is_undefined_strict());
-        assert!(jsg::Lenient::<String>::from(Some(Nullable::<String>::Null)).is_null());
         Ok(())
     });
 }

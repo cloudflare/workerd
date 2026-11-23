@@ -12,8 +12,8 @@ import { strictEqual, deepStrictEqual } from 'node:assert';
 import { Buffer } from 'node:buffer';
 import { echo, endsImmediately, sink, resetter, once } from 'servers';
 
-// bufferSize reflects the queued-but-unflushed bytes while writing and is 0
-// once finished.
+// bufferSize reflects the queued-but-unflushed bytes while writing, is 0 on
+// 'finish', and is undefined once the socket is destroyed and has no handle.
 export const bufferSizeTracksQueue = {
   async test(ctrl, env) {
     const socket = endsImmediately(env);
@@ -23,9 +23,14 @@ export const bufferSizeTracksQueue = {
     socket.end();
     strictEqual(socket.bufferSize, 1);
     const closed = once(socket, 'close');
-    await once(socket, 'finish');
-    strictEqual(socket.bufferSize, 0);
+    // The peer has already ended, so the socket auto-destroys right after
+    // 'finish'; read bufferSize in the listener.
+    const finished = new Promise((resolve) =>
+      socket.once('finish', () => resolve(socket.bufferSize))
+    );
+    strictEqual(await finished, 0);
     await closed;
+    strictEqual(socket.bufferSize, undefined);
   },
 };
 
