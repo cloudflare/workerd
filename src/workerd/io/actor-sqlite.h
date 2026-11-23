@@ -206,6 +206,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool getAlarmDirty();
     void setAlarmDirty();
 
+    // The alarm in the database outside this transaction and its parents, which a rollback of the
+    // outermost one would restore.
+    kj::Maybe<kj::Date> getCommittedAlarm();
+
     void setSomeWriteConfirmed(bool someWriteConfirmed);
     bool isSomeWriteConfirmed() const;
 
@@ -244,6 +248,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool alarmDirty = false;
     // True if any of the writes in this commit are confirmed writes.
     bool someWriteConfirmed = false;
+    // The alarm when the outermost transaction began.
+    kj::Maybe<kj::Date> alarmBeforeTxn;
 
     void rollbackImpl();
     void commitImpl();
@@ -377,6 +383,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // To be called just before committing the local sqlite db, to synchronously start any necessary
   // alarm scheduling:
   PrecommitAlarmState startPrecommitAlarmScheduling();
+
+  // The alarm in the database outside any explicit transaction that is open, which may still be
+  // rolled back. commitImpl() can wait for the alarm scheduler while one is open, and sync() can be
+  // called in one.
+  kj::Maybe<kj::Date> getCommittedAlarm();
 
   // Performs the rest of the asynchronous commit, to be waited on after committing the local
   // sqlite db.  Should be called in the same turn of the event loop as
