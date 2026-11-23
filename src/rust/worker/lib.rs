@@ -16,6 +16,7 @@
 pub mod cxx_worker;
 pub mod error;
 pub mod exception;
+pub mod failure;
 pub mod ffi;
 pub mod kill_switch;
 pub mod ok;
@@ -90,6 +91,17 @@ pub trait Interface: kj::http::Service {
     /// promise rejects, this indicates a bug in the test harness itself.)
     async fn test(&mut self) -> Result<bool> {
         Ok(false)
+    }
+
+    /// Run the bench handler with `params`, an encoded `BenchParams` message (bench.capnp) in
+    /// words. Returns the `BenchReport.Group` the handler filled in, encoded in words, without its
+    /// name, which the caller sets. Failures in user code are recorded in the group; an error
+    /// means the handler couldn't be run at all. Only `workerd bench` calls this.
+    ///
+    /// The default fails as C++ `WorkerInterface::bench()` does, for a service without a bench
+    /// handler.
+    async fn bench(&mut self, _params: &[u64]) -> Result<Vec<u64>> {
+        Err(kj::not_implemented!("this service doesn't support bench()").into())
     }
 
     /// Allows delivery of a variety of event types by implementing a callback that delivers the

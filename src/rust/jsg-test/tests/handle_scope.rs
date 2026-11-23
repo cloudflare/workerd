@@ -188,3 +188,23 @@ fn escapable_scopes_nest() {
         Ok(())
     });
 }
+
+/// A handle created in a scope nested in the escapable one can be escaped through it, and stays
+/// valid once both scopes close.
+#[test]
+fn handle_of_a_nested_scope_can_be_escaped() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let object = lock.with_escapable_handle_scope(|lock, scope| {
+            lock.with_handle_scope(move |lock, _| {
+                let object = lock.new_object();
+                let value = v8::Number::new(lock, 4.0).into();
+                object.set(lock, "value", value).unwrap();
+                scope.escape(object)
+            })
+        });
+        let value = object.get(lock, "value").unwrap();
+        assert!((f64::from_js(lock, value).unwrap() - 4.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}

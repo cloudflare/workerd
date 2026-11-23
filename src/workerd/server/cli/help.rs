@@ -23,6 +23,7 @@ macro_rules! run_options {
   -w, --watch                        Reload when files change
       --experimental                 Allow experimental features
       --verbose                      Log to stderr
+      --data-dir <dir>               Keep state in dir, not in .wrangler/state
   -d, --directory-path <name>=<dir>  Point disk service name at dir
   -e, --external-addr <name>=<addr>  Point external service name at addr
   -h, --help                         Print this help
@@ -42,13 +43,15 @@ macro_rules! cluster_options {
     () => {
         "\
 Cluster (experimental):
-      --cluster-addr <addr>          Override cluster address; keep private
+      --cluster-addr <addr>          Cluster address, joining if config has none
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
-  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
-  SIGTERM an instance hands its objects to its peers and exits within
-  stopTimeoutMs (8 s by default). GET /ready on the cluster address
-  answers OK once serving.
+  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. An
+  empty cluster key comes from WORKERD_CLUSTER_KEY or the file that
+  WORKERD_CLUSTER_KEY_FILE names, an empty bucket from
+  WORKERD_CLUSTER_BUCKET. On SIGTERM an instance hands its objects to its
+  peers and exits within stopTimeoutMs (8 s by default). GET /ready on
+  the cluster address answers OK once serving.
 "
     };
 }
@@ -57,24 +60,24 @@ macro_rules! cluster_setup {
     () => {
         "\
 Cluster setup:
-  Publish the Worker to the bucket, then start each instance; restart
-  them after each deploy.
+  Start each instance with the same key and bucket. A wrangler.json
+  joins with --cluster-addr. --data-dir holds its Durable Objects and
+  those of the bucket's deployments.
+
+    $ export WORKERD_CLUSTER_KEY=<secret>      # openssl rand -hex 32
+    $ export WORKERD_CLUSTER_BUCKET=s3://bucket/prefix
+    $ workerd serve --experimental wrangler.json \\
+        --cluster-addr 10.0.0.1:7000 --data-dir /var/lib/workerd
+
+  key is at least 32 bytes, the same everywhere. --cluster-addr is where
+  this instance listens for peers, on a private network; behind NAT,
+  --cluster-advertise is where they reach it. A .capnp config sets
+  these in cluster = (...) instead.
+
+  To serve more Workers on every instance, publish them to the bucket,
+  then restart the instances:
 
     $ workerd deploy --experimental . --bucket s3://bucket/prefix
-    $ workerd serve --experimental instance.capnp config
-
-    # instance.capnp, for a wrangler.json named app
-    using Workerd = import \"/workerd/workerd.capnp\";
-    const config :Workerd.Config = (
-      cluster = (bucket = \"s3://bucket/prefix\", key = \"<secret>\",
-                 address = \"10.0.0.1:7000\"),
-      services = [(name = \"do-storage\",
-                   disk = (path = \"/var/lib/workerd\", writable = true))],
-      sockets = [(name = \"http\", address = \"*:8787\", service = \"app\")],
-    );
-
-  key is at least 32 bytes, the same everywhere (openssl rand -hex 32).
-  address is where peers reach this instance, on a private network.
 "
     };
 }
@@ -169,8 +172,8 @@ Config:
     with --experimental: kv_namespaces, queues, triggers, workflows,
     d1_databases, assets
   Other fields are errors. esbuild (node_modules or PATH) bundles main
-  unless no_bundle is set. State: .wrangler/state/workerd/. A .capnp
-  config also works.
+  unless no_bundle is set. State: .wrangler/state/workerd/, or
+  --data-dir. A .capnp config also works.
 
 Options:
   -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080

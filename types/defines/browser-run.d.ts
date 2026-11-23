@@ -226,17 +226,50 @@ type BrowserRunLinksOptions = BrowserRunCommonOptions & {
 };
 
 type BrowserRunSnapshotFormat =
-  'content' | 'screenshot' | 'markdown' | 'accessibilityTree';
+  | 'content'
+  | 'screenshot'
+  | 'markdown'
+  | 'accessibilityTree'
+  | 'pdf'
+  | 'links'
+  | 'scrape'
+  | 'json';
 
-type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
-  /** Which representations of the page to return. At least two distinct formats
-   * are required; request a single format from its dedicated action instead.
-   * @default ["content","screenshot"]
-   */
-  formats?: BrowserRunSnapshotFormat[];
-  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
-  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, 'encoding'>;
-};
+type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions & {
+    /** Which representations of the page to return. At least two distinct formats
+     * are required; request a single format from its dedicated action instead.
+     * @default ["content","screenshot"]
+     */
+    formats?: BrowserRunSnapshotFormat[];
+    /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+    screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, 'encoding'>;
+    /** CSS selectors to scrape. Required when `formats` includes `scrape`. */
+    elements?: BrowserRunScrapeOptions['elements'];
+    /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+    pdfOptions?: BrowserRunPDFOptions['pdfOptions'];
+    /** When true, only return links that are visible on the page. @default false */
+    visibleLinksOnly?: BrowserRunLinksOptions['visibleLinksOnly'];
+    /** When true, exclude links pointing to external domains. @default false */
+    excludeExternalLinks?: BrowserRunLinksOptions['excludeExternalLinks'];
+    /** When true, prune accessibility nodes that carry no semantic meaning.
+     * @default true
+     */
+    interestingOnly?: BrowserRunAccessibilityTreeOptions['interestingOnly'];
+    /** CSS selector limiting the accessibility tree to the matching element's
+     * subtree.
+     */
+    root?: BrowserRunAccessibilityTreeOptions['root'];
+    /** Natural-language prompt describing what data to extract. Required when
+     * `formats` includes `json`, unless `response_format` is set.
+     */
+    prompt?: string;
+    /** Structured output schema for the AI model. Required when `formats`
+     * includes `json`, unless `prompt` is set.
+     * @see https://developers.cloudflare.com/workers-ai/json-mode/
+     */
+    response_format?: AiTextGenerationResponseFormat;
+  };
 
 /** Options for the `accessibilityTree` quick action. */
 type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
@@ -425,6 +458,14 @@ type BrowserRunSnapshotSuccessResponse = {
     markdown?: string;
     /** Root of the page's accessibility tree. */
     accessibilityTree?: BrowserRunSerializedAXNode;
+    /** Base64-encoded PDF. */
+    pdf?: string;
+    /** Links found on the page. */
+    links?: string[];
+    /** Elements matched by the requested selectors. */
+    scrape?: BrowserRunScrapeSuccessResponse['result'];
+    /** JSON data extracted from the page using an AI model. */
+    json?: Record<string, unknown> | unknown[] | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -825,8 +866,9 @@ declare abstract class BrowserRun {
   /**
    * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including the `formats` to return and
-   * screenshot settings (encoding is always base64).
+   * @param options - Snapshot options: the `formats` to return, plus the
+   * per-format options for screenshots, PDFs, scraped elements, links, the
+   * accessibility tree, and JSON extraction.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**

@@ -241,10 +241,10 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(
   ClearErrorOnReturn clearErrorOnReturn;
 
   if (jwk.kty != "RSA"_kj) return kj::none;
-  auto n = JSG_REQUIRE_NONNULL(jwk.n.map([](auto& str) { return str.asPtr(); }), Error,
+  kj::StringPtr n = JSG_REQUIRE_NONNULL(jwk.n, Error,
       "Invalid RSA key in JSON Web Key; missing or invalid "
       "Modulus parameter (\"n\").");
-  auto e = JSG_REQUIRE_NONNULL(jwk.e.map([](auto& str) { return str.asPtr(); }), Error,
+  kj::StringPtr e = JSG_REQUIRE_NONNULL(jwk.e, Error,
       "Invalid RSA key in JSON Web Key; missing or invalid "
       "Exponent parameter (\"e\").");
 
@@ -262,22 +262,22 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(
   eDecoded.release();
 
   if (keyType == KeyType::PRIVATE) {
-    auto d = JSG_REQUIRE_NONNULL(jwk.d.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr d = JSG_REQUIRE_NONNULL(jwk.d, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "Private Exponent parameter (\"d\").");
-    auto p = JSG_REQUIRE_NONNULL(jwk.p.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr p = JSG_REQUIRE_NONNULL(jwk.p, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "First Prime Factor parameter (\"p\").");
-    auto q = JSG_REQUIRE_NONNULL(jwk.q.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr q = JSG_REQUIRE_NONNULL(jwk.q, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "Second Prime Factor parameter (\"q\").");
-    auto dp = JSG_REQUIRE_NONNULL(jwk.dp.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr dp = JSG_REQUIRE_NONNULL(jwk.dp, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "First Factor CRT Exponent parameter (\"dp\").");
-    auto dq = JSG_REQUIRE_NONNULL(jwk.dq.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr dq = JSG_REQUIRE_NONNULL(jwk.dq, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "Second Factor CRT Exponent parameter (\"dq\").");
-    auto qi = JSG_REQUIRE_NONNULL(jwk.qi.map([](auto& str) { return str.asPtr(); }), Error,
+    kj::StringPtr qi = JSG_REQUIRE_NONNULL(jwk.qi, Error,
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "First CRT Coefficient parameter (\"qi\").");
     auto dBuf = simdutfBase64UrlDecodeChecked(js, d, "Invalid RSA key in JSON Web Key"_kj);

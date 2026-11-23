@@ -472,7 +472,9 @@ class Server: public kj::PtrTarget {
                                paramsWords.size())
                                .as<kj_rs::Rust>())
                        .attach(reports(server));
-    capnp::FlatArrayMessageReader reportMessage(asWords(kj::from<kj_rs::Rust>(outcome.report)));
+    // A report can be larger than capnp's default traversal limit.
+    capnp::FlatArrayMessageReader reportMessage(asWords(kj::from<kj_rs::Rust>(outcome.report)),
+        capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
     report.setGroups(reportMessage.getRoot<bench::BenchReport>().getGroups());
     co_return outcome.passed;
   }
@@ -1168,7 +1170,7 @@ KJ_TEST("Server: a short cluster key is refused") {
   TestServer test(clusterConfig("0123456789abcdef"));
   test.server.allowExperimental();
   test.expectErrors(R"(
-    cluster.key must be at least 32 bytes.
+    cluster.key must be at least 32 bytes. Fix it in the config, or leave it empty and set WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE.
   )"_blockquote);
 }
 
@@ -7170,6 +7172,49 @@ KJ_TEST("Server: bench command") {
                    .wait(test.ws));
     KJ_EXPECT(report.getGroups().size() == 0);
   }
+}
+
+KJ_TEST("Server: bench groups can be larger than capnp's default traversal limit") {
+  setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
+
+  // The case's name is 72 MiB, past the default limit of 8M words (64 MiB) for reading a message.
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  bench(b) { b.run("x".repeat(72 << 20), () => {}, {warmup: 0, batch: 1, samples: 1}); }
+                `}
+            )
+          ]
+        )
+      ),
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  capnp::MallocMessageBuilder paramsMessage;
+  capnp::MallocMessageBuilder reportMessage;
+  auto report = reportMessage.initRoot<bench::BenchReport>();
+  auto params = paramsMessage.initRoot<bench::BenchParams>();
+  params.setSkipStartup(true);
+  KJ_EXPECT_LOG(DBG, "[ BENCH ] hello");
+  KJ_EXPECT_LOG(DBG, "[ DONE ] hello (");
+  KJ_EXPECT(test.server.bench(v8System, *test.config, params.asReader(), report, "hello", "default")
+                .wait(test.ws));
+
+  auto groups = report.getGroups();
+  KJ_ASSERT(groups.size() == 1);
+  KJ_EXPECT(!groups[0].hasError(), groups[0].getError());
+  auto cases = groups[0].getCases();
+  KJ_ASSERT(cases.size() == 1);
+  KJ_EXPECT(cases[0].getStatus() == bench::BenchReport::Case::Status::OK, cases[0].getError());
+  KJ_EXPECT(cases[0].getName().size() == 72 << 20);
 }
 
 // =======================================================================================

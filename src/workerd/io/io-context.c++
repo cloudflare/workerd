@@ -215,7 +215,7 @@ kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
       }
       KJ_UNREACHABLE;
     });
-    auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
+    kj::Maybe<kj::StringPtr> actorIdPtr = actorId;
     AsyncTraceSinks sinks;
     isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
     if (isAsyncTracePerfettoEnabled()) {
@@ -320,9 +320,7 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   }
 
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource());
+      maybeTriggerInvocationSpan, context->getEntropySource());
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
@@ -696,9 +694,8 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
       auto userSpan = request.getRootUserTraceSpan();
       auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
 
-      auto errorInfo =
-          tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
-              error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+      auto errorInfo = tracing::ErrorInfo::fromErrorProperties(
+          kj::str(error.name), kj::str(error.message), error.stack);
       t.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
           kj::mv(errorInfo.stack));
     }
@@ -1641,6 +1638,19 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
   return js.v8Ref(contextHandle);
+}
+
+IoContext::IncomingRequest& IoContext::getIncomingRequestForIoChannels() {
+  auto& current = getCurrentIncomingRequest();
+  if (!util::Autogate::isEnabled(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)) {
+    return current;
+  }
+  for (auto& request: incomingRequests) {
+    if (!request.waitedForWaitUntil) {
+      return request;
+    }
+  }
+  return current;
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {

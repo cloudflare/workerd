@@ -4,8 +4,8 @@
 //! command line), parses the command line, produces the encoded config (C++ compiles schema
 //! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
-//! first adds the deployments in the cluster's bucket to the config ([`deployments`]), and
-//! `deploy` publishes one ([`deploy`]).
+//! first joins a config without a cluster to one with `--cluster-addr` and adds the deployments in
+//! the cluster's bucket to the config ([`deployments`]), and `deploy` publishes one ([`deploy`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
@@ -36,7 +36,10 @@ use workerd_server::entry;
 use workerd_server::run::RunOptions;
 
 use crate::bridge::ffi;
+use crate::config::ClusterError;
+use crate::config::ClusterFlags;
 use crate::config::Config;
+use crate::config::Env;
 use crate::process::Executable;
 use crate::process::Process;
 use crate::socket_fd::InheritedSocket;
@@ -93,13 +96,20 @@ fn run_compiled(
 
     let args: T = parse(T::command());
     check_serve_or_test::<T>(&args.serve_or_test);
+    if args.serve_or_test.data_dir.is_some() {
+        usage_error::<T>(
+            "--data-dir: the config compiled into this executable fixed its directories when it \
+             was compiled. Pass --directory-path to move a disk service.",
+        );
+    }
     let config = Config::from_words(embedded_config).unwrap_or_else(|error| {
         usage_error::<T>(format!("the config compiled into this executable: {error}"))
     });
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    let (config, options) = with_deployments(config, &args.serve_or_test, options, &process);
+    let (config, options) =
+        with_cluster::<T>(config, &args.serve_or_test, options, &process, false);
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -129,9 +139,12 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 config,
                 const_name.const_name,
                 &process,
+                &options,
+                serve_or_test.data_dir.as_deref(),
                 serve_or_test.experimental,
             );
-            let (config, options) = with_deployments(config, &serve_or_test, options, &process);
+            let (config, options) =
+                with_cluster::<T>(config, &serve_or_test, options, &process, true);
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -161,13 +174,21 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(config, None, &process, serve_or_test.experimental);
+            let options = run_options(&serve_or_test);
+            let config = load_config::<T>(
+                config,
+                None,
+                &process,
+                &options,
+                serve_or_test.data_dir.as_deref(),
+                serve_or_test.experimental,
+            );
             entry::test(
                 verbose,
                 config.into_words(),
                 (&serve_or_test).into(),
                 (&args::TestArgs::default()).into(),
-                run_options(&serve_or_test),
+                options,
                 patterns(args::TestFilter::default()),
                 watching(process),
             )
@@ -246,7 +267,15 @@ fn run_deploy(
                 binary: args.binary,
                 config_file,
             };
-            (name, load_config::<T>(config, const_name, &process, true))
+            let config = load_config::<T>(
+                config,
+                const_name,
+                &process,
+                &RunOptions::default(),
+                None,
+                true,
+            );
+            (name, config)
         }
         Err(error) => usage_error::<T>(error),
     };
@@ -290,7 +319,8 @@ fn run_compile(
     }
     let process = Process::new(executable, None, Vec::new());
     // The binary checks `--experimental` when it runs (the server, for bundled modules).
-    let config = load_config::<T>(config, const_name, &process, true);
+    let options = RunOptions::default();
+    let config = load_config::<T>(config, const_name, &process, &options, None, true);
     let written = if config_only {
         config.write_to_stdout()
     } else {
@@ -313,10 +343,16 @@ fn run_test(
     let filter = test.filter.take().unwrap_or_default();
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
     let process = Process::new(executable, watcher, Vec::new());
+    let options = RunOptions {
+        socket_addresses: args::override_map(std::mem::take(&mut test.socket_addr_overrides)),
+        ..run_options(serve_or_test)
+    };
     let config = load_config::<T>(
         config,
         filter.const_name.clone(),
         &process,
+        &options,
+        serve_or_test.data_dir.as_deref(),
         serve_or_test.experimental,
     );
     entry::test(
@@ -324,10 +360,7 @@ fn run_test(
         config.into_words(),
         serve_or_test.into(),
         (&test).into(),
-        RunOptions {
-            socket_addresses: args::override_map(test.socket_addr_overrides),
-            ..run_options(serve_or_test)
-        },
+        options,
         patterns(filter),
         watching(process),
     )
@@ -347,10 +380,13 @@ fn run_bench(
     let filter = bench.filter.take().unwrap_or_default();
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
     let process = Process::new(executable, watcher, Vec::new());
+    let options = run_options(serve_or_test);
     let config = load_config::<T>(
         config,
         filter.test.const_name.clone(),
         &process,
+        &options,
+        serve_or_test.data_dir.as_deref(),
         serve_or_test.experimental,
     );
     entry::bench(
@@ -358,7 +394,7 @@ fn run_bench(
         config.into_words(),
         serve_or_test.into(),
         bench.options(filter.case_pattern),
-        run_options(serve_or_test),
+        options,
         patterns(filter.test),
         watching(process),
     )
@@ -402,14 +438,16 @@ fn release_version() -> &'static str {
 }
 
 /// The config to run: a schema file compiled now (the compiler registers every file it reads with
-/// the process's watcher before reading it), or an encoded message read from a file or stdin.
-/// Exits with a usage error on a problem with the file itself. Parse errors in a schema file are
-/// printed; without `--watch` they end the process, with it the process waits for the files to
-/// change and reloads.
+/// the process's watcher before reading it), a wrangler config translated now for a run with
+/// `options`, or an encoded message read from a file or stdin. Exits with a usage error on a
+/// problem with the file itself. Parse errors in a schema file are printed; without `--watch` they
+/// end the process, with it the process waits for the files to change and reloads.
 fn load_config<T: CommandFactory>(
     config: args::ConfigFileArgs,
     const_name: Option<String>,
     process: &Process,
+    options: &RunOptions,
+    data_dir: Option<&str>,
     experimental: bool,
 ) -> Config {
     let args::ConfigFileArgs {
@@ -417,6 +455,12 @@ fn load_config<T: CommandFactory>(
         binary,
         config_file,
     } = config;
+    if data_dir.is_some() && (binary || !wrangler::is_wrangler_config(&config_file)) {
+        usage_error::<T>(
+            "--data-dir: only a wrangler config keeps its state there. A Cap'n Proto config names \
+             its disk services' directories, or takes them from --directory-path.",
+        );
+    }
     for dir in &import_paths {
         if !std::path::Path::new(dir).is_dir() {
             usage_error::<T>(format!("--import-path={dir}: No such directory."));
@@ -446,7 +490,8 @@ fn load_config<T: CommandFactory>(
         if !std::path::Path::new(&config_file).is_file() {
             usage_error::<T>(format!("{config_file}: No such file."));
         }
-        return wrangler::load(&config_file, process, experimental)
+        let data_dir = data_dir.map(std::path::Path::new);
+        return wrangler::load(&config_file, process, options, data_dir, experimental)
             .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
     }
 
@@ -465,18 +510,39 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Adds cluster deployments to `config` and records their service sources in `options`.
+/// Joins `config` to a cluster with `--cluster-addr` if it has none, `can_join` (not for a
+/// compiled config) and a writable disk service `do-storage`, fills its cluster key and bucket
+/// from the environment ([`Config::with_cluster`]), then adds cluster deployments to `config` and
+/// records their service sources in `options`.
 ///
-/// Deployments are added only with `--experimental`. A public cluster address or an error in
-/// `config` found during composition is a config error. A deployment that does not compose is
-/// skipped. A bucket that cannot be opened or read ends the process, even under `--watch`, because
-/// the cause may lie outside the config files. See `deployments.rs`.
-fn with_deployments(
+/// Only joining happens without `--experimental`, so that the server refuses the cluster as it
+/// refuses one in the config. A public cluster address or an error in `config` found during
+/// composition is a config error. A deployment that does not compose is skipped. A cluster key or
+/// bucket that is missing or whose environment variable is unusable, or a bucket that cannot be
+/// opened or read, ends the process, even under `--watch`, because the cause can lie outside the
+/// config files. See `deployments.rs`.
+fn with_cluster<T: CommandFactory>(
     config: Config,
     serve_or_test: &args::ServeOrTestArgs,
     mut options: RunOptions,
     process: &Process,
+    can_join: bool,
 ) -> (Config, RunOptions) {
+    let flags = ClusterFlags {
+        address: options.cluster_address.as_deref(),
+        advertise: options.cluster_advertise.as_deref(),
+        can_join,
+    };
+    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let environment = serve_or_test.experimental.then_some(&var as Env<'_>);
+    let config = match config.with_cluster(&flags, environment) {
+        Ok(config) => config,
+        Err(ClusterError::Usage(error)) => usage_error::<T>(error),
+        Err(ClusterError::Environment(error)) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
     if !serve_or_test.experimental {
         return (config, options);
     }

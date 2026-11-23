@@ -1199,15 +1199,15 @@ kj::Maybe<kj::String> LegacyWebSocketAdapter::getPreferredExtensions(
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getUrl() {
-  return url.map([](kj::StringPtr value) { return value; });
+  return url;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getProtocol() {
-  return protocol.map([](kj::StringPtr value) { return value; });
+  return protocol;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getExtensions() {
-  return extensions.map([](kj::StringPtr value) { return value; });
+  return extensions;
 }
 
 kj::Maybe<jsg::JsValue> LegacyWebSocketAdapter::deserializeAttachment(jsg::Lock& js) {

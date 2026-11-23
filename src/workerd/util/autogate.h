@@ -134,7 +134,14 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* An actor's outgoing calls use the I/O channels of its newest request that is still running,   \
+     rather than its newest request, which may have returned and be waiting only for background    \
+     work. See IoContext::getIncomingRequestForIoChannels(). */                                    \
+  V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
+  /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
+     instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
+  V(RUST_FAILURE_WORKER_INTERFACE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
