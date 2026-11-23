@@ -1677,7 +1677,9 @@ struct ResourceTypeBuilder {
     prototype->Set(isolate, name, tmpl);
 
     if constexpr (isContext) {
-      if (getSpecCompliantPropertyAttributes(isolate)) {
+      // V8 installs its own DOMException on every global object, and rejects a global template
+      // property of the same name, so hideV8DomExceptionGlobals() installs this one instead.
+      if (getSpecCompliantPropertyAttributes(isolate) && kj::StringPtr(name) != "DOMException"_kj) {
         // Per Web IDL, [Exposed] interface objects must be own properties of the global
         // object with { writable: true, enumerable: false, configurable: true }.  When
         // building the global scope (isContext == true), also install on the instance
@@ -1752,6 +1754,10 @@ struct NewContextOptions {
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
+
+// V8 installs DOMException and QuotaExceededError as own properties of every global object.
+// Removes them, leaving the global's DOMException, if any, the one a JSG_NESTED_TYPE installs.
+void hideV8DomExceptionGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 // Whether TypeWrapper belongs to an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE.
 template <typename TypeWrapper>
@@ -1909,6 +1915,11 @@ class ResourceWrapper {
 
     if (!options.enableTemporal) {
       deleteTemporalGlobals(isolate, context);
+    }
+
+    // A context deserialized from a startup snapshot has the globals the zygote's context had.
+    if (!js.isStartingFromSnapshot()) {
+      hideV8DomExceptionGlobals(isolate, context);
     }
 
     // We need to set the highest used index in every context we create to be a nullptr
