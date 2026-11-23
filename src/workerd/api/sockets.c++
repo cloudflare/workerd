@@ -852,13 +852,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
 
   auto outcome = EventOutcome::OK;
   KJ_TRY {
-    co_await context.run([this, entrypointName, versionInfo = kj::mv(versionInfo),
-                             props = kj::mv(props), isDynamicDispatch](
-                             Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+    co_await context.run(
+        [this, entrypointName, clientAddress = kj::mv(incomingRequest->clientAddress),
+            versionInfo = kj::mv(versionInfo), props = kj::mv(props), isDynamicDispatch](
+            Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
       jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
-      return lock.getGlobalScope().connectUdp(kj::mv(host), channel, lock,
+      return lock.getGlobalScope().connectUdp(kj::mv(host), kj::mv(clientAddress), channel, lock,
           lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
               context.getActor(), isDynamicDispatch));
     });

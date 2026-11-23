@@ -738,6 +738,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   //
   // `channel` is borrowed, not owned.
   kj::Promise<void> connectUdp(kj::String host,
+      kj::Maybe<kj::String> clientAddress,
       DatagramChannel& channel,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
