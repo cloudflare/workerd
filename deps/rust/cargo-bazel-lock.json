@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "6b7b26d7a718abecad1a310b3254c7e9c33f7ce5e7827334361aaa1a0b8caf7e",
+  "checksum": "3166d2ce8c2e245c54021fe02552adb8da94f834dd3338caba549f054c106b81",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -52,6 +52,13 @@
     ],
     "cfg(any())": [],
     "cfg(any(target_arch = \"aarch64\", target_arch = \"x86\", target_arch = \"x86_64\"))": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu"
+    ],
+    "cfg(any(target_arch = \"aarch64\", target_arch = \"x86_64\", target_arch = \"x86\"))": [
       "aarch64-apple-darwin",
       "aarch64-unknown-linux-gnu",
       "x86_64-apple-darwin",
@@ -112,6 +119,7 @@
       "x86_64-pc-windows-msvc",
       "x86_64-unknown-linux-gnu"
     ],
+    "cfg(not(target_has_atomic = \"ptr\"))": [],
     "cfg(not(windows))": [
       "aarch64-apple-darwin",
       "aarch64-unknown-linux-gnu",
@@ -454,6 +462,39 @@
         }
       ],
       "version": "1.0.104"
+    },
+    "arrayvec 0.7.8": {
+      "common_attrs": {
+        "crate_features": [
+          "default",
+          "std"
+        ],
+        "edition": "2018"
+      },
+      "library_target_name": "arrayvec",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "arrayvec",
+      "package_url": "https://github.com/bluss/arrayvec",
+      "repository": {
+        "Http": {
+          "sha256": "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56",
+          "url": "https://static.crates.io/crates/arrayvec/0.7.8/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "arrayvec",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.7.8"
     },
     "ascii 1.1.0": {
       "common_attrs": {
@@ -1615,6 +1656,35 @@
       ],
       "version": "1.1.1"
     },
+    "cmov 0.5.4": {
+      "common_attrs": {
+        "edition": "2024"
+      },
+      "library_target_name": "cmov",
+      "license": "Apache-2.0 OR MIT",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "cmov",
+      "package_url": "https://github.com/RustCrypto/utils",
+      "repository": {
+        "Http": {
+          "sha256": "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a",
+          "url": "https://static.crates.io/crates/cmov/0.5.4/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "cmov",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.5.4"
+    },
     "codespan-reporting 0.13.1": {
       "common_attrs": {
         "crate_features": [
@@ -2312,6 +2382,41 @@
       ],
       "version": "0.7.1"
     },
+    "ctutils 0.4.8": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "cmov 0.5.4",
+            "target": "cmov"
+          }
+        ],
+        "edition": "2024"
+      },
+      "library_target_name": "ctutils",
+      "license": "Apache-2.0 OR MIT",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "ctutils",
+      "package_url": "https://github.com/RustCrypto/utils",
+      "repository": {
+        "Http": {
+          "sha256": "261af4dc7a06ea8a527a8717d8cbba3417530d6ea14e1edb3de6b67806be474f",
+          "url": "https://static.crates.io/crates/ctutils/0.4.8/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "ctutils",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.4.8"
+    },
     "data-encoding 2.11.1": {
       "common_attrs": {
         "crate_features": [
@@ -2616,8 +2721,11 @@
     "digest 0.11.3": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "block-api",
-          "default"
+          "default",
+          "mac",
+          "oid"
         ],
         "deps": [
           {
@@ -2625,9 +2733,17 @@
             "target": "block_buffer"
           },
           {
+            "id": "const-oid 0.10.3",
+            "target": "const_oid"
+          },
+          {
             "alias": "common",
             "id": "crypto-common 0.2.2",
             "target": "crypto_common"
+          },
+          {
+            "id": "ctutils 0.4.8",
+            "target": "ctutils"
           }
         ],
         "edition": "2024"
@@ -2970,6 +3086,14 @@
           {
             "id": "rustls-webpki 0.103.17",
             "target": "webpki"
+          },
+          {
+            "id": "s3s-chunked 0.18.0-alpha.2",
+            "target": "s3s_chunked"
+          },
+          {
+            "id": "s3s-sigv4 0.17.0",
+            "target": "s3s_sigv4"
           },
           {
             "id": "serde 1.0.229",
@@ -4783,6 +4907,84 @@
       ],
       "version": "0.5.3"
     },
+    "hex-simd 0.8.0": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
+          "detect",
+          "std"
+        ],
+        "deps": [
+          {
+            "id": "outref 0.5.2",
+            "target": "outref"
+          },
+          {
+            "id": "vsimd 0.8.0",
+            "target": "vsimd"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "hex_simd",
+      "license": "MIT",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "hex-simd",
+      "package_url": "https://github.com/Nugine/simd",
+      "repository": {
+        "Http": {
+          "sha256": "1f7685beb53fc20efc2605f32f5d51e9ba18b8ef237961d1760169d2290d3bee",
+          "url": "https://static.crates.io/crates/hex-simd/0.8.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "hex_simd",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.8.0"
+    },
+    "hmac 0.13.0": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "digest 0.11.3",
+            "target": "digest"
+          }
+        ],
+        "edition": "2024"
+      },
+      "library_target_name": "hmac",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "hmac",
+      "package_url": "https://github.com/RustCrypto/MACs",
+      "repository": {
+        "Http": {
+          "sha256": "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f",
+          "url": "https://static.crates.io/crates/hmac/0.13.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "hmac",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.13.0"
+    },
     "hstr 4.0.3": {
       "common_attrs": {
         "crate_features": [
@@ -6219,6 +6421,154 @@
       ],
       "version": "0.6.7"
     },
+    "jiff 0.2.46": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "std"
+        ],
+        "deps": {
+          "common": [
+            {
+              "alias": "jcore",
+              "id": "jiff-core 0.1.8",
+              "target": "jiff_core"
+            }
+          ],
+          "selects": {
+            "cfg(not(target_has_atomic = \"ptr\"))": [
+              {
+                "id": "portable-atomic 1.15.0",
+                "target": "portable_atomic"
+              },
+              {
+                "id": "portable-atomic-util 0.2.8",
+                "target": "portable_atomic_util"
+              }
+            ]
+          }
+        },
+        "edition": "2021",
+        "proc_macro_deps": {
+          "common": [],
+          "selects": {
+            "cfg(any())": [
+              {
+                "id": "jiff-static 0.2.46",
+                "target": "jiff_static"
+              }
+            ]
+          }
+        }
+      },
+      "library_target_name": "jiff",
+      "license": "Unlicense OR MIT",
+      "license_file": "LICENSE-MIT",
+      "license_ids": [
+        "MIT",
+        "Unlicense"
+      ],
+      "name": "jiff",
+      "package_url": "https://github.com/BurntSushi/jiff",
+      "repository": {
+        "Http": {
+          "sha256": "175dc66334db3b9ab9985bf8b61cfed50dc16d20964bb47f9e479adcae984a7f",
+          "url": "https://static.crates.io/crates/jiff/0.2.46/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "jiff",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.46"
+    },
+    "jiff-core 0.1.8": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
+          "std",
+          "tz-fat"
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "jiff_core",
+      "license": "Unlicense OR MIT",
+      "license_file": "LICENSE-MIT",
+      "license_ids": [
+        "MIT",
+        "Unlicense"
+      ],
+      "name": "jiff-core",
+      "package_url": "https://github.com/BurntSushi/jiff",
+      "repository": {
+        "Http": {
+          "sha256": "e599b80292e597019b8b3e392de3f4bea2959ddfb8c7dff60e035e9e311a2c1b",
+          "url": "https://static.crates.io/crates/jiff-core/0.1.8/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "jiff_core",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.1.8"
+    },
+    "jiff-static 0.2.46": {
+      "common_attrs": {
+        "deps": [
+          {
+            "alias": "jcore",
+            "id": "jiff-core 0.1.8",
+            "target": "jiff_core"
+          },
+          {
+            "id": "proc-macro2 1.0.107",
+            "target": "proc_macro2"
+          },
+          {
+            "id": "quote 1.0.47",
+            "target": "quote"
+          },
+          {
+            "id": "syn 2.0.119",
+            "target": "syn"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "jiff_static",
+      "license": "Unlicense OR MIT",
+      "license_file": "LICENSE-MIT",
+      "license_ids": [
+        "MIT",
+        "Unlicense"
+      ],
+      "name": "jiff-static",
+      "package_url": "https://github.com/BurntSushi/jiff",
+      "repository": {
+        "Http": {
+          "sha256": "c7b1af7547d47354bc438d797e3854601bde8f8d185780c5ba4ab27afa54f1ba",
+          "url": "https://static.crates.io/crates/jiff-static/0.2.46/download"
+        }
+      },
+      "targets": [
+        {
+          "ProcMacro": {
+            "crate_name": "jiff_static",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.46"
+    },
     "jni 0.22.4": {
       "build_script_attrs": {
         "deps": [
@@ -7294,6 +7644,45 @@
       ],
       "version": "0.31.3"
     },
+    "nom 8.0.0": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
+          "std"
+        ],
+        "deps": [
+          {
+            "id": "memchr 2.8.3",
+            "target": "memchr"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "nom",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "nom",
+      "package_url": "https://github.com/rust-bakery/nom",
+      "repository": {
+        "Http": {
+          "sha256": "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405",
+          "url": "https://static.crates.io/crates/nom/8.0.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "nom",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "8.0.0"
+    },
     "notify 8.2.2": {
       "common_attrs": {
         "crate_features": [
@@ -8351,6 +8740,90 @@
         }
       ],
       "version": "0.2.17"
+    },
+    "portable-atomic 1.15.0": {
+      "build_script_attrs": {},
+      "common_attrs": {
+        "edition": "2018",
+        "extra_deps": [
+          ":build_script_build"
+        ]
+      },
+      "library_target_name": "portable_atomic",
+      "license": "Apache-2.0 OR MIT",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "portable-atomic",
+      "package_url": "https://github.com/taiki-e/portable-atomic",
+      "repository": {
+        "Http": {
+          "sha256": "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85",
+          "url": "https://static.crates.io/crates/portable-atomic/1.15.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "portable_atomic",
+            "crate_root": "src/lib.rs"
+          }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs"
+          }
+        }
+      ],
+      "version": "1.15.0"
+    },
+    "portable-atomic-util 0.2.8": {
+      "build_script_attrs": {},
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "portable-atomic 1.15.0",
+            "target": "portable_atomic"
+          }
+        ],
+        "edition": "2018",
+        "extra_deps": [
+          ":build_script_build"
+        ]
+      },
+      "library_target_name": "portable_atomic_util",
+      "license": "Apache-2.0 OR MIT",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "portable-atomic-util",
+      "package_url": "https://github.com/taiki-e/portable-atomic-util",
+      "repository": {
+        "Http": {
+          "sha256": "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715",
+          "url": "https://static.crates.io/crates/portable-atomic-util/0.2.8/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "portable_atomic_util",
+            "crate_root": "src/lib.rs"
+          }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs"
+          }
+        }
+      ],
+      "version": "0.2.8"
     },
     "potential_utf 0.1.6": {
       "common_attrs": {
@@ -10226,6 +10699,160 @@
       ],
       "version": "1.0.23"
     },
+    "s3s-chunked 0.18.0-alpha.2": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "bytes 1.12.1",
+            "target": "bytes"
+          },
+          {
+            "id": "futures-core 0.3.34",
+            "target": "futures_core"
+          },
+          {
+            "id": "http 1.5.0",
+            "target": "http"
+          },
+          {
+            "id": "memchr 2.8.3",
+            "target": "memchr"
+          },
+          {
+            "id": "pin-project-lite 0.2.17",
+            "target": "pin_project_lite"
+          },
+          {
+            "id": "s3s-sigv4 0.17.0",
+            "target": "s3s_sigv4"
+          },
+          {
+            "id": "sha2 0.11.1",
+            "target": "sha2"
+          },
+          {
+            "id": "thiserror 2.0.21",
+            "target": "thiserror"
+          },
+          {
+            "id": "zeroize 1.9.1",
+            "target": "zeroize"
+          }
+        ],
+        "edition": "2024"
+      },
+      "library_target_name": "s3s_chunked",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "s3s-chunked",
+      "package_url": "https://github.com/Nugine/s3s",
+      "repository": {
+        "Git": {
+          "commitish": {
+            "Rev": "2465a82c5f072f5537c7b4221f047b772511ab37"
+          },
+          "remote": "https://github.com/s3s-project/s3s",
+          "strip_prefix": "crates/s3s-chunked"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "s3s_chunked",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.18.0-alpha.2"
+    },
+    "s3s-sigv4 0.17.0": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "arrayvec 0.7.8",
+            "target": "arrayvec"
+          },
+          {
+            "id": "base64-simd 0.8.0",
+            "target": "base64_simd"
+          },
+          {
+            "id": "hex-simd 0.8.0",
+            "target": "hex_simd"
+          },
+          {
+            "id": "hmac 0.13.0",
+            "target": "hmac"
+          },
+          {
+            "id": "jiff 0.2.46",
+            "target": "jiff"
+          },
+          {
+            "id": "nom 8.0.0",
+            "target": "nom"
+          },
+          {
+            "id": "serde 1.0.229",
+            "target": "serde"
+          },
+          {
+            "id": "sha2 0.11.1",
+            "target": "sha2"
+          },
+          {
+            "id": "smallvec 1.16.5",
+            "target": "smallvec"
+          },
+          {
+            "id": "std-next 0.1.9",
+            "target": "stdx"
+          },
+          {
+            "id": "subtle 2.6.1",
+            "target": "subtle"
+          },
+          {
+            "id": "thiserror 2.0.21",
+            "target": "thiserror"
+          },
+          {
+            "id": "zeroize 1.9.1",
+            "target": "zeroize"
+          }
+        ],
+        "edition": "2024"
+      },
+      "library_target_name": "s3s_sigv4",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "s3s-sigv4",
+      "package_url": "https://github.com/Nugine/s3s",
+      "repository": {
+        "Git": {
+          "commitish": {
+            "Rev": "2465a82c5f072f5537c7b4221f047b772511ab37"
+          },
+          "remote": "https://github.com/s3s-project/s3s",
+          "strip_prefix": "crates/s3s-sigv4"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "s3s_sigv4",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.17.0"
+    },
     "same-file 1.0.6": {
       "common_attrs": {
         "deps": {
@@ -10961,6 +11588,60 @@
       ],
       "version": "0.11.0"
     },
+    "sha2 0.11.1": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
+          "oid"
+        ],
+        "deps": {
+          "common": [
+            {
+              "id": "cfg-if 1.0.5",
+              "target": "cfg_if"
+            },
+            {
+              "id": "digest 0.11.3",
+              "target": "digest"
+            }
+          ],
+          "selects": {
+            "cfg(any(target_arch = \"aarch64\", target_arch = \"x86_64\", target_arch = \"x86\"))": [
+              {
+                "id": "cpufeatures 0.3.1",
+                "target": "cpufeatures"
+              }
+            ]
+          }
+        },
+        "edition": "2024"
+      },
+      "library_target_name": "sha2",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "sha2",
+      "package_url": "https://github.com/RustCrypto/hashes",
+      "repository": {
+        "Http": {
+          "sha256": "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19",
+          "url": "https://static.crates.io/crates/sha2/0.11.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "sha2",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.11.1"
+    },
     "shlex 2.0.1": {
       "common_attrs": {
         "crate_features": [
@@ -11381,6 +12062,49 @@
       ],
       "version": "1.1.0"
     },
+    "std-next 0.1.9": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
+          "std"
+        ],
+        "deps": [
+          {
+            "id": "simdutf8 0.1.5",
+            "target": "simdutf8"
+          },
+          {
+            "id": "thiserror 2.0.21",
+            "target": "thiserror"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "stdx",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "std-next",
+      "package_url": "https://github.com/Nugine/std-next",
+      "repository": {
+        "Http": {
+          "sha256": "04082e93ed1a06debd9148c928234b46d2cf260bc65f44e1d1d3fa594c5beebc",
+          "url": "https://static.crates.io/crates/std-next/0.1.9/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "stdx",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.1.9"
+    },
     "strck 1.0.0": {
       "common_attrs": {
         "crate_features": [
@@ -11461,6 +12185,11 @@
     },
     "subtle 2.6.1": {
       "common_attrs": {
+        "crate_features": [
+          "default",
+          "i128",
+          "std"
+        ],
         "edition": "2018"
       },
       "library_target_name": "subtle",
@@ -15986,6 +16715,8 @@
     "rustls-platform-verifier 0.7.1",
     "rustls-webpki 0.103.17",
     "rustversion 1.0.23",
+    "s3s-chunked 0.18.0-alpha.2",
+    "s3s-sigv4 0.17.0",
     "serde 1.0.229",
     "serde_json 1.0.154",
     "sha1 0.11.0",

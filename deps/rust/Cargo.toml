@@ -92,6 +92,12 @@ rustls-platform-verifier = "0.7"
 # kj-hyper's TLS direct trust recognizes webpki's chain-building errors, and checks a directly
 # trusted certificate's validity and key usage itself.
 rustls-webpki = { version = "0.103", default-features = false }
+# AwsChunkedDecoderStream: the aws-chunked framing of S3 streaming uploads, and the SigV4
+# chunk signatures of signed ones. The decoder is not on crates.io yet (its 0.18.0-alpha.1
+# there is an empty placeholder), so it comes from the repository, pinned to a commit.
+s3s-chunked = { git = "https://github.com/s3s-project/s3s", rev = "2465a82c5f072f5537c7b4221f047b772511ab37" }
+# The x-amz-date type that s3s-chunked's signing context takes.
+s3s-sigv4 = { git = "https://github.com/s3s-project/s3s", rev = "2465a82c5f072f5537c7b4221f047b772511ab37" }
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
