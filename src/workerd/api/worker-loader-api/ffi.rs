@@ -13,8 +13,6 @@
 use jsg::ToJS;
 use jsg::v8;
 
-use crate::DateValidation;
-
 #[cxx::bridge(namespace = "workerd::api")]
 mod bridge {
     #[namespace = "workerd::rust::jsg"]
@@ -26,11 +24,11 @@ mod bridge {
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
     }
 
-    /// C++ `CompatibilityDateValidation`.
-    enum WorkerLoaderDateValidation {
-        CodeVersion,
-        CurrentDateForCloudflare,
-        FutureForTest,
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/compatibility-date.h");
+
+        type CompatibilityDateValidation = worker_loader_interop::CompatibilityDateValidation;
     }
 
     extern "Rust" {
@@ -38,7 +36,7 @@ mod bridge {
         unsafe fn worker_loader_new(
             isolate: *mut Isolate,
             channel: u32,
-            date_validation: WorkerLoaderDateValidation,
+            date_validation: CompatibilityDateValidation,
         ) -> MaybeLocal;
     }
 }
@@ -48,15 +46,8 @@ mod bridge {
 unsafe fn worker_loader_new(
     isolate: *mut bridge::Isolate,
     channel: u32,
-    date_validation: bridge::WorkerLoaderDateValidation,
+    date_validation: bridge::CompatibilityDateValidation,
 ) -> bridge::MaybeLocal {
-    let date_validation = match date_validation {
-        bridge::WorkerLoaderDateValidation::CurrentDateForCloudflare => {
-            DateValidation::CurrentDateForCloudflare
-        }
-        bridge::WorkerLoaderDateValidation::FutureForTest => DateValidation::FutureForTest,
-        _ => DateValidation::CodeVersion,
-    };
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {

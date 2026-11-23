@@ -1,0 +1,48 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The worker-loader case of startup-snapshot-bindings-test.js, with the startup-snapshot autogate
+# turned on here, so every variant starts from a snapshot: the @ variant with the C++
+# WorkerLoader, and the @all-autogates variant, which also turns the rust-worker-loader autogate
+# on, with the Rust one.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "startup-snapshot-bindings-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "SNAPSHOT_REQUIRED", json = "true"),
+          (name = "worker-loader", service = "worker-loader"),
+        ],
+      )
+    ),
+    ( name = "worker-loader",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"worker-loader\""),
+          (name = "LOADER", workerLoader = ()),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-startup-snapshot",
+  ],
+);

@@ -29,6 +29,7 @@ use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use kj_rs::KjOwn;
+use worker_loader_interop::CompatibilityDateValidation;
 use worker_loader_interop::Limits;
 use worker_loader_interop::SourceBuilder;
 use worker_loader_interop::WorkerStubHandle;
@@ -38,16 +39,6 @@ use crate::code::Wasm;
 use crate::validate::ErrorKind;
 use crate::validate::ModuleKind;
 use crate::validate::ValidationError;
-
-/// The compatibility dates a `WorkerLoader` accepts, as C++ `CompatibilityDateValidation`,
-/// whose values these are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum DateValidation {
-    CodeVersion = 0,
-    CurrentDateForCloudflare = 1,
-    FutureForTest = 2,
-}
 
 fn limits_to_ffi(limits: Option<&ResourceLimits>) -> Limits {
     Limits {
@@ -64,7 +55,7 @@ fn limits_to_ffi(limits: Option<&ResourceLimits>) -> Limits {
 #[derive(Clone, Copy, Debug)]
 pub struct LoaderState {
     channel: u32,
-    date_validation: DateValidation,
+    date_validation: CompatibilityDateValidation,
 }
 
 // Plain data.
@@ -78,7 +69,7 @@ pub struct WorkerLoader {
 
 impl WorkerLoader {
     #[must_use]
-    pub fn new(channel: u32, date_validation: DateValidation) -> Self {
+    pub fn new(channel: u32, date_validation: CompatibilityDateValidation) -> Self {
         Self {
             state: LoaderState {
                 channel,
@@ -97,15 +88,15 @@ impl WorkerLoader {
     pub fn get<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
-        name: jsg::NullOrUndefined<String>,
-        get_code: v8::Local<'s, v8::Function>,
+        name: jsg::Nullable<String>,
+        get_code: CodeFunction<'s>,
     ) -> jsg::Result<jsg::Rc<WorkerStub>> {
         let io_context = IoContext::current(lock)?;
         let name = match name {
-            jsg::NullOrUndefined::Some(name) => Some(name),
-            _ => None,
+            jsg::Nullable::Some(name) => Some(name),
+            jsg::Nullable::Null => None,
         };
-        let callback = code_callback(lock, &io_context, self.state, get_code)?;
+        let callback = code_callback(lock, &io_context, self.state, get_code.0)?;
         let handle = worker_loader_interop::get(
             lock,
             &io_context,
@@ -231,8 +222,47 @@ fn entrypoint_options(
     Ok((props, limits_to_ffi(options.limits.as_ref())))
 }
 
+/// `get()`'s `getCode`: a function, which C++ declares as a `jsg::Function`, under the name C++
+/// JSG gives that type in its errors.
+pub struct CodeFunction<'s>(v8::Local<'s, v8::Function>);
+
+impl jsg::TypeInfo for CodeFunction<'_> {
+    fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        <v8::Function as jsg::TypeInfo>::describe(cx)
+    }
+}
+
+impl<'s> FromJS<'s> for CodeFunction<'s> {
+    type ResultType = Self;
+
+    // Checking for a function runs no script.
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
+    fn type_name() -> String {
+        "function".to_owned()
+    }
+
+    fn from_js(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<Self> {
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            jsg::Error::new_type_error(format!("Expected function but got {}", value.type_of(lock)))
+        })
+    }
+
+    fn try_from_js(
+        _lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<Option<Self>> {
+        Ok(v8::Local::<v8::Function>::try_from(value).ok().map(Self))
+    }
+}
+
 /// The callback that `get()` hands to C++, which calls `get_code` in `io_context` each time the
-/// Worker needs loading, and converts what it resolves to in the same `IoContext`.
+/// Worker needs loading, and makes the Worker's source in the same `IoContext`.
+///
+/// `get_code` is called and what it returns converted as C++ JSG calls a
+/// `jsg::Function<jsg::Promise<WorkerCode>()>`: with the global object as `this`, and with the
+/// result converted to a `jsg::Promise<WorkerCode>`, so a promise's value is converted in a
+/// reaction of its own, before the one that makes the source, and anything else at once.
 ///
 /// The callback holds the `IoContext` weakly, as C++ does: the `WorkerStub` and the stubs it
 /// vends hold it until they are collected, and a strong one would keep the request open, which
@@ -245,12 +275,17 @@ fn code_callback<'s>(
 ) -> jsg::Result<worker_loader_interop::CodeCallback> {
     let get_code = get_code.to_global(lock);
     let callback = io_context.make_reentry_callback_weak(move |lock, context| {
-        let code = get_code.as_local(lock).call(lock, None, &[])?;
-        let code = v8::Promise::resolved(lock, code)?;
-        // `getCode()` may resolve its promise from another request: the conversion runs only in
+        let this = lock.global_object().into();
+        let code = get_code.as_local(lock).call(lock, Some(this), &[])?;
+        let Some(code) = jsg::Promise::<WorkerCode>::try_from_js(lock, code)? else {
+            return Err(jsg::Error::new_incorrect_type(
+                jsg::TypeErrorContext::CallbackReturn,
+                &jsg::Promise::<WorkerCode>::type_name(),
+            ));
+        };
+        // `getCode()` may resolve its promise from another request: the source is made only in
         // this `IoContext`, as C++ `awaitJs(js, promise, func)` ensures.
-        context.await_js_local(lock, code, move |lock, context, value| {
-            let code = WorkerCode::from_js(lock, value)?;
+        context.await_js_promise_local(lock, code, move |lock, context, code| {
             to_source(lock, context, state, code)
         })
     })?;
@@ -310,7 +345,7 @@ fn to_source<'s>(
         &compat_date,
         flags.as_deref().unwrap_or_default(),
         allow_experimental,
-        state.date_validation as u8,
+        state.date_validation,
     )?;
 
     if let Some(env) = env {

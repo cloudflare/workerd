@@ -189,16 +189,13 @@ bool source_builder_compile_compat_flags(v8::Isolate* isolate,
     ::rust::Str compatDate,
     ::rust::Slice<const ::rust::String> flags,
     bool allowExperimental,
-    uint8_t dateValidation) {
+    CompatibilityDateValidation dateValidation) {
   return jsg_cpp::callCpp(isolate, [&](jsg::Lock& js) {
     auto date = kj::str(kj::ArrayPtr<const char>(compatDate.data(), compatDate.size()));
     auto ownFlags = KJ_MAP(flag, flags) {
       return kj::str(kj::ArrayPtr<const char>(flag.data(), flag.size()));
     };
-    KJ_REQUIRE(
-        dateValidation <= static_cast<uint8_t>(CompatibilityDateValidation::FUTURE_FOR_TEST));
-    builder.compileCompatFlags(js, date, ownFlags, allowExperimental,
-        static_cast<CompatibilityDateValidation>(dateValidation));
+    builder.compileCompatFlags(js, date, ownFlags, allowExperimental, dateValidation);
   });
 }
 

@@ -165,3 +165,157 @@ export let manyModules = {
     assert.strictEqual(await response.text(), 'bytes 781');
   },
 };
+
+function respond(text) {
+  return code({
+    modules: {
+      'main.js': `export default { fetch() { return new Response(${JSON.stringify(text)}); } }`,
+    },
+  });
+}
+
+async function fetchText(worker) {
+  const response = await worker.getEntrypoint().fetch('http://x/');
+  return response.text();
+}
+
+// A `SharedArrayBuffer`, or a view of one, is bytes for a `data` or `wasm` module, as C++ JSG
+// takes a `kj::Array<const byte>`.
+export let sharedArrayBuffers = {
+  async test(ctrl, env) {
+    const shared = (bytes) => {
+      const buffer = new SharedArrayBuffer(bytes.byteLength);
+      new Uint8Array(buffer).set(bytes);
+      return buffer;
+    };
+    const text = new TextEncoder().encode('shared');
+    const worker = env.loader.load(
+      code({
+        modules: {
+          'main.js': `
+            import bytes from "a.bin";
+            import view from "b.bin";
+            import wasm from "w.wasm";
+            export default {
+              fetch() {
+                const add = new WebAssembly.Instance(wasm).exports.add;
+                const decode = (b) => new TextDecoder().decode(b);
+                return new Response(decode(bytes) + " " + decode(view) + " " + add(2, 3));
+              }
+            }`,
+          'a.bin': { data: shared(text) },
+          'b.bin': { data: new Uint8Array(shared(text), 1, 4) },
+          'w.wasm': { wasm: shared(WASM_ADD_BYTES) },
+        },
+      })
+    );
+    assert.strictEqual(await fetchText(worker), 'shared hare 5');
+  },
+};
+
+// `get()` takes a name, which may be `null` or `undefined` but not missing, as C++ JSG converts a
+// `kj::Maybe<kj::String>` parameter.
+export let getArguments = {
+  async test(ctrl, env) {
+    assert.throws(() => env.loader.get(), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'get' on 'WorkerLoader': parameter 1 is not of type 'string'.",
+    });
+    assert.throws(() => env.loader.get(null), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'get' on 'WorkerLoader': parameter 2 is not of type 'function'.",
+    });
+    const worker = env.loader.get(undefined, () => respond('unnamed'));
+    assert.strictEqual(await fetchText(worker), 'unnamed');
+  },
+};
+
+// `getCode()` is called with the global object as `this`, as C++ JSG calls a `jsg::Function`.
+export let getCodeThis = {
+  async test(ctrl, env) {
+    let thisIsGlobal;
+    const worker = env.loader.get('get-code-this', function () {
+      thisIsGlobal = this === globalThis;
+      return respond('called');
+    });
+    assert.strictEqual(await fetchText(worker), 'called');
+    assert.strictEqual(thisIsGlobal, true);
+  },
+};
+
+// What `getCode()` returns converts as C++ JSG converts a callback's `jsg::Promise<WorkerCode>`:
+// a promise to what it resolves to, a thenable to what it resolves to only under
+// `unwrap_custom_thenables`, and anything else to `WorkerCode` itself.
+export let getCodeResults = {
+  async test(ctrl, env) {
+    assert.strictEqual(
+      await fetchText(env.loader.get('plain', () => respond('plain'))),
+      'plain'
+    );
+    assert.strictEqual(
+      await fetchText(
+        env.loader.get('promise', async () => respond('promise'))
+      ),
+      'promise'
+    );
+
+    const thenable = {
+      ...respond('the thenable itself'),
+      then(resolve) {
+        resolve(respond('what it resolves to'));
+      },
+    };
+    assert.strictEqual(
+      await fetchText(env.loader.get('thenable', () => thenable)),
+      env.unwrapThenables ? 'what it resolves to' : 'the thenable itself'
+    );
+
+    await assert.rejects(fetchText(env.loader.get('number', () => 5)), {
+      name: 'TypeError',
+      message: "Callback returned incorrect type; expected 'Promise'",
+    });
+    await assert.rejects(
+      fetchText(env.loader.get('async-number', async () => 5)),
+      {
+        name: 'TypeError',
+        message:
+          "Incorrect type for Promise: the Promise did not resolve to 'WorkerCode'.",
+      }
+    );
+  },
+};
+
+// A promise from `getCode()` is converted to `WorkerCode` in a reaction of its own, and the
+// Worker's source, which serializes `env`, is made in the next one, as C++ JSG converts the
+// promise before `IoContext::awaitJs()` reacts to it.
+export let getCodeConversionOrder = {
+  async test(ctrl, env) {
+    const log = [];
+    const worker = env.loader.get('conversion-order', () => {
+      queueMicrotask(() => log.push('queued by getCode'));
+      return Promise.resolve({
+        ...respond('ordered'),
+        get compatibilityDate() {
+          log.push('convert');
+          queueMicrotask(() => log.push('queued by conversion'));
+          return '2025-01-01';
+        },
+        env: {
+          get value() {
+            log.push('serialize env');
+            return 1;
+          },
+        },
+      });
+    });
+    assert.strictEqual(await fetchText(worker), 'ordered');
+    assert.deepStrictEqual(log, [
+      'queued by getCode',
+      'convert',
+      'queued by conversion',
+      'serialize env',
+    ]);
+  },
+};

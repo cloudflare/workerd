@@ -39,6 +39,23 @@ pub mod bridge {
         Wasm,
     }
 
+    /// C++ `CompatibilityDateValidation` (`workerd/io/compatibility-date.h`): the compatibility
+    /// dates a Worker Loader accepts.
+    #[namespace = "workerd"]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(i32)]
+    enum CompatibilityDateValidation {
+        CODE_VERSION,
+        CURRENT_DATE_FOR_CLOUDFLARE,
+        FUTURE_FOR_TEST,
+    }
+
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/io/compatibility-date.h");
+        type CompatibilityDateValidation;
+    }
+
     /// C++ `kj::Maybe<ResourceLimits>`: `present` says whether there are limits at all.
     struct Limits {
         present: bool,
@@ -124,7 +141,7 @@ pub mod bridge {
             compat_date: &str,
             flags: &[String],
             allow_experimental: bool,
-            date_validation: u8,
+            date_validation: CompatibilityDateValidation,
         ) -> bool;
         unsafe fn source_builder_inherit_global_outbound(
             isolate: *mut Isolate,
@@ -190,6 +207,7 @@ pub mod bridge {
     impl KjOwn<WorkerStubHandle> {}
 }
 
+pub use bridge::CompatibilityDateValidation;
 pub use bridge::Limits;
 pub use bridge::ModuleKind;
 pub use bridge::SourceBuilder;
@@ -277,8 +295,7 @@ impl SourceBuilder {
     }
 
     /// Compiles the code's compatibility date and flags with C++ `compileCompatibilityFlags()`,
-    /// as the C++ Worker Loader does. `date_validation` is a C++
-    /// `CompatibilityDateValidation`.
+    /// as the C++ Worker Loader does.
     ///
     /// # Errors
     /// A pending error with the compiler's first error, as C++ Worker Loader throws it.
@@ -288,7 +305,7 @@ impl SourceBuilder {
         compat_date: &str,
         flags: &[String],
         allow_experimental: bool,
-        date_validation: u8,
+        date_validation: CompatibilityDateValidation,
     ) -> jsg::Result<()> {
         jsg_cpp::call_cpp(lock, |isolate| {
             // SAFETY: `call_cpp` calls the shim with the lock's isolate.

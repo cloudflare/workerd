@@ -22,7 +22,8 @@
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
 
 #include <rust/cxx.h>
-#include <v8.h>
+#include <v8-isolate.h>
+#include <v8-wasm.h>
 
 #include <cstdint>
 
@@ -127,13 +128,13 @@ bool source_builder_add_compiled_wasm(v8::Isolate* isolate,
     ::rust::String name,
     kj::Own<CompiledWasmModule> module);
 
-// builder.compileCompatFlags(). `dateValidation` is a CompatibilityDateValidation.
+// builder.compileCompatFlags().
 bool source_builder_compile_compat_flags(v8::Isolate* isolate,
     SourceBuilder& builder,
     ::rust::Str compatDate,
     ::rust::Slice<const ::rust::String> flags,
     bool allowExperimental,
-    uint8_t dateValidation);
+    CompatibilityDateValidation dateValidation);
 
 // Has the loaded Worker inherit the calling Worker's global outbound:
 // getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL).

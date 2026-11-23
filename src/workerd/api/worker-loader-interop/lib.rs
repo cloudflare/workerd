@@ -14,6 +14,7 @@
 mod ffi;
 
 pub use ffi::CodeCallback;
+pub use ffi::CompatibilityDateValidation;
 pub use ffi::Limits;
 pub use ffi::ModuleKind;
 pub use ffi::SourceBuilder;

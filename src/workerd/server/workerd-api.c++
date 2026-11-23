@@ -755,7 +755,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       if (util::Autogate::isEnabled(util::AutogateKey::RUST_WORKER_LOADER)) {
         return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
             api::worker_loader_new(lock.v8Isolate, global.getWorkerLoader(),
-                api::WorkerLoaderDateValidation::CodeVersion)));
+                CompatibilityDateValidation::CODE_VERSION)));
       }
       return lock.wrap(context,
           lock.alloc<api::WorkerLoader>(

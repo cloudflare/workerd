@@ -135,6 +135,11 @@ async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
   // snapshot says whether the pipeline is on in this variant.
   const pipelineOn = unsafe.startedFromStartupSnapshot();
+  // A config that turns the startup-snapshot autogate on itself requires the pipeline in every
+  // variant.
+  if (env.SNAPSHOT_REQUIRED) {
+    strictEqual(pipelineOn, true, 'runner: snapshotUsed');
+  }
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
@@ -143,7 +148,9 @@ async function test(ctrl, env) {
   // Workers.
   const fallback = ['rpc-property', 'wrapped', 'crypto-key'];
 
+  // A config may bind only some of the cases.
   const run = async (name, expectedSnapshotUsed) => {
+    if (!(name in env)) return;
     const response = await env[name].fetch('http://case/');
     const r = await response.json();
     strictEqual(r.mode, name);

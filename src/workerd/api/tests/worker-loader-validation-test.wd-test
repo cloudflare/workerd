@@ -1,7 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 # The same tests under each setting of `dont_substitute_null_on_type_error`, which changes how a
-# `globalOutbound` of the wrong type converts.
+# `globalOutbound` of the wrong type converts, and of `unwrap_custom_thenables`, which changes how
+# a thenable that `getCode()` returns converts.
 const unitTests :Workerd.Config = (
   services = [
     ( name = "worker-loader-validation-test",
@@ -9,10 +10,16 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "worker-loader-validation-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "dont_substitute_null_on_type_error"],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "dont_substitute_null_on_type_error",
+          "unwrap_custom_thenables",
+        ],
         bindings = [
           (name = "loader", workerLoader = ()),
           (name = "noSubstituteNull", json = "true"),
+          (name = "unwrapThenables", json = "true"),
         ],
       )
     ),
@@ -21,10 +28,16 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "worker-loader-validation-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "substitute_null_on_type_error"],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "substitute_null_on_type_error",
+          "no_unwrap_custom_thenables",
+        ],
         bindings = [
           (name = "loader", workerLoader = ()),
           (name = "noSubstituteNull", json = "false"),
+          (name = "unwrapThenables", json = "false"),
         ],
       )
     ),

@@ -5,7 +5,10 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 # otherwise.
 wd_rust_crate(
     name = "worker-loader-api",
-    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io:compatibility-date",
+    ],
     cxx_bridge_hdrs = [],
     cxx_bridge_src = "ffi.rs",
     cxx_bridge_visibility = ["//visibility:public"],

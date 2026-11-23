@@ -11,14 +11,18 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 
-/// The bytes of an `ArrayBuffer` or an `ArrayBufferView`, copied out of the V8 backing store,
-/// which a resizable or transferable buffer can lose before the Worker is compiled.
+/// The bytes of an `ArrayBufferView`, an `ArrayBuffer` or a `SharedArrayBuffer`, as C++ JSG
+/// takes a `kj::Array<const byte>`, copied out of the V8 backing store, which a resizable or
+/// transferable buffer can lose before the Worker is compiled.
 fn bytes_of(value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
+        return Some(view.to_vec());
+    }
     if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
         return Some(buffer.to_vec());
     }
-    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
-        return Some(view.to_vec());
+    if let Ok(buffer) = v8::Local::<v8::SharedArrayBuffer>::try_from(value) {
+        return Some(buffer.to_vec());
     }
     None
 }
