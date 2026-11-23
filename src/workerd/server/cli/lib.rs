@@ -525,10 +525,25 @@ fn with_environment(config: Config) -> Config {
         })
 }
 
+/// The value of the environment variable `name` for [`Config::with_cluster`]: `None` when it is
+/// unset or empty. One that is not UTF-8 ends the process, as an unusable
+/// `WORKERD_SHUTDOWN_DELAY_MS` does, rather than count as unset.
+fn cluster_var(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) => Some(value).filter(|value| !value.is_empty()),
+        Err(std::env::VarError::NotPresent) => None,
+        // The value is not shown: it may be the cluster key.
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("{name}: not UTF-8 text.");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Joins `config` to a cluster with `--cluster-addr` if it has none, `can_join` (not for a
-/// compiled config) and a writable disk service `do-storage`, fills its cluster key and bucket
-/// from the environment ([`Config::with_cluster`]), then adds cluster deployments to `config` and
-/// records their service sources in `options`.
+/// compiled config) and a writable disk service `do-storage`, takes its cluster key, bucket and
+/// stop timeout from the environment where it sets them ([`Config::with_cluster`]), then adds
+/// cluster deployments to `config` and records their service sources in `options`.
 ///
 /// Only joining happens without `--experimental`, so that the server refuses the cluster as it
 /// refuses one in the config. A public cluster address or an error in `config` found during
@@ -548,8 +563,9 @@ fn with_cluster<T: CommandFactory>(
         advertise: options.cluster_advertise.as_deref(),
         can_join,
     };
-    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    let environment = serve_or_test.experimental.then_some(&var as Env<'_>);
+    let environment = serve_or_test
+        .experimental
+        .then_some(&cluster_var as Env<'_>);
     let config = match config.with_cluster(&flags, environment) {
         Ok(config) => config,
         Err(ClusterError::Usage(error)) => usage_error::<T>(error),

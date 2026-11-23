@@ -452,6 +452,126 @@ fn a_config_joins_and_takes_the_environment_in_one_pass() {
     assert!(error.starts_with("cluster.key is not set."), "{error}");
 }
 
+/// A config with a cluster with `KEY` and a bucket, and with `stopTimeoutMs` set to `timeout`, if
+/// any.
+fn stop_timeout_config(timeout: Option<u32>) -> Config {
+    let mut message = capnp::message::Builder::new_default();
+    let mut root = message.init_root::<config::Builder>();
+    root.reborrow().init_services(1).get(0).set_name("main");
+    let mut cluster = root.init_cluster();
+    cluster.set_key(KEY);
+    cluster.set_bucket("s3://bucket/prefix");
+    cluster.set_address("127.0.0.1:0");
+    if let Some(timeout) = timeout {
+        cluster.set_stop_timeout_ms(timeout);
+    }
+    Config(words_from_bytes(&capnp::serialize::write_message_to_words(
+        &message,
+    )))
+}
+
+/// The cluster's `stopTimeoutMs` in `config`.
+fn stop_timeout_of(config: &Config) -> u32 {
+    read(config)
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_cluster()
+        .unwrap()
+        .get_stop_timeout_ms()
+}
+
+#[test]
+fn cluster_stop_timeout_in_environment_overrides_config() {
+    for configured in [None, Some(20_000)] {
+        for (value, timeout) in [
+            ("30000", 30_000),
+            ("8000", 8000),
+            ("0", 0),
+            ("3600000", 3_600_000),
+            // Trailing whitespace, such as a file's final newline, is trimmed.
+            ("30000\n", 30_000),
+        ] {
+            let config = stop_timeout_config(configured)
+                .fill(env(&[(CLUSTER_STOP_TIMEOUT_MS, value)]))
+                .unwrap();
+            assert_eq!(
+                stop_timeout_of(&config),
+                timeout,
+                "{configured:?} {value:?}"
+            );
+            // The rest of the cluster is kept.
+            assert_eq!(
+                cluster_of(&config),
+                (KEY.to_owned(), "s3://bucket/prefix".to_owned())
+            );
+        }
+    }
+}
+
+#[test]
+fn cluster_stop_timeout_unset_or_blank_in_environment_keeps_config() {
+    for configured in [None, Some(20_000)] {
+        for vars in [vec![], vec![(CLUSTER_STOP_TIMEOUT_MS, " \n")]] {
+            let config = stop_timeout_config(configured);
+            let before = config.0.clone();
+            let config = config.fill(env(&vars)).unwrap();
+            assert_eq!(config.0, before, "{configured:?} {vars:?}");
+        }
+    }
+}
+
+#[test]
+fn unusable_cluster_stop_timeout_in_environment_is_an_error() {
+    for value in [
+        "abc",
+        "-1",
+        "+20",
+        "1.5",
+        "8s",
+        " 20",
+        "3600001",
+        "99999999999",
+    ] {
+        for configured in [None, Some(20_000)] {
+            let Err(error) =
+                stop_timeout_config(configured).fill(env(&[(CLUSTER_STOP_TIMEOUT_MS, value)]))
+            else {
+                panic!("{value:?} accepted over {configured:?}");
+            };
+            assert_eq!(
+                error,
+                format!(
+                    "WORKERD_CLUSTER_STOP_TIMEOUT_MS={value}: not a whole number of milliseconds \
+                     from 0 to 3600000 (an hour)."
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn cluster_stop_timeout_applies_to_a_joined_cluster_only_with_a_cluster() {
+    let vars = [
+        (CLUSTER_KEY, KEY),
+        (CLUSTER_BUCKET, "s3://bucket/prefix"),
+        (CLUSTER_STOP_TIMEOUT_MS, "30000"),
+    ];
+    let var = env(&vars);
+    let flags = ClusterFlags {
+        address: Some("10.0.0.4:7000"),
+        advertise: None,
+        can_join: true,
+    };
+    let config = joinable_config().with_cluster(&flags, Some(&var)).unwrap();
+    assert_eq!(stop_timeout_of(&config), 30_000);
+
+    // A config that joins no cluster is unchanged.
+    let config = cluster_config(None);
+    let before = config.0.clone();
+    let config = config.fill(env(&vars)).unwrap();
+    assert_eq!(config.0, before);
+}
+
 #[test]
 fn a_config_without_cluster_storage_cannot_join_a_cluster() {
     let expected = "--cluster-addr: the config has no writable disk service named `do-storage`, \

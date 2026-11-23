@@ -366,6 +366,13 @@ struct ClusterConfig {
   # serves as before and keeps its objects, but `GET /ready` answers 503: for load balancers that go
   # on sending requests for a while, as a cloud load balancer in front of Kubernetes does. The
   # supervisor's grace period must then cover the delay plus this timeout.
+  #
+  # `serve`, and a binary that `workerd compile` builds, take this from the environment variable
+  # `WORKERD_CLUSTER_STOP_TIMEOUT_MS` instead when that is set, as they take
+  # `Config.shutdownDelayMs` from `WORKERD_SHUTDOWN_DELAY_MS`, so the two timings that the grace
+  # period must cover are set in one place. A blank variable counts as unset. It holds a whole
+  # number of milliseconds in digits, and trailing whitespace is ignored; any other value, or one
+  # above 3600000 (an hour), ends the process at startup.
 
   unsafeTimeDivisor @7 :UInt32 = 1;
   # For tests: divides by this the times that a takeover and a stop wait out, which tests would

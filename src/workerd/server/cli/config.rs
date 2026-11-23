@@ -91,10 +91,13 @@ impl Config {
     /// `--cluster-addr` overrides its address. A config without either is unchanged, and then
     /// `flags.advertise`, the value of `--cluster-advertise`, is an error.
     ///
-    /// Then, with `var`, the cluster's `key` and `bucket` are taken from the environment where it
-    /// sets them, over the config's. See `ClusterConfig` in workerd.capnp. `var` reads an
+    /// Then, with `var`, the cluster's `key`, `bucket` and `stopTimeoutMs` are taken from the
+    /// environment where it sets them, over the config's: the key and bucket from
+    /// [`CLUSTER_KEY`] or [`CLUSTER_KEY_FILE`] and [`CLUSTER_BUCKET`], the stop timeout from
+    /// [`CLUSTER_STOP_TIMEOUT_MS`]. See `ClusterConfig` in workerd.capnp. `var` reads an
     /// environment variable and returns `None` when it is unset or empty. A key or bucket that
-    /// neither the environment nor the config sets is an error.
+    /// neither the environment nor the config sets, and a stop timeout variable that is not a
+    /// whole number of milliseconds up to `MAX_STOP_TIMEOUT_MS`, is an error.
     pub fn with_cluster(
         self,
         flags: &ClusterFlags<'_>,
@@ -136,8 +139,8 @@ impl Config {
                 (None, None) => return Ok(self),
             }
         };
-        let (key, bucket) = match var {
-            None => (None, None),
+        let (key, bucket, stop_timeout) = match var {
+            None => (None, None, None),
             Some(var) => {
                 // A joined config's cluster is new, so its key and bucket are empty.
                 let (key_empty, bucket_empty) = if join.is_some() {
@@ -150,11 +153,18 @@ impl Config {
                     };
                     (empty(cluster.get_key())?, empty(cluster.get_bucket())?)
                 };
-                cluster_environment(var, key_empty, bucket_empty)
-                    .map_err(ClusterError::Environment)?
+                let (key, bucket) = cluster_environment(var, key_empty, bucket_empty)
+                    .map_err(ClusterError::Environment)?;
+                let stop_timeout = milliseconds(
+                    CLUSTER_STOP_TIMEOUT_MS,
+                    var(CLUSTER_STOP_TIMEOUT_MS).map(OsString::from),
+                    MAX_STOP_TIMEOUT_MS,
+                )
+                .map_err(ClusterError::Environment)?;
+                (key, bucket, stop_timeout)
             }
         };
-        if join.is_none() && key.is_none() && bucket.is_none() {
+        if join.is_none() && key.is_none() && bucket.is_none() && stop_timeout.is_none() {
             return Ok(self);
         }
         let mut message = capnp::message::Builder::new_default();
@@ -173,6 +183,9 @@ impl Config {
         }
         if let Some(bucket) = bucket {
             cluster.set_bucket(bucket.as_str());
+        }
+        if let Some(timeout) = stop_timeout {
+            cluster.set_stop_timeout_ms(timeout);
         }
         Ok(Self(words_from_bytes(
             &capnp::serialize::write_message_to_words(&message),
@@ -195,7 +208,12 @@ impl Config {
             .get_root::<config::Reader>()
             .map_err(|error| error.to_string())?;
         let configured = root.get_shutdown_delay_ms();
-        let Some(delay) = shutdown_delay(var(SHUTDOWN_DELAY_MS))? else {
+        let Some(delay) = milliseconds(
+            SHUTDOWN_DELAY_MS,
+            var(SHUTDOWN_DELAY_MS),
+            MAX_SHUTDOWN_DELAY_MS,
+        )?
+        else {
             if configured > MAX_SHUTDOWN_DELAY_MS {
                 return Err(format!(
                     "Config.shutdownDelayMs = {configured}: more than {MAX_SHUTDOWN_DELAY_MS} \
@@ -381,18 +399,24 @@ pub const SHUTDOWN_DELAY_MS: &str = "WORKERD_SHUTDOWN_DELAY_MS";
 /// and a cluster node killed by its supervisor before it hands its Durable Objects off.
 const MAX_SHUTDOWN_DELAY_MS: u32 = 3_600_000;
 
-/// The delay in `value`, the value of `SHUTDOWN_DELAY_MS`, without trailing whitespace such as a
-/// final newline: digits only. `None` when it is unset or blank.
-fn shutdown_delay(value: Option<OsString>) -> Result<Option<u32>, String> {
+/// The environment variable that holds the cluster's stop timeout, over the config's.
+pub const CLUSTER_STOP_TIMEOUT_MS: &str = "WORKERD_CLUSTER_STOP_TIMEOUT_MS";
+
+/// The largest stop timeout in `CLUSTER_STOP_TIMEOUT_MS`. A stop takes seconds, so a larger value
+/// is a mistake, such as a value in microseconds, that would leave a stopping node waiting for
+/// days on a request that does not end.
+const MAX_STOP_TIMEOUT_MS: u32 = 3_600_000;
+
+/// The milliseconds in `value`, the value of the environment variable `name`, without trailing
+/// whitespace such as a final newline: digits only, up to `max`, an hour for each caller, as the
+/// error says. `None` when it is unset or blank.
+fn milliseconds(name: &str, value: Option<OsString>, max: u32) -> Result<Option<u32>, String> {
     let Some(value) = value else {
         return Ok(None);
     };
-    let value = value.into_string().map_err(|value| {
-        format!(
-            "{SHUTDOWN_DELAY_MS}={}: not UTF-8 text.",
-            value.to_string_lossy()
-        )
-    })?;
+    let value = value
+        .into_string()
+        .map_err(|value| format!("{name}={}: not UTF-8 text.", value.to_string_lossy()))?;
     let digits = value.trim_end();
     if digits.is_empty() {
         return Ok(None);
@@ -402,13 +426,10 @@ fn shutdown_delay(value: Option<OsString>) -> Result<Option<u32>, String> {
         .all(|byte| byte.is_ascii_digit())
         .then(|| digits.parse::<u32>().ok())
         .flatten()
-        .filter(|delay| *delay <= MAX_SHUTDOWN_DELAY_MS)
+        .filter(|ms| *ms <= max)
         .map(Some)
         .ok_or_else(|| {
-            format!(
-                "{SHUTDOWN_DELAY_MS}={value}: not a whole number of milliseconds from 0 to \
-                 {MAX_SHUTDOWN_DELAY_MS} (an hour)."
-            )
+            format!("{name}={value}: not a whole number of milliseconds from 0 to {max} (an hour).")
         })
 }
 

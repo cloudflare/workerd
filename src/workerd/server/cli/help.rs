@@ -50,8 +50,9 @@ Cluster (experimental):
   WORKERD_CLUSTER_KEY, or the file that WORKERD_CLUSTER_KEY_FILE names,
   overrides the config's cluster key, WORKERD_CLUSTER_BUCKET its bucket.
   On SIGTERM, after any shutdown delay, an instance hands its objects to
-  its peers and exits within stopTimeoutMs (8 s by default). GET /ready
-  on the cluster address answers OK once serving, until SIGTERM.
+  its peers and exits within WORKERD_CLUSTER_STOP_TIMEOUT_MS, or else
+  stopTimeoutMs (8 s by default). GET /ready on the cluster address
+  answers OK once serving, until SIGTERM.
 "
     };
 }
