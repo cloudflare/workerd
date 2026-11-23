@@ -649,6 +649,9 @@ pub mod ffi {
         fn request_metadata_from_handoff(metadata: &RequestMetadata) -> bool;
         /// The objects whose work made the request, as its maker said.
         fn request_metadata_caused_by(metadata: &RequestMetadata) -> Vec<String>;
+        /// How long from now the request's caller sends it again if it fails before it reaches
+        /// the actor, in nanoseconds; zero if it does not.
+        fn request_metadata_actor_retry_within_ns(metadata: &RequestMetadata) -> u64;
         /// Sets what made the request, also for a peer it is sent to.
         fn request_metadata_set_cause(
             metadata: Pin<&mut RequestMetadata>,

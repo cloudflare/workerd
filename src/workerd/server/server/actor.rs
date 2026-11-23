@@ -94,6 +94,10 @@ const HANDOFF_POLL: Duration = Duration::from_millis(10);
 const HANDOFFS_AT_ONCE: usize = 32;
 /// How many actors a stopping instance stops between turns of its event loop.
 const STOPS_AT_ONCE: usize = 64;
+/// How much longer than a relay a caller's retry of a peer's request that waited for a handoff
+/// must have, for the request to be answered `moved` rather than relayed: for the answer to reach
+/// the caller, and for the retry to find where the object went.
+const HANDOFF_RETRY_MARGIN: Duration = Duration::from_millis(500);
 
 const EVICT_TIMEOUT_MESSAGE: &str =
     "jsg.Error: Timed out waiting to evict Durable Object: it still has active references.";
@@ -841,13 +845,27 @@ struct RoutedChannel {
     bound: Rc<RefCell<Option<Rc<Resolved>>>>,
 }
 
-/// Answers `moved` to a peer's request for the object `key` that waited for its handoff, past
-/// the time to relay it (`ClusterNode::handed_off_relay_deadline`).
+/// Answers `moved` to a peer's request for the object `key` that waited for its handoff: one its
+/// caller sends again in time (`retried_in_time`), or one past the time to relay it
+/// (`ClusterNode::handed_off_relay_deadline`).
 fn handed_off(key: &str) -> crate::Error {
     tracing::info!(
         "cluster: {key}: a peer's request that waited for its handoff is answered moved"
     );
     moved("the Durable Object was handed off")
+}
+
+/// Whether the caller of the request `metadata` sends it again if it fails before it reaches the
+/// actor, with at least as long for the retry as a relay would have until `node` cuts it off
+/// (`ClusterNode::handed_off_relay_cutoff`), and `HANDOFF_RETRY_MARGIN` more: then the retry has at
+/// least the time a relay has for the new owner to take the object over. Nothing cuts off a relay
+/// before `node` stops.
+fn retried_in_time(metadata: &RequestMetadata, node: &ClusterNode) -> bool {
+    let Some(cutoff) = node.handed_off_relay_cutoff() else {
+        return false;
+    };
+    let retry = Duration::from_nanos(ffi::request_metadata_actor_retry_within_ns(metadata));
+    retry >= cutoff.saturating_duration_since(Instant::now()) + HANDOFF_RETRY_MARGIN
 }
 
 /// Whether `deadline` passed.
@@ -907,14 +925,16 @@ impl Channel for RoutedChannel {
             _ => None,
         };
         Ok(PromisedInterface::new(async move {
-            // A peer's request that waited for a handoff is sent on to where the object went, so
-            // that it does not outlast its caller's retries, while there is time for it: until
+            // A peer's request that waited for a handoff is answered `moved`, nothing having run,
+            // if its caller sends it again in time (`retried_in_time`): it does so where the object
+            // went, without this instance, whose exit would cut off a relay as a request that may
+            // have run, and has longer for it than a relay. Any other is sent on to where the
+            // object went, so that it does not fail, while there is time for it: until
             // `ClusterNode::handed_off_relay_deadline`, as it is resolved and as it starts. After
-            // that it is answered `moved`, nothing having run. The debug port's requests are always
-            // sent on. It binds nothing, so that the peer's next request is answered `moved` and
-            // finds the object itself (`resolve`). Any request a draining instance sends to a peer
-            // names it, so that the peer does not route it back here on a route from before the
-            // handoff.
+            // that it is answered `moved` too. The debug port's requests are always sent on. A
+            // relay binds nothing, so that the peer's next request is answered `moved` and finds
+            // the object itself (`resolve`). Any request a draining instance sends to a peer names
+            // it, so that the peer does not route it back here on a route from before the handoff.
             let mut forward = false;
             // When a relay of a peer's request that waited for a handoff must have started by.
             let mut relay_by: Option<Instant> = None;
@@ -954,7 +974,7 @@ impl Channel for RoutedChannel {
                 forget(&bound, &resolved);
                 if peer && let Some(node) = namespace.cluster() {
                     relay_by = node.handed_off_relay_deadline();
-                    if passed(relay_by) {
+                    if retried_in_time(&metadata, node) || passed(relay_by) {
                         return Err(handed_off(&key));
                     }
                 }

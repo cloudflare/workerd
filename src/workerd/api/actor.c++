@@ -44,6 +44,12 @@ UserDefinedRetryPolicy toUserDefinedRetryPolicy(
   return policy;
 }
 
+// `SubrequestMetadata::actorRetryBy` for `attempt`, which starts now.
+kj::Maybe<kj::TimePoint> retryBy(const ActorCallRetryState::Attempt& attempt) {
+  return attempt.getRetryWithin().map(
+      [](kj::Duration within) { return kj::systemPreciseMonotonicClock().now() + within; });
+}
+
 // This number was arbitrarily chosen, but is meant to account for the cost of holding open outbound
 // actor connections, which do have a real cost and should be accounted for to encourage GC if they
 // accumulate.
@@ -169,7 +175,8 @@ Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newActorCallAttempt
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent),
-          .actorRetryRequestMetadata = attempt.takeMetadata()});
+          .actorRetryRequestMetadata = attempt.takeMetadata(),
+          .actorRetryBy = retryBy(attempt)});
   };
   auto client = startActorSubrequest(context, makeClient, attempt.getCountSubrequest());
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
@@ -207,7 +214,8 @@ Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newActorCallAttemp
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
       .parentSpan = tracing.getInternalSpanParent(),
       .userSpanParent = kj::mv(userSpanParent),
-      .actorRetryRequestMetadata = attempt.takeMetadata()});
+      .actorRetryRequestMetadata = attempt.takeMetadata(),
+      .actorRetryBy = retryBy(attempt)});
   };
   auto client = startActorSubrequest(context, startRequest, attempt.getCountSubrequest());
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};

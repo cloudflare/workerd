@@ -4,6 +4,7 @@
 
 #include "worker-factory-impl.h"
 
+#include <workerd/api/actor-call-retry.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
@@ -31,14 +32,16 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
       Persistent fromPersistentStub,
       FromHandoff fromHandoff,
       kj::Maybe<kj::String> forwardedBy,
-      kj::Array<kj::String> causedBy)
+      kj::Array<kj::String> causedBy,
+      kj::Maybe<kj::TimePoint> actorRetryBy)
       : httpOverCapnpFactory(httpOverCapnpFactory),
         service(kj::mv(service)),
         cfBlobJson(kj::mv(cfBlobJson)),
         fromPersistentStub(fromPersistentStub),
         fromHandoff(fromHandoff),
         forwardedBy(kj::mv(forwardedBy)),
-        causedBy(kj::mv(causedBy)) {}
+        causedBy(kj::mv(causedBy)),
+        actorRetryBy(actorRetryBy) {}
 
   kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
     IoChannelFactory::SubrequestMetadata metadata;
@@ -47,6 +50,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     metadata.fromHandoff = fromHandoff;
     metadata.forwardedBy = kj::mv(forwardedBy);
     metadata.causedBy = kj::mv(causedBy);
+    metadata.actorRetryBy = actorRetryBy;
     context.initResults(capnp::MessageSize{4, 1})
         .setHttp(httpOverCapnpFactory.kjToCapnp(getService()->startRequest(kj::mv(metadata))));
     return kj::READY_NOW;
@@ -108,6 +112,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   FromHandoff fromHandoff;
   kj::Maybe<kj::String> forwardedBy;
   kj::Array<kj::String> causedBy;
+  kj::Maybe<kj::TimePoint> actorRetryBy;
 
   kj::Rc<IoChannelFactory::SubrequestChannel> getService() {
     auto result =
@@ -122,6 +127,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     metadata.fromHandoff = fromHandoff;
     metadata.forwardedBy = kj::mv(forwardedBy);
     metadata.causedBy = kj::mv(causedBy);
+    metadata.actorRetryBy = actorRetryBy;
     return getService()->startRequest(kj::mv(metadata));
   }
 
@@ -141,12 +147,19 @@ kj::Promise<void> WorkerdBootstrapImpl::startEvent(StartEventContext context) {
   if (params.hasCfBlobJson()) cfBlobJson = kj::str(params.getCfBlobJson());
   kj::Maybe<kj::String> forwardedBy;
   if (params.hasForwardedBy()) forwardedBy = kj::str(params.getForwardedBy());
+  kj::Maybe<kj::TimePoint> actorRetryBy;
+  if (auto within = params.getActorRetryWithinNs(); within > 0) {
+    // No call retries for longer than the longest retry timeout a stub can set.
+    constexpr uint64_t MAX_NS =
+        api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_TIMEOUT / kj::NANOSECONDS;
+    actorRetryBy =
+        kj::systemPreciseMonotonicClock().now() + kj::min(within, MAX_NS) * kj::NANOSECONDS;
+  }
   context.initResults(capnp::MessageSize{4, 1})
-      .setDispatcher(
-          kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(), kj::mv(cfBlobJson),
-              Persistent(params.getFromPersistentStub()), FromHandoff(params.getFromHandoff()),
-              kj::mv(forwardedBy),
-              KJ_MAP(object, params.getCausedBy()) { return kj::str(object); }));
+      .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(),
+          kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()),
+          FromHandoff(params.getFromHandoff()), kj::mv(forwardedBy),
+          KJ_MAP(object, params.getCausedBy()) { return kj::str(object); }, actorRetryBy));
   return kj::READY_NOW;
 }
 
@@ -399,6 +412,10 @@ kj::Own<WorkerInterface> rpc_client_start_request(
   KJ_IF_SOME(node, metadata->forwardedBy) request.setForwardedBy(node);
   auto causedBy = request.initCausedBy(metadata->causedBy.size());
   for (auto i: kj::indices(metadata->causedBy)) causedBy.set(i, metadata->causedBy[i]);
+  KJ_IF_SOME(by, metadata->actorRetryBy) {
+    auto within = by - kj::systemPreciseMonotonicClock().now();
+    if (within > 0 * kj::NANOSECONDS) request.setActorRetryWithinNs(within / kj::NANOSECONDS);
+  }
   auto dispatcher = request.send().getDispatcher();
   auto& factory = impl.factory.getImpl();
   return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,

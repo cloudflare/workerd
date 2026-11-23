@@ -1318,6 +1318,14 @@ bool request_metadata_from_handoff(const RequestMetadata& metadata) {
   return result;
 }
 
+uint64_t request_metadata_actor_retry_within_ns(const RequestMetadata& metadata) {
+  KJ_IF_SOME(by, metadata.actorRetryBy) {
+    auto within = by - kj::systemPreciseMonotonicClock().now();
+    if (within > 0 * kj::NANOSECONDS) return within / kj::NANOSECONDS;
+  }
+  return 0;
+}
+
 void request_metadata_set_cause(
     RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy) {
   metadata.fromHandoff = FromHandoff(fromHandoff);

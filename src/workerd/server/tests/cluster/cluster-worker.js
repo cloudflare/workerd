@@ -88,7 +88,10 @@
 // The top-level fetch() additionally honors a `delay` query parameter (ms): it
 // waits that long *before* calling the DO. This lets a test put a request in
 // flight on a node and SIGTERM that node while the request has not yet routed
-// to the DO's owner.
+// to the DO's owner. With `stream` set, it calls the DO with a POST whose body
+// is a stream, which the stub cannot send again: the call is not retried.
+// `maxRetries` and `retryTimeoutMs` set the stub's retry options of those
+// names.
 //
 // Its /rpc-identity calls the DO's identity() method over JS RPC rather than
 // fetch(). A failure is reported with the error's `retryable`.
@@ -164,7 +167,18 @@ export default {
 
     // Synthesize a stub URL for the DO.
     const id = env.COUNTER.idFromName(name);
-    const stub = env.COUNTER.get(id);
+    let options;
+    for (const [param, option] of [
+      ['maxRetries', 'maxRetries'],
+      ['retryTimeoutMs', 'timeoutMs'],
+    ]) {
+      const value = url.searchParams.get(param);
+      if (value !== null) {
+        options ??= { retry: {} };
+        options.retry[option] = Number(value);
+      }
+    }
+    const stub = env.COUNTER.get(id, options);
 
     const delay = url.searchParams.get('delay');
     if (delay !== null) {
@@ -184,11 +198,11 @@ export default {
 
     // Forward to the DO with the same path and query.
     const forwardUrl = new URL(url.pathname + url.search, 'http://do/');
+    const init = url.searchParams.has('stream')
+      ? { method: 'POST', body: new Blob(['streamed']).stream() }
+      : { method: request.method, headers: request.headers };
     try {
-      return await stub.fetch(forwardUrl.toString(), {
-        method: request.method,
-        headers: request.headers,
-      });
+      return await stub.fetch(forwardUrl.toString(), init);
     } catch (err) {
       return Response.json({ error: String(err) }, { status: 500 });
     }

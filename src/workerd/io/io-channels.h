@@ -194,6 +194,12 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // logical-call token.
     kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
 
+    // Set on an attempt of an actor call whose caller sends it again if it fails before it reaches
+    // the actor (`REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID`), and the caller can still do so: a
+    // failure the caller sees at a time `t` before this one, by `kj::systemPreciseMonotonicClock()`,
+    // is sent again, and the retry has at least the time from `t` to this one to finish.
+    kj::Maybe<kj::TimePoint> actorRetryBy;
+
     // A hibernatable WebSocket event wakes an actor over a loopback that outlives it. With no live
     // actor owning the manager, the pipeline that loopback holds can name a version that is no
     // longer current, so runtimes with mutable actor code should re-resolve it from its script ID.
