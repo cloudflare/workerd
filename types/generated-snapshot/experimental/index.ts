@@ -3630,12 +3630,16 @@ export interface SqlStorage {
 }
 export declare abstract class SqlStorageStatement {}
 export type SqlStorageValue = ArrayBuffer | string | number | null;
+export interface SqlStorageCursor<
+  T extends Record<string, SqlStorageValue>,
+> extends Disposable {}
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
   next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
+  close(): void;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
   columnNames: string[];
   get rowsRead(): number;
