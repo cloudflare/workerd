@@ -877,7 +877,12 @@ kj::Maybe<kj::String> getLinkRawTarget(const RustSymbolicLink& link) {
 
 kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> resolveLink(
     jsg::Lock& js, const RustSymbolicLink& link) {
-  auto resolved = withHost(js, [&](Host& host) { return link_resolve(link.get(), host); });
+  auto resolved = withHost(js, [&](Host& host) {
+    KJ_IF_SOME(guard, SymbolicLinkRecursionGuardScope::tryGetRustGuard()) {
+      return link_resolve_in(link.get(), host, *guard.inner);
+    }
+    return link_resolve(link.get(), host);
+  });
   KJ_IF_SOME(node, toNode(kj::mv(resolved))) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<File>) {

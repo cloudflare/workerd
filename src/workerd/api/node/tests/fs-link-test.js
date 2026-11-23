@@ -16,6 +16,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
   link,
   symlink,
   readlink,
@@ -52,6 +53,7 @@ const kEInvalError = { code: 'EINVAL' };
 const kENoentError = { code: 'ENOENT' };
 const kEExistError = { code: 'EEXIST' };
 const kEPermError = { code: 'EPERM' };
+const kELoopError = { code: 'ELOOP' };
 const kEIsDir = { code: 'EISDIR' };
 
 export const linkAndUnlinkSyncTest = {
@@ -521,5 +523,27 @@ export const relativeSymlinkTargetIsKeptAndResolvedFromTheLink = {
     await promises.symlink('../sub/x.txt', '/tmp/r/sub/p');
     strictEqual(await promises.readlink('/tmp/r/sub/p'), '../sub/x.txt');
     strictEqual(readFileSync('/tmp/r/sub/p', 'utf8'), 'x');
+  },
+};
+
+// A recursive readdir counts every link it follows in one guard, including
+// those followed while resolving another link, so following a link a second
+// time anywhere in the walk is reported as a loop.
+export const readdirRecursiveCountsLinksFollowedWhileResolving = {
+  test() {
+    mkdirSync('/tmp/walk/d', { recursive: true });
+    mkdirSync('/tmp/walk/e/sub', { recursive: true });
+    writeFileSync('/tmp/walk/e/f', 'f');
+    symlinkSync('/tmp/walk/e', '/tmp/walk/d/l2');
+    symlinkSync('/tmp/walk/d/l2/sub', '/tmp/walk/d/l1');
+    symlinkSync('/tmp/walk/d/l2/f', '/tmp/walk/e/sub/l3');
+
+    // Each link resolves on its own.
+    strictEqual(readFileSync('/tmp/walk/e/sub/l3', 'utf8'), 'f');
+    ok(statSync('/tmp/walk/d/l1').isDirectory());
+    deepStrictEqual(readdirSync('/tmp/walk/d').sort(), ['l1', 'l2']);
+
+    // Resolving l3 follows l2, which the walk has already followed.
+    throws(() => readdirSync('/tmp/walk/d', { recursive: true }), kELoopError);
   },
 };

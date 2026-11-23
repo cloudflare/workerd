@@ -886,6 +886,11 @@ class SymbolicLinkRecursionGuardScope final {
   // as seen so that it can be checked against in the future.
   static kj::Maybe<FsError> checkSeen(SymbolicLink* link) KJ_WARN_UNUSED_RESULT;
 
+  // The guard of the outermost scope on this thread for links of the Rust implementation, or none
+  // outside any scope. Resolving a link counts the links it follows here, as the C++
+  // implementation's nested lookups count theirs in the same scope.
+  static kj::Maybe<RustLinkGuard&> tryGetRustGuard() KJ_WARN_UNUSED_RESULT;
+
  private:
   kj::HashSet<SymbolicLink*> linksSeen;
   // Counts the links of the Rust implementation, whose C++ objects are made per use, so they

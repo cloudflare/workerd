@@ -300,6 +300,12 @@ pub mod ffi {
         fn link_target(link: &RsSymbolicLink) -> Vec<u8>;
         fn link_raw_target(link: &RsSymbolicLink) -> RawTarget;
         fn link_resolve(link: &RsSymbolicLink, host: &VfsHost) -> Box<RsNode>;
+        /// As `link_resolve`, counting the links followed in `guard`.
+        fn link_resolve_in(
+            link: &RsSymbolicLink,
+            host: &VfsHost,
+            guard: &mut RsLinkGuard,
+        ) -> Box<RsNode>;
         /// The NUL-terminated identifier, or an empty slice outside a request.
         ///
         /// # Safety
@@ -936,6 +942,14 @@ fn link_raw_target(link: &RsSymbolicLink) -> ffi::RawTarget {
 
 fn link_resolve(link: &RsSymbolicLink, host: &ffi::VfsHost) -> Box<RsNode> {
     node_result(link.0.resolve(&CppHost(host)))
+}
+
+fn link_resolve_in(
+    link: &RsSymbolicLink,
+    host: &ffi::VfsHost,
+    guard: &mut RsLinkGuard,
+) -> Box<RsNode> {
+    node_result(link.0.resolve_in(&CppHost(host), &mut guard.0))
 }
 
 #[expect(

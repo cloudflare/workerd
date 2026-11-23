@@ -1558,16 +1558,24 @@ SymbolicLinkRecursionGuardScope::~SymbolicLinkRecursionGuardScope() noexcept(fal
   }
 }
 
+kj::Maybe<RustLinkGuard&> SymbolicLinkRecursionGuardScope::tryGetRustGuard() {
+  if (symbolicLinkGuard == nullptr) {
+    return kj::none;
+  }
+  auto& guard = *symbolicLinkGuard;
+  if (guard.rustGuard == kj::none) {
+    guard.rustGuard = vfs::newLinkGuard();
+  }
+  return *KJ_ASSERT_NONNULL(guard.rustGuard);
+}
+
 kj::Maybe<FsError> SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link) {
   if (symbolicLinkGuard == nullptr) {
     return kj::none;
   }
   auto& guard = *symbolicLinkGuard;
   KJ_IF_SOME(rustLink, link->tryGetRust()) {
-    if (guard.rustGuard == kj::none) {
-      guard.rustGuard = vfs::newLinkGuard();
-    }
-    return vfs::checkLink(*KJ_ASSERT_NONNULL(guard.rustGuard), rustLink);
+    return vfs::checkLink(KJ_ASSERT_NONNULL(tryGetRustGuard()), rustLink);
   }
   if (guard.linksSeen.find(link) != kj::none) {
     return FsError::SYMLINK_DEPTH_EXCEEDED;
