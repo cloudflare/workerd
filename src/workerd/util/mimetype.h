@@ -11,9 +11,10 @@
 
 namespace workerd {
 
-template <size_t>
-class StringBuffer;
 class MimeType;
+namespace legacy {
+struct MimeTypeAccess;
+}
 class ConstMimeType final {
  public:
   constexpr ConstMimeType(kj::StringPtr type, kj::StringPtr subtype)
@@ -206,10 +207,7 @@ class MimeType final {
   kj::String subtype_;
   MimeParams params_;
 
-  using ToStringBuffer = StringBuffer<128>;
-  // 128 bytes will keep all reasonable mimetypes on the stack.
-
-  void paramsToString(ToStringBuffer& buffer) const;
+  friend struct legacy::MimeTypeAccess;
 };
 
 inline ConstMimeType::operator MimeType() const {

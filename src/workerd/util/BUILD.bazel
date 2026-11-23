@@ -198,8 +198,14 @@ wd_cc_library(
 
 wd_cc_library(
     name = "mimetype",
-    srcs = ["mimetype.c++"],
-    hdrs = ["mimetype.h"],
+    srcs = [
+        "mimetype.c++",
+        "mimetype-legacy.c++",
+    ],
+    hdrs = [
+        "mimetype.h",
+        "mimetype-legacy.h",
+    ],
     implementation_deps = [
         ":string-buffer",
     ],
