@@ -134,8 +134,6 @@ wd_cc_library(
         "//src/workerd/api:data-url",
         "//src/workerd/api/bench-core",
         "//src/workerd/api/bench-core:ffi.rs@cxx",
-        "//src/workerd/api/crypto/segment-cipher",
-        "//src/workerd/api/crypto/segment-cipher:lib.rs@cxx",
         "//src/workerd/api/node:exceptions",
         "//src/workerd/api/streams/aws-chunked",
         "//src/workerd/api/streams/aws-chunked:lib.rs@cxx",

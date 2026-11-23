@@ -4,137 +4,341 @@
 
 #include "crypto.h"
 #include "impl.h"
+#include "segment-cipher.h"
 
-#include <workerd/api/crypto/segment-cipher/lib.rs.h>
 #include <workerd/api/streams/sync-transform.h>
 #include <workerd/io/io-context.h>
 
-#include <kj-rs/convert.h>
+#include <cmath>
 
 namespace workerd::api {
 
 namespace {
 
-using RustTransform = ::rust::Box<segment_cipher::SegmentTransform>;
+// Number.MAX_SAFE_INTEGER: larger lengths and indexes can't be represented exactly in JavaScript.
+constexpr double MAX_SAFE_INTEGER = 9007199254740991.0;
 
-// Runs the Rust transform (`segment-cipher/lib.rs`), giving it the IoContext's entropy for nonces.
-class SegmentCipherStage final: public SyncTransformStage {
+// A segment stream handles fewer than 2^32 segments, so that random 96-bit nonces stay
+// collision-safe even if a key schedule is reused.
+constexpr uint64_t MAX_SEGMENTS_PER_STREAM = 0xffffffffull;
+
+uint64_t requireSafeInteger(double value, kj::StringPtr name) {
+  JSG_REQUIRE(value >= 0 && value <= MAX_SAFE_INTEGER && std::floor(value) == value, RangeError,
+      name, " must be a non-negative integer no greater than Number.MAX_SAFE_INTEGER.");
+  return static_cast<uint64_t>(value);
+}
+
+SegmentLayout toLayout(kj::StringPtr algorithm, double segmentSize) {
+  auto size = requireSafeInteger(segmentSize, "segmentSize");
+  JSG_REQUIRE(size <= SegmentLayout::MAX_SEGMENT_SIZE, RangeError, "segmentSize must be between ",
+      SegmentLayout::MIN_SEGMENT_SIZE, " and ", SegmentLayout::MAX_SEGMENT_SIZE, " bytes.");
+  return SegmentLayout(parseSegmentAlgorithm(algorithm), static_cast<uint32_t>(size));
+}
+
+SegmentInfoTemplate toInfoTemplate(jsg::Lock& js, SegmentKeyInfo& info) {
+  return SegmentInfoTemplate{
+    .prefix = info.prefix.getHandle(js).copy(),
+    .index = parseSegmentIndexEncoding(info.index),
+    .suffix = info.suffix.map([&](auto& suffix) {
+    return suffix.getHandle(js).copy();
+  }).orDefault(kj::Array<kj::byte>()),
+  };
+}
+
+SegmentCipher toCipher(jsg::Lock& js, SegmentCipherOptions& options) {
+  auto layout = toLayout(options.algorithm, options.segmentSize);
+  auto& keys = options.keys;
+  JSG_REQUIRE(keys.derive == "HKDF"_kj, DOMNotSupportedError,
+      "Unrecognized segment key derivation \"", keys.derive, "\"; expected \"HKDF\".");
+  const EVP_MD* digest = lookupDigestAlgorithm(getAlgorithmName(keys.hash)).second;
+  auto salt = keys.salt.getHandle(js);
+  return SegmentCipher(layout,
+      SegmentCipher::KeySchedule{
+        .digest = digest,
+        .prk = keys.key->hkdfExtract(digest, salt.asArrayPtr()),
+        .info = toInfoTemplate(js, keys.info),
+        .macInfo = keys.macInfo.map([&](SegmentKeyInfo& info) { return toInfoTemplate(js, info); }),
+      },
+      options.length.orDefault(256));
+}
+
+// Checks that a stream of `count` segments stays under the segment limit.
+void requireSegmentCount(uint64_t count) {
+  JSG_REQUIRE(count <= MAX_SEGMENTS_PER_STREAM, RangeError, "A segment stream can hold at most ",
+      MAX_SEGMENTS_PER_STREAM, " segments.");
+}
+
+// Checks that a plaintext of `length` bytes can be encrypted in one stream: its segments stay
+// under the limit, and its encrypted length is a safe integer.
+void requireEncryptableLength(const SegmentLayout& layout, uint64_t length) {
+  requireSegmentCount(layout.segmentCount(length));
+  JSG_REQUIRE(layout.sealedLength(length) <= MAX_SAFE_INTEGER, RangeError,
+      "The encrypted length would exceed Number.MAX_SAFE_INTEGER.");
+}
+
+// Checks that `segmentCount` segments starting at `firstSegment` can be keyed and that the
+// stream stays under its segment limit.
+void requireSegmentRange(const SegmentCipher& cipher, uint64_t firstSegment, uint64_t count) {
+  requireSegmentCount(count);
+  // The last index, firstSegment + count - 1, must not exceed maxIndex(), which may be 2^64 - 1.
+  JSG_REQUIRE(firstSegment <= cipher.maxIndex() &&
+          (count == 0 || count - 1 <= cipher.maxIndex() - firstSegment),
+      RangeError, "The segment indexes exceed what the key schedule's index encoding can hold.");
+}
+
+// Cuts the plaintext into segments and seals each one.
+class SegmentEncryptStage final: public SyncTransformStage {
  public:
-  SegmentCipherStage(RustTransform transform, kj::EntropySource& entropy)
-      : transform(kj::mv(transform)),
+  SegmentEncryptStage(SegmentCipher cipher,
+      uint64_t firstSegment,
+      kj::Maybe<uint64_t> plaintextLength,
+      kj::EntropySource& entropy)
+      : cipher(kj::mv(cipher)),
+        firstSegment(firstSegment),
+        plaintextLength(plaintextLength),
         entropy(entropy) {}
 
+  // A push holds at most a segment of input, so it completes at most one segment.
   void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) override {
-    auto maybeException =
-        kj::runCatchingExceptions([&]() { transform->push(input.as<kj_rs::Rust>(), entropy); });
-    // The segments before a failure are still output.
-    output = fromRustBytes(transform->take_output());
-    KJ_IF_SOME(exception, maybeException) {
-      kj::throwFatalException(kj::mv(exception));
+    received += input.size();
+    KJ_IF_SOME(length, plaintextLength) {
+      JSG_REQUIRE(received <= length, DOMOperationError, "Received more than the plaintextLength (",
+          length, ") bytes of plaintext.");
+    }
+    size_t segmentSize = cipher.getLayout().getSegmentSize();
+    while (input.size() > 0) {
+      if (buffered == 0 && input.size() >= segmentSize) {
+        // A whole segment is in the input; seal it from there.
+        output = sealNext(input.first(segmentSize));
+        input = input.slice(segmentSize);
+        continue;
+      }
+      // Only input that doesn't fill a segment needs the scratch buffer, so it's allocated when
+      // that first happens.
+      if (buffer == nullptr) buffer = kj::heapArray<kj::byte>(segmentSize);
+      size_t n = kj::min(segmentSize - buffered, input.size());
+      buffer.slice(buffered).write(input.first(n));
+      buffered += n;
+      input = input.slice(n);
+      if (buffered == segmentSize) {
+        output = sealNext(buffer);
+        buffered = 0;
+      }
     }
   }
 
   void end(kj::Array<kj::byte>& output) override {
-    transform->end(entropy);
-    output = fromRustBytes(transform->take_output());
+    KJ_IF_SOME(length, plaintextLength) {
+      JSG_REQUIRE(received == length, DOMOperationError, "Received ", received,
+          " bytes of plaintext, but the plaintextLength is ", length, ".");
+    }
+    if (buffered > 0) {
+      output = sealNext(buffer.first(buffered));
+      buffered = 0;
+    }
   }
 
   kj::Maybe<uint64_t> getOutputLength() const override {
-    return transform->output_length();
+    return plaintextLength.map(
+        [&](uint64_t length) { return cipher.getLayout().sealedLength(length); });
   }
 
   size_t retainedBytes() const override {
-    return transform->retained_bytes();
+    return buffer.size() + cipher.retainedBytes();
   }
 
  private:
-  RustTransform transform;
+  SegmentCipher cipher;
+  uint64_t firstSegment;
+  kj::Maybe<uint64_t> plaintextLength;
   kj::EntropySource& entropy;
+  // Holds a partial segment. Empty until one is needed.
+  kj::Array<kj::byte> buffer;
+  size_t buffered = 0;
+  uint64_t received = 0;
+  uint64_t segmentsSealed = 0;
+
+  kj::Array<kj::byte> sealNext(kj::ArrayPtr<const kj::byte> plaintext) {
+    requireSegmentRange(cipher, firstSegment, segmentsSealed + 1);
+    return cipher.seal(firstSegment + segmentsSealed++, plaintext, entropy);
+  }
 };
 
-::rust::String toRust(kj::StringPtr string) {
-  return ::rust::String(string.begin(), string.size());
-}
+// Splits the input into sealed segments by their known sizes, opens each one, and trims the
+// plaintext to the requested range. Every segment is authenticated, including those whose
+// plaintext is trimmed away.
+class SegmentDecryptStage final: public SyncTransformStage {
+ public:
+  SegmentDecryptStage(SegmentCipher cipher,
+      uint64_t firstSegment,
+      uint64_t plaintextLength,
+      uint64_t outputOffset,
+      uint64_t outputEnd)
+      : cipher(kj::mv(cipher)),
+        firstSegment(firstSegment),
+        plaintextLength(plaintextLength),
+        outputOffset(outputOffset),
+        outputEnd(outputEnd),
+        expectedInput(this->cipher.getLayout().sealedLength(plaintextLength)) {}
 
-::rust::Vec<uint8_t> toRust(jsg::Lock& js, const jsg::JsRef<jsg::JsBufferSource>& bytes) {
-  return bytes.getHandle(js).asArrayPtr().as<kj_rs::RustCopy>();
-}
-
-segment_cipher::KeyInfo toRust(jsg::Lock& js, SegmentKeyInfo& info) {
-  return segment_cipher::KeyInfo{
-    .prefix = toRust(js, info.prefix),
-    .index = toRust(info.index),
-    .suffix = info.suffix.map([&](auto& suffix) { return toRust(js, suffix); }).orDefault({}),
-  };
-}
-
-// Flattens the options for Rust, which validates them.
-segment_cipher::CipherOptions toRust(jsg::Lock& js, SegmentCipherOptions& options) {
-  auto& keys = options.keys;
-  auto digestName = lookupDigestAlgorithm(getAlgorithmName(keys.hash)).first;
-  segment_cipher::CipherOptions result{
-    .algorithm = toRust(options.algorithm),
-    .segment_size = options.segmentSize,
-    .derive = toRust(keys.derive),
-    .hash = toRust(digestName),
-    .info = toRust(js, keys.info),
-    .has_mac_info = keys.macInfo != kj::none,
-    .mac_info = {},
-    .has_key_bits = options.length != kj::none,
-    .key_bits = options.length.orDefault(0),
-    .has_first_segment = options.firstSegment != kj::none,
-    .first_segment = options.firstSegment.orDefault(0),
-    .has_plaintext_length = options.plaintextLength != kj::none,
-    .plaintext_length = options.plaintextLength.orDefault(0),
-    .has_output_offset = options.outputOffset != kj::none,
-    .output_offset = options.outputOffset.orDefault(0),
-    .has_output_length = options.outputLength != kj::none,
-    .output_length = options.outputLength.orDefault(0),
-  };
-  KJ_IF_SOME(macInfo, keys.macInfo) {
-    result.mac_info = toRust(js, macInfo);
+  void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) override {
+    while (input.size() > 0) {
+      JSG_REQUIRE(received < expectedInput, DOMOperationError,
+          "The input continues past the end of the last segment (byte ", expectedInput, ").");
+      size_t needed = currentSealedSize();
+      if (buffered == 0 && input.size() >= needed) {
+        // A whole segment is in the input; open it from there.
+        received += needed;
+        openNext(input.first(needed), output);
+        input = input.slice(needed);
+        continue;
+      }
+      // Only input that doesn't hold a whole segment needs the scratch buffer, so it's allocated
+      // when that first happens.
+      if (buffer == nullptr) {
+        buffer = kj::heapArray<kj::byte>(cipher.getLayout().fullSealedSegmentSize());
+      }
+      size_t n = kj::min(needed - buffered, input.size());
+      buffer.slice(buffered).write(input.first(n));
+      buffered += n;
+      received += n;
+      input = input.slice(n);
+      if (buffered == needed) {
+        openNext(buffer.first(needed), output);
+        buffered = 0;
+      }
+    }
   }
-  return result;
-}
 
-// HKDF-Extract of the key and salt, which stays in C++ with the key. Throws an InvalidAccessError
-// unless the key is an HKDF key that may derive.
-ZeroOnFree extractPrk(jsg::Lock& js, SegmentKeySchedule& keys) {
-  auto digest = lookupDigestAlgorithm(getAlgorithmName(keys.hash)).second;
-  return ZeroOnFree(keys.key->hkdfExtract(digest, keys.salt.getHandle(js).asArrayPtr()));
-}
+  void end(kj::Array<kj::byte>& output) override {
+    JSG_REQUIRE(received == expectedInput, DOMOperationError, "The input ended after ", received,
+        " bytes, in segment ", firstSegment + segmentsOpened, "; expected ", expectedInput,
+        " bytes.");
+  }
 
-using NewTransform = RustTransform (*)(segment_cipher::CipherOptions, ::rust::Slice<const uint8_t>);
+  kj::Maybe<uint64_t> getOutputLength() const override {
+    return outputEnd - outputOffset;
+  }
 
-JsReadableWritablePair newSegmentStreams(
-    jsg::Lock& js, SegmentCipherOptions& options, NewTransform newTransform) {
-  auto prk = extractPrk(js, options.keys);
-  auto transform =
-      newTransform(toRust(js, options), kj::ArrayPtr<const kj::byte>(prk).as<kj_rs::Rust>());
-  auto& ioContext = IoContext::current();
-  // Writes are taken a segment at a time, so that an aligned write is transformed in place.
-  auto highWaterMark = transform->high_water_mark();
-  auto stage = kj::heap<SegmentCipherStage>(kj::mv(transform), ioContext.getEntropySource());
-  return newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);
-}
+  size_t retainedBytes() const override {
+    return buffer.size() + cipher.retainedBytes();
+  }
+
+ private:
+  SegmentCipher cipher;
+  uint64_t firstSegment;
+  uint64_t plaintextLength;
+  uint64_t outputOffset;
+  uint64_t outputEnd;
+  uint64_t expectedInput;
+  // Holds a partial segment. Empty until one is needed.
+  kj::Array<kj::byte> buffer;
+  size_t buffered = 0;
+  uint64_t received = 0;
+  uint64_t segmentsOpened = 0;
+
+  // The plaintext size of the next segment.
+  size_t currentPlaintextSize() const {
+    auto& layout = cipher.getLayout();
+    uint64_t start = segmentsOpened * layout.getSegmentSize();
+    return kj::min(plaintextLength - start, layout.getSegmentSize());
+  }
+
+  // The sealed size of the next segment.
+  size_t currentSealedSize() const {
+    return cipher.getLayout().sealedSegmentSize(currentPlaintextSize());
+  }
+
+  void openNext(kj::ArrayPtr<const kj::byte> sealed, kj::Array<kj::byte>& output) {
+    uint64_t start = segmentsOpened * cipher.getLayout().getSegmentSize();
+    uint64_t index = firstSegment + segmentsOpened;
+    size_t expected = currentPlaintextSize();
+    auto plaintext = cipher.open(index, sealed);
+    ++segmentsOpened;
+    // Padding lets CBC segments of nearby sizes seal to the same size, so the authenticated size
+    // must be checked too: otherwise a segment sealed for a different plaintextLength would pass.
+    JSG_REQUIRE(plaintext.size() == expected, DOMOperationError, "Segment ", index, " holds ",
+        plaintext.size(), " bytes of plaintext, but the plaintextLength requires ", expected, ".");
+    uint64_t end = start + plaintext.size();
+    // The part of [start, end) within [outputOffset, outputEnd).
+    uint64_t from = kj::max(start, outputOffset);
+    uint64_t to = kj::min(end, outputEnd);
+    if (from >= to) return;
+    auto kept = from == start && to == end
+        ? kj::mv(plaintext)
+        : kj::heapArray(plaintext.slice(from - start, to - start));
+    if (output == nullptr) {
+      output = kj::mv(kept);
+    } else {
+      // A push holds at most a full sealed segment, so it completes a second one only when that
+      // one is the short last segment.
+      auto joined = kj::heapArray<kj::byte>(output.size() + kept.size());
+      joined.first(output.size()).copyFrom(output);
+      joined.slice(output.size()).copyFrom(kept);
+      output = kj::mv(joined);
+    }
+  }
+};
 
 }  // namespace
 
 jsg::Ref<SegmentEncryptionStream> SegmentEncryptionStream::constructor(
     jsg::Lock& js, SegmentCipherOptions options) {
-  auto streams = newSegmentStreams(js, options, segment_cipher::new_encryptor);
+  JSG_REQUIRE(options.outputOffset == kj::none && options.outputLength == kj::none, TypeError,
+      "outputOffset and outputLength are only used by SegmentDecryptionStream.");
+  auto cipher = toCipher(js, options);
+  auto firstSegment = requireSafeInteger(options.firstSegment.orDefault(0), "firstSegment");
+  auto plaintextLength = options.plaintextLength.map(
+      [](double length) { return requireSafeInteger(length, "plaintextLength"); });
+  KJ_IF_SOME(length, plaintextLength) {
+    requireEncryptableLength(cipher.getLayout(), length);
+    requireSegmentRange(cipher, firstSegment, cipher.getLayout().segmentCount(length));
+  } else {
+    requireSegmentRange(cipher, firstSegment, 0);
+  }
+
+  auto& ioContext = IoContext::current();
+  // Writes are taken a segment at a time, so that a segment-aligned write is sealed in place.
+  auto highWaterMark = cipher.getLayout().getSegmentSize();
+  auto stage = kj::heap<SegmentEncryptStage>(
+      kj::mv(cipher), firstSegment, plaintextLength, ioContext.getEntropySource());
+  auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);
   return js.alloc<SegmentEncryptionStream>(kj::mv(streams.readable), kj::mv(streams.writable));
 }
 
 double SegmentEncryptionStream::encryptedLength(
     double plaintextLength, SegmentLayoutOptions options) {
-  return segment_cipher::encrypted_length(
-      plaintextLength, toRust(options.algorithm), options.segmentSize);
+  // The same limits as the encrypting stream's, so that a length it reports can be encrypted.
+  auto layout = toLayout(options.algorithm, options.segmentSize);
+  auto length = requireSafeInteger(plaintextLength, "plaintextLength");
+  requireEncryptableLength(layout, length);
+  return static_cast<double>(layout.sealedLength(length));
 }
 
 jsg::Ref<SegmentDecryptionStream> SegmentDecryptionStream::constructor(
     jsg::Lock& js, SegmentCipherOptions options) {
-  auto streams = newSegmentStreams(js, options, segment_cipher::new_decryptor);
+  auto cipher = toCipher(js, options);
+  auto firstSegment = requireSafeInteger(options.firstSegment.orDefault(0), "firstSegment");
+  auto plaintextLength = requireSafeInteger(
+      JSG_REQUIRE_NONNULL(options.plaintextLength, TypeError,
+          "SegmentDecryptionStream requires plaintextLength, so that it can detect truncation."),
+      "plaintextLength");
+  auto outputOffset = requireSafeInteger(options.outputOffset.orDefault(0), "outputOffset");
+  JSG_REQUIRE(outputOffset <= plaintextLength, RangeError, "outputOffset (", outputOffset,
+      ") is past the end of the plaintext (", plaintextLength, ").");
+  uint64_t outputEnd = plaintextLength;
+  KJ_IF_SOME(length, options.outputLength) {
+    outputEnd = outputOffset +
+        kj::min(requireSafeInteger(length, "outputLength"), plaintextLength - outputOffset);
+  }
+  requireSegmentRange(cipher, firstSegment, cipher.getLayout().segmentCount(plaintextLength));
+
+  auto& ioContext = IoContext::current();
+  // Writes are taken a sealed segment at a time, so that an aligned write is opened in place.
+  auto highWaterMark = cipher.getLayout().fullSealedSegmentSize();
+  auto stage = kj::heap<SegmentDecryptStage>(
+      kj::mv(cipher), firstSegment, plaintextLength, outputOffset, outputEnd);
+  auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);
   return js.alloc<SegmentDecryptionStream>(kj::mv(streams.readable), kj::mv(streams.writable));
 }
 

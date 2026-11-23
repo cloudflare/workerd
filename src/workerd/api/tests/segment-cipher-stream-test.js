@@ -150,6 +150,59 @@ export const encryptedLength = {
         }),
       { name: 'NotSupportedError' }
     );
+
+    // A stream holds at most 2^32 - 1 segments, and encryptedLength() agrees with the stream.
+    const limit = 0xffffffff * 1024;
+    const small = (n) =>
+      crypto.SegmentEncryptionStream.encryptedLength(n, {
+        algorithm: 'AES-GCM',
+        segmentSize: 1024,
+      });
+    strictEqual(small(limit), 0xffffffff * (1024 + 28));
+    throws(() => small(limit + 1), RangeError);
+  },
+};
+
+export const encryptedLengthMatchesTheStream = {
+  async test() {
+    const limit = 0xffffffff * SEGMENT_SIZE;
+    const stream = new crypto.SegmentEncryptionStream(
+      await optionsFor('AES-GCM', { plaintextLength: limit })
+    );
+    await stream.writable.abort();
+    const options = await optionsFor('AES-GCM', { plaintextLength: limit + 1 });
+    throws(() => new crypto.SegmentEncryptionStream(options), RangeError);
+  },
+};
+
+// One write can finish a segment and hold all of the short last one: the stream delivers both.
+export const lastSegmentInTheSameWrite = {
+  async test() {
+    for (const algorithm of ALGORITHMS) {
+      const plaintext = bytes(SEGMENT_SIZE + 10, 5);
+      const ciphertext = await encrypt(algorithm, plaintext);
+      const sealedSize = (n) =>
+        crypto.SegmentEncryptionStream.encryptedLength(n, {
+          algorithm,
+          segmentSize: SEGMENT_SIZE,
+        });
+      const last = sealedSize(10);
+      strictEqual(ciphertext.byteLength, sealedSize(SEGMENT_SIZE) + last);
+      const stream = new crypto.SegmentDecryptionStream(
+        await optionsFor(algorithm, { plaintextLength: plaintext.byteLength })
+      );
+      // The second write is one full sealed segment long, the most one push takes.
+      const writer = stream.writable.getWriter();
+      const writing = (async () => {
+        await writer.write(ciphertext.slice(0, last));
+        await writer.write(ciphertext.slice(last));
+        await writer.close();
+      })();
+      const chunks = [];
+      for await (const chunk of stream.readable) chunks.push(chunk);
+      await writing;
+      deepStrictEqual(concat(chunks), plaintext, algorithm);
+    }
   },
 };
 

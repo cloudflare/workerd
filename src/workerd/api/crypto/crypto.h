@@ -1007,7 +1007,7 @@ class DigestStream: public WritableStream {
 //
 // Non-standard transform streams that encrypt and decrypt in fixed-size, individually
 // authenticated segments, so that a reader can start at any segment and stream without holding
-// the whole message. See segment-cipher/layout.rs for the format. Both sides are native streams, so a
+// the whole message. See segment-cipher.h for the format. Both sides are native streams, so a
 // pipe through one of these between two other native streams never runs JavaScript.
 
 // The HKDF info for each segment: prefix || encode(index) || suffix.
@@ -1028,7 +1028,8 @@ struct SegmentKeyInfo {
 // How each segment's key is derived: HKDF-Expand(HKDF-Extract(salt, key), info(segment index)).
 // The schedule (key, salt and info) must be unique to each message, and to each version of a
 // message rewritten under the same name, for example through a fresh random salt per encryption:
-// segments are bound to their message only through it. See segment-cipher/cipher.rs.
+// segments are bound to their message only through it. See SegmentCipher in
+// segment-cipher.h.
 struct SegmentKeySchedule {
   // Only "HKDF".
   kj::String derive;
