@@ -141,6 +141,8 @@ uint64_t SegmentCipher::maxIndex() const {
   return result;
 }
 
+// The key depends only on the key schedule and the index, so segments are bound to their
+// message only as far as the schedule is unique to it; see the class comment.
 ZeroOnFree SegmentCipher::deriveKey(
     const SegmentInfoTemplate& infoTemplate, uint64_t segmentIndex) const {
   auto segmentInfo = infoTemplate.build(segmentIndex);

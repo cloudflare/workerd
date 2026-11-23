@@ -83,8 +83,7 @@ class SegmentEncryptStage final: public SyncTransformStage {
       : cipher(kj::mv(cipher)),
         firstSegment(firstSegment),
         plaintextLength(plaintextLength),
-        entropy(entropy),
-        buffer(kj::heapArray<kj::byte>(this->cipher.getLayout().getSegmentSize())) {}
+        entropy(entropy) {}
 
   void push(kj::ArrayPtr<const kj::byte> input, Output& output) override {
     received += input.size();
@@ -92,7 +91,7 @@ class SegmentEncryptStage final: public SyncTransformStage {
       JSG_REQUIRE(received <= length, DOMOperationError, "Received more than the plaintextLength (",
           length, ") bytes of plaintext.");
     }
-    size_t segmentSize = buffer.size();
+    size_t segmentSize = cipher.getLayout().getSegmentSize();
     while (input.size() > 0) {
       if (buffered == 0 && input.size() >= segmentSize) {
         // A whole segment is in the input; seal it from there.
@@ -100,6 +99,9 @@ class SegmentEncryptStage final: public SyncTransformStage {
         input = input.slice(segmentSize);
         continue;
       }
+      // Only input that doesn't fill a segment needs the scratch buffer, so it's allocated when
+      // that first happens.
+      if (buffer == nullptr) buffer = kj::heapArray<kj::byte>(segmentSize);
       size_t n = kj::min(segmentSize - buffered, input.size());
       buffer.slice(buffered).write(input.first(n));
       buffered += n;
@@ -127,11 +129,16 @@ class SegmentEncryptStage final: public SyncTransformStage {
         [&](uint64_t length) { return cipher.getLayout().sealedLength(length); });
   }
 
+  size_t retainedBytes() const override {
+    return buffer.size();
+  }
+
  private:
   SegmentCipher cipher;
   uint64_t firstSegment;
   kj::Maybe<uint64_t> plaintextLength;
   kj::EntropySource& entropy;
+  // Holds a partial segment. Empty until one is needed.
   kj::Array<kj::byte> buffer;
   size_t buffered = 0;
   uint64_t received = 0;
@@ -158,8 +165,7 @@ class SegmentDecryptStage final: public SyncTransformStage {
         plaintextLength(plaintextLength),
         outputOffset(outputOffset),
         outputEnd(outputEnd),
-        expectedInput(this->cipher.getLayout().sealedLength(plaintextLength)),
-        buffer(kj::heapArray<kj::byte>(this->cipher.getLayout().fullSealedSegmentSize())) {}
+        expectedInput(this->cipher.getLayout().sealedLength(plaintextLength)) {}
 
   void push(kj::ArrayPtr<const kj::byte> input, Output& output) override {
     while (input.size() > 0) {
@@ -172,6 +178,11 @@ class SegmentDecryptStage final: public SyncTransformStage {
         openNext(input.first(needed), output);
         input = input.slice(needed);
         continue;
+      }
+      // Only input that doesn't hold a whole segment needs the scratch buffer, so it's allocated
+      // when that first happens.
+      if (buffer == nullptr) {
+        buffer = kj::heapArray<kj::byte>(cipher.getLayout().fullSealedSegmentSize());
       }
       size_t n = kj::min(needed - buffered, input.size());
       buffer.slice(buffered).write(input.first(n));
@@ -195,6 +206,10 @@ class SegmentDecryptStage final: public SyncTransformStage {
     return outputEnd - outputOffset;
   }
 
+  size_t retainedBytes() const override {
+    return buffer.size();
+  }
+
  private:
   SegmentCipher cipher;
   uint64_t firstSegment;
@@ -202,21 +217,34 @@ class SegmentDecryptStage final: public SyncTransformStage {
   uint64_t outputOffset;
   uint64_t outputEnd;
   uint64_t expectedInput;
+  // Holds a partial segment. Empty until one is needed.
   kj::Array<kj::byte> buffer;
   size_t buffered = 0;
   uint64_t received = 0;
   uint64_t segmentsOpened = 0;
 
-  // The sealed size of the next segment.
-  size_t currentSealedSize() const {
+  // The plaintext size of the next segment.
+  size_t currentPlaintextSize() const {
     auto& layout = cipher.getLayout();
     uint64_t start = segmentsOpened * layout.getSegmentSize();
-    return layout.sealedSegmentSize(kj::min(plaintextLength - start, layout.getSegmentSize()));
+    return kj::min(plaintextLength - start, layout.getSegmentSize());
+  }
+
+  // The sealed size of the next segment.
+  size_t currentSealedSize() const {
+    return cipher.getLayout().sealedSegmentSize(currentPlaintextSize());
   }
 
   void openNext(kj::ArrayPtr<const kj::byte> sealed, Output& output) {
     uint64_t start = segmentsOpened * cipher.getLayout().getSegmentSize();
-    auto plaintext = cipher.open(firstSegment + segmentsOpened++, sealed);
+    uint64_t index = firstSegment + segmentsOpened;
+    size_t expected = currentPlaintextSize();
+    auto plaintext = cipher.open(index, sealed);
+    ++segmentsOpened;
+    // Padding lets CBC segments of nearby sizes seal to the same size, so the authenticated size
+    // must be checked too: otherwise a segment sealed for a different plaintextLength would pass.
+    JSG_REQUIRE(plaintext.size() == expected, DOMOperationError, "Segment ", index, " holds ",
+        plaintext.size(), " bytes of plaintext, but the plaintextLength requires ", expected, ".");
     uint64_t end = start + plaintext.size();
     // The part of [start, end) within [outputOffset, outputEnd).
     uint64_t from = kj::max(start, outputOffset);
@@ -249,7 +277,8 @@ jsg::Ref<SegmentEncryptionStream> SegmentEncryptionStream::constructor(
   }
 
   auto& ioContext = IoContext::current();
-  auto highWaterMark = cipher.getLayout().fullSealedSegmentSize();
+  // Writes are taken a segment at a time, so that a segment-aligned write is sealed in place.
+  auto highWaterMark = cipher.getLayout().getSegmentSize();
   auto stage = kj::heap<SegmentEncryptStage>(
       kj::mv(cipher), firstSegment, plaintextLength, ioContext.getEntropySource());
   auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);
@@ -284,7 +313,8 @@ jsg::Ref<SegmentDecryptionStream> SegmentDecryptionStream::constructor(
   requireSegmentRange(cipher, firstSegment, cipher.getLayout().segmentCount(plaintextLength));
 
   auto& ioContext = IoContext::current();
-  auto highWaterMark = cipher.getLayout().getSegmentSize();
+  // Writes are taken a sealed segment at a time, so that an aligned write is opened in place.
+  auto highWaterMark = cipher.getLayout().fullSealedSegmentSize();
   auto stage = kj::heap<SegmentDecryptStage>(
       kj::mv(cipher), firstSegment, plaintextLength, outputOffset, outputEnd);
   auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);

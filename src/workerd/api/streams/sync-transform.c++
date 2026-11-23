@@ -18,10 +18,11 @@ class SyncTransform final: public kj::Refcounted,
                            public ReadableStreamSource,
                            public WritableStreamSink {
  public:
-  SyncTransform(IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark)
-      : ioContext(ioContext),
-        stage(kj::mv(stage)),
-        highWaterMark(highWaterMark),
+  SyncTransform(
+      kj::Own<SyncTransformStage> stage, size_t highWaterMark, jsg::ExternalMemoryAdjustment memory)
+      : stage(kj::mv(stage)),
+        highWaterMark(kj::max(highWaterMark, size_t(1))),
+        memory(kj::mv(memory)),
         remainingLength(this->stage->getOutputLength()) {}
 
   // ReadableStreamSource ----------------------------------------------------------------
@@ -29,26 +30,37 @@ class SyncTransform final: public kj::Refcounted,
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_REQUIRE(minBytes <= maxBytes);
     KJ_REQUIRE(readWaiter == kj::none, "only one read may be pending at a time");
+    if (maxBytes == 0) return size_t(0);
+    // A read that returns no bytes means the end of the stream, so every read waits for one.
+    minBytes = kj::max(minBytes, size_t(1));
     auto dest = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
     KJ_IF_SOME(n, tryReadNow(dest, minBytes)) {
       return n;
     }
     // Take what is queued now, so that the writer isn't held back by backpressure while the read
-    // waits for the rest of its minimum.
+    // waits for the rest of its minimum. The wait is not I/O: the writer, which is, is what ends
+    // it.
     size_t filled = dequeue(dest);
     return kj::newAdaptedPromise<size_t, ReadWaiter>(*this, dest, minBytes, filled)
-        .attach(kj::addRef(*this), ioContext.registerPendingEvent());
+        .attach(kj::addRef(*this));
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     KJ_REQUIRE(minBytes <= buffer.size());
     if (readWaiter != kj::none) return kj::none;
-    return tryReadNow(buffer, minBytes);
+    if (buffer.size() == 0) return size_t(0);
+    return tryReadNow(buffer, kj::max(minBytes, size_t(1)));
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     if (encoding != StreamEncoding::IDENTITY) return kj::none;
-    return remainingLength;
+    KJ_IF_SOME(length, remainingLength) {
+      // A consumer told that nothing remains would not read again, so until the stage has
+      // ended successfully, and can no longer fail, report no length rather than zero.
+      if (length == 0 && !succeeded()) return kj::none;
+      return length;
+    }
+    return kj::none;
   }
 
   void cancel(kj::Exception reason) override {
@@ -74,7 +86,12 @@ class SyncTransform final: public kj::Refcounted,
     if (writeInProgress || ended || failure != kj::none || queuedBytes > highWaterMark) {
       return false;
     }
-    pushAll(pieces);
+    // Only take what fits in one increment: a larger write goes through write(), which waits
+    // for the reader between increments.
+    size_t total = 0;
+    for (auto piece: pieces) total += piece.size();
+    if (total > highWaterMark) return false;
+    for (auto piece: pieces) push(piece);
     return true;
   }
 
@@ -88,6 +105,8 @@ class SyncTransform final: public kj::Refcounted,
     requireWritable();
     ended = true;
     runStage([&](SyncTransformStage::Output& output) { stage->end(output); });
+    // The stage is done, so let go of what it holds.
+    releaseStage();
   }
 
   void abort(kj::Exception reason) override {
@@ -164,9 +183,11 @@ class SyncTransform final: public kj::Refcounted,
     bool afterOutput;
   };
 
-  IoContext& ioContext;
+  // Null once the stage has ended, failed, or been canceled: it is not used again.
   kj::Own<SyncTransformStage> stage;
   size_t highWaterMark;
+  // Charges the queued output and the stage's retained bytes to the isolate.
+  jsg::ExternalMemoryAdjustment memory;
   kj::Maybe<uint64_t> remainingLength;
 
   // Output waiting to be read. The first chunk has had `frontOffset` bytes read from it already.
@@ -181,6 +202,11 @@ class SyncTransform final: public kj::Refcounted,
   kj::Maybe<ReadWaiter&> readWaiter;
   kj::Maybe<WriteWaiter&> writeWaiter;
 
+  // True once the stage has ended without failing, so that the output it queued is final.
+  bool succeeded() const {
+    return ended && failure == kj::none;
+  }
+
   void requireWritable() {
     KJ_IF_SOME(f, failure) {
       kj::throwFatalException(f.exception.clone());
@@ -194,20 +220,23 @@ class SyncTransform final: public kj::Refcounted,
     KJ_REQUIRE(!writeInProgress, "only one write may be pending at a time");
     writeInProgress = true;
     KJ_DEFER(writeInProgress = false);
-    if (queuedBytes > highWaterMark) {
-      // Wait for the reader to catch up before taking on more input. The caller keeps the pieces
-      // alive until the returned promise resolves.
-      co_await kj::newAdaptedPromise<void, WriteWaiter>(*this).attach(
-          ioContext.registerPendingEvent());
-      requireWritable();
+    // The caller keeps the pieces alive until the returned promise resolves.
+    for (auto piece: pieces) {
+      while (piece.size() > 0) {
+        if (queuedBytes > highWaterMark) {
+          // Wait for the reader to catch up before taking on more input.
+          co_await kj::newAdaptedPromise<void, WriteWaiter>(*this);
+          requireWritable();
+        }
+        auto increment = piece.first(kj::min(piece.size(), highWaterMark));
+        piece = piece.slice(increment.size());
+        push(increment);
+      }
     }
-    pushAll(pieces);
   }
 
-  void pushAll(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) {
-    for (auto piece: pieces) {
-      runStage([&](SyncTransformStage::Output& output) { stage->push(piece, output); });
-    }
+  void push(kj::ArrayPtr<const kj::byte> input) {
+    runStage([&](SyncTransformStage::Output& output) { stage->push(input, output); });
   }
 
   // Runs one stage operation and queues what it produced. If the stage throws, the stream fails,
@@ -224,6 +253,7 @@ class SyncTransform final: public kj::Refcounted,
     }
     KJ_IF_SOME(exception, maybeException) {
       failure = Failure{.exception = exception.clone(), .afterOutput = true};
+      releaseStage();
       KJ_IF_SOME(waiter, writeWaiter) {
         writeWaiter = kj::none;
         waiter.fulfiller.reject(exception.clone());
@@ -231,24 +261,53 @@ class SyncTransform final: public kj::Refcounted,
       serviceReader();
       kj::throwFatalException(kj::mv(exception));
     }
+    updateMemory();
     serviceReader();
   }
 
-  // Answers a read from the queue if it can be answered without waiting.
+  void releaseStage() {
+    stage = nullptr;
+    updateMemory();
+  }
+
+  void updateMemory() {
+    // The chunk at the front of the queue is held in full until it has all been read.
+    size_t retained = queuedBytes + frontOffset;
+    if (stage.get() != nullptr) retained += stage->retainedBytes();
+    memory.set(retained);
+  }
+
+  // The number of queued bytes a read may take now. When the output length is known, the last
+  // byte is held back until the stage has ended successfully, so a consumer that stops reading
+  // once it has the whole length still sees a failure the end of the input reveals.
+  size_t deliverable() const {
+    if (!succeeded()) {
+      KJ_IF_SOME(length, remainingLength) {
+        if (length <= queuedBytes) return length == 0 ? 0 : static_cast<size_t>(length - 1);
+      }
+    }
+    return queuedBytes;
+  }
+
+  // Answers a read from the queue if it can be answered without waiting. `minBytes` is at least
+  // 1.
   kj::Maybe<size_t> tryReadNow(kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
     KJ_IF_SOME(f, failure) {
-      if (!f.afterOutput || queuedBytes == 0) {
+      // A read shorter than its minimum would be taken for the end of the stream, so once the
+      // queue can't satisfy one, reads report the failure instead.
+      if (!f.afterOutput || deliverable() < minBytes) {
         kj::throwFatalException(f.exception.clone());
       }
       return dequeue(dest);
     }
-    if (queuedBytes >= minBytes || ended) {
+    if (deliverable() >= minBytes || succeeded()) {
       return dequeue(dest);
     }
     return kj::none;
   }
 
   size_t dequeue(kj::ArrayPtr<kj::byte> dest) {
+    dest = dest.first(kj::min(dest.size(), deliverable()));
     size_t copied = 0;
     while (copied < dest.size() && !queue.empty()) {
       auto& front = queue.front();
@@ -266,6 +325,7 @@ class SyncTransform final: public kj::Refcounted,
     KJ_IF_SOME(length, remainingLength) {
       remainingLength = length - kj::min(length, static_cast<uint64_t>(copied));
     }
+    updateMemory();
     if (queuedBytes <= highWaterMark) {
       KJ_IF_SOME(waiter, writeWaiter) {
         writeWaiter = kj::none;
@@ -283,16 +343,17 @@ class SyncTransform final: public kj::Refcounted,
       KJ_IF_SOME(f, failure) {
         if (f.afterOutput) waiter.filled += dequeue(waiter.buffer.slice(waiter.filled));
         readWaiter = kj::none;
-        if (waiter.filled > 0) {
+        if (waiter.filled >= waiter.minBytes) {
           // Deliver what the read holds; the next read reports the failure.
           waiter.fulfiller.fulfill(kj::cp(waiter.filled));
         } else {
+          // A short read would be taken for the end of the stream.
           waiter.fulfiller.reject(f.exception.clone());
         }
         return;
       }
       waiter.filled += dequeue(waiter.buffer.slice(waiter.filled));
-      if (waiter.filled >= waiter.minBytes || ended) {
+      if (waiter.filled >= waiter.minBytes || succeeded()) {
         readWaiter = kj::none;
         waiter.fulfiller.fulfill(kj::cp(waiter.filled));
       }
@@ -306,11 +367,13 @@ class SyncTransform final: public kj::Refcounted,
       f.afterOutput = false;
     } else {
       failure = Failure{.exception = reason.clone(), .afterOutput = false};
-      if (!ended) stage->cancel(reason);
+      if (stage.get() != nullptr) stage->cancel(reason);
     }
+    stage = nullptr;
     queue.clear();
     frontOffset = 0;
     queuedBytes = 0;
+    updateMemory();
     KJ_IF_SOME(waiter, readWaiter) {
       readWaiter = kj::none;
       waiter.fulfiller.reject(reason.clone());
@@ -326,7 +389,8 @@ class SyncTransform final: public kj::Refcounted,
 
 SyncTransformStreams newSyncTransformStreams(
     jsg::Lock& js, IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark) {
-  auto transform = kj::refcounted<SyncTransform>(ioContext, kj::mv(stage), highWaterMark);
+  auto transform = kj::refcounted<SyncTransform>(
+      kj::mv(stage), highWaterMark, js.getExternalMemoryAdjustment(0));
   kj::Own<ReadableStreamSource> source = kj::addRef(*transform);
   kj::Own<WritableStreamSink> sink = kj::mv(transform);
   return SyncTransformStreams{

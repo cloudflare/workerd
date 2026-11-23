@@ -100,6 +100,20 @@ struct SegmentInfoTemplate {
 };
 
 // Seals and opens individual segments.
+//
+// Each segment's key is HKDF-Expand(prk, info(index)), and the nonce or IV beside it is random.
+// The segment index authenticates a segment's position, and the decrypting side checks each
+// segment's plaintext size against the plaintextLength it is given. Nothing else ties a segment to
+// its message, so the caller must keep two things:
+//
+// - The key schedule (key, salt and info) must be unique to each message, and to each version of
+//   a message that is rewritten under the same name: for example a fresh random salt for every
+//   encryption, or an info that carries an authenticated version identifier. Otherwise segments at
+//   the same index of two messages, or two versions, are interchangeable, and so are whole
+//   messages that end at the same segment.
+// - The plaintextLength given to the decrypting side must come from metadata that is itself
+//   authenticated or trusted, such as the record that holds the salt. It is what detects
+//   truncation and extension; the ciphertext cannot.
 class SegmentCipher {
  public:
   struct KeySchedule {
@@ -111,8 +125,8 @@ class SegmentCipher {
     kj::Maybe<SegmentInfoTemplate> macInfo;
   };
 
-  // `keyBits` is the AES key size for AES-GCM (128, 192 or 256); the other algorithms have fixed
-  // key sizes and require 256. Throws if the key schedule doesn't suit the algorithm.
+  // `keyBits` is the AES key size for AES-GCM (128 or 256); the other algorithms have fixed key
+  // sizes and require 256. Throws if the key schedule doesn't suit the algorithm.
   SegmentCipher(SegmentLayout layout, KeySchedule keys, uint32_t keyBits);
 
   const SegmentLayout& getLayout() const {

@@ -1026,6 +1026,10 @@ struct SegmentKeyInfo {
 };
 
 // Every segment's key is HKDF-Expand(HKDF-Extract(salt, key), info(segment index)).
+// How each segment's key is derived. The schedule (key, salt and info) must be unique to each
+// message, and to each version of a message rewritten under the same name, for example through a
+// fresh random salt per encryption: segments are bound to their message only through it. See
+// SegmentCipher in segment-cipher.h.
 struct SegmentKeySchedule {
   // Only "HKDF".
   kj::String derive;
@@ -1066,7 +1070,8 @@ struct SegmentCipherOptions {
   // The index of the first segment this stream handles. Defaults to 0.
   jsg::Optional<double> firstSegment;
   // Encryption: optional, and if set, more or less input is an error.
-  // Decryption: required; the number of plaintext bytes the input holds.
+  // Decryption: required; the number of plaintext bytes the input holds. It must come from
+  // trusted or authenticated metadata: it is what detects truncation and extension.
   jsg::Optional<double> plaintextLength;
   // Decryption only: the number of plaintext bytes to drop from the start of the output.
   jsg::Optional<double> outputOffset;

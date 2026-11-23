@@ -16,8 +16,8 @@ namespace workerd::api {
 // transfer coding: `hex-size[;extensions] CRLF data CRLF` per chunk, then a zero-size chunk,
 // trailer fields, and a final CRLF. The trailer usually carries the payload checksum.
 //
-// Chunk extensions, such as chunk-signature, are parsed and skipped: chunk signatures are not
-// verified. Both sides are native streams, so a pipe through the decoder between two other
+// Chunk extensions, such as chunk-signature, are checked against RFC 9112's grammar and skipped:
+// chunk signatures are not verified. A trailer line may end in LF before its CRLF, as S3 allows. Both sides are native streams, so a pipe through the decoder between two other
 // native streams never runs JavaScript.
 //
 // Experimental: exposed only with the "experimental" compatibility flag.

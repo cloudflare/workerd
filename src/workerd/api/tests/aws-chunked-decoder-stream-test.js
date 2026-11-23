@@ -121,6 +121,105 @@ export const hexSizes = {
   },
 };
 
+// Wire bytes written out by hand, rather than by encode(), in the forms S3 clients send.
+const SIGNATURE =
+  'ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648';
+const WIRE_BODY = encoder.encode('hello world');
+
+export const wireFixtures = {
+  async test() {
+    // STREAMING-UNSIGNED-PAYLOAD-TRAILER, with and without the LF some clients send after the
+    // checksum.
+    for (const checksumLine of [
+      'x-amz-checksum-crc32:DUoRhQ==\r\n',
+      'x-amz-checksum-crc32:DUoRhQ==\n\r\n',
+    ]) {
+      const stream = new AwsChunkedDecoderStream({ decodedLength: 11 });
+      const wire = encoder.encode(
+        '6\r\nhello \r\n5\r\nworld\r\n0\r\n' + checksumLine + '\r\n'
+      );
+      deepStrictEqual(await run(stream, wire, 4), WIRE_BODY);
+      strictEqual(
+        (await stream.trailers).get('x-amz-checksum-crc32'),
+        'DUoRhQ=='
+      );
+    }
+
+    // STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER: every chunk, the final one included, carries a
+    // signature, and the trailer has its own.
+    const signed = new AwsChunkedDecoderStream({
+      decodedLength: 11,
+      allowedTrailers: ['x-amz-checksum-crc32'],
+    });
+    const signedWire = encoder.encode(
+      `6;chunk-signature=${SIGNATURE}\r\nhello \r\n` +
+        `5;chunk-signature=${SIGNATURE}\r\nworld\r\n` +
+        `0;chunk-signature=${SIGNATURE}\r\n` +
+        'x-amz-checksum-crc32:DUoRhQ==\n\r\n' +
+        `x-amz-trailer-signature:${SIGNATURE}\r\n` +
+        '\r\n'
+    );
+    deepStrictEqual(await run(signed, signedWire, 7), WIRE_BODY);
+    const trailers = await signed.trailers;
+    strictEqual(trailers.get('x-amz-checksum-crc32'), 'DUoRhQ==');
+    strictEqual([...trailers].length, 1);
+
+    // STREAMING-AWS4-HMAC-SHA256-PAYLOAD, with no trailer.
+    const plain = new AwsChunkedDecoderStream({ decodedLength: 11 });
+    const plainWire = encoder.encode(
+      `b;chunk-signature=${SIGNATURE}\r\nhello world\r\n` +
+        `0;chunk-signature=${SIGNATURE}\r\n\r\n`
+    );
+    deepStrictEqual(await run(plain, plainWire, 5), WIRE_BODY);
+    strictEqual([...(await plain.trailers)].length, 0);
+  },
+};
+
+// Chunk extensions follow RFC 9112: whitespace around ";" and "=", names without values, and
+// quoted values with escapes.
+export const extensionGrammar = {
+  async test() {
+    for (const extension of [
+      ';a',
+      ';a=b',
+      ';a;b=c',
+      ' ;a',
+      '\t; a = b ;c',
+      ';a="quoted ; value"',
+      ';a="escaped \\" quote"',
+      ';a=""',
+      ';a = "x"\t; b',
+    ]) {
+      const stream = new AwsChunkedDecoderStream();
+      deepStrictEqual(
+        await run(stream, encode(BODY, { extension }), 3),
+        BODY,
+        JSON.stringify(extension)
+      );
+    }
+    for (const extension of [
+      ';',
+      ';;a',
+      ';a=',
+      ';a b',
+      ';a=b c',
+      ';a="unterminated',
+      ';a="x"y',
+      ';a=b ',
+      ' ',
+      ';a ',
+      ';@',
+      ';a=@',
+      ';a="\x01"',
+    ]) {
+      await rejectsMalformed(
+        encode(BODY, { extension }),
+        /Malformed aws-chunked chunk extension/
+      );
+    }
+  },
+};
+
 async function rejectsMalformed(input, message, options = {}) {
   const stream = new AwsChunkedDecoderStream(options);
   await rejects(run(stream, input), (e) => {
@@ -219,6 +318,76 @@ export const lengthsAndLimits = {
       () => new AwsChunkedDecoderStream({ maxTrailerBytes: 0.5 }),
       RangeError
     );
+  },
+};
+
+// An error that the end of the input reveals reaches a consumer that reads the whole body, even
+// when the decoded length says the body is complete without it, and whether the stream had
+// failed before the consumer started reading or fails while it waits.
+export const lateFailureWholeBody = {
+  async test() {
+    const cases = [
+      [
+        { decodedLength: BODY.byteLength },
+        encode(BODY, { trailer: ['bad name: x'] }),
+        /trailer field name/,
+      ],
+      [
+        { decodedLength: BODY.byteLength, drainOnError: false },
+        encode(BODY, { trailer: ['bad name: x'] }),
+        /trailer field name/,
+      ],
+      [
+        { decodedLength: BODY.byteLength },
+        encode(BODY).subarray(0, encode(BODY).byteLength - 1),
+        /ended before its final chunk/,
+      ],
+      [{ decodedLength: 0 }, encoder.encode('0\r\n'), /ended before/],
+      [{ decodedLength: 0 }, encoder.encode('0\r\nx\r\n'), /ended before/],
+    ];
+    for (const [options, input, message] of cases) {
+      // Failed before reading began.
+      const failed = new AwsChunkedDecoderStream(options);
+      const writer = failed.writable.getWriter();
+      const writing = writer.write(input).then(() => writer.close());
+      await rejects(writing, message);
+      await rejects(new Response(failed.readable).arrayBuffer(), message);
+
+      // Failing while a read waits.
+      const pending = new AwsChunkedDecoderStream(options);
+      const body = new Response(pending.readable).arrayBuffer();
+      body.catch(() => {});
+      const pendingWriter = pending.writable.getWriter();
+      await rejects(
+        pendingWriter.write(input).then(() => pendingWriter.close()),
+        message
+      );
+      await rejects(body, message);
+    }
+
+    // The same lengths decode when the input is intact.
+    const intact = new AwsChunkedDecoderStream({
+      decodedLength: BODY.byteLength,
+    });
+    const writer = intact.writable.getWriter();
+    const writing = writer
+      .write(encode(BODY, { trailer: [CHECKSUM] }))
+      .then(() => writer.close());
+    deepStrictEqual(
+      new Uint8Array(await new Response(intact.readable).arrayBuffer()),
+      BODY
+    );
+    await writing;
+    const empty = new AwsChunkedDecoderStream({ decodedLength: 0 });
+    const emptyWriter = empty.writable.getWriter();
+    const emptyWriting = emptyWriter
+      .write(encoder.encode('0\r\n\r\n'))
+      .then(() => emptyWriter.close());
+    strictEqual(
+      (await new Response(empty.readable).arrayBuffer()).byteLength,
+      0
+    );
+    await emptyWriting;
   },
 };
 

@@ -39,6 +39,12 @@ class SyncTransformStage {
   virtual kj::Maybe<uint64_t> getOutputLength() const {
     return kj::none;
   }
+
+  // The bytes the stage holds between calls, such as a partial block, so that they can be
+  // charged to the isolate as external memory.
+  virtual size_t retainedBytes() const {
+    return 0;
+  }
 };
 
 struct SyncTransformStreams {
@@ -50,9 +56,16 @@ struct SyncTransformStreams {
 // to `writable` and makes the output readable from `readable`. Both sides are native, so a pipe
 // between them and another native stream runs entirely in C++.
 //
-// A write is accepted once the output still waiting to be read is at most `highWaterMark` bytes,
-// as a TransformStream's second write waits for its readable side to be read. So at most
-// `highWaterMark` bytes, plus the output of one write, are buffered at any time.
+// Input is passed to the stage at most `highWaterMark` bytes at a time, and each increment waits
+// until the output still waiting to be read is at most `highWaterMark` bytes, as a
+// TransformStream's second write waits for its readable side to be read. So at most
+// `highWaterMark` bytes, plus the output of one increment, are queued at any time, however large
+// the writes are. The queued output and the stage's retained bytes are charged to the isolate as
+// external memory.
+//
+// If the stage knows its output length, the readable side reports it, and holds back the last
+// byte until the stage has ended successfully. So a consumer that stops reading once it has the
+// whole length still sees an error that the end of the input reveals.
 SyncTransformStreams newSyncTransformStreams(
     jsg::Lock& js, IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark);
 

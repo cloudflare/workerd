@@ -18,8 +18,8 @@ namespace workerd::api {
 namespace {
 
 constexpr size_t DEFAULT_MAX_TRAILER_BYTES = 16 * 1024;
-// A size line's extensions hold at most a chunk signature in practice; this bounds what is
-// buffered while skipping them.
+// A size line's extensions hold at most a chunk signature in practice; this bounds the work spent
+// skipping them.
 constexpr size_t MAX_EXTENSION_BYTES = 4096;
 // 16 hex digits express any 64-bit size.
 constexpr size_t MAX_SIZE_DIGITS = 16;
@@ -37,6 +37,21 @@ bool isTokenChar(kj::byte c) {
   // RFC 9110 tchar.
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
       kj::StringPtr("!#$%&'*+-.^_`|~").findFirst(static_cast<char>(c)) != kj::none;
+}
+
+bool isWhitespace(kj::byte c) {
+  return c == ' ' || c == '\t';
+}
+
+// RFC 9110 qdtext, the characters a quoted-string holds without escaping.
+bool isQuotedTextChar(kj::byte c) {
+  return c == '\t' || c == ' ' || c == 0x21 || (c >= 0x23 && c <= 0x5b) ||
+      (c >= 0x5d && c <= 0x7e) || c >= 0x80;
+}
+
+// RFC 9110 quoted-pair: the characters a backslash may escape.
+bool isQuotablePairChar(kj::byte c) {
+  return c == '\t' || c == ' ' || (c >= 0x21 && c != 0x7f);
 }
 
 kj::ArrayPtr<const kj::byte> trimWhitespace(kj::ArrayPtr<const kj::byte> text) {
@@ -70,7 +85,22 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
       // Draining: the input is read and discarded until it ends.
       return;
     }
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { decode(input, output); })) {
+    // The chunk data in `input`, which is copied out as one array however many chunks it spans.
+    kj::Vector<kj::ArrayPtr<const kj::byte>> data;
+    auto maybeException = kj::runCatchingExceptions([&]() { decode(input, data); });
+    // The data decoded before a failure is still output.
+    size_t total = 0;
+    for (auto piece: data) total += piece.size();
+    if (total > 0) {
+      auto result = kj::heapArray<kj::byte>(total);
+      size_t offset = 0;
+      for (auto piece: data) {
+        result.slice(offset).write(piece);
+        offset += piece.size();
+      }
+      output.add(kj::mv(result));
+    }
+    KJ_IF_SOME(exception, maybeException) {
       fail(kj::mv(exception));
     }
   }
@@ -96,6 +126,7 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
  private:
   enum class State {
     SIZE,
+    // Parsing the chunk extensions, as `extensionState` says.
     EXTENSION,
     SIZE_LF,
     DATA,
@@ -103,6 +134,23 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
     DATA_LF,
     TRAILER,
     DONE,
+  };
+
+  // Where the extension parser is in RFC 9112's
+  //   chunk-ext = *( BWS ";" BWS chunk-ext-name [ BWS "=" BWS chunk-ext-val ] )
+  // where chunk-ext-name is a token and chunk-ext-val is a token or a quoted-string.
+  enum class ExtensionState {
+    // After the size or an extension; a ";" or the line ending may follow.
+    BEFORE_SEMICOLON,
+    BEFORE_NAME,
+    NAME,
+    // After an extension's name and some whitespace; a "=" or ";" may follow.
+    AFTER_NAME,
+    BEFORE_VALUE,
+    TOKEN_VALUE,
+    QUOTED_VALUE,
+    // After a backslash in a quoted value.
+    QUOTED_PAIR,
   };
 
   kj::Maybe<uint64_t> decodedLength;
@@ -113,6 +161,10 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
 
   State state = State::SIZE;
   size_t sizeDigits = 0;
+  ExtensionState extensionState = ExtensionState::BEFORE_SEMICOLON;
+  // True when the extension parser has just passed whitespace, which the line ending may not
+  // follow.
+  bool afterWhitespace = false;
   size_t extensionBytes = 0;
   uint64_t chunkRemaining = 0;
   uint64_t decoded = 0;
@@ -136,7 +188,7 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
     }
   }
 
-  void decode(kj::ArrayPtr<const kj::byte> input, Output& output) {
+  void decode(kj::ArrayPtr<const kj::byte> input, kj::Vector<kj::ArrayPtr<const kj::byte>>& data) {
     while (input.size() > 0) {
       switch (state) {
         case State::SIZE: {
@@ -146,24 +198,31 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
                 "An aws-chunked chunk size has more than ", MAX_SIZE_DIGITS, " digits.");
             chunkRemaining = chunkRemaining << 4 | digit;
             sizeDigits++;
+          } else if (c == '\r') {
+            JSG_REQUIRE(sizeDigits > 0, TypeError, "Malformed aws-chunked chunk size.");
+            state = State::SIZE_LF;
           } else {
-            JSG_REQUIRE(sizeDigits > 0 && (c == ';' || c == '\r'), TypeError,
+            JSG_REQUIRE(sizeDigits > 0 && (c == ';' || isWhitespace(c)), TypeError,
                 "Malformed aws-chunked chunk size.");
-            state = c == ';' ? State::EXTENSION : State::SIZE_LF;
+            // The extensions start here, and the parser takes this first byte too.
+            state = State::EXTENSION;
+            extensionState = ExtensionState::BEFORE_SEMICOLON;
+            afterWhitespace = false;
+            continue;
           }
           input = input.slice(1);
           break;
         }
         case State::EXTENSION: {
-          auto end = input.findFirst('\r').orDefault(input.size());
-          extensionBytes += end;
-          JSG_REQUIRE(extensionBytes <= MAX_EXTENSION_BYTES, TypeError,
-              "An aws-chunked chunk extension is longer than ", MAX_EXTENSION_BYTES, " bytes.");
-          if (end < input.size()) {
-            state = State::SIZE_LF;
-            end++;
+          kj::byte c = input.front();
+          input = input.slice(1);
+          if (c == '\r') {
+            endExtensions();
+          } else {
+            JSG_REQUIRE(++extensionBytes <= MAX_EXTENSION_BYTES, TypeError,
+                "An aws-chunked chunk extension is longer than ", MAX_EXTENSION_BYTES, " bytes.");
+            extensionByte(c);
           }
-          input = input.slice(end);
           break;
         }
         case State::SIZE_LF:
@@ -174,7 +233,7 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
         case State::DATA: {
           size_t n = kj::min(chunkRemaining, static_cast<uint64_t>(input.size()));
           decoded += n;
-          output.add(kj::heapArray(input.first(n)));
+          data.add(input.first(n));
           chunkRemaining -= n;
           input = input.slice(n);
           if (chunkRemaining == 0) state = State::DATA_CR;
@@ -198,6 +257,85 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
           JSG_FAIL_REQUIRE(TypeError, "The aws-chunked body continues past its trailer.");
       }
     }
+  }
+
+  [[noreturn]] static void malformedExtension() {
+    JSG_FAIL_REQUIRE(TypeError, "Malformed aws-chunked chunk extension.");
+  }
+
+  // Advances the extension parser over one byte of the size line, other than its CR.
+  void extensionByte(kj::byte c) {
+    bool whitespace = isWhitespace(c);
+    switch (extensionState) {
+      case ExtensionState::BEFORE_SEMICOLON:
+        if (c == ';') {
+          extensionState = ExtensionState::BEFORE_NAME;
+        } else if (!whitespace) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::BEFORE_NAME:
+        if (isTokenChar(c)) {
+          extensionState = ExtensionState::NAME;
+        } else if (!whitespace) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::NAME:
+      case ExtensionState::AFTER_NAME:
+        if (c == '=') {
+          extensionState = ExtensionState::BEFORE_VALUE;
+        } else if (c == ';') {
+          extensionState = ExtensionState::BEFORE_NAME;
+        } else if (whitespace) {
+          extensionState = ExtensionState::AFTER_NAME;
+        } else if (!(extensionState == ExtensionState::NAME && isTokenChar(c))) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::BEFORE_VALUE:
+        if (c == '"') {
+          extensionState = ExtensionState::QUOTED_VALUE;
+        } else if (isTokenChar(c)) {
+          extensionState = ExtensionState::TOKEN_VALUE;
+        } else if (!whitespace) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::TOKEN_VALUE:
+        if (c == ';') {
+          extensionState = ExtensionState::BEFORE_NAME;
+        } else if (whitespace) {
+          extensionState = ExtensionState::BEFORE_SEMICOLON;
+        } else if (!isTokenChar(c)) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::QUOTED_VALUE:
+        if (c == '"') {
+          extensionState = ExtensionState::BEFORE_SEMICOLON;
+        } else if (c == '\\') {
+          extensionState = ExtensionState::QUOTED_PAIR;
+        } else if (!isQuotedTextChar(c)) {
+          malformedExtension();
+        }
+        break;
+      case ExtensionState::QUOTED_PAIR:
+        if (!isQuotablePairChar(c)) malformedExtension();
+        extensionState = ExtensionState::QUOTED_VALUE;
+        break;
+    }
+    afterWhitespace = whitespace;
+  }
+
+  // Handles the CR that ends a size line with extensions. It may only follow a complete
+  // extension, with no whitespace before it.
+  void endExtensions() {
+    bool complete = extensionState == ExtensionState::NAME ||
+        extensionState == ExtensionState::TOKEN_VALUE ||
+        extensionState == ExtensionState::BEFORE_SEMICOLON;
+    if (!complete || afterWhitespace) malformedExtension();
+    state = State::SIZE_LF;
   }
 
   void startChunk() {
@@ -261,6 +399,8 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
       while (!(section[lineEnd] == '\r' && section[lineEnd + 1] == '\n')) lineEnd++;
       auto line = section.first(lineEnd);
       section = section.slice(lineEnd + 2);
+      // S3 accepts an LF between a checksum and its CRLF, as some clients send.
+      if (line.size() > 0 && line.back() == '\n') line = line.first(line.size() - 1);
 
       auto colon = JSG_REQUIRE_NONNULL(
           line.findFirst(':'), TypeError, "Malformed aws-chunked trailer field.");
@@ -328,7 +468,10 @@ jsg::Ref<AwsChunkedDecoderStream> AwsChunkedDecoderStream::constructor(
   // Up to one network read of decoded data may wait to be read.
   auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), 64 * 1024);
 
-  auto trailers = ioContext.awaitIo(js, kj::mv(paf.promise), [](jsg::Lock& js, Trailers fields) {
+  // The trailers are settled by the writes, so waiting for them is not I/O of its own: if
+  // nothing writes, the request should be seen to hang rather than wait on them.
+  auto trailers =
+      ioContext.awaitIoLegacy(js, kj::mv(paf.promise)).then(js, [](jsg::Lock& js, Trailers fields) {
     auto headers = js.alloc<Headers>();
     for (auto& field: fields) {
       headers->append(js, kj::mv(kj::get<0>(field)), kj::mv(kj::get<1>(field)));

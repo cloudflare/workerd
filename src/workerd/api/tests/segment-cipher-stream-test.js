@@ -605,31 +605,129 @@ export const nativePipe = {
   },
 };
 
-// Like a TransformStream, a write waits once the readable side has a backlog.
+// Like a TransformStream, a write waits once the readable side has a backlog. A large write is
+// taken a segment at a time, so it waits for the reader between segments rather than queuing
+// all of its output at once.
 export const backpressure = {
   async test() {
+    const segmentSize = 65536;
+    const segments = 16;
     const stream = new crypto.SegmentEncryptionStream(
-      await optionsFor('AES-GCM')
+      await optionsFor('AES-GCM', { segmentSize })
     );
     const writer = stream.writable.getWriter();
-    await writer.write(bytes(4 * SEGMENT_SIZE));
-    let secondDone = false;
-    const second = writer.write(bytes(SEGMENT_SIZE)).then(() => {
-      secondDone = true;
+    let writeDone = false;
+    const writing = writer.write(bytes(segments * segmentSize)).then(() => {
+      writeDone = true;
     });
-    await scheduler.wait(10);
-    strictEqual(secondDone, false);
 
-    // Reading the backlog lets the second write through.
+    // The write can't finish until the reader has drained most of its output.
     const reader = stream.readable.getReader();
-    const expected = 5 * (SEGMENT_SIZE + 28);
-    let read = 0;
+    const expected = segments * (segmentSize + 28);
+    let read = (await reader.read()).value.byteLength;
+    strictEqual(writeDone, false);
     while (read < expected) {
       const { value } = await reader.read();
       read += value.byteLength;
     }
-    await second;
+    await writing;
     strictEqual(read, expected);
+  },
+};
+
+// A failure that the input reveals after some output has been produced errors a consumer that
+// reads the whole body, whether the stream had failed before it started reading or fails while
+// it waits. This includes output ranges that end before the failing segment, and empty ones:
+// every segment is authenticated.
+export const lateFailureWholeBody = {
+  async test() {
+    const plaintextLength = SEGMENT_SIZE + 10;
+    const plaintext = bytes(plaintextLength, 21);
+    const ranges = [
+      {},
+      { outputLength: SEGMENT_SIZE },
+      { outputOffset: SEGMENT_SIZE + 4 },
+      { outputLength: 0 },
+      { outputOffset: plaintextLength },
+    ];
+    for (const algorithm of ALGORITHMS) {
+      const ciphertext = await encrypt(algorithm, plaintext);
+      const corrupt = ciphertext.slice();
+      corrupt[corrupt.length - 1] ^= 1;
+      for (const range of ranges) {
+        const options = await optionsFor(algorithm, {
+          plaintextLength,
+          ...range,
+        });
+        const label = `${algorithm} ${JSON.stringify(range)}`;
+
+        // Failed before reading began.
+        const failed = new crypto.SegmentDecryptionStream(options);
+        await rejectsOperation(
+          failed.writable.getWriter().write(corrupt),
+          /Segment 1 failed/
+        );
+        await rejectsOperation(
+          new Response(failed.readable).arrayBuffer(),
+          /Segment 1 failed/
+        );
+
+        // Failing while a read waits.
+        const pending = new crypto.SegmentDecryptionStream(options);
+        const body = new Response(pending.readable).arrayBuffer();
+        body.catch(() => {});
+        await rejectsOperation(
+          pending.writable.getWriter().write(corrupt),
+          /Segment 1 failed/
+        );
+        await rejectsOperation(body, /Segment 1 failed/);
+
+        // The intact ciphertext reads in full.
+        const intact = new crypto.SegmentDecryptionStream(options);
+        const writer = intact.writable.getWriter();
+        const writing = writer.write(ciphertext).then(() => writer.close());
+        const output = new Uint8Array(
+          await new Response(intact.readable).arrayBuffer()
+        );
+        await writing;
+        const from = range.outputOffset ?? 0;
+        const to = Math.min(
+          plaintextLength,
+          from + (range.outputLength ?? plaintextLength)
+        );
+        deepStrictEqual(output, plaintext.subarray(from, to), label);
+      }
+    }
+  },
+};
+
+// CBC padding seals plaintexts of nearby sizes to the same size, so a segment's authenticated
+// plaintext size is checked against the plaintextLength too.
+export const cbcPlaintextLength = {
+  async test() {
+    const algorithm = 'AES-CBC-HMAC-SHA256';
+    for (const [actual, declared, segment] of [
+      [15, 14, 0],
+      [14, 15, 0],
+      [SEGMENT_SIZE + 15, SEGMENT_SIZE + 14, 1],
+      [SEGMENT_SIZE + 1, SEGMENT_SIZE + 15, 1],
+    ]) {
+      const ciphertext = await encrypt(algorithm, bytes(actual, 3));
+      strictEqual(
+        ciphertext.byteLength,
+        crypto.SegmentEncryptionStream.encryptedLength(declared, {
+          algorithm,
+          segmentSize: SEGMENT_SIZE,
+        })
+      );
+      await rejectsOperation(
+        decrypt(algorithm, ciphertext, declared),
+        new RegExp(
+          `Segment ${segment} holds ${actual % SEGMENT_SIZE} bytes of plaintext, ` +
+            `but the plaintextLength requires ${declared % SEGMENT_SIZE}`
+        )
+      );
+    }
   },
 };
 
