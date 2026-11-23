@@ -92,6 +92,37 @@ class CxxEcho final: public TestEcho::Server {
   kj::Vector<kj::byte> writtenData;
 };
 
+constexpr kj::Exception::DetailTypeId TEST_DETAIL_ID = 0x5d0e'9b31'c4a2'7f68ull;
+
+// A TestEcho server whose echo() fails with an exception that carries a detail entry, as
+// workerd's exceptions do.
+class DetailedFailureEcho final: public TestEcho::Server {
+ public:
+  kj::Promise<void> echo(EchoContext context) override {
+    auto exception = KJ_EXCEPTION(DISCONNECTED, "detailed failure");
+    exception.setDetail(TEST_DETAIL_ID, kj::heapArray("payload"_kjb));
+    return kj::mv(exception);
+  }
+};
+
+// Waits for `promise` to fail, and checks that its exception is DetailedFailureEcho's, whole.
+template <typename T>
+void expectDetailedFailure(kj::Promise<T> promise, kj::WaitScope& waitScope) {
+  auto exception = promise
+                       .then([](auto&&) -> kj::Maybe<kj::Exception> { return kj::none; },
+                           [](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
+    return kj::mv(e);
+  }).wait(waitScope);
+  auto& e = KJ_ASSERT_NONNULL(exception, "the call didn't fail");
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(e.getDescription() == "detailed failure", e.getDescription());
+  KJ_IF_SOME(detail, e.getDetail(TEST_DETAIL_ID)) {
+    KJ_EXPECT(detail == "payload"_kjb);
+  } else {
+    KJ_FAIL_EXPECT("the exception lost its detail");
+  }
+}
+
 kj::String echoText(TestEcho::Client& echo, kj::StringPtr text, kj::WaitScope& waitScope) {
   auto request = echo.echoRequest();
   request.setText(text);
@@ -259,6 +290,21 @@ KJ_TEST("a C++ server's error reaches Rust, and comes back to C++") {
   Fixture f;
   KJ_EXPECT_THROW_MESSAGE("cxx failure",
       rust_fail(clientToRust(f.cxxEcho("cxx:")), rs("cxx failure")).wait(f.waitScope));
+}
+
+KJ_TEST("a C++ exception keeps its details through a Rust server that returns it") {
+  Fixture f;
+  auto echo = f.rustEcho("rust:");
+  auto request = echo.callBackRequest();
+  request.setCallee(kj::heap<DetailedFailureEcho>());
+  request.setText("hello");
+  expectDetailedFailure(request.send(), f.waitScope);
+}
+
+KJ_TEST("a C++ exception keeps its details through a Rust client that returns it") {
+  Fixture f;
+  TestEcho::Client failing = kj::heap<DetailedFailureEcho>();
+  expectDetailedFailure(rust_echo(clientToRust(kj::mv(failing)), rs("hello")), f.waitScope);
 }
 
 KJ_TEST("canceling a call to a Rust server leaves it running, as KJ does by default") {
