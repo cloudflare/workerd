@@ -233,10 +233,17 @@ const kAdopt: symbol = Symbol('adopt');
 
 let urlState: (url: unknown) => unknown;
 
+// The overload signatures are the declarations the Workers types publish
+// (public-types.d.ts), as WHATWG URL declares them at every compatibility
+// date; the implementations take any value, which they convert as WebIDL
+// does.
 class URL {
   #state: unknown;
   #searchParams: URLSearchParams | undefined;
 
+  constructor(url: string | URL, base?: string | URL);
+  /** @internal */
+  constructor(adopt: symbol, state: unknown);
   constructor(url: unknown, base?: unknown) {
     let state;
     if (url === kAdopt) {
@@ -359,6 +366,7 @@ class URL {
     return backend.get(urlState(this), HREF);
   }
 
+  static canParse(url: string | URL, base?: string | URL): boolean;
   static canParse(url: unknown, base?: unknown): boolean {
     requireArguments(
       arguments.length,
@@ -369,6 +377,7 @@ class URL {
     return backend.canParse(urlString, toOptionalUSVString(base));
   }
 
+  static parse(url: string | URL, base?: string | URL): URL | null;
   static parse(url: unknown, base?: unknown): URL | null {
     requireArguments(arguments.length, 1, "Failed to execute 'parse' on 'URL'");
     const urlString = toUSVString(url);
@@ -377,6 +386,7 @@ class URL {
     return new URL(kAdopt, state);
   }
 
+  static createObjectURL(object: File | Blob): string;
   static createObjectURL(object: unknown): string {
     const what = "Failed to execute 'createObjectURL' on 'URL'";
     requireArguments(arguments.length, 1, what);
@@ -388,6 +398,7 @@ class URL {
     throw new Error('URL.createObjectURL() is not implemented');
   }
 
+  static revokeObjectURL(object_url: string): void;
   static revokeObjectURL(url: unknown): void {
     requireArguments(
       arguments.length,
@@ -421,9 +432,21 @@ const kHas = "Failed to execute 'has' on 'URLSearchParams'";
 const kSet = "Failed to execute 'set' on 'URLSearchParams'";
 const kForEach = "Failed to execute 'forEach' on 'URLSearchParams'";
 
+// The default iterator, which the prototype's setup below installs. The
+// Workers types fold it into the class's declaration.
+interface URLSearchParams {
+  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+}
+
+// Declared as URL is, above.
 class URLSearchParams {
   #store: SearchParamsStore;
 
+  constructor(
+    init?: Iterable<Iterable<string>> | Record<string, string> | string
+  );
+  /** @internal */
+  constructor(adopt: symbol, store: SearchParamsStore);
   constructor(init?: unknown, store?: unknown) {
     this.#store =
       init === kAdopt ? (store as SearchParamsStore) : storeFromInit(init);
@@ -444,6 +467,7 @@ class URLSearchParams {
     return searchParamsStore(this).size();
   }
 
+  append(name: string, value: string): void;
   append(name: unknown, value: unknown): void {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 2, kAppend);
@@ -451,6 +475,10 @@ class URLSearchParams {
     store.append(nameString, toUSVString(value));
   }
 
+  // delete() and has() declare `value` at every compatibility date, though
+  // without urlsearchparams_delete_has_value_arg (the default from
+  // 2023-07-01) they ignore it.
+  delete(name: string, value?: string): void;
   delete(name: unknown, value?: unknown): void {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 1, kDelete);
@@ -461,18 +489,21 @@ class URLSearchParams {
     );
   }
 
+  get(name: string): string | null;
   get(name: unknown): string | null {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 1, kGet);
     return store.get(toUSVString(name));
   }
 
+  getAll(name: string): string[];
   getAll(name: unknown): string[] {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 1, kGetAll);
     return store.getAll(toUSVString(name));
   }
 
+  has(name: string, value?: string): boolean;
   has(name: unknown, value?: unknown): boolean {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 1, kHas);
@@ -483,6 +514,7 @@ class URLSearchParams {
     );
   }
 
+  set(name: string, value: string): void;
   set(name: unknown, value: unknown): void {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 2, kSet);
@@ -494,18 +526,32 @@ class URLSearchParams {
     searchParamsStore(this).sort();
   }
 
-  entries(): URLSearchParamsIterator {
+  // The iterators inherit their own [Symbol.iterator] from
+  // %IteratorPrototype%, which their class's declaration leaves out.
+  entries(): IterableIterator<[key: string, value: string]>;
+  entries(): object {
     return new URLSearchParamsIterator(searchParamsStore(this), kEntries);
   }
 
-  keys(): URLSearchParamsIterator {
+  keys(): IterableIterator<string>;
+  keys(): object {
     return new URLSearchParamsIterator(searchParamsStore(this), kKeys);
   }
 
-  values(): URLSearchParamsIterator {
+  values(): IterableIterator<string>;
+  values(): object {
     return new URLSearchParamsIterator(searchParamsStore(this), kValues);
   }
 
+  forEach<This = unknown>(
+    callback: (
+      this: This,
+      value: string,
+      key: string,
+      parent: URLSearchParams
+    ) => void,
+    thisArg?: This
+  ): void;
   forEach(callback: unknown, thisArg?: unknown): void {
     const store = searchParamsStore(this);
     requireArguments(arguments.length, 1, kForEach);
@@ -708,6 +754,8 @@ const cppExports = {
     return searchParamsStore(params).serialize();
   },
 };
+
+export type { URL, URLSearchParams };
 
 export type UrlExports = {
   URL: typeof URL;

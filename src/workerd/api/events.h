@@ -18,7 +18,7 @@ namespace messageevent {
 // know, and lives in a namespace of its own, so that JSG's conversion errors name the type.
 //
 // RTTI describes it as an object; MessageEvent's TypeScript overrides name it MessagePort,
-// which types/defines/messagechannel.d.ts declares.
+// which src/per_isolate/messagechannel/messagechannel.public.d.ts declares.
 class MessagePort {
  public:
   static constexpr kj::StringPtr BRAND = "workerd:MessagePort"_kj;

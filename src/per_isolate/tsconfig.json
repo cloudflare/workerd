@@ -2,6 +2,7 @@
   "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
     "declaration": true,
+    "stripInternal": true,
     "module": "commonjs",
     "moduleResolution": "node",
     "verbatimModuleSyntax": false,
