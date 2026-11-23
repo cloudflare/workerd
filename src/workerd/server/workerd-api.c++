@@ -6,6 +6,7 @@
 
 #include "workerd-api-isolate.h"
 
+#include <workerd/api/bench-api/ffi.rs.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
@@ -68,7 +69,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/secrets-store.js"_kj, SECRETS_STORE_JS);
     return map;
   }();
-  return bundled.find(name).map([](auto& source) { return source; });
+  return bundled.find(name);
 }
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
@@ -273,9 +274,18 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
-const jsg::TypeHandler<api::BenchExportedHandler>& WorkerdApi::getBenchTypeHandler(
-    jsg::Lock& lock) const {
-  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::BenchExportedHandler>();
+v8::Local<v8::Promise> WorkerdApi::runBench(jsg::Lock& lock,
+    v8::Local<v8::Value> handler,
+    v8::Local<v8::Value> env,
+    v8::Local<v8::Value> ctx,
+    kj::ArrayPtr<const capnp::word> params) const {
+  static_assert(sizeof(capnp::word) == sizeof(uint64_t));
+  auto words = kj::arrayPtr(reinterpret_cast<const uint64_t*>(params.begin()), params.size());
+  auto result = jsg::check(
+      ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(api::bench_run(lock.v8Isolate,
+          ::workerd::rust::jsg::to_ffi(kj::mv(handler)), ::workerd::rust::jsg::to_ffi(kj::mv(env)),
+          ::workerd::rust::jsg::to_ffi(kj::mv(ctx)), words.as<kj_rs::Rust>())));
+  return result.As<v8::Promise>();
 }
 
 kj::Maybe<const jsg::TypeHandler<Worker::Api::EventListenerCallback>&> WorkerdApi::

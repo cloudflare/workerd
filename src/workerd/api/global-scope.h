@@ -5,7 +5,6 @@
 #pragma once
 
 #include "basics.h"
-#include "bench.h"
 #include "filesystem.h"
 #include "http.h"
 #include "performance.h"
@@ -635,20 +634,6 @@ struct ExportedHandler {
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
 
-// The `bench` handler of an exported object. It isn't a member of ExportedHandler, which is
-// unwrapped from the export for every event, reading each of its handlers: reading another name
-// there would break exports that reject unknown properties, such as a Proxy. Instead,
-// ServiceWorkerGlobalScope::bench() unwraps this from ExportedHandler::self, only when a
-// benchmark runs.
-struct BenchExportedHandler {
-  using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
-
-  JSG_STRUCT(bench);
-};
-
 // V8 private key set on functions marked with retryable() from "cloudflare:durable-objects".
 // Reading it runs no user code, so a claim can check it before the handler or method runs.
 inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
@@ -784,9 +769,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
-  // register cases, then runs them. Failures, of the handler or of a case, are recorded in the
-  // result rather than rejecting.
-  jsg::Promise<BenchGroupResult> bench(Worker::Lock& lock,
+  // register cases, then runs them, through Worker::Api::runBench(). Resolves with the group's
+  // `BenchReport.Group`, without its name, as an encoded message. Failures, of the handler or of
+  // a case, are recorded in the group rather than rejecting.
+  jsg::Promise<kj::Array<capnp::word>> bench(Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler,
       bench::BenchParams::Reader params);
 
@@ -1318,10 +1304,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
-      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+      api::ExecutionContext, api::ExportedHandler,                                                 \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

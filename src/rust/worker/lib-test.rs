@@ -36,3 +36,12 @@ impl kj::http::Service for HeaderOverrideProxy {
         todo!()
     }
 }
+
+#[test]
+fn default_bench_fails_as_unimplemented() {
+    let mut worker = crate::ok::Worker;
+    let error = futures::executor::block_on(crate::Interface::bench(&mut worker, &[]))
+        .expect_err("the default bench must fail");
+    assert_eq!(error.r#type(), cxx::KjExceptionType::Unimplemented);
+    assert_eq!(error.what(), "this service doesn't support bench()");
+}
