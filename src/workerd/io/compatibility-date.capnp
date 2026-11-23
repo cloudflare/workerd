@@ -1877,4 +1877,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  websocketSendUsvString @210 :Bool
+      $compatEnableFlag("websocket_send_usv_string")
+      $compatDisableFlag("websocket_send_legacy_string");
+  # Makes `WebSocket.send()` convert a string message to a USVString, as the WHATWG WebSockets spec
+  # requires, so each unpaired surrogate is sent as U+FFFD. Without the flag an unpaired surrogate
+  # is sent as its WTF-8 bytes, which makes the text frame invalid UTF-8.
 }

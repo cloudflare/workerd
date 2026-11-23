@@ -244,7 +244,7 @@ class WebSocket: public EventTarget {
   // so that the websocket can start processing messages once the connection has been established.
   void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
-  void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
+  void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, jsg::JsString> message);
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason);
 
   // Used to get/set the attachment for hibernation.

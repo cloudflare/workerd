@@ -333,7 +333,7 @@ void sendFromDo(TestFixture& fixture,
         hm.getWebSockets(js, tag.size() == 0 ? kj::Maybe<kj::StringPtr>(kj::none) : tag);
     KJ_ASSERT(
         websockets.size() == 1, "expected exactly one WebSocket for tag", tag, websockets.size());
-    websockets[0]->send(js, kj::OneOf<kj::Array<kj::byte>, kj::String>(kj::str(msg)));
+    websockets[0]->send(js, kj::OneOf<kj::Array<kj::byte>, jsg::JsString>(js.str(msg)));
   });
 }
 
@@ -1356,7 +1356,7 @@ KJ_TEST("HibernationManager: DO sends binary message to eyeball") {
     auto websockets = hm->getWebSockets(js, kj::none);
     KJ_ASSERT(websockets.size() == 1);
     auto bytes = kj::heapArray<kj::byte>({0xde, 0xad, 0xbe, 0xef});
-    websockets[0]->send(js, kj::OneOf<kj::Array<kj::byte>, kj::String>(kj::mv(bytes)));
+    websockets[0]->send(js, kj::OneOf<kj::Array<kj::byte>, jsg::JsString>(kj::mv(bytes)));
   });
 
   auto msg = end1->receive().wait(fixture.getWaitScope());
