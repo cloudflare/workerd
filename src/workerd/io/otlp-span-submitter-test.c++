@@ -22,6 +22,7 @@
 #include <opentelemetry/proto/collector/logs/v1/logs_service.pb.h>
 #include <opentelemetry/proto/collector/trace/v1/trace_service.pb.h>
 
+#include <capnp/message.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
 
@@ -933,6 +934,151 @@ KJ_TEST("an invocation whose spans are not exported still exports its logs and i
   KJ_EXPECT(out[1].event_name() == "cloudflare.invocation");
   KJ_EXPECT(out[1].body().string_value() == "scheduled");
   KJ_EXPECT(attribute(out[1].attributes(), "faas.trigger").string_value() == "timer");
+}
+
+// `tags` one per line, strings quoted.
+kj::String describe(kj::ArrayPtr<const Span::Tag> tags) {
+  return kj::strArray(KJ_MAP(tag, tags) {
+    KJ_SWITCH_ONEOF(tag.value) {
+      KJ_CASE_ONEOF(s, kj::ConstString) {
+        return kj::str(tag.key, " = \"", s, "\"");
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        return kj::str(tag.key, " = ", b);
+      }
+      KJ_CASE_ONEOF(i, int64_t) {
+        return kj::str(tag.key, " = ", i);
+      }
+      KJ_CASE_ONEOF(d, double) {
+        return kj::str(tag.key, " = ", d);
+      }
+    }
+    KJ_UNREACHABLE;
+  }, "\n");
+}
+
+constexpr kj::StringPtr WORKER_RESOURCE =
+    "0af9070ab1060a1b0a0c736572766963652e6e616d65120b0a096d792d776f726b65720a270a1274656c656d"
+    "657472792e73646b2e6e616d6512110a0f776f726b6572732d72756e74696d650a1e0a1674656c656d657472"
+    "792e73646b2e6c616e677561676512040a026a730a180a09666161732e6e616d65120b0a096d792d73637269"
+    "70740a250a16636c6f7564666c6172652e7363726970745f6e616d65120b0a096d792d7363726970740a360a"
+    "0c666161732e76657273696f6e12260a2430313233343536372d383961622d636465662d666564632d626139"
+    "3837363534333231300a460a1c636c6f7564666c6172652e7363726970745f76657273696f6e2e696412260a"
+    "2430313233343536372d383961622d636465662d666564632d6261393837363534333231300a250a1d636c6f"
+    "7564666c6172652e7363726970745f76657273696f6e2e74616712040a0276320a340a21636c6f7564666c61"
+    "72652e7363726970745f76657273696f6e2e6d657373616765120f0a0d46697820746865207468696e670a2f"
+    "0a1d636c6f7564666c6172652e64697370617463685f6e616d657370616365120e0a0c6d792d6e616d657370"
+    "6163650a270a15636c6f7564666c6172652e656e747279706f696e74120e0a0c4d79456e747279706f696e74"
+    "0a180a0f636c6f7564666c6172652e636f6c6f12050a034c49530a1d0a13666161732e696e766f6b65645f72"
+    "6567696f6e12060a04574555520a250a15636c6f7564666c6172652e707265766965772e6964120c0a0a7072"
+    "65766965772d69640a290a17636c6f7564666c6172652e707265766965772e736c7567120e0a0c7072657669"
+    "65772d736c75670a240a17636c6f7564666c6172652e707265766965772e6e616d6512090a07507265766965"
+    "770a500a16636c6f7564666c6172652e7363726970745f7461677312360a347465616d3a612c63663a656e76"
+    "69726f6e6d656e743d70726f64756374696f6e2c782c792c63663a656e7669726f6e6d656e743d0a2b0a1b64"
+    "65706c6f796d656e742e656e7669726f6e6d656e742e6e616d65120c0a0a70726f64756374696f6e0a210a1b"
+    "6465706c6f796d656e742e656e7669726f6e6d656e742e6e616d6512020a0012c2010a110a0f776f726b6572"
+    "732d72756e74696d6512ac010a1001020304050607081112131415161718120800000000000000012a04726f"
+    "6f7430024a270a15636c6f7564666c6172652e656e747279706f696e74120e0a0c4d79456e747279706f696e"
+    "744a2a0a1c636c6f7564666c6172652e64757261626c655f6f626a6563742e6964120a0a0830313233616263"
+    "644a2b0a25636c6f7564666c6172652e696e766f636174696f6e2e73657175656e63652e6e756d6265721202"
+    "1801850101000000"_kj;
+
+KJ_TEST("makeOtlpResource() and makeOtlpIdentityTags() describe a worker") {
+  setPredictableModeForTest();
+  capnp::MallocMessageBuilder message;
+  auto version = message.initRoot<ScriptVersion>();
+  version.getId().setUpper(0x0123456789abcdef);
+  version.getId().setLower(0xfedcba9876543210);
+  version.setTag("v2");
+  version.setMessage("Fix the thing");
+  auto scriptTags = kj::arr(kj::str("team:a"), kj::str("cf:environment=production"), kj::str("x,y"),
+      kj::str("cf:environment="));
+  tracing::TracePreview preview(kj::str("preview-id"), kj::str("preview-slug"), kj::str("Preview"));
+  OtlpServiceInfo service{
+    .serviceName = "my-worker",
+    .scriptName = "my-script"_kj,
+    .scriptVersion = version.asReader(),
+    .dispatchNamespace = "my-namespace"_kj,
+    .scriptTags = scriptTags,
+    .entrypoint = "MyEntrypoint"_kj,
+    .durableObjectId = "0123abcd"_kj,
+    .preview = preview,
+    .colo = "LIS"_kj,
+    .region = "WEUR"_kj,
+  };
+  auto resource = makeOtlpResource(service);
+  // The service name and the Durable Object id are not part of it. Every `cf:environment=` tag
+  // gives a `deployment.environment.name`, and the script tags are joined with commas, although
+  // a tag may contain one.
+  KJ_EXPECT(describe(resource) ==
+          R"(telemetry.sdk.name = "workers-runtime"
+telemetry.sdk.language = "js"
+faas.name = "my-script"
+cloudflare.script_name = "my-script"
+faas.version = "01234567-89ab-cdef-fedc-ba9876543210"
+cloudflare.script_version.id = "01234567-89ab-cdef-fedc-ba9876543210"
+cloudflare.script_version.tag = "v2"
+cloudflare.script_version.message = "Fix the thing"
+cloudflare.dispatch_namespace = "my-namespace"
+cloudflare.entrypoint = "MyEntrypoint"
+cloudflare.colo = "LIS"
+faas.invoked_region = "WEUR"
+cloudflare.preview.id = "preview-id"
+cloudflare.preview.slug = "preview-slug"
+cloudflare.preview.name = "Preview"
+cloudflare.script_tags = "team:a,cf:environment=production,x,y,cf:environment="
+deployment.environment.name = "production"
+deployment.environment.name = "")"_kj,
+      describe(resource));
+  auto identity = makeOtlpIdentityTags(service);
+  KJ_EXPECT(describe(identity) ==
+          R"(cloudflare.entrypoint = "MyEntrypoint"
+cloudflare.durable_object.id = "0123abcd")"_kj,
+      describe(identity));
+
+  // The resource and the identity tags as embedders export them.
+  NoEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  {
+    auto root = startExportedUserSpan(entropy, exporter.addRef(), testContext(),
+        {
+          .serviceName = service.serviceName,
+          .resource = resource,
+          .defaultTags = identity,
+        },
+        "root"_kjc);
+  }
+  KJ_ASSERT(exporter->spanRequests.size() == 1);
+  auto request = expectTraceGolden("WORKER_RESOURCE", exporter->spanRequests[0], WORKER_RESOURCE);
+  auto& attributes = request.resource_spans(0).resource().attributes();
+  KJ_ASSERT(attributes.size() == resource.size() + 1);
+  KJ_EXPECT(attributes[0].key() == "service.name");
+  // Duplicate keys reach the resource as they are.
+  KJ_EXPECT(attributes[17].key() == "deployment.environment.name");
+  KJ_EXPECT(attributes[18].key() == "deployment.environment.name");
+}
+
+KJ_TEST("makeOtlpResource() and makeOtlpIdentityTags() leave out what a worker does not have") {
+  capnp::MallocMessageBuilder message;
+  // A null version id is no id. A version without a tag or a message has neither attribute.
+  auto version = message.initRoot<ScriptVersion>();
+  OtlpServiceInfo service{
+    .serviceName = "my-worker",
+    .scriptVersion = version.asReader(),
+  };
+  KJ_EXPECT(describe(makeOtlpResource(service)) ==
+      R"(telemetry.sdk.name = "workers-runtime"
+telemetry.sdk.language = "js")"_kj);
+  KJ_EXPECT(makeOtlpIdentityTags(service).size() == 0);
+
+  // An empty tag or message still counts.
+  version.setTag("");
+  version.setMessage("");
+  KJ_EXPECT(describe(makeOtlpResource(service)) ==
+      R"(telemetry.sdk.name = "workers-runtime"
+telemetry.sdk.language = "js"
+cloudflare.script_version.tag = ""
+cloudflare.script_version.message = "")"_kj);
 }
 
 }  // namespace
