@@ -2591,8 +2591,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   }
 
   kj::String snapshotImageRef;
-  kj::Maybe<kj::StringPtr> effectiveImage =
-      imageName.map([](kj::String& image) -> kj::StringPtr { return image; });
+  kj::Maybe<kj::StringPtr> effectiveImage = imageName;
   auto source = params.getSource();
   switch (source.which()) {
     case rpc::Container::StartParams::Source::IMAGE:
