@@ -164,22 +164,31 @@ class SegmentEncryptStage final: public SyncTransformStage {
   }
 };
 
+using FailedSegmentFulfiller = kj::PromiseFulfiller<kj::Maybe<SegmentFailure>>;
+
 // Splits the input into sealed segments by their known sizes, opens each one, and trims the
 // plaintext to the requested range. Every segment is authenticated, including those whose
-// plaintext is trimmed away.
+// plaintext is trimmed away. A segment that fails to open settles `failedSegment` with its
+// sealed bytes; any other end of the stage settles it with none.
 class SegmentDecryptStage final: public SyncTransformStage {
  public:
   SegmentDecryptStage(SegmentCipher cipher,
       uint64_t firstSegment,
       uint64_t plaintextLength,
       uint64_t outputOffset,
-      uint64_t outputEnd)
+      uint64_t outputEnd,
+      kj::Own<FailedSegmentFulfiller> failedSegment)
       : cipher(kj::mv(cipher)),
         firstSegment(firstSegment),
         plaintextLength(plaintextLength),
         outputOffset(outputOffset),
         outputEnd(outputEnd),
-        expectedInput(this->cipher.getLayout().sealedLength(plaintextLength)) {}
+        expectedInput(this->cipher.getLayout().sealedLength(plaintextLength)),
+        failedSegment(kj::mv(failedSegment)) {}
+
+  ~SegmentDecryptStage() noexcept(false) {
+    failedSegment->fulfill(kj::none);
+  }
 
   void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) override {
     while (input.size() > 0) {
@@ -211,9 +220,14 @@ class SegmentDecryptStage final: public SyncTransformStage {
   }
 
   void end(kj::Array<kj::byte>& output) override {
+    KJ_DEFER(failedSegment->fulfill(kj::none));
     JSG_REQUIRE(received == expectedInput, DOMOperationError, "The input ended after ", received,
         " bytes, in segment ", firstSegment + segmentsOpened, "; expected ", expectedInput,
         " bytes.");
+  }
+
+  void cancel(const kj::Exception& reason) override {
+    failedSegment->fulfill(kj::none);
   }
 
   kj::Maybe<uint64_t> getOutputLength() const override {
@@ -236,6 +250,7 @@ class SegmentDecryptStage final: public SyncTransformStage {
   size_t buffered = 0;
   uint64_t received = 0;
   uint64_t segmentsOpened = 0;
+  kj::Own<FailedSegmentFulfiller> failedSegment;
 
   // The plaintext size of the next segment.
   size_t currentPlaintextSize() const {
@@ -253,6 +268,11 @@ class SegmentDecryptStage final: public SyncTransformStage {
     uint64_t start = segmentsOpened * cipher.getLayout().getSegmentSize();
     uint64_t index = firstSegment + segmentsOpened;
     size_t expected = currentPlaintextSize();
+    // Fulfilling is idempotent, so a failure later in the stage leaves this one in place.
+    KJ_ON_SCOPE_FAILURE(failedSegment->fulfill(SegmentFailure{
+      .index = static_cast<double>(index),
+      .sealed = kj::heapArray(sealed),
+    }));
     auto plaintext = cipher.open(index, sealed);
     ++segmentsOpened;
     // Padding lets CBC segments of nearby sizes seal to the same size, so the authenticated size
@@ -334,12 +354,17 @@ jsg::Ref<SegmentDecryptionStream> SegmentDecryptionStream::constructor(
   requireSegmentRange(cipher, firstSegment, cipher.getLayout().segmentCount(plaintextLength));
 
   auto& ioContext = IoContext::current();
+  auto paf = kj::newPromiseAndFulfiller<kj::Maybe<SegmentFailure>>();
   // Writes are taken a sealed segment at a time, so that an aligned write is opened in place.
   auto highWaterMark = cipher.getLayout().fullSealedSegmentSize();
-  auto stage = kj::heap<SegmentDecryptStage>(
-      kj::mv(cipher), firstSegment, plaintextLength, outputOffset, outputEnd);
+  auto stage = kj::heap<SegmentDecryptStage>(kj::mv(cipher), firstSegment, plaintextLength,
+      outputOffset, outputEnd, kj::mv(paf.fulfiller));
   auto streams = newSyncTransformStreams(js, ioContext, kj::mv(stage), highWaterMark);
-  return js.alloc<SegmentDecryptionStream>(kj::mv(streams.readable), kj::mv(streams.writable));
+  // Not counted as pending I/O: the stage settles it as the stream is written, so a stream that
+  // nothing writes to should leave the request seen as hung, not as waiting on this promise.
+  auto failedSegment = ioContext.awaitIoLegacy(js, kj::mv(paf.promise));
+  return js.alloc<SegmentDecryptionStream>(
+      kj::mv(streams.readable), kj::mv(streams.writable), kj::mv(failedSegment));
 }
 
 }  // namespace workerd::api

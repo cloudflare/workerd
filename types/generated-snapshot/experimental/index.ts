@@ -1648,6 +1648,10 @@ export declare class SegmentEncryptionStream {
     options: SegmentLayoutOptions,
   ): number;
 }
+export interface SegmentFailure {
+  index: number;
+  sealed: ArrayBuffer;
+}
 export declare class SegmentDecryptionStream {
   constructor(
     options: SegmentCipherOptions & {
@@ -1656,6 +1660,7 @@ export declare class SegmentDecryptionStream {
   );
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+  readonly failedSegment: Promise<SegmentFailure | null>;
 }
 /**
  * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as UTF-8, ISO-8859-2, or GBK. A decoder takes an array of bytes as input and returns a JavaScript string.

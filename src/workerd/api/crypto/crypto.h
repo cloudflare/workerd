@@ -1069,7 +1069,10 @@ struct SegmentCipherOptions {
   jsg::Optional<uint32_t> length;
   // The index of the first segment this stream handles. Defaults to 0.
   jsg::Optional<double> firstSegment;
-  // Encryption: optional, and if set, more or less input is an error.
+  // Encryption: optional, and if set, more or less input is an error, and the last byte of the
+  // output is held back until the writable side closes. So a caller can check the input, such
+  // as against a checksum, after writing all of it, and abort the writable side if the check
+  // fails: whatever reads the output then never receives the whole of it.
   // Decryption: required; the number of plaintext bytes the input holds. For a ranged read,
   // that is the plaintext of the fetched segments, not of the whole message: fetching segments
   // [first, last) of a message of L bytes with segment size S gives min(last * S, L) - first * S.
@@ -1134,11 +1137,24 @@ class SegmentEncryptionStream: public jsg::Object {
   }
 };
 
+// A segment that SegmentDecryptionStream could not open.
+struct SegmentFailure {
+  // The segment's index, as used to key it.
+  double index;
+  // The segment as it was read, sealed. Nothing in it was authenticated.
+  kj::Array<kj::byte> sealed;
+
+  JSG_STRUCT(index, sealed);
+};
+
 class SegmentDecryptionStream: public jsg::Object {
  public:
-  SegmentDecryptionStream(JsReadableStream readable, JsWritableStream writable)
+  SegmentDecryptionStream(JsReadableStream readable,
+      JsWritableStream writable,
+      jsg::Promise<kj::Maybe<SegmentFailure>> failedSegment)
       : readable(kj::mv(readable)),
-        writable(kj::mv(writable)) {}
+        writable(kj::mv(writable)),
+        failedSegment(kj::mv(failedSegment)) {}
 
   static jsg::Ref<SegmentDecryptionStream> constructor(jsg::Lock& js, SegmentCipherOptions options);
 
@@ -1148,24 +1164,34 @@ class SegmentDecryptionStream: public jsg::Object {
   JsWritableStream getWritable(jsg::Lock& js) {
     return writable.addRef(js);
   }
+  // Resolves once the stream has ended, failed or been canceled: with the segment that failed
+  // authentication or held the wrong amount of plaintext, or with null if none did. It is
+  // for diagnosing a failure, such as by comparing the bytes that failed with another copy of
+  // them; the stream's error says why it failed.
+  jsg::MemoizedIdentity<jsg::Promise<kj::Maybe<SegmentFailure>>>& getFailedSegment() {
+    return failedSegment;
+  }
 
   JSG_RESOURCE_TYPE(SegmentDecryptionStream) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
+    JSG_READONLY_PROTOTYPE_PROPERTY(failedSegment, getFailedSegment);
 
     JSG_TS_OVERRIDE({
       constructor(options: SegmentCipherOptions & { plaintextLength: number });
       readonly readable: ReadableStream<Uint8Array>;
       readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+      readonly failedSegment: Promise<SegmentFailure | null>;
     });
   }
 
  private:
   JsReadableStream readable;
   JsWritableStream writable;
+  jsg::MemoizedIdentity<jsg::Promise<kj::Maybe<SegmentFailure>>> failedSegment;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(readable, writable);
+    visitor.visit(readable, writable, failedSegment);
   }
 };
 
@@ -1257,7 +1283,7 @@ class Crypto final: public jsg::Object {
       api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestStream::Options,         \
       api::DigestContextHandle, api::SegmentKeyInfo, api::SegmentKeySchedule,                      \
       api::SegmentLayoutOptions, api::SegmentCipherOptions, api::SegmentEncryptionStream,          \
-      api::SegmentDecryptionStream
+      api::SegmentFailure, api::SegmentDecryptionStream
 
 }  // namespace workerd::api
 

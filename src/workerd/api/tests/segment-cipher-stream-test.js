@@ -532,6 +532,107 @@ export const outputBeforeFailure = {
   },
 };
 
+// failedSegment gives the index and the sealed bytes of the segment that failed, as they were
+// read, and null when no segment failed.
+export const failedSegment = {
+  async test() {
+    const length = 3 * SEGMENT_SIZE + 10;
+    const plaintext = bytes(length, 9);
+    for (const algorithm of ALGORITHMS) {
+      const ciphertext = await encrypt(algorithm, plaintext);
+      const sealedSize = crypto.SegmentEncryptionStream.encryptedLength(
+        SEGMENT_SIZE,
+        { algorithm, segmentSize: SEGMENT_SIZE }
+      );
+      const open = async (input, extra = {}) => {
+        const stream = new crypto.SegmentDecryptionStream(
+          await optionsFor(algorithm, { plaintextLength: length, ...extra })
+        );
+        const error = await transform(stream, input).then(
+          () => undefined,
+          (e) => e
+        );
+        return { error, failed: await stream.failedSegment };
+      };
+
+      // A flipped bit in the second segment of a message that starts at segment 5.
+      const corrupt = await encrypt(algorithm, plaintext, { firstSegment: 5 });
+      corrupt[sealedSize + 100] ^= 1;
+      const { error, failed } = await open(corrupt, { firstSegment: 5 });
+      strictEqual(error?.name, 'OperationError');
+      strictEqual(failed.index, 6);
+      ok(failed.sealed instanceof ArrayBuffer);
+      deepStrictEqual(
+        new Uint8Array(failed.sealed),
+        corrupt.subarray(sealedSize, 2 * sealedSize)
+      );
+
+      // The short last segment.
+      const last = ciphertext.slice();
+      last[last.length - 1] ^= 1;
+      const atEnd = await open(last);
+      strictEqual(atEnd.failed.index, 3);
+      deepStrictEqual(
+        new Uint8Array(atEnd.failed.sealed),
+        last.subarray(3 * sealedSize)
+      );
+
+      // No segment failed: the stream succeeded, or the input was truncated.
+      strictEqual((await open(ciphertext)).failed, null);
+      const truncated = await open(ciphertext.subarray(0, 2 * sealedSize));
+      strictEqual(truncated.error?.name, 'OperationError');
+      strictEqual(truncated.failed, null);
+    }
+
+    // A stream aborted before any segment failed.
+    const stream = new crypto.SegmentDecryptionStream(
+      await optionsFor('AES-GCM', { plaintextLength: length })
+    );
+    await stream.writable.abort(new Error('gone'));
+    strictEqual(await stream.failedSegment, null);
+  },
+};
+
+// The encrypting stream holds back the last byte of its output until its writable side closes,
+// so a caller can check the plaintext before the output is complete, and abort if the check
+// fails.
+export const lastByteWaitsForClose = {
+  async test() {
+    // Whole segments, so that the last one is sealed before the input ends.
+    const plaintext = bytes(2 * SEGMENT_SIZE, 10);
+    const expected = crypto.SegmentEncryptionStream.encryptedLength(
+      plaintext.byteLength,
+      { algorithm: 'AES-GCM', segmentSize: SEGMENT_SIZE }
+    );
+    for (const accept of [true, false]) {
+      const stream = new crypto.SegmentEncryptionStream(
+        await optionsFor('AES-GCM', { plaintextLength: plaintext.byteLength })
+      );
+      const writer = stream.writable.getWriter();
+      const writing = writer.write(plaintext);
+      const reader = stream.readable.getReader();
+      let received = 0;
+      while (received < expected - 1) {
+        const { value } = await reader.read();
+        received += value.byteLength;
+      }
+      await writing;
+      strictEqual(received, expected - 1);
+
+      const lastRead = reader.read();
+      if (accept) {
+        await writer.close();
+        const { value } = await lastRead;
+        strictEqual(value.byteLength, 1);
+        strictEqual((await reader.read()).done, true);
+      } else {
+        await writer.abort(new Error('checksum mismatch'));
+        await rejects(lastRead, /checksum mismatch/);
+      }
+    }
+  },
+};
+
 export const plaintextLengthOnEncrypt = {
   async test() {
     const plaintext = bytes(100);
