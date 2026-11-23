@@ -8,6 +8,7 @@ use std::rc::Rc;
 use super::*;
 use crate::NoopFdObserver;
 use crate::tests::TestHost;
+use crate::tests::clear;
 use crate::tests::names;
 use crate::tests::p;
 
@@ -221,6 +222,7 @@ fn open_fd_on_links() {
     );
     let opened = vfs.open_fd(&host, &p("tmp/l"), WRITE).unwrap();
     assert_eq!(opened.node().fs_type(), FsType::File);
+    clear(&host, &tmp);
 }
 
 #[test]
