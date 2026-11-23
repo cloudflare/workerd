@@ -744,6 +744,9 @@ impl Error {
                 "Incorrect type for map entry '{name}': the provided value is not of type \
                  '{expected}'."
             ),
+            TypeErrorContext::CallbackReturn => {
+                format!("Callback returned incorrect type; expected '{expected}'")
+            }
         };
         Self::new_type_error(message)
     }
@@ -767,6 +770,8 @@ pub enum TypeErrorContext<'a> {
     ArrayElement(usize),
     /// The value of a `Dict` entry, by its key.
     DictField(&'a str),
+    /// What a JavaScript callback returned.
+    CallbackReturn,
 }
 
 /// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.

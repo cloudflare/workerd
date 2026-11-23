@@ -615,6 +615,14 @@ impl<'s, T: PromiseValue> Promise<'s, T> {
         T::from_raw(lock, raw).map_err(|_| self)
     }
 
+    /// The JavaScript promise under this one, for code outside Rust JSG that reacts to it once
+    /// and takes the value from what it settles with by [`PromiseValue::from_raw`], as C++
+    /// `IoContext::awaitJs()` reacts to a `jsg::Promise<T>`.
+    #[doc(hidden)]
+    pub fn into_raw_promise(self) -> Local<'s, v8::Promise> {
+        self.handle
+    }
+
     /// Makes the promise persistent, to keep it beyond the current scope.
     pub fn into_traced(self, lock: &mut Lock<'s>) -> TracedPromise<T> {
         TracedPromise {
