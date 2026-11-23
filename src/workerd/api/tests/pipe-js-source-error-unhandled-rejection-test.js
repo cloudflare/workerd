@@ -12,7 +12,8 @@
 // only in a later microtask, so when unhandled rejections are processed in a
 // microtask (see the .wd-test's compatibility flags) the promise was reported
 // first. This covers the loop for JavaScript-backed writables (DigestStream is
-// one) and the loop for internal ones (IdentityTransformStream).
+// one) and the loop for internal ones (IdentityTransformStream), and internal
+// sources as well as JavaScript-backed ones.
 
 import { deepStrictEqual, rejects } from 'node:assert';
 
@@ -118,5 +119,34 @@ export const teedByteSourceIntoDigestStreams = {
         ['rejected', 'rejected']
       );
     });
+  },
+};
+
+// An internal (native) source that errors while piped into a JavaScript-backed
+// writable: the IdentityTransformStream's writable side is aborted mid-pipe.
+async function abortedNativeSourceIntoDigestStream(options) {
+  const { readable, writable } = new IdentityTransformStream();
+  const piped = rejects(readable.pipeTo(newDigestStream(), options), {
+    message: 'source aborted',
+  });
+  const writer = writable.getWriter();
+  await writer.write(new Uint8Array(10));
+  await writer.abort(new Error('source aborted'));
+  await piped;
+}
+
+export const nativeSourceIntoDigestStream = {
+  async test() {
+    await expectNoUnhandledRejection(() =>
+      abortedNativeSourceIntoDigestStream()
+    );
+  },
+};
+
+export const nativeSourceIntoDigestStreamPreventAbort = {
+  async test() {
+    await expectNoUnhandledRejection(() =>
+      abortedNativeSourceIntoDigestStream({ preventAbort: true })
+    );
   },
 };
