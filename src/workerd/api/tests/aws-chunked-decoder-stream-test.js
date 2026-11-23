@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
+import { FIXTURES, SENTENCE } from './aws-chunked-sdk-fixtures.js';
 
 // An experimental global, which the linter's environment doesn't declare.
 const { AwsChunkedDecoderStream } = globalThis;
@@ -172,6 +173,110 @@ export const wireFixtures = {
     );
     deepStrictEqual(await run(plain, plainWire, 5), WIRE_BODY);
     strictEqual([...(await plain.trailers)].length, 0);
+  },
+};
+
+// Bodies that S3 clients sent: see aws-chunked-fixtures/README.md.
+const DIGESTS = {
+  'x-amz-checksum-crc32': 'crc32',
+  'x-amz-checksum-crc32c': 'crc32c',
+  'x-amz-checksum-crc64nvme': 'crc64nvme',
+  'x-amz-checksum-sha1': 'SHA-1',
+  'x-amz-checksum-sha256': 'SHA-256',
+};
+
+function fixturePayload(length) {
+  return encoder.encode(
+    SENTENCE.repeat(Math.ceil(length / SENTENCE.length)).slice(0, length)
+  );
+}
+
+function fixtureBody(fixture) {
+  const payload = fixturePayload(fixture.decodedLength);
+  let offset = 0;
+  const parts = fixture.body.map((part) => {
+    if (typeof part === 'string') return encoder.encode(part);
+    offset += part;
+    return payload.subarray(offset - part, offset);
+  });
+  return concat(parts);
+}
+
+async function checksum(trailer, data) {
+  const digest = new crypto.DigestStream(DIGESTS[trailer]);
+  const writer = digest.getWriter();
+  await writer.write(data);
+  await writer.close();
+  return btoa(String.fromCharCode(...new Uint8Array(await digest.digest)));
+}
+
+export const sdkFixtures = {
+  async test() {
+    for (const fixture of FIXTURES) {
+      const input = fixtureBody(fixture);
+      const payload = fixturePayload(fixture.decodedLength);
+      for (const writeSize of [input.byteLength || 1, 65539, 1000]) {
+        const where = `${fixture.name}, writes of ${writeSize}`;
+        const stream = new AwsChunkedDecoderStream({
+          decodedLength: fixture.decodedLength,
+          ...(fixture.trailer && { allowedTrailers: [fixture.trailer] }),
+        });
+        deepStrictEqual(await run(stream, input, writeSize), payload, where);
+        const trailers = [...(await stream.trailers)];
+        if (!fixture.trailer) {
+          deepStrictEqual(trailers, [], where);
+          continue;
+        }
+        // The decoded bytes are what the client checksummed.
+        deepStrictEqual(
+          trailers,
+          [[fixture.trailer, await checksum(fixture.trailer, payload)]],
+          where
+        );
+      }
+
+      // With no filter, a signed trailer's signature is kept too.
+      const unfiltered = new AwsChunkedDecoderStream();
+      await run(unfiltered, input);
+      const names = [...(await unfiltered.trailers)].map(([name]) => name);
+      const expected = fixture.trailer ? [fixture.trailer] : [];
+      if (
+        fixture.contentSha256 === 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER'
+      ) {
+        expected.push('x-amz-trailer-signature');
+      }
+      deepStrictEqual(names, expected, fixture.name);
+    }
+  },
+};
+
+// A kept trailer value is returned unchanged, so it must be UTF-8; a dropped one need not be.
+export const trailerValueEncoding = {
+  async test() {
+    const kept = new AwsChunkedDecoderStream();
+    await run(kept, encoder.encode('0\r\nx-a: caf\u00e9 \u{1f600}\r\n\r\n'));
+    strictEqual((await kept.trailers).get('x-a'), 'caf\u00e9 \u{1f600}');
+
+    const latin1 = concat([
+      encoder.encode('0\r\nx-a: caf'),
+      new Uint8Array([0xe9]),
+      encoder.encode('\r\n' + CHECKSUM + '\r\n\r\n'),
+    ]);
+    const rejected = new AwsChunkedDecoderStream();
+    await rejects(run(rejected, latin1), {
+      name: 'TypeError',
+      message: 'aws-chunked trailer field value is not UTF-8.',
+    });
+    await rejects(rejected.trailers, { name: 'TypeError' });
+
+    const dropped = new AwsChunkedDecoderStream({
+      allowedTrailers: ['x-amz-checksum-crc32'],
+    });
+    await run(dropped, latin1);
+    deepStrictEqual(
+      [...(await dropped.trailers)],
+      [['x-amz-checksum-crc32', 'sOO8/Q==']]
+    );
   },
 };
 

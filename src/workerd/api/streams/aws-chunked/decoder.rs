@@ -35,9 +35,9 @@ fn malformed<T>(message: impl Into<String>) -> Result<T, Malformed> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
-    /// The value's bytes as they were sent. A field value may hold any byte from 0x80 up, which
-    /// need not be UTF-8.
-    pub value: Vec<u8>,
+    /// The value as it was sent. HTTP allows any byte from 0x80 up in a field value; a field that
+    /// is kept must be UTF-8, so that it is returned unchanged.
+    pub value: String,
 }
 
 #[derive(Clone, Debug)]
@@ -434,11 +434,13 @@ impl Decoder {
             }
             // The name is token characters, which are ASCII.
             let name = String::from_utf8_lossy(name).into_owned();
+            // A dropped field is held only to HTTP's grammar. A kept one must also be UTF-8, which
+            // JavaScript reads back unchanged, rather than be returned altered.
             if self.is_allowed(&name) {
-                fields.push(Field {
-                    name,
-                    value: value.to_vec(),
-                });
+                let Ok(value) = String::from_utf8(value.to_vec()) else {
+                    return malformed("aws-chunked trailer field value is not UTF-8.");
+                };
+                fields.push(Field { name, value });
             }
         }
         Ok(fields)

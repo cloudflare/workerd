@@ -882,7 +882,10 @@ wd_test(
 wd_test(
     src = "aws-chunked-decoder-stream-test.wd-test",
     args = ["--experimental"],
-    data = ["aws-chunked-decoder-stream-test.js"],
+    data = [
+        "aws-chunked-decoder-stream-test.js",
+        "aws-chunked-sdk-fixtures.js",
+    ],
 )
 
 wd_test(

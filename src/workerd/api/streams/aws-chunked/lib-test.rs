@@ -84,16 +84,28 @@ fn trailers_are_returned() {
     let trailers = decoder.end().unwrap();
     assert_eq!(trailers.len(), 1);
     assert_eq!(
-        (trailers[0].name.as_str(), trailers[0].value.as_slice()),
-        ("x-a", &b"b"[..])
+        (trailers[0].name.as_str(), trailers[0].value.as_str()),
+        ("x-a", "b")
     );
 }
 
 #[test]
-fn trailer_bytes_reach_cxx_unchanged() {
-    let mut decoder = new_decoder(options(true)).unwrap();
-    decoder.push(b"0\r\nx-a: caf\xe9\r\n\r\n").unwrap();
-    assert_eq!(decoder.end().unwrap()[0].value, b"caf\xe9");
+fn trailer_values_reach_cxx_unchanged() {
+    let mut decoder = new_decoder(options(false)).unwrap();
+    decoder
+        .push("0\r\nx-a: caf\u{e9}\r\n\r\n".as_bytes())
+        .unwrap();
+    assert_eq!(decoder.end().unwrap()[0].value, "caf\u{e9}");
+
+    let mut decoder = new_decoder(options(false)).unwrap();
+    let error = decoder
+        .push(b"0\r\nx-a: caf\xe9\r\n\r\n")
+        .and_then(|()| decoder.end().map(drop))
+        .unwrap_err();
+    assert_eq!(
+        error.description(),
+        "jsg.TypeError: aws-chunked trailer field value is not UTF-8."
+    );
 }
 
 #[test]

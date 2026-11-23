@@ -17,7 +17,8 @@ namespace workerd::api {
 // trailer fields, and a final CRLF. The trailer usually carries the payload checksum.
 //
 // Chunk extensions, such as chunk-signature, are checked against RFC 9112's grammar and skipped:
-// chunk signatures are not verified. A trailer line may end in LF before its CRLF, as S3 allows. Both sides are native streams, so a pipe through the decoder between two other
+// chunk signatures are not verified. A checksum trailer's line may end in LF before its CRLF, as
+// S3 allows. Both sides are native streams, so a pipe through the decoder between two other
 // native streams never runs JavaScript.
 //
 // The decoding itself is the Rust crate in aws-chunked/; this class and its stage connect it to
@@ -29,7 +30,8 @@ class AwsChunkedDecoderStream: public jsg::Object {
   struct Options {
     // The decoded length (x-amz-decoded-content-length). If set, any other length is an error.
     jsg::Optional<double> decodedLength;
-    // The trailer fields to keep, case-insensitively. Others are dropped. Defaults to all.
+    // The trailer fields to keep, case-insensitively. Others are dropped. Defaults to all. A
+    // kept field's value must be UTF-8, so that it is returned unchanged.
     jsg::Optional<kj::Array<kj::String>> allowedTrailers;
     // The most bytes the trailer section may take. Defaults to 16 KiB.
     jsg::Optional<double> maxTrailerBytes;

@@ -22,8 +22,7 @@ mod ffi {
     #[derive(Debug)]
     struct TrailerField {
         name: String,
-        /// The value's bytes as they were sent, which need not be UTF-8.
-        value: Vec<u8>,
+        value: String,
     }
 
     /// The decoder's options, as JavaScript passed them. Each `has_` flag says whether the

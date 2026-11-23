@@ -46,7 +46,7 @@ fn decodes_every_split() {
             trailers,
             vec![Field {
                 name: "x-amz-checksum-crc32".to_owned(),
-                value: b"DUoRhQ==".to_vec(),
+                value: "DUoRhQ==".to_owned(),
             }]
         );
     }
@@ -56,8 +56,8 @@ fn decodes_every_split() {
 fn accepts_an_lf_before_a_checksum_crlf() {
     let (_, trailers) = decode(b"0\r\nX-Amz-Checksum-CRC32:DUoRhQ==\n\r\nx-b: c \r\n\r\n").unwrap();
     assert_eq!(trailers.len(), 2);
-    assert_eq!(trailers[0].value, b"DUoRhQ==");
-    assert_eq!(trailers[1].value, b"c");
+    assert_eq!(trailers[0].value, "DUoRhQ==");
+    assert_eq!(trailers[1].value, "c");
 }
 
 // Only checksums get the LF: other fields, the trailer signature included, keep HTTP's grammar.
@@ -72,11 +72,33 @@ fn rejects_an_lf_before_other_crlfs() {
     }
 }
 
-// Field values may hold any byte from 0x80 up, which are kept as they are, UTF-8 or not.
+// Field values may hold any byte from 0x80 up. A kept field is returned unchanged, so it must be
+// UTF-8; a dropped one need not be.
 #[test]
-fn keeps_value_bytes() {
-    let (_, trailers) = decode(b"0\r\nx-a: \x80caf\xe9\xff\r\n\r\n").unwrap();
-    assert_eq!(trailers[0].value, b"\x80caf\xe9\xff");
+fn keeps_only_utf8_values() {
+    let (_, trailers) = decode("0\r\nx-a: caf\u{e9} \u{1f600}\r\n\r\n".as_bytes()).unwrap();
+    assert_eq!(trailers[0].value, "caf\u{e9} \u{1f600}");
+    for value in [&b"caf\xe9"[..], b"\x80", b"\xf0\x9f\x98", b"\xff"] {
+        let input = [&b"0\r\nx-a: "[..], value, b"\r\n\r\n"].concat();
+        assert_eq!(
+            error(&input),
+            "aws-chunked trailer field value is not UTF-8.",
+            "{value:?}"
+        );
+        let only_b = Options {
+            allowed_trailers: Some(vec!["x-b".to_owned()]),
+            ..options()
+        };
+        let input = [&b"0\r\nx-a: "[..], value, b"\r\nx-b: c\r\n\r\n"].concat();
+        let (_, trailers) = decode_with(only_b, &input, input.len()).unwrap();
+        assert_eq!(
+            trailers,
+            vec![Field {
+                name: "x-b".to_owned(),
+                value: "c".to_owned()
+            }]
+        );
+    }
     assert_eq!(
         error(b"0\r\nx-a: caf\x7f\r\n\r\n"),
         "Malformed aws-chunked trailer field value."

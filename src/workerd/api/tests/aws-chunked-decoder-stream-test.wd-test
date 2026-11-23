@@ -4,13 +4,19 @@ const unitTests :Workerd.Config = (
   services = [
     ( name = "aws-chunked-decoder-stream-test",
       worker = (
-        modules = [(name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js")],
+        modules = [
+          (name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js"),
+          (name = "aws-chunked-sdk-fixtures.js", esModule = embed "aws-chunked-sdk-fixtures.js"),
+        ],
         compatibilityFlags = ["nodejs_compat", "experimental"],
       )
     ),
     ( name = "aws-chunked-decoder-stream-ts-streams-test",
       worker = (
-        modules = [(name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js")],
+        modules = [
+          (name = "worker", esModule = embed "aws-chunked-decoder-stream-test.js"),
+          (name = "aws-chunked-sdk-fixtures.js", esModule = embed "aws-chunked-sdk-fixtures.js"),
+        ],
         compatibilityFlags = ["nodejs_compat", "experimental", "typescript_implemented_streams"],
       )
     ),

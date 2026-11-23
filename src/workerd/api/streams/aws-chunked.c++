@@ -105,10 +105,7 @@ jsg::Ref<AwsChunkedDecoderStream> AwsChunkedDecoderStream::constructor(
       ioContext.awaitIoLegacy(js, kj::mv(paf.promise)).then(js, [](jsg::Lock& js, Trailers fields) {
     auto headers = js.alloc<Headers>();
     for (auto& field: fields) {
-      // The value's bytes are kept as they were sent, whatever their encoding.
-      auto& value = field.value;
-      headers->append(js, kj::str(field.name),
-          kj::heapString(reinterpret_cast<const char*>(value.data()), value.size()));
+      headers->append(js, kj::str(field.name), kj::str(field.value));
     }
     return headers;
   });
