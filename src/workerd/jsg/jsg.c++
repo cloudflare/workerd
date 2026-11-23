@@ -445,6 +445,10 @@ void Lock::runMicrotasks() {
     if (!isolate.takeExtraMicrotaskCheckpointRequested({})) {
       return;
     }
+    // A checkpoint with the termination pending would run the microtasks still queued.
+    if (v8Isolate->IsExecutionTerminating()) {
+      return;
+    }
     v8Isolate->PerformMicrotaskCheckpoint();
   }
 

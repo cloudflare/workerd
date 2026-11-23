@@ -63,6 +63,50 @@ class RejectionReporter {
   }
 };
 
+KJ_TEST("an unhandled rejection handler that terminates execution ends a chain of rejections") {
+  // Each round of the chain takes an extra microtask checkpoint: the handler queues a microtask
+  // that rejects the next promise. At the last round it then terminates execution, as a listener
+  // that exceeds the CPU limit or aborts its Durable Object does.
+  static constexpr uint ROUNDS = 10;
+  Evaluator<CheckpointContext, CheckpointIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto reject = compileFunction(js, "(function() { Promise.reject(new Error('rejected')); })");
+    uint rounds = 0;
+    UnhandledRejectionHandler handler(
+        [&](Lock& js, v8::PromiseRejectEvent, V8Ref<v8::Promise>, Value) {
+      // A chain that outlives the termination stops, for the test to fail rather than hang.
+      if (++rounds > ROUNDS) {
+        return;
+      }
+      enqueue(js, reject);
+      if (rounds == ROUNDS) {
+        js.terminateExecutionNow();
+      }
+    });
+    RejectionReporter reporter(js, handler);
+
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks for the termination.
+    v8::TryCatch tryCatch(js.v8Isolate);
+    call(js, reject);
+    js.runMicrotasks();
+    KJ_EXPECT(tryCatch.HasTerminated());
+    KJ_EXPECT(rounds == ROUNDS, rounds);
+    // The microtask that the last round queued has not run. Nothing was logged either: an
+    // unexpected error log fails the test.
+    KJ_EXPECT(reporter.reported == ROUNDS, reporter.reported);
+    js.v8Isolate->CancelTerminateExecution();
+
+    // That microtask is still queued, as V8 drops the queue only when a microtask terminates
+    // execution. The caller cancels it.
+    js.terminateNextExecution();
+    js.runMicrotasks();
+    KJ_EXPECT(tryCatch.HasTerminated());
+    js.v8Isolate->CancelTerminateExecution();
+    js.runMicrotasks();
+    KJ_EXPECT(reporter.reported == ROUNDS, reporter.reported);
+  });
+}
+
 KJ_TEST("a microtask that terminates execution drops the pending unhandled rejections") {
   Evaluator<CheckpointContext, CheckpointIsolate> e(v8System);
   e.run([](Lock& js) {

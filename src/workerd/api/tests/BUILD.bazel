@@ -992,6 +992,15 @@ wd_test(
 )
 
 wd_test(
+    src = "unhandled-rejection-abort-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "unhandled-rejection-abort-test.js",
+        "unhandled-rejection-abort-test-chain.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "htmlrewriter-test.wd-test",
     args = ["--experimental"],

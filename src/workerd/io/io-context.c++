@@ -1878,6 +1878,13 @@ void IoContext::runImpl(Runnable& runnable,
           tryCatch.Reset();
           // Ensure we don't pump the message loop in this case
           gotTermination = true;
+
+          // V8 drops the queue when a microtask terminates, but not when an unhandledrejection
+          // listener does: listeners run once the queue is empty, and may have queued microtasks
+          // since. Cancel those as above, or they would run in whatever enters the isolate next.
+          js.terminateNextExecution();
+          js.runMicrotasks();
+          tryCatch.Reset();
         }
       }
 
