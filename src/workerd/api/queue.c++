@@ -641,7 +641,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise =
           f(lock, js.alloc<QueueController>(event.addRef()),
-              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
+              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx(js))
               .then([event = event.addRef(), weakContext = context.getWeakRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
         auto& context = KJ_REQUIRE_NONNULL(
