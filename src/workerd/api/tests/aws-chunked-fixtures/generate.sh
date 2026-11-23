@@ -33,9 +33,9 @@ python3 "$HERE/capture.py" captures.json "$HTTP_PORT" "$HTTPS_PORT" cert.pem key
 SERVER=$!
 until grep -q ready capture.log; do sleep 0.2; done
 
-(cd js && node client.mjs "$HTTP_PORT" "$HTTPS_PORT")
-py/.venv/bin/python "$HERE/boto3-client.py" "$HTTP_PORT" "$HTTPS_PORT"
-go/client "$HTTP_PORT" "$HTTPS_PORT"
+(cd js && node client.mjs "$HTTP_PORT" "$HTTPS_PORT" "$WORK/cert.pem")
+py/.venv/bin/python "$HERE/boto3-client.py" "$HTTP_PORT" "$HTTPS_PORT" "$WORK/cert.pem"
+go/client "$HTTP_PORT" "$HTTPS_PORT" "$WORK/cert.pem"
 
 python3 "$HERE/to-js.py" captures.json > "$HERE/../aws-chunked-sdk-fixtures.js"
 echo "Wrote $(grep -c "name:" "$HERE/../aws-chunked-sdk-fixtures.js") fixtures to aws-chunked-sdk-fixtures.js"

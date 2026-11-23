@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"os"
@@ -39,16 +40,23 @@ func must(err error) {
 }
 
 func main() {
-	httpPort, httpsPort := os.Args[1], os.Args[2]
+	httpPort, httpsPort, certPath := os.Args[1], os.Args[2], os.Args[3]
 	ctx := context.Background()
-	insecure := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	// The recording server's certificate is the only one trusted.
+	cert, err := os.ReadFile(certPath)
+	must(err)
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(cert) {
+		panic("no certificate in " + certPath)
+	}
+	trusting := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}}
 
 	client := s3.New(s3.Options{
 		Region:       "us-east-1",
 		BaseEndpoint: aws.String("https://127.0.0.1:" + httpsPort),
 		UsePathStyle: true,
 		Credentials:  credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		HTTPClient:   insecure,
+		HTTPClient:   trusting,
 	})
 	put := func(name string, size int, algorithm types.ChecksumAlgorithm) {
 		_, err := client.PutObject(ctx, &s3.PutObjectInput{
@@ -66,7 +74,7 @@ func main() {
 		transport := http.DefaultTransport
 		if secure {
 			endpoint = "127.0.0.1:" + httpsPort
-			transport = insecure.Transport
+			transport = trusting.Transport
 		}
 		mc, err := minio.New(endpoint, &minio.Options{
 			Creds: miniocreds.NewStaticV4(accessKey, secretKey, ""), Secure: secure,

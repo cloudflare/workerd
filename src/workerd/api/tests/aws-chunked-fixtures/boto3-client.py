@@ -6,12 +6,10 @@
 
 import io
 import sys
-import warnings
 
 import boto3
 from botocore.config import Config
 
-warnings.filterwarnings("ignore")
 SENTENCE = b"The quick brown fox jumps over the lazy dog. "
 
 
@@ -32,14 +30,15 @@ class Unseekable(io.RawIOBase):
         return self.data.read(n)
 
 
-http_port, https_port = sys.argv[1:3]
+# The recording server's certificate is the only one trusted.
+http_port, https_port, cert_path = sys.argv[1:4]
 s3 = boto3.client(
     "s3",
     endpoint_url=f"https://127.0.0.1:{https_port}",
     region_name="us-east-1",
     aws_access_key_id="AKIDEXAMPLE",
     aws_secret_access_key="wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-    verify=False,
+    verify=cert_path,
     config=Config(s3={"addressing_style": "path"}),
 )
 s3.put_object(

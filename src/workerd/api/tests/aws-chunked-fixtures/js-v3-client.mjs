@@ -7,11 +7,14 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { Readable } from 'node:stream';
 import https from 'node:https';
+import { readFileSync } from 'node:fs';
 
 const SENTENCE = 'The quick brown fox jumps over the lazy dog. ';
 const payload = (n) =>
   Buffer.from(SENTENCE.repeat(Math.ceil(n / SENTENCE.length) + 1).slice(0, n));
-const [httpPort, httpsPort] = process.argv.slice(2);
+// The recording server's certificate, which is the only one trusted.
+const [httpPort, httpsPort, certPath] = process.argv.slice(2);
+const ca = readFileSync(certPath);
 
 function client(secure) {
   return new S3Client({
@@ -25,7 +28,7 @@ function client(secure) {
       secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',
     },
     requestHandler: new NodeHttpHandler({
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      httpsAgent: new https.Agent({ ca }),
     }),
   });
 }
