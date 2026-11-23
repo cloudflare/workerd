@@ -593,11 +593,12 @@ class SubtleCrypto final: public jsg::Object {
       kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithm,
       const CryptoKey& baseKey,
       // The operation needs to be able to take both undefined and null
-      // and handle them equivalently... if we just used jsg::Optional<int>
-      // here, null would be coerced to 0. If we just used kj::Maybe<int>
+      // and handle them equivalently... if we just used jsg::Optional<uint32_t>
+      // here, null would be coerced to 0. If we just used kj::Maybe<uint32_t>
       // here, undefined would be an error. So we need to use an optional
-      // maybe int in order to treat undefined and null as being equivalent.
-      jsg::Optional<kj::Maybe<int>> length);
+      // maybe uint32_t in order to treat undefined and null as being equivalent.
+      // uint32_t unwraps with [EnforceRange], as the spec's unsigned long length requires.
+      jsg::Optional<kj::Maybe<uint32_t>> length);
 
   jsg::Promise<jsg::Ref<CryptoKey>> importKey(jsg::Lock& js,
       kj::String format,

@@ -1680,6 +1680,16 @@ wd_test(
 )
 
 wd_test(
+    src = "new-module-registry-lazy-globals-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-lazy-globals-request-test.js",
+        "new-module-registry-lazy-globals-top-level-test.js",
+        "new-module-registry-lazy-globals-warning-test.js",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-startup-eval-test.wd-test",
     args = ["--experimental"],
     data = [

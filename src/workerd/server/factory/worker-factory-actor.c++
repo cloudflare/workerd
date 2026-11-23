@@ -441,7 +441,7 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
     if (!storage->actors->replicated()) return kj::READY_NOW;
     // A new or earlier alarm is in the cluster's index before the commit setting it starts, so
     // that a peer wakes the object if this instance dies once it is durable, acknowledged or not.
-    auto name = kj::str(actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj));
+    auto name = kj::str(kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj));
     return priorTask.then(
         [storage = kj::addRef(*storage), id = kj::str(actor.actorId), name = kj::mv(name), atMs]() {
       return result_task_run(storage->actors->alarm_set(toRust(id), toRust(name), atMs));
@@ -452,7 +452,7 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
   // index write is written again by the index's next tidy.
   void opened(kj::Date time) {
     storage->alarmScheduler->setAlarm(actor, time);
-    auto name = actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj);
+    auto name = kj::Maybe<kj::StringPtr>(actor.name).orDefault(""_kj);
     auto atMs = (time - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     result_task_run(storage->actors->alarm_opened(toRust(actor.actorId), toRust(name), atMs))
         .detach([](kj::Exception&& e) {

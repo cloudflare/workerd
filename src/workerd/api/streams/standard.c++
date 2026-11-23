@@ -3286,8 +3286,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSource = kj::mv(maybeUnderlyingSource).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  auto type =
-      kj::str(underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj));
+  auto type = kj::str(kj::Maybe<kj::StringPtr>(underlyingSource.type).orDefault(""_kj));
 
   expectedLength = underlyingSource.expectedLength;
 
@@ -3306,8 +3305,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     kj::Maybe<int> autoAllocateChunkSize;
     if (useSpecCompliantBehavior) {
       // Spec-compliant: only set if user explicitly provides it
-      autoAllocateChunkSize =
-          underlyingSource.autoAllocateChunkSize.map([](int size) { return size; });
+      autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize;
     } else {
       // Legacy behavior: apply a default autoAllocateChunkSize if not provided.
       auto defaultChunkSize = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
@@ -4204,7 +4202,7 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->getDesiredSize().map([](ssize_t size) -> int { return size; });
+      return controller->getDesiredSize();
     }
   }
   KJ_UNREACHABLE;
