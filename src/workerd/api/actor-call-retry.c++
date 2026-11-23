@@ -67,7 +67,21 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
     ++retryAttemptsStarted;
     observer->recordActorRetry(config.callType);
   }
-  return Attempt(metadata, isFirstAttempt);
+  return Attempt(metadata, isFirstAttempt, retryWithin());
+}
+
+kj::Maybe<kj::Duration> ActorCallRetryState::retryWithin() const {
+  // A JS RPC call commits to its attempt once a call is pipelined on its result, which can happen
+  // while the attempt is in flight; from then on it retries nothing.
+  if (!retriesEnabled || config.callType != ActorRetryCallType::FETCH ||
+      attemptCount >= policy.maxAttempts()) {
+    return kj::none;
+  }
+  // The retry waits out its backoff first, and must start before the cutoff.
+  auto& backoff = RETRY_BACKOFFS[kj::min(attemptCount, kj::size(RETRY_BACKOFFS)) - 1];
+  auto left = retryCutoff() - timer.nowForLimitTimeout() - backoff.max;
+  if (left <= 0 * kj::SECONDS) return kj::none;
+  return left;
 }
 
 kj::Exception ActorCallRetryState::retryTimeoutExpired() {

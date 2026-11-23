@@ -84,9 +84,11 @@ class ActorCallRetryState final: public kj::Refcounted {
   class Attempt {
    public:
     Attempt(kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata,
-        IsFirstActorCallAttempt isFirstAttempt)
+        IsFirstActorCallAttempt isFirstAttempt,
+        kj::Maybe<kj::Duration> retryWithin = kj::none)
         : metadata(kj::mv(metadata)),
-          isFirstAttempt(isFirstAttempt) {
+          isFirstAttempt(isFirstAttempt),
+          retryWithin(retryWithin) {
       KJ_REQUIRE(isFirstAttempt.toBool() || this->metadata != kj::none,
           "actor call retry attempt requires retry metadata");
     }
@@ -106,10 +108,17 @@ class ActorCallRetryState final: public kj::Refcounted {
     IsFirstActorCallAttempt getIsFirstAttempt() const {
       return isFirstAttempt;
     }
+    // Set if the call sends this attempt again when it fails before it reaches the actor: a
+    // failure within this time of the attempt's start is retried, and the retry has at least the
+    // rest of it to finish (`SubrequestMetadata::actorRetryBy`).
+    kj::Maybe<kj::Duration> getRetryWithin() const {
+      return retryWithin;
+    }
 
    private:
     kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
     IsFirstActorCallAttempt isFirstAttempt;
+    kj::Maybe<kj::Duration> retryWithin;
   };
 
   // `callStart` is when the logical call began, and the retry timeout runs from it. A redirected
@@ -174,6 +183,7 @@ class ActorCallRetryState final: public kj::Refcounted {
     return callStart + policy.timeout();
   }
   kj::Exception retryTimeoutExpired();
+  kj::Maybe<kj::Duration> retryWithin() const;
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
   kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);
   kj::Duration retryDelay();

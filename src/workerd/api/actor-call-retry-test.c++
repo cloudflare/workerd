@@ -59,12 +59,14 @@ class RecordingObserver final: public RequestObserver {
 // A retry state with every gate enabled and a replayable payload.
 kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
     RecordingObserver& observer,
-    ActorRetryPolicy policy = ActorRetryPolicy::systemDefault()) {
+    ActorRetryPolicy policy = ActorRetryPolicy::systemDefault(),
+    ActorRetryCallType callType = ActorRetryCallType::JSRPC,
+    ActorCallPayloadReplayable payloadReplayable = ActorCallPayloadReplayable::YES) {
   return kj::rc<ActorCallRetryState>(timer, observer,
       ActorCallRetryState::Config{
-        .callType = ActorRetryCallType::JSRPC,
+        .callType = callType,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
-        .payloadReplayable = ActorCallPayloadReplayable::YES,
+        .payloadReplayable = payloadReplayable,
       },
       policy, timer.nowForLimitTimeout());
 }
@@ -102,6 +104,58 @@ KJ_TEST("not-delivered actor calls retry with a new token") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).isRetry == IsActorRetry::NO);
 
   state->recordRecovered();
+}
+
+KJ_TEST("a fetch attempt says how long a failure before delivery is retried") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state =
+      newRetryState(timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCallType::FETCH);
+
+  // The retry timeout, less the first retry's longest backoff.
+  auto first = startAttempt(*state);
+  KJ_EXPECT(first.getRetryWithin() == 9500 * kj::MILLISECONDS);
+
+  timer.advance(1 * kj::SECONDS);
+  auto notDelivered = makeDisconnect("not delivered"_kj);
+  jsg::markActorRequestNotDelivered(notDelivered);
+  KJ_EXPECT(handleFailure(*state, kj::mv(notDelivered)).is<kj::Duration>());
+
+  // What is left of the timeout, less the second retry's longest backoff.
+  auto second = startAttempt(*state);
+  KJ_EXPECT(second.getRetryWithin() == 8 * kj::SECONDS);
+
+  state->recordRecovered();
+}
+
+KJ_TEST("an attempt that would not be retried says so") {
+  auto retryWithin = [](ActorRetryPolicy policy, ActorRetryCallType callType,
+                         ActorCallPayloadReplayable replayable = ActorCallPayloadReplayable::YES) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = newRetryState(timer, *observer, policy, callType, replayable);
+    return startAttempt(*state).getRetryWithin();
+  };
+  auto fetch = ActorRetryCallType::FETCH;
+  auto system = ActorRetryPolicy::systemDefault();
+
+  // Retries disabled, or a body that cannot be sent again.
+  KJ_EXPECT(retryWithin(ActorRetryPolicy::userDefined({.maxRetries = 0}), fetch) == kj::none);
+  KJ_EXPECT(retryWithin(system, fetch, ActorCallPayloadReplayable::NO) == kj::none);
+  // A retry timeout no longer than the first retry's backoff.
+  auto shortTimeout = UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS};
+  KJ_EXPECT(retryWithin(ActorRetryPolicy::userDefined(shortTimeout), fetch) == kj::none);
+  // A JS RPC call can commit to its attempt while it is in flight.
+  KJ_EXPECT(retryWithin(system, ActorRetryCallType::JSRPC) == kj::none);
+
+  // The last attempt.
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state =
+      newRetryState(timer, *observer, ActorRetryPolicy::userDefined({.maxRetries = 1}), fetch);
+  KJ_EXPECT(startAttempt(*state).getRetryWithin() != kj::none);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Duration>());
+  KJ_EXPECT(startAttempt(*state).getRetryWithin() == kj::none);
 }
 
 KJ_TEST("ambiguous actor calls retry with the same token") {
