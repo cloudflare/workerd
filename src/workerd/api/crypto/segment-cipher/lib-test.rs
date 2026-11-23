@@ -57,7 +57,9 @@ fn creates_transforms() {
         let encryptor = new_encryptor(options(algorithm), &PRK).unwrap();
         assert_eq!(encryptor.high_water_mark(), 65536);
         assert!(encryptor.output_length().is_none());
-        assert_eq!(encryptor.retained_bytes(), 0);
+        // Only the key schedule is held before anything is pushed.
+        let retained = encryptor.retained_bytes();
+        assert!(retained > 0 && retained < 1024, "{retained}");
     }
     let decryptor = new_decryptor(decrypt_options(100_000.0), &PRK).unwrap();
     assert_eq!(decryptor.high_water_mark(), 65536 + 28);
@@ -194,4 +196,52 @@ fn encrypted_lengths() {
     assert!(encrypted_length(-1.0, "AES-GCM", 65536.0).is_err());
     assert!(encrypted_length(9_007_199_254_740_991.0, "AES-GCM", 65536.0).is_err());
     assert!(encrypted_length(1.0, "AES-CTR", 65536.0).is_err());
+}
+
+// encryptedLength() accepts exactly the lengths an encryptor does: with 1 KiB segments, 2^32
+// segments (4 TiB) are one too many.
+#[test]
+fn encrypted_length_applies_the_segment_limit() {
+    let limit = 4_294_967_295.0 * 1024.0;
+    assert!(encrypted_length(limit, "AES-GCM", 1024.0).is_ok());
+    assert!(encrypted_length(limit + 1.0, "AES-GCM", 1024.0).is_err());
+    let at_limit = |plaintext_length| ffi::CipherOptions {
+        segment_size: 1024.0,
+        has_plaintext_length: true,
+        plaintext_length,
+        ..options("AES-GCM")
+    };
+    assert!(new_encryptor(at_limit(limit), &PRK).is_ok());
+    assert!(new_encryptor(at_limit(limit + 1.0), &PRK).is_err());
+}
+
+#[test]
+fn charges_its_configuration_from_the_start() {
+    let big = || ffi::KeyInfo {
+        prefix: vec![0; 8192],
+        suffix: vec![0; 4096],
+        ..info()
+    };
+    let encryptor = new_encryptor(
+        ffi::CipherOptions {
+            info: big(),
+            ..options("AES-GCM")
+        },
+        &PRK,
+    )
+    .unwrap();
+    assert!(encryptor.retained_bytes() >= 8192 + 4096 + PRK.len());
+    let decryptor = new_decryptor(
+        ffi::CipherOptions {
+            mac_info: big(),
+            ..ffi::CipherOptions {
+                has_plaintext_length: true,
+                plaintext_length: 1.0,
+                ..options("AES-CBC-HMAC-SHA256")
+            }
+        },
+        &PRK,
+    )
+    .unwrap();
+    assert!(decryptor.retained_bytes() >= 8192 + 4096);
 }

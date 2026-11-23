@@ -9,8 +9,6 @@
 
 #include <rust/cxx.h>
 
-#include <kj/vector.h>
-
 namespace workerd::api {
 
 // A byte transform that runs synchronously: each input chunk is consumed in full as it arrives,
@@ -21,17 +19,16 @@ namespace workerd::api {
 // not touch JavaScript or anything the isolate owns.
 class SyncTransformStage {
  public:
-  using Output = kj::Vector<kj::Array<kj::byte>>;
-
   virtual ~SyncTransformStage() noexcept(false) = default;
 
-  // Consumes all of `input`, appending any output it completes to `output`. Throws if the input
-  // is invalid; the stream then errors once the output already produced has been read.
-  virtual void push(kj::ArrayPtr<const kj::byte> input, Output& output) = 0;
+  // Consumes all of `input`, setting `output`, which starts empty, to any output it completes.
+  // Throws if the input is invalid; the stream then errors once the output set before the throw
+  // has been read.
+  virtual void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) = 0;
 
-  // Called once, when the input has ended. Appends any remaining output, and throws if the input
-  // was incomplete.
-  virtual void end(Output& output) = 0;
+  // Called once, when the input has ended. Sets `output` to any remaining output, and throws if
+  // the input was incomplete.
+  virtual void end(kj::Array<kj::byte>& output) = 0;
 
   // Called once if the stream is canceled or aborted before the stage has failed or ended. The
   // stage is not used again.
@@ -42,20 +39,18 @@ class SyncTransformStage {
     return kj::none;
   }
 
-  // The bytes the stage holds between calls, such as a partial block, so that they can be
-  // charged to the isolate as external memory.
+  // The bytes the stage holds between calls, such as a partial block or its configuration, so
+  // that they can be charged to the isolate as external memory from the moment the stream is
+  // created.
   virtual size_t retainedBytes() const {
     return 0;
   }
 };
 
-// Takes the bytes a Rust stage produced as stage output, without copying them.
+// Takes the bytes a Rust stage produced as stage output. The stream charges and bounds its queue
+// by the bytes in it, so the allocation is kept only if it is close to their size; otherwise
+// they are copied out and the allocation freed.
 kj::Array<kj::byte> fromRustBytes(::rust::Vec<uint8_t> bytes);
-
-struct SyncTransformStreams {
-  JsReadableStream readable;
-  JsWritableStream writable;
-};
 
 // Returns the two sides of a byte-only transform stream that runs `stage` over everything written
 // to `writable` and makes the output readable from `readable`. Both sides are native, so a pipe
@@ -66,12 +61,12 @@ struct SyncTransformStreams {
 // TransformStream's second write waits for its readable side to be read. So at most
 // `highWaterMark` bytes, plus the output of one increment, are queued at any time, however large
 // the writes are. The queued output and the stage's retained bytes are charged to the isolate as
-// external memory.
+// external memory, from the moment the streams are created.
 //
 // If the stage knows its output length, the readable side reports it, and holds back the last
 // byte until the stage has ended successfully. So a consumer that stops reading once it has the
 // whole length still sees an error that the end of the input reveals.
-SyncTransformStreams newSyncTransformStreams(
+JsReadableWritablePair newSyncTransformStreams(
     jsg::Lock& js, IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark);
 
 }  // namespace workerd::api

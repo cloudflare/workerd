@@ -54,6 +54,11 @@ pub struct InfoTemplate {
 }
 
 impl InfoTemplate {
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        self.prefix.capacity() + self.suffix.capacity()
+    }
+
     /// The info for segment `index`, which must be at most the encoding's `max_index()`.
     #[must_use]
     pub fn build(&self, index: u64) -> Vec<u8> {

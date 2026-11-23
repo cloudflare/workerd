@@ -46,18 +46,51 @@ fn decodes_every_split() {
             trailers,
             vec![Field {
                 name: "x-amz-checksum-crc32".to_owned(),
-                value: "DUoRhQ==".to_owned(),
+                value: b"DUoRhQ==".to_vec(),
             }]
         );
     }
 }
 
 #[test]
-fn accepts_an_lf_before_a_trailer_crlf() {
-    let (_, trailers) = decode(b"0\r\nx-amz-checksum-crc32:DUoRhQ==\n\r\nx-b: c \r\n\r\n").unwrap();
+fn accepts_an_lf_before_a_checksum_crlf() {
+    let (_, trailers) = decode(b"0\r\nX-Amz-Checksum-CRC32:DUoRhQ==\n\r\nx-b: c \r\n\r\n").unwrap();
     assert_eq!(trailers.len(), 2);
-    assert_eq!(trailers[0].value, "DUoRhQ==");
-    assert_eq!(trailers[1].value, "c");
+    assert_eq!(trailers[0].value, b"DUoRhQ==");
+    assert_eq!(trailers[1].value, b"c");
+}
+
+// Only checksums get the LF: other fields, the trailer signature included, keep HTTP's grammar.
+#[test]
+fn rejects_an_lf_before_other_crlfs() {
+    for input in [
+        &b"0\r\nx-b: c\n\r\n\r\n"[..],
+        b"0\r\nx-amz-trailer-signature:abc\n\r\n\r\n",
+        b"0\r\nx-amz-checksum-:abc\n\r\n\r\n",
+    ] {
+        assert_eq!(error(input), "Malformed aws-chunked trailer field value.");
+    }
+}
+
+// Field values may hold any byte from 0x80 up, which are kept as they are, UTF-8 or not.
+#[test]
+fn keeps_value_bytes() {
+    let (_, trailers) = decode(b"0\r\nx-a: \x80caf\xe9\xff\r\n\r\n").unwrap();
+    assert_eq!(trailers[0].value, b"\x80caf\xe9\xff");
+    assert_eq!(
+        error(b"0\r\nx-a: caf\x7f\r\n\r\n"),
+        "Malformed aws-chunked trailer field value."
+    );
+}
+
+#[test]
+fn retains_its_allowed_trailers() {
+    let name = "x-amz-checksum-sha256".repeat(100);
+    let decoder = Decoder::new(Options {
+        allowed_trailers: Some(vec![name.clone()]),
+        ..options()
+    });
+    assert!(decoder.retained_bytes() >= name.len());
 }
 
 #[test]

@@ -22,7 +22,8 @@ mod ffi {
     #[derive(Debug)]
     struct TrailerField {
         name: String,
-        value: String,
+        /// The value's bytes as they were sent, which need not be UTF-8.
+        value: Vec<u8>,
     }
 
     /// The decoder's options, as JavaScript passed them. Each `has_` flag says whether the
@@ -206,7 +207,7 @@ impl Decoder {
     }
 
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
+    pub fn retained_bytes(&self) -> usize {
         self.inner.retained_bytes()
     }
 }

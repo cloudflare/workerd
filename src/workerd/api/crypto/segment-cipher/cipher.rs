@@ -126,6 +126,16 @@ impl Cipher {
         &self.layout
     }
 
+    /// The bytes the cipher's configuration holds: the key and the info templates.
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        let mac_info = match &self.construction {
+            Construction::Aead(_) => 0,
+            Construction::CbcHmac { mac_info } => mac_info.retained_bytes(),
+        };
+        self.keys.prk.as_slice().len() + self.info.retained_bytes() + mac_info
+    }
+
     /// The largest segment index the key schedule can derive a key for.
     #[must_use]
     pub fn max_index(&self) -> u64 {
@@ -151,7 +161,9 @@ impl Cipher {
     ) -> Result<()> {
         debug_assert!(!plaintext.is_empty() && plaintext.len() <= self.layout.segment_size());
         let start = out.len();
-        out.resize(start + self.layout.sealed_segment_size(plaintext.len()), 0);
+        let size = self.layout.sealed_segment_size(plaintext.len());
+        out.reserve_exact(size);
+        out.resize(start + size, 0);
         let result = self.seal_into(index, plaintext, entropy, &mut out[start..]);
         if result.is_err() {
             out.truncate(start);
@@ -212,7 +224,9 @@ impl Cipher {
                     return Err(authentication_failure(index));
                 }
                 let (nonce, ciphertext) = sealed.split_at(AEAD_NONCE_SIZE);
-                out.resize(start + ciphertext.len() - AEAD_TAG_SIZE, 0);
+                let size = ciphertext.len() - AEAD_TAG_SIZE;
+                out.reserve_exact(size);
+                out.resize(start + size, 0);
                 if !ffi::aead_open(*aead, key.as_slice(), nonce, ciphertext, &mut out[start..])? {
                     return Err(authentication_failure(index));
                 }
@@ -233,6 +247,7 @@ impl Cipher {
                     return Err(authentication_failure(index));
                 }
                 let (iv, ciphertext) = signed.split_at(CBC_BLOCK_SIZE);
+                out.reserve_exact(ciphertext.len());
                 out.resize(start + ciphertext.len(), 0);
                 let mut written = 0;
                 if !ffi::aes_256_cbc_decrypt(

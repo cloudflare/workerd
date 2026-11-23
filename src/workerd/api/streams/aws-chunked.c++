@@ -32,18 +32,18 @@ class AwsChunkedDecodeStage final: public SyncTransformStage {
         JSG_KJ_EXCEPTION(DISCONNECTED, TypeError, "The aws-chunked stream did not finish."));
   }
 
-  void push(kj::ArrayPtr<const kj::byte> input, Output& output) override {
+  void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) override {
     auto maybeException =
         kj::runCatchingExceptions([&]() { decoder->push(input.as<kj_rs::Rust>()); });
     // The data decoded before a failure is still output.
-    output.add(fromRustBytes(decoder->take_output()));
+    output = fromRustBytes(decoder->take_output());
     KJ_IF_SOME(exception, maybeException) {
       trailersFulfiller->reject(exception.clone());
       kj::throwFatalException(kj::mv(exception));
     }
   }
 
-  void end(Output& output) override {
+  void end(kj::Array<kj::byte>& output) override {
     KJ_IF_SOME(exception,
         kj::runCatchingExceptions([&]() { trailersFulfiller->fulfill(decoder->end()); })) {
       trailersFulfiller->reject(exception.clone());
@@ -105,7 +105,10 @@ jsg::Ref<AwsChunkedDecoderStream> AwsChunkedDecoderStream::constructor(
       ioContext.awaitIoLegacy(js, kj::mv(paf.promise)).then(js, [](jsg::Lock& js, Trailers fields) {
     auto headers = js.alloc<Headers>();
     for (auto& field: fields) {
-      headers->append(js, kj::str(field.name), kj::str(field.value));
+      // The value's bytes are kept as they were sent, whatever their encoding.
+      auto& value = field.value;
+      headers->append(js, kj::str(field.name),
+          kj::heapString(reinterpret_cast<const char*>(value.data()), value.size()));
     }
     return headers;
   });

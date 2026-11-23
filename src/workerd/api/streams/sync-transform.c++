@@ -23,7 +23,10 @@ class SyncTransform final: public kj::Refcounted,
       : stage(kj::mv(stage)),
         highWaterMark(kj::max(highWaterMark, static_cast<size_t>(1))),
         memory(kj::mv(memory)),
-        remainingLength(this->stage->getOutputLength()) {}
+        remainingLength(this->stage->getOutputLength()) {
+    // The stage's configuration is held from the start, before anything is written.
+    updateMemory();
+  }
 
   // ReadableStreamSource ----------------------------------------------------------------
 
@@ -104,7 +107,7 @@ class SyncTransform final: public kj::Refcounted,
     if (ended && failure == kj::none) co_return;
     requireWritable();
     ended = true;
-    runStage([&](SyncTransformStage::Output& output) { stage->end(output); });
+    runStage([&](kj::Array<kj::byte>& output) { stage->end(output); });
     // The stage is done, so let go of what it holds.
     releaseStage();
   }
@@ -236,7 +239,7 @@ class SyncTransform final: public kj::Refcounted,
   }
 
   void push(kj::ArrayPtr<const kj::byte> input) {
-    runStage([&](SyncTransformStage::Output& output) { stage->push(input, output); });
+    runStage([&](kj::Array<kj::byte>& output) { stage->push(input, output); });
   }
 
   // Runs one stage operation and queues what it produced. If the stage throws, the stream fails,
@@ -244,12 +247,11 @@ class SyncTransform final: public kj::Refcounted,
   // writer.
   template <typename Func>
   void runStage(Func&& func) {
-    SyncTransformStage::Output output;
+    kj::Array<kj::byte> output;
     auto maybeException = kj::runCatchingExceptions([&]() { func(output); });
-    for (auto& chunk: output) {
-      if (chunk.size() == 0) continue;
-      queuedBytes += chunk.size();
-      queue.push_back(kj::mv(chunk));
+    if (output.size() > 0) {
+      queuedBytes += output.size();
+      queue.push_back(kj::mv(output));
     }
     KJ_IF_SOME(exception, maybeException) {
       failure = Failure{.exception = exception.clone(), .afterOutput = true};
@@ -388,18 +390,22 @@ class SyncTransform final: public kj::Refcounted,
 }  // namespace
 
 kj::Array<kj::byte> fromRustBytes(::rust::Vec<uint8_t> bytes) {
+  // Slack of up to an eighth, plus a little for small outputs, is kept rather than copied.
+  if (bytes.capacity() - bytes.size() > bytes.size() / 8 + 64) {
+    return kj::heapArray<kj::byte>(kj::arrayPtr(bytes.data(), bytes.size()));
+  }
   auto owner = kj::heap(kj::mv(bytes));
   auto view = kj::arrayPtr(owner->data(), owner->size());
   return view.attach(kj::mv(owner));
 }
 
-SyncTransformStreams newSyncTransformStreams(
+JsReadableWritablePair newSyncTransformStreams(
     jsg::Lock& js, IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark) {
   auto transform = kj::refcounted<SyncTransform>(
       kj::mv(stage), highWaterMark, js.getExternalMemoryAdjustment(0));
   kj::Own<ReadableStreamSource> source = kj::addRef(*transform);
   kj::Own<WritableStreamSink> sink = kj::mv(transform);
-  return SyncTransformStreams{
+  return JsReadableWritablePair{
     .readable = JsReadableStream::create(js, ioContext, kj::mv(source)),
     .writable = JsWritableStream::create(
         js, ioContext, kj::mv(sink), ioContext.getMetrics().tryCreateWritableByteStreamObserver()),

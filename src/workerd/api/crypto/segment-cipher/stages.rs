@@ -17,6 +17,20 @@ use crate::layout::to_u64;
 /// collision-safe even if a key schedule is reused.
 pub const MAX_SEGMENTS_PER_STREAM: u64 = u32::MAX as u64;
 
+/// Checks that a stream of `count` segments stays under the segment limit.
+///
+/// # Errors
+///
+/// Fails with a `RangeError` if it doesn't.
+pub fn require_segment_count(count: u64) -> Result<()> {
+    if count > MAX_SEGMENTS_PER_STREAM {
+        return Err(range_error(&format!(
+            "A segment stream can hold at most {MAX_SEGMENTS_PER_STREAM} segments."
+        )));
+    }
+    Ok(())
+}
+
 /// Checks that `count` segments starting at `first_segment` can be keyed and that the stream
 /// stays under its segment limit.
 ///
@@ -24,11 +38,7 @@ pub const MAX_SEGMENTS_PER_STREAM: u64 = u32::MAX as u64;
 ///
 /// Fails with a `RangeError` if they can't.
 pub fn require_segment_range(cipher: &Cipher, first_segment: u64, count: u64) -> Result<()> {
-    if count > MAX_SEGMENTS_PER_STREAM {
-        return Err(range_error(&format!(
-            "A segment stream can hold at most {MAX_SEGMENTS_PER_STREAM} segments."
-        )));
-    }
+    require_segment_count(count)?;
     // The last index, first_segment + count - 1, must not exceed max_index(), which may be
     // u64::MAX.
     let max = cipher.max_index();
@@ -140,8 +150,8 @@ impl Encryptor {
     }
 
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
-        self.buffer.capacity()
+    pub fn retained_bytes(&self) -> usize {
+        self.buffer.capacity() + self.cipher.retained_bytes()
     }
 
     fn seal_buffer(&mut self, entropy: &mut dyn Entropy, out: &mut Vec<u8>) -> Result<()> {
@@ -284,8 +294,8 @@ impl Decryptor {
     }
 
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
-        self.buffer.capacity()
+    pub fn retained_bytes(&self) -> usize {
+        self.buffer.capacity() + self.cipher.retained_bytes()
     }
 
     /// The plaintext size of the next segment.

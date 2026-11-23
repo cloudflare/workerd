@@ -84,7 +84,25 @@ fn trailers_are_returned() {
     let trailers = decoder.end().unwrap();
     assert_eq!(trailers.len(), 1);
     assert_eq!(
-        (trailers[0].name.as_str(), trailers[0].value.as_str()),
-        ("x-a", "b")
+        (trailers[0].name.as_str(), trailers[0].value.as_slice()),
+        ("x-a", &b"b"[..])
     );
+}
+
+#[test]
+fn trailer_bytes_reach_cxx_unchanged() {
+    let mut decoder = new_decoder(options(true)).unwrap();
+    decoder.push(b"0\r\nx-a: caf\xe9\r\n\r\n").unwrap();
+    assert_eq!(decoder.end().unwrap()[0].value, b"caf\xe9");
+}
+
+#[test]
+fn charges_its_configuration_from_the_start() {
+    let decoder = new_decoder(ffi::DecoderOptions {
+        has_allowed_trailers: true,
+        allowed_trailers: vec!["x".repeat(4096)],
+        ..options(true)
+    })
+    .unwrap();
+    assert!(decoder.retained_bytes() >= 4096);
 }

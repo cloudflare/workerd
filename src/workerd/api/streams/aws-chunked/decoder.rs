@@ -35,7 +35,9 @@ fn malformed<T>(message: impl Into<String>) -> Result<T, Malformed> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
-    pub value: String,
+    /// The value's bytes as they were sent. A field value may hold any byte from 0x80 up, which
+    /// need not be UTF-8.
+    pub value: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +117,12 @@ const fn is_quotable_pair_char(c: u8) -> bool {
     matches!(c, b'\t' | b' ' | 0x21..=0x7e | 0x80..=0xff)
 }
 
+/// The flexible-checksum trailers, `x-amz-checksum-<algorithm>`.
+fn is_checksum_field(name: &[u8]) -> bool {
+    const PREFIX: &[u8] = b"x-amz-checksum-";
+    name.len() > PREFIX.len() && name[..PREFIX.len()].eq_ignore_ascii_case(PREFIX)
+}
+
 fn trim_whitespace(text: &[u8]) -> &[u8] {
     let start = text
         .iter()
@@ -165,10 +173,15 @@ impl Decoder {
         }
     }
 
-    /// The bytes the decoder holds between calls: a partial trailer section.
+    /// The bytes the decoder holds between calls: its allowed trailer names and a partial
+    /// trailer section.
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
-        self.trailer_bytes.capacity()
+    pub fn retained_bytes(&self) -> usize {
+        let allowed = self.options.allowed_trailers.as_ref().map_or(0, |names| {
+            names.capacity() * size_of::<String>()
+                + names.iter().map(String::capacity).sum::<usize>()
+        });
+        allowed + self.trailer_bytes.capacity()
     }
 
     /// Decodes `input`, appending the chunk data in it to `output`. On failure, `output` holds
@@ -398,30 +411,33 @@ impl Decoder {
             let Some(end) = section.windows(2).position(|pair| pair == b"\r\n") else {
                 return malformed("Malformed aws-chunked trailer field.");
             };
-            let mut line = &section[..end];
+            let line = &section[..end];
             section = &section[end + 2..];
-            // S3 accepts an LF between a checksum and its CRLF, as some clients send.
-            if let Some(stripped) = line.strip_suffix(b"\n") {
-                line = stripped;
-            }
             let Some(colon) = line.iter().position(|&c| c == b':') else {
                 return malformed("Malformed aws-chunked trailer field.");
             };
-            let (name, value) = (&line[..colon], trim_whitespace(&line[colon + 1..]));
+            let (name, mut value) = (&line[..colon], &line[colon + 1..]);
             if name.is_empty() || !name.iter().all(|&c| is_token_char(c)) {
                 return malformed("Malformed aws-chunked trailer field name.");
             }
+            // S3 accepts an LF between a checksum and its CRLF, as some clients send. Other
+            // fields are held to HTTP's grammar, which has no bare LF.
+            if is_checksum_field(name) {
+                value = value.strip_suffix(b"\n").unwrap_or(value);
+            }
+            let value = trim_whitespace(value);
             if !value
                 .iter()
                 .all(|&c| c == b'\t' || (c >= 0x20 && c != 0x7f))
             {
                 return malformed("Malformed aws-chunked trailer field value.");
             }
+            // The name is token characters, which are ASCII.
             let name = String::from_utf8_lossy(name).into_owned();
             if self.is_allowed(&name) {
                 fields.push(Field {
                     name,
-                    value: String::from_utf8_lossy(value).into_owned(),
+                    value: value.to_vec(),
                 });
             }
         }

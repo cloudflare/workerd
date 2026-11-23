@@ -151,3 +151,29 @@ fn max_index_is_the_smaller_encoding() {
         u64::from(u32::MAX)
     );
 }
+
+// The bridge checks its slices itself, before BoringSSL writes anything.
+#[test]
+fn cbc_bridge_checks_its_output_first() {
+    let key = [1; 32];
+    let iv = [2; CBC_BLOCK_SIZE];
+    for size in [0, 16, 31, 33] {
+        let mut out = vec![0xaa; size];
+        assert!(ffi::aes_256_cbc_encrypt(&key, &iv, &[3; 16], &mut out).is_err());
+        assert!(out.iter().all(|&byte| byte == 0xaa), "{size}");
+    }
+    let mut out = vec![0; 32];
+    assert!(ffi::aes_256_cbc_encrypt(&key, &iv, &[3; 16], &mut out).is_ok());
+    let mut written = 0;
+    let mut short = vec![0xaa; 16];
+    assert!(ffi::aes_256_cbc_decrypt(&key, &iv, &out, &mut short, &mut written).is_err());
+    assert!(ffi::aes_256_cbc_decrypt(&key, &iv, &out[..31], &mut [0; 31], &mut written).is_err());
+}
+
+#[test]
+fn retains_its_configuration() {
+    let mut cipher = cipher(Algorithm::AesCbcHmacSha256, 1024);
+    assert!(cipher.retained_bytes() < 8192);
+    cipher.info.prefix = vec![0; 8192];
+    assert!(cipher.retained_bytes() >= 8192);
+}

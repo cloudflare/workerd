@@ -24,19 +24,19 @@ class SegmentCipherStage final: public SyncTransformStage {
       : transform(kj::mv(transform)),
         entropy(entropy) {}
 
-  void push(kj::ArrayPtr<const kj::byte> input, Output& output) override {
+  void push(kj::ArrayPtr<const kj::byte> input, kj::Array<kj::byte>& output) override {
     auto maybeException =
         kj::runCatchingExceptions([&]() { transform->push(input.as<kj_rs::Rust>(), entropy); });
     // The segments before a failure are still output.
-    takeOutput(output);
+    output = fromRustBytes(transform->take_output());
     KJ_IF_SOME(exception, maybeException) {
       kj::throwFatalException(kj::mv(exception));
     }
   }
 
-  void end(Output& output) override {
+  void end(kj::Array<kj::byte>& output) override {
     transform->end(entropy);
-    takeOutput(output);
+    output = fromRustBytes(transform->take_output());
   }
 
   kj::Maybe<uint64_t> getOutputLength() const override {
@@ -50,11 +50,6 @@ class SegmentCipherStage final: public SyncTransformStage {
  private:
   RustTransform transform;
   kj::EntropySource& entropy;
-
-  void takeOutput(Output& output) {
-    auto bytes = transform->take_output();
-    if (!bytes.empty()) output.add(fromRustBytes(kj::mv(bytes)));
-  }
 };
 
 ::rust::String toRust(kj::StringPtr string) {
@@ -111,7 +106,7 @@ ZeroOnFree extractPrk(jsg::Lock& js, SegmentKeySchedule& keys) {
 
 using NewTransform = RustTransform (*)(segment_cipher::CipherOptions, ::rust::Slice<const uint8_t>);
 
-SyncTransformStreams newSegmentStreams(
+JsReadableWritablePair newSegmentStreams(
     jsg::Lock& js, SegmentCipherOptions& options, NewTransform newTransform) {
   auto prk = extractPrk(js, options.keys);
   auto transform =

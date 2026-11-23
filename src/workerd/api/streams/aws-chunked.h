@@ -57,7 +57,11 @@ class AwsChunkedDecoderStream: public jsg::Object {
     return writable.addRef(js);
   }
   // Resolves with the trailer fields once the input has been decoded, and rejects if it can't
-  // be.
+  // be. Resolving means only that the framing was complete and valid: the decoder verifies no
+  // checksum or signature, and `allowedTrailers` only filters, so a body that carries none of the
+  // allowed fields resolves with none. A caller that needs integrity must check that the
+  // trailer it declared is present, and verify it against the decoded body, before relying on
+  // the body.
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<Headers>>>& getTrailers() {
     return trailers;
   }

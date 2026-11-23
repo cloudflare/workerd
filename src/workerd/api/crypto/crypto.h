@@ -1069,10 +1069,14 @@ struct SegmentCipherOptions {
   // The index of the first segment this stream handles. Defaults to 0.
   jsg::Optional<double> firstSegment;
   // Encryption: optional, and if set, more or less input is an error.
-  // Decryption: required; the number of plaintext bytes the input holds. It must come from
-  // trusted or authenticated metadata: it is what detects truncation and extension.
+  // Decryption: required; the number of plaintext bytes the input holds. For a ranged read,
+  // that is the plaintext of the fetched segments, not of the whole message: fetching segments
+  // [first, last) of a message of L bytes with segment size S gives min(last * S, L) - first * S.
+  // It must come from trusted or authenticated metadata, such as L itself: it is what detects
+  // truncation and extension.
   jsg::Optional<double> plaintextLength;
-  // Decryption only: the number of plaintext bytes to drop from the start of the output.
+  // Decryption only: the number of plaintext bytes to drop from the start of the output, counted
+  // from the start of segment `firstSegment`.
   jsg::Optional<double> outputOffset;
   // Decryption only: the most plaintext bytes to output.
   jsg::Optional<double> outputLength;

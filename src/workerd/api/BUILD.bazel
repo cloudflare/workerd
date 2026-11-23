@@ -710,6 +710,7 @@ wd_cc_library(
         "streams/queue-test.c++",
         "streams/standard-test.c++",
         "streams/streams-native-source-ownership-test.c++",
+        "streams/sync-transform-test.c++",
     ]
 ]
 

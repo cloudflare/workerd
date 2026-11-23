@@ -17,12 +17,15 @@
 #include <kj/debug.h>
 #include <kj/memory.h>
 
+#include <climits>
+
 namespace workerd::api::segment_cipher {
 
 namespace {
 
 constexpr size_t AEAD_TAG_SIZE = 16;
 constexpr size_t HMAC_SHA256_SIZE = 32;
+constexpr size_t CBC_BLOCK_SIZE = 16;
 
 const EVP_MD* digestFor(Digest digest) {
   switch (digest) {
@@ -120,7 +123,11 @@ void aes_256_cbc_encrypt(::rust::Slice<const uint8_t> key,
     ::rust::Slice<const uint8_t> iv,
     ::rust::Slice<const uint8_t> plaintext,
     ::rust::Slice<uint8_t> out) {
-  KJ_REQUIRE(key.size() == 32 && iv.size() == 16);
+  KJ_REQUIRE(key.size() == 32 && iv.size() == CBC_BLOCK_SIZE);
+  // EVP takes an int length, and PKCS#7 always adds a block's padding at most.
+  KJ_REQUIRE(plaintext.size() <= static_cast<size_t>(INT_MAX) - CBC_BLOCK_SIZE);
+  KJ_REQUIRE(out.size() == (plaintext.size() / CBC_BLOCK_SIZE + 1) * CBC_BLOCK_SIZE,
+      "the output must be the padded ciphertext's size");
   auto ctx = newCipherContext();
   check(EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_cbc(), nullptr, key.data(), iv.data()),
       "EVP_EncryptInit_ex()");
@@ -139,7 +146,11 @@ bool aes_256_cbc_decrypt(::rust::Slice<const uint8_t> key,
     ::rust::Slice<const uint8_t> ciphertext,
     ::rust::Slice<uint8_t> out,
     size_t& written) {
-  KJ_REQUIRE(key.size() == 32 && iv.size() == 16 && out.size() == ciphertext.size());
+  KJ_REQUIRE(key.size() == 32 && iv.size() == CBC_BLOCK_SIZE);
+  // EVP takes an int length, and writes at most the ciphertext's size.
+  KJ_REQUIRE(ciphertext.size() <= static_cast<size_t>(INT_MAX));
+  KJ_REQUIRE(ciphertext.size() % CBC_BLOCK_SIZE == 0 && out.size() == ciphertext.size(),
+      "the ciphertext must be whole blocks, and the output as long");
   auto ctx = newCipherContext();
   check(EVP_DecryptInit_ex(ctx.get(), EVP_aes_256_cbc(), nullptr, key.data(), iv.data()),
       "EVP_DecryptInit_ex()");

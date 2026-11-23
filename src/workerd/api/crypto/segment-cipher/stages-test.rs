@@ -154,3 +154,18 @@ fn segment_range() {
     assert!(require_segment_range(&cbc, u64::from(u32::MAX), 1).is_ok());
     assert!(require_segment_range(&cbc, u64::from(u32::MAX) + 1, 0).is_err());
 }
+
+// Output is allocated only for the segments a push completes.
+#[test]
+fn allocates_output_per_segment() {
+    let mut entropy = CountingEntropy::default();
+    let mut encryptor = Encryptor::new(cipher(Algorithm::AesGcm, to_u64(SEGMENT)), 0, None);
+    let mut out = Vec::new();
+    encryptor.push(&[1; 10], &mut entropy, &mut out).unwrap();
+    assert_eq!(out.capacity(), 0);
+    encryptor
+        .push(&[1; SEGMENT], &mut entropy, &mut out)
+        .unwrap();
+    assert_eq!(out.len(), SEGMENT + 28);
+    assert_eq!(out.capacity(), SEGMENT + 28);
+}

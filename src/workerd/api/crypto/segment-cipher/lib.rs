@@ -38,6 +38,7 @@ use crate::schedule::Secret;
 use crate::stages::Decryptor;
 use crate::stages::Encryptor;
 use crate::stages::OutputRange;
+use crate::stages::require_segment_count;
 use crate::stages::require_segment_range;
 
 #[cxx::bridge(namespace = "workerd::api::segment_cipher")]
@@ -288,7 +289,10 @@ fn to_cipher(options: ffi::CipherOptions, prk: &[u8]) -> Result<(Cipher, StreamO
     Ok((cipher, stream))
 }
 
-fn require_safe_sealed_length(layout: &Layout, plaintext_length: u64) -> Result<u64> {
+/// Checks what an encryptor of `plaintext_length` bytes requires of the layout alone: a segment
+/// count within the limit and a sealed length JavaScript can represent. Returns the sealed length.
+fn require_encryptable_length(layout: &Layout, plaintext_length: u64) -> Result<u64> {
+    require_segment_count(layout.segment_count(plaintext_length))?;
     let length = layout.sealed_length(plaintext_length);
     if length > MAX_SAFE_INTEGER {
         return Err(range_error(
@@ -327,7 +331,7 @@ pub fn new_encryptor(options: ffi::CipherOptions, prk: &[u8]) -> Result<Box<Segm
             stream.first_segment,
             cipher.layout().segment_count(length),
         )?;
-        require_safe_sealed_length(cipher.layout(), length)?;
+        require_encryptable_length(cipher.layout(), length)?;
     } else {
         require_segment_range(&cipher, stream.first_segment, 0)?;
     }
@@ -382,11 +386,11 @@ pub fn new_decryptor(options: ffi::CipherOptions, prk: &[u8]) -> Result<Box<Segm
 ///
 /// # Errors
 ///
-/// Fails with a `RangeError` for an invalid length or layout, or one that encrypts to more than
-/// `Number.MAX_SAFE_INTEGER` bytes.
+/// Fails with a `RangeError` for an invalid length or layout, or one that a stream can't encrypt:
+/// more segments than a stream holds, or more than `Number.MAX_SAFE_INTEGER` bytes.
 pub fn encrypted_length(plaintext_length: f64, algorithm: &str, segment_size: f64) -> Result<f64> {
     let layout = to_layout(algorithm, segment_size)?;
-    let length = require_safe_sealed_length(
+    let length = require_encryptable_length(
         &layout,
         require_safe_integer(plaintext_length, "plaintextLength")?,
     )?;
@@ -414,8 +418,8 @@ impl SegmentTransform {
     ///
     /// Fails with an `OperationError` if the input is invalid or fails authentication.
     pub fn push(&mut self, input: &[u8], entropy: Pin<&mut ffi::EntropySource>) -> Result<()> {
-        // Sealing adds a few dozen bytes per segment, and opening removes them.
-        let mut output = Vec::with_capacity(input.len() + self.high_water_mark() / 16);
+        // Sealing and opening reserve the output as each segment is done.
+        let mut output = Vec::new();
         let result = match &mut self.stage {
             Stage::Encrypt(encryptor) => {
                 encryptor.push(input, &mut IoEntropy(entropy), &mut output)
@@ -455,7 +459,7 @@ impl SegmentTransform {
     }
 
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
+    pub fn retained_bytes(&self) -> usize {
         match &self.stage {
             Stage::Encrypt(encryptor) => encryptor.retained_bytes(),
             Stage::Decrypt(decryptor) => decryptor.retained_bytes(),
