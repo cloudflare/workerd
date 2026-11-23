@@ -77,7 +77,11 @@ export const FsCpIntoSubdirectoryThroughSymlink = {
           new URL('file:///tmp/loop-link/dest'),
           { recursive: true }
         ),
-      { code: 'ERR_FS_CP_EINVAL' }
+      {
+        code: 'ERR_FS_CP_EINVAL',
+        message:
+          /Cannot copy '\/tmp\/loop-src' to a subdirectory of itself, '\/tmp\/loop-link\/dest'/,
+      }
     );
     // The refused copy left nothing behind in the source.
     strictEqual(existsSync(new URL('file:///tmp/loop-src/dest')), false);
@@ -104,7 +108,11 @@ export const FsCpDereferencedDestinationInsideSource = {
           new URL('file:///tmp/deref-dest'),
           { recursive: true, dereference: true }
         ),
-      { code: 'ERR_FS_CP_EINVAL' }
+      {
+        code: 'ERR_FS_CP_EINVAL',
+        message:
+          /Cannot copy '\/tmp\/deref-src' to a subdirectory of itself, '\/tmp\/deref-dest'/,
+      }
     );
     // The refused copy did not overwrite the source's own file.
     strictEqual(
