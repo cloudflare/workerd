@@ -11,6 +11,9 @@
 #include <rust/capnp-kj/tests/test.capnp.h>
 
 #include <capnp/capability.h>
+#include <capnp/membrane.h>
+#include <capnp/rpc-twoparty.h>
+#include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/test.h>
 
@@ -146,6 +149,41 @@ struct Fixture {
     return kj::heap<CxxEcho>(kj::str(prefix), cxxHangStarts, cxxHangDrops);
   }
 };
+
+// A two-party RPC connection over an in-memory pipe, whose server end serves `bootstrap`.
+struct RpcConnection {
+  explicit RpcConnection(capnp::Capability::Client bootstrap)
+      : server(*pipe.ends[1], kj::mv(bootstrap), capnp::rpc::twoparty::Side::SERVER),
+        client(*pipe.ends[0]) {}
+
+  TestEcho::Client echo() {
+    return client.bootstrap().castAs<TestEcho>();
+  }
+
+  kj::TwoWayPipe pipe = kj::newTwoWayPipe();
+  capnp::TwoPartyClient server;
+  capnp::TwoPartyClient client;
+};
+
+// A membrane that lets every call through, so that calls through it carry its own call contexts.
+class OpenMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+ public:
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+  kj::Own<capnp::MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+};
+
+TestEcho::Client throughMembrane(TestEcho::Client client) {
+  return capnp::membrane(kj::mv(client), kj::refcounted<OpenMembrane>());
+}
 
 ::rust::String rs(kj::StringPtr s) {
   return ::rust::String(s.begin(), s.size());
@@ -305,6 +343,70 @@ KJ_TEST("a C++ exception keeps its details through a Rust client that returns it
   Fixture f;
   TestEcho::Client failing = kj::heap<DetailedFailureEcho>();
   expectDetailedFailure(rust_echo(clientToRust(kj::mv(failing)), rs("hello")), f.waitScope);
+}
+
+KJ_TEST("Rust calls C++ and Rust servers over RPC") {
+  Fixture f;
+  RpcConnection toCxx(f.cxxEcho("cxx:"));
+  auto viaCxx = rust_echo(clientToRust(toCxx.echo()), rs("hello")).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaCxx)) == "cxx:hello");
+  RpcConnection toRust(f.rustEcho("rust:"));
+  auto viaRust = rust_echo(clientToRust(toRust.echo()), rs("hello")).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaRust)) == "rust:hello");
+}
+
+KJ_TEST("C++ calls a Rust server over RPC") {
+  Fixture f;
+  RpcConnection connection(f.rustEcho("rust:"));
+  auto echo = connection.echo();
+  KJ_EXPECT(echoText(echo, "hello", f.waitScope) == "rust:hello");
+}
+
+KJ_TEST("Rust passes and pipelines on capabilities over RPC") {
+  Fixture f;
+  RpcConnection toRust(f.rustEcho("rust:"));
+  auto calledBack =
+      rust_call_back(clientToRust(toRust.echo()), clientToRust(f.cxxEcho("cxx:")), rs("hello"))
+          .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(calledBack)) == "cxx:hello");
+  RpcConnection toCxx(f.cxxEcho("cxx:"));
+  auto child =
+      rust_child_echo(clientToRust(toCxx.echo()), rs("child:"), rs("hello")).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(child)) == "cxx:child:hello");
+}
+
+KJ_TEST("Rust streams to a Rust server over RPC") {
+  Fixture f;
+  RpcConnection connection(f.rustEcho("rust:"));
+  ::rust::Vec<::rust::String> chunks;
+  chunks.push_back(rs("one,"));
+  chunks.push_back(rs("two"));
+  auto result = rust_write(clientToRust(connection.echo()), kj::mv(chunks)).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(result)) == "one,two");
+}
+
+KJ_TEST("Rust calls C++ and Rust servers through a membrane") {
+  Fixture f;
+  auto viaCxx =
+      rust_echo(clientToRust(throughMembrane(f.cxxEcho("cxx:"))), rs("hello")).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaCxx)) == "cxx:hello");
+  auto viaRust =
+      rust_echo(clientToRust(throughMembrane(f.rustEcho("rust:"))), rs("hello")).wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(viaRust)) == "rust:hello");
+  auto child =
+      rust_child_echo(clientToRust(throughMembrane(f.rustEcho("rust:"))), rs("child:"), rs("hello"))
+          .wait(f.waitScope);
+  KJ_EXPECT(toString(kj::mv(child)) == "rust:child:hello");
+}
+
+KJ_TEST("C++ calls a Rust server through a membrane") {
+  Fixture f;
+  auto echo = throughMembrane(f.rustEcho("rust:"));
+  KJ_EXPECT(echoText(echo, "hello", f.waitScope) == "rust:hello");
+  auto request = echo.callBackRequest();
+  request.setCallee(f.cxxEcho("cxx:"));
+  request.setText("hello");
+  KJ_EXPECT(request.send().wait(f.waitScope).getText() == "cxx:hello");
 }
 
 KJ_TEST("canceling a call to a Rust server leaves it running, as KJ does by default") {
