@@ -1,4 +1,4 @@
-"""Tests for the Chromium Rust crate alignment in v8_update.py.
+"""Tests for the patch naming and Chromium Rust crate alignment in v8_update.py.
 
 Cargo, Bazel and the Chromium lockfile are mocked, so the tests check which
 versions the helper asks Cargo for, and when it fails.
@@ -175,6 +175,28 @@ class ReachableVersionsTest(unittest.TestCase):
             ValueError, r"exactly one version of root, but locks 1\.0\.0, 2\.0\.0"
         ):
             self._reachable(_package("root", "1.0.0"), _package("root", "2.0.0"))
+
+
+class DatedPatchNamesTest(unittest.TestCase):
+    def test_replaces_the_number_with_the_author_date(self):
+        self.assertEqual(
+            v8_update.dated_patch_names(
+                ["0001-Add-a-thing.patch", "0002-Fix-it.patch"],
+                ["2026-11-01", "2025-03-02"],
+            ),
+            ["2026-11-01-Add-a-thing.patch", "2025-03-02-Fix-it.patch"],
+        )
+
+    def test_fails_on_a_duplicate_name(self):
+        with self.assertRaisesRegex(ValueError, r"2026-11-01-Fix-it\.patch"):
+            v8_update.dated_patch_names(
+                ["0001-Fix-it.patch", "0002-Fix-it.patch"],
+                ["2026-11-01", "2026-11-01"],
+            )
+
+    def test_fails_when_a_date_is_missing(self):
+        with self.assertRaises(ValueError):
+            v8_update.dated_patch_names(["0001-Fix-it.patch"], [])
 
 
 if __name__ == "__main__":

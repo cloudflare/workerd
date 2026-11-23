@@ -3,6 +3,8 @@
 
 import argparse
 import base64
+import collections
+import difflib
 import hashlib
 import json
 import os
@@ -376,6 +378,48 @@ def prepare_update(target):
     return True
 
 
+def dated_patch_names(generated, dates):
+    """Return the name of each patch that format-patch wrote, in stack order.
+
+    A patch is named <author date>-<subject>.patch, so its name changes only when
+    its subject does, and no patch is renamed when another is added or removed.
+    Patches apply in name order, which is author date order; to move a patch in
+    the stack, change its author date (git commit --amend --date=...).
+
+    `generated` holds format-patch's names, and `dates` the author date of each
+    commit, both in stack order.
+    """
+    names = [
+        f"{date}-{name.split('-', 1)[1]}"
+        for date, name in zip(dates, generated, strict=True)
+    ]
+    duplicates = sorted(
+        name for name, count in collections.Counter(names).items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(
+            "patches with the same author date and subject: " + ", ".join(duplicates)
+        )
+    return names
+
+
+def _warn_misordered(stack_order):
+    print(
+        f"WARNING: the commits in {CHECKOUT} are not in the order their patches apply:",
+        file=sys.stderr,
+    )
+    for line in difflib.unified_diff(
+        stack_order, sorted(stack_order), "commits", "patches", lineterm=""
+    ):
+        print(line, file=sys.stderr)
+    print(
+        "Check that the patches apply in that order, e.g. with `git am` onto the new "
+        "version, or change the author dates of the commits so that they sort in "
+        "stack order, and run finish again.",
+        file=sys.stderr,
+    )
+
+
 def finish_update(target):
     with tempfile.TemporaryDirectory() as patch_dir:
         run(
@@ -387,6 +431,7 @@ def finish_update(target):
                 "--no-signature",
                 "--no-stat",
                 "--zero-commit",
+                "--filename-max-length=200",
                 "--output-directory",
                 patch_dir,
                 target,
@@ -394,14 +439,31 @@ def finish_update(target):
             cwd=CHECKOUT,
         )
         generated = sorted(Path(patch_dir).glob("*.patch"))
+        # format-patch numbers the patches in stack order and leaves out merge
+        # commits, as this log does.
+        dates = run(
+            [
+                "git",
+                "log",
+                "--reverse",
+                "--no-merges",
+                "--format=%as",
+                f"{target}..HEAD",
+            ],
+            cwd=CHECKOUT,
+            stdout=subprocess.PIPE,
+        ).stdout.split()
+        names = dated_patch_names([patch.name for patch in generated], dates)
+        if names != sorted(names):
+            _warn_misordered(names)
         for patch in PATCHES.glob("*.patch"):
             patch.unlink()
-        for patch in generated:
+        for patch, name in zip(generated, names, strict=True):
             # copy2 preserves the patch's timestamps and other file metadata.
-            shutil.copy2(patch, PATCHES / patch.name)
-        patch_names = [patch.name for patch in generated]
+            shutil.copy2(patch, PATCHES / name)
 
-    _update_module(target, patch_names)
+    # Bazel applies the patches in list order, and prepare_update in name order.
+    _update_module(target, sorted(names))
     _update_aligned_dependencies()
     # The Rust ICU pin must match the ICU that Bazel builds, so regenerate the
     # ICU repository from its new commit before deriving the pin.
