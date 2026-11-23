@@ -16,6 +16,10 @@ const unitTests :Workerd.Config = (
             r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"other\"}" ) ) ),
           ( name = "R2_WORKER",
             service = ( name = "r2", props = ( json = "{\"bucket\": \"test\"}" ) ) ),
+          # BUCKET's objects, through a store that counts and refuses HEADs.
+          ( name = "PROBED",
+            r2Bucket = ( name = "r2-probe", props = ( json = "{\"bucket\": \"test\"}" ) ) ),
+          ( name = "PROBE", service = "r2-blobs-probe" ),
         ],
       )
     ),
@@ -31,5 +35,24 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "r2-blobs",
       bucket = ( path = "r2", localDisk = "TEST_TMPDIR" ) ),
+    ( name = "r2-probe",
+      worker = (
+        modules = [ ( name = "r2.js", bundled = "/workerd/r2.js" ) ],
+        compatibilityFlags = ["rpc"],
+        bindings = [
+          ( name = "BLOBS", service = "r2-blobs-probe" ),
+        ],
+      )
+    ),
+    ( name = "r2-blobs-probe",
+      worker = (
+        modules = [
+          ( name = "r2-blobs-probe", esModule = embed "r2-blobs-probe.js" ),
+        ],
+        bindings = [
+          ( name = "BLOBS", service = "r2-blobs" ),
+        ],
+      )
+    ),
   ],
 );

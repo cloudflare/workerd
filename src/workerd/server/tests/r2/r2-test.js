@@ -201,6 +201,28 @@ export const copyValues = {
   },
 };
 
+// A reply has its objects and prefixes in UTF-8 byte order, as stores sort
+// keys, which UTF-16's is not: U+FF61 is before U+1F600 in UTF-8, after
+// its surrogates in UTF-16.
+export const listingOrder = {
+  async test(ctrl, env) {
+    const names = ['o/a', 'o/\uFF61', 'o/\u{1F600}'];
+    const keys = names.flatMap((n) => [n, `${n}/k`]);
+    await Promise.all(keys.map((k) => env.BUCKET.put(k, '')));
+    const page = await env.BUCKET.list({ prefix: 'o/', delimiter: '/' });
+    assert.strictEqual(page.truncated, false);
+    assert.deepStrictEqual(
+      page.objects.map((o) => o.key),
+      names
+    );
+    assert.deepStrictEqual(
+      page.delimitedPrefixes,
+      names.map((n) => `${n}/`)
+    );
+    await env.BUCKET.delete(keys);
+  },
+};
+
 // A listing whose reply would pass the binding's 1 MiB stops short, with a
 // cursor that resumes after its last key.
 export const largeListings = {
@@ -228,6 +250,19 @@ export const largeListings = {
     } while (cursor);
     assert.ok(pages > 1, `${pages} page`);
     assert.deepStrictEqual(listed, keys.toSorted());
+    // A page HEADs its objects only as far as its budget reaches, and
+    // never the last here, whose HEAD would fail.
+    await env.PROBE.fetch('http://control/', {
+      method: 'POST',
+      body: keys.at(-1),
+    });
+    const cut = await env.PROBED.list({
+      prefix: 'l/',
+      include: ['customMetadata'],
+    });
+    assert.ok(cut.truncated);
+    const { heads } = await (await env.PROBE.fetch('http://control/')).json();
+    assert.ok(heads < keys.length, `${heads} HEADs`);
     await env.BUCKET.delete(keys);
 
     // The budget is bytes, not characters, and counts prefixes, which a

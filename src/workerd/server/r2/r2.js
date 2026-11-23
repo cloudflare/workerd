@@ -69,8 +69,8 @@ const MAX_METADATA = 8192;
 const MAX_LIST = 1000;
 const MIN_PART = 5 * 1024 * 1024;
 const TEST_MIN_PART = 50;
-// Requests to `BLOBS` in flight at once for a listing's metadata or a
-// multi-key delete.
+// The most requests to `BLOBS` in flight at once for a listing's metadata
+// or a multi-key delete.
 const PARALLEL = 16;
 // The user metadata holding the R2 record.
 const ENVELOPE = 'workerd-r2';
@@ -617,28 +617,41 @@ async function list(bucket, req) {
     version: e.version,
     uploaded: e.modified,
   }));
-  // Metadata the listing doesn't carry is a HEAD of each object.
-  let objects = await parallel(entries, async (e) => {
+  // Metadata the listing doesn't carry is a HEAD of the object.
+  const describeEntry = async (e) => {
     if (!wanted.http && !wanted.custom) return describe(e, undefined, wanted);
     return describe((await head(bucket, e.key)) ?? e, undefined, wanted);
-  });
-  let delimitedPrefixes = page.prefixes.map(strip);
-  let next = page.token == null ? undefined : CURSOR + page.token;
+  };
   // Fewer than `limit` when the reply would be too large, as R2 does: the
   // objects and prefixes in the store's order, until their JSON's bytes
-  // pass the budget.
+  // pass the budget. The items are taken `PARALLEL` at a time, only as far
+  // as the budget reaches, and the objects among them described at once.
   const items = [
-    ...objects.map((o) => [o.name, o]),
-    ...delimitedPrefixes.map((p) => [p, null]),
+    ...entries.map((e) => [e.key, e]),
+    ...page.prefixes.map((p) => [strip(p), null]),
   ].sort(([a], [b]) => compare(a, b));
+  const kept = [];
   let size = 0;
-  const over = items.findIndex(
-    ([p, o]) => (size += utf8Bytes(JSON.stringify(o ?? p)).length) > MAX_REPLY
-  );
-  const kept = items.slice(0, Math.max(1, over));
-  if (over !== -1 && kept.length < items.length) {
-    objects = kept.filter(([, o]) => o).map(([, o]) => o);
-    delimitedPrefixes = kept.filter(([, o]) => !o).map(([p]) => p);
+  let full = false;
+  for (let i = 0; i < items.length && !full; i += PARALLEL) {
+    const batch = items.slice(i, i + PARALLEL);
+    const described = await Promise.all(
+      batch.map(([, e]) => e && describeEntry(e))
+    );
+    for (const [j, [name]] of batch.entries()) {
+      const o = described[j];
+      size += utf8Bytes(JSON.stringify(o ?? name)).length;
+      if (size > MAX_REPLY && kept.length > 0) {
+        full = true;
+        break;
+      }
+      kept.push([name, o]);
+    }
+  }
+  const objects = kept.filter(([, o]) => o).map(([, o]) => o);
+  const delimitedPrefixes = kept.filter(([, o]) => !o).map(([p]) => p);
+  let next = page.token == null ? undefined : CURSOR + page.token;
+  if (full) {
     // After a prefix is after every key in it.
     const [last, o] = kept.at(-1);
     next = AFTER + (o ? last : last + '\u{10FFFF}');
