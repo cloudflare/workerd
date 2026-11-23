@@ -20,6 +20,9 @@ namespace workerd::api {
 // chunk signatures are not verified. A trailer line may end in LF before its CRLF, as S3 allows. Both sides are native streams, so a pipe through the decoder between two other
 // native streams never runs JavaScript.
 //
+// The decoding itself is the Rust crate in aws-chunked/; this class and its stage connect it to
+// the streams.
+//
 // Experimental: exposed only with the "experimental" compatibility flag.
 class AwsChunkedDecoderStream: public jsg::Object {
  public:

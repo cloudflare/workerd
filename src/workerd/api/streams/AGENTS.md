@@ -47,7 +47,8 @@ Key deps: `util/state-machine.h` (stream state FSM), `util/weak-refs.h`, `util/r
 | `compression.{h,c++}`               | `CompressionStream`/`DecompressionStream` (zlib transforms)                                         |
 | `encoding.{h,c++}`                  | `TextEncoderStream`/`TextDecoderStream`                                                             |
 | `sync-transform.{h,c++}`            | `newSyncTransformStreams()`: native readable/writable pair over a synchronous `SyncTransformStage`, with backpressure |
-| `aws-chunked.{h,c++}`               | Experimental `AwsChunkedDecoderStream` (aws-chunked content decoding), a `SyncTransformStage`        |
+| `aws-chunked.{h,c++}`               | Experimental `AwsChunkedDecoderStream`: the JS class and a `SyncTransformStage` over the decoder     |
+| `aws-chunked/`                      | Rust crate `aws-chunked`: the aws-chunked framing decoder, bridged to `aws-chunked.c++`              |
 
 ## INVARIANTS
 

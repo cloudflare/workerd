@@ -21,7 +21,7 @@ class SyncTransform final: public kj::Refcounted,
   SyncTransform(
       kj::Own<SyncTransformStage> stage, size_t highWaterMark, jsg::ExternalMemoryAdjustment memory)
       : stage(kj::mv(stage)),
-        highWaterMark(kj::max(highWaterMark, size_t(1))),
+        highWaterMark(kj::max(highWaterMark, static_cast<size_t>(1))),
         memory(kj::mv(memory)),
         remainingLength(this->stage->getOutputLength()) {}
 
@@ -30,9 +30,9 @@ class SyncTransform final: public kj::Refcounted,
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_REQUIRE(minBytes <= maxBytes);
     KJ_REQUIRE(readWaiter == kj::none, "only one read may be pending at a time");
-    if (maxBytes == 0) return size_t(0);
+    if (maxBytes == 0) return static_cast<size_t>(0);
     // A read that returns no bytes means the end of the stream, so every read waits for one.
-    minBytes = kj::max(minBytes, size_t(1));
+    minBytes = kj::max(minBytes, static_cast<size_t>(1));
     auto dest = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
     KJ_IF_SOME(n, tryReadNow(dest, minBytes)) {
       return n;
@@ -48,8 +48,8 @@ class SyncTransform final: public kj::Refcounted,
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     KJ_REQUIRE(minBytes <= buffer.size());
     if (readWaiter != kj::none) return kj::none;
-    if (buffer.size() == 0) return size_t(0);
-    return tryReadNow(buffer, kj::max(minBytes, size_t(1)));
+    if (buffer.size() == 0) return static_cast<size_t>(0);
+    return tryReadNow(buffer, kj::max(minBytes, static_cast<size_t>(1)));
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -89,9 +89,9 @@ class SyncTransform final: public kj::Refcounted,
     // Only take what fits in one increment: a larger write goes through write(), which waits
     // for the reader between increments.
     size_t total = 0;
-    for (auto piece: pieces) total += piece.size();
+    for (auto& piece: pieces) total += piece.size();
     if (total > highWaterMark) return false;
-    for (auto piece: pieces) push(piece);
+    for (auto& piece: pieces) push(piece);
     return true;
   }
 
@@ -386,6 +386,12 @@ class SyncTransform final: public kj::Refcounted,
 };
 
 }  // namespace
+
+kj::Array<kj::byte> fromRustBytes(::rust::Vec<uint8_t> bytes) {
+  auto owner = kj::heap(kj::mv(bytes));
+  auto view = kj::arrayPtr(owner->data(), owner->size());
+  return view.attach(kj::mv(owner));
+}
 
 SyncTransformStreams newSyncTransformStreams(
     jsg::Lock& js, IoContext& ioContext, kj::Own<SyncTransformStage> stage, size_t highWaterMark) {

@@ -7,6 +7,8 @@
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
 
+#include <rust/cxx.h>
+
 #include <kj/vector.h>
 
 namespace workerd::api {
@@ -46,6 +48,9 @@ class SyncTransformStage {
     return 0;
   }
 };
+
+// Takes the bytes a Rust stage produced as stage output, without copying them.
+kj::Array<kj::byte> fromRustBytes(::rust::Vec<uint8_t> bytes);
 
 struct SyncTransformStreams {
   JsReadableStream readable;
