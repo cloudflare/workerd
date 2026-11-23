@@ -302,7 +302,7 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
     return false;
   }
 
-  JSGWrappable& resolve(v8::Local<v8::Object> object) {
+  __attribute__((hot)) JSGWrappable& resolve(v8::Local<v8::Object> object) {
     KJ_IF_SOME(active, state.tryGet<Active>()) {
       // An Active shim always holds its wrapper; see the invariant on `wrapper` below.
       if (KJ_ASSERT_NONNULL(wrapper) == object) {
@@ -538,7 +538,7 @@ Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::
   return unwrapFromShim(isolate, object, kJsgWrappableTagRange);
 }
 
-Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
+__attribute__((hot)) Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
     v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
   // See the header for why an out-of-range tag here must abort.
   auto* wrappable = unwrapFromShim(isolate, object, tagRange);

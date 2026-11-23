@@ -1396,7 +1396,7 @@ class Object: private Wrappable {
   // to explicitly declare the default constructor.
   Object() = default;
 
-  inline Object* jsgTryGetObject() override {
+  __attribute__((hot)) inline Object* jsgTryGetObject() override {
     return this;
   }
 

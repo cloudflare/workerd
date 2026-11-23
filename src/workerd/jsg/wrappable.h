@@ -421,7 +421,7 @@ class Wrappable: public kj::Refcounted {
   // The range check is done in C++ (after unwrapping with the full JSG tag range) rather than by
   // passing `tagRange` to Object::Unwrap, because a checked V8 build turns a narrow-range miss into
   // its own fatal DCHECK before returning, producing a different crash than the abort here.
-  static Wrappable* unwrapFromShimInRangeOrAbort(
+  __attribute__((hot)) static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
   // Override in subclasses with state that must survive a V8 startup snapshot. Must return a deep,

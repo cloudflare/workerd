@@ -1111,7 +1111,7 @@ class IsolateBase {
   static bool isJsApiWrapperNativeErrorCallback(v8::Isolate* isolate, v8::Local<v8::Object> object);
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
-  static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
+  __attribute__((hot)) static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
   void recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size);
   void recordCodeMoved(kj::Maybe<v8::JitCodeEvent::CodeType> type);
 

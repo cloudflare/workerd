@@ -1380,7 +1380,7 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   return self->evalAllowed;
 }
 
-void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
+__attribute__((hot)) void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source
   // code locations, which we use when reporting stack traces during crashes.
 
