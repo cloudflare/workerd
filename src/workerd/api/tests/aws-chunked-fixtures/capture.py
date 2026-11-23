@@ -4,17 +4,22 @@
 
 """Records S3 PutObject/UploadPart request bodies exactly as clients send them.
 
-Usage: capture.py OUT_DIR HTTP_PORT HTTPS_PORT CERT KEY
-Each request to /<bucket>/<key> is saved as OUT_DIR/<key>.json (headers) and OUT_DIR/<key>.bin
-(the body after HTTP-level framing is removed).
+Usage: capture.py OUT_FILE HTTP_PORT HTTPS_PORT CERT KEY
+Each PUT to /<bucket>/<key> is recorded in OUT_FILE, a JSON object keyed by <key>, with its
+headers and its body (base64, after any HTTP-level chunked framing is removed). OUT_FILE is
+rewritten after every request.
 """
 
+import base64
 import http.server
 import json
 import ssl
 import sys
 import threading
 from pathlib import Path
+
+captures = {}
+lock = threading.Lock()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -45,17 +50,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_PUT(self):
         body = self.read_body()
         name = self.path.split("?")[0].rstrip("/").split("/")[-1]
-        out = Path(sys.argv[1])
-        (out / (name + ".bin")).write_bytes(body)
-        with (out / (name + ".json")).open("w") as f:
-            json.dump(
-                {
-                    "path": self.path,
-                    "headers": {k.lower(): v for k, v in self.headers.items()},
-                },
-                f,
-                indent=2,
-            )
+        with lock:
+            captures[name] = {
+                "path": self.path,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+                "body": base64.b64encode(body).decode("ascii"),
+            }
+            Path(sys.argv[1]).write_text(json.dumps(captures, indent=2))
         self.reply()
 
     def do_GET(self):
@@ -69,11 +70,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    out, http_port, https_port, cert, key = sys.argv[1:6]
-    Path(out).mkdir(parents=True, exist_ok=True)
+    _, http_port, https_port, cert, key = sys.argv[1:6]
     plain = http.server.ThreadingHTTPServer(("127.0.0.1", int(http_port)), Handler)
     secure = http.server.ThreadingHTTPServer(("127.0.0.1", int(https_port)), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     secure.socket = context.wrap_socket(secure.socket, server_side=True)
     threading.Thread(target=plain.serve_forever, daemon=True).start()

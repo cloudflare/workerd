@@ -4,13 +4,14 @@
 
 """Writes captured aws-chunked uploads as the JavaScript fixture module.
 
-Usage: to-js.py CAPTURE_DIR > aws-chunked-sdk-fixtures.js
+Usage: to-js.py CAPTURES_JSON > aws-chunked-sdk-fixtures.js
 
 Each body is stored as its framing, verbatim, with the payload runs between replaced by their
 lengths. The payload is the same sentence repeated, which the test regenerates. The script checks
 that every fixture rebuilds its captured body byte for byte.
 """
 
+import base64
 import json
 import re
 import sys
@@ -80,8 +81,8 @@ def js_string(data):
 
 
 def main():
-    directory = Path(sys.argv[1])
-    names = sorted(f.stem for f in directory.iterdir() if f.suffix == ".json")
+    captures = json.loads(Path(sys.argv[1]).read_text())
+    names = sorted(captures)
     print("// Copyright (c) 2026 Cloudflare, Inc.")
     print("// Licensed under the Apache 2.0 license found in the LICENSE file or at:")
     print("//     https://opensource.org/licenses/Apache-2.0")
@@ -100,8 +101,8 @@ def main():
     print()
     print("export const FIXTURES = [")
     for name in names:
-        headers = json.loads((directory / (name + ".json")).read_text())["headers"]
-        body = (directory / (name + ".bin")).read_bytes()
+        headers = captures[name]["headers"]
+        body = base64.b64decode(captures[name]["body"])
         decoded_length = int(headers["x-amz-decoded-content-length"])
         parts = split(body)
         assert rebuild(parts, decoded_length) == body, name

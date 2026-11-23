@@ -18,7 +18,7 @@ cd "$WORK"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 \
   -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" 2>/dev/null
 
-mkdir js py go out
+mkdir js py go
 (cd js && npm init -y >/dev/null && npm install --silent @aws-sdk/client-s3@3.1175.0)
 cp "$HERE/js-v3-client.mjs" js/client.mjs
 uv venv -q py/.venv
@@ -29,7 +29,7 @@ cp "$HERE/go-client.go" go/main.go
     github.com/aws/aws-sdk-go-v2/credentials@v1.21.3 github.com/minio/minio-go/v7@v7.4.1 \
     2>/dev/null && go mod tidy 2>/dev/null && go build -o client .)
 
-python3 "$HERE/capture.py" out "$HTTP_PORT" "$HTTPS_PORT" cert.pem key.pem > capture.log 2>&1 &
+python3 "$HERE/capture.py" captures.json "$HTTP_PORT" "$HTTPS_PORT" cert.pem key.pem > capture.log 2>&1 &
 SERVER=$!
 until grep -q ready capture.log; do sleep 0.2; done
 
@@ -37,5 +37,5 @@ until grep -q ready capture.log; do sleep 0.2; done
 py/.venv/bin/python "$HERE/boto3-client.py" "$HTTP_PORT" "$HTTPS_PORT"
 go/client "$HTTP_PORT" "$HTTPS_PORT"
 
-python3 "$HERE/to-js.py" out > "$HERE/../aws-chunked-sdk-fixtures.js"
-echo "Wrote $(ls out/*.bin | wc -l | tr -d ' ') fixtures to aws-chunked-sdk-fixtures.js"
+python3 "$HERE/to-js.py" captures.json > "$HERE/../aws-chunked-sdk-fixtures.js"
+echo "Wrote $(grep -c "name:" "$HERE/../aws-chunked-sdk-fixtures.js") fixtures to aws-chunked-sdk-fixtures.js"

@@ -123,11 +123,11 @@ export const FIXTURES = [
     contentSha256: 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD',
     decodedLength: 70000,
     body: [
-      '10000;chunk-signature=679be28964b93f530c369d553a77613bff0ca907c41d510e665839144419c3da\r\n',
+      '10000;chunk-signature=0ae564dc14345fd260ce459a6cdc74122d1dc24d43292cf36139bacd26ee1d59\r\n',
       65536,
-      '\r\n1170;chunk-signature=de233ea5c036eae0d4fdc637fde229c6250711e6af7b5438e0caf7b70cc3532d\r\n',
+      '\r\n1170;chunk-signature=5a234916ac64481034cbf9003aeb57e672577cf0cbe7f1e88989858628086121\r\n',
       4464,
-      '\r\n0;chunk-signature=ccaf97b52f3f10fde64ce4bbb340cd2e1a5826efc3df0417293c9fa7f2c5055f\r\n\r\n',
+      '\r\n0;chunk-signature=d69cc45502d57822e41ed87cefe3738ea39e9f09e6ab4cf0e7e61bc298c01e08\r\n\r\n',
     ],
   },
   {
@@ -137,11 +137,11 @@ export const FIXTURES = [
     decodedLength: 70000,
     trailer: 'x-amz-checksum-crc32c',
     body: [
-      '10000;chunk-signature=fa25ed94c9f260b45b536c2181917b96b592712df115fc177495c83270670dfd\r\n',
+      '10000;chunk-signature=ec1cbea5d23a357534ff83c5be7f4b59086fa128846e83257afd6a4aa4bf4e53\r\n',
       65536,
-      '\r\n1170;chunk-signature=b6fc14b87700775aa9dafb593eb44ad258c32a2f66a44d3488671e0ee2c6c336\r\n',
+      '\r\n1170;chunk-signature=452aca9a91eb7cf3eebe39f7badc7a6bba849cdad5a0adda416da8e12895b897\r\n',
       4464,
-      '\r\n0;chunk-signature=c5dcbf78824d543d74642f44da99889546d48af22b3063cb6a0a4c4ea00d766e\r\nx-amz-checksum-crc32c:7/4pjw==\n\r\nx-amz-trailer-signature:bb13546dae496ec6a5ae05bb211b3aaf4ed9a51dc6928947ab495260ca1547fc\r\n\r\n',
+      '\r\n0;chunk-signature=f5fcc8f5eda06f67fce8feb9e37eb540c2a3a8a528044faf29f181a6e2fc666d\r\nx-amz-checksum-crc32c:7/4pjw==\n\r\nx-amz-trailer-signature:da9fd34cbb0da5cf04146e621ec3932ae03ed62cfaa9576258d623333b2662e7\r\n\r\n',
     ],
   },
   {
