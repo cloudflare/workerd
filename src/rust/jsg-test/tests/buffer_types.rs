@@ -273,6 +273,47 @@ fn array_buffer_try_from_fails_for_typed_array() {
     });
 }
 
+// =============================================================================
+// SharedArrayBuffer
+// =============================================================================
+
+#[test]
+fn shared_array_buffer_is_not_an_array_buffer() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new SharedArrayBuffer(4)").unwrap();
+        assert!(v8::Local::<v8::ArrayBuffer>::try_from(val).is_err());
+        assert!(v8::Local::<v8::SharedArrayBuffer>::try_from(val).is_ok());
+
+        let val = ctx.eval_raw(lock, "new ArrayBuffer(4)").unwrap();
+        assert!(v8::Local::<v8::SharedArrayBuffer>::try_from(val).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn shared_array_buffer_to_vec_copies_its_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx
+            .eval_raw(
+                lock,
+                "const sab = new SharedArrayBuffer(3, { maxByteLength: 8 }); \
+                 new Uint8Array(sab).set([5, 6, 7]); sab.grow(4); sab",
+            )
+            .unwrap();
+        let buf = v8::Local::<v8::SharedArrayBuffer>::try_from(val).unwrap();
+        assert_eq!(buf.byte_length(), 4);
+        assert_eq!(buf.to_vec(), vec![5u8, 6, 7, 0]);
+
+        let val = ctx.eval_raw(lock, "new SharedArrayBuffer(0)").unwrap();
+        let buf = v8::Local::<v8::SharedArrayBuffer>::try_from(val).unwrap();
+        assert!(buf.is_empty());
+        assert_eq!(buf.to_vec(), Vec::<u8>::new());
+        Ok(())
+    });
+}
+
 #[test]
 fn array_buffer_into_object() {
     let harness = crate::Harness::new();

@@ -378,6 +378,12 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<SharedArrayBuffer>
+        #[nothrow]
+        pub unsafe fn local_shared_array_buffer_byte_length(buffer: &Local) -> usize;
+        #[nothrow]
+        pub unsafe fn local_shared_array_buffer_copy_to(buffer: &Local, out: &mut [u8]) -> usize;
+
         // Local<WasmModuleObject>
         pub unsafe fn local_wasm_module_object_get_compiled_module(
             module: &Local,
@@ -1409,7 +1415,7 @@ impl ffi::ExceptionType {
 // Deliberately left unimplemented because we didn't need them yet:
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
-// - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
+// - Map, Set, Proxy, RegExp, External, DataView, Float16Array
 // - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
@@ -1688,6 +1694,8 @@ pub struct BigInt64Array;
 pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
+/// Marker for `v8::SharedArrayBuffer` handles, which are not `ArrayBuffer`s.
+pub struct SharedArrayBuffer;
 pub struct ArrayBufferView;
 /// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
 pub struct WasmModuleObject;
@@ -2729,6 +2737,7 @@ impl_local_cast!(Function: Object, Value; is_function);
 impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
+impl_local_cast!(SharedArrayBuffer: Object, Value; is_shared_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
 impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
@@ -3147,6 +3156,35 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl Local<'_, SharedArrayBuffer> {
+    /// Returns the byte length of this `SharedArrayBuffer`.
+    #[inline]
+    pub fn byte_length(&self) -> usize {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_shared_array_buffer_byte_length(self.raw()) }
+    }
+
+    /// Returns `true` if this `SharedArrayBuffer` has zero bytes.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.byte_length() == 0
+    }
+
+    /// Copies the `SharedArrayBuffer`'s contents into a new `Vec<u8>`.
+    ///
+    /// Another agent may write to shared memory at any time, so Rust never borrows it: C++
+    /// copies the bytes, as C++ JSG reads them.
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut bytes = vec![0; self.byte_length()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_shared_array_buffer_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the buffer can't have
+        // grown; a growable `SharedArrayBuffer` never shrinks.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
     }
 }
 
