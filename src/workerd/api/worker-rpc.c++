@@ -1041,9 +1041,8 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
   attemptCanceler = kj::mv(oneCall.attemptCanceler);
   kj::Vector<kj::StringPtr> pathViews;
   parent->appendPath(pathViews);
-  auto nameRef = name.map([](kj::String& value) -> const kj::String& { return value; });
   auto callSpan =
-      prepareJsRpcCallAttempt(ioContext, *parent, nameRef, pathViews.asPtr(), operation, oneCall);
+      prepareJsRpcCallAttempt(ioContext, *parent, name, pathViews.asPtr(), operation, oneCall);
 
   auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(oneCall.client), KJ_ASSERT_NONNULL(callPlan),
       callSpan, parent->getActorTargetRetryability(), DeferActorRpcFailure::YES);
@@ -2215,8 +2214,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
 
     // Try to execute the requested method.
     co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
-      maybeAddDurableObjectId(
-          e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+      maybeAddDurableObjectId(e, durableObjectId);
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -2398,8 +2396,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
       }),
                   ctx.addFunctor([durableObjectId = getCurrentDurableObjectId()](
                                      jsg::Lock& js, jsg::Value&& error) {
-        maybeAddDurableObjectId(
-            js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+        maybeAddDurableObjectId(js, error, durableObjectId);
         js.throwException(kj::mv(error));
       })));
       result = awaitCancelableIncomingCall(

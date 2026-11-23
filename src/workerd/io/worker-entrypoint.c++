@@ -27,10 +27,6 @@ namespace workerd {
 
 namespace {
 
-kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
-  return value.map([](kj::String& text) -> kj::StringPtr { return text; });
-}
-
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -533,8 +529,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
           // Getting the handler finishes actor construction, so the claim sees a constructed actor
           // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
-              kj::mv(props), context.getActor(), isDynamicDispatch);
+          auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
+              context.getActor(), isDynamicDispatch);
           auto retryable = IsRetryableHandler::NO;
           KJ_IF_SOME(h, handler) {
             retryable = h->isFetchRetryable(lock);
@@ -814,7 +810,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     auto& response = KJ_REQUIRE_NONNULL(weakResponse.tryGet(), "response destroyed before connect");
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, kj::mv(settings), lock,
-        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(self.props),
+        lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(self.props),
             context.getActor(), self.isDynamicDispatch));
   })
           .then([weakContext = context.getWeakRef(), workerTracer]() {
@@ -973,7 +969,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
-            asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()));
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
@@ -1066,7 +1062,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(
-              asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
+              entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
           // runAlarm()'s continuation refers to the handler, which may be a per-event heap copy.
           return lock.getGlobalScope()
               .runAlarm(scheduledTime, timeout, retryCount, incomingRequest, lock, handler)
@@ -1167,7 +1163,7 @@ kj::Promise<void> WorkerEntrypoint::bench(
     return context.awaitJs(lock,
         lock.getGlobalScope().bench(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
             params));
   });
   // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
@@ -1206,7 +1202,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
             lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -1240,11 +1236,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   }
 
   KJ_TRY {
-    return wrapWithCanceler(
-        event
-            ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo),
-                kj::mv(props), waitUntilTasks, isDynamicDispatch)
-            .attach(kj::mv(event)));
+    return wrapWithCanceler(event
+                                ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                                    kj::mv(props), waitUntilTasks, isDynamicDispatch)
+                                .attach(kj::mv(event)));
   }
   KJ_CATCH(exception) {
     markExceptionAsDelivered(exception);

@@ -221,8 +221,7 @@ kj::Own<PendingToken> factory_encode_subrequest_token(const WorkerFactory& facto
   auto service = kj::str(serviceName);
   auto ep = toKj(entrypoint);
   return kj::heap<PendingToken>(factory.getImpl().channelTokenHandler.encodeSubrequestChannelToken(
-      usage, service, ep.map([](kj::String& e) -> kj::StringPtr { return e; }), propsRef(props),
-      Persistent(persistent)));
+      usage, service, ep, propsRef(props), Persistent(persistent)));
 }
 
 kj::Own<PendingToken> factory_encode_actor_class_token(const WorkerFactory& factory,
@@ -983,8 +982,7 @@ class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSel
 
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
       IoChannelFactory::ChannelTokenUsage usage) override {
-    return tokens.encodeSubrequestChannelToken(usage, serviceName,
-        entrypoint.map([](kj::String& e) -> kj::StringPtr { return e; }), props, persistent);
+    return tokens.encodeSubrequestChannelToken(usage, serviceName, entrypoint, props, persistent);
   }
 
  private:
@@ -1130,7 +1128,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     OtlpServiceInfo service{
       .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
       .entrypoint = entrypointName,
-      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
+      .durableObjectId = durableObjectId,
     };
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
@@ -1593,9 +1591,8 @@ kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags
     auto version = getPythonBundleName(release);
     if (manager.getPyodideBundle(version) != kj::none) co_return;
     auto bytes = co_await pyodide_bundle_fetch(
-        toRust(options.pyodideBundleDiskCacheDir.map(
-            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
-        toRust(version), toRust(release.getIntegrity()));
+        toRust(kj::Maybe<kj::StringPtr>(options.pyodideBundleDiskCacheDir)), toRust(version),
+        toRust(release.getIntegrity()));
     // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
     // this one waited.
     if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;

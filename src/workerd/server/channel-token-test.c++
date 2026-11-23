@@ -86,13 +86,11 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
         auto& channel = self.assertLive();
         auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
         return expectSync(h.encodeSubrequestChannelToken(usage, channel.triplet.serviceName,
-            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
-            channel.triplet.props, channel.persistent));
+            channel.triplet.entrypoint, channel.triplet.props, channel.persistent));
       });
     } else {
-      return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
-          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-          persistent));
+      return expectSync(h.encodeSubrequestChannelToken(
+          usage, triplet.serviceName, triplet.entrypoint, triplet.props, persistent));
     }
   }
 };
@@ -131,13 +129,11 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
         auto& channel = self.assertLive();
         auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
         return expectSync(h.encodeActorClassChannelToken(usage, channel.triplet.serviceName,
-            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
-            channel.triplet.props, channel.persistent));
+            channel.triplet.entrypoint, channel.triplet.props, channel.persistent));
       });
     } else {
-      return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
-          triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-          persistent));
+      return expectSync(h.encodeActorClassChannelToken(
+          usage, triplet.serviceName, triplet.entrypoint, triplet.props, persistent));
     }
   }
 };
@@ -189,12 +185,11 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
           [weakHandler = h.addWeak(), usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
         auto& channel = self.assertLive();
         auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
-        return h.encodeActorChannelToken(usage, channel.namespaceKey, channel.id,
-            channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }), channel.persistent);
+        return h.encodeActorChannelToken(
+            usage, channel.namespaceKey, channel.id, channel.name, channel.persistent);
       });
     } else {
-      return h.encodeActorChannelToken(usage, namespaceKey, id,
-          name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
+      return h.encodeActorChannelToken(usage, namespaceKey, id, name, persistent);
     }
   }
 };
@@ -261,7 +256,7 @@ void expectActorChannel(MockActorChannel& channel,
   for (auto i: kj::indices(id)) {
     KJ_EXPECT(channel.id[i] == id[i]);
   }
-  KJ_EXPECT(channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }) == name);
+  KJ_EXPECT(kj::Maybe<kj::StringPtr>(channel.name) == name);
 }
 
 KJ_TEST("channel token basics") {
@@ -462,8 +457,7 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
     auto channel =
         handler.decodeSubrequestChannelToken(Usage::RPC, token).downcast<MockSubrequestChannel>();
     KJ_EXPECT(channel->triplet.serviceName == "outer");
-    KJ_EXPECT(channel->triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }) ==
-        "OuterEntry"_kj);
+    KJ_EXPECT(kj::Maybe<kj::StringPtr>(channel->triplet.entrypoint) == "OuterEntry"_kj);
 
     auto capTable = channel->triplet.props.getCapTable();
     KJ_ASSERT(capTable.size() == 3);
