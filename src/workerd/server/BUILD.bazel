@@ -430,6 +430,16 @@ kj_test(
     ],
 )
 
+# The C++ handler against a copy of the C++ codec it replaced.
+kj_test(
+    src = "channel-token-legacy-test.c++",
+    deps = [
+        ":channel-token",
+        "//src/workerd/util:entropy",
+        "@ssl",
+    ],
+)
+
 # The C++ handler against tokens that its C++ encoder wrote.
 kj_test(
     src = "channel-token-golden-test.c++",
