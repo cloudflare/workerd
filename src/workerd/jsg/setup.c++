@@ -260,8 +260,7 @@ void IsolateBase::registerTypeHandler(const std::type_info& type, const void* ha
 }
 
 kj::Maybe<const void*> IsolateBase::tryGetTypeHandlerErased(const std::type_info& type) const {
-  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type})
-      .map([](const void* const& handler) { return handler; });
+  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type});
 }
 
 kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type) {

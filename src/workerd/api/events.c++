@@ -61,9 +61,9 @@ jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
 
 CustomEvent::CustomEventInit::operator Event::Init() {
   return {
-    .bubbles = this->bubbles.map([](auto& val) { return val; }),
-    .cancelable = this->cancelable.map([](auto& val) { return val; }),
-    .composed = this->composed.map([](auto& val) { return val; }),
+    .bubbles = this->bubbles,
+    .cancelable = this->cancelable,
+    .composed = this->composed,
   };
 }
 
@@ -148,9 +148,7 @@ MessageEvent::MessageEvent(jsg::Lock& js, kj::String type, Initializer initializ
       lastEventId(kj::mv(initializer.lastEventId).orDefault(kj::String())),
       maybeSource(kj::mv(initializer.source).orDefault(kj::none)),
       // Per the spec, origin defaults to the empty string for user-constructed events.
-      maybeOrigin(kj::mv(initializer.origin)
-                      .map([](jsg::USVString&& origin) -> kj::String { return kj::mv(origin); })
-                      .orDefault(kj::String())),
+      maybeOrigin(kj::Maybe<kj::String>(kj::mv(initializer.origin)).orDefault(kj::String())),
       ports(kj::mv(initializer.ports).orDefault([] {
         return kj::Array<messageevent::MessagePort>();
       })) {}
@@ -173,7 +171,7 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
 }
 
 kj::Maybe<kj::StringPtr> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](kj::String& origin) -> kj::StringPtr { return origin; });
+  return maybeOrigin;
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {

@@ -205,6 +205,8 @@ class SqlStorage::Cursor final: public jsg::Object {
     JSG_METHOD(next);
     JSG_METHOD(toArray);
     JSG_METHOD(one);
+    JSG_METHOD(close);
+    JSG_DISPOSE(close);
 
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
@@ -212,13 +214,16 @@ class SqlStorage::Cursor final: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
 
-    JSG_TS_DEFINE(type SqlStorageValue = ArrayBuffer | string | number | null);
+    // Extends `Disposable` because TypeScript before 5.2 has no `Symbol.dispose`.
+    JSG_TS_DEFINE(type SqlStorageValue = ArrayBuffer | string | number | null;
+      interface SqlStorageCursor<T extends Record<string, SqlStorageValue>> extends Disposable {});
     JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
       [Symbol.iterator](): IterableIterator<T>;
       raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
       next(): IteratorResult<T, undefined>;
       toArray(): T[];
       one(): T;
+      close(): void;
       columnNames: string[];
     });
 
@@ -244,6 +249,7 @@ class SqlStorage::Cursor final: public jsg::Object {
   RowIterator::Next next(jsg::Lock& js);
   jsg::JsArray toArray(jsg::Lock& js);
   jsg::JsValue one(jsg::Lock& js);
+  void close();
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     if (state != kj::none) {
