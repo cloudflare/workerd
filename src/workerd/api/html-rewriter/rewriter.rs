@@ -112,7 +112,8 @@ pub trait Dispatcher {
 pub type Rewriter = lol_html::send::HtmlRewriter<'static, Output>;
 
 /// Locks `mutex`. Nothing panics while holding a rewriter's mutexes but lol-html and handlers,
-/// whose panic fails the rewriter, so a poisoned mutex holds nothing that is used again.
+/// whose panic fails the rewriter (see `HtmlRewriterHandle::borrow_state()`), so a poisoned
+/// mutex holds nothing that is used again.
 pub fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -486,10 +487,18 @@ impl HtmlRewriterHandle {
 impl HtmlRewriterHandle {
     /// Locks the state, or fails if a handler of the running `write()` or `end()` call asks, as
     /// only the thread with the isolate lock locks it.
+    ///
+    /// A poisoned state means lol-html or a handler panicked within `write()` or `end()`, which
+    /// leaves the rewriter part-way through a chunk, so the rewriter fails.
     fn borrow_state(&self) -> jsg::Result<MutexGuard<'_, State>> {
         match self.state.try_lock() {
             Ok(state) => Ok(state),
-            Err(TryLockError::Poisoned(state)) => Ok(state.into_inner()),
+            Err(TryLockError::Poisoned(state)) => {
+                let mut state = state.into_inner();
+                *state = State::Failed;
+                self.state.clear_poison();
+                Ok(state)
+            }
             Err(TryLockError::WouldBlock) => Err(jsg::Error::new_type_error(
                 "An HTMLRewriter handler can't use the rewriter that is running it.",
             )),

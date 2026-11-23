@@ -424,3 +424,20 @@ fn the_output_buffer_counts_as_external_memory() {
         Ok(())
     });
 }
+
+#[test]
+fn a_panic_within_a_call_fails_the_rewriter() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let handle = new_handle(lock, ctx);
+        let handle = handle.get(lock);
+        // As a panic in lol-html or a handler leaves it, within `write()` or `end()`.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _state = handle.state.lock();
+            panic!("a panic within a call");
+        }));
+        assert!(handle.state.is_poisoned());
+        assert!(matches!(*handle.borrow_state()?, super::State::Failed));
+        assert!(!handle.state.is_poisoned());
+        Ok(())
+    });
+}
