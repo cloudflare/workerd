@@ -326,6 +326,7 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Datagram: typeof Datagram;
   Performance: typeof Performance;
   PerformanceEntry: typeof PerformanceEntry;
   PerformanceMark: typeof PerformanceMark;
@@ -3463,6 +3464,7 @@ interface Socket {
   get opened(): Promise<SocketInfo>;
   get upgraded(): boolean;
   get secureTransport(): "on" | "off" | "starttls";
+  get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
@@ -3481,6 +3483,10 @@ interface TlsOptions {
 interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
+}
+declare class Datagram {
+  constructor(data: Uint8Array);
+  get data(): Uint8Array;
 }
 interface ExecOutput {
   readonly stdout: ArrayBuffer;
