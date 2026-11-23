@@ -10,6 +10,7 @@
 
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <kj/async-io.h>
 
@@ -111,9 +112,26 @@ enum class ArgumentKind {
   TRANSFERRED_RPC_STUB,
 };
 
+// Which implementation newPromisedWorkerInterface() uses. DEFAULT leaves the autogates as the
+// environment sets them; the others set RUST_PROMISED_WORKER_INTERFACE and nothing else.
+enum class PromisedInterfaceImpl {
+  DEFAULT,
+  CXX,
+  RUST,
+};
+
 class JsRpcSenderHarness {
  public:
-  explicit JsRpcSenderHarness(size_t payloadSize = 0): io(kj::setupAsyncIo()) {
+  explicit JsRpcSenderHarness(
+      size_t payloadSize = 0, PromisedInterfaceImpl promisedImpl = PromisedInterfaceImpl::DEFAULT)
+      : io(kj::setupAsyncIo()) {
+    auto gates = [&]() -> kj::Array<util::AutogateKey> {
+      if (promisedImpl == PromisedInterfaceImpl::RUST) {
+        return kj::arr(util::AutogateKey::RUST_PROMISED_WORKER_INTERFACE);
+      }
+      return nullptr;
+    };
+    bool ignoreAllAutogatesEnv = promisedImpl != PromisedInterfaceImpl::DEFAULT;
     capnp::MallocMessageBuilder flagsMessage;
     auto flags = flagsMessage.initRoot<CompatibilityFlags>();
     flags.setFetcherRpc(true);
@@ -122,12 +140,16 @@ class JsRpcSenderHarness {
 
     receiver = kj::heap<TestFixture>(TestFixture::SetupParams{
       .waitScope = io.waitScope,
+      .autogateKeys = gates(),
+      .ignoreAllAutogatesEnv = ignoreAllAutogatesEnv,
       .mainModuleSource = RECEIVER_SOURCE,
       .useRealTimers = false,
     });
     sender = kj::heap<TestFixture>(TestFixture::SetupParams{
       .waitScope = io.waitScope,
       .featureFlags = flags.asReader(),
+      .autogateKeys = gates(),
+      .ignoreAllAutogatesEnv = ignoreAllAutogatesEnv,
       .useRealTimers = false,
     });
     ioContext = sender->newIoContext();
@@ -271,8 +293,11 @@ void JsRpcTransferredStub(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations());
 }
 
-void runPendingCallsBenchmark(benchmark::State& state, size_t payloadSize, size_t concurrentCalls) {
-  JsRpcSenderHarness harness(payloadSize);
+void runPendingCallsBenchmark(benchmark::State& state,
+    size_t payloadSize,
+    size_t concurrentCalls,
+    PromisedInterfaceImpl promisedImpl = PromisedInterfaceImpl::DEFAULT) {
+  JsRpcSenderHarness harness(payloadSize, promisedImpl);
   int64_t pendingAllocatedBytes = 0;
   int64_t pendingExternalBytes = 0;
   for (auto _: state) {
@@ -301,12 +326,40 @@ void JsRpcPendingLargeCalls(benchmark::State& state) {
   runPendingCallsBenchmark(state, LARGE_VALUE_SIZE, state.range(0));
 }
 
+// The Promised* cases compare the C++ and Rust newPromisedWorkerInterface(), with range(0) as
+// the implementation: 0 for C++, 1 for Rust. Every call waits for its target to start, so each
+// goes through a promised interface. Run them with --benchmark_enable_random_interleaving=true so
+// that both implementations see the same machine load.
+PromisedInterfaceImpl promisedImpl(const benchmark::State& state) {
+  return state.range(0) == 0 ? PromisedInterfaceImpl::CXX : PromisedInterfaceImpl::RUST;
+}
+
+void PromisedSingleCall(benchmark::State& state) {
+  runPendingCallsBenchmark(state, 16, 1, promisedImpl(state));
+}
+
+void PromisedConcurrentTinyCalls(benchmark::State& state) {
+  runPendingCallsBenchmark(state, 16, CONCURRENT_CALLS, promisedImpl(state));
+}
+
+void PromisedConcurrentSmallCalls(benchmark::State& state) {
+  runPendingCallsBenchmark(state, 1024, CONCURRENT_CALLS, promisedImpl(state));
+}
+
+void PromisedPendingLargeCalls(benchmark::State& state) {
+  runPendingCallsBenchmark(state, LARGE_VALUE_SIZE, 2, promisedImpl(state));
+}
+
 WD_BENCHMARK(JsRpcNoArgs);
 WD_BENCHMARK(JsRpcPlainValue)->Arg(1024)->Arg(64 * 1024)->Arg(1024 * 1024)->Arg(LARGE_VALUE_SIZE);
 WD_BENCHMARK(JsRpcWritableStream);
 WD_BENCHMARK(JsRpcTransferredStub);
 WD_BENCHMARK(JsRpcConcurrentSmallCalls)->Iterations(1);
 WD_BENCHMARK(JsRpcPendingLargeCalls)->Arg(1)->Arg(2)->Iterations(1);
+WD_BENCHMARK(PromisedSingleCall)->ArgName("rust")->Arg(0)->Arg(1);
+WD_BENCHMARK(PromisedConcurrentTinyCalls)->ArgName("rust")->Arg(0)->Arg(1);
+WD_BENCHMARK(PromisedConcurrentSmallCalls)->ArgName("rust")->Arg(0)->Arg(1);
+WD_BENCHMARK(PromisedPendingLargeCalls)->ArgName("rust")->Arg(0)->Arg(1);
 
 }  // namespace
 }  // namespace workerd::api
