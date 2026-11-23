@@ -793,13 +793,16 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   defaultContextHandle.Reset();
 
   // 8. Reject a heap holding a suspended generator, such as an async function the top level left
-  // awaiting a promise: CreateBlob(kClear) discards the bytecode it would resume in. Checked last,
-  // when only what CreateBlob() serializes is left to reach it.
+  // awaiting a promise. The snapshot keeps the bytecode it would resume in, but resuming one in a
+  // restored Worker is untested, so it stays rejected. Checked last, when only what CreateBlob()
+  // serializes is left to reach it.
   KJ_REQUIRE(!getSnapshotCreator()->HasSuspendedGenerators(),
       "PREPARE_SNAPSHOT: a generator or async function is suspended in the zygote's heap");
 
+  // Keep the bytecode of the functions the zygote compiled, so the restored Worker doesn't compile
+  // them again on first call. V8 patch 0057 lets the context snapshot reference it.
   artifact.blob =
-      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kKeep);
 
   KJ_REQUIRE(*badTagFieldsCount == 0,
       "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
