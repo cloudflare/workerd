@@ -707,10 +707,6 @@ impl<T: PromiseValue> Type for Promise<'_, T> {
     fn class_name() -> &'static str {
         "Promise"
     }
-
-    fn is_exact(value: Local<'_, Value>) -> bool {
-        value.is_promise()
-    }
 }
 
 /// The capability to settle one [`Promise<'s, T>`](Promise), like C++ JSG's

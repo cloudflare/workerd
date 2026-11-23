@@ -15,6 +15,7 @@ use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use outcome_capnp::EventOutcome;
@@ -48,7 +49,8 @@ impl Worker {
     fn error(file: &str, line: u32) -> Result<()> {
         Err(kj::failed!("jsg.Error: This script has been killed.")
             .with_details(vec![(SCRIPT_KILLED_DETAIL_ID, vec![])])
-            .with_location(file.to_owned(), line))
+            .with_location(file.to_owned(), line)
+            .into())
     }
 }
 
@@ -61,7 +63,7 @@ impl kj::http::Service for Worker {
         _headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
         _response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         Self::error(file!(), line!())
     }
 
@@ -72,7 +74,7 @@ impl kj::http::Service for Worker {
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         Self::error(file!(), line!())
     }
 }

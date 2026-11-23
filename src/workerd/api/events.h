@@ -2,7 +2,6 @@
 
 #include "basics.h"
 
-#include <workerd/api/messagechannel.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 
@@ -13,24 +12,28 @@ class Blob;
 
 namespace messageevent {
 
-// A MessagePort as a MessageEvent holds one: either the C++ api::MessagePort, or an instance of
-// the per-isolate bootstrap's TypeScript implementation, whose constructor marks it with the
-// private brand BRAND (`utils.setPrivate(port, BRAND, true)`). The class is named after the type
-// users know, and lives in a namespace of its own, so that JSG's conversion errors name the type
-// as before.
+// A MessagePort as a MessageEvent holds one: an instance of the per-isolate bootstrap's
+// MessagePort (src/per_isolate/messagechannel/), whose constructor marks it with the private
+// brand BRAND (`utils.setPrivate(port, BRAND, true)`). The class is named after the type users
+// know, and lives in a namespace of its own, so that JSG's conversion errors name the type.
+//
+// RTTI describes it as an object; MessageEvent's TypeScript overrides name it MessagePort,
+// which types/defines/messagechannel.d.ts declares.
 class MessagePort {
  public:
   static constexpr kj::StringPtr BRAND = "workerd:MessagePort"_kj;
 
-  using JsgRttiDelegate = jsg::Ref<api::MessagePort>;
+  using JsgRttiDelegate = jsg::JsObject;
 
-  explicit MessagePort(jsg::Ref<api::MessagePort> port): port(kj::mv(port)) {}
-
-  // Returns kj::none unless `value` is a MessagePort of either implementation. Runs no JS.
+  // Returns kj::none unless `value` is a branded MessagePort. Runs no JS.
   static kj::Maybe<MessagePort> tryFrom(jsg::Lock& js, jsg::JsValue value);
 
-  MessagePort addRef(jsg::Lock& js);
-  jsg::JsValue getHandle(jsg::Lock& js);
+  MessagePort addRef(jsg::Lock& js) {
+    return MessagePort(port.addRef(js));
+  }
+  jsg::JsValue getHandle(jsg::Lock& js) {
+    return port.getHandle(js);
+  }
 
   static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
       jsg::Lock& js,
@@ -47,23 +50,18 @@ class MessagePort {
     return tryFrom(js, jsg::JsValue(handle));
   }
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(port);
+  }
 
   JSG_MEMORY_INFO(MessagePort) {
-    KJ_SWITCH_ONEOF(port) {
-      KJ_CASE_ONEOF(ref, jsg::Ref<api::MessagePort>) {
-        tracker.trackField("port", ref);
-      }
-      KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-        tracker.trackField("port", object);
-      }
-    }
+    tracker.trackField("port", port);
   }
 
  private:
   explicit MessagePort(jsg::JsRef<jsg::JsObject> object): port(kj::mv(object)) {}
 
-  kj::OneOf<jsg::Ref<api::MessagePort>, jsg::JsRef<jsg::JsObject>> port;
+  jsg::JsRef<jsg::JsObject> port;
 };
 
 }  // namespace messageevent
@@ -191,6 +189,8 @@ class MessageEvent final: public Event {
     JSG_STRUCT(bubbles, cancelable, composed, data, origin, lastEventId, source, ports);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
       data?: any;
+      source?: MessagePort | null;
+      ports?: MessagePort[];
     });
   };
 
@@ -223,7 +223,11 @@ class MessageEvent final: public Event {
     JSG_READONLY_INSTANCE_PROPERTY(ports, getPorts);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({ readonly data: any; });
+    JSG_TS_OVERRIDE({
+      readonly data: any;
+      readonly source: MessagePort | null;
+      readonly ports: MessagePort[];
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;

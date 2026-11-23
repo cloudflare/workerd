@@ -25,6 +25,7 @@ import { Readable } from 'node-internal:streams_readable';
 import { Duplex, duplexPair } from 'node-internal:streams_duplex';
 import { Transform, PassThrough } from 'node-internal:streams_transform';
 import { promises } from 'node-internal:streams_promises';
+import { setCustomPromisified } from 'node-internal:internal_utils';
 
 // eslint-disable-next-line @typescript-eslint/unbound-method
 export const _isArrayBufferView = Stream._isArrayBufferView;
@@ -34,6 +35,9 @@ export const _isUint8Array = Stream._isUint8Array;
 export const _uint8ArrayToBuffer = Stream._uint8ArrayToBuffer;
 const destroy = destroyer;
 const finished = eos;
+
+setCustomPromisified(pipeline, promises.pipeline);
+setCustomPromisified(finished, promises.finished);
 
 export {
   addAbortSignal,

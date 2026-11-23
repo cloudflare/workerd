@@ -125,10 +125,6 @@ impl<T: Traced> Traced for Cell<T> {
         // that is leaving the cell.
         self.read_in_place(|value| value.trace(visitor));
     }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
-    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Cell<T> {}
@@ -250,10 +246,6 @@ impl<T: Traced> Traced for RefCell<T> {
         if let Ok(inner) = self.inner.try_borrow() {
             inner.trace(visitor);
         }
-    }
-
-    fn needs_drop_detach() -> bool {
-        T::needs_drop_detach()
     }
 }
 

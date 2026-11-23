@@ -17,7 +17,6 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/form-data.h>
@@ -53,10 +52,13 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/api/wrapped-binding.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+// JSG_DECLARE_ISOLATE_TYPE, from type-wrapper.h, expands to setup.h's jsg::Isolate. include-cleaner
+// doesn't count a symbol that only a macro from another header uses.
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/setup.h>
 #include <workerd/server/workerd-debug-port-client.h>
 
@@ -118,7 +120,6 @@ namespace workerd::server {
   EW_NODE_ISOLATE_TYPES,                                \
   EW_RTTI_ISOLATE_TYPES,                                \
   EW_HYPERDRIVE_ISOLATE_TYPES,                          \
-  EW_EVENTSOURCE_ISOLATE_TYPES,                         \
   EW_WORKER_LOADER_ISOLATE_TYPES,                       \
   EW_MESSAGECHANNEL_ISOLATE_TYPES,                      \
   EW_WORKERS_MODULE_ISOLATE_TYPES,                      \

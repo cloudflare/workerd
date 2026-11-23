@@ -17,7 +17,8 @@ src/rust/jsg/jsg.h jsg::Lock 3
 src/rust/jsg/jsg.h JsExceptionThrown 1
 src/rust/jsg/jsg.h jsg::Data 1
 
-# A reviewed exception, explained above it in that file: io_context_await_io_and_run()
-# propagates the exception that a failed callback left pending to IoContext::run() as
-# JsExceptionThrown, which is how run() learns of it. Don't add to it.
+# A reviewed exception, explained above it in that file: throwPendingToRun() propagates the
+# exception or termination that Rust left pending, for io_context_await_io_and_run() and
+# ReentryCallback, to IoContext::run() as JsExceptionThrown, which is how run() learns of it.
+# Don't add to it.
 src/workerd/io/io-context/ffi.c++ JsExceptionThrown 1

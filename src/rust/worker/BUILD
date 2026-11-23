@@ -6,10 +6,13 @@ wd_rust_crate(
     name = "worker",
     cxx_bridge_deps = {
         "ffi.rs": [
-            "@workerd//src/workerd/io:worker-interface",
+            "@workerd//src/workerd/io:worker-interface-hdrs",
             "@workerd//src/rust/kj",
         ],
         "error.rs": [
+            ":ffi.rs@cxx",
+        ],
+        "failure.rs": [
             ":ffi.rs@cxx",
         ],
         "kill_switch.rs": [
@@ -21,10 +24,13 @@ wd_rust_crate(
     },
     cxx_bridge_srcs = [
         "error.rs",
+        "failure.rs",
         "ffi.rs",
         "kill_switch.rs",
         "ok.rs",
     ],
+    # WorkerInterface::fromException() makes the worker of failure.rs.
+    cxx_bridge_visibility = ["//src/workerd/io:__pkg__"],
     link_deps = [
         ":bridge",
     ],
@@ -46,9 +52,11 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi.rs@cxx",
+        "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@workerd//src/workerd/io:worker-interface",
+        "@workerd//src/workerd/io:bench_capnp",
+        "@workerd//src/workerd/io:worker-interface-hdrs",
         "@workerd//src/workerd/util",
     ],
 )

@@ -144,6 +144,10 @@ class ZlibContext final {
         maxOutputLength);
   };
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("dictionary", dictionary.size());
+  }
+
  private:
   bool initializeZlib();
   kj::Maybe<CompressionError> setDictionary();
@@ -235,6 +239,14 @@ class ZlibUtil final: public jsg::Object {
     // collect with this tracing.
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(writeCallback, writeResult, errorHandler);
+    }
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      allocator.visitForMemoryInfo(tracker);
+      context_.visitForMemoryInfo(tracker);
+      tracker.trackField("writeCallback", writeCallback);
+      tracker.trackField("writeResult", writeResult);
+      tracker.trackField("errorHandler", errorHandler);
     }
 
    protected:

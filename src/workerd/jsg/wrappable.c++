@@ -692,9 +692,13 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // Internal field 0 holds a marker identifying this as a workerd API object; see
-  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
-  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  // Internal field 0 holds a marker identifying this as a workerd API object (see
+  // isWorkerdApiObject()), or as a Rust resource. The marker's address is a small integer
+  // type-tagged by slot index. The field is stored only once, as V8 allocates a new cppgc object
+  // for every store of a non-null pointer.
+  auto tagAddress = const_cast<uint16_t*>(static_cast<uint16_t>(tag) == kRustResourceWrappableTag
+          ? &WORKERD_RUST_WRAPPABLE_TAG
+          : &WORKERD_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
 
@@ -792,9 +796,11 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   auto isolate = v8::Isolate::GetCurrent();
   auto object =
       jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
-  // Null prototype: opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable
-  // check does Get(value, "then"). A null prototype keeps that lookup off Object.prototype.
-  jsg::check(object->SetPrototype(context, v8::Null(isolate)));
+  // Don't change the object's prototype or add properties here. Either would give it a map other
+  // than the constructor's initial map, and V8 never drops such a wrapper in a scavenge (see
+  // JSObject::IsUnmodifiedApiObject()). Every opaque wrapper would then be a scavenge root until
+  // the next full GC, along with everything its C++ value keeps alive. The template's prototype
+  // shadows `then` instead; see IsolateBase::IsolateBase().
   attachWrapper(isolate, object, needsGcTracing,
       static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
   return object;

@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/basics.h>
 #include <workerd/api/events.h>
 #include <workerd/api/hibernation-event-params.h>
 #include <workerd/api/web-socket.h>

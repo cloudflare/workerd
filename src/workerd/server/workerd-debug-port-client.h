@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/io/io-channels.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>

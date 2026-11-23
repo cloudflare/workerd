@@ -180,6 +180,8 @@ constexpr kj::StringPtr MALFORMED_DATA_MESSAGE =
     "Deserialization failed: the data is malformed."_kj;
 }  // namespace
 
+Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
+
 void Serializer::ExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, func, " could not be cloned.");
@@ -574,7 +576,10 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   } else if (value.isArrayBuffer()) {
     arrayBuffer = v8::Local<v8::Value>(value).As<v8::ArrayBuffer>();
   } else {
-    JSG_FAIL_REQUIRE(TypeError, "Object is not transferable");
+    // A primitive fails WebIDL's conversion to sequence<object>, which throws a TypeError. An
+    // object that is not transferable is a DataCloneError.
+    JSG_REQUIRE(v8::Local<v8::Value>(value)->IsObject(), TypeError, "Object is not transferable");
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "Object is not transferable.");
   }
 
   // SharedArrayBuffers are not transferable. Per the HTML spec, attempting to

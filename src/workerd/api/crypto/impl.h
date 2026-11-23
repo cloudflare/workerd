@@ -9,6 +9,8 @@
 
 #include "crypto.h"
 
+// For fastEncodeBase64Url, widely used in crypto implementation
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/api/util.h>
 #include <workerd/jsg/jsvalue.h>
 
@@ -185,6 +187,11 @@ class CryptoKey::Impl {
   bool isExtractable() const {
     return extractable;
   }
+
+  // Throws the errors exportKey() and wrapKey() raise for a key they can't export, in the order
+  // the spec checks them: NotSupportedError, then InvalidAccessError.
+  void requireExportable() const;
+
   CryptoKeyUsageSet getUsages() const {
     return usages;
   }
@@ -255,6 +262,12 @@ class CryptoKey::Impl {
     // For many algorithms, unwrapKey() is the same as decrypt(), so as a convenience the default
     // implementation just forwards to it.
     return decrypt(js, kj::mv(algorithm), wrappedKey);
+  }
+
+  // Whether the algorithm supports the Web Crypto export key operation. Override it to return
+  // false in any Impl that doesn't override exportKey().
+  virtual bool supportsExport() const {
+    return true;
   }
 
   virtual SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const {

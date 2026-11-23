@@ -13,7 +13,6 @@
 #include <capnp/capability.h>
 #include <capnp/message.h>
 #include <capnp/schema.h>
-#include <capnp/serialize.h>
 #include <kj/async.h>
 #include <kj/memory.h>
 #include <kj/refcount.h>

@@ -16,6 +16,15 @@
       "name": "rules_shell",
       "type": "bazel_dep"
     },
+    // protobuf builds the OTLP schemas in src/opentelemetry for tests. Perfetto depends on it too.
+    {
+      "name": "protobuf",
+      "type": "bazel_dep",
+      // 37.0 is the first release whose EpsCopyInputStream::PopLimit() takes its LimitToken by
+      // reference (protocolbuffers/protobuf#28619). Before it, ASan + UBSan builds abort while
+      // registering any generated descriptor. Unfreeze once 37.0 is out.
+      "freeze_version": "37.0-rc3"
+    },
     // abseil is used by protobuf and tcmalloc.
     {
       "name": "abseil-cpp",
@@ -74,7 +83,8 @@
       "patches": [
         "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
         "//:patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch",
-        "//:patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch"
+        "//:patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch",
+        "//:patches/rules_rust/0004-Add-a-flag-that-adds-inputs-to-every-Rustc-action.patch"
       ]
     },
     {

@@ -34,6 +34,9 @@ class TestService final: public kj::HttpService {
   // /tail responds, then waits on `tailRelease`; `tailEnded` reports whether it got past it.
   kj::PromiseFulfillerPair<void> tailRelease = kj::newPromiseAndFulfiller<void>();
   kj::PromiseFulfillerPair<bool> tailEnded = kj::newPromiseAndFulfiller<bool>();
+  // /abort-mid-body writes, aborts its body on `abortBody`, drops it, and fails on `failCall`.
+  kj::PromiseFulfillerPair<void> abortBody = kj::newPromiseAndFulfiller<void>();
+  kj::PromiseFulfillerPair<void> failCall = kj::newPromiseAndFulfiller<void>();
   // Fulfilled when the WebSocket of /ws-aborted reports `whenAborted()`.
   kj::PromiseFulfillerPair<void> aborted = kj::newPromiseAndFulfiller<void>();
   // Requests to /gate wait on this; `inFlight` counts them.
@@ -208,6 +211,15 @@ class TestService final: public kj::HttpService {
     } else if (url == "/fail-mid-body") {
       auto out = response.send(200, "OK", responseHeaders, static_cast<uint64_t>(10));
       co_await out->write("hello"_kj.asBytes());
+      KJ_FAIL_REQUIRE("failed mid-body");
+    } else if (url == "/abort-mid-body") {
+      // As a pump whose source fails: the body is aborted and dropped before the call fails.
+      auto out = response.send(200, "OK", responseHeaders, kj::none);
+      co_await out->write("hello"_kj.asBytes());
+      co_await abortBody.promise;
+      out->abortWrite(KJ_EXCEPTION(FAILED, "the body's source failed"));
+      out = nullptr;
+      co_await failCall.promise;
       KJ_FAIL_REQUIRE("failed mid-body");
     } else if (url == "/no-response") {
       co_return;
@@ -773,6 +785,24 @@ KJ_TEST("server: an exception mid-body cuts the response short") {
   conn->write("GET /fail-mid-body HTTP/1.1\r\nHost: foo\r\n\r\n"_kj.asBytes()).wait(f.ws);
   auto response = conn->readAllText().wait(f.ws);
   KJ_EXPECT(response == "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello", response);
+}
+
+KJ_TEST("server: a body aborted and dropped before its call fails is cut short") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("GET /abort-mid-body HTTP/1.1\r\nHost: foo\r\n\r\n"_kj.asBytes()).wait(f.ws);
+  KJ_EXPECT(readHead(*conn).wait(f.ws) == "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+  KJ_EXPECT(readBytes(f.ws, *conn, 10) == "5\r\nhello\r\n");
+  f.service.abortBody.fulfiller->fulfill();
+  // hyper polls the body while the call has yet to fail. A body that took its drop for its end
+  // would be framed as complete by now, and the connection kept open.
+  f.timer.afterDelay(20 * kj::MILLISECONDS).wait(f.ws);
+  f.service.failCall.fulfiller->fulfill();
+  auto rest = conn->readAllText()
+                  .exclusiveJoin(f.timer.afterDelay(5 * kj::SECONDS).then([]() {
+    return kj::str("<the connection stayed open>");
+  })).wait(f.ws);
+  KJ_EXPECT(rest == "", rest);
 }
 
 KJ_TEST("server: a response to HEAD keeps the application's Content-Length") {

@@ -17,17 +17,17 @@
 //!   cycle through it can be collected
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
+//! - [`CompiledWasmModule`] - Owned handle to the compiled code of a `WebAssembly.Module`,
+//!   which C++ can make another module object from without recompiling
 //!
 //! # Garbage Collection
 //!
 //! Rust resources integrate with V8's GC through the C++ `Wrappable` base class. Each Rust
-//! resource is wrapped in `Rc<R>` with a `Wrappable` on the KJ heap that bridges to cppgc
-//! via a `CppgcShim`. The Wrappable's `data[0..1]` stores a fat pointer to
-//! `dyn GarbageCollected` — the data part is the `Rc::into_raw` pointer (pointing to `R`
-//! inside the `Rc` allocation) and the vtable part carries `R`'s `GarbageCollected` impl.
-//! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
-//! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
-//! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
+//! resource lives in the allocation of a `Wrappable` on the KJ heap, which bridges to cppgc via
+//! a `CppgcShim`. The Wrappable's `trait_object` stores a fat pointer to the resource as
+//! `dyn GarbageCollected`, whose vtable carries the resource's `GarbageCollected` impl.
+//! On destruction, `wrappable_invoke_drop` drops the resource in place. The Rust `jsg::Rc<R>`
+//! smart pointer holds a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, under the isolate lock, `wrappable_remove_strong_ref()` releases its strong reference,
 //! then the `WrappableRc` drop decrements the `kj::Rc` refcount; without the lock, its isolate's
 //! [`IsolateState`] queues both until the next lock. A function created by
@@ -46,8 +46,9 @@ use std::mem::ManuallyDrop;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::rc::Rc;
 use std::sync::Arc;
+
+use kj_rs::KjOwn;
 
 pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::JsErrorType;
@@ -182,6 +183,17 @@ pub mod ffi {
         EvalError,
     }
 
+    /// How throwing an internal error logs its message.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum InternalErrorLog {
+        /// At `ERROR`, with the reference ID that JavaScript gets when an error is created.
+        /// While execution is terminating, logs only the message without creating an error.
+        Error,
+        /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
+        /// `worker_do_not_log` that it throws to JavaScript.
+        Info,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -191,12 +203,11 @@ pub mod ffi {
     }
 
     extern "Rust" {
-        /// Called from C++ Wrappable destructor to drop the Rust object.
-        /// Reconstructs the `Rc<dyn GarbageCollected>` from `data[0..1]` and drops it.
+        /// Called from C++ Wrappable destructor to drop the Rust object in place.
         unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut Wrappable>);
 
         /// Called from C++ Wrappable::jsgVisitForGc to trace nested handles.
-        /// Reconstructs `&dyn GarbageCollected` from `data[0..1]` and calls `trace()`.
+        /// Reconstructs `&dyn GarbageCollected` from `trait_object` and calls `trace()`.
         unsafe fn wrappable_invoke_trace(wrappable: &Wrappable, visitor: *mut GcVisitor);
 
         /// Called from C++ `Wrappable::jsgGetMemoryName`.
@@ -204,11 +215,6 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
-
-        /// Called from C++ `Wrappable::snapshotClone`: the trait object of a fresh instance for
-        /// a wrapper restored from a startup snapshot (`GarbageCollected::snapshot_recreate`), or
-        /// a cleared pointer (`data_ptr == 0`) when the resource's type is not stateless.
-        unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &Wrappable) -> TraitObjectPtr;
 
         /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
         /// which C++ adds to the Wrappable's own.
@@ -219,6 +225,26 @@ pub mod ffi {
         unsafe fn wrappable_invoke_get_memory_info(
             wrappable: &Wrappable,
             tracker: Pin<&mut MemoryTracker>,
+        );
+
+        /// Called from C++ `Wrappable::snapshotClone()`. If the resource's type implements
+        /// `jsg::SnapshotTransfer`, stores in `copy` the address of a new `Wrappable` that owns
+        /// what the snapshot stores of the resource, or, called on that, a restored resource,
+        /// and passes the caller its only `kj::Rc` reference. Returns false otherwise. May run on
+        /// any thread, with no isolate locked.
+        unsafe fn wrappable_invoke_snapshot_clone(wrappable: &Wrappable, copy: &mut usize) -> bool;
+
+        /// Called from C++ `Wrappable::snapshotReferences()`: the Wrappables of the resources
+        /// that `jsg::SnapshotTransfer::snapshot_references` adds, 0 for `None`.
+        unsafe fn wrappable_invoke_snapshot_references(wrappable: &Wrappable) -> Vec<usize>;
+
+        /// Called from C++ `Wrappable::snapshotRelink()`, under the isolate lock with a context
+        /// entered and a `HandleScope` open: calls `jsg::SnapshotTransfer::snapshot_relink` with
+        /// the restored Wrappables, 0 for none.
+        unsafe fn wrappable_invoke_snapshot_relink(
+            wrappable: &Wrappable,
+            isolate: *mut Isolate,
+            restored: &[usize],
         );
     }
 
@@ -236,6 +262,8 @@ pub mod ffi {
         type PropertySetterCallbackInfo;
         type PropertyQueryCallbackInfo;
         type Wrappable;
+        /// C++ `v8::EscapableHandleScope`, which `Lock::with_escapable_handle_scope` opens.
+        type EscapableHandleScope;
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
@@ -245,6 +273,9 @@ pub mod ffi {
         /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
         /// (see `ffi.h`).
         type ExternalMemoryAdjustment;
+        /// C++ `v8::CompiledWasmModule`, the compiled code of a `WebAssembly.Module`, which C++
+        /// holds in a `kj::Own` (see `ffi.h`).
+        type CompiledWasmModule;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -347,6 +378,18 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<WasmModuleObject>
+        pub unsafe fn local_wasm_module_object_get_compiled_module(
+            module: &Local,
+        ) -> KjOwn<CompiledWasmModule>;
+
+        // CompiledWasmModule
+        #[nothrow]
+        pub unsafe fn compiled_wasm_module_get_wire_bytes(
+            module: &CompiledWasmModule,
+            length: &mut usize,
+        ) -> *const u8;
+
         // Local<ArrayBufferView>
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
@@ -434,6 +477,8 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_date(value: &Local) -> bool;
+        #[nothrow]
+        pub unsafe fn local_is_wasm_module_object(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
         // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
         // store the result in `result` and return true, or return false if the coercion threw,
@@ -727,9 +772,24 @@ pub mod ffi {
         pub unsafe fn wrappable_strong_refcount(wrappable: &Wrappable) -> u32;
 
         // Wrappable lifecycle — KjRc<Wrappable> for reference-counted ownership
-        pub unsafe fn wrappable_new(ptr: TraitObjectPtr) -> KjRc<Wrappable>;
-
+        pub unsafe fn wrappable_new(
+            size: usize,
+            align: usize,
+            storage: &mut usize,
+        ) -> KjRc<Wrappable>;
+        pub unsafe fn wrappable_init(wrappable: Pin<&mut Wrappable>, ptr: TraitObjectPtr);
+        pub unsafe fn wrappable_init_unreferenced(
+            wrappable: Pin<&mut Wrappable>,
+            ptr: TraitObjectPtr,
+        );
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
+
+        pub unsafe fn wrappable_downgrade(wrappable: Pin<&mut Wrappable>) -> WrappableWeakRc;
+        pub unsafe fn wrappable_weak_clone(weak: &WrappableWeakRc) -> WrappableWeakRc;
+        pub unsafe fn wrappable_weak_is_alive(weak: &WrappableWeakRc) -> bool;
+        pub unsafe fn wrappable_weak_upgrade(weak: &WrappableWeakRc) -> KjMaybe<KjRc<Wrappable>>;
+        pub unsafe fn wrappable_weak_drop(weak: &mut WrappableWeakRc);
+
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
         pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
@@ -958,6 +1018,7 @@ pub mod ffi {
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
+            log: InternalErrorLog,
         ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
@@ -974,9 +1035,30 @@ pub mod ffi {
             exception: &mut MaybeLocal,
         );
 
+        // HandleScope
+        pub unsafe fn isolate_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize),
+        );
+        pub unsafe fn isolate_escapable_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize, Pin<&mut EscapableHandleScope>),
+        );
+        #[nothrow]
+        pub unsafe fn escapable_handle_scope_escape(
+            scope: Pin<&mut EscapableHandleScope>,
+            value: Local,
+        ) -> Local;
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        pub unsafe fn isolate_throw_internal_error(
+            isolate: *mut Isolate,
+            internal_message: &str,
+            log: InternalErrorLog,
+        );
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         #[nothrow]
@@ -1034,7 +1116,7 @@ pub mod ffi {
     /// Stored inside the C++ `Wrappable` struct. Contains everything needed to
     /// reconstruct the Rust trait object and verify its type.
     pub struct TraitObjectPtr {
-        /// `Rc::into_raw(*const R)` — data pointer to the resource.
+        /// Data pointer to the `R` in the Wrappable's storage.
         pub data_ptr: usize,
         /// Vtable pointer for `R as dyn GarbageCollected`.
         pub vtable_ptr: usize,
@@ -1042,6 +1124,13 @@ pub mod ffi {
         pub type_id_lo: usize,
         /// `TypeId::of::<R>()` high 64 bits.
         pub type_id_hi: usize,
+    }
+
+    /// A `kj::WeakRc<Wrappable>`, with its layout: the pointers to its weak cell and to the
+    /// Wrappable. Owned by a [`WrappableWeak`](super::WrappableWeak).
+    pub struct WrappableWeakRc {
+        cell: usize,
+        ptr: usize,
     }
 
     pub struct ConstructorDescriptor {
@@ -1159,6 +1248,13 @@ pub mod ffi {
             wrapped_elsewhere: &mut bool,
         ) -> MaybeLocal /* v8::Local<Value> */;
 
+        // The existing wrapper, as `wrap_resource` returns it, without creating one; see `ffi.h`.
+        pub unsafe fn wrappable_get_wrapper(
+            isolate: *mut Isolate,
+            wrappable: Pin<&mut Wrappable>,
+            wrapped_elsewhere: &mut bool,
+        ) -> MaybeLocal /* v8::Local<Value> */;
+
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
@@ -1251,10 +1347,6 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
-
-    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
-    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
-    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -1318,7 +1410,7 @@ impl ffi::ExceptionType {
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
 // - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
-// - WasmModuleObject, WasmMemoryObject
+// - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
 // `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
@@ -1597,6 +1689,8 @@ pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
 pub struct ArrayBufferView;
+/// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
+pub struct WasmModuleObject;
 
 // =============================================================================
 // `BackingStore` — owned handle to a heap-allocated `std::shared_ptr<v8::BackingStore>`
@@ -1743,6 +1837,62 @@ impl BackingStore {
         }
         // SAFETY: data() is non-null for non-empty stores; byte_length() bytes are valid.
         unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+    }
+}
+
+/// The compiled code of a `WebAssembly.Module`: C++ `v8::CompiledWasmModule`.
+///
+/// Obtained with [`Local<WasmModuleObject>::compiled_module()`]. V8 shares the compiled code
+/// between every module object made from it, in any isolate, so C++ can make another
+/// `WebAssembly.Module` from it without recompiling (`v8::WasmModuleObject::FromCompiledModule`).
+/// It is not on the V8 heap: it keeps the code and the wire bytes alive for as long as it is held,
+/// needs no lock, and can be dropped on any thread that may use V8: one created, after V8 starts,
+/// by a thread that may use V8.
+///
+/// Drop it before V8 is disposed: dropping the last reference to the compiled code frees it
+/// through the process-wide WebAssembly engine, which `V8::Dispose()` destroys. A value that lives
+/// until process exit, such as in a `static` or `thread_local!`, may be dropped too late.
+pub struct CompiledWasmModule {
+    inner: KjOwn<ffi::CompiledWasmModule>,
+}
+
+// SAFETY: a `v8::CompiledWasmModule` holds only a `std::shared_ptr` to the module's compiled code,
+// which V8 shares between isolates on different threads, and the module's source URL. Both are
+// const, so they may be read, copied and destroyed on any thread that may use V8. Destroying the
+// last reference to the compiled code frees it through the process-wide `wasm::WasmEngine`, so it
+// must happen before `V8::Dispose()` destroys the engine; the type's docs say so.
+unsafe impl Send for CompiledWasmModule {}
+// SAFETY: `&self` only reads the wire bytes, which never change.
+unsafe impl Sync for CompiledWasmModule {}
+
+impl CompiledWasmModule {
+    /// Returns the bytes the module was compiled from, which it owns.
+    ///
+    /// Corresponds to `v8::CompiledWasmModule::GetWireBytesRef()`.
+    #[inline]
+    pub fn wire_bytes(&self) -> &[u8] {
+        let mut length = 0;
+        // SAFETY: `inner` is a live `v8::CompiledWasmModule`.
+        let data = unsafe { ffi::compiled_wasm_module_get_wire_bytes(&self.inner, &mut length) };
+        if length == 0 {
+            return &[];
+        }
+        // SAFETY: the module owns `length` bytes at `data`, which never change, for as long as
+        // `self` holds it.
+        unsafe { std::slice::from_raw_parts(data, length) }
+    }
+
+    /// Returns the C++ `kj::Own<v8::CompiledWasmModule>`, to hand the module to C++.
+    pub fn into_ffi(self) -> KjOwn<ffi::CompiledWasmModule> {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for CompiledWasmModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledWasmModule")
+            .field("wire_bytes_len", &self.wire_bytes().len())
+            .finish()
     }
 }
 
@@ -2057,6 +2207,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_typed_array(self.raw()) }
     }
 
+    /// Returns true if the value is a `WebAssembly.Module`.
+    pub fn is_wasm_module_object(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_wasm_module_object(self.raw()) }
+    }
+
     /// Returns true if the value is a `SharedArrayBuffer`.
     pub fn is_shared_array_buffer(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -2254,10 +2410,6 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
-    fn detach_before_drop(&self) -> bool {
-        T::needs_drop_detach()
-    }
-
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -2313,6 +2465,39 @@ impl Function {
         Ok(function)
     }
 
+    /// Creates a JavaScript function that V8 calls `callback` for, with no data, like C++
+    /// `v8::Function::New()` with a plain callback.
+    ///
+    /// Unlike [`Function::new`], a call doesn't reach data through a Wrappable, so it costs no
+    /// more than V8's call of `callback`. The function carries no state: its data is
+    /// `undefined`. It has no signature, so `this` can be any value, it can be called with `new`,
+    /// and, as with [`Function::new`], its name is empty and its `length` is 0.
+    ///
+    /// [`crate::function_callback`] turns a Rust closure that captures nothing into a callback,
+    /// which opens a [`crate::CallbackScope`] and turns a panic into an internal error that
+    /// terminates execution. A callback can also be an `extern "C"` function that V8 calls
+    /// directly. It gets no lock and no panic handling of its own, so a panic in it aborts the
+    /// process.
+    ///
+    /// Fails as [`Function::new`] does.
+    pub fn from_callback<'s>(
+        lock: &mut Lock<'s>,
+        callback: crate::RawFunctionCallback,
+    ) -> crate::Result<Local<'s, Self>> {
+        let undefined = lock.undefined();
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock); `callback` is a V8 function callback and `undefined` a handle in
+        // the lock's scope, in which the function is created.
+        unsafe {
+            Local::from_ffi_maybe(ffi::function_new(
+                lock.isolate().as_ffi(),
+                callback as usize,
+                undefined.raw(),
+            ))
+        }
+        .ok_or_else(Error::pending)
+    }
+
     /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
     /// and its opaque wrapper is the V8 data of every function, so the garbage collector traces
     /// `data` once, whichever of the functions are reachable, and drops it once none is.
@@ -2327,12 +2512,9 @@ impl Function {
     where
         T: Traced + 'static,
     {
-        // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
-        // Wrappable is destroyed.
-        let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
-        let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
-        let mut wrappable: WrappableRc =
-            ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
+        // As in `jsg::Rc::new`, the Wrappable owns the data, which is dropped when the Wrappable
+        // is destroyed.
+        let (mut wrappable, _) = WrappableRc::new(FunctionData(data));
         let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
@@ -2548,6 +2730,7 @@ impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
 impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
 impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
@@ -2964,6 +3147,19 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl Local<'_, WasmModuleObject> {
+    /// Returns the module's compiled code, which outlives this handle.
+    ///
+    /// Corresponds to `v8::WasmModuleObject::GetCompiledModule()`. It takes no context and runs
+    /// no JavaScript.
+    pub fn compiled_module(&self) -> CompiledWasmModule {
+        CompiledWasmModule {
+            // SAFETY: handle is valid within the current HandleScope and is a `WasmModuleObject`.
+            inner: unsafe { ffi::local_wasm_module_object_get_compiled_module(self.raw()) },
+        }
     }
 }
 
@@ -4495,6 +4691,25 @@ impl<T> TracedGlobal<T> {
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
+
+    /// Clears the traced reference, if any, without resetting it, and makes the strong handle
+    /// strong; see [`GcVisitor::visit_traced_global`]. The caller must hold the lock of the
+    /// handle's isolate, which must not be closed.
+    fn let_go_of_traced(&self) {
+        // SAFETY: GC writes into the slot only while it runs on the thread holding the lock,
+        // which is this thread; see `GlobalSlot`.
+        let (strong, traced) = unsafe {
+            (
+                &raw mut (*self.slot.strong.get()).ptr,
+                &mut *self.slot.traced.get(),
+            )
+        };
+        if traced.ptr != 0 {
+            traced.ptr = 0;
+            // SAFETY: the strong handle is valid, and this thread holds its isolate's lock.
+            unsafe { ffi::global_clear_weak(strong) };
+        }
+    }
 }
 
 /// Dropping a `TracedGlobal` hands its slot to its isolate's state, which resets the strong handle
@@ -5007,8 +5222,8 @@ impl Clone for ffi::TraitObjectPtr {
 }
 
 impl ffi::TraitObjectPtr {
-    /// Creates a `TraitObjectPtr` from a raw `*mut dyn GarbageCollected` fat pointer
-    /// and the concrete type's `TypeId`.
+    /// Creates a `TraitObjectPtr` from a raw `*mut dyn GarbageCollected` fat pointer to a `T`
+    /// and the `TypeId` of `T`.
     pub(crate) fn from_raw(ptr: *mut dyn GarbageCollected, type_id: std::any::TypeId) -> Self {
         // SAFETY: a fat pointer is layout-equivalent to [*mut (); 2].
         let [data, vtable]: [*mut (); 2] = unsafe { std::mem::transmute(ptr) };
@@ -5021,10 +5236,9 @@ impl ffi::TraitObjectPtr {
             "fat pointer layout assumption violated: expected [data, vtable]"
         );
 
-        assert!(!data.is_null(), "Rc::into_raw returned null");
+        assert!(!data.is_null(), "trait object pointer is null");
 
-        // SAFETY: TypeId is 128 bits (two usize on 64-bit), transmute to split halves for FFI storage.
-        let [type_id_lo, type_id_hi]: [usize; 2] = unsafe { std::mem::transmute(type_id) };
+        let [type_id_lo, type_id_hi] = split_type_id(type_id);
 
         Self {
             data_ptr: data as usize,
@@ -5050,8 +5264,7 @@ impl ffi::TraitObjectPtr {
 
     /// Returns the stored `TypeId`.
     pub(crate) fn type_id(&self) -> std::any::TypeId {
-        // SAFETY: Reconstructing TypeId from the same [lo, hi] halves stored in from_raw.
-        unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
+        join_type_id([self.type_id_lo, self.type_id_hi])
     }
 
     /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
@@ -5060,17 +5273,9 @@ impl ffi::TraitObjectPtr {
         if self.is_cleared() || self.type_id() != std::any::TypeId::of::<R>() {
             return None;
         }
-        // SAFETY: TypeId matched, so data_ptr is a valid Rc::into_raw pointer to R.
-        Some(unsafe { self.data_as::<R>() })
-    }
-
-    /// Returns the data pointer as a `NonNull<R>`.
-    ///
-    /// # Safety
-    /// The caller must have verified the `TypeId` matches `R`.
-    unsafe fn data_as<R>(&self) -> NonNull<R> {
-        // SAFETY: data_ptr is non-null (checked in from_raw) and TypeId was verified by caller.
-        unsafe { NonNull::new_unchecked(self.data_ptr as *mut R) }
+        // SAFETY: data_ptr is non-null (checked in from_raw), and the TypeId matched, so it
+        // points to an `R`.
+        Some(unsafe { NonNull::new_unchecked(self.data_ptr as *mut R) })
     }
 
     /// Reconstructs a shared reference to the `dyn GarbageCollected` object.
@@ -5090,24 +5295,23 @@ impl ffi::TraitObjectPtr {
         }
     }
 
-    /// Reconstructs the `Rc<dyn GarbageCollected>` and drops it.
+    /// Drops the object in place. Its storage is freed with the Wrappable.
     ///
     /// # Safety
-    /// The data pointer must have originated from `Rc::into_raw`.
-    /// Must only be called once per allocation.
-    unsafe fn drop_rc(&self) {
-        // SAFETY: transmuting [data, vtable] back into a fat pointer; Rc::from_raw
-        // reclaims the allocation originally created by Rc::into_raw in from_raw.
+    /// The object must be alive, and must not be used again.
+    unsafe fn drop_object(&self) {
+        // SAFETY: transmuting [data, vtable] back into a fat pointer to the live object, which
+        // the caller guarantees is not used again.
         unsafe {
-            let fat_ptr: *const dyn GarbageCollected =
-                std::mem::transmute([self.data_ptr as *const (), self.vtable_ptr as *const ()]);
-            drop(Rc::from_raw(fat_ptr));
+            let fat_ptr: *mut dyn GarbageCollected =
+                std::mem::transmute([self.data_ptr as *mut (), self.vtable_ptr as *mut ()]);
+            std::ptr::drop_in_place(fat_ptr);
         }
     }
 
     /// Zeroes the trait object in a Wrappable.
     ///
-    /// Called before `drop_rc` so that any re-entrant `wrappable_invoke_trace`
+    /// Called before `drop_object` so that any re-entrant `wrappable_invoke_trace`
     /// calls during destruction see null and no-op.
     ///
     /// # Safety
@@ -5118,39 +5322,19 @@ impl ffi::TraitObjectPtr {
     }
 }
 
-/// `TraitObjectPtr` → `WrappableRc`: allocates a new Wrappable on the KJ heap,
-/// transferring ownership of the `Rc`-backed `dyn GarbageCollected` fat pointer.
-///
-/// # Safety
-/// The data pointer must have come from `Rc::into_raw` and must not be used to
-/// reconstruct the Rc after this call (the Wrappable now owns it).
-impl From<ffi::TraitObjectPtr> for WrappableRc {
-    fn from(ptr: ffi::TraitObjectPtr) -> Self {
-        Self {
-            // SAFETY: ptr contains a valid Rc::into_raw data pointer (guaranteed by caller).
-            handle: unsafe { ffi::wrappable_new(ptr) },
-        }
-    }
-}
-
 unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
     // SAFETY: wrappable is valid and exclusively accessed (Pin<&mut>).
     // Clear data slots before drop to prevent re-entrant trace during destruction,
-    // then drop the Rc<dyn GarbageCollected> to release the resource.
+    // then drop the object in place.
     unsafe {
         let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable.as_ref().get_ref())
         else {
             return;
         };
-        // Clone before clearing — clear_wrappable_data zeroes data_ptr.
+        // Clone before clearing — clear_wrappable zeroes data_ptr.
         let saved = trait_ptr.clone();
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
-        // The resource is alive until `drop_rc`.
-        let resource = saved.as_gc_ref();
-        if resource.detach_before_drop() {
-            GcVisitor::detach_for_drop(resource);
-        }
-        saved.drop_rc();
+        saved.drop_object();
     }
 }
 
@@ -5165,6 +5349,55 @@ unsafe fn wrappable_invoke_trace(wrappable: &ffi::Wrappable, visitor: *mut ffi::
     }
 }
 
+/// A `TypeId` as the two halves C++ stores.
+pub(crate) fn split_type_id(type_id: TypeId) -> [usize; 2] {
+    // SAFETY: a `TypeId` is 128 bits, two `usize`s on the 64-bit targets workerd builds for.
+    unsafe { std::mem::transmute(type_id) }
+}
+
+/// The `TypeId` that [`split_type_id`] split into `halves`, which C++ stored.
+pub(crate) fn join_type_id(halves: [usize; 2]) -> TypeId {
+    // SAFETY: the halves of a `TypeId` of this binary, from `split_type_id`.
+    unsafe { std::mem::transmute(halves) }
+}
+
+/// The resource of `wrappable` as a `jsg::SnapshotTransfer`, if its type implements it.
+fn snapshot_transfer_of(wrappable: &ffi::Wrappable) -> Option<&dyn crate::ErasedSnapshotTransfer> {
+    let trait_ptr = ffi::TraitObjectPtr::from_wrappable(wrappable)?;
+    // SAFETY: the resource is alive while its Wrappable holds it.
+    unsafe { trait_ptr.as_gc_ref() }.snapshot_transfer()
+}
+
+unsafe fn wrappable_invoke_snapshot_clone(wrappable: &ffi::Wrappable, copy: &mut usize) -> bool {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return false;
+    };
+    *copy = transfer.snapshot_copy().into_wrappable();
+    true
+}
+
+unsafe fn wrappable_invoke_snapshot_references(wrappable: &ffi::Wrappable) -> Vec<usize> {
+    snapshot_transfer_of(wrappable)
+        .map_or_else(Vec::new, crate::ErasedSnapshotTransfer::snapshot_references)
+}
+
+unsafe fn wrappable_invoke_snapshot_relink(
+    wrappable: &ffi::Wrappable,
+    isolate: *mut ffi::Isolate,
+    restored: &[usize],
+) {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return;
+    };
+    // SAFETY: C++ calls this under the isolate lock, with a context entered and its own
+    // `HandleScope` innermost until it returns.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    let lock = scope.open();
+    // SAFETY: C++ passes the Wrappables of restored wrappers of this isolate, which stay alive
+    // while the context is created.
+    unsafe { transfer.snapshot_relink(lock, restored) };
+}
+
 unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str {
     // SAFETY: wrappable is valid.
     unsafe {
@@ -5175,25 +5408,6 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // literal). Convert to &str so CXX can pass it as rust::Str. The C++
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
-    }
-}
-
-unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &ffi::Wrappable) -> ffi::TraitObjectPtr {
-    const NONE: ffi::TraitObjectPtr = ffi::TraitObjectPtr {
-        data_ptr: 0,
-        vtable_ptr: 0,
-        type_id_lo: 0,
-        type_id_hi: 0,
-    };
-    // SAFETY: wrappable is valid.
-    unsafe {
-        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
-            return NONE;
-        };
-        trait_ptr
-            .as_gc_ref()
-            .snapshot_recreate()
-            .map_or(NONE, |recreated| recreated.0)
     }
 }
 
@@ -5236,16 +5450,13 @@ pub struct GcVisitor {
 }
 
 /// What a [`GcVisitor`] visits for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum VisitMode {
     /// For the C++ `jsg::GcVisitor` of its owner's visit.
     Visit,
     /// To detach the value from its owner, under the lock of the given isolate; see
     /// [`GcVisitor::is_detaching`].
     Detach(*mut ffi::Isolate),
-    /// To detach the references of a resource that is being dropped from it, before its `Drop`
-    /// runs; see [`GcVisitor::detach_for_drop`].
-    DetachForDrop,
 }
 
 impl GcVisitor {
@@ -5280,32 +5491,12 @@ impl GcVisitor {
         value.trace(&mut visitor);
     }
 
-    /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
-    /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
-    /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
-    /// next owner's visit asserts against. Every `jsg::Rc` and C++ `jsg::Ref` of an isolate whose
-    /// lock this thread holds becomes strong again and forgets its parent, as a moved C++
-    /// `jsg::Ref` does; the others are left as they are, as is every `TracedGlobal`. This can run
-    /// during the garbage collector's sweep, when the value of a weak `TracedGlobal` may already
-    /// be dead, so making one strong could revive a freed value.
-    ///
-    /// A child without a wrapper is visited once here, to make what it holds strong, and again
-    /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
-    /// resources that each implement `Drop` costs time quadratic in its length.
-    pub(crate) fn detach_for_drop(resource: &dyn GarbageCollected) {
-        let mut visitor = Self {
-            handle: ffi::GcVisitor { ptr: 0 },
-            mode: VisitMode::DetachForDrop,
-        };
-        resource.trace(&mut visitor);
-    }
-
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
     /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        matches!(self.mode, VisitMode::Detach(_) | VisitMode::DetachForDrop)
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -5335,8 +5526,6 @@ impl GcVisitor {
     ///
     /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
     ///   another, or of a closed isolate.
-    /// - A drop visit (see [`GcVisitor::detach_for_drop`]) changes the reference only if this
-    ///   thread holds the lock of the reference's isolate, and otherwise leaves it as it is.
     /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
     ///   reference as it is: a strong reference stays strong, so its target leaks rather than
     ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
@@ -5350,9 +5539,6 @@ impl GcVisitor {
                 "attempt to use a {what} in an isolate other than the one it was created in"
             );
             return true;
-        }
-        if self.mode == VisitMode::DetachForDrop {
-            return state.this_thread_holds_lock();
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
@@ -5386,8 +5572,8 @@ impl GcVisitor {
     ///
     /// # Traced nodes
     ///
-    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
+    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource (by a
+    /// hand-written `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -5434,60 +5620,31 @@ impl GcVisitor {
     /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         // Once the isolate is being torn down, its handles are left to `Dispose`, as those of a
-        // dropped `TracedGlobal` are. A drop visit leaves them as well; see `detach_for_drop`.
-        if global.state.is_closed() || self.mode == VisitMode::DetachForDrop {
+        // dropped `TracedGlobal` are.
+        if global.state.is_closed() {
             return;
         }
-        if let VisitMode::Detach(isolate) = self.mode {
-            assert!(
-                global.state.belongs_to(isolate),
-                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
-            );
-            // SAFETY: see below, and `GlobalSlot`.
-            let (strong, traced) = unsafe {
-                (
-                    &raw mut (*global.slot.strong.get()).ptr,
-                    &mut *global.slot.traced.get(),
-                )
-            };
-            if traced.ptr != 0 {
-                traced.ptr = 0;
-                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
-                // isolate, as checked above.
-                unsafe { ffi::global_clear_weak(strong) };
-            }
-            return;
-        }
-        // SAFETY: the visitor is valid for the duration of the visit.
-        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
-        if visiting.is_null() {
-            // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes under the lock of the resource's isolate.
-            if !global.state.this_thread_holds_lock() {
-                return;
-            }
+        // A detaching visit panics with the message `assert_in_isolate_of` uses for both kinds
+        // of handle; the debug assert of a GC visit names the only kind it visits.
+        let what = if self.is_detaching() {
+            "Global or TracedGlobal"
         } else {
-            let foreign = !global.state.belongs_to(visiting);
-            debug_assert!(
-                !foreign,
-                "a TracedGlobal was visited on behalf of an isolate other than its own"
-            );
-            if foreign {
-                return;
-            }
+            "TracedGlobal"
+        };
+        if !self.may_change_in(&global.state, what) {
+            return;
         }
-        // SAFETY: see above, and `GlobalSlot`.
+        global.let_go_of_traced();
+        if self.is_detaching() {
+            return;
+        }
+        // SAFETY: see `GlobalSlot`.
         let (strong, traced) = unsafe {
             (
                 &raw mut (*global.slot.strong.get()).ptr,
                 &mut *global.slot.traced.get(),
             )
         };
-        if traced.ptr != 0 {
-            traced.ptr = 0;
-            // SAFETY: the strong handle is valid, and the visit runs under the isolate lock.
-            unsafe { ffi::global_clear_weak(strong) };
-        }
         // SAFETY: the handles are valid handles of the visitor's isolate, which is locked, and
         // stay where they are for as long as they exist.
         unsafe { ffi::wrappable_visit_global(&raw mut self.handle, strong, traced) };
@@ -5641,6 +5798,48 @@ pub unsafe fn borrow_receiver<'a, R>(resource: NonNull<R>, _this: &'a Local<'_, 
 }
 
 impl WrappableRc {
+    /// Allocates a Wrappable that owns `value`, which lives in the Wrappable's allocation and is
+    /// dropped when the Wrappable is destroyed. Returns the Wrappable, with one strong reference,
+    /// and `value`'s address.
+    pub(crate) fn new<T: GarbageCollected + 'static>(value: T) -> (Self, NonNull<T>) {
+        Self::allocate(value, ffi::wrappable_init)
+    }
+
+    /// Like [`new`](Self::new), but adds no strong reference, for an object no `Rc` refers to.
+    pub(crate) fn new_unreferenced<T: GarbageCollected + 'static>(value: T) -> Self {
+        Self::allocate(value, ffi::wrappable_init_unreferenced).0
+    }
+
+    fn allocate<T: GarbageCollected + 'static>(
+        value: T,
+        init: unsafe fn(Pin<&mut ffi::Wrappable>, ffi::TraitObjectPtr),
+    ) -> (Self, NonNull<T>) {
+        const {
+            assert!(
+                align_of::<T>() <= 16,
+                "a resource or function data must not be aligned to more than 16 bytes"
+            );
+        }
+        let mut storage = 0;
+        // SAFETY: the size and alignment are those of the object moved into the storage below.
+        let handle = unsafe { ffi::wrappable_new(size_of::<T>(), align_of::<T>(), &mut storage) };
+        let object = std::ptr::with_exposed_provenance_mut::<T>(storage);
+        // SAFETY: `storage` is the address of uninitialized storage for a `T` in the Wrappable's
+        // allocation, which nothing else uses.
+        unsafe { object.write(value) };
+        let this = Self { handle };
+        let fat: *mut dyn GarbageCollected = object;
+        // SAFETY: the Wrappable is valid, and `fat` points to the object in its storage.
+        unsafe {
+            init(
+                this.as_pin_mut(),
+                ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<T>()),
+            );
+        }
+        // SAFETY: the storage of a live allocation is not null.
+        (this, unsafe { NonNull::new_unchecked(object) })
+    }
+
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable
@@ -5655,8 +5854,8 @@ impl WrappableRc {
         handle.map(|handle| Self { handle })
     }
 
-    /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
-    /// use creating) `R`'s cached constructor template.
+    /// Returns this Wrappable's JavaScript wrapper. If it has none yet, creates one as an object
+    /// of resource type `R`, using (and on first use creating) `R`'s cached constructor template.
     ///
     /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate. That
     /// is a bug in the caller, which [`resource::wrap`](crate::resource::wrap) turns into a
@@ -5671,8 +5870,24 @@ impl WrappableRc {
         &self,
         lock: &mut Lock<'s>,
     ) -> crate::Result<Option<Local<'s, Value>>> {
-        let constructor = lock.realm().get_constructor::<R>().as_ffi();
         let mut wrapped_elsewhere = false;
+        // A resource returned again usually has its wrapper already, which needs no template.
+        // SAFETY: isolate is valid and locked, and the Wrappable is alive while `self` is.
+        let existing = unsafe {
+            ffi::wrappable_get_wrapper(
+                lock.isolate().as_ffi(),
+                self.as_pin_mut(),
+                &mut wrapped_elsewhere,
+            )
+        };
+        if wrapped_elsewhere {
+            return Ok(None);
+        }
+        // SAFETY: the wrapper is read into the scope of `lock`.
+        if let Some(wrapper) = unsafe { Local::from_ffi_maybe(existing) } {
+            return Ok(Some(wrapper));
+        }
+        let constructor = lock.realm().get_constructor::<R>().as_ffi();
         // SAFETY: isolate is valid and locked; the constructor is a function template of the
         // isolate, which the Realm's template cache keeps alive.
         let handle = unsafe {
@@ -5686,7 +5901,7 @@ impl WrappableRc {
         if wrapped_elsewhere {
             return Ok(None);
         }
-        // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
+        // SAFETY: the wrapper is created in the scope of `lock`.
         let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
         Ok(Some(wrapper))
     }
@@ -5704,6 +5919,18 @@ impl WrappableRc {
         unsafe { ffi::wrappable_attach_wrapper(self.handle.clone(), pin) };
     }
 
+    /// Makes a weak reference to the Wrappable, which expires when the last `kj::Rc` reference
+    /// to it is dropped, before the Wrappable and its Rust object are destroyed.
+    ///
+    /// The caller must hold the Wrappable's isolate lock, which guards the reference's count.
+    pub(crate) fn downgrade(&self) -> WrappableWeak {
+        WrappableWeak {
+            // SAFETY: the Wrappable is valid (guaranteed by KjRc lifetime).
+            handle: unsafe { ffi::wrappable_downgrade(self.as_pin_mut()) },
+            _not_send: PhantomData,
+        }
+    }
+
     /// Creates an owning `WrappableRc` from a raw `*const ffi::Wrappable` pointer.
     ///
     /// Increments the `kj::Rc` refcount via `addRefToThis()`.
@@ -5711,15 +5938,27 @@ impl WrappableRc {
     /// # Safety
     /// The pointed-to Wrappable must still be alive.
     pub(crate) unsafe fn from_raw_wrappable(ptr: *const ffi::Wrappable) -> Self {
-        // SAFETY: ptr is valid and alive (caller verified via Weak::upgrade).
-        // The const-to-mut cast is sound for the same reason as as_pin_mut().
-        // wrappable_to_rc calls addRefToThis() which uses interior mutability.
+        // SAFETY: the caller guarantees `ptr` is alive. The const-to-mut cast is sound for the
+        // same reason as in `as_pin_mut()`.
         unsafe {
             let wrappable = Pin::new_unchecked(&mut *ptr.cast_mut());
             Self {
                 handle: ffi::wrappable_to_rc(wrappable),
             }
         }
+    }
+
+    /// The Wrappable's address, passing the caller this `kj::Rc` reference to it.
+    pub(crate) fn into_wrappable(self) -> usize {
+        let address = self.handle.get().expose_provenance();
+        std::mem::forget(self);
+        address
+    }
+
+    /// Returns a `NonNull` pointer to the underlying `ffi::Wrappable`.
+    pub(crate) fn as_ptr(&self) -> NonNull<ffi::Wrappable> {
+        // SAFETY: KjRc always holds a valid, non-null pointer.
+        unsafe { NonNull::new_unchecked(self.handle.get().cast_mut()) }
     }
 
     /// Returns a `Pin<&mut ffi::Wrappable>` for C++ FFI calls.
@@ -5769,15 +6008,6 @@ impl WrappableRc {
                 std::ptr::from_mut(&mut visitor.handle),
             );
         }
-    }
-
-    /// Returns a `NonNull` pointer to the underlying `ffi::Wrappable`.
-    ///
-    /// The `KjRc` always holds a valid, non-null pointer to the Wrappable on
-    /// the KJ heap.
-    pub(crate) fn as_ptr(&self) -> NonNull<ffi::Wrappable> {
-        // SAFETY: KjRc always holds a valid, non-null pointer.
-        unsafe { NonNull::new_unchecked(self.handle.get().cast_mut()) }
     }
 
     /// Reports the Wrappable to a heap snapshot, as C++ reports a `jsg::Ref`.
@@ -5910,7 +6140,7 @@ impl WrappableRc {
         handle.map(|handle| Self { handle })
     }
 
-    /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
+    /// Resolves the object stored in the Wrappable as a typed `NonNull<R>`.
     ///
     /// Returns `None` if the trait object has been cleared or holds a type other than `R`.
     pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
@@ -5922,13 +6152,56 @@ impl WrappableRc {
         trait_ptr.resolve::<R>()
     }
 
-    /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
+    /// Resolves the resource stored in the Wrappable as a typed `NonNull<R>`.
     ///
     /// Returns `None` if the trait object has been cleared or the stored `TypeId`
     /// does not match `R`, preventing type confusion in all builds.
     #[doc(hidden)]
     pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
         self.resolve::<R>()
+    }
+}
+
+/// An owned `kj::WeakRc<Wrappable>`, made by [`WrappableRc::downgrade`].
+///
+/// Its count is not atomic, so every operation, dropping included, needs the Wrappable's isolate
+/// lock, or must be the one thread that releases references once the isolate is disposed (see
+/// [`IsolateState`]).
+pub(crate) struct WrappableWeak {
+    handle: ffi::WrappableWeakRc,
+    _not_send: PhantomData<*const ()>,
+}
+
+impl WrappableWeak {
+    /// Whether the Wrappable is alive.
+    pub(crate) fn is_alive(&self) -> bool {
+        // SAFETY: `handle` is a valid `kj::WeakRc`.
+        unsafe { ffi::wrappable_weak_is_alive(&self.handle) }
+    }
+
+    /// Returns a strong reference to the Wrappable if it is alive.
+    pub(crate) fn upgrade(&self) -> Option<WrappableRc> {
+        // SAFETY: `handle` is a valid `kj::WeakRc`.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::wrappable_weak_upgrade(&self.handle) }.into();
+        handle.map(|handle| WrappableRc { handle })
+    }
+}
+
+impl Clone for WrappableWeak {
+    fn clone(&self) -> Self {
+        Self {
+            // SAFETY: `handle` is a valid `kj::WeakRc`.
+            handle: unsafe { ffi::wrappable_weak_clone(&self.handle) },
+            _not_send: PhantomData,
+        }
+    }
+}
+
+impl Drop for WrappableWeak {
+    fn drop(&mut self) {
+        // SAFETY: `handle` is a valid `kj::WeakRc`, not used after this.
+        unsafe { ffi::wrappable_weak_drop(&mut self.handle) };
     }
 }
 

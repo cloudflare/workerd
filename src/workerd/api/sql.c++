@@ -257,8 +257,7 @@ double SqlStorage::Cursor::getRowsWritten() {
 }
 
 SqlStorage::Cursor::RowIterator::Next SqlStorage::Cursor::next(jsg::Lock& js) {
-  auto self = JSG_THIS;
-  auto maybeRow = rowIteratorNext(js, self);
+  auto maybeRow = nextRow(js);
   bool done = maybeRow == kj::none;
   return {
     .done = done,
@@ -267,11 +266,10 @@ SqlStorage::Cursor::RowIterator::Next SqlStorage::Cursor::next(jsg::Lock& js) {
 }
 
 jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
-  auto self = JSG_THIS;
   v8::LocalVector<v8::Value> results(js.v8Isolate);
   auto& limitEnforcer = Worker::Isolate::from(js).getLimitEnforcer();
   for (;;) {
-    auto maybeRow = rowIteratorNext(js, self);
+    auto maybeRow = nextRow(js);
     KJ_IF_SOME(row, maybeRow) {
       results.push_back(row);
 
@@ -297,9 +295,8 @@ jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
 }
 
 jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
-  auto self = JSG_THIS;
-  auto result = JSG_REQUIRE_NONNULL(rowIteratorNext(js, self), Error,
-      "Expected exactly one result from SQL query, but got no results.");
+  auto result = JSG_REQUIRE_NONNULL(
+      nextRow(js), Error, "Expected exactly one result from SQL query, but got no results.");
 
   KJ_IF_SOME(s, state) {
     // It appears that the query had more results, otherwise we would have set `state` to `none`
@@ -312,13 +309,24 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
   return result;
 }
 
-jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
-  return js.alloc<RowIterator>(JSG_THIS);
+void SqlStorage::Cursor::close() {
+  KJ_IF_SOME(s, state) {
+    endQuery(*s);
+  }
+  KJ_DASSERT(state == kj::none);
 }
 
-kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  KJ_IF_SOME(values, iteratorImpl(js, obj)) {
-    auto names = obj->columnNames.getHandle(js);
+jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
+  return js.alloc<RowIterator>(IteratorState{.cursor = JSG_THIS});
+}
+
+kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, IteratorState& state) {
+  return state.cursor->nextRow(js);
+}
+
+kj::Maybe<jsg::JsObject> SqlStorage::Cursor::nextRow(jsg::Lock& js) {
+  KJ_IF_SOME(values, iteratorImpl(js)) {
+    auto names = columnNames.getHandle(js);
     jsg::JsObject result = js.obj();
     KJ_ASSERT(names.size() == values.size());
     for (auto i: kj::zeroTo(names.size())) {
@@ -331,7 +339,7 @@ kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg:
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock& js) {
-  return js.alloc<RawIterator>(JSG_THIS);
+  return js.alloc<RawIterator>(IteratorState{.cursor = JSG_THIS});
 }
 
 // Returns the set of column names for the current Cursor. An exception will be thrown if the
@@ -341,18 +349,17 @@ jsg::JsArray SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
   return columnNames.getHandle(js);
 }
 
-kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  KJ_IF_SOME(values, iteratorImpl(js, obj)) {
+kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, IteratorState& state) {
+  KJ_IF_SOME(values, state.cursor->iteratorImpl(js)) {
     return jsg::JsArray(v8::Array::New(js.v8Isolate, values.data(), values.size()));
   } else {
     return kj::none;
   }
 }
 
-kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
-    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  auto& state = *KJ_UNWRAP_OR(obj->state, {
-    if (obj->canceled) {
+kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(jsg::Lock& js) {
+  auto& stateRef = *KJ_UNWRAP_OR(state, {
+    if (canceled) {
       JSG_FAIL_REQUIRE(Error,
           "SQL cursor was closed because the same statement was executed again. If you need to "
           "run multiple copies of the same statement concurrently, you must create multiple "
@@ -363,10 +370,10 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
     }
   });
 
-  auto& query = state.query;
+  auto& query = stateRef.query;
 
   if (query.isDone()) {
-    obj->endQuery(state);
+    endQuery(stateRef);
     return kj::none;
   }
 
@@ -408,11 +415,10 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
   // GC'ed, which might prevent the cache from being effective in the meantime.
   //
   // Unfortunately, this does not help with the case where the application stops iterating with
-  // results still available from the cursor. There's not much we can do about that case since
-  // there's no way to know if the app might come back and try to use the cursor again later.
+  // results still available from the cursor. Such applications need to call close().
   query.nextRow();
   if (query.isDone()) {
-    obj->endQuery(state);
+    endQuery(stateRef);
   }
 
   return kj::mv(results);

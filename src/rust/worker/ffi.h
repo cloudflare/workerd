@@ -88,6 +88,8 @@ kj::Promise<AlarmResult> worker_run_alarm(
     WorkerInterface& worker, int64_t scheduledTimeNanos, uint32_t retryCount);
 kj::Promise<CustomEventResult> worker_custom_event(
     WorkerInterface& worker, kj::Own<CustomEvent> event);
+kj::Promise<::rust::Vec<uint64_t>> worker_bench(
+    WorkerInterface& worker, ::rust::Slice<const uint64_t> params);
 kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> event);
 void custom_event_failed(kj::Own<CustomEvent> event, kj::Exception exception);
 
