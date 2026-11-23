@@ -148,6 +148,11 @@ impl Interface for CxxWorkerInterface {
         // SAFETY: the returned future borrows self.inner for its duration.
         Ok(unsafe { bridge::worker_test(self.inner.as_mut()) }.await?)
     }
+
+    async fn bench(&mut self, params: &[u64]) -> Result<Vec<u64>> {
+        // SAFETY: the returned future borrows self.inner and params for its duration.
+        Ok(unsafe { bridge::worker_bench(self.inner.as_mut(), params) }.await?)
+    }
 }
 
 // Reverse of the conversions in ffi.rs: the bridge's shared result structs -> the crate's owned

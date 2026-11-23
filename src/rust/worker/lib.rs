@@ -92,6 +92,17 @@ pub trait Interface: kj::http::Service {
         Ok(false)
     }
 
+    /// Run the bench handler with `params`, an encoded `BenchParams` message (bench.capnp) in
+    /// words. Returns the `BenchReport.Group` the handler filled in, encoded in words, without its
+    /// name, which the caller sets. Failures in user code are recorded in the group; an error
+    /// means the handler couldn't be run at all. Only `workerd bench` calls this.
+    ///
+    /// The default fails as C++ `WorkerInterface::bench()` does, for a service without a bench
+    /// handler.
+    async fn bench(&mut self, _params: &[u64]) -> Result<Vec<u64>> {
+        Err(kj::not_implemented!("this service doesn't support bench()").into())
+    }
+
     /// Allows delivery of a variety of event types by implementing a callback that delivers the
     /// event to a particular isolate. If and when the event is delivered to an isolate,
     /// `callback->run()` will be called inside a fresh `IoContext::IncomingRequest` to begin the

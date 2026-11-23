@@ -146,6 +146,11 @@ impl Interface for PromisedInterface {
         target.test().await
     }
 
+    async fn bench(&mut self, params: &[u64]) -> Result<Vec<u64>> {
+        let target = self.target().await?;
+        target.bench(params).await
+    }
+
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
         let target = match self.target().await {
             Ok(target) => target,
