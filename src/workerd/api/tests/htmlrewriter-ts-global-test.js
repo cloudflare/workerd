@@ -86,3 +86,28 @@ export const assignmentBeforeFirstRead = {
     }
   },
 };
+
+export const readAfterFreezingTheGlobal = {
+  async test() {
+    if (env.TEST !== 'frozen') return;
+    Object.freeze(prototype);
+    Object.freeze(globalThis);
+    // The accessor can no longer become a data property, so it stays an accessor and each read
+    // gets the same class.
+    strictEqual(HTMLRewriter, HTMLRewriter);
+    strictEqual(HTMLRewriter.name, 'HTMLRewriter');
+    strictEqual(
+      typeof Object.getOwnPropertyDescriptor(holder, 'HTMLRewriter').get,
+      'function'
+    );
+    const out = await new HTMLRewriter()
+      .on('p', {
+        element(el) {
+          el.setAttribute('a', 'b');
+        },
+      })
+      .transform(new Response('<p>x</p>'))
+      .text();
+    strictEqual(out, '<p a="b">x</p>');
+  },
+};

@@ -26,6 +26,13 @@ const unitTests :Workerd.Config = (
         bindings = [(name = "TEST", text = "assign")],
       )
     ),
+    ( name = "htmlrewriter-ts-global-frozen",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-ts-global-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [(name = "TEST", text = "frozen")],
+      )
+    ),
   ],
   autogates = ["workerd-autogate-ts-html-rewriter"],
 );

@@ -462,9 +462,9 @@ if (compatFlags['expose_serialization_test_class']) {
 }
 
 // Defines `name` on `target` as an accessor that loads the value on the first
-// read and then becomes a data property holding it. An assignment before then
-// makes the data property an assignment to it would have, with the assigned
-// value.
+// read and then becomes a data property holding it, unless `target` has been
+// frozen. An assignment before then makes the data property an assignment to
+// it would have, with the assigned value.
 function defineLazyGlobal(
   target: object,
   name: string,
@@ -477,13 +477,19 @@ function defineLazyGlobal(
     enumerable,
     get(): unknown {
       const value = load();
-      ObjectDefineProperty(target, name, {
-        __proto__: null,
-        configurable: true,
-        enumerable,
-        writable: true,
-        value,
-      });
+      try {
+        ObjectDefineProperty(target, name, {
+          __proto__: null,
+          configurable: true,
+          enumerable,
+          writable: true,
+          value,
+        });
+      } catch {
+        // Freezing `target` made the accessor non-configurable, so it stays
+        // the accessor, and each read loads the value again from the module
+        // cache.
+      }
       return value;
     },
     set(this: unknown, value: unknown): void {
