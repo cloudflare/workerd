@@ -1167,5 +1167,177 @@ KJ_TEST("WorkerInterface::fromException() fails each event with the whole except
   WorkerInterface::fromException(tracedFailure())->prewarm("/warm"_kj).wait(waitScope);
 }
 
+// ======================================================================================
+// newPromisedWorkerInterface()
+//
+// These hold for both implementations: the Rust PromisedInterface when the
+// RUST_PROMISED_WORKER_INTERFACE autogate is enabled, as in the @all-autogates variant, and the C++
+// PromisedWorkerInterface otherwise.
+
+KJ_TEST("newPromisedWorkerInterface() starts its target before the first event") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto ready = kj::newPromiseAndFulfiller<void>();
+  auto started = kj::newPromiseAndFulfiller<void>();
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  auto worker = newPromisedWorkerInterface(
+      kj::mv(ready.promise)
+          .then([startedFulfiller = kj::mv(started.fulfiller),
+                    stub = kj::mv(stub)]() mutable -> kj::Own<WorkerInterface> {
+    startedFulfiller->fulfill();
+    return kj::mv(stub);
+  }));
+
+  ready.fulfiller->fulfill();
+  KJ_EXPECT(started.promise.poll(waitScope));
+
+  worker->prewarm("/warm"_kj).wait(waitScope);
+  KJ_EXPECT(stubRef.prewarmCalled);
+}
+
+KJ_TEST("newPromisedWorkerInterface() fails every event with the whole startup failure") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // The target fails to start before any event arrives.
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+  auto worker = newPromisedWorkerInterface(kj::mv(paf.promise));
+  paf.fulfiller->reject(tracedFailure());
+  waitScope.poll();
+
+  for (int attempt = 0; attempt < 2; attempt++) {
+    for (auto& event: failingEvents()) {
+      expectTracedFailure(
+          KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event(*worker, waitScope); })));
+    }
+    expectTracedFailure(KJ_ASSERT_NONNULL(
+        kj::runCatchingExceptions([&]() { worker->prewarm("/warm"_kj).wait(waitScope); })));
+    expectCustomEventFails(*worker, waitScope);
+  }
+}
+
+KJ_TEST("newPromisedWorkerInterface() tells a waiting customEvent the startup failure") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // The event arrives first and waits; the target then fails to start.
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+  auto worker = newPromisedWorkerInterface(kj::mv(paf.promise));
+  bool failedCalled = false;
+  auto pending = worker->customEvent(kj::heap<RecordingEvent>([&](const kj::Exception& e) {
+    failedCalled = true;
+    expectTracedFailure(e);
+  }));
+  KJ_ASSERT(!pending.poll(waitScope));
+  KJ_EXPECT(!failedCalled);
+
+  paf.fulfiller->reject(tracedFailure());
+  expectTracedFailure(
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { pending.wait(waitScope); })));
+  KJ_EXPECT(failedCalled);
+}
+
+KJ_TEST("newPromisedWorkerInterface() forwards events to its target once it starts") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+  auto worker = newPromisedWorkerInterface(kj::mv(paf.promise));
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+
+  // An event canceled while it waits leaves the start to the next one.
+  {
+    auto canceled = worker->runScheduled(kj::UNIX_EPOCH, "* * * * *"_kj);
+    KJ_ASSERT(!canceled.poll(waitScope));
+  }
+  KJ_EXPECT(!stubRef.runScheduledCalled);
+
+  // An event that arrives while the target is starting waits for it.
+  auto pending = worker->prewarm("/warm"_kj);
+  KJ_ASSERT(!pending.poll(waitScope));
+  KJ_EXPECT(!stubRef.prewarmCalled);
+  paf.fulfiller->fulfill(kj::mv(stub));
+  pending.wait(waitScope);
+  KJ_EXPECT(stubRef.prewarmCalled);
+  KJ_EXPECT(stubRef.prewarmUrl == "/warm");
+
+  auto scheduled =
+      worker->runScheduled(kj::UNIX_EPOCH + 1000 * kj::SECONDS, "0 0 * * *"_kj).wait(waitScope);
+  KJ_EXPECT(stubRef.runScheduledCalled);
+  KJ_EXPECT(scheduled.outcome == workerd::EventOutcome::OK);
+
+  auto alarm = worker->runAlarm(kj::UNIX_EPOCH + 2000 * kj::SECONDS, 3).wait(waitScope);
+  KJ_EXPECT(stubRef.runAlarmCalled);
+  KJ_EXPECT(!alarm.retryCountsAgainstLimit);
+  KJ_EXPECT(alarm.outcome == workerd::EventOutcome::OK);
+
+  auto stored = worker->abandonAlarm(kj::UNIX_EPOCH + 3000 * kj::SECONDS).wait(waitScope);
+  KJ_EXPECT(stubRef.abandonAlarmCalled);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(stored) == StubWorker::STORED_ALARM_TIME);
+
+  auto custom = worker
+                    ->customEvent(kj::heap<RecordingEvent>([](const kj::Exception&) {
+    KJ_FAIL_EXPECT("failed() called on a started target");
+  })).wait(waitScope);
+  KJ_EXPECT(stubRef.customEventCalled);
+  KJ_EXPECT(custom.outcome == workerd::EventOutcome::OK);
+
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  auto client = kj::newHttpClient(*worker);
+  auto response =
+      client->request(kj::HttpMethod::GET, "http://test/"_kj, headers).response.wait(waitScope);
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(response.body->readAllText().wait(waitScope) == "STUB");
+
+  auto connected = client->connect("example.com:443"_kj, headers, kj::HttpConnectSettings{})
+                       .status.wait(waitScope);
+  KJ_EXPECT(stubRef.connectCalled);
+  KJ_EXPECT(stubRef.connectHost == "example.com:443");
+  KJ_EXPECT(connected.statusCode == 200);
+}
+
+KJ_TEST("newPromisedWorkerInterface() cancels its target's start when dropped") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // Dropped before any event.
+  {
+    auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+    auto worker = newPromisedWorkerInterface(kj::mv(paf.promise));
+    waitScope.poll();
+    KJ_EXPECT(paf.fulfiller->isWaiting());
+    worker = nullptr;
+    KJ_EXPECT(!paf.fulfiller->isWaiting());
+  }
+
+  // Dropped after an event that waited on the start was canceled.
+  {
+    auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+    auto worker = newPromisedWorkerInterface(kj::mv(paf.promise));
+    {
+      auto pending = worker->prewarm("/warm"_kj);
+      KJ_ASSERT(!pending.poll(waitScope));
+    }
+    KJ_EXPECT(paf.fulfiller->isWaiting());
+    worker = nullptr;
+    KJ_EXPECT(!paf.fulfiller->isWaiting());
+  }
+}
+
+KJ_TEST("promised interface forwards test() to its target") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  auto worker = newPromisedInterface(kj::Own<WorkerInterface>(kj::mv(stub)));
+  KJ_EXPECT(worker->test().wait(waitScope));
+  KJ_EXPECT(stubRef.testCalled);
+}
+
 }  // namespace
 }  // namespace workerd

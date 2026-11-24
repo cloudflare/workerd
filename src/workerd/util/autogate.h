@@ -141,7 +141,10 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* newPromisedWorkerInterface() makes the Rust PromisedInterface in src/rust/worker/promised.rs  \
+     instead of the C++ PromisedWorkerInterface in io/worker-interface.c++. */                     \
+  V(RUST_PROMISED_WORKER_INTERFACE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
