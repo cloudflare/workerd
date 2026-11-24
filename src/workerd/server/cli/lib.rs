@@ -6,12 +6,14 @@
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
 //! first joins a config without a cluster to one with `--cluster-addr` and adds the deployments in
 //! the cluster's bucket to the config ([`deployments`]), and `deploy` publishes one ([`deploy`]).
+//! `repl` evaluates JavaScript typed at a console ([`repl`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Three modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations;
-// socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor; and
-// rseq.rs, which reads a glibc symbol and edits the environment before any thread starts.
-// Everything else is safe code over std, socket2 and the bridge.
+// Six modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
+// to FFI declarations; socket_fd.rs, where a descriptor number from the command line becomes an
+// owned descriptor; rseq.rs, which reads a glibc symbol and edits the environment before any
+// thread starts; repl/terminal.rs, which puts the terminal in raw mode; and repl/interrupt.rs,
+// which takes SIGINT. Everything else is safe code over std, socket2 and the bridges.
 
 mod args;
 mod bridge;
@@ -20,6 +22,7 @@ mod deploy;
 mod deployments;
 mod help;
 mod process;
+mod repl;
 #[cfg(target_os = "linux")]
 mod rseq;
 #[cfg(target_os = "linux")]
@@ -215,6 +218,14 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             const_name,
             deploy,
         } => Ok(run_deploy(&project, const_name, &deploy, executable)),
+        args::Command::Repl { repl } => {
+            if !repl.experimental {
+                usage_error::<T>(
+                    "The repl command is experimental. Pass --experimental to use it.",
+                );
+            }
+            repl::run(verbose, repl)
+        }
     }
 }
 
@@ -645,7 +656,7 @@ fn watcher<T: CommandFactory>(
             );
         };
         Some(
-            Watcher::new(executable.path())
+            Watcher::with_executable(executable.path())
                 .unwrap_or_else(|error| usage_error::<T>(format!("--watch: {error}"))),
         )
     }

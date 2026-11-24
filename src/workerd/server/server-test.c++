@@ -531,6 +531,7 @@ class Server: public kj::PtrTarget {
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
     auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
+    started.mock_internet();
     for (auto& [deployment, service]: deploymentServices) {
       started.add_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
           service.asPtr().as<kj_rs::RustUncheckedUtf8>());
