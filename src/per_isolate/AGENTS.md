@@ -61,7 +61,10 @@ at context creation, before any user code. C++ entry point:
   in `types/AGENTS.md` for overloads, `@internal`, interfaces merged with a
   class, and hand-written declarations, and "Porting an API to the
   bootstrap" there for the steps that move an API's types from C++. The
-  tsconfig sets `stripInternal` for them.
+  tsconfig sets `stripInternal`, so an `@internal` declaration is missing
+  from every declaration file the bootstrap emits, not only from what the
+  manifest publishes. `types/` is those files' only reader: embedder
+  scripts type-check against `per_isolate-env.d.ts`.
 
 ## EMBEDDER SCRIPTS
 
