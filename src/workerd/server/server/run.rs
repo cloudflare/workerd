@@ -209,7 +209,7 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let (ports, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
+    let (listening, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
@@ -219,8 +219,8 @@ async fn start(
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener, &mut control)?;
     }
-    for (name, port, url) in ports {
-        control.listen(&name, port, url);
+    for socket in listening {
+        control.listen(&socket.name, socket.port, socket.url);
     }
     listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
@@ -272,16 +272,22 @@ fn start_cluster(
     Ok(())
 }
 
-/// Starts the listener of every socket of the config that bound; each socket's name, port and URL,
-/// for its `listen` event, and the listeners. A socket whose service does not resolve is a config
-/// error.
+/// A socket that listens, as its `listen` event reports it.
+struct ListeningSocket {
+    name: String,
+    port: u16,
+    url: Option<String>,
+}
+
+/// Starts the listener of every socket of the config that bound; the sockets, for their `listen`
+/// events, and the listeners. A socket whose service does not resolve is a config error.
 fn socket_listeners(
     context: &Rc<ListenContext>,
     config: config::Reader<'_>,
     bound: Vec<Option<(BoundSocket, String)>>,
     server: &Server,
-) -> Result<(Vec<(String, u16, Option<String>)>, Listeners)> {
-    let mut ports = Vec::new();
+) -> Result<(Vec<ListeningSocket>, Listeners)> {
+    let mut listening = Vec::new();
     let listeners = Listeners::new();
     let sockets = config.get_sockets().map_err(capnp_error)?;
     for (sock, bound) in sockets.iter().zip(bound) {
@@ -302,14 +308,15 @@ fn socket_listeners(
         }
         let channel = server.lookup(&designator);
         let port = listen::bound_port(&bound)?;
-        ports.push((name, port, listen::url(sock, &address, port)));
+        let url = listen::url(sock, &address, port);
+        listening.push(ListeningSocket { name, port, url });
         if let Some(listener) =
             listener(Rc::clone(context), sock, bound, &address, channel, server)?
         {
             listeners.push(listener);
         }
     }
-    Ok((ports, listeners))
+    Ok((listening, listeners))
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
