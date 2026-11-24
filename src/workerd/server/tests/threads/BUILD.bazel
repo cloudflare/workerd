@@ -57,3 +57,19 @@ js_test(
     ],
     tags = ["js-test"],
 )
+
+js_test(
+    name = "threads-services-test",
+    size = "large",
+    data = [
+        ":services-config.capnp",
+        ":services-worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "services-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_SERVICES_CONFIG": "$(rootpath :services-config.capnp)",
+    },
+    tags = ["js-test"],
+)
