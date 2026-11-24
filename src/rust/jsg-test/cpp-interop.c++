@@ -73,6 +73,32 @@ kj::StringPtr TestCppHolder::which(kj::OneOf<HostRef, ::workerd::jsg::Ref<TestCp
   KJ_UNREACHABLE;
 }
 
+void TestCppFinisher::serialize(::workerd::jsg::Lock& js, ::workerd::jsg::Serializer& serializer) {
+  serializer.write(js, value.getHandle(js));
+}
+
+::workerd::jsg::Ref<TestCppFinisher> TestCppFinisher::deserialize(
+    ::workerd::jsg::Lock& js, SerializationTag tag, ::workerd::jsg::Deserializer& deserializer) {
+  auto value = deserializer.readValue(js);
+  deserializer.afterRead([value = ::workerd::jsg::JsRef<::workerd::jsg::JsValue>(js, value)](
+                             ::workerd::jsg::Lock& js) {
+    auto afterRead = js.global().get(js, "afterRead"_kj);
+    KJ_ASSERT_NONNULL(afterRead.tryCast<::workerd::jsg::JsFunction>())
+        .callNoReceiver(js, value.getHandle(js));
+  });
+  return js.alloc<TestCppFinisher>(::workerd::jsg::JsRef<::workerd::jsg::JsValue>(js, value));
+}
+
+::workerd::jsg::JsObject TestCppGetter::deserialize(
+    ::workerd::jsg::Lock& js, SerializationTag tag, ::workerd::jsg::Deserializer& deserializer) {
+  v8::Local<v8::Object> object = js.obj();
+  v8::Local<v8::Function> getter = KJ_ASSERT_NONNULL(
+      js.global().get(js, "probeGetter"_kj).tryCast<::workerd::jsg::JsFunction>());
+  v8::Local<v8::String> name = js.strIntern("probe"_kj);
+  object->SetAccessorProperty(name, getter);
+  return ::workerd::jsg::JsObject(object);
+}
+
 uint32_t holdersDestroyedForTest() {
   return holdersDestroyed;
 }
@@ -213,6 +239,14 @@ jsg_cpp::MaybeLocal test_cpp_derived_new(v8::Isolate* isolate) {
 jsg_cpp::MaybeLocal test_cpp_holder_new(v8::Isolate* isolate) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   return wrapNew(isolate, js.alloc<TestCppHolder>());
+}
+
+jsg_cpp::MaybeLocal test_cpp_finisher_new(v8::Isolate* isolate, jsg_cpp::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle =
+      ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value)));
+  return wrapNew(isolate,
+      js.alloc<TestCppFinisher>(::workerd::jsg::JsRef<::workerd::jsg::JsValue>(js, handle)));
 }
 
 jsg_cpp::MaybeLocal test_cpp_holder_new_holding_host(v8::Isolate* isolate, ::rust::Str label) {

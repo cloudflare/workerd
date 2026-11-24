@@ -799,6 +799,12 @@ wd_test(
 )
 
 wd_test(
+    src = "deserialize-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["deserialize-pollution-test.js"],
+)
+
+wd_test(
     src = "actor-stub-test.wd-test",
     args = ["--experimental"],
     data = ["actor-stub-test.js"],
