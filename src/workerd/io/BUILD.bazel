@@ -878,6 +878,17 @@ kj_test(
 kj_test(
     src = "hibernation-manager-test.c++",
     deps = [
+        ":hibernation-manager-test-fixture",
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+wd_cc_library(
+    name = "hibernation-manager-test-fixture",
+    testonly = True,
+    hdrs = ["hibernation-manager-test-fixture.h"],
+    deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
     ],
