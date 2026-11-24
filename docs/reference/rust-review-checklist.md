@@ -15,8 +15,7 @@ All Rust/C++ interop uses the `cxx` crate. Each crate with a bridge declares
   `Box`/`UniquePtr`.
 - **Always** verify that lifetimes are respected — an opaque C++ type behind `&T` must outlive the
   Rust reference.
-- **Always** verify that bridges must use the `workerd::rust::<crate_name>` naming convention. The
-  only exception is `python-parser` which uses `edgeworker::rust::python_parser`.
+- **Always** verify that bridges must use the `workerd::rust::<crate_name>` naming convention.
 - **Always** verify companion files. Every CXX bridge should have hand-written `ffi.c++` and `ffi.h`
   implementing the C++ side. Generated headers (`<file>.rs.h`) are produced by the build system.
 
