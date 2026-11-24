@@ -285,6 +285,44 @@ export type { Thing };
   );
 });
 
+test('collectPerIsolateDeclarations: rejects a private or protected member', () => {
+  // TypeScript emits these, unlike #private members.
+  for (const [member, memberName] of [
+    ['private store;', 'store'],
+    ['protected flush(): void;', 'flush'],
+  ]) {
+    assert.throws(
+      () =>
+        collect({
+          'public-types.d.ts': `export type { Thing } from './thing';\n`,
+          'thing.d.ts': `declare class Thing {
+    #private;
+    ${member}
+}
+export type { Thing };
+`,
+        }),
+      {
+        message: `Thing: ${memberName} is private or protected, which the Workers types would publish; make it a #private member`,
+      }
+    );
+  }
+  // A class that users cannot construct.
+  assert.strictEqual(
+    collect({
+      'public-types.d.ts': `export type { Thing } from './thing';\n`,
+      'thing.d.ts': `declare class Thing {
+    private constructor();
+}
+export type { Thing };
+`,
+    }),
+    `declare class Thing {
+    private constructor();
+}`
+  );
+});
+
 test('collectPerIsolateDeclarations: gives a class the type parameter constraints and defaults of a merged interface', () => {
   const printed = collect({
     'public-types.d.ts': `export type { Thing } from './thing';\n`,

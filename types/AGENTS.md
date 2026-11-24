@@ -111,6 +111,9 @@ emits is what users get:
   standard MDN comments by name. TypeScript leaves `@internal` members out
   only of the declaration files it emits, so the generator rejects one in a
   hand-written declaration file, which declares only the public surface.
+  TypeScript emits a member marked `private` or `protected`, which would
+  make the published class nominal, so the generator rejects one: a member
+  the class keeps to itself is `#private`.
 
 ### Porting an API to the bootstrap
 

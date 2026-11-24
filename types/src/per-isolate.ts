@@ -407,6 +407,7 @@ function foldInterfaces(
   interfaces: ts.InterfaceDeclaration[]
 ): ts.ClassDeclaration {
   checkMembersDeclaredOnce(name, declaration, interfaces);
+  checkNoPrivateOrProtectedMembers(name, declaration);
   const members: ts.ClassElement[] = declaration.members.filter(
     (member) =>
       !(ts.isPropertyDeclaration(member) && ts.isPrivateIdentifier(member.name))
@@ -448,6 +449,26 @@ function foldInterfaces(
     heritageClauses.length === 0 ? undefined : heritageClauses,
     members
   );
+}
+
+// TypeScript leaves only `#private` members out of the declaration files it
+// emits: one marked `private` or `protected` would print, naming it in the
+// Workers types and making the class nominal, so that a structurally equal
+// object no longer assigns to it. A constructor's modifier says only who may
+// construct the class.
+function checkNoPrivateOrProtectedMembers(
+  name: string,
+  declaration: ts.ClassDeclaration
+): void {
+  for (const member of declaration.members) {
+    if (ts.isConstructorDeclaration(member)) continue;
+    const flags = ts.getCombinedModifierFlags(member);
+    if (flags & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) {
+      throw new Error(
+        `${name}: ${member.name?.getText()} is private or protected, which the Workers types would publish; make it a #private member`
+      );
+    }
+  }
 }
 
 // TypeScript orders the overloads of a member that more than one of the
