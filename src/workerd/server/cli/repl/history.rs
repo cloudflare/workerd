@@ -7,10 +7,11 @@
 //! `WORKERD_REPL_HISTORY` turns saving off.
 //!
 //! The file holds one entry per line; an entry has no line breaks, since Enter ends a line. Each
-//! entry is appended as it is submitted, rather than the history being written at exit, because a
-//! Ctrl+C while an input runs ends the process at once. Loading keeps the latest entries and
-//! rewrites a file that holds more, in place, so that a history file that is a symbolic link stays
-//! one. The file is created readable by its owner only: typed lines can hold secrets.
+//! entry is appended as it is submitted, rather than the history being written at exit, because the
+//! REPL can end at once: a second Ctrl+C while an input runs ends the process, as a signal does.
+//! Loading keeps the latest entries and rewrites a file that holds more, in place, so that a
+//! history file that is a symbolic link stays one. The file is created readable by its owner only:
+//! typed lines can hold secrets.
 
 use std::ffi::OsString;
 use std::fs;
