@@ -38,6 +38,10 @@ struct ReplEnvironmentOptions {
 
   // Render results with ANSI colors.
   bool colors = false;
+
+  // For tests: awaited as the close of each server that this environment, or one it starts,
+  // loaded begins, so that a test can hold a close open.
+  kj::Maybe<kj::Function<kj::Promise<void>()>&> beforeServerClose;
 };
 
 // The JavaScript environment `workerd repl` evaluates input in: a worker that never receives an

@@ -260,9 +260,13 @@ kj::Promise<void> ReplConfigServer::close() {
 }
 
 kj::Promise<void> ReplConfigServer::closeServer() {
+  KJ_DEFER(closeDone = true);
   // The server's isolates end on the event loop, not under the lock of the isolate that asked for
   // the close.
   co_await kj::yield();
+  KJ_IF_SOME(hold, context.beforeClose) {
+    co_await hold();
+  }
   watching = kj::none;
   // A reload under way finishes, and its server is the one closed. No reload starts after this
   // one: they refuse once closing has begun.

@@ -471,6 +471,10 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
   bool isClosed() const override {
     return closing != kj::none;
   }
+  // Whether the close has finished, or failed; isClosed() is true from when it begins.
+  bool isCloseDone() const {
+    return closeDone;
+  }
 
   kj::Promise<kj::String> evaluate(kj::String input) override {
     auto& open = requireOpen();
@@ -491,6 +495,8 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
   kj::Maybe<kj::Own<ReplEnvironment>> environment;
   kj::String compatibilityDate;
   kj::Array<kj::String> compatibilityFlags;
+  // Set as ReplConfigServer's is.
+  bool closeDone = false;
   kj::Maybe<kj::ForkedPromise<void>> closing;
   // Declared after `environment`, so that what it wraps is canceled before that is destroyed.
   kj::Canceler canceler;
@@ -511,6 +517,7 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
   }
 
   kj::Promise<void> closeEnvironment() {
+    KJ_DEFER(closeDone = true);
     // Asked for under the REPL's isolate lock; the environment's isolate is torn down without it.
     co_await kj::yield();
     canceler.cancel(JSG_KJ_EXCEPTION(FAILED, Error, "The environment was closed."));
@@ -587,12 +594,14 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
         .replHeaderTable = *headerTable,
         .loader = configLoader,
         .experimental = options.experimental,
+        .beforeClose = options.beforeServerClose,
       },
       kj::mv(source));
-  // Drop the servers that were closed since the last load.
+  // Drop the servers that finished closing since the last load. One still closing stays, so that
+  // drain() waits for it.
   kj::Vector<kj::Own<ReplConfigServer>> open(servers.size() + 1);
   for (auto& s: servers) {
-    if (!s->isClosed()) open.add(kj::mv(s));
+    if (!s->isCloseDone()) open.add(kj::mv(s));
   }
   open.add(kj::addRef(*server));
   servers = kj::mv(open);
@@ -609,6 +618,7 @@ kj::Own<ReplEnvironment> ReplEnvironment::startEnvironment(
           .experimental = options.experimental,
           // The rendering is a string in the REPL that started it, where escapes would show.
           .colors = false,
+          .beforeServerClose = options.beforeServerClose,
         });
   }
   KJ_CATCH(exception) {
@@ -626,10 +636,11 @@ kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
   auto environment = startEnvironment(date, settings.compatibilityFlags);
   auto nested = kj::refcounted<Nested>(
       kj::mv(environment), kj::mv(date), kj::mv(settings.compatibilityFlags));
-  // Drop the environments that were closed since the last one started.
+  // Drop the environments that finished closing since the last one started, as loadConfig() drops
+  // servers.
   kj::Vector<kj::Own<Nested>> open(environments.size() + 1);
   for (auto& e: environments) {
-    if (!e->isClosed()) open.add(kj::mv(e));
+    if (!e->isCloseDone()) open.add(kj::mv(e));
   }
   open.add(kj::addRef(*nested));
   environments = kj::mv(open);

@@ -189,11 +189,29 @@ struct Fixture final: public ReplConfigLoader {
   // wait on one.
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> change;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> watchAwaited;
+
+  // The close holdNextClose() holds: what it waits on, and what to tell once it does.
+  struct NextClose {
+    kj::Promise<void> held;
+    kj::Own<kj::PromiseFulfiller<void>> waiting;
+  };
+  kj::Maybe<NextClose> nextClose;
+  kj::Function<kj::Promise<void>()> beforeServerClose = [this]() -> kj::Promise<void> {
+    KJ_IF_SOME(next, nextClose) {
+      auto held = kj::mv(next.held);
+      next.waiting->fulfill();
+      nextClose = kj::none;
+      return held;
+    }
+    return kj::READY_NOW;
+  };
+
   TestCandidateSource candidateSource;
+  bool drained = false;
   ReplEnvironment environment;
 
   explicit Fixture(ReplEnvironmentOptions options = {})
-      : environment(resources, *this, candidateSource, kj::mv(options)) {
+      : environment(resources, *this, candidateSource, holdingCloses(kj::mv(options))) {
     setConfig("worker.capnp", WORKER_CONFIG);
     setConfig("no-sockets.capnp", NO_SOCKETS_CONFIG);
     setConfig("broken.capnp", BROKEN_CONFIG);
@@ -201,7 +219,36 @@ struct Fixture final: public ReplConfigLoader {
   }
 
   ~Fixture() noexcept(false) {
-    environment.drain().wait(io.waitScope);
+    if (!drained) {
+      environment.drain().wait(io.waitScope);
+    }
+  }
+
+  ReplEnvironmentOptions holdingCloses(ReplEnvironmentOptions options) {
+    options.beforeServerClose = beforeServerClose;
+    return options;
+  }
+
+  // Drains the environment, which ~Fixture otherwise does.
+  kj::Promise<void> drain() {
+    drained = true;
+    return environment.drain();
+  }
+
+  struct HeldClose {
+    // Resolves once the close has begun and waits.
+    kj::Promise<void> waiting;
+    // Lets it go on.
+    kj::Own<kj::PromiseFulfiller<void>> release;
+  };
+
+  // Holds the next close of a server that the environment, or one it starts, loaded, until
+  // released.
+  HeldClose holdNextClose() {
+    auto held = kj::newPromiseAndFulfiller<void>();
+    auto waiting = kj::newPromiseAndFulfiller<void>();
+    nextClose = NextClose{.held = kj::mv(held.promise), .waiting = kj::mv(waiting.fulfiller)};
+    return {.waiting = kj::mv(waiting.promise), .release = kj::mv(held.fulfiller)};
   }
 
   void setConfig(kj::StringPtr path, kj::StringPtr text) {
@@ -765,6 +812,41 @@ KJ_TEST("REPL closes a server at once, whatever the config's shutdownDelayMs") {
   auto closing = fixture.environment.evaluate(candidates.finish());
   auto closed = fixture.resources.timer.timeoutAfter(5 * kj::SECONDS, kj::mv(closing));
   KJ_EXPECT(closed.wait(fixture.io.waitScope).text == "undefined");
+}
+
+// The drain that `fixture` starts once `close`'s close is held and the environment has let go of
+// what it closes: the drain must wait for the close, and then finish.
+void expectDrainWaitsFor(Fixture& fixture, Fixture::HeldClose close) {
+  auto draining = fixture.drain();
+  KJ_EXPECT(!draining.poll(fixture.io.waitScope), "the drain did not wait for the close");
+  close.release->fulfill();
+  draining.wait(fixture.io.waitScope);
+}
+
+KJ_TEST("REPL drains a server whose close a later load found still under way") {
+  Fixture fixture;
+  fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')");
+  auto close = fixture.holdNextClose();
+  KJ_EXPECT(fixture.eval("s.close(), 'closing'") == "'closing'");
+  close.waiting.wait(fixture.io.waitScope);
+  // A load lets go of the servers that have closed.
+  fixture.evalAwait("t = await workerd.loadConfig('worker.capnp')");
+  expectDrainWaitsFor(fixture, kj::mv(close));
+}
+
+KJ_TEST("REPL drains an environment whose close a later start found still under way") {
+  Fixture fixture;
+  fixture.evalAwait("e = await workerd.environment()");
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("await e.eval(\"s = await workerd.loadConfig('worker.capnp')\")"),
+      "'ReplServer {");
+  auto close = fixture.holdNextClose();
+  // Closing the environment closes its server, whose close waits.
+  KJ_EXPECT(fixture.eval("e.close(), 'closing'") == "'closing'");
+  close.waiting.wait(fixture.io.waitScope);
+  // A start lets go of the environments that have closed.
+  fixture.evalAwait("f = await workerd.environment()");
+  expectDrainWaitsFor(fixture, kj::mv(close));
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
+#include <kj/function.h>
 #include <kj/refcount.h>
 #include <kj/time.h>
 #include <kj/timer.h>
@@ -71,6 +72,8 @@ struct ReplServerContext {
   ReplConfigLoader& loader;
   // `--experimental`.
   bool experimental;
+  // ReplEnvironmentOptions::beforeServerClose.
+  kj::Maybe<kj::Function<kj::Promise<void>()>&> beforeClose;
 };
 
 // Whether a reload prints its outcome rather than failing with it.
@@ -118,6 +121,10 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
   bool isClosed() const override {
     return closing != kj::none;
   }
+  // Whether the close has finished, or failed; isClosed() is true from when it begins.
+  bool isCloseDone() const {
+    return closeDone;
+  }
   bool isWatching() const override {
     return source.watch && !isClosed();
   }
@@ -145,6 +152,9 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
   // Waits for a watched file to change, then asks for a reload; none if the config isn't watched,
   // or once closing has begun.
   kj::Maybe<kj::Promise<void>> watching;
+  // Set by the close as it ends, even if it is destroyed unfinished: declared before `closing`,
+  // which holds it.
+  bool closeDone = false;
   kj::Maybe<kj::ForkedPromise<void>> closing;
 
   // Asks for a reload after the one asked for last; the reload, which fails if it does unless
