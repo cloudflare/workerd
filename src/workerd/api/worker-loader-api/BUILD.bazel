@@ -1,0 +1,25 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# WorkerLoader and WorkerStub, the JavaScript API of a Worker Loader binding, in Rust. C++ creates
+# it for a Worker Loader binding when the RUST_WORKER_LOADER autogate is on; worker-loader.c++
+# otherwise.
+wd_rust_crate(
+    name = "worker-loader-api",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io:compatibility-date",
+    ],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
+        "//src/workerd/api/worker-loader-interop",
+        "//src/workerd/io/frankenvalue",
+        "//src/workerd/io/io-context",
+    ],
+)

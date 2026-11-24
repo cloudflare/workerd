@@ -10,6 +10,7 @@
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/worker-loader-api/ffi.rs.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/modules-new.h>
@@ -761,6 +762,11 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           context, lock.alloc<api::LoopbackDurableObjectClass>(global.getLoopbackActorClass()));
 
     case Global::WORKER_LOADER:
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_WORKER_LOADER)) {
+        return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+            api::worker_loader_new(lock.v8Isolate, global.getWorkerLoader(),
+                CompatibilityDateValidation::CODE_VERSION)));
+      }
       return lock.wrap(context,
           lock.alloc<api::WorkerLoader>(
               global.getWorkerLoader(), CompatibilityDateValidation::CODE_VERSION));

@@ -359,10 +359,12 @@ once.
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
 | `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
-| `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
+| `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID, Worker Loader) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
+| `src/workerd/api/tests/startup-snapshot-worker-loader-test` | the Worker Loader case of `startup-snapshot-bindings-test` with the pipeline on in every variant, so both the C++ and the Rust `WorkerLoader` cross the snapshot |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 
 Each `wd_test` runs the pipeline in its `@all-autogates` variant and the plain Worker in the `@`
-variant, and asserts the same observable behavior for both. A case Worker learns which path it
+variant, and asserts the same observable behavior for both, except
+`startup-snapshot-worker-loader-test`, whose config turns the pipeline on in every variant. A case Worker learns which path it
 took at request time from `startedFromStartupSnapshot()` on `workerd:unsafe`; asked at module
 scope, the answer would be the zygote's and be baked into the snapshot.

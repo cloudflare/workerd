@@ -34,6 +34,9 @@ switch (MODE) {
     captured = { ns, id: ns.idFromName('a') };
     break;
   }
+  case 'worker-loader':
+    captured = env.LOADER;
+    break;
   case 'rpc-property':
     // A method taken off a stub is a JsRpcProperty holding the stub, which has no transfer.
     captured = env.RPC.ping;
@@ -80,6 +83,31 @@ async function checks() {
           captured.id.toString() === env.NS.idFromName('a').toString(),
         works: (await captured.ns.get(captured.id).ping()) === 'pong',
       };
+    case 'worker-loader': {
+      const code = (compatibilityDate) => ({
+        compatibilityDate,
+        mainModule: 'main.js',
+        modules: {
+          'main.js': 'export default { echo(value) { return value; } }',
+        },
+      });
+      // workerd's loaders accept compatibility dates up to the code version only.
+      let futureDateRejected = false;
+      try {
+        await captured.load(code('2999-12-31')).getEntrypoint().echo('');
+      } catch (e) {
+        futureDateRejected = /compatibility date/.test(e.message);
+      }
+      return {
+        sameBinding: captured === env.LOADER,
+        works:
+          (await captured
+            .load(code('2025-01-01'))
+            .getEntrypoint()
+            .echo('pong')) === 'pong',
+        futureDateRejected,
+      };
+    }
     case 'rpc-property':
       return { works: (await captured()) === 'pong' };
     case 'wrapped':
@@ -107,15 +135,22 @@ async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
   // snapshot says whether the pipeline is on in this variant.
   const pipelineOn = unsafe.startedFromStartupSnapshot();
+  // A config that turns the startup-snapshot autogate on itself requires the pipeline in every
+  // variant.
+  if (env.SNAPSHOT_REQUIRED) {
+    strictEqual(pipelineOn, true, 'runner: snapshotUsed');
+  }
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
-  const transferable = ['rpc', 'durable-object'];
+  const transferable = ['rpc', 'durable-object', 'worker-loader'];
   // Cases that fail the zygote, or whose bindings keep them out of the pipeline: always plain
   // Workers.
   const fallback = ['rpc-property', 'wrapped', 'crypto-key'];
 
+  // A config may bind only some of the cases.
   const run = async (name, expectedSnapshotUsed) => {
+    if (!(name in env)) return;
     const response = await env[name].fetch('http://case/');
     const r = await response.json();
     strictEqual(r.mode, name);

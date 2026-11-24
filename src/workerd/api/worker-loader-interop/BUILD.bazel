@@ -1,0 +1,43 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# What the Rust Worker Loader (api/worker-loader-api) needs of C++: building a
+# DynamicWorkerSource, IoChannelFactory::loadIsolate(), and the WorkerStubChannel it returns.
+# ffi.h and ffi.c++ are the shims, C++ API code that lives with the API.
+wd_rust_crate(
+    name = "worker-loader-interop",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/api/channel-interop:ffi.rs@cxx",
+        "//src/workerd/io",
+        "//src/workerd/io/frankenvalue:ffi.rs@cxx",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
+        "//src/workerd/io/frankenvalue",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io",
+        "//src/workerd/io/io-context:current-with-id",
+    ],
+)

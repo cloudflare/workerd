@@ -405,6 +405,37 @@ impl<'s> IoContext<'s> {
         })
     }
 
+    /// [`await_js_local`](Self::await_js_local) for a typed promise, as C++ `awaitJs()` waits
+    /// for a `jsg::Promise<T>`: `map` takes the promise's value, which the promise's own
+    /// conversion, if any, made before this reaction runs.
+    ///
+    /// # Errors
+    /// As for `await_js_local`, and `map` fails with an internal error if the promise was settled
+    /// with a value other than its own (see [`jsg::PromiseValue`]).
+    pub fn await_js_promise_local<V, T, M>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: jsg::Promise<'s, V>,
+        map: M,
+    ) -> jsg::Result<AwaitJsLocal<T>>
+    where
+        V: jsg::PromiseValue,
+        T: 'static,
+        M: Copy
+            + Send
+            + 'static
+            + for<'a> Fn(&mut jsg::Lock<'a>, &IoContext<'a>, V::Value<'a>) -> jsg::Result<T>,
+    {
+        self.await_js_local(
+            lock,
+            promise.into_raw_promise(),
+            move |lock, context, raw| {
+                let value = V::from_raw(lock, raw)?;
+                map(lock, context, value)
+            },
+        )
+    }
+
     /// Registers `on_fulfilled` to run in this `IoContext` when `promise` is fulfilled, and
     /// returns the promise for its result, as C++ `promise.then(js, ioctx.addFunctor(func))`
     /// does. A rejection passes through without running it, in whatever `IoContext` is current.

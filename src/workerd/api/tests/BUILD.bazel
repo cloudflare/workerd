@@ -1431,6 +1431,14 @@ wd_test(
     data = ["startup-snapshot-bindings-test.js"],
 )
 
+# A Worker Loader binding across a startup snapshot in every variant: the C++ WorkerLoader in @,
+# the Rust one in @all-autogates.
+wd_test(
+    src = "startup-snapshot-worker-loader-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-bindings-test.js"],
+)
+
 # Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
 # pipeline. The @all-compat-flags variant would turn new_module_registry on, under which the
 # function createRequire('/worker.js') returns does not find ./lib.cjs.
@@ -1907,9 +1915,21 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-validation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-validation-test.js"],
+)
+
+wd_test(
     src = "worker-loader-gc-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-gc-test.js"],
+)
+
+wd_test(
+    src = "worker-loader-hibernation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-hibernation-test.js"],
 )
 
 wd_test(

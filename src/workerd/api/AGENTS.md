@@ -10,6 +10,8 @@ crypto/              # WebCrypto + Node crypto: AES, RSA, EC, DH, HKDF, PBKDF2, 
 streams/             # ReadableStream/WritableStream/TransformStream (internal + standard); has README.md
 node/                # Node.js compat C++ layer; register new modules in NODEJS_MODULES macro in node.h
 pyodide/             # Python Workers Pyodide/Emscripten bridge (7 files)
+worker-loader-api/   # Rust Worker Loader (WorkerLoader, WorkerStub), used under the RUST_WORKER_LOADER autogate
+worker-loader-interop/ # C++ shims the Rust Worker Loader calls: source building, isolate loading, stub channels
 tests/               # JS integration tests (238 entries); each test = .js + .wd-test pair
 ```
 
@@ -32,6 +34,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 | Encoding (TextEncoder/Dec)     | `encoding.h`; stream variants in `streams/encoding.h` |
 | Scheduled / Queue / Alarm      | `scheduled.h`, `queue.h`, `actor-state.h`             |
 | HTMLRewriter                   | `html-rewriter.h`                                     |
+| Worker Loader (dynamic Workers) | `worker-loader.{h,c++}` (C++); `worker-loader-api/` + `worker-loader-interop/` (Rust, `RUST_WORKER_LOADER`) |
 | R2 storage                     | `r2-bucket.h`, `r2-multipart.h`                       |
 | KV / SyncKV                    | `kv.h`, `sync-kv.h`                                   |
 | SQL (DO)                       | `sql.h`                                               |

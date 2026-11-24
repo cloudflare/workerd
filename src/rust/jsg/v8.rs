@@ -386,6 +386,12 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<SharedArrayBuffer>
+        #[nothrow]
+        pub unsafe fn local_shared_array_buffer_byte_length(buffer: &Local) -> usize;
+        #[nothrow]
+        pub unsafe fn local_shared_array_buffer_copy_to(buffer: &Local, out: &mut [u8]) -> usize;
+
         // Local<WasmModuleObject>
         pub unsafe fn local_wasm_module_object_get_compiled_module(
             module: &Local,
@@ -403,6 +409,8 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_buffer_data(view: &Local) -> *mut u8;
         pub unsafe fn local_array_buffer_view_data(view: &Local, byte_length: &mut usize) -> usize;
+        #[nothrow]
+        pub unsafe fn local_array_buffer_view_copy_to(view: &Local, out: &mut [u8]) -> usize;
         pub unsafe fn local_array_buffer_view_get_buffer(
             isolate: *mut Isolate,
             view: &Local,
@@ -1426,7 +1434,7 @@ impl ffi::ExceptionType {
 // Deliberately left unimplemented because we didn't need them yet:
 // - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
-// - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
+// - Map, Set, Proxy, RegExp, External, DataView, Float16Array
 // - WasmMemoryObject
 // - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
 //
@@ -1705,6 +1713,8 @@ pub struct BigInt64Array;
 pub struct BigUint64Array;
 pub struct Uint8ClampedArray;
 pub struct ArrayBuffer;
+/// Marker for `v8::SharedArrayBuffer` handles, which are not `ArrayBuffer`s.
+pub struct SharedArrayBuffer;
 pub struct ArrayBufferView;
 /// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
 pub struct WasmModuleObject;
@@ -2753,6 +2763,7 @@ impl_local_cast!(Function: Object, Value; is_function);
 impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
+impl_local_cast!(SharedArrayBuffer: Object, Value; is_shared_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
 impl_local_cast!(WasmModuleObject: Object, Value; is_wasm_module_object);
 impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
@@ -3174,6 +3185,35 @@ impl<'s> Local<'s, ArrayBuffer> {
     }
 }
 
+impl Local<'_, SharedArrayBuffer> {
+    /// Returns the byte length of this `SharedArrayBuffer`.
+    #[inline]
+    pub fn byte_length(&self) -> usize {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_shared_array_buffer_byte_length(self.raw()) }
+    }
+
+    /// Returns `true` if this `SharedArrayBuffer` has zero bytes.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.byte_length() == 0
+    }
+
+    /// Copies the `SharedArrayBuffer`'s contents into a new `Vec<u8>`.
+    ///
+    /// Another agent may write to shared memory at any time, so Rust never borrows it: C++
+    /// copies the bytes, as C++ JSG reads them.
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut bytes = vec![0; self.byte_length()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_shared_array_buffer_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the buffer can't have
+        // grown; a growable `SharedArrayBuffer` never shrinks.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
+    }
+}
+
 impl Local<'_, WasmModuleObject> {
     /// Returns the module's compiled code, which outlives this handle.
     ///
@@ -3262,6 +3302,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// no JavaScript (which could detach, resize or write to the buffer) can run while
     /// it is live.
     ///
+    /// For a view over a `SharedArrayBuffer`, another agent may write the bytes while the slice
+    /// is live; [`to_vec`](Self::to_vec) copies them without borrowing.
+    ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
@@ -3299,9 +3342,17 @@ impl<'s> Local<'s, ArrayBufferView> {
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
+    ///
+    /// The view's buffer may be a `SharedArrayBuffer`, which another agent may write to at any
+    /// time, so C++ copies the bytes and Rust never borrows them.
     pub fn to_vec(&self) -> Vec<u8> {
-        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
-        unsafe { &*self.as_raw_slice() }.to_vec()
+        let mut bytes = vec![0; self.as_raw_slice().len()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_array_buffer_view_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the view can't have
+        // shrunk.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
     }
 
     /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with
