@@ -23,8 +23,25 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { validateFunction } from 'node-internal:validators';
 import { default as timersUtil } from 'node-internal:timers';
+import processImpl from 'node-internal:process';
+import type * as Validators from 'node-internal:validators';
+
+// This module is loaded for every worker with enable_nodejs_global_timers, so it avoids a
+// static import of node-internal:validators, whose module graph is large. The validators are
+// loaded only to build the error for an invalid callback.
+let validators: typeof Validators | undefined;
+function validateCallback(
+  value: unknown
+): asserts value is (...args: unknown[]) => unknown {
+  if (typeof value !== 'function') {
+    validators ??= processImpl.getInternalModule(
+      'node-internal:validators'
+    ) as typeof Validators;
+    const loaded: typeof Validators = validators;
+    loaded.validateFunction(value, 'callback');
+  }
+}
 
 // Capture original global timer functions at module load time, before they might be
 // overridden by the enable_nodejs_global_timers compat flag. This avoids circular
@@ -137,7 +154,7 @@ export function setTimeout<TArgs extends unknown[]>(
   delay?: number,
   ...args: TArgs
 ): Timeout {
-  validateFunction(callback, 'callback');
+  validateCallback(callback);
 
   return new Timeout(
     callback,
@@ -167,7 +184,7 @@ export function setInterval<TArgs extends unknown[]>(
   repeat?: number,
   ...args: TArgs
 ): Timeout {
-  validateFunction(callback, 'callback');
+  validateCallback(callback);
   return new Timeout(
     callback,
     repeat,
