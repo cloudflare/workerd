@@ -175,12 +175,14 @@ KJ_TEST("C++ that a link's resolution calls can't check a link against the same 
         // resolution once Rust has returned.
         KJ_EXPECT_THROW_MESSAGE("resolved through the same guard", (void)link->resolve(js));
         KJ_EXPECT(loads == 1);
+        // The guard is no longer lent: resolving again retries the failed load and succeeds.
+        KJ_EXPECT(link->resolve(js) != kj::none);
+        KJ_EXPECT(loads == 2);
       } else {
         // C++ keeps the guard in the scope, where the loader's check is one more link seen.
         KJ_EXPECT(link->resolve(js) != kj::none);
+        KJ_EXPECT(loads == 1);
       }
-      // The guard is no longer lent: resolving again loads the directory and succeeds.
-      KJ_EXPECT(link->resolve(js) != kj::none);
     });
   });
 }

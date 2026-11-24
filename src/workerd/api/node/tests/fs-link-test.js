@@ -526,9 +526,9 @@ export const relativeSymlinkTargetIsKeptAndResolvedFromTheLink = {
   },
 };
 
-// A recursive readdir counts every link it follows in one guard, including
-// those followed while resolving another link, so following a link a second
-// time anywhere in the walk is reported as a loop.
+// A recursive readdir counts the links it follows beneath a link in one guard,
+// including those followed while resolving another link, so following a link
+// a second time beneath the link the walk entered is reported as a loop.
 export const readdirRecursiveCountsLinksFollowedWhileResolving = {
   test() {
     mkdirSync('/tmp/walk/d', { recursive: true });

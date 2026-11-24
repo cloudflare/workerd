@@ -43,12 +43,12 @@ class RustLinkGuard final {
  public:
   template <typename Func>
   auto lend(Func&& func) {
-    KJ_REQUIRE(!lent,
+    KJ_ASSERT(!lent,
         "a symbolic link was checked or resolved while a link of the Rust file system resolved "
         "through the same guard");
     lent = true;
     KJ_DEFER(lent = false);
-    return func(*inner);
+    return kj::fwd<Func>(func)(*inner);
   }
 
  private:
