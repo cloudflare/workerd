@@ -70,6 +70,10 @@ impl Store for Flaky {
     async fn delete(&self, key: &str) -> Result<()> {
         self.store.delete(key).await
     }
+
+    fn clock_skew_ms(&self) -> Option<u64> {
+        self.store.clock_skew_ms()
+    }
 }
 
 /// A lease thread for node `a` with `timing`, over a bucket that works
