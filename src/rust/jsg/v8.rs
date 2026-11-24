@@ -768,6 +768,7 @@ pub mod ffi {
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
+        #[nothrow]
         pub unsafe fn wrappable_clear_trait_object(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_strong_refcount(wrappable: &Wrappable) -> u32;
 
@@ -777,7 +778,9 @@ pub mod ffi {
             align: usize,
             storage: &mut usize,
         ) -> KjRc<Wrappable>;
+        #[nothrow]
         pub unsafe fn wrappable_init(wrappable: Pin<&mut Wrappable>, ptr: TraitObjectPtr);
+        #[nothrow]
         pub unsafe fn wrappable_init_unreferenced(
             wrappable: Pin<&mut Wrappable>,
             ptr: TraitObjectPtr,

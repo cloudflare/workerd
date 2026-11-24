@@ -1341,8 +1341,7 @@ kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
 }
 
 void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
-  wrappable.trait_object = kj::mv(ptr);
-  wrappable.addStrongRef();
+  wrappable.init(ptr);
 }
 
 void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr) {
