@@ -15,6 +15,7 @@
 #include <workerd/api/url-bootstrap.h>
 #include <workerd/api/urlpattern-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -550,6 +551,27 @@ static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// An array holding, for each compatibility enable-flag in schema order, its name and then whether
+// it is set for this worker: what `Cloudflare.compatibilityFlags` lists. Disable-flags do not
+// appear. The bootstrap's `compatFlags` holds only the flags that are set, so it has neither the
+// other names nor the order.
+static void CompatibilityFlagStates(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto flags = capnp::toDynamic(FeatureFlags::get(js));
+    kj::Vector<jsg::JsValue> states;
+    for (auto field: flags.getSchema().getFields()) {
+      for (auto annotation: field.getProto().getAnnotations()) {
+        if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+          states.add(js.strIntern(annotation.getValue().getText()));
+          states.add(js.boolean(flags.get(field).as<bool>()));
+        }
+      }
+    }
+    return v8::Local<v8::Value>(js.arr(states.asPtr()));
+  });
+}
+
 // The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
 // scripts use as a property key: `object[key]` reads or writes the slot that
 // jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
@@ -672,6 +694,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "readableStreamState",
     "DOMExceptionBase",
     "structuredClone",
+    "compatibilityFlagStates",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -717,6 +740,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, ReadableStreamState),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
     getMethod(js, StructuredClone),
+    getMethod(js, CompatibilityFlagStates),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -845,10 +869,13 @@ void requireImpl(const v8::FunctionCallbackInfo<v8::Value>& info, RequireScope s
       state.loading.insert(kj::str(normalized));
       KJ_DEFER(state.loading.eraseMatch(normalized));
 
-      // Create the module and exports objects for this script.
+      // Create the module and exports objects for this script. `exports` is an own data
+      // property of the module object: a script can load after user code has run, and neither
+      // creating the property, a script's assignment to it, nor the read below may reach an
+      // accessor that user code put on Object.prototype.
       auto moduleObj = js.obj();
       auto exportsObj = js.obj();
-      moduleObj.set(js, "exports"_kj, exportsObj);
+      moduleObj.createDataProperty(js, js.strIntern("exports"_kj), exportsObj);
 
       auto args = pseudoGlobalValues(js, state, moduleObj, exportsObj, scriptRequire);
 
@@ -956,9 +983,10 @@ jsg::JsRef<jsg::JsFunction> newRequireFunction(jsg::Lock& js, v8::FunctionCallba
 
 // Build a JS object with { flagName: true } entries for enabled compat flags.
 // Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
-// which yields false for unset flags.
+// which yields false for unset flags. The object has no prototype: scripts read flags after
+// user code has run, and an unset flag must not read as what user code put on Object.prototype.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
   auto dynamicFlags = capnp::toDynamic(flags);
 
   for (auto& entry: getCompatFlagFields()) {
@@ -971,9 +999,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 }
 
 // Build a JS object with { gateName: true } entries for enabled autogates.
-// Disabled autogates are omitted.
+// Disabled autogates are omitted. The object has no prototype, as the compat flags object.
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
 
   for (util::AutogateKey key: util::getAutogateKeys()) {
     if (util::Autogate::isEnabled(key)) {

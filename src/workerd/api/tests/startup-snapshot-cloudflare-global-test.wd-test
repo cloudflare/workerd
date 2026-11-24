@@ -1,0 +1,65 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The `Cloudflare` global across a startup snapshot; see startup-snapshot-cloudflare-global-test.js.
+# The runner's test() fetches the case services and asserts their reports. The @all-autogates
+# variant turns the startup-snapshot autogate on, so every service goes through the zygote, and the
+# TS_CLOUDFLARE_GLOBAL autogate, so the object is the TypeScript one; the @ variant runs plain
+# Workers with the C++ one.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "experimental",
+  "unsafe_module",
+];
+
+const caseModules :List(Workerd.Worker.Module) = [
+  (name = "worker.js", esModule = embed "startup-snapshot-cloudflare-global-case-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-cloudflare-global-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "kept", service = "kept"),
+          (name = "object", service = "object"),
+          (name = "unread", service = "unread"),
+        ],
+      )
+    ),
+    # The top level keeps the object, its flags, and what it reads from them.
+    ( name = "kept",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"kept\""),
+        ],
+      )
+    ),
+    # The top level keeps the object without reading its flags: a request reads them first.
+    ( name = "object",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"object\""),
+        ],
+      )
+    ),
+    # The top level leaves `Cloudflare` unread: a request reads it first.
+    ( name = "unread",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"unread\""),
+        ],
+      )
+    ),
+  ],
+);

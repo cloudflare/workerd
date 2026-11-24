@@ -141,7 +141,10 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* The `Cloudflare` global is the TypeScript implementation from the per-isolate bootstrap       \
+     (src/per_isolate/cloudflare-global.ts) rather than the C++ class in api/global-scope.h. */    \
+  V(TS_CLOUDFLARE_GLOBAL)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

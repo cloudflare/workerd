@@ -257,6 +257,10 @@ declare const utils: {
   // any other object throws a TypeError, and an uncloneable value a
   // DataCloneError. Consumed by structured-clone.
   structuredClone(value: unknown, transfer: object[] | undefined): unknown;
+  // A new array holding, for each compatibility enable-flag in schema order,
+  // its name and then whether it is set for this worker. Unlike `compatFlags`
+  // it lists the flags that are not set. Consumed by cloudflare-global.
+  compatibilityFlagStates(): (string | boolean)[];
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

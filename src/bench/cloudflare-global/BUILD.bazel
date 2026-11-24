@@ -1,0 +1,17 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The Cloudflare global's benchmarks, against the C++ implementation and the
+# TypeScript one (TS_CLOUDFLARE_GLOBAL). Enabling every autogate enables
+# TS_CLOUDFLARE_GLOBAL, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables it itself.
+
+wd_bench(
+    src = "cloudflare-global-cpp.wd-bench",
+    data = ["cloudflare-global.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "cloudflare-global-ts.wd-bench",
+    data = ["cloudflare-global.js"],
+)

@@ -1,0 +1,39 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CloudflareGlobalModules = import "cloudflare-global-modules.capnp";
+
+# Runs the Cloudflare global's suite against the TypeScript implementation
+# (src/per_isolate/cloudflare-global.ts, under TS_CLOUDFLARE_GLOBAL), with
+# the flags the wd_test variants' dates give.
+#
+# No compatibilityDate: the wd_test variants supply the date axis, and with
+# it which of the dated flags are set. nodejs_compat is for node:assert and
+# node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cloudflare-global-ts",
+      worker = (
+        modules = CloudflareGlobalModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+          (name = "NAMED_FLAGS", json = "[\"nodejs_compat\"]"),
+        ],
+      )
+    ),
+    ( name = "cloudflare-global-ts-first-read",
+      worker = (
+        modules = CloudflareGlobalModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-cloudflare-global"],
+);

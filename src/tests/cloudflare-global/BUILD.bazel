@@ -1,0 +1,41 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The Cloudflare global's suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. The opt-in cells need
+# --experimental for spec_compliant_property_attributes and
+# enable_web_file_system.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_CLOUDFLARE_GLOBAL, which swaps in the TypeScript implementation
+# under a cell whose USING_TS_IMPL binding says C++. The TypeScript cells
+# enable TS_CLOUDFLARE_GLOBAL themselves.
+
+cloudflare_global_suite_srcs = glob(["*.js"]) + [
+    "cloudflare-global-modules.capnp",
+    # The modules embed the schema that defines the flags.
+    "//src/workerd/io:compatibility-date.capnp",
+]
+
+wd_test(
+    src = "cloudflare-global-cpp.wd-test",
+    data = cloudflare_global_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "cloudflare-global-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = cloudflare_global_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "cloudflare-global-ts.wd-test",
+    data = cloudflare_global_suite_srcs,
+)
+
+wd_test(
+    src = "cloudflare-global-opt-in-ts.wd-test",
+    args = ["--experimental"],
+    data = cloudflare_global_suite_srcs,
+)

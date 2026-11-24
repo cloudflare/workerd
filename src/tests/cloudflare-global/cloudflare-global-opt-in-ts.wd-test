@@ -1,0 +1,50 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CloudflareGlobalModules = import "cloudflare-global-modules.capnp";
+
+# Runs the Cloudflare global's suite against the TypeScript implementation
+# (src/per_isolate/cloudflare-global.ts, under TS_CLOUDFLARE_GLOBAL), with
+# set_tostring_tag at either date, the dateless opt-ins
+# spec_compliant_property_attributes and immutable_api_prototypes, and
+# enable_web_file_system; two of them are experimental, hence --experimental
+# in BUILD.bazel.
+#
+# No compatibilityDate: the wd_test variants supply the date axis, and with
+# it which of the dated flags are set. nodejs_compat is for node:assert and
+# node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cloudflare-global-opt-in-ts",
+      worker = (
+        modules = CloudflareGlobalModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "set_tostring_tag",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+          "enable_web_file_system",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+          (name = "NAMED_FLAGS", json = "[\"nodejs_compat\", \"set_tostring_tag\", \"spec_compliant_property_attributes\", \"immutable_api_prototypes\", \"enable_web_file_system\"]"),
+        ],
+      )
+    ),
+    ( name = "cloudflare-global-opt-in-ts-first-read",
+      worker = (
+        modules = CloudflareGlobalModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "set_tostring_tag",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+          "enable_web_file_system",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-cloudflare-global"],
+);

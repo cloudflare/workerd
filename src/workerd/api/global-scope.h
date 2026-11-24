@@ -998,7 +998,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(caches, getCaches);
     JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
-    JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
+    // Under the TS_CLOUDFLARE_GLOBAL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the `Cloudflare` global instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_CLOUDFLARE_GLOBAL)) {
+      JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
+    }
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
 
 #ifdef WORKERD_FUZZILLI

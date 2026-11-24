@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CloudflareGlobalModules = import "cloudflare-global-modules.capnp";
+
+# Runs the Cloudflare global's suite against the C++ implementation
+# (api/global-scope.{h,c++}), with
+# the flags the wd_test variants' dates give.
+#
+# No compatibilityDate: the wd_test variants supply the date axis, and with
+# it which of the dated flags are set. nodejs_compat is for node:assert and
+# node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cloudflare-global-cpp",
+      worker = (
+        modules = CloudflareGlobalModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+          (name = "NAMED_FLAGS", json = "[\"nodejs_compat\"]"),
+        ],
+      )
+    ),
+    ( name = "cloudflare-global-cpp-first-read",
+      worker = (
+        modules = CloudflareGlobalModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+      )
+    ),
+  ],
+);

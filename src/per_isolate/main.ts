@@ -434,6 +434,19 @@ if (autogates['ts-structured-clone']) {
   });
 }
 
+// The `Cloudflare` global is the object cloudflare-global.ts makes, which
+// replaces the C++ one that global-scope.h then leaves out. It is a lazy data
+// property of the global, as JSG_LAZY_INSTANCE_PROPERTY defines the C++ one:
+// the module loads when it is first read.
+if (autogates['ts-cloudflare-global']) {
+  utils.defineLazyDataProperty(
+    globalThis,
+    'Cloudflare',
+    'cloudflare-global',
+    true
+  );
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

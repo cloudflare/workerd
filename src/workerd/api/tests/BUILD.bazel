@@ -1425,6 +1425,18 @@ wd_test(
     data = ["startup-snapshot-bindings-test.js"],
 )
 
+# The `Cloudflare` global across a startup snapshot, kept by the top level or first read by a
+# request. Only the @all-autogates variant runs the pipeline, and with it the TypeScript object
+# (TS_CLOUDFLARE_GLOBAL).
+wd_test(
+    src = "startup-snapshot-cloudflare-global-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-cloudflare-global-case-test.js",
+        "startup-snapshot-cloudflare-global-test.js",
+    ],
+)
+
 # Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
 # pipeline. The @all-compat-flags variant would turn new_module_registry on, under which the
 # function createRequire('/worker.js') returns does not find ./lib.cjs.
