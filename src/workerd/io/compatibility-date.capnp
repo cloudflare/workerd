@@ -1836,7 +1836,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonDedicatedSnapshotKeepImportCaches @206 :Bool
       $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
-      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches");
+      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-12-10");
   # When enabled, a Python Worker restored from a dedicated memory snapshot keeps the import system's
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
