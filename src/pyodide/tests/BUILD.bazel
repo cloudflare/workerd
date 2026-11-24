@@ -17,7 +17,15 @@ vendored_py_wd_test(
     test_template = "pytest/pytest.wd-test",
 )
 
-py_wd_test("hello")
+# The one test whose 0.26.0a2 variant creates its snapshot from scratch and then restores it, so
+# that both stay covered for that version. It is the smallest Python worker whose top level runs
+# checks (of `js` and of a disallowed top-level fetch) while the snapshot is collected and whose
+# handler runs after the restore. The other 0.26.0a2 variants load the baseline snapshot, to keep
+# them fast.
+py_wd_test(
+    "hello",
+    create_0_26_snapshot_from_scratch = True,
+)
 
 py_wd_test("top-level-tests")
 
