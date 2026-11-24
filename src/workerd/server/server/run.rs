@@ -88,6 +88,8 @@ pub struct RunOptions {
     /// refused or the start fails. `--control-fd`'s `listen` events, for a server embedded in this
     /// process. A run given it serves until drained, even with nothing to listen on.
     pub started: Option<oneshot::Sender<Weak<Server>>>,
+    /// Drain as soon as told to, rather than serving on through `Config.shutdownDelayMs`.
+    pub drain_at_once: bool,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -475,7 +477,11 @@ pub async fn run(
     report: Reporter,
     drain: impl Stream<Item = ()>,
 ) -> Result<()> {
-    let delay = shutdown_delay(&factory)?;
+    let delay = if options.drain_at_once {
+        Duration::ZERO
+    } else {
+        shutdown_delay(&factory)?
+    };
     let Some(Running {
         server,
         mut listeners,

@@ -750,5 +750,22 @@ KJ_TEST("REPL closes the server of a load still under way when it drains") {
   KJ_EXPECT(fixture.eval("workerd.loadConfig('worker.capnp'), 'loading'") == "'loading'");
 }
 
+KJ_TEST("REPL closes a server at once, whatever the config's shutdownDelayMs") {
+  Fixture fixture;
+  // WORKER_CONFIG, with a delay that ~Fixture can wait out if the close does not skip it.
+  fixture.setConfig("delayed.capnp", kj::str("(shutdownDelayMs = 20000,", WORKER_CONFIG.slice(1)));
+  fixture.evalAwait("s = await workerd.loadConfig('delayed.capnp')");
+  // Answered once the run serves its listeners. A close before then drains at once anyway, as
+  // for a signal that comes while the server starts.
+  KJ_EXPECT(fixture.evalAwait("await (await s.socket('http').fetch('http://x/')).text()") ==
+      "'hello GET / none'");
+  auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(1);
+  candidates.add(ReplEnvironment::Candidate{
+    .source = kj::str("(async () => (await s.close()\n))()"), .awaited = true});
+  auto closing = fixture.environment.evaluate(candidates.finish());
+  auto closed = fixture.resources.timer.timeoutAfter(5 * kj::SECONDS, kj::mv(closing));
+  KJ_EXPECT(closed.wait(fixture.io.waitScope).text == "undefined");
+}
+
 }  // namespace
 }  // namespace workerd::server

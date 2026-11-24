@@ -189,7 +189,9 @@ impl InProcessServer {
     ///
     /// The stream sockets listen on `loopback:` names, each its own name, rather than on their
     /// addresses. The config's process-wide settings, which the host set up for the process
-    /// before the factory existed, are reported as warnings.
+    /// before the factory existed, are reported as warnings. Closing it drains at once: the
+    /// config's `shutdownDelayMs` gives load balancers time to stop sending connections, and the
+    /// host closes a server once it wants nothing more served.
     ///
     /// The run is a task of the event loop's `LocalSet`, as `workerd serve`'s is. It cannot be one
     /// of the factory's tasks (tasks.rs): the server it owns clears those when it drops.
@@ -207,6 +209,7 @@ impl InProcessServer {
         let options = RunOptions {
             socket_addresses,
             started: Some(started),
+            drain_at_once: true,
             ..RunOptions::default()
         };
         let drain = futures::stream::unfold(Rc::clone(&self.drain), |drain| async move {

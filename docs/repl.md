@@ -350,8 +350,9 @@ config brings the server up to date. Reloads, asked for or not, run one at a tim
 
 ### Closing
 
-Closing a server revokes everything it handed out. Requests still in progress are canceled, and
-every later use of a `Fetcher`, RPC stub or unread response body from that server fails with
+Closing a server drains it at once, without waiting out the config's `shutdownDelayMs`, and revokes
+everything it handed out. Requests still in progress are canceled, and every later use of a
+`Fetcher`, RPC stub or unread response body from that server fails with
 `Error: The server for <path> was closed.` Quitting the REPL closes every server that is still
 loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 
