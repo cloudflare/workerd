@@ -308,6 +308,12 @@ class OutputGate: public kj::PtrTarget {
 
   bool isBroken();
 
+  // True if the caller can skip wait(): no lock is held, no earlier wait() is pending (skipping
+  // then would let new output overtake output still queued behind it), and the gate is not broken.
+  bool isIdle() const {
+    return lockCount == 0 && waiterCount == 0 && brokenException == kj::none;
+  }
+
  private:
   Hooks& hooks;
 
@@ -315,6 +321,9 @@ class OutputGate: public kj::PtrTarget {
 
   kj::StickyFlag brokenFlag;
   kj::Maybe<kj::Exception> brokenException;
+
+  uint lockCount = 0;
+  uint waiterCount = 0;
 
   void setBroken(const kj::Exception& e);
 
@@ -337,6 +346,7 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
   }
 
   hooks.outputGateLocked();
+  ++lockCount;
   auto rejectIfCanceled = kj::defer([this, &fulfiller]() {
     hooks.outputGateReleased();
     if (fulfiller->isWaiting()) {
@@ -344,6 +354,7 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
       setBroken(e);
       fulfiller->reject(kj::mv(e));
     }
+    --lockCount;
   });
 
   try {

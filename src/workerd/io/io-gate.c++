@@ -387,9 +387,13 @@ kj::Own<kj::PromiseFulfiller<void>> OutputGate::lock() {
 
 kj::Promise<void> OutputGate::wait(SpanParent parentSpan) {
   hooks.outputGateWaiterAdded();
+  ++waiterCount;
   SpanBuilder waitSpan = parentSpan.newChild("output_gate_lock_wait"_kjc);
-  return pastLocksPromise.addBranch().attach(
-      kj::defer([this]() { hooks.outputGateWaiterRemoved(); }), kj::mv(waitSpan));
+  auto removeWaiter = kj::defer([this]() {
+    --waiterCount;
+    hooks.outputGateWaiterRemoved();
+  });
+  return pastLocksPromise.addBranch().attach(kj::mv(removeWaiter), kj::mv(waitSpan));
 }
 
 kj::Promise<void> OutputGate::onBroken() {
