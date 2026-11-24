@@ -31,7 +31,15 @@
 // const foo = require('./foo');
 // (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
 //
-const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
+import type { NavigatorExports } from './navigator';
+
+const {
+  ObjectDefineProperties,
+  ObjectDefineProperty,
+  ObjectGetOwnPropertyDescriptor,
+  ObjectGetPrototypeOf,
+  TypeError: TypeErrorCtor,
+} = primordials;
 
 // Loaded whatever the compatibility flags, as is every module that sets up a
 // cloneable class that every reader must be able to read (see
@@ -447,32 +455,99 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
-// The TypeScript Navigator replaces the C++ one, which global-scope.h then
-// leaves out. Installed as the MessageChannel classes above are, matching
-// JSG_NESTED_TYPE. The `navigator` global stays the lazy property that
-// global-scope.h registers, which makes its value with this module's
-// createNavigator().
+// The `navigator` global and the TypeScript Navigator replace the C++ ones,
+// which global-scope.h then leaves out. Few workers use either, so the
+// module (navigator.ts) loads the first time one of them is read: until then
+// each is an accessor, which replaces itself with the data property that JSG
+// defines for the C++ one, holding what the module made. `navigator` is the
+// global's own property; `Navigator` is where JSG_NESTED_TYPE puts a class.
+// Assigning to one before it is read makes it that data property with the
+// value assigned, and the module does not load.
+//
+// The module therefore loads after user code may have run. What that lets
+// user code observe is in src/tests/navigator/AGENTS.md.
 if (autogates['ts-navigator'] && compatFlags['global_navigator']) {
-  const { Navigator } = require('navigator');
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-    Navigator: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: Navigator,
-    },
-  });
-  if (compatFlags['spec_compliant_property_attributes']) {
-    ObjectDefineProperties(globalThis, {
-      Navigator: {
+  // Loading runs user code if it replaced Object.defineProperty, which the
+  // compiled module calls first. A read of either global from there finds
+  // the module half loaded.
+  let loading = false;
+  const load = (): NavigatorExports => {
+    if (loading) {
+      throw new TypeErrorCtor('The navigator global is being initialized.');
+    }
+    loading = true;
+    try {
+      return require('navigator') as NavigatorExports;
+    } finally {
+      loading = false;
+    }
+  };
+
+  // Defines `name` on each of `holders` as an accessor that makes the value
+  // with `make()` the first time one of them is read. Every holder that is
+  // still that accessor then becomes a data property holding the value;
+  // assigning to one makes it a data property holding what was assigned.
+  const defineOnFirstRead = (
+    name: string,
+    make: () => unknown,
+    holders: object[],
+    enumerable: boolean[]
+  ): void => {
+    const getters: (() => unknown)[] = [];
+    const settle = (index: number, value: unknown): void => {
+      ObjectDefineProperty(holders[index] as object, name, {
         __proto__: null,
         configurable: true,
-        enumerable: false,
+        enumerable: enumerable[index] as boolean,
         writable: true,
-        value: Navigator,
-      },
-    });
+        value,
+      });
+    };
+    for (let i = 0; i < holders.length; i++) {
+      const get = (): unknown => {
+        const value = make();
+        for (let j = 0; j < holders.length; j++) {
+          const descriptor = ObjectGetOwnPropertyDescriptor(
+            holders[j] as object,
+            name
+          );
+          // User code may have redefined or deleted the accessor.
+          if (descriptor !== undefined && descriptor.get === getters[j]) {
+            settle(j, value);
+          }
+        }
+        return value;
+      };
+      getters[i] = get;
+      ObjectDefineProperty(holders[i] as object, name, {
+        __proto__: null,
+        configurable: true,
+        enumerable: enumerable[i] as boolean,
+        get,
+        set(value: unknown): void {
+          settle(i, value);
+        },
+      });
+    }
+  };
+
+  defineOnFirstRead(
+    'navigator',
+    () => load().createNavigator(),
+    [globalThis],
+    [true]
+  );
+  const scope = ObjectGetPrototypeOf(globalThis) as object;
+  const getConstructor = (): unknown => load().Navigator;
+  if (compatFlags['spec_compliant_property_attributes']) {
+    defineOnFirstRead(
+      'Navigator',
+      getConstructor,
+      [scope, globalThis],
+      [true, false]
+    );
+  } else {
+    defineOnFirstRead('Navigator', getConstructor, [scope], [true]);
   }
 }
 

@@ -29,7 +29,9 @@ declare const exports: any;
 
 /**
  * Compatibility flags for the current worker configuration.
- * Scripts use these to conditionally install globals.
+ * Scripts use these to conditionally install globals. An enabled flag is an
+ * own property that is `true`; the object has no prototype, so a flag that
+ * is not enabled reads as `undefined` whatever user code has done.
  */
 declare const compatFlags: {
   readonly [key: string]: boolean;
@@ -39,6 +41,7 @@ declare const compatFlags: {
  * Autogate flags for the current process. Unlike compatFlags (per-worker),
  * autogates are process-wide and used for gradual rollout of risky changes.
  * Gate names use kebab-case (e.g., "v8-fast-api", "rust-backed-node-dns").
+ * The object has no prototype, as `compatFlags`.
  */
 declare const autogates: {
   readonly [key: string]: boolean;
@@ -244,16 +247,10 @@ declare const utils: {
   // The native half of the TypeScript Navigator (NavigatorNative in
   // api/global-scope.h).
   createNavigatorNative(): NavigatorNative;
-  // Defines `name` as an own property of `object` that is to JavaScript a
-  // read-only, enumerable, configurable data property, whose value is what
-  // `getter()` returns each time it is read, as a property that
-  // JSG_READONLY_INSTANCE_PROPERTY defines is. For an attribute that returns
-  // a new object on every read; a constant needs only a data property.
-  defineComputedProperty(
-    object: object,
-    name: string,
-    getter: () => unknown
-  ): void;
+  // Defines `languages` on `navigator`, the TypeScript navigator, as the C++
+  // Navigator has it: to JavaScript a read-only, enumerable, configurable own
+  // data property, whose value is a new `['en']` on every read.
+  defineNavigatorLanguages(navigator: object): void;
 };
 
 // The native half of the TypeScript Navigator (api/global-scope.h:

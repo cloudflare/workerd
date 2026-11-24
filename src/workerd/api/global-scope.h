@@ -913,10 +913,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     return js.alloc<Navigator>();
   }
 
-  // The `navigator` global under the TS_NAVIGATOR autogate: a new instance of the TypeScript
-  // Navigator (src/per_isolate/navigator.ts).
-  jsg::JsValue getTypeScriptNavigator(jsg::Lock& js);
-
   jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
     return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
   }
@@ -1115,15 +1111,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(TextDecoder);
     JSG_NESTED_TYPE(TextEncoder);
 
-    if (flags.getGlobalNavigator()) {
-      // Under the TS_NAVIGATOR autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-      // installs the TypeScript Navigator instead, and the global is an instance of it.
-      if (util::Autogate::isEnabled(util::AutogateKey::TS_NAVIGATOR)) {
-        JSG_LAZY_INSTANCE_PROPERTY(navigator, getTypeScriptNavigator);
-      } else {
-        JSG_LAZY_INSTANCE_PROPERTY(navigator, getNavigator);
-        JSG_NESTED_TYPE(Navigator);
-      }
+    // Under the TS_NAVIGATOR autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the `navigator` global and the TypeScript Navigator instead.
+    if (flags.getGlobalNavigator() && !util::Autogate::isEnabled(util::AutogateKey::TS_NAVIGATOR)) {
+      JSG_LAZY_INSTANCE_PROPERTY(navigator, getNavigator);
+      JSG_NESTED_TYPE(Navigator);
     }
 
     // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the

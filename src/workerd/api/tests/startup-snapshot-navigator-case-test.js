@@ -58,6 +58,11 @@ async function navigatorChecks() {
     language: navigator.language === 'en',
     languages: languages.length === 1 && languages[0] === 'en',
     languagesIsANewArrayEachTime: languages !== navigator.languages,
+    languagesIsOfThisRealm:
+      Object.getPrototypeOf(languages) === Array.prototype,
+    constructorIsOfThisRealm:
+      Object.getPrototypeOf(Navigator) === Function.prototype,
+    errorIsOfThisRealm: caught(() => new Navigator()) instanceof TypeError,
     storageIsTheSameObject: navigator.storage === navigator.storage,
     storageWorks: root instanceof FileSystemDirectoryHandle,
     sendsBeacon: navigator.sendBeacon('http://sink/request', 'body') === true,

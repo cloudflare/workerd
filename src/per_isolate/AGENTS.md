@@ -30,11 +30,11 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
-- Under the `TS_NAVIGATOR` autogate, `main.ts` installs the TypeScript
-  `Navigator` (`navigator.ts`), which replaces the C++ one. The `navigator`
-  global stays the lazy property `global-scope.h` registers, whose getter
-  calls the module's `createNavigator()`. `src/tests/navigator/AGENTS.md`
-  describes the behavior and keeps the ledger of differences.
+- Under the `TS_NAVIGATOR` autogate, `main.ts` installs the `navigator`
+  global and the TypeScript `Navigator` (`navigator.ts`), which replace the
+  C++ ones, as accessors that load the module the first time one of them is
+  read. `src/tests/navigator/AGENTS.md` describes the behavior and keeps the
+  ledger of differences.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which
@@ -84,8 +84,14 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   registers with `JSG_READONLY_INSTANCE_PROPERTY` (or the lazy variants) is
   an own data property of each instance whatever the flags, so a bootstrap
   class defines it as one (`navigator.ts`). Where the C++ getter returns a
-  new object on each read, `utils.defineComputedProperty()` defines the
-  same kind of property, whose value a function computes on each read.
+  new object on each read, a native helper defines the same kind of property
+  (`utils.defineNavigatorLanguages()`), with a getter written in C++.
+- **A native property NEVER carries a JavaScript function or object as its
+  data** (`SetNativeDataProperty()`, `SetLazyDataProperty()`). V8 serializes
+  such a property into the isolate part of a startup snapshot, not the
+  context's, and its data takes a copy of the whole context along: in a
+  worker started from the snapshot the function runs in that copy, with
+  other intrinsics and no bootstrap state.
 - Internal cross-module surfaces are exported as a single namespace
   object (`internalsForPipe`, `nativeStreamInternals`), never
   re-exported to users.

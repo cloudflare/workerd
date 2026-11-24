@@ -3,9 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // A worker of its own, whose top level replaces built-ins before the first
-// read of `navigator`, which is what makes the instance; and, as nothing
-// else runs in this worker, the changes to the instance that cannot be
-// undone.
+// read of `Navigator` and of `navigator`, which is what loads the TypeScript
+// implementation and makes the instance; and, as nothing else runs in this
+// worker, the changes to the instance that cannot be undone.
 //
 // While built-ins are replaced, this module uses only what it captured
 // first, syntax, and index loops.
@@ -20,9 +20,56 @@ const hasStorage = flags['enable_web_file_system'] === true;
 const { defineProperty, getOwnPropertyDescriptor, getPrototypeOf } = Object;
 const { deleteProperty, ownKeys } = Reflect;
 
+// What kind of property each global of the TypeScript implementation is
+// before anything has read it. (Getting the descriptor of a C++ one reads
+// it.)
+function kindOf(object, key) {
+  const descriptor = getOwnPropertyDescriptor(object, key);
+  if (descriptor === undefined) return 'none';
+  return [
+    'value' in descriptor ? 'data' : 'accessor',
+    descriptor.writable ? 'w' : '',
+    descriptor.enumerable ? 'e' : '',
+    descriptor.configurable ? 'c' : '',
+  ].join('');
+}
+const kUnreadKinds =
+  env.USING_TS_IMPL === true
+    ? [
+        kindOf(globalThis, 'navigator'),
+        kindOf(getPrototypeOf(globalThis), 'Navigator'),
+        kindOf(globalThis, 'Navigator'),
+      ]
+    : null;
+
 const kCalled = new Error('a replaced built-in was called');
 function fail() {
   throw kCalled;
+}
+
+// The replaced Object.defineProperty: records its calls, and defines
+// nothing. While `breakLoading` it also reads `navigator` and throws.
+const definePropertyCalls = [];
+let breakLoading = true;
+let reentrantRead = 'not read';
+function recordDefineProperty(target, name, descriptor) {
+  // Not an assignment, which would reach the accessor on Object.prototype.
+  defineProperty(definePropertyCalls, definePropertyCalls.length, {
+    __proto__: null,
+    value: { __proto__: null, target, name, descriptor },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  if (breakLoading) {
+    try {
+      reentrantRead = globalThis.navigator;
+    } catch (error) {
+      reentrantRead = error;
+    }
+    throw kCalled;
+  }
+  return target;
 }
 
 const kStatics = [
@@ -60,7 +107,10 @@ for (let i = 0; i < kStatics.length; i++) {
   savedStatics[i] = getOwnPropertyDescriptor(kStatics[i][0], kStatics[i][1]);
   defineProperty(kStatics[i][0], kStatics[i][1], {
     __proto__: null,
-    value: fail,
+    value:
+      kStatics[i][1] === 'defineProperty' && kStatics[i][0] === Object
+        ? recordDefineProperty
+        : fail,
     writable: true,
     configurable: true,
   });
@@ -78,6 +128,17 @@ for (let i = 0; i < kAccessors.length; i++) {
     configurable: true,
   });
 }
+
+// The first read of `Navigator`, while the replaced Object.defineProperty
+// throws; then it no longer does.
+let brokenRead;
+let brokenReadError;
+try {
+  brokenRead = Navigator;
+} catch (error) {
+  brokenReadError = error;
+}
+breakLoading = false;
 
 // What user code assigns to Navigator.prototype, where it can, before the
 // instance is made.
@@ -139,7 +200,54 @@ export default {
     const usingTsImpl = env.USING_TS_IMPL === true;
     const { sendBeacon } = kPrototype;
 
-    // The first read, among replaced built-ins.
+    // Ledger: until it is read, a TypeScript global is an accessor with the
+    // enumerability of the data property that it then becomes, and that a
+    // C++ one is from the start.
+    const specCompliant = flags['spec_compliant_property_attributes'] === true;
+    if (usingTsImpl) {
+      deepStrictEqual(kUnreadKinds, [
+        'accessorec',
+        'accessorec',
+        specCompliant ? 'accessorc' : 'none',
+      ]);
+    }
+    strictEqual(kindOf(globalThis, 'navigator'), 'datawec');
+    strictEqual(kindOf(getPrototypeOf(globalThis), 'Navigator'), 'datawec');
+    strictEqual(
+      kindOf(globalThis, 'Navigator'),
+      specCompliant ? 'datawc' : 'none'
+    );
+
+    if (usingTsImpl) {
+      // Ledger: the module loads at the first read of either global, and the
+      // code TypeScript compiles it to begins by calling the global
+      // Object.defineProperty on its `exports` object. User code that
+      // replaced it is called with that object, which stays empty and which
+      // nothing else uses, and what it throws fails the read; the next read
+      // loads the module again. A read of `navigator` from inside it throws.
+      strictEqual(brokenRead, undefined);
+      strictEqual(brokenReadError, kCalled);
+      strictEqual(reentrantRead instanceof TypeError, true);
+      strictEqual(
+        reentrantRead.message,
+        'The navigator global is being initialized.'
+      );
+      strictEqual(definePropertyCalls.length >= 2, true);
+      for (const { target, name, descriptor } of definePropertyCalls) {
+        strictEqual(name, '__esModule');
+        deepStrictEqual(ownKeys(target), []);
+        strictEqual(getPrototypeOf(target), Object.prototype);
+        deepStrictEqual(ownKeys(descriptor), ['value']);
+        strictEqual(descriptor.value, true);
+      }
+    } else {
+      strictEqual(brokenRead, Navigator);
+      strictEqual(brokenReadError, undefined);
+      strictEqual(reentrantRead, 'not read');
+      strictEqual(definePropertyCalls.length, 0);
+    }
+
+    // The first read of `navigator`, among replaced built-ins.
     strictEqual(firstReadError, undefined);
     strictEqual(accessorRan, false);
     strictEqual(firstRead, navigator);

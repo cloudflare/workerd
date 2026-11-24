@@ -16,7 +16,6 @@
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/http.h>
 #include <workerd/api/navigator-bootstrap.h>
-#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -1472,12 +1471,6 @@ jsg::JsValue createNavigatorNative(jsg::Lock& js) {
   auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<NavigatorNative>>(),
       "NavigatorNative is missing from the isolate type list");
   return jsg::JsValue(handler.wrap(js, js.alloc<NavigatorNative>()));
-}
-
-jsg::JsValue ServiceWorkerGlobalScope::getTypeScriptNavigator(jsg::Lock& js) {
-  auto create = KJ_ASSERT_NONNULL(tryGetBootstrapFunction(js, "navigator"_kj, "createNavigator"_kj),
-      "the per-isolate bootstrap did not load the TypeScript Navigator");
-  return create.call(js, js.undefined());
 }
 
 // ======================================================================================

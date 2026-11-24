@@ -7,9 +7,9 @@
 // src/tests/navigator/ runs one suite against both implementations, and its
 // AGENTS.md records where they differ.
 //
-// main.ts installs the constructor. The global itself stays the lazy property
-// that global-scope.h registers, whose getter calls createNavigator() the
-// first time `navigator` is read.
+// main.ts installs both globals as accessors that load this module the first
+// time one of them is read, so it runs after user code may have: it reads
+// nothing through a prototype chain or a global that user code can replace.
 //
 // What needs the request, JSG's conversion of a request body or a C++ object
 // is behind NavigatorNative (api/global-scope.h): sendBeacon()'s fetch, and
@@ -30,7 +30,7 @@ const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
 
-const { createNavigatorNative, defineComputedProperty, getPrivateSymbol } =
+const { createNavigatorNative, defineNavigatorLanguages, getPrivateSymbol } =
   utils;
 
 // V8-private, so that it is neither inherited nor forgeable: an object that
@@ -112,11 +112,6 @@ const kPrototype = {
 
 const { sendBeacon } = kPrototype;
 
-// A new array on every read, as the C++ getter returns.
-function getLanguages(): string[] {
-  return ['en'];
-}
-
 // The descriptor of an attribute, reused for every one. Its prototype is
 // null, so that defining with it reads nothing user code can patch.
 class AttributeDescriptor {
@@ -151,7 +146,8 @@ function createNavigator(): object {
     defineAttribute(navigator, 'storage', getNative().createStorage());
   }
   if (kHasLanguage) {
-    defineComputedProperty(navigator, 'languages', getLanguages);
+    // A new array on every read, as the C++ getter returns.
+    defineNavigatorLanguages(navigator);
     defineAttribute(navigator, 'language', 'en');
   }
   defineAttribute(navigator, 'platform', '');

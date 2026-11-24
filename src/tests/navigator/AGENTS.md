@@ -19,12 +19,15 @@ variant, since enabling every autogate enables `TS_NAVIGATOR`.
 
 Every cell but the absent ones has three services: the suite (`main.js`); a
 worker of its own (`first-read.js`) whose top level replaces built-ins
-before the first read of `navigator`, which makes the instance, and which
-then makes the changes to the instance that cannot be undone; and the sink
+before the first read of `Navigator` and of `navigator`, which loads the
+TypeScript implementation and makes the instance, and which then makes the
+changes to the instance that cannot be undone; and the sink
 (`sink.js`), the other two's global outbound, which records the beacons.
 
 `//src/workerd/api/tests:startup-snapshot-navigator-test` holds the
-navigator across a startup snapshot; its `@all-autogates` variant runs the
+navigator across a startup snapshot, in a Worker whose top level reads it
+and in one that first reads it in a request, and checks that what it makes
+belongs to the Worker's realm; its `@all-autogates` variant runs the
 TypeScript implementation through the snapshot pipeline.
 
 The Web Platform Tests for the navigator are
@@ -41,6 +44,9 @@ and `//src/wpt:fs` reaches the file system through `navigator.storage`. The
   `spec_compliant_property_attributes` also a non-enumerable own property of
   the global. `no_global_navigator` leaves both out (`api-surface.js`,
   `absent.js`).
+- **Loading:** the TypeScript implementation loads at the first read of
+  either global (`src/per_isolate/main.ts`), so a Worker that uses neither
+  does not pay for it.
 - **The constructor:** a function named `Navigator` of length 0, whose
   `prototype` is writable unless `immutable_api_prototypes`; assigning it
   changes what `instanceof` says of the navigator, not the navigator.
@@ -75,7 +81,8 @@ and `//src/wpt:fs` reaches the file system through `navigator.storage`. The
   start at the caller.
 - **Serialization:** `structuredClone(navigator)` throws a `DataCloneError`.
 - **Pollution:** nothing the navigator does calls or reads anything user
-  code can replace, its first read included (`pollution.js`,
+  code can replace (`pollution.js`), nor does making it at its first read,
+  but for what loading the TypeScript implementation calls (ledger row 6,
   `first-read.js`).
 
 ## Ledger
@@ -87,5 +94,7 @@ on both sides with a `usingTsImpl` branch.
 | --- | --- | --- | --- | --- |
 | 1 | `Function.prototype.toString()` of `Navigator` and `sendBeacon` | `function Navigator() { [native code] }` | the function's source | `api-surface.js` |
 | 2 | Code run by the conversion of `sendBeacon()`'s arguments (`toString()`, `Symbol.toPrimitive`) | called from the caller's frame | a frame of `workerd:per-isolate/navigator` in between, which the stack of an error made there shows, as does that of the error a failed beacon is logged with | `send-beacon.js` |
-| 3 | Position of `Navigator` among the properties of the global scope's prototype, which `for...in` over the global follows | where `global-scope.h` registers it, after `TextEncoder` | after the properties JSG registers | `api-surface.js` |
+| 3 | Position of `navigator` among the global's own properties and of `Navigator` among those of the global scope's prototype, which `for...in` over the global follows | where `global-scope.h` registers them: after `console`, and after `TextEncoder` | after the properties JSG registers | `api-surface.js` |
 | 4 | `Navigator.prototype` assigned (without `immutable_api_prototypes`) before the first read of `navigator` | the instance inherits from the object assigned | the instance inherits from the original prototype | `first-read.js` |
+| 5 | `navigator` and `Navigator` before their first read | data properties | accessors with the same enumerability and configurability; read or assigned, each becomes the data property | `first-read.js` |
+| 6 | User code that replaced the global `Object.defineProperty` before the first read of either global | not called | called as the module loads, with the module's initial `exports` object (empty, and used by nothing else), `'__esModule'` and `{ value: true }`; what it throws fails that read, and the next read loads the module again; a read of `navigator` from inside it throws a `TypeError` | `first-read.js` |

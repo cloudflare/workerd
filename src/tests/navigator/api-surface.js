@@ -40,10 +40,17 @@ const kExpectedInstanceKeys = [
 export const globalPlacement = {
   test() {
     // The instance: an own, writable, enumerable, configurable data
-    // property of the global, where global-scope.h registers it.
+    // property of the global, once read.
     strictEqual(attributesOf(globalThis, 'navigator'), 'datawec');
+    // Ledger: the C++ one is where global-scope.h registers it; the
+    // TypeScript one comes after the properties JSG registers on the global.
     const ownKeys = Reflect.ownKeys(globalThis);
-    strictEqual(ownKeys.indexOf('navigator'), ownKeys.indexOf('console') + 1);
+    if (usingTsImpl) {
+      ok(ownKeys.indexOf('navigator') > ownKeys.indexOf('console') + 1);
+      ok(ownKeys.indexOf('navigator') > ownKeys.indexOf('caches'));
+    } else {
+      strictEqual(ownKeys.indexOf('navigator'), ownKeys.indexOf('console') + 1);
+    }
     const scope = Object.getPrototypeOf(globalThis);
     strictEqual(attributesOf(scope, 'navigator'), 'none');
 
