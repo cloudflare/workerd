@@ -36,40 +36,41 @@ import { constants } from 'node-internal:internal_zlib_constants';
 import assert, { ok } from 'node-internal:internal_assert';
 
 const {
-  CONST_INFLATE,
-  CONST_GUNZIP,
-  CONST_GZIP,
-  CONST_UNZIP,
-  CONST_Z_DEFAULT_CHUNK,
-  CONST_Z_DEFAULT_STRATEGY,
-  CONST_Z_DEFAULT_MEMLEVEL,
-  CONST_Z_DEFAULT_WINDOWBITS,
-  CONST_Z_DEFAULT_COMPRESSION,
-  CONST_Z_FIXED,
-  CONST_Z_MAX_LEVEL,
-  CONST_Z_MAX_MEMLEVEL,
-  CONST_Z_MAX_WINDOWBITS,
-  CONST_Z_MIN_LEVEL,
-  CONST_Z_MIN_MEMLEVEL,
-  CONST_Z_SYNC_FLUSH,
-  CONST_Z_NO_FLUSH,
-  CONST_Z_BLOCK,
-  CONST_Z_MIN_CHUNK,
-  CONST_Z_PARTIAL_FLUSH,
-  CONST_Z_FULL_FLUSH,
-  CONST_Z_FINISH,
-  CONST_BROTLI_ENCODE,
-  CONST_BROTLI_DECODE,
-  CONST_BROTLI_OPERATION_PROCESS,
-  CONST_BROTLI_OPERATION_EMIT_METADATA,
-  CONST_BROTLI_OPERATION_FINISH,
-  CONST_BROTLI_OPERATION_FLUSH,
-  CONST_ZSTD_ENCODE,
-  CONST_ZSTD_DECODE,
-  CONST_ZSTD_e_continue,
-  CONST_ZSTD_e_end,
-  CONST_ZSTD_e_flush,
-} = zlibUtil;
+  INFLATE,
+  GUNZIP,
+  GZIP,
+  UNZIP,
+  Z_DEFAULT_CHUNK,
+  Z_DEFAULT_STRATEGY,
+  Z_DEFAULT_MEMLEVEL,
+  Z_DEFAULT_WINDOWBITS,
+  Z_DEFAULT_COMPRESSION,
+  Z_FIXED,
+  Z_MAX_LEVEL,
+  Z_MAX_MEMLEVEL,
+  Z_MAX_WINDOWBITS,
+  Z_MIN_LEVEL,
+  Z_MIN_MEMLEVEL,
+  Z_MIN_WINDOWBITS,
+  Z_SYNC_FLUSH,
+  Z_NO_FLUSH,
+  Z_BLOCK,
+  Z_MIN_CHUNK,
+  Z_PARTIAL_FLUSH,
+  Z_FULL_FLUSH,
+  Z_FINISH,
+  BROTLI_ENCODE,
+  BROTLI_DECODE,
+  BROTLI_OPERATION_PROCESS,
+  BROTLI_OPERATION_EMIT_METADATA,
+  BROTLI_OPERATION_FINISH,
+  BROTLI_OPERATION_FLUSH,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
+  ZSTD_e_continue,
+  ZSTD_e_end,
+  ZSTD_e_flush,
+} = constants;
 
 // This type contains all possible handler types.
 type ZlibHandleType =
@@ -84,9 +85,9 @@ const FLUSH_BOUND_IDX_NORMAL: number = 0;
 const FLUSH_BOUND_IDX_BROTLI: number = 1;
 const FLUSH_BOUND_IDX_ZSTD: number = 2;
 const FLUSH_BOUND: [[number, number], [number, number], [number, number]] = [
-  [CONST_Z_NO_FLUSH, CONST_Z_BLOCK],
-  [CONST_BROTLI_OPERATION_PROCESS, CONST_BROTLI_OPERATION_EMIT_METADATA],
-  [CONST_ZSTD_e_continue, CONST_ZSTD_e_end],
+  [Z_NO_FLUSH, Z_BLOCK],
+  [BROTLI_OPERATION_PROCESS, BROTLI_OPERATION_EMIT_METADATA],
+  [ZSTD_e_continue, ZSTD_e_end],
 ];
 
 const kFlushFlag = Symbol('kFlushFlag');
@@ -201,12 +202,12 @@ function processCallback(this: ZlibHandleType): void {
 //     Z_SYNC_FLUSH < Z_FULL_FLUSH < Z_FINISH
 const flushiness: number[] = [];
 const kFlushFlagList: number[] = [
-  CONST_Z_NO_FLUSH,
-  CONST_Z_BLOCK,
-  CONST_Z_PARTIAL_FLUSH,
-  CONST_Z_SYNC_FLUSH,
-  CONST_Z_FULL_FLUSH,
-  CONST_Z_FINISH,
+  Z_NO_FLUSH,
+  Z_BLOCK,
+  Z_PARTIAL_FLUSH,
+  Z_SYNC_FLUSH,
+  Z_FULL_FLUSH,
+  Z_FINISH,
 ];
 for (let i = 0; i < kFlushFlagList.length; i++) {
   flushiness[kFlushFlagList[i] as number] = i;
@@ -347,9 +348,9 @@ type ZlibDefaultOptions = {
 };
 
 const zlibDefaultOptions = {
-  flush: CONST_Z_NO_FLUSH,
-  finishFlush: CONST_Z_FINISH,
-  fullFlush: CONST_Z_FULL_FLUSH,
+  flush: Z_NO_FLUSH,
+  finishFlush: Z_FINISH,
+  fullFlush: Z_FULL_FLUSH,
 };
 
 export class ZlibBase extends Transform {
@@ -376,13 +377,13 @@ export class ZlibBase extends Transform {
     handle: ZlibHandleType,
     { flush, finishFlush, fullFlush }: ZlibDefaultOptions = zlibDefaultOptions
   ) {
-    let chunkSize = CONST_Z_DEFAULT_CHUNK;
+    let chunkSize = Z_DEFAULT_CHUNK;
     let maxOutputLength = kMaxLength;
 
     let flushBoundIdx;
-    if (mode === CONST_BROTLI_ENCODE || mode === CONST_BROTLI_DECODE) {
+    if (mode === BROTLI_ENCODE || mode === BROTLI_DECODE) {
       flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
-    } else if (mode === CONST_ZSTD_ENCODE || mode === CONST_ZSTD_DECODE) {
+    } else if (mode === ZSTD_ENCODE || mode === ZSTD_DECODE) {
       flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
     } else {
       flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
@@ -394,11 +395,11 @@ export class ZlibBase extends Transform {
         chunkSize = opts.chunkSize;
       }
       if (!checkFiniteNumber(chunkSize, 'options.chunkSize')) {
-        chunkSize = CONST_Z_DEFAULT_CHUNK;
-      } else if (chunkSize < CONST_Z_MIN_CHUNK) {
+        chunkSize = Z_DEFAULT_CHUNK;
+      } else if (chunkSize < Z_MIN_CHUNK) {
         throw new ERR_OUT_OF_RANGE(
           'options.chunkSize',
-          `>= ${CONST_Z_MIN_CHUNK}`,
+          `>= ${Z_MIN_CHUNK}`,
           chunkSize
         );
       }
@@ -610,14 +611,14 @@ export class ZlibBase extends Transform {
 }
 
 export class Zlib extends ZlibBase {
-  _level = CONST_Z_DEFAULT_COMPRESSION;
-  _strategy = CONST_Z_DEFAULT_STRATEGY;
+  _level = Z_DEFAULT_COMPRESSION;
+  _strategy = Z_DEFAULT_STRATEGY;
 
   constructor(options: ZlibOptions | null | undefined, mode: number) {
-    let windowBits = CONST_Z_DEFAULT_WINDOWBITS;
-    let level = CONST_Z_DEFAULT_COMPRESSION;
-    let memLevel = CONST_Z_DEFAULT_MEMLEVEL;
-    let strategy = CONST_Z_DEFAULT_STRATEGY;
+    let windowBits = Z_DEFAULT_WINDOWBITS;
+    let level = Z_DEFAULT_COMPRESSION;
+    let memLevel = Z_DEFAULT_MEMLEVEL;
+    let strategy = Z_DEFAULT_STRATEGY;
     let dictionary: ZlibOptions['dictionary'];
 
     if (options != null) {
@@ -626,44 +627,41 @@ export class Zlib extends ZlibBase {
       // - Decompression: 0 indicates zlib to use the window size in the header of the compressed stream.
       if (
         (options.windowBits == null || options.windowBits === 0) &&
-        (mode === CONST_INFLATE ||
-          mode === CONST_GUNZIP ||
-          mode === CONST_UNZIP)
+        (mode === INFLATE || mode === GUNZIP || mode === UNZIP)
       ) {
         windowBits = 0;
       } else {
         // `{ windowBits: 8 }` is valid for DEFLATE but not for GZIP.
-        const min =
-          zlibUtil.CONST_Z_MIN_WINDOWBITS + (mode === CONST_GZIP ? 1 : 0);
+        const min = Z_MIN_WINDOWBITS + (mode === GZIP ? 1 : 0);
         windowBits = checkRangesOrGetDefault(
           options.windowBits,
           'options.windowBits',
           min,
-          CONST_Z_MAX_WINDOWBITS,
-          CONST_Z_DEFAULT_WINDOWBITS
+          Z_MAX_WINDOWBITS,
+          Z_DEFAULT_WINDOWBITS
         );
       }
 
       level = checkRangesOrGetDefault(
         options.level,
         'options.level',
-        CONST_Z_MIN_LEVEL,
-        CONST_Z_MAX_LEVEL,
-        CONST_Z_DEFAULT_COMPRESSION
+        Z_MIN_LEVEL,
+        Z_MAX_LEVEL,
+        Z_DEFAULT_COMPRESSION
       );
       memLevel = checkRangesOrGetDefault(
         options.memLevel,
         'options.memLevel',
-        CONST_Z_MIN_MEMLEVEL,
-        CONST_Z_MAX_MEMLEVEL,
-        CONST_Z_DEFAULT_MEMLEVEL
+        Z_MIN_MEMLEVEL,
+        Z_MAX_MEMLEVEL,
+        Z_DEFAULT_MEMLEVEL
       );
       strategy = checkRangesOrGetDefault(
         options.strategy,
         'options.strategy',
-        CONST_Z_DEFAULT_STRATEGY,
-        CONST_Z_FIXED,
-        CONST_Z_DEFAULT_STRATEGY
+        Z_DEFAULT_STRATEGY,
+        Z_FIXED,
+        Z_DEFAULT_STRATEGY
       );
       dictionary = options.dictionary;
 
@@ -703,22 +701,12 @@ export class Zlib extends ZlibBase {
   }
 
   params(level: number, strategy: number, callback: () => void): void {
-    checkRangesOrGetDefault(
-      level,
-      'level',
-      CONST_Z_MIN_LEVEL,
-      CONST_Z_MAX_LEVEL
-    );
-    checkRangesOrGetDefault(
-      strategy,
-      'strategy',
-      CONST_Z_DEFAULT_STRATEGY,
-      CONST_Z_FIXED
-    );
+    checkRangesOrGetDefault(level, 'level', Z_MIN_LEVEL, Z_MAX_LEVEL);
+    checkRangesOrGetDefault(strategy, 'strategy', Z_DEFAULT_STRATEGY, Z_FIXED);
 
     if (this._level !== level || this._strategy !== strategy) {
       this.flush(
-        CONST_Z_SYNC_FLUSH,
+        Z_SYNC_FLUSH,
         this.#paramsAfterFlushCallback.bind(this, level, strategy, callback)
       );
     } else {
@@ -752,14 +740,14 @@ const kMaxBrotliParam = Math.max(
 );
 const brotliInitParamsArray = new Uint32Array(kMaxBrotliParam + 1);
 const brotliDefaultOptions: ZlibDefaultOptions = {
-  flush: CONST_BROTLI_OPERATION_PROCESS,
-  finishFlush: CONST_BROTLI_OPERATION_FINISH,
-  fullFlush: CONST_BROTLI_OPERATION_FLUSH,
+  flush: BROTLI_OPERATION_PROCESS,
+  finishFlush: BROTLI_OPERATION_FINISH,
+  fullFlush: BROTLI_OPERATION_FLUSH,
 };
 
 export class Brotli extends ZlibBase {
   constructor(options: BrotliOptions | undefined | null, mode: number) {
-    ok(mode === CONST_BROTLI_DECODE || mode === CONST_BROTLI_ENCODE);
+    ok(mode === BROTLI_DECODE || mode === BROTLI_ENCODE);
     brotliInitParamsArray.fill(-1);
 
     if (options?.params) {
@@ -788,7 +776,7 @@ export class Brotli extends ZlibBase {
     }
 
     const handle =
-      mode === CONST_BROTLI_DECODE
+      mode === BROTLI_DECODE
         ? new zlibUtil.BrotliDecoder(mode)
         : new zlibUtil.BrotliEncoder(mode);
 
@@ -827,9 +815,9 @@ export const kMaxZstdDParam = Math.max(
 export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
 
 const zstdDefaultOptions: ZlibDefaultOptions = {
-  flush: CONST_ZSTD_e_continue,
-  finishFlush: CONST_ZSTD_e_end,
-  fullFlush: CONST_ZSTD_e_flush,
+  flush: ZSTD_e_continue,
+  finishFlush: ZSTD_e_end,
+  fullFlush: ZSTD_e_flush,
 };
 
 export class Zstd extends ZlibBase {
@@ -839,7 +827,7 @@ export class Zstd extends ZlibBase {
     initParamsArray: Int32Array,
     maxParam: number
   ) {
-    ok(mode === CONST_ZSTD_DECODE || mode === CONST_ZSTD_ENCODE);
+    ok(mode === ZSTD_DECODE || mode === ZSTD_ENCODE);
     initParamsArray.fill(-1);
 
     if (options?.params) {
@@ -868,7 +856,7 @@ export class Zstd extends ZlibBase {
     }
 
     const handle =
-      mode === CONST_ZSTD_DECODE
+      mode === ZSTD_DECODE
         ? new zlibUtil.ZstdDecoder(mode)
         : new zlibUtil.ZstdEncoder(mode);
 
