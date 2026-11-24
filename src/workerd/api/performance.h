@@ -82,8 +82,6 @@ class PerformanceEntry: public jsg::Object {
 
 class PerformanceMark: public PerformanceEntry {
  public:
-  friend class Performance;
-
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
     jsg::Optional<double> startTime;
@@ -207,10 +205,12 @@ class PerformanceNodeTiming: public PerformanceEntry {
 
 class PerformanceMeasure: public PerformanceEntry {
  public:
-  PerformanceMeasure(kj::String name, double startTime, double duration)
-      : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration) {}
-
-  friend class Performance;
+  PerformanceMeasure(kj::String name,
+      jsg::Optional<jsg::JsRef<jsg::JsValue>> detail,
+      double startTime,
+      double duration)
+      : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration),
+        detail(kj::mv(detail)) {}
 
   struct Entry {
     kj::String entryType;
