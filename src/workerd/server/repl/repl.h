@@ -50,6 +50,6 @@ kj::Promise<ReplEvaluation> repl_evaluate(
     ReplSession& session, ::rust::Vec<ReplCandidate> candidates);
 kj::Promise<::rust::Vec<::rust::String>> repl_property_names(
     ReplSession& session, ::rust::String base);
-kj::Promise<void> repl_drain(ReplSession& session);
+kj::Promise<bool> repl_drain(ReplSession& session);
 
 }  // namespace workerd::server::repl

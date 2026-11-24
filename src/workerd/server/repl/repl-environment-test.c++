@@ -246,8 +246,9 @@ struct Fixture final: public ReplConfigLoader {
     return options;
   }
 
-  // Drains the environment, which ~Fixture otherwise does.
-  kj::Promise<void> drain() {
+  // Drains the environment, which ~Fixture otherwise does; whether anything failed in the
+  // background.
+  kj::Promise<bool> drain() {
     drained = true;
     return environment.drain();
   }
@@ -952,6 +953,31 @@ KJ_TEST("REPL refuses a config a UDP address another server listens on") {
   }
 }
 
+KJ_TEST("REPL says whether anything failed in the background") {
+  {
+    Fixture fixture;
+    fixture.evalAwait("await new Promise((resolve) => setTimeout(resolve, 0)), 0");
+    KJ_EXPECT(!fixture.drain().wait(fixture.io.waitScope));
+  }
+  for (auto input:
+      {
+        // A timer callback that throws. A timer still pending at the drain never fires.
+        "setTimeout(() => { throw new Error('timer') }, 0),"
+        " await new Promise((resolve) => setTimeout(resolve, 10))"_kj,
+        // A rejection nothing handles.
+        "void Promise.reject(new Error('rejected'))"_kj,
+        // A waitUntil() task that rejects.
+        "(await import('cloudflare:workers')).waitUntil(Promise.reject(new Error('task')))"_kj,
+        // Any of those in an environment started from this one, closed or not.
+        "e = await workerd.environment(), await e.eval('void Promise.reject(1)')"_kj,
+        "e = await workerd.environment(), await e.eval('void Promise.reject(1)'), await e.close()"_kj,
+      }) {
+    Fixture fixture;
+    KJ_EXPECT(!fixture.evalAwait(input).startsWith("Uncaught "), input);
+    KJ_EXPECT(fixture.drain().wait(fixture.io.waitScope), input);
+  }
+}
+
 KJ_TEST("REPL reports configs that do not load") {
   Fixture fixture;
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('missing.capnp')"),
@@ -1002,7 +1028,7 @@ void expectDrainWaitsFor(Fixture& fixture, Fixture::HeldClose close) {
   auto draining = fixture.drain();
   KJ_EXPECT(!draining.poll(fixture.io.waitScope), "the drain did not wait for the close");
   close.release->fulfill();
-  draining.wait(fixture.io.waitScope);
+  KJ_EXPECT(!draining.wait(fixture.io.waitScope));
 }
 
 KJ_TEST("REPL drains a server whose close a later load found still under way") {

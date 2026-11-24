@@ -97,9 +97,10 @@ pub mod ffi {
             base: String,
         ) -> Result<Vec<String>>;
 
-        /// Closes the loaded configs' servers and ends the session's JavaScript. Must complete
-        /// before the session is dropped.
-        async unsafe fn repl_drain<'a>(session: Pin<&'a mut ReplSession>) -> Result<()>;
+        /// Closes the loaded configs' servers and ends the session's JavaScript; whether
+        /// anything failed in the background, such as a timer callback that threw or a rejection
+        /// nothing handled. Must complete before the session is dropped.
+        async unsafe fn repl_drain<'a>(session: Pin<&'a mut ReplSession>) -> Result<bool>;
     }
 
     extern "Rust" {
@@ -151,7 +152,8 @@ pub async fn property_names(
         .map_err(cxx::KjError::from)
 }
 
-pub async fn drain(mut session: KjOwn<ffi::ReplSession>) -> Result<(), cxx::KjError> {
+/// Drains the session; whether anything failed in the background (`repl_drain`).
+pub async fn drain(mut session: KjOwn<ffi::ReplSession>) -> Result<bool, cxx::KjError> {
     // SAFETY: the returned future borrows the session, which outlives it here.
     unsafe { ffi::repl_drain(session.as_mut()) }
         .await

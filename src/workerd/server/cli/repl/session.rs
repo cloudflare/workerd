@@ -59,13 +59,14 @@ pub enum Evaluated {
     TimedOut(Duration),
 }
 
-/// Serves `requests` until the console drops its sender, then drains the session. An input that
-/// takes longer than `timeout` times out.
+/// Serves `requests` until the console drops its sender, then drains the session; whether anything
+/// failed in the background (see [`bridge::drain`]). An input that takes longer than `timeout`
+/// times out.
 pub async fn serve(
     mut session: KjOwn<ReplSession>,
     mut requests: mpsc::UnboundedReceiver<Request>,
     timeout: Option<Duration>,
-) -> Result<(), cxx::KjError> {
+) -> Result<bool, cxx::KjError> {
     while let Some(request) = requests.recv().await {
         // A console that gave up on the reply has ended; its next `recv` sees that.
         match request {

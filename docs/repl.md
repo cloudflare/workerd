@@ -93,6 +93,11 @@ REPL's input ends. The REPL prints the failure and goes on to the next input, so
 inputs still run. A config named on the command line that fails to load is an input that failed.
 An input that Ctrl+C stops awaiting, or that `.break` abandons, hasn't failed.
 
+The REPL also exits with status 1 if something failed in the background, in its JavaScript or in
+an [environment](#other-compatibility-settings) it started: a timer callback that threw, a
+`waitUntil()` task that rejected, or a rejection nothing handled, which the REPL prints as
+`Uncaught (in promise)`. The first two print nothing; `--verbose` logs them.
+
 ## Typing input
 
 An input runs once it is finished. While a bracket, a template literal or a `/* */` comment is still

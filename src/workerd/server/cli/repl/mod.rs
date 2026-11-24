@@ -44,7 +44,8 @@ use workerd_server::entry;
 
 use crate::args::ReplArgs;
 
-/// Runs the REPL until its input ends; the exit status, 1 if an input failed or the session did.
+/// Runs the REPL until its input ends; the exit status, 1 if an input failed, something failed in
+/// the background, or the session did.
 pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
     // Before the REPL starts any thread, each of which blocks SIGINT then.
     #[cfg(unix)]
@@ -84,10 +85,10 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
             })?;
         let serving = session::serve(session, received, args.input_timeout);
         let code = match runtime.block_on(serving) {
-            Ok(Ok(())) => {
+            Ok(Ok(failed_in_background)) => {
                 // The session ended because the console did. A console that panicked failed.
                 let failed = console.join().unwrap_or(true);
-                i32::from(failed)
+                i32::from(failed || failed_in_background)
             }
             Ok(Err(error)) | Err(error) => {
                 eprintln!("*** Uncaught exception ***\n{}", error.description());

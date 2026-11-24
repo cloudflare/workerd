@@ -26,11 +26,15 @@ constexpr kj::StringPtr MAIN_MODULE_BODY = "export default {};"_kj;
 
 constexpr kj::StringPtr INSPECT_MODULE = "node-internal:internal_inspect"_kj;
 
-// Reports promises that user code rejected and nothing handled, such as `Promise.reject(1);`. The
-// REPL handles the promises it awaits itself.
-constexpr kj::StringPtr STARTUP_SCRIPT = "addEventListener('unhandledrejection', (event) => {"
-                                         " console.error('Uncaught (in promise)', event.reason);"
-                                         "});"_kj;
+// Evaluates to a function that, given `report`, reports promises that user code rejected and
+// nothing handled, such as `Promise.reject(1);`, calling `report` for each. The REPL handles the
+// promises it awaits itself.
+constexpr kj::StringPtr STARTUP_SCRIPT = R"JS((report) => {
+  addEventListener('unhandledrejection', (event) => {
+    report();
+    console.error('Uncaught (in promise)', event.reason);
+  });
+})JS"_kj;
 
 // Defines `_` and `_error` on the global scope, as Node's REPL does: the last input's result and
 // its last exception. Assigning one keeps the assigned value from then on. Evaluates to the
@@ -299,7 +303,15 @@ void ReplEnvironment::compileWorker() {
     // `target` is the env of a modules worker; `workerd` goes on the global scope instead.
     auto control = js.alloc<ReplControl>(*this, RELEASE_VERSION);
     js.global().set(js, "workerd"_kj, WorkerdApi::from(api).wrapReplControl(js, kj::mv(control)));
-    jsg::NonModuleScript::compile(js, STARTUP_SCRIPT, "repl-startup.js"_kj).run(js);
+    auto startup =
+        jsg::NonModuleScript::compile(js, STARTUP_SCRIPT, "repl-startup.js"_kj).runAndReturn(js);
+    // This environment owns the isolate, so `report` is never called once it is gone.
+    auto report = js.wrapSimpleFunction(
+        js.v8Context(), [this](jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) {
+      failedInBackground = true;
+    });
+    KJ_ASSERT_NONNULL(startup.tryCast<jsg::JsFunction>())
+        .call(js, js.undefined(), jsg::JsValue(report.As<v8::Value>()));
     auto record =
         jsg::NonModuleScript::compile(js, OUTCOMES_SCRIPT, "repl-outcomes.js"_kj).runAndReturn(js);
     recordOutcome = jsg::JsRef(js, KJ_ASSERT_NONNULL(record.tryCast<jsg::JsFunction>()));
@@ -466,13 +478,16 @@ kj::Promise<kj::Array<kj::String>> ReplEnvironment::propertyNames(kj::String bas
   co_return names.releaseAsArray();
 }
 
-// An environment another started with compatibility settings of its own.
+// An environment another, `parent`, started with compatibility settings of its own. What fails
+// in its background counts as failing in its parent's. The parent's drain() waits for its close.
 class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refcounted {
  public:
-  Nested(kj::Own<ReplEnvironment> environment,
+  Nested(ReplEnvironment& parent,
+      kj::Own<ReplEnvironment> environment,
       kj::String compatibilityDate,
       kj::Array<kj::String> compatibilityFlags)
-      : environment(kj::mv(environment)),
+      : parent(parent),
+        environment(kj::mv(environment)),
         compatibilityDate(kj::mv(compatibilityDate)),
         compatibilityFlags(kj::mv(compatibilityFlags)) {}
 
@@ -508,6 +523,7 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
   }
 
  private:
+  ReplEnvironment& parent;
   // None once closing has begun.
   kj::Maybe<kj::Own<ReplEnvironment>> environment;
   kj::String compatibilityDate;
@@ -540,7 +556,9 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
     canceler.cancel(JSG_KJ_EXCEPTION(FAILED, Error, "The environment was closed."));
     auto closed = kj::mv(KJ_ASSERT_NONNULL(environment));
     environment = kj::none;
-    co_await closed->drain();
+    if (co_await closed->drain()) {
+      parent.failedInBackground = true;
+    }
   }
 };
 
@@ -569,7 +587,7 @@ kj::Own<void> ReplEnvironment::beginStart() {
   }));
 }
 
-kj::Promise<void> ReplEnvironment::drain() {
+kj::Promise<bool> ReplEnvironment::drain() {
   // A start under way, such as a loadConfig() that wasn't awaited, adds what it started when it
   // finishes. Canceling one could drop a server that is running but not closed.
   drainStarted = true;
@@ -589,15 +607,22 @@ kj::Promise<void> ReplEnvironment::drain() {
   }
 
   KJ_IF_SOME(request, incomingRequest) {
+    // Kept past the request, for what its waitUntil() tasks did.
+    auto context = kj::addRef(request->getContext());
     auto draining = kj::mv(request);
     incomingRequest = kj::none;
     draining->drain(waitUntilTasks, kj::mv(draining));
     co_await waitUntilTasks.onEmpty();
+    // A timer callback that threw counts, as a waitUntil() task that rejected does.
+    if (context->waitUntilStatus() != EventOutcome::OK) {
+      failedInBackground = true;
+    }
   }
 
   KJ_IF_SOME(exception, failure) {
     kj::throwFatalException(kj::mv(exception));
   }
+  co_return failedInBackground;
 }
 
 kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSource source) {
@@ -652,7 +677,7 @@ kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
   auto date = kj::mv(settings.compatibilityDate).orDefault([]() { return currentDateStr(); });
   auto environment = startEnvironment(date, settings.compatibilityFlags);
   auto nested = kj::refcounted<Nested>(
-      kj::mv(environment), kj::mv(date), kj::mv(settings.compatibilityFlags));
+      *this, kj::mv(environment), kj::mv(date), kj::mv(settings.compatibilityFlags));
   // Drop the environments that finished closing since the last one started, as loadConfig() drops
   // servers.
   kj::Vector<kj::Own<Nested>> open(environments.size() + 1);

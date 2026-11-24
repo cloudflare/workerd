@@ -192,6 +192,23 @@ test('.break abandons an unfinished input', async () => {
   assert.deepStrictEqual(results, ['2']);
 });
 
+test('a failure in the background fails the exit status', async () => {
+  for (const lines of [
+    // A timer callback that throws, once it has fired.
+    [
+      "setTimeout(() => { throw new Error('timer') }, 0), 0",
+      'await new Promise((resolve) => setTimeout(resolve, 10))',
+    ],
+    ["void Promise.reject(new Error('rejected'))"],
+    [
+      "(await import('cloudflare:workers')).waitUntil(Promise.reject(new Error('task')))",
+    ],
+  ]) {
+    const { code, stderr } = await repl([], lines);
+    assert.strictEqual(code, 1, `${lines}: ${stderr}`);
+  }
+});
+
 // Starts `workerd repl --experimental ...args` for a test to give input to as it goes. With
 // `ignoringInterrupts`, the REPL starts with SIGINT ignored, as a shell without job control starts
 // a background job.

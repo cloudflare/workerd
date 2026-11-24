@@ -113,8 +113,10 @@ class ReplEnvironment final: public ReplHost {
   // loaded config's server and every environment this one started, then ends the session's
   // IoContext once its waitUntil() tasks are done. Must complete before destruction; nothing else
   // may be called afterwards. Rejects with the first failure to close, if any, once all of that is
-  // done.
-  kj::Promise<void> drain();
+  // done. Otherwise, resolves to whether anything failed in the background, here or in an
+  // environment this one started: a timer callback that threw, a waitUntil() task that rejected,
+  // or a rejection nothing handled.
+  kj::Promise<bool> drain();
 
   kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) override;
   kj::Promise<kj::Own<ReplEnvironmentHost>> newEnvironment(
@@ -173,6 +175,10 @@ class ReplEnvironment final: public ReplHost {
   // Sets `_` or `_error` (its first argument) to an input's outcome (its second); see
   // OUTCOMES_SCRIPT. None only while the worker is compiled.
   kj::Maybe<jsg::JsRef<jsg::JsFunction>> recordOutcome;
+  // Whether something failed in the background: see drain(). Set by the JavaScript reporting a
+  // rejection nothing handled (STARTUP_SCRIPT), by drain(), and by the close of an environment
+  // this one started.
+  bool failedInBackground = false;
 
   kj::Own<kj::TaskSet::ErrorHandler> waitUntilErrorHandler;
   kj::TaskSet waitUntilTasks;

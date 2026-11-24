@@ -229,7 +229,7 @@ kj::Promise<::rust::Vec<::rust::String>> repl_property_names(
   co_return result;
 }
 
-kj::Promise<void> repl_drain(ReplSession& session) {
+kj::Promise<bool> repl_drain(ReplSession& session) {
   return session.getImpl().getEnvironment().drain();
 }
 
