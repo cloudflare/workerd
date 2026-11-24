@@ -133,6 +133,41 @@ test('collectPerIsolateDeclarations: rejects references through an import that d
   );
 });
 
+test('collectPerIsolateDeclarations: checks the references in computed member names', () => {
+  // A unique symbol that the module declares is not in the output.
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Thing } from './thing';\n`,
+        'thing.d.ts': `declare const kSlots: unique symbol;
+declare class Thing {
+    [kSlots]: number;
+}
+export type { Thing };
+`,
+      }),
+    {
+      message: `Thing refers to kSlots, which /per_isolate/thing.d.ts declares but ${kManifest} does not publish`,
+    }
+  );
+  // A global's symbol and a literal key are.
+  assert.strictEqual(
+    collect({
+      'public-types.d.ts': `export type { Thing } from './thing';\n`,
+      'thing.d.ts': `declare class Thing {
+    [Symbol.iterator](): void;
+    ['read'](): void;
+}
+export type { Thing };
+`,
+    }),
+    `declare class Thing {
+    [Symbol.iterator](): void;
+    ['read'](): void;
+}`
+  );
+});
+
 test('collectPerIsolateDeclarations: rejects an import type', () => {
   // TypeScript writes these for an inferred type that the module does not
   // name, such as a getter's without a return type.

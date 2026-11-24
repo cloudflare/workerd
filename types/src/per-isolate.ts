@@ -231,6 +231,16 @@ function checkReferences(
     if (ts.isTypeReferenceNode(node)) entity = node.typeName;
     else if (ts.isExpressionWithTypeArguments(node)) entity = node.expression;
     else if (ts.isTypeQueryNode(node)) entity = node.exprName;
+    else if (
+      ts.isComputedPropertyName(node) &&
+      (ts.isIdentifier(node.expression) ||
+        ts.isPropertyAccessExpression(node.expression))
+    ) {
+      // A member's key, such as `[Symbol.iterator]` or a module's
+      // `[kSlots]`, refers to a value; a literal key such as `['read']`
+      // refers to nothing.
+      entity = node.expression;
+    }
     if (entity !== undefined) {
       checkEntity(checker, manifestPath, name, entity, publishedSymbols);
     }
