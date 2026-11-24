@@ -244,25 +244,27 @@ export type { Thing };
 
 test('collectPerIsolateDeclarations: rejects a member declared by both a class and a merged interface', () => {
   // TypeScript tries the later interface's overload first, which the folded
-  // class would try last.
-  assert.throws(
-    () =>
-      collect({
-        'public-types.d.ts': `export type { Thing } from './thing';\n`,
-        'thing.d.ts': `declare class Thing {
+  // class would try last. A literal key names the same member.
+  for (const key of ['read', "['read']", "'read'"]) {
+    assert.throws(
+      () =>
+        collect({
+          'public-types.d.ts': `export type { Thing } from './thing';\n`,
+          'thing.d.ts': `declare class Thing {
     read(value: object): 'generic';
 }
 interface Thing {
-    read(value: { id: string }): 'specific';
+    ${key}(value: { id: string }): 'specific';
 }
 export type { Thing };
 `,
-      }),
-    {
-      message:
-        'Thing: read is declared by more than one of the class and the interfaces merged with it; declare it, with all its overloads, in one of them',
-    }
-  );
+        }),
+      {
+        message:
+          'Thing: read is declared by more than one of the class and the interfaces merged with it; declare it, with all its overloads, in one of them',
+      }
+    );
+  }
   // A static member does not merge with an instance member.
   assert.strictEqual(
     collect({

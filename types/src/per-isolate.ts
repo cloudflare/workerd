@@ -474,17 +474,21 @@ function checkMembersDeclaredOnce(
 }
 
 // The name of an instance member, or undefined for a static member or one
-// without a name, such as a constructor or an index signature.
+// without a name, such as a constructor or an index signature. A literal
+// key names the member it spells: `['read']` is `read`.
 function instanceMemberName(
   member: ts.ClassElement | ts.TypeElement
 ): string | undefined {
-  if (member.name === undefined) return undefined;
+  const { name } = member;
+  if (name === undefined) return undefined;
   if (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Static) {
     return undefined;
   }
-  return ts.isComputedPropertyName(member.name)
-    ? `[${member.name.expression.getText()}]`
-    : member.name.text;
+  if (!ts.isComputedPropertyName(name)) return name.text;
+  const key = name.expression;
+  return ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)
+    ? key.text
+    : `[${key.getText()}]`;
 }
 
 // `parameters` with the constraints and defaults that `merged` gives
