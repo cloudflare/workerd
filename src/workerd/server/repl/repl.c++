@@ -166,6 +166,7 @@ class ReplSession::Impl {
               .network = provider.getNetwork(),
               .entropySource = entropySource,
               .fs = *fs,
+              .claims = serverClaims,
             },
             configLoader,
             candidateSource,
@@ -187,6 +188,7 @@ class ReplSession::Impl {
   jsg::V8System v8System;
   ConfigLoader configLoader;
   CandidateSource candidateSource;
+  ReplServerClaims serverClaims;
   ReplEnvironment environment;
 
   // Autogates are process-wide and set before V8 starts.

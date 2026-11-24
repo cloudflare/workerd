@@ -249,7 +249,8 @@ lists them, and nothing is left running. With `watch: true`, the config [reloads
 whenever a file it was loaded from changes.
 
 Each config is served by a server of its own, as `workerd serve` would serve it, in the REPL's
-process. A config can be loaded more than once, and several configs can be loaded at the same time.
+process. A config can be loaded more than once, and several configs can be loaded at the same time,
+as long as no two of them store the same [Durable Objects](#durable-objects).
 
 - The config's HTTP, HTTPS and TCP sockets listen on in-process names instead of their addresses.
   A config whose ports are in use still loads, and nothing outside the process can connect to it.
@@ -275,7 +276,7 @@ workerd. `workerd.evict()` evicts a [Durable Object](#durable-objects).
 | `service(name, { entrypoint, props })`   | A `Fetcher` for the config's service `name`, for `fetch()` and RPC: its `entrypoint` (the default export if none), with `props` as `ctx.props`. |
 | `socket(name)`                           | A `Fetcher` whose `fetch()` sends the request to the config's HTTP socket `name`, as a client connecting to the socket would.                   |
 | `durableObject(service, className, key)` | A stub for the [Durable Object](#durable-objects) `key` names, of the class `className` that the config's service `service` exports.            |
-| `reload()`                               | Loads the config again and serves it in place of the old one. Resolves to the handle once the new server is serving.                            |
+| `reload()`                               | Loads the config again, closes the old server, and serves the new one in its place. Resolves to the handle once the new server is serving.      |
 | `close()`                                | Drains the server and shuts it down. Resolves once it has; calling it again is harmless.                                                        |
 
 `service()` reaches any service in the config, not only a Worker, as a binding to it would. It
@@ -319,15 +320,33 @@ or close with `webSockets: 'close'`. The promise rejects if the object isn't run
 undefined
 ```
 
+Two servers can't store the same Durable Objects, just as two `workerd serve` processes can't share
+a storage directory: both would write the objects' SQLite files. A config is refused if one of its
+classes stores its objects where a loaded server's does, in the same `localDisk` directory under
+the same `uniqueKey`, whichever [environment](#other-compatibility-settings) loaded that server:
+
+```
+> await workerd.loadConfig('copy.capnp')
+Uncaught Error: copy.capnp stores Durable Objects in /home/me/app/storage/counter, as the server for config.capnp does. Close that server first.
+```
+
 ### Reloading
 
-`await s.reload()` reads the config again, as `loadConfig()` read it, and starts a new server on
-it. Once that is serving, it takes the old server's place behind the handle, and the old server is
-closed as `close()` would close it: what it handed out fails with
-`Error: The server for <path> was reloaded.`, so ask the handle for new `Fetcher`s and Durable
-Object stubs. Durable Objects and other state held in memory start afresh. If the config no longer
-loads, or the new server doesn't start, the promise rejects with the problems and the old server
-runs on.
+`await s.reload()` reads the config again, as `loadConfig()` read it. Then it closes the old
+server, as `close()` would close it, and starts a new server in its place behind the handle. What
+the old server handed out fails with `Error: The server for <path> was reloaded.`, so ask the
+handle for new `Fetcher`s and Durable Object stubs. Durable Objects and other state held in memory
+start afresh. Until the new server is serving, the handle's `service()`, `socket()` and
+`durableObject()` throw `Error: The server for <path> is reloading.` The old server goes first
+because the two can't both run: a config's Durable Objects and UDP addresses belong to one server
+at a time.
+
+If the config no longer loads, or is [refused](#durable-objects), the promise rejects with the
+problems, and the old server runs on. If it loads but the new server doesn't start, nothing serves
+the config, as under `workerd serve --watch`. The promise rejects with
+`Error: <path> did not reload, and nothing serves it:` and the problems. Until a reload starts a
+server, `service()`, `socket()` and `durableObject()` throw
+`Error: Nothing serves <path>: its last reload failed to start the new server.`
 
 A config loaded with `watch: true` reloads by itself whenever one of the files it was loaded from
 changes: the config, the files it imports and embeds, or for a `wrangler.json`, the Worker's
@@ -345,8 +364,9 @@ ReplServer {
 > Reloaded config.capnp: a file it was loaded from changed.
 ```
 
-A reload that fails is reported the same way, and the next change reloads again, so fixing the
-config brings the server up to date. Reloads, asked for or not, run one at a time.
+A reload that fails is reported the same way, with whether the old server runs on, and the next
+change reloads again, so fixing the config brings the server up to date. Reloads, asked for or
+not, run one at a time.
 
 ### Closing
 
@@ -527,7 +547,10 @@ no KJ I/O objects.
 V8 and event loop and hands it to the Rust server's `InProcessServer` (`server/in_process.rs`).
 `InProcessServer::start()` serves the config in the background, its stream sockets on `loopback:`
 names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds. A reload
-does all of that again and swaps the new `InProcessServer` in before closing the old one. The
+reads the config and builds the new `InProcessServer`, closes the old one, then starts the new.
+Before a load or a reload builds anything, it claims the Durable Object directories the config
+names in `ReplServerClaims`, which the REPL keeps for the whole session, so that a config another
+server's directories are in is refused before anything of it runs. The
 config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
 text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
 `repl_load_config` registers each file it reads with.

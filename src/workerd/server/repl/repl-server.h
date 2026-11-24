@@ -14,6 +14,7 @@
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
 #include <kj/function.h>
+#include <kj/list.h>
 #include <kj/refcount.h>
 #include <kj/time.h>
 #include <kj/timer.h>
@@ -27,6 +28,38 @@ namespace workerd::server {
 class WorkerFactory;
 struct InProcessServer;
 
+// What no two servers of a REPL session may hold at once: the directory of each of their durable
+// Durable Object namespaces. Two servers over one such directory would run two instances of each
+// of its Durable Objects on one database. One for the session, whose environments share it.
+class ReplServerClaims {
+ public:
+  // What one server holds, until it is destroyed.
+  class Claim {
+   public:
+    Claim(ReplServerClaims& registry, kj::String path, kj::Array<kj::String> held);
+    ~Claim() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(Claim);
+
+   private:
+    ReplServerClaims& registry;
+    // The config of the server, as the user named it.
+    kj::String path;
+    // Each a phrase, such as "stores Durable Objects in /storage/counter".
+    kj::Array<kj::String> held;
+    kj::ListLink<Claim> link;
+
+    friend class ReplServerClaims;
+  };
+
+  // Claims `held` for the server of the config `path`. Throws a JSG error if a claim other than
+  // `except` holds one of them.
+  kj::Own<Claim> claim(
+      kj::StringPtr path, kj::Array<kj::String> held, kj::Maybe<const Claim&> except = kj::none);
+
+ private:
+  kj::List<Claim, &Claim::link> claims;
+};
+
 // What the server of a loaded config is built from: the REPL session's process-wide resources.
 struct ReplServerResources {
   jsg::V8System& v8System;
@@ -35,6 +68,7 @@ struct ReplServerResources {
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
+  ReplServerClaims& claims;
 };
 
 // The files a config was loaded from, watched for changes.
@@ -92,11 +126,17 @@ WD_STRONG_BOOL(ReportReloadOutcome);
 // server takes its factory apart, so that a JavaScript Fetcher or Response the REPL still holds
 // does not keep the factory alive.
 //
-// Reloading loads the config again and starts a new Rust server on it. Once that has started, it
-// takes the old one's place, and the old one is revoked and closed as closing would. A reload that
-// fails leaves the old server running. Reloads run one at a time, in the order asked for. A
-// watched config is reloaded whenever a file the last load read changes, so one that failed to
-// load is reloaded once it is fixed; the outcome is printed to stderr.
+// Reloading loads the config again and builds a new Rust server on it. The old one is revoked and
+// closed as closing would, and then the new one serves in its place: two servers of one config at
+// once would run two instances of each of its Durable Objects. A config that doesn't load, or
+// whose server would store Durable Objects where another server does, leaves the old server
+// running. A server that doesn't start leaves nothing serving until a reload starts one. Reloads
+// run one at a time, in the order asked for. A watched config is reloaded whenever a file the last
+// load read changes, so one that failed is reloaded once it is fixed; the outcome is printed to
+// stderr.
+//
+// Loading a config refuses it if its server would store Durable Objects where another server of
+// the session does (ReplServerClaims), until that server's close is done.
 class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
  public:
   // Loads the config `source` names and starts serving it. Resolves once every socket listens.
@@ -108,7 +148,8 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
   ReplConfigServer(ReplServerContext context,
       ReplConfigSource source,
       ::rust::Box<InProcessServer> server,
-      kj::Array<kj::String> warnings);
+      kj::Array<kj::String> warnings,
+      kj::Own<ReplServerClaims::Claim> claim);
   ~ReplConfigServer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ReplConfigServer);
 
@@ -143,9 +184,12 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
  private:
   ReplServerContext context;
   ReplConfigSource source;
-  // The running server, which owns its factory; none once closed.
+  // The running server, which owns its factory; none once closed, while a reload replaces it, and
+  // after a reload whose new server did not start.
   kj::Maybe<::rust::Box<InProcessServer>> server;
   kj::Array<kj::String> warnings;
+  // A reload has closed the server and has yet to start the new one.
+  bool replacing = false;
 
   // The last reload asked for, settled or not. Never rejects.
   kj::ForkedPromise<void> reloading;
@@ -155,13 +199,18 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
   // Set by the close as it ends, even if it is destroyed unfinished: declared before `closing`,
   // which holds it.
   bool closeDone = false;
+  // What the server holds, or would; none once nothing runs. Released by the close as it ends,
+  // like `closeDone`.
+  kj::Maybe<kj::Own<ReplServerClaims::Claim>> claim;
   kj::Maybe<kj::ForkedPromise<void>> closing;
 
   // Asks for a reload after the one asked for last; the reload, which fails if it does unless
   // `report` prints its outcome instead.
   kj::ForkedPromise<void> queueReload(ReportReloadOutcome report);
   kj::Promise<void> reloadAfter(kj::Promise<void> previous, ReportReloadOutcome report);
-  kj::Promise<void> replaceServer();
+  // Replaces the server with one of the config as it is now, `watch` watching the files the load
+  // reads.
+  kj::Promise<void> replaceServer(kj::Maybe<ReplConfigWatch&> watch);
   // Asks for a reload once a file `watch` watches changes.
   void watchFor(kj::Own<ReplConfigWatch> watch);
   kj::Promise<void> closeServer();

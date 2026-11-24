@@ -14,6 +14,7 @@
 #include <capnp/serialize-text.h>
 #include <capnp/serialize.h>
 #include <kj/async-io.h>
+#include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <kj/test.h>
@@ -90,6 +91,18 @@ constexpr kj::StringPtr BROKEN_CONFIG = R"((
   sockets = [ (name = "http", address = "*:0", http = (), service = "missing") ],
 ))"_kj;
 
+// A config whose worker's script throws as it starts.
+constexpr kj::StringPtr THROWING_SCRIPT_CONFIG = R"((
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [ (name = "worker.js", esModule = "throw new Error('broken');") ],
+      ),
+    ),
+  ],
+))"_kj;
+
 // A config with the process-wide settings the REPL ignores.
 constexpr kj::StringPtr PROCESS_WIDE_CONFIG = R"((
   v8Flags = ["--expose-gc"],
@@ -115,8 +128,8 @@ kj::String configAnswering(kj::StringPtr text) {
 }
 
 // A config whose worker exports a Durable Object class, Counter, stored in `storageDir`, and an
-// ephemeral one, Scratch.
-kj::String durableObjectsConfig(kj::StringPtr storageDir) {
+// ephemeral one, Scratch. `moduleEnd` ends the worker's module.
+kj::String durableObjectsConfig(kj::StringPtr storageDir, kj::StringPtr moduleEnd = ""_kj) {
   return kj::str(R"((
   services = [
     ( name = "main",
@@ -140,6 +153,8 @@ kj::String durableObjectsConfig(kj::StringPtr storageDir) {
               `  hit() { return ++this.hits; }
               `}
               `export default { fetch() { return new Response("ok"); } };
+              `)",
+      moduleEnd, R"(
           ),
         ],
         durableObjectNamespaces = [
@@ -176,6 +191,7 @@ struct Fixture final: public ReplConfigLoader {
   kj::AsyncIoContext io = kj::setupAsyncIo();
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   TestEntropySource entropySource;
+  ReplServerClaims claims;
   ReplServerResources resources{
     .v8System = v8System,
     .timer = io.provider->getTimer(),
@@ -183,6 +199,7 @@ struct Fixture final: public ReplConfigLoader {
     .network = io.provider->getNetwork(),
     .entropySource = entropySource,
     .fs = *fs,
+    .claims = claims,
   };
   kj::HashMap<kj::String, kj::String> configs;
   // The change the last watch a server waits on would report, and the test waiting for a server to
@@ -469,6 +486,7 @@ KJ_TEST("REPL rejects invalid compatibility settings") {
   kj::AsyncIoContext io = kj::setupAsyncIo();
   auto fs = kj::newDiskFilesystem();
   TestEntropySource entropySource;
+  ReplServerClaims claims;
   ReplServerResources resources{
     .v8System = v8System,
     .timer = io.provider->getTimer(),
@@ -476,6 +494,7 @@ KJ_TEST("REPL rejects invalid compatibility settings") {
     .network = io.provider->getNetwork(),
     .entropySource = entropySource,
     .fs = *fs,
+    .claims = claims,
   };
   struct: public ReplConfigLoader {
     kj::Array<capnp::word> load(
@@ -607,16 +626,21 @@ KJ_TEST("REPL revokes what a closed server handed out") {
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('main')"), closed);
 }
 
+// The directory `name` in the test's temporary directory, empty: without what a run before this one
+// stored.
+kj::String emptyDirectory(Fixture& fixture, kj::StringPtr name) {
+  const char* tmpdir = getenv("TEST_TMPDIR");
+  auto directory = kj::str(tmpdir == nullptr ? "/tmp" : tmpdir, "/", name);
+  auto path = fixture.fs->getCurrentPath().evalNative(directory);
+  fixture.fs->getRoot().tryRemove(path);
+  fixture.fs->getRoot().openSubdir(path, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
+  return directory;
+}
+
 KJ_TEST("REPL reaches a config's Durable Objects and evicts them") {
   // For the ephemeral class.
   Fixture fixture({.experimental = true});
-  const char* tmpdir = getenv("TEST_TMPDIR");
-  auto storageDir = kj::str(tmpdir == nullptr ? "/tmp" : tmpdir, "/repl-durable-objects");
-  auto storagePath = fixture.fs->getCurrentPath().evalNative(storageDir);
-  // Without what a run before this one stored.
-  fixture.fs->getRoot().tryRemove(storagePath);
-  fixture.fs->getRoot().openSubdir(
-      storagePath, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
+  auto storageDir = emptyDirectory(fixture, "repl-durable-objects");
   fixture.setConfig("durable-objects.capnp", durableObjectsConfig(storageDir));
   KJ_EXPECT_STARTS_WITH(
       fixture.evalAwait("s = await workerd.loadConfig('durable-objects.capnp')"), "ReplServer");
@@ -726,13 +750,29 @@ KJ_TEST("REPL reloads a config in place") {
       "service(), socket() or durableObject().");
 
   // A config that no longer loads leaves the server as it was.
-  fixture.setConfig("reload.capnp", BROKEN_CONFIG);
-  KJ_EXPECT_STARTS_WITH(
-      fixture.evalAwait("await s.reload()"), "Uncaught Error: Failed to load reload.capnp:");
   fixture.configs.erase("reload.capnp"_kj);
   KJ_EXPECT_STARTS_WITH(
       fixture.evalAwait("await s.reload()"), "Uncaught Error: reload.capnp: No such file.");
   KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+
+  // One whose server doesn't start leaves nothing serving, since the old server closes first,
+  // until a reload starts one.
+  auto noServer = "Uncaught Error: Nothing serves reload.capnp: its last reload failed to start "
+                  "the new server. Fix the config and reload()."_kj;
+  fixture.setConfig("reload.capnp", THROWING_SCRIPT_CONFIG);
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await s.reload()"),
+      "Uncaught Error: reload.capnp did not reload, and nothing serves it: Failed to load "
+      "reload.capnp:");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('main')"), noServer);
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.socket('http')"), noServer);
+  KJ_EXPECT(fixture.eval("[s.closed, workerd.servers.length]") == "[ false, 1 ]");
+  fixture.configs.erase("reload.capnp"_kj);
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await s.reload()"),
+      "Uncaught Error: reload.capnp did not reload, and nothing serves it: reload.capnp: No such "
+      "file.");
+  fixture.setConfig("reload.capnp", configAnswering("three"));
+  KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'three'");
 
   fixture.evalAwait("await s.close()");
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await s.reload()"),
@@ -750,11 +790,15 @@ KJ_TEST("REPL reloads a watched config when a file it was loaded from changes") 
   fixture.changeWatchedFiles();
   KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
 
-  // A change that breaks the config leaves the server running, and the change that fixes it
-  // reloads it.
-  fixture.setConfig("reload.capnp", BROKEN_CONFIG);
+  // A change that leaves the config unloadable leaves the server running, and one that breaks its
+  // server leaves nothing serving. The change that fixes it reloads it.
+  fixture.configs.erase("reload.capnp"_kj);
   fixture.changeWatchedFiles();
   KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+  fixture.setConfig("reload.capnp", BROKEN_CONFIG);
+  fixture.changeWatchedFiles();
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait(FETCH_MAIN), "Uncaught Error: Nothing serves reload.capnp");
   fixture.setConfig("reload.capnp", configAnswering("three"));
   fixture.changeWatchedFiles();
   KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'three'");
@@ -768,6 +812,64 @@ KJ_TEST("REPL reloads a watched config when a file it was loaded from changes") 
 
   fixture.evalAwait("await s.close()");
   KJ_EXPECT(fixture.eval("s.watching") == "false");
+}
+
+KJ_TEST("REPL closes the server a reload replaces before the new one serves") {
+  Fixture fixture;
+  fixture.setConfig("reload.capnp", configAnswering("one"));
+  fixture.evalAwait("s = await workerd.loadConfig('reload.capnp')");
+  fixture.setConfig("reload.capnp", configAnswering("two"));
+  auto close = fixture.holdNextClose();
+  KJ_EXPECT(fixture.eval("reloaded = s.reload(), 'reloading'") == "'reloading'");
+  close.waiting.wait(fixture.io.waitScope);
+  // The old server is closing, and the new one isn't serving yet.
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('main')"),
+      "Uncaught Error: The server for reload.capnp is reloading.");
+  close.release->fulfill();
+  KJ_EXPECT(fixture.evalAwait("(await reloaded) === s") == "true");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+}
+
+KJ_TEST("REPL refuses a config whose Durable Objects another server stores") {
+  Fixture fixture({.experimental = true});
+  auto storageDir = emptyDirectory(fixture, "repl-claimed-durable-objects");
+  fixture.setConfig("durable-objects.capnp", durableObjectsConfig(storageDir));
+  fixture.setConfig("again.capnp", durableObjectsConfig(storageDir));
+  fixture.evalAwait("s = await workerd.loadConfig('durable-objects.capnp')");
+  auto refused = kj::str("Uncaught Error: again.capnp stores Durable Objects in ",
+      fixture.fs->getCurrentPath().evalNative(storageDir).toNativeString(true),
+      "/counter, as the server for durable-objects.capnp does. Close that server first.");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('again.capnp')"), refused);
+  KJ_EXPECT(fixture.eval("workerd.servers.length") == "1");
+  // As is a load in another environment. Its eval() returns the message as a string, which renders
+  // as a literal that escapes backslashes, such as a Windows path's, as encodeCEscape() does.
+  fixture.evalAwait("e = await workerd.environment()");
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("await e.eval(\"await workerd.loadConfig('again.capnp')\")"),
+      kj::str("'", kj::encodeCEscape(refused)));
+
+  // A reload claims what the server it replaces held.
+  KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('again.capnp')"), refused);
+
+  // A reload whose server doesn't start leaves nothing holding them.
+  fixture.setConfig(
+      "durable-objects.capnp", durableObjectsConfig(storageDir, "throw new Error('broken');"));
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await s.reload()"),
+      "Uncaught Error: durable-objects.capnp did not reload, and nothing serves it:");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("t = await workerd.loadConfig('again.capnp')"),
+      "ReplServer {\n  path: 'again.capnp',");
+  fixture.evalAwait("await t.close()");
+  fixture.setConfig("durable-objects.capnp", durableObjectsConfig(storageDir));
+  KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('again.capnp')"), refused);
+
+  // Once that server has closed, another may store them.
+  fixture.evalAwait("await s.close()");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("t = await workerd.loadConfig('again.capnp')"),
+      "ReplServer {\n  path: 'again.capnp',");
+  KJ_EXPECT(fixture.evalAwait("await t.durableObject('main', 'Counter', 'alice').increment()") ==
+      "'1/1'");
 }
 
 KJ_TEST("REPL reports configs that do not load") {
