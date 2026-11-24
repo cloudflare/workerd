@@ -1,0 +1,16 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The bridge between the C++ VFS facade in //src/workerd/io (worker-fs-rust.c++) and the `vfs`
+# crate. A package of its own so that `vfs` stays free of V8 and of the bridge. The C++ it calls
+# is declared in host.h as abstract classes that //src/workerd/io implements, so that
+# //src/workerd/io can depend on this crate without a cycle.
+wd_rust_crate(
+    name = "vfs-ffi",
+    cxx_bridge_hdrs = ["host.h"],
+    cxx_bridge_src = "ffi.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io/vfs",
+    ],
+)

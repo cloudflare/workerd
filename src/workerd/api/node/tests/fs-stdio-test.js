@@ -3,15 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Line buffering of writes to the stdio file descriptors. The same module
-// runs under the C++ implementation (fs-stdio-cpp.wd-test) and the TypeScript
-// one (fs-stdio-ts.wd-test). The TS_STDIO autogate, which user code cannot
-// read, selects between them, so each cell says which one it is meant to run
-// through its USING_TS_IMPL binding.
+// runs under the C++ implementation (fs-stdio-cpp.wd-test), the Rust virtual
+// file system (fs-stdio-rust.wd-test) and the TypeScript implementation
+// (fs-stdio-ts.wd-test). Autogates, which user code cannot read, select
+// between them, so each cell says whether it is meant to run the TypeScript
+// one through its USING_TS_IMPL binding.
 
 import { env } from 'cloudflare:workers';
 import { Buffer } from 'node:buffer';
 import { appendFileSync, writeFile, writeFileSync, writeSync } from 'node:fs';
-import { deepStrictEqual, strictEqual } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 
 const usingTsImpl = env.USING_TS_IMPL === true;
 
@@ -99,5 +100,31 @@ export const writeFileToStdio = {
     const cb = await capture(() => writeFile(1, 'c\n', done.resolve));
     strictEqual(await done.promise, null);
     deepStrictEqual(cb.lines, ['c']);
+  },
+};
+
+export const consoleLogThrows = {
+  async test() {
+    const error = new Error('log failed');
+    const lines = [];
+    const log = console.log;
+    let calls = 0;
+    console.log = (msg) => {
+      if (calls++ === 0) throw error;
+      lines.push(String(msg).replace(/^stdout: ?/, ''));
+    };
+    try {
+      writeSync(1, 'p');
+      throws(
+        () => writeSync(1, 'q\nr\n'),
+        (e) => e === error
+      );
+      // The line that failed, and the rest of its write, are dropped.
+      writeSync(1, 's\n');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      console.log = log;
+    }
+    deepStrictEqual(lines, ['s']);
   },
 };

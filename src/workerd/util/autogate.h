@@ -141,7 +141,11 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* The virtual file system of a Worker (io/worker-fs.h) is the Rust implementation (io/vfs)      \
+     rather than the C++ one in io/worker-fs.c++. The gate is read wherever a file, directory or   \
+     file system is created, so a file system never mixes the two. */                              \
+  V(RUST_VFS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

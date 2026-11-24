@@ -105,6 +105,8 @@ wd_cc_library(
         "tracer.c++",
         "worker.c++",
         "worker-fs.c++",
+        "worker-fs-rust.c++",
+        "worker-fs-rust.h",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "async-trace-promises.h",
@@ -133,6 +135,7 @@ wd_cc_library(
         "//src/workerd/api:crypto-endianness",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
+        "//src/workerd/io/vfs/ffi:vfs-ffi",
         "//src/workerd/util:abortable",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
