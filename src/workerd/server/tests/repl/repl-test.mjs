@@ -18,10 +18,9 @@ assert(env.REPL_CONFIG !== undefined, 'Set REPL_CONFIG.');
 const COMPILE_CACHE_WARNING =
   /^.*per-isolate bootstrap compile cache failed its compatibility check.*\n/gm;
 
-// Runs `workerd repl --experimental ...args` with `lines` as its input; its exit status, what it
-// wrote to stdout, where the results go, as text and as lines, and what it wrote to stderr. A
-// result can take several lines, as an object or an exception's stack does.
-function repl(args, lines) {
+// Runs `workerd repl --experimental ...args` with `input` as its stdin; its exit status, what it
+// wrote to stdout, as text and as lines, and what it wrote to stderr.
+function run(args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       env.WORKERD_BINARY,
@@ -37,6 +36,10 @@ function repl(args, lines) {
     child.stderr.on('data', (data) => (stderr += data));
     child.on('error', reject);
     child.on('close', (code) => {
+      // On Windows, what workerd writes through C's stdio, such as console.log() output, ends its
+      // lines with \r\n, since stdio translates \n there.
+      stdout = stdout.replaceAll('\r\n', '\n');
+      stderr = stderr.replaceAll('\r\n', '\n');
       stderr = stderr.replace(COMPILE_CACHE_WARNING, '');
       resolve({
         code,
@@ -45,8 +48,18 @@ function repl(args, lines) {
         stderr,
       });
     });
-    child.stdin.end(lines.map((line) => `${line}\n`).join(''));
+    child.stdin.end(input);
   });
+}
+
+// Runs `workerd repl --experimental --interactive ...args`, which reads `lines` an input at a
+// time; `results` are the lines of stdout, where the results go. A result can take several lines,
+// as an object or an exception's stack does.
+function repl(args, lines) {
+  return run(
+    ['--interactive', ...args],
+    lines.map((line) => `${line}\n`).join('')
+  );
 }
 
 test('a config named on the command line is loaded into `s`', async () => {
@@ -282,6 +295,83 @@ test('a failure in the background fails the exit status', async () => {
   }
 });
 
+test('piped stdin is one script', async () => {
+  // A line can continue the statement before it, and a function declared last is declared
+  // throughout, though the script awaits.
+  const { code, stdout, stderr } = await run(
+    [],
+    `const words = ['b', 'a']
+  .sort();
+console.log(words.join(' '));
+console.log(await new Promise((resolve) => setTimeout(() => resolve('later'), 10)));
+declaredBelow();
+function declaredBelow() { console.log('declared below'); }
+`
+  );
+  assert.strictEqual(code, 0, stderr);
+  assert.strictEqual(stdout, 'a b\nlater\ndeclared below\n');
+  assert.strictEqual(stderr, '');
+});
+
+test('-i reads piped stdin an input at a time, and prints the results', async () => {
+  for (const [args, stdout] of [
+    [['-i'], '2\n'],
+    [['--interactive'], '2\n'],
+    [[], ''],
+  ]) {
+    const result = await run(args, '1 + 1\n');
+    assert.strictEqual(result.code, 0, result.stderr);
+    assert.strictEqual(result.stdout, stdout, `${args}`);
+  }
+});
+
+test('an exception the script does not catch ends it', async () => {
+  const { code, stdout, stderr } = await run(
+    [],
+    "console.log('before');\nnull.x;\nconsole.log('after');\n"
+  );
+  assert.strictEqual(code, 1, stderr);
+  assert.strictEqual(stdout, 'before\n');
+  assert(
+    stderr.startsWith('Uncaught TypeError: Cannot read properties of null'),
+    stderr
+  );
+});
+
+test('the exit status says whether the script failed', async () => {
+  for (const [args, script, failed] of [
+    [[], '', false],
+    [[], "try { null.x } catch {}\n'done'", false],
+    [[], "await Promise.reject(new Error('no'))", true],
+    [[], "void Promise.reject(new Error('unhandled'))", true],
+    [[], 'f(', true],
+    [['--input-timeout=0.1'], 'await new Promise(() => {})', true],
+  ]) {
+    const { code, stderr } = await run(args, script);
+    assert.strictEqual(code, failed ? 1 : 0, `${script}: ${stderr}`);
+  }
+});
+
+test('a script runs once the command line config is in `s`', async () => {
+  const { code, stdout, stderr } = await run(
+    [env.REPL_CONFIG],
+    "console.log(await (await s.service('main').fetch('http://x/')).text())"
+  );
+  assert.strictEqual(code, 0, stderr);
+  assert.strictEqual(stdout, 'hello\n');
+  assert.strictEqual(stderr, '');
+});
+
+test('a script does not run when the command line config fails to load', async () => {
+  const { code, stdout, stderr } = await run(
+    ['no-such-config.capnp'],
+    "console.log('ran')"
+  );
+  assert.strictEqual(code, 1, stderr);
+  assert.strictEqual(stdout, '');
+  assert(stderr.startsWith('Uncaught Error: no-such-config.capnp'), stderr);
+});
+
 // Starts `workerd repl --experimental ...args` for a test to give input to as it goes. With
 // `ignoringInterrupts`, the REPL starts with SIGINT ignored, as a shell without job control starts
 // a background job.
@@ -364,7 +454,7 @@ test('a watched config reloads when its file changes', async () => {
   await writeFile(config, configAnswering('one'));
   const fetchMain = "await (await s.service('main').fetch('http://x/')).text()";
 
-  const repl = startRepl([]);
+  const repl = startRepl(['-i']);
   repl.send(
     `s = await workerd.loadConfig(${JSON.stringify(config)}, { watch: true })`
   );
@@ -390,7 +480,7 @@ const unixOnly = {
 };
 
 test('Ctrl+C stops awaiting an input', unixOnly, async () => {
-  const repl = startRepl([]);
+  const repl = startRepl(['-i']);
   repl.send("console.log('awaiting'); await new Promise(() => {})");
   await repl.waitFor(({ stdout }) => stdout.includes('awaiting'));
   repl.interrupt();
@@ -404,7 +494,7 @@ test(
   'a second Ctrl+C ends the REPL while an input runs without awaiting',
   unixOnly,
   async () => {
-    const repl = startRepl([]);
+    const repl = startRepl(['-i']);
     repl.send("console.log('spinning'); while (true) {}");
     await repl.waitFor(({ stdout }) => stdout.includes('spinning'));
     // Signals that arrive together are taken as one, so this signals until the REPL ends.
@@ -416,7 +506,7 @@ test(
 );
 
 test('a REPL started with SIGINT ignored ignores it', unixOnly, async () => {
-  const repl = startRepl([], { ignoringInterrupts: true });
+  const repl = startRepl(['-i'], { ignoringInterrupts: true });
   repl.send("console.log('ready')");
   await repl.waitFor(({ stdout }) => stdout.includes('ready'));
   repl.interrupt();
@@ -429,6 +519,17 @@ test('a REPL started with SIGINT ignored ignores it', unixOnly, async () => {
     ),
   ]);
   assert.strictEqual(await repl.end(), 0, repl.output.stderr);
+});
+
+test('Ctrl+C ends the REPL while a script runs', unixOnly, async () => {
+  const repl = startRepl([]);
+  repl.send("console.log('started'); await new Promise(() => {})");
+  // The script runs once its input ends.
+  const ended = repl.end();
+  await repl.waitFor(({ stdout }) => stdout.includes('started'));
+  repl.interrupt();
+  assert.deepStrictEqual(await repl.exited, { code: null, signal: 'SIGINT' });
+  await ended;
 });
 
 test('an environment evaluates input as the console does', async () => {

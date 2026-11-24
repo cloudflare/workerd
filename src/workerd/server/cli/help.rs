@@ -384,16 +384,19 @@ workerd repl: evaluate JavaScript in a Worker (experimental).
 Usage:
   workerd repl --experimental [options] [config] [const]
 
-Prints the result of each input. The workerd global loads configs, as
-serve does, and calls their services and sockets; type .help in the
-REPL for more. [config], a wrangler.json, wrangler.jsonc or .capnp
-config as for serve, is loaded into the global s before the first
-prompt; [const] names the constant of a .capnp config.
+On a terminal, or with -i, reads an input at a time and prints its
+result. Otherwise stdin is one script, run once stdin ends. Its result
+isn't printed, and a timer it doesn't await may never fire.
+The workerd global loads configs, as serve does, and calls their
+services and sockets; type .help in the REPL for more. [config], a
+wrangler.json, wrangler.jsonc or .capnp config as for serve, is loaded
+into the global s first; the script doesn't run if it fails to load.
+[const] names the constant of a .capnp config.
 
-The exit status is 1 if an input failed: it threw, the promise it
-awaited rejected, it timed out, it is no command, or it was left
-unfinished. It is 1 too if a timer callback threw, a waitUntil() task
-rejected, or a rejection went unhandled.
+The exit status is 1 if an input or the script failed: it threw, the
+promise it awaited rejected, it timed out, it is no command, or it was
+left unfinished. It is 1 too if a timer callback threw, a waitUntil()
+task rejected, or a rejection went unhandled.
 
 On a terminal, the lines typed are saved in ~/.workerd_repl_history;
 WORKERD_REPL_HISTORY names another file, or, set to the empty string,
@@ -408,6 +411,7 @@ Options:
       --autogate <name>              Enable an autogate; repeat for more
       --v8-flag <flag>               Pass a flag to V8; repeat for more
       --input-timeout <seconds>      Stop awaiting an input after this long
+  -i, --interactive                  Read stdin an input at a time
       --experimental                 Required
       --verbose                      Log to stderr
   -h, --help                         Print this help

@@ -3,7 +3,8 @@
 `workerd repl` evaluates JavaScript typed at a console, in a Worker's global scope, and prints each
 result. Its `workerd` global loads configs, serves them in the same process as `workerd serve`
 would, and calls into their services and sockets. Use it to try out an API, inspect what a value
-looks like at runtime, or poke at a config's Workers without writing a test.
+looks like at runtime, or poke at a config's Workers without writing a test. Piped a script
+instead, it runs the script, as `node` does (see [A script](#a-script)).
 
 The REPL is a tool for developing workerd. It is experimental: it requires `--experimental`, and
 its behavior, commands and JavaScript API may change or go away in any release.
@@ -62,7 +63,8 @@ workerd repl --experimental [options] [<config-file> [<const-name>]]
 A `<config-file>` is loaded into the global `s`, as
 `s = await workerd.loadConfig('<config-file>', { constName: '<const-name>' })` would load it. The
 REPL prints its result, and when it shows prompts, shows that input at the first. A config that
-fails to load is reported like any failed input, and the REPL carries on with `s` unset.
+fails to load is reported like any failed input, and the REPL carries on with `s` unset. Before a
+[script](#a-script), the load prints nothing unless it fails, which keeps the script from running.
 
 | Option                      | Effect                                                                                                                                                                                                                     |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -72,6 +74,7 @@ fails to load is reported like any failed input, and the REPL carries on with `s
 | `--autogate=<name>`         | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
 | `--v8-flag=<flag>`          | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
 | `--input-timeout=<seconds>` | Stops awaiting an input once it has taken this many seconds, such as `30` or `0.5`; see [Interrupting](#interrupting).                                                                                                     |
+| `-i`, `--interactive`       | Reads a stdin that isn't a terminal a line at a time, as it reads a terminal, rather than as one [script](#a-script); see [A line at a time](#a-line-at-a-time).                                                           |
 
 The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
 Workers use their own settings from the config.
@@ -89,9 +92,10 @@ Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 The REPL exits with status 1 if an input failed, or if the REPL itself did, and 0 otherwise. An
 input fails if it throws, if the promise it awaits rejects, if it is a command the REPL doesn't
 know, if it [times out](#interrupting), or if it is still [unfinished](#typing-input) when the
-REPL's input ends. The REPL prints the failure and goes on to the next input, so a script's later
-inputs still run. A config named on the command line that fails to load is an input that failed.
-An input that Ctrl+C stops awaiting, or that `.break` abandons, hasn't failed.
+REPL's input ends. The REPL prints the failure and goes on to the next input, so later inputs
+still run. A config named on the command line that fails to load is an input that failed. An
+input that Ctrl+C stops awaiting, or that `.break` abandons, hasn't failed. A
+[script](#a-script) is one input, and fails as one does.
 
 The REPL also exits with status 1 if something failed in the background, in its JavaScript or in
 an [environment](#other-compatibility-settings) it started: a timer callback that threw, a
@@ -217,7 +221,8 @@ On Unix, Ctrl+C while an input awaits stops awaiting it, whether or not input co
 terminal. The REPL says `Interrupted`, and prompts for the next input. The input's promise isn't
 canceled, and what it started, such as a request, goes on; `_` and `_error` stay as they were.
 JavaScript that runs without awaiting, such as a loop, can't be stopped that way: press Ctrl+C
-again to end the REPL. On Windows, Ctrl+C ends the REPL.
+again to end the REPL. On Windows, Ctrl+C ends the REPL. So does Ctrl+C while the REPL reads or
+runs a [script](#a-script), as it ends `node`.
 
 Ctrl+C at a terminal, and `kill -INT` from elsewhere, send the REPL SIGINT. One that arrives while
 no input runs ends the REPL, unless the terminal is editing a line, which takes Ctrl+C as a key.
@@ -230,7 +235,8 @@ line first gives the terminal back the modes it had, and turns bracketed paste m
 
 With `--input-timeout=<seconds>`, the REPL stops awaiting an input once it has taken that long, as
 Ctrl+C does, and says `Timed out`. The input counts as failed. As for Ctrl+C, JavaScript that runs
-without awaiting runs on.
+without awaiting runs on. A script is one input, so the timeout limits the whole script, and the
+config loaded before it gets a timeout of its own.
 
 ### History
 
@@ -242,19 +248,12 @@ the session. A line that repeats the one before it, or is empty, isn't saved.
 
 ### Without a terminal
 
-Elsewhere, such as when input is piped in or on Windows, the REPL reads plain lines and saves no
-history. Results go to stdout, and the REPL's own messages to stderr. When stdin is a terminal,
-the banner and prompts go to stderr too. When it isn't, the REPL shows neither, so stderr holds
-only what went wrong and what JavaScript writes there, such as with `console.error()`. A script can
-drive it so, and tell from its [exit status](#command-line) whether an input failed:
-
-```sh
-printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
-    "await (await s.service('main').fetch('http://x/')).text()" |
-  workerd repl --experimental
-```
-
-[Scripts and agents](#scripts-and-agents) says more about driving the REPL from a program.
+Input piped in is one [script](#a-script), unless `-i` is given. Elsewhere, such as on Windows or
+with `-i`, the REPL reads plain lines and saves no history. Results go to stdout, and the REPL's
+own messages to stderr. When stdin is a terminal, the banner and prompts go to stderr too. When it
+isn't, the REPL shows neither, so stderr holds only what went wrong and what JavaScript writes
+there, such as with `console.error()`. [Scripts and agents](#scripts-and-agents) says more about
+driving the REPL from a program.
 
 ## Loading configs
 
@@ -432,12 +431,60 @@ every environment still open.
 
 ## Scripts and agents
 
-A program, such as a coding agent, can drive the REPL through its stdin, a script at a time or in
-a long-running session. Either way, the REPL reads plain lines, as it does
-[without a terminal](#without-a-terminal), and these rules apply:
+A program, such as a coding agent, can pipe the REPL a script, or drive it a line at a time in a
+long-running session. Either way:
 
 - Pass `--compat-date`, so that what the REPL's JavaScript can do doesn't change with the day it
   runs.
+- `--input-timeout` stops awaiting a promise that never settles. It doesn't stop JavaScript that
+  runs without awaiting, such as `for (;;) {}`, nor the wait for the REPL's `waitUntil()` tasks
+  once its input ends. Limit the whole run as well, such as with GNU `timeout(1)` (`gtimeout` on
+  macOS with Homebrew's coreutils), or kill the REPL.
+- Once its input ends, the REPL [closes its servers](#closing), waits for its `waitUntil()` tasks,
+  and exits. It doesn't wait for a timer still pending then, which may never fire; await what
+  needs to finish.
+- `import()` can't load files from disk. To run a file's code, load a config with a Worker that
+  has it, and call the Worker through `service()`.
+
+### A script
+
+Piped to the REPL without `-i`, stdin is one script, which runs once stdin ends, as `node` runs a
+script piped to it. A quoted heredoc keeps the shell from expanding `$` and backticks in the
+JavaScript:
+
+```sh
+timeout 60 workerd repl --experimental --compat-date=2025-01-01 --input-timeout=10 \
+  config.capnp <<'EOF'
+const r = await s.service('main').fetch('http://example.com/');
+console.log(r.status, await r.text());
+EOF
+```
+
+The REPL loads `config.capnp` into `s`, then runs the script. Nothing runs until the REPL has read
+the whole script, so a statement can continue on the next line, as it can in any script.
+
+- The REPL prints nothing of its own unless something fails, and doesn't print the script's
+  result. So stdout holds what the script writes with `console.log()`, and stderr what it writes
+  with `console.error()` and what failed.
+- An exception the script doesn't catch ends it, as in any script, and prints on stderr as
+  `Uncaught` followed by the error. The [exit status](#command-line) is 1 if the script failed: it
+  threw, the promise it awaited rejected, or it timed out. It is 1 too if the config named on the
+  command line failed to load, which keeps the script from running, or if something failed in the
+  background.
+- The end of the script is the end of the REPL's input, so the REPL doesn't wait for a timer the
+  script doesn't await, which may never fire. To let one fire, await it, such as with
+  `await new Promise((resolve) => setTimeout(resolve, 100))`.
+- A script that awaits at top level runs as the body of an async function, so what it declares is
+  the function's own rather than global. One that doesn't runs as it is, in the global scope.
+- [Commands](#commands) are lines of the REPL's input: a line of a script that starts with `.` is
+  JavaScript.
+- Ctrl+C ends the REPL while it reads or runs the script (see [Interrupting](#interrupting)).
+
+### A line at a time
+
+With `-i`, the REPL reads piped input a line at a time, as it reads a terminal, and runs each input
+once it is finished. These rules apply:
+
 - A line that leaves no bracket, template literal or `/* */` comment open ends the input, and the
   input runs before the REPL reads the next line. A statement continued on the next line runs
   without that line, which then runs as an input of its own. That can fail, as a line starting
@@ -454,42 +501,26 @@ a long-running session. Either way, the REPL reads plain lines, as it does
 - An exception prints on stdout, as `Uncaught` followed by the error. The REPL's own errors go to
   stderr, such as `Error: Timed out after 30s: ...` and `Unknown command: ...`, along with
   `console.error()` and `console.warn()`, unhandled rejections, and the reports of reloads.
-- `--input-timeout` stops awaiting a promise that never settles. It doesn't stop JavaScript that
-  runs without awaiting, such as `for (;;) {}`, nor the wait for the REPL's `waitUntil()` tasks
-  once its input ends. Limit the whole run as well, such as with GNU `timeout(1)` (`gtimeout` on
-  macOS with Homebrew's coreutils), or kill the REPL.
-- Once its input ends, the REPL [closes its servers](#closing), waits for its `waitUntil()` tasks,
-  and exits. A timer still pending then never fires; await what needs to finish.
-- `import()` can't load files from disk. To run a file's code, load a config with a Worker that
-  has it, and call the Worker through `service()`.
 
-### A script at a time
-
-Pipe the inputs in, as in [Without a terminal](#without-a-terminal). A quoted heredoc keeps the
-shell from expanding `$` and backticks in the JavaScript:
+Every input runs, even after one fails, and the [exit status](#command-line) is 1 if any failed:
 
 ```sh
-timeout 60 workerd repl --experimental --compat-date=2025-01-01 --input-timeout=10 \
-  config.capnp <<'EOF'
-r = await s.service('main').fetch('http://example.com/'); r.status
-await r.text()
-EOF
+printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
+    "await (await s.service('main').fetch('http://x/')).text()" |
+  workerd repl --experimental -i
 ```
-
-The REPL loads `config.capnp` into `s` and prints the server handle, then runs the inputs. Every
-input runs, even after one fails, and the [exit status](#command-line) is 1 if any failed.
 
 ### A session
 
 To keep state from one command to the next, such as a loaded server or a Durable Object held in
-memory, start the REPL in the background, reading from a FIFO:
+memory, start the REPL with `-i` in the background, reading from a FIFO:
 
 ```sh
 dir=$(mktemp -d) && mkfifo "$dir/in" && touch "$dir/out" "$dir/err"
 # Holds the FIFO open for writing, so that the REPL's input doesn't end between sends.
 nohup sleep 86400 > "$dir/in" 2> /dev/null & echo $! > "$dir/holder.pid"
-nohup workerd repl --experimental --compat-date=2025-01-01 --input-timeout=30 config.capnp \
-  < "$dir/in" > "$dir/out" 2> "$dir/err" & echo $! > "$dir/repl.pid"
+nohup workerd repl --experimental -i --compat-date=2025-01-01 --input-timeout=30 \
+  config.capnp < "$dir/in" > "$dir/out" 2> "$dir/err" & echo $! > "$dir/repl.pid"
 echo "$dir"
 ```
 
@@ -557,7 +588,10 @@ finished, and a few _candidates_: ways to compile it, such as a plain script or,
 awaits at top level, an async function that returns its last statement's value. The session
 evaluates the first candidate that compiles, except that it passes over the plain script if the
 script uses `await` as a name: a script reads `await (x)` as a call to a function named `await`.
-Compiling the script in a class static block, where `await` can't be a name, tells.
+Compiling the script in a class static block, where `await` can't be a name, tells. A
+[script](#a-script) piped in is one input, which the console sends once stdin ends, with candidates
+of its own: the script as it is and, if it awaits, the script as the body of an async function,
+whose declarations stay its own.
 
 **The environment.** `ReplEnvironment` (`repl/repl-environment.h`) is a Worker that never receives
 an event, compiled on the REPL's isolate under the new module registry. One `IoContext` serves the

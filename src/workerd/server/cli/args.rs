@@ -268,6 +268,9 @@ pub struct ReplArgs {
     #[arg(long, value_name = "seconds", value_parser = parse_seconds)]
     pub input_timeout: Option<Duration>,
 
+    #[arg(short = 'i', long)]
+    pub interactive: bool,
+
     #[arg(long)]
     pub experimental: bool,
 }

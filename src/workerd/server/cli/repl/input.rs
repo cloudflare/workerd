@@ -500,6 +500,28 @@ pub fn candidates(input: &str) -> Vec<ReplCandidate> {
     candidates
 }
 
+/// The ways the REPL may compile `script`, the whole of a piped stdin (console.rs), in the order to
+/// try them: as it is, then, if it may await at top level, as the body of an async function. Unlike
+/// an input's wrappings, this one leaves the script as it is: no later input needs its
+/// declarations, and returning the value of its last statement would turn a function declared
+/// there into an expression, which declares nothing.
+pub fn script_candidates(script: &str) -> Vec<ReplCandidate> {
+    let mut candidates = vec![ReplCandidate {
+        source: script.to_owned(),
+        awaited: false,
+        parenthesized: false,
+    }];
+    if script.contains("await") {
+        // The line break keeps a line comment that ends the script from swallowing the wrapping.
+        candidates.push(ReplCandidate {
+            source: format!("(async () => {{{script}\n}})()"),
+            awaited: true,
+            parenthesized: false,
+        });
+    }
+    candidates
+}
+
 /// Where the last statement of `source` is: the code after its last top-level `;`, not counting
 /// those that end it, up to them.
 fn last_statement(source: &str) -> Range<usize> {

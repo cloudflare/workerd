@@ -2,9 +2,12 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_py_test.bzl", "wd_py_test")
 
 # `workerd repl` as a user runs it, input piped in: what only the command line and the console
-# do. src/workerd/server/repl/repl-environment-test.c++ covers evaluation.
+# do. src/workerd/server/repl/repl-environment-test.c++ covers evaluation. Each case starts
+# workerd; in a fastbuild on a loaded CI executor the cases take about 15 s in all, a medium test's
+# whole timeout.
 wd_js_test(
     name = "repl-test",
+    size = "large",
     data = [
         ":repl-test.capnp",
         "//src/workerd/server:workerd",

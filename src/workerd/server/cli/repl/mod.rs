@@ -9,10 +9,11 @@
 //! (bridge.rs, over the C++ in //src/workerd/server/repl), which owns V8 and the loaded configs'
 //! servers. The console thread (console.rs) blocks reading input and sends each finished input to
 //! the session ([`session`]), so the event loop keeps running -- timers, `waitUntil()`, the
-//! loaded servers -- while the console waits for the next line. What decides whether an input is
-//! finished, and how an input that awaits compiles, is in input.rs. On a terminal, the console
-//! keeps the lines typed in the history file (history.rs). On Unix, Ctrl+C abandons an input that
-//! awaits (interrupt.rs).
+//! loaded servers -- while the console waits for the next line. Piped in without `--interactive`,
+//! the input is one script instead, which the console reads to its end. What decides whether an
+//! input is finished, and how an input or a script that awaits compiles, is in input.rs. On a
+//! terminal, the console keeps the lines typed in the history file (history.rs). On Unix, Ctrl+C
+//! abandons an input that awaits (interrupt.rs).
 
 mod bridge;
 mod console;
@@ -54,6 +55,11 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         .config_file
         .as_deref()
         .map(|path| load_config_input(path, args.const_name.as_deref()));
+    let reading = if args.interactive || std::io::stdin().is_terminal() {
+        console::Reading::Lines
+    } else {
+        console::Reading::Script
+    };
     let options = bridge::ffi::ReplOptions {
         compat_date: args.compat_date.unwrap_or_default(),
         compat_flags: args.compat_flags,
@@ -76,7 +82,7 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         let (requests, received) = mpsc::unbounded_channel();
         let console = std::thread::Builder::new()
             .name("repl-console".to_owned())
-            .spawn(move || console::run(requests, first_input))
+            .spawn(move || console::run(requests, first_input, reading))
             .map_err(|error| {
                 cxx::KjError::new(
                     cxx::KjExceptionType::Failed,

@@ -18,6 +18,7 @@ use workerd_server::run::RunOptions;
 
 use super::bridge;
 use super::bridge::ffi::Features;
+use super::bridge::ffi::ReplCandidate;
 use super::bridge::ffi::ReplSession;
 use super::editor::Completion;
 use super::input;
@@ -32,10 +33,10 @@ const MAX_COMPLETIONS: usize = 200;
 
 /// What the console asks of the session.
 pub enum Request {
-    /// What became of `input`; an error if the session failed to evaluate it. A send on `abandon`
-    /// while the input awaits abandons it.
+    /// What became of the input `candidates` compile (input.rs); an error if the session failed to
+    /// evaluate it. A send on `abandon` while the input awaits abandons it.
     Evaluate {
-        input: String,
+        candidates: Vec<ReplCandidate>,
         abandon: oneshot::Receiver<()>,
         reply: oneshot::Sender<Result<Evaluated, String>>,
     },
@@ -71,11 +72,11 @@ pub async fn serve(
         // A console that gave up on the reply has ended; its next `recv` sees that.
         match request {
             Request::Evaluate {
-                input,
+                candidates,
                 abandon,
                 reply,
             } => {
-                let evaluated = evaluate(session.as_mut(), &input, abandon, timeout).await;
+                let evaluated = evaluate(session.as_mut(), candidates, abandon, timeout).await;
                 let _ = reply.send(evaluated);
             }
             Request::Complete {
@@ -91,16 +92,16 @@ pub async fn serve(
     bridge::drain(session).await
 }
 
-/// Evaluates `input`, unless abandoned or timed out first. Either drops the evaluation, which stops
-/// awaiting the input's promise. The timer runs only while the event loop does, so it can't time
-/// out JavaScript that runs without awaiting.
+/// Evaluates the input `candidates` compile, unless abandoned or timed out first. Either drops the
+/// evaluation, which stops awaiting the input's promise. The timer runs only while the event loop
+/// does, so it can't time out JavaScript that runs without awaiting.
 async fn evaluate(
     session: Pin<&mut ReplSession>,
-    input: &str,
+    candidates: Vec<ReplCandidate>,
     abandon: oneshot::Receiver<()>,
     timeout: Option<Duration>,
 ) -> Result<Evaluated, String> {
-    let mut evaluation = pin!(bridge::evaluate(session, input::candidates(input)));
+    let mut evaluation = pin!(bridge::evaluate(session, candidates));
     // None once the console has dropped its sender without sending: it never abandons then.
     let mut abandon = Some(abandon);
     let mut deadline = pin!(timeout.map(tokio::time::sleep));

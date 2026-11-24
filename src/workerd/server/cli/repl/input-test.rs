@@ -257,6 +257,27 @@ fn candidates_wrap_inputs_that_await() {
 }
 
 #[test]
+fn script_candidates_wrap_a_script_that_awaits_as_it_is() {
+    let sources = |script| {
+        script_candidates(script)
+            .into_iter()
+            .map(|c| (c.source, c.awaited, c.parenthesized))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sources("{ a: 1 }"), [("{ a: 1 }".to_owned(), false, false)]);
+    // Unlike an input's, the wrapping neither moves the declarations out nor returns the last
+    // statement, which would make `g` an expression.
+    let script = "const x = await f();\ng(x);\nfunction g() {} // done";
+    assert_eq!(
+        sources(script),
+        [
+            (script.to_owned(), false, false),
+            (format!("(async () => {{{script}\n}})()"), true, false),
+        ]
+    );
+}
+
+#[test]
 fn candidates_of_an_input_that_ends_with_a_declaration_return_nothing() {
     let wrapped = candidates("x = 1; var y = await f()\n");
     assert_eq!(
