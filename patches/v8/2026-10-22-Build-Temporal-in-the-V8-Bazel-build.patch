@@ -14,7 +14,7 @@ ourselves, but this will make it easier to potentially upstream the
 patch to V8.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac86258798 100644
+index 790d2fcc82ee19c428f23d699abd6899d27a43ca..d974b56b24c902c4d8e6b7f92094ecebbc6e487c 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -210,6 +210,20 @@ v8_flag(
@@ -133,7 +133,7 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
  #
  # The headers themselves reach the action through the
  # `metagen_sandbox_headers` glob below, which already covers src/**.
-@@ -4998,6 +5038,9 @@ v8_library(
+@@ -4996,6 +5036,9 @@ v8_library(
              ":v8_compiler_files",
          ],
          "//conditions:default": [],
@@ -143,7 +143,7 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
      }),
      copts = ["-Wno-implicit-fallthrough"],
      icu_deps = [
-@@ -5030,6 +5073,9 @@ v8_library(
+@@ -5028,6 +5071,9 @@ v8_library(
      ] + select({
          ":is_v8_use_metagen": [":noicu/run_metagen"],
          "//conditions:default": [],
@@ -153,7 +153,7 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
      }),
      deps = [
          ":lib_dragonbox",
-@@ -5047,6 +5093,9 @@ v8_library(
+@@ -5045,6 +5091,9 @@ v8_library(
      ] + select({
          ":is_v8_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
          "//conditions:default": [],

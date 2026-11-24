@@ -24,7 +24,7 @@ index fe7a5f83a46a71ad7b8e3ea5341a0921632643e6..6f33e4c2420f3b0887537be97915f9df
      enum {
        kNone = 0,
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b5ce84d7eb23d067f9ebde69a709cd83b07ed1ae..38ed0abb3a65c583b06ca6105ff11fdd4c98d7bc 100644
+index 8d4b0a95ac795d32a26e440783c0fdb217afe937..7861de8445ce4b4137ff946c4fc2d335096e3a4e 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -6021,6 +6021,10 @@ bool String::IsOneByte() const {

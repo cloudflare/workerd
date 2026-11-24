@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Cormick Holland <cormick@cloudflare.com>
 Date: Wed, 4 Nov 2026 00:10:59 +0000
-Subject: [PATCH] [snapshot] Keep functions created by v8::Function::New() in
- the context snapshot
+Subject: [snapshot] Keep functions created by v8::Function::New() in the
+ context snapshot
 
 v8::Function::New() creates a function template that is not cacheable
 and instantiates it once, in one context. Its callback data, and so the
@@ -20,13 +20,9 @@ object cache, so the startup serializer serialized the callback data:
 
 Keep such a template, and the SharedFunctionInfo of an API function
 created from it, in the context snapshot.
----
- src/snapshot/context-serializer.cc | 32 ++++++++++++++++++++++++++++--
- src/snapshot/context-serializer.h  |  2 ++
- 2 files changed, 32 insertions(+), 2 deletions(-)
 
 diff --git a/src/snapshot/context-serializer.cc b/src/snapshot/context-serializer.cc
-index 5c1996d0ea2..3c2605a3588 100644
+index 5c1996d0ea2de9bf297bf04ccc789c4a45178b5f..3c2605a3588e8b495a55b59299674da9efc2b061 100644
 --- a/src/snapshot/context-serializer.cc
 +++ b/src/snapshot/context-serializer.cc
 @@ -14,7 +14,9 @@
@@ -85,7 +81,7 @@ index 5c1996d0ea2..3c2605a3588 100644
    // contain a unique ID, and deserializing several context snapshots containing
    // script would cause dupes.
 diff --git a/src/snapshot/context-serializer.h b/src/snapshot/context-serializer.h
-index df1363a9d31..306f07cb877 100644
+index df1363a9d311079df90f0e9e7efc8a6d3af51c58..306f07cb8776b1a20f9f8ec5ca24180cf0e0b681 100644
 --- a/src/snapshot/context-serializer.h
 +++ b/src/snapshot/context-serializer.h
 @@ -32,6 +32,8 @@ class V8_EXPORT_PRIVATE ContextSerializer : public Serializer {

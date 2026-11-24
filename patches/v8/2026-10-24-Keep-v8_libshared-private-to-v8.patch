@@ -9,10 +9,10 @@ compiles. v8_library takes implementation deps for each ICU variant, and
 v8 depends on v8_libshared through them.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index e0360267ea0d9aad55b4ca292965a9a09cf6cb39..8540b88c12c124043c9742f41214727c88c30505 100644
+index 8c2df533e010ac51ff44edc4164505b0b9d4b32f..0106a2c4fd04183a185ebccdb296beac86258798 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -5063,9 +5063,10 @@ v8_library(
+@@ -5112,9 +5112,10 @@ v8_library(
      }),
      hdrs = [":public_header_files"],
      copts = ["-Wno-implicit-fallthrough"],
