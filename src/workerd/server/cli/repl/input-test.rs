@@ -96,6 +96,62 @@ fn regular_expression_literals() {
 }
 
 #[test]
+fn slash_after_closing_bracket() {
+    // After the condition of an `if`, a loop or a `with`, a `/` starts a regular expression.
+    for input in [
+        "if (true) /[(]/.test('(')",
+        "while (false) /[(]/; 7",
+        "if (x) /{/.test(s)",
+        r#"if (true) /\(/.test("(")"#,
+        "for (;;) /[{]/.test(s)",
+        // A comment between the tokens doesn't change that.
+        r"if /* ( */ (x) /* ( */ /\(/.test(s)",
+        "if (x) // (\n  /\\(/.test(s)",
+    ] {
+        assert!(!unfinished(input), "{input:?}");
+    }
+    // A property named `if` is not the keyword.
+    assert!(unfinished("a.if(x) / (2"));
+    // After an object literal's `}` or an expression's `)`, a `/` divides.
+    for input in [
+        "String({valueOf: () => 4} / 2)",
+        "`${ {valueOf: () => 4} / 2 }`",
+        "String({valueOf: () => 4} / 2) / 3",
+        "({} / 2) / (3)",
+        "const o = {valueOf() { return 4 }}\n/ 2",
+    ] {
+        assert!(!unfinished(input), "{input:?}");
+    }
+    // After a block's `}`, a `/` starts a regular expression, unless one would reach a line break:
+    // the `}` of a function expression's body is a block's, and a `/` after it divides.
+    assert!(unfinished("function f() {}\n/[(]/.test(s,"));
+    assert!(unfinished("if (a) {} /[(]/.test(s,"));
+    assert!(!unfinished("if (a) { /}/.test(s) }"));
+    assert!(!unfinished("f(function () {} / 2)"));
+    assert!(unfinished("f(function () {} / 2,\n"));
+    // The end of what is scanned ends a regular expression, as a line break does: the `,` is the
+    // declaration's.
+    assert_eq!(
+        rewrite_declarations("let a = function () {} / 2, b = await f()"),
+        rewritten(
+            "    a = function () {} / 2, b = await f()",
+            "let a, b;",
+            true
+        )
+    );
+    // Elsewhere, a regular expression that reaches a line break is one, which V8 reports.
+    assert!(!unfinished("x = /(abc"));
+    assert!(!unfinished(r"x = /[)}\]]/g.test(s)"));
+}
+
+#[test]
+fn mismatched_closing_bracket_finishes_input() {
+    for input in ["f([)", "{ a: (1 }", "`${ (1 }`", "f(\n  [1, 2)"] {
+        assert_eq!(unclosed(input), None, "{input:?}");
+    }
+}
+
+#[test]
 fn scanning_continues_across_lines() {
     let mut scanner = Scanner::default();
     scanner.scan("`first ${\n");

@@ -9,32 +9,56 @@
 //! A [`Scanner`] follows JavaScript's lexical structure closely enough to know when it is inside
 //! a string, a template literal and its `${}` substitutions, a comment, a regular expression
 //! literal, or brackets. Whether a `/` starts a regular expression or divides depends on the
-//! token before it, which the scanner judges by that token alone. Two judgments then differ from
-//! the language's: after a `}` the scanner takes `/` to start a regular expression, which it does
-//! after a block but not after an object literal; after a `)` it takes `/` to divide, which it
-//! does after an expression but not after the condition of an `if` or a loop.
+//! token before it. After a `)`, a `/` starts one only if the parentheses hold the condition of an
+//! `if`, a loop or a `with`. After a `}`, it starts one only if the braces are a block rather than
+//! an object literal, which the scanner judges by what precedes the `{`: a `{` that starts a
+//! statement, or follows a token after which an expression can't start (as the `)` before a
+//! function body), opens a block; any other `{`, such as one after a `:`, opens an object literal.
+//! A block's `}` can also end a function or class expression, after which `/` divides, so a
+//! regular expression after one that reaches a line break, which it can't contain, is scanned
+//! again as a division. A closing bracket that doesn't match the open one finishes the input, as
+//! a syntax error the evaluation reports.
 
+use std::mem;
 use std::ops::Range;
 
 use super::bridge::ffi::ReplCandidate;
 
-/// The keywords after which an expression starts, so that a `/` starts a regular expression.
-const KEYWORDS_BEFORE_EXPRESSION: &[&[u8]] = &[
-    b"await",
-    b"case",
-    b"delete",
-    b"do",
-    b"else",
-    b"in",
-    b"instanceof",
-    b"new",
-    b"of",
-    b"return",
-    b"throw",
-    b"typeof",
-    b"void",
-    b"yield",
-];
+/// What the last token of code was, as far as that decides how the next is read: whether a `/`
+/// starts a regular expression or divides, and whether a `{` opens a block or an object literal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum After {
+    /// The start of a statement, as after a `;` or a block's `{`: a `/` starts a regular
+    /// expression, and a `{` opens a block.
+    Statement,
+    /// A block's `}`, after which a statement starts. But the `}` may end a function or class
+    /// expression instead, after which a `/` divides: a `/` starts a regular expression that is
+    /// scanned again as a division if it reaches a line break ([`Mode::Regex`]).
+    Block,
+    /// A token that an expression follows, such as an operator, a `(` or `return`: a `/` starts a
+    /// regular expression, and a `{` opens an object literal.
+    Operator,
+    /// The end of a value, such as a name, a literal or an expression's `)`: a `/` divides, and a
+    /// `{` opens a body, such as a function's.
+    Value,
+    /// `if`, `while`, `for` or `with`, whose `(` opens a condition.
+    Condition,
+    /// A `.`, after which a word is a property name.
+    Dot,
+}
+
+impl After {
+    /// What a word that is not a property name is.
+    fn word(word: &[u8]) -> Self {
+        match word {
+            b"do" | b"else" => Self::Statement,
+            b"for" | b"if" | b"while" | b"with" => Self::Condition,
+            b"await" | b"case" | b"delete" | b"in" | b"instanceof" | b"new" | b"of" | b"return"
+            | b"throw" | b"typeof" | b"void" | b"yield" => Self::Operator,
+            _ => Self::Value,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -46,14 +70,25 @@ enum Mode {
     BlockComment,
     Regex {
         in_class: bool,
+        /// The offset in the piece scanned of the `/` that started it, if that `/` may divide
+        /// instead: one after a block's `}`. A regular expression that reaches a line break or
+        /// the end of the piece is then scanned again from there, so this never outlives the
+        /// piece.
+        slash: Option<usize>,
     },
 }
 
 /// An open bracket or substitution, and the line of the input it opens on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Open {
-    /// `(`, `[` or `{`.
-    Bracket { byte: u8, line: usize },
+    /// `(`, `[` or `{`. After the closing bracket a statement starts, so that a `/` starts a
+    /// regular expression, if `statement_after`: this `(` holds the condition of an `if`, a loop
+    /// or a `with`, or this `{` opens a block.
+    Bracket {
+        byte: u8,
+        line: usize,
+        statement_after: bool,
+    },
     /// A template literal's `${`, whose `}` returns to the template, which starts on
     /// `template_line`.
     Substitution { line: usize, template_line: usize },
@@ -78,10 +113,10 @@ pub struct Scanner {
     line: usize,
     /// The next byte is escaped by a backslash.
     escaped: bool,
-    /// A `/` in code here starts a regular expression.
-    regex_allowed: bool,
-    /// The last significant byte of code was a `.`, so a word is a property name.
-    after_dot: bool,
+    /// What the last token of code was.
+    after: After,
+    /// A closing bracket didn't match the open one: the input is finished, as a syntax error.
+    mismatched: bool,
 }
 
 impl Default for Scanner {
@@ -92,8 +127,8 @@ impl Default for Scanner {
             open: Vec::new(),
             line: 1,
             escaped: false,
-            regex_allowed: true,
-            after_dot: false,
+            after: After::Statement,
+            mismatched: false,
         }
     }
 }
@@ -124,6 +159,9 @@ impl Scanner {
 
     /// What keeps the input scanned so far unfinished, if it is ([`Self::is_unfinished`]).
     pub fn unclosed(&self) -> Option<Unclosed> {
+        if self.mismatched {
+            return None;
+        }
         let literal = match self.mode {
             Mode::String(_) => Some("string literal"),
             Mode::Template => Some("template literal"),
@@ -137,7 +175,7 @@ impl Scanner {
             });
         }
         self.open.last().map(|open| match *open {
-            Open::Bracket { byte, line } => Unclosed {
+            Open::Bracket { byte, line, .. } => Unclosed {
                 what: match byte {
                     b'(' => "`(`",
                     b'[' => "`[`",
@@ -157,28 +195,22 @@ impl Scanner {
 
     fn scan_tokens(&mut self, bytes: &[u8], mut on_token: impl FnMut(Token)) {
         let mut i = 0;
-        while i < bytes.len() {
-            let byte = bytes[i];
+        loop {
+            let Some(&byte) = bytes.get(i) else {
+                // The end of the piece ends a regular expression literal, as a line break does.
+                match self.reconsider_regex() {
+                    Some(slash) => {
+                        i = slash;
+                        continue;
+                    }
+                    None => return,
+                }
+            };
             let next = bytes.get(i + 1).copied();
             match self.mode {
                 Mode::Code => {
                     if is_word_byte(byte) {
-                        let end = bytes[i..]
-                            .iter()
-                            .position(|&b| !is_word_byte(b))
-                            .map_or(bytes.len(), |n| i + n);
-                        let word = &bytes[i..end];
-                        let property = self.after_dot;
-                        on_token(Token::Word {
-                            start: i,
-                            end,
-                            top_level: self.open.is_empty() && !property,
-                        });
-                        self.regex_allowed = !property
-                            && !byte.is_ascii_digit()
-                            && KEYWORDS_BEFORE_EXPRESSION.contains(&word);
-                        self.after_dot = false;
-                        i = end;
+                        i = self.scan_word(bytes, i, &mut on_token);
                         continue;
                     }
                     if self.open.is_empty() {
@@ -212,7 +244,7 @@ impl Scanner {
                             template_line: self.mode_line,
                         });
                         self.mode = Mode::Code;
-                        self.regex_allowed = true;
+                        self.after = After::Operator;
                         i += 1;
                     }
                 }
@@ -227,18 +259,31 @@ impl Scanner {
                         i += 1;
                     }
                 }
-                Mode::Regex { in_class } => {
-                    if self.escaped {
+                Mode::Regex { in_class, slash } => {
+                    // A regular expression can't contain a line break, even after a `\`.
+                    if byte == b'\n' {
+                        if let Some(at) = self.reconsider_regex() {
+                            i = at;
+                            continue;
+                        }
+                        self.end_literal();
+                    } else if self.escaped {
                         self.escaped = false;
                     } else if byte == b'\\' {
                         self.escaped = true;
-                    } else if byte == b'\n' || (byte == b'/' && !in_class) {
+                    } else if byte == b'/' && !in_class {
                         // The flags that follow scan as a word.
                         self.end_literal();
                     } else if byte == b'[' {
-                        self.mode = Mode::Regex { in_class: true };
+                        self.mode = Mode::Regex {
+                            in_class: true,
+                            slash,
+                        };
                     } else if byte == b']' {
-                        self.mode = Mode::Regex { in_class: false };
+                        self.mode = Mode::Regex {
+                            in_class: false,
+                            slash,
+                        };
                     }
                 }
             }
@@ -250,55 +295,131 @@ impl Scanner {
         }
     }
 
+    /// The word of code that starts at `start`; returns where it ends.
+    fn scan_word(&mut self, bytes: &[u8], start: usize, on_token: &mut impl FnMut(Token)) -> usize {
+        let end = bytes[start..]
+            .iter()
+            .position(|&b| !is_word_byte(b))
+            .map_or(bytes.len(), |n| start + n);
+        let word = &bytes[start..end];
+        let property = self.after == After::Dot;
+        on_token(Token::Word {
+            start,
+            end,
+            top_level: self.open.is_empty() && !property,
+        });
+        self.after = if property {
+            After::Value
+        } else {
+            After::word(word)
+        };
+        end
+    }
+
     /// One byte of code that does not start a word; `i` moves past what it consumes after it.
     fn scan_code(&mut self, byte: u8, next: Option<u8>, i: &mut usize) {
         if byte.is_ascii_whitespace() {
             return;
         }
-        let regex_allowed = self.regex_allowed;
-        self.after_dot = byte == b'.';
-        // After most punctuation an expression starts; after a closing bracket a value ended.
-        self.regex_allowed = !matches!(byte, b')' | b']' | b'.');
+        // A comment is not a token: what the token before it decided holds after it.
+        if byte == b'/' && next == Some(b'/') {
+            self.mode = Mode::LineComment;
+            *i += 1;
+            return;
+        }
+        if byte == b'/' && next == Some(b'*') {
+            self.start_mode(Mode::BlockComment, self.line);
+            *i += 1;
+            return;
+        }
+        // After most punctuation an expression starts.
+        let after = mem::replace(&mut self.after, After::Operator);
         match byte {
-            b'(' | b'[' | b'{' => self.open.push(Open::Bracket {
-                byte,
-                line: self.line,
-            }),
-            b')' | b']' => {
-                if matches!(self.open.last(), Some(Open::Bracket { .. })) {
-                    self.open.pop();
+            b'(' | b'[' | b'{' => {
+                let statement_after = match byte {
+                    b'(' => after == After::Condition,
+                    b'[' => false,
+                    // Where an expression starts, a `{` opens an object literal; elsewhere, a
+                    // block, or a body such as the one after a function's parameters.
+                    _ => after != After::Operator,
+                };
+                if byte == b'{' && statement_after {
+                    self.after = After::Statement;
                 }
+                self.open.push(Open::Bracket {
+                    byte,
+                    line: self.line,
+                    statement_after,
+                });
             }
-            b'}' => match self.open.last() {
-                Some(Open::Bracket { .. }) => {
-                    self.open.pop();
-                }
-                Some(&Open::Substitution { template_line, .. }) => {
-                    self.open.pop();
-                    self.start_mode(Mode::Template, template_line);
-                }
-                None => {}
-            },
+            b')' | b']' | b'}' => self.close(byte),
+            b'.' => self.after = After::Dot,
+            b';' => self.after = After::Statement,
+            // An arrow function's body.
+            b'=' if next == Some(b'>') => {
+                self.after = After::Statement;
+                *i += 1;
+            }
             b'\'' | b'"' => self.start_mode(Mode::String(byte), self.line),
             b'`' => self.start_mode(Mode::Template, self.line),
             // `x++ / 2`: an operand an increment or decrement ends.
             b'+' | b'-' if next == Some(byte) => {
-                self.regex_allowed = false;
+                self.after = After::Value;
                 *i += 1;
             }
-            b'/' if next == Some(b'/') => {
-                self.mode = Mode::LineComment;
-                self.regex_allowed = regex_allowed;
-                *i += 1;
+            b'/' if matches!(after, After::Statement | After::Block | After::Operator) => {
+                self.mode = Mode::Regex {
+                    in_class: false,
+                    slash: (after == After::Block).then_some(*i),
+                };
             }
-            b'/' if next == Some(b'*') => {
-                self.start_mode(Mode::BlockComment, self.line);
-                self.regex_allowed = regex_allowed;
-                *i += 1;
-            }
-            b'/' if regex_allowed => self.mode = Mode::Regex { in_class: false },
             _ => {}
         }
+    }
+
+    /// Closes the innermost bracket or substitution with `byte`, a `)`, `]` or `}`, or finds the
+    /// input mismatched if `byte` doesn't close it.
+    fn close(&mut self, byte: u8) {
+        // A value ends with it, unless it closes a condition or a block.
+        self.after = After::Value;
+        match self.open.last() {
+            Some(&Open::Bracket {
+                byte: open,
+                statement_after,
+                ..
+            }) if matches!((open, byte), (b'(', b')') | (b'[', b']') | (b'{', b'}')) => {
+                self.open.pop();
+                if statement_after {
+                    self.after = if byte == b'}' {
+                        After::Block
+                    } else {
+                        After::Statement
+                    };
+                }
+            }
+            Some(&Open::Substitution { template_line, .. }) if byte == b'}' => {
+                self.open.pop();
+                self.start_mode(Mode::Template, template_line);
+            }
+            Some(_) => self.mismatched = true,
+            None => {}
+        }
+    }
+
+    /// For a regular expression literal that meets a line break, which it can't contain, or the
+    /// end of the piece: if its `/` may divide instead ([`Mode::Regex`]), goes back to code to scan
+    /// that `/` again as a division, and returns its offset.
+    fn reconsider_regex(&mut self) -> Option<usize> {
+        let Mode::Regex {
+            slash: Some(slash), ..
+        } = self.mode
+        else {
+            return None;
+        };
+        self.mode = Mode::Code;
+        self.escaped = false;
+        self.after = After::Value;
+        Some(slash)
     }
 
     /// Enters a string, a template literal or a block comment that starts on `line`.
@@ -310,8 +431,8 @@ impl Scanner {
     /// A string, template or regular expression literal ended: a value, which a `/` divides.
     fn end_literal(&mut self) {
         self.mode = Mode::Code;
-        self.regex_allowed = false;
-        self.after_dot = false;
+        self.escaped = false;
+        self.after = After::Value;
     }
 }
 

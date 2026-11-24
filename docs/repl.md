@@ -115,9 +115,8 @@ undefined
 Enter also continues the input after a line that ends inside a string with a backslash. A string
 left open at the end of any other line is a syntax error, as it is in JavaScript.
 
-The REPL decides this without parsing JavaScript, so it can misjudge a `/` that could start either
-a regular expression or a division: it takes a `/` after `}` to start a regular expression, and
-one after `)` to divide.
+A closing bracket that doesn't match the bracket it would close, as the `)` in `f([)`, finishes the
+input, which then fails with a syntax error.
 
 To abandon an unfinished input, type `.break` on a line of its own, or press Ctrl+C on a terminal.
 An input still unfinished when the REPL's input ends doesn't run: the REPL says which construct it

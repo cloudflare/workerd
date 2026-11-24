@@ -222,6 +222,40 @@ test('an input that starts with `{` is an object literal if it can be', async ()
   assert.deepStrictEqual(results, ['{ a: 1, b: 2 }', '{ a: 1 }', '1', '1']);
 });
 
+test('an input with a `/` after a closing bracket finishes where JavaScript ends it', async () => {
+  const { results, stdout } = await repl(
+    [],
+    [
+      'String({ valueOf: () => 4 } / 2)',
+      'if (true) /[(]/.test("(")',
+      'while (false) /[(]/; 7',
+      '`${ { valueOf: () => 4 } / 2 }`',
+      'String({ valueOf: () => 4 } / 2) / 4',
+      'if (true) /{/.test("{")',
+      'if (true) /\\(/.test("(")',
+      '[function () {} / 2]',
+      'f([)',
+      "'next'",
+    ]
+  );
+  assert.deepStrictEqual(
+    results,
+    [
+      "'2'",
+      'true',
+      '7',
+      "'2'",
+      '0.5',
+      'true',
+      'true',
+      '[ NaN ]',
+      "Uncaught SyntaxError: Unexpected token ')'",
+      "'next'",
+    ],
+    stdout
+  );
+});
+
 test('.break abandons an unfinished input', async () => {
   const { code, results, stderr } = await repl(
     [],
