@@ -421,21 +421,17 @@ impl Shared {
         };
         state.backoff = backoff;
         state.retry_at = Some(now + backoff);
-        let valid = state.token.as_ref().filter(|t| now < t.expires_at);
-        let what = self.describe();
-        if let Some(token) = valid {
-            tracing::warn!(
-                "cluster: a token from {what}: {error}; the current one expires in {} s; next \
-                 attempt in {} s",
-                (token.expires_at - now).as_secs(),
-                backoff.as_secs()
-            );
-        } else {
-            tracing::warn!(
-                "cluster: a token from {what}: {error}; next attempt in {} s",
-                backoff.as_secs()
-            );
-        }
+        let expires_in_secs = state
+            .token
+            .as_ref()
+            .and_then(|token| (now < token.expires_at).then(|| (token.expires_at - now).as_secs()));
+        tracing::warn!(
+            token_source = self.describe(),
+            error,
+            expires_in_secs,
+            retry_in_secs = backoff.as_secs(),
+            "cluster: fetching a token failed; retrying"
+        );
         state.error = Some(error);
     }
 

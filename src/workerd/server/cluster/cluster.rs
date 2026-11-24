@@ -233,7 +233,7 @@ impl Cluster {
         let released = self.ownership.release(ns, actor, epoch).await?;
         if released {
             self.owners.forget(ns, actor);
-            tracing::info!("cluster: {ns}/{actor} epoch {epoch} handed off");
+            tracing::info!(namespace = ns, actor, epoch, "cluster: handed off actor");
         }
         Ok(released)
     }
@@ -417,7 +417,7 @@ impl Cluster {
             let delay = match step {
                 Step::Fence(reason) => return reason,
                 Step::Retry(reason) => {
-                    tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
+                    tracing::warn!(reason, "renewing the cluster lease failed; retrying");
                     timing.retry_ms
                 }
                 Step::Renew => timing.interval_ms,
@@ -426,7 +426,10 @@ impl Cluster {
             // failure is logged, never fatal.
             match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
                 Ok(Ok(_)) => {}
-                Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
+                Ok(Err(e)) => tracing::warn!(
+                    error = &e as &dyn std::error::Error,
+                    "listing the cluster failed"
+                ),
                 Err(_) => tracing::warn!("listing the cluster timed out"),
             }
             tokio::time::sleep(ms(delay)).await;
@@ -461,7 +464,10 @@ impl Cluster {
             // once on a node with nothing to hand off, published its record
             // expired and draining.
             Ok(Err(crate::Error::NotHere(_))) if self.registry.left() => {}
-            Ok(Err(e)) => tracing::warn!("cluster: publishing the drain failed: {e}"),
+            Ok(Err(e)) => tracing::warn!(
+                error = &e as &dyn std::error::Error,
+                "cluster: publishing the drain failed"
+            ),
             Err(_) => tracing::warn!("cluster: publishing the drain timed out"),
         }
         let _ = timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await;

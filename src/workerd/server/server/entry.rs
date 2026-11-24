@@ -227,7 +227,10 @@ fn sigterm() -> impl Future<Output = ()> {
                 signal.recv().await;
             }
             Err(e) => {
-                tracing::error!("drain signal handler: {e}");
+                tracing::error!(
+                    error = &e as &dyn std::error::Error,
+                    "installing drain signal handler failed"
+                );
                 std::future::pending::<()>().await;
             }
         }

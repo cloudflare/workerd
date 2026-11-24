@@ -181,7 +181,10 @@ impl Index {
             self.orphans_at.set(now_ms + self.orphans_every_ms);
             match self.orphans(registry, &live, &dead).await {
                 Ok(orphans) => drop(self.orphans.replace(orphans)),
-                Err(e) => tracing::warn!("looking for orphaned alarms: {e}"),
+                Err(e) => tracing::warn!(
+                    error = &e as &dyn std::error::Error,
+                    "looking for orphaned alarms failed"
+                ),
             }
         }
         dead.extend(self.orphans.borrow().iter().cloned());
@@ -206,7 +209,7 @@ impl Index {
         let mut orphans = Vec::new();
         for node in self.unknown(&known).await? {
             if !registry.recorded(&node).await? {
-                tracing::warn!("adopting the alarms of {node}, which has no record");
+                tracing::warn!(node, "adopting alarms from a node with no record");
                 orphans.push(node);
             }
         }
@@ -400,7 +403,11 @@ impl Index {
             let entries = match self.alarms.list(node).await {
                 Ok(entries) => entries,
                 Err(e) => {
-                    tracing::warn!("listing {node}'s alarms: {e}");
+                    tracing::warn!(
+                        node,
+                        error = &e as &dyn std::error::Error,
+                        "listing node alarms failed"
+                    );
                     continue;
                 }
             };
@@ -413,7 +420,13 @@ impl Index {
             while let Some(result) = results.next().await {
                 match result {
                     Ok(a) => adopted(a),
-                    Err(e) => tracing::warn!("adopting {node}'s alarm: {e}"),
+                    Err(e) => {
+                        tracing::warn!(
+                            node,
+                            error = &e as &dyn std::error::Error,
+                            "adopting a node alarm failed"
+                        )
+                    }
                 }
             }
         }
@@ -445,7 +458,11 @@ impl Index {
             }
         }
         if let Err(e) = self.alarms.delete(node, &entry).await {
-            tracing::warn!("deleting {node}'s adopted alarm: {e}");
+            tracing::warn!(
+                node,
+                error = &e as &dyn std::error::Error,
+                "deleting an adopted alarm failed"
+            );
         }
         Ok(Adopted {
             namespace: entry.namespace,

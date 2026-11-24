@@ -92,7 +92,10 @@ impl Control {
         if let Some(file) = &mut self.0
             && let Err(e) = file.write_all(line.as_bytes())
         {
-            tracing::error!("--control-fd: {e}");
+            tracing::error!(
+                error = &e as &dyn std::error::Error,
+                "writing to --control-fd failed"
+            );
         }
     }
 
@@ -274,7 +277,7 @@ async fn start_cluster(
         let reason = cluster.maintain().await;
         // Peers may take this instance's objects over once its lease lapses: it must stop
         // serving first.
-        tracing::error!("leaving the cluster: {reason}");
+        tracing::error!(reason, "leaving the cluster");
         std::process::exit(1);
     });
     let cluster = Rc::clone(&node.cluster);
@@ -496,7 +499,10 @@ pub async fn run(
                     let deregister = node.cluster.deregister();
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
-                        Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
+                        Ok(Err(e)) => tracing::warn!(
+                            error = &e as &dyn std::error::Error,
+                            "leaving the cluster failed"
+                        ),
                         Err(_) => tracing::warn!("leaving the cluster timed out"),
                     }
                 } else {

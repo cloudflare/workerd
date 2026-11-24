@@ -83,14 +83,18 @@ pub fn start(
             for attempt in 1..=ATTEMPTS {
                 match arm(&*channel).await {
                     Ok(()) => {
-                        tracing::info!("cron \"{name}\" armed");
+                        tracing::info!(worker = name, "cron armed");
                         break;
                     }
                     Err(e) if attempt == ATTEMPTS => {
-                        tracing::error!("cron \"{name}\" not armed: {}", e.description());
+                        tracing::error!(worker = name, error = e.description(), "cron not armed");
                     }
                     Err(e) => {
-                        tracing::warn!("cron \"{name}\" not armed, retrying: {}", e.description());
+                        tracing::warn!(
+                            worker = name,
+                            error = e.description(),
+                            "cron not armed, retrying"
+                        );
                         factory_.sleep(delay).await;
                         delay *= 2;
                     }

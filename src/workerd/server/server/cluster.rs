@@ -476,7 +476,12 @@ impl ClusterNode {
         let released = match tokio::time::timeout_at(deadlines.handoff, release).await {
             Ok(Ok(released)) => released,
             Ok(Err(e)) => {
-                tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                tracing::warn!(
+                    namespace,
+                    actor,
+                    error = &e as &dyn std::error::Error,
+                    "cluster: handing off actor failed"
+                );
                 false
             }
             Err(_) => false,
@@ -537,7 +542,10 @@ impl ClusterNode {
                 };
                 let (actor, name) = (&alarm.actor, alarm.name.as_deref());
                 if let Err(e) = namespace.adopt_alarm(actor, name, alarm.at_ms) {
-                    tracing::warn!("scheduling an adopted alarm: {}", e.description());
+                    tracing::warn!(
+                        error = e.description(),
+                        "scheduling an adopted alarm failed"
+                    );
                 }
             };
             self.cluster.alarms_round(cluster::now_ms(), schedule).await;
@@ -743,7 +751,7 @@ pub async fn serve(listener: TcpListener, node: Rc<ClusterNode>) {
             )
             .await
             {
-                tracing::warn!("cluster connection failed: {}", e.description());
+                tracing::warn!(error = e.description(), "cluster connection failed");
             }
         });
     }
@@ -800,7 +808,7 @@ impl Handler for PeerConnection {
         let table = header_table(&self.node.factory);
         let empty = Headers::new(table);
         if let Err(e) = self.verify(headers.get_by_name(AUTH_HEADER)) {
-            tracing::warn!("cluster CONNECT refused: {}", e.description());
+            tracing::warn!(error = e.description(), "cluster CONNECT refused");
             connect.reject(403, "Forbidden", HeadersRef::from(&empty), Some(0))?;
             return Ok(());
         }
@@ -893,7 +901,12 @@ impl Owned {
             match cluster.hand_off_actor(&namespace, &actor, epoch).await {
                 Ok(released) => released,
                 Err(e) => {
-                    tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                    tracing::warn!(
+                        namespace,
+                        actor,
+                        error = &e as &dyn std::error::Error,
+                        "cluster: handing off actor failed"
+                    );
                     false
                 }
             }

@@ -203,9 +203,11 @@ impl Owners {
             };
             let capture = Capture::resume(object.cursor.clone(), &object.databases);
             tracing::info!(
-                "cluster: {ns}/{actor} epoch {} resumes at {}",
-                object.epoch,
-                object.tiered
+                namespace = ns,
+                actor,
+                epoch = object.epoch,
+                frame = object.tiered,
+                "cluster: resumed actor"
             );
             self.objects
                 .borrow_mut()
@@ -242,10 +244,13 @@ impl Owners {
                 remove_dir(&spool)?;
                 let end = placed?;
                 tracing::info!(
-                    "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket up to {end}, \
-                     {} databases",
-                    owned.epoch,
-                    databases.len()
+                    namespace = ns,
+                    actor,
+                    epoch = owned.epoch,
+                    recovered_epoch = recover,
+                    frame = end,
+                    database_count = databases.len(),
+                    "cluster: recovered actor from the bucket"
                 );
             }
         }
@@ -291,7 +296,12 @@ impl Owners {
         if !ownership.open(ns, actor, owned.epoch).await? {
             return Ok(false);
         }
-        tracing::info!("cluster: {ns}/{actor} epoch {} opens new", owned.epoch);
+        tracing::info!(
+            namespace = ns,
+            actor,
+            epoch = owned.epoch,
+            "cluster: opened new actor"
+        );
         self.opened
             .borrow_mut()
             .insert(object_key(ns, actor), owned.epoch);
@@ -343,7 +353,12 @@ impl Owners {
                 owned.epoch
             )));
         }
-        tracing::info!("cluster: {ns}/{actor} epoch {} open", owned.epoch);
+        tracing::info!(
+            namespace = ns,
+            actor,
+            epoch = owned.epoch,
+            "cluster: opened actor"
+        );
         object.prune = true;
         Ok(object)
     }
@@ -483,18 +498,30 @@ impl Owners {
         };
         let snapshot = match merged(&replica, &plan).await {
             Ok(snapshot) => snapshot,
-            Err(e) => return tracing::warn!("cluster: {key} compaction failed: {e}"),
+            Err(e) => {
+                return tracing::warn!(
+                    key,
+                    error = &e as &dyn std::error::Error,
+                    "cluster: compaction failed"
+                );
+            }
         };
         let from = plan.first().filter(|f| f.snapshot).map_or(0, |f| f.frame);
         if snapshot.frame <= from {
-            return tracing::warn!("cluster: {key} log has a gap after {from}");
+            return tracing::warn!(key, frame = from, "cluster: log has a gap after frame");
         }
         if !self.serves(key, slot) {
             return;
         }
         let snapshot = match upload(&replica, snapshot).await {
             Ok(snapshot) => snapshot,
-            Err(e) => return tracing::warn!("cluster: {key} snapshot upload failed: {e}"),
+            Err(e) => {
+                return tracing::warn!(
+                    key,
+                    error = &e as &dyn std::error::Error,
+                    "cluster: snapshot upload failed"
+                );
+            }
         };
         let replaced: Vec<File> = {
             let mut guard = slot.object.lock().await;
@@ -552,7 +579,12 @@ impl Owners {
         if let Some(root) = dormant.as_ref().and_then(|o| o.replica.cache.parent())
             && let Err(e) = remove_dir(root)
         {
-            tracing::warn!("cluster: {ns}/{actor}: removing its log copies: {e}");
+            tracing::warn!(
+                namespace = ns,
+                actor,
+                error = &e as &dyn std::error::Error,
+                "cluster: removing actor log copies failed"
+            );
         }
     }
 
@@ -774,7 +806,12 @@ fn snapshot_due(files: &[File]) -> bool {
 async fn prune_older(replica: &Replica) {
     let files = match replica.client.older(replica.session).await {
         Ok(files) => files,
-        Err(e) => return tracing::warn!("cluster: pruning old sessions: {e}"),
+        Err(e) => {
+            return tracing::warn!(
+                error = &e as &dyn std::error::Error,
+                "cluster: pruning old sessions failed"
+            );
+        }
     };
     stream::iter(files)
         .for_each_concurrent(TIER_CONCURRENCY, |f| async move {

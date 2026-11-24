@@ -371,9 +371,9 @@ pub async fn attempt<T, E, F: Future<Output = Result<T, E>>>(
         return once(answer);
     }
     tracing::warn!(
-        "cluster: {} had no answer in {} ms; sending it again",
-        what(),
-        bound.as_millis()
+        request = what(),
+        timeout_ms = bound.as_millis(),
+        "cluster: request timed out; sending it again"
     );
     let second = send();
     tokio::pin!(second);

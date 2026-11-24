@@ -1453,7 +1453,7 @@ for (const dialect of ['s3', 'gcs']) {
         const [node] = nodes;
         const key = nodeKeys.get(node.nodeId);
         const resent =
-          /PUT \S*nodes\/\S+\.json had no answer in \d+ ms; sending it again/;
+          /cluster: request timed out; sending it again; request = "PUT \S*nodes\/\S+\.json"; timeout_ms = \d+/;
         // What the node logs from here on.
         const armed = node.stderr.length;
         // Longer than a renewal round may take: unanswered, it would time the
@@ -1553,7 +1553,10 @@ test('cluster: a DO reopened where it was closed resumes its epoch', async () =>
     assert.strictEqual(record.epoch, 1, JSON.stringify(record));
     // No session 2, whose name is `zd`.
     assert.deepStrictEqual(await bucket.list(`${prefix}/snapshot/zd/`), []);
-    assert.match(node.stderr, /epoch 1 resumes at \d+/);
+    assert.match(
+      node.stderr,
+      /cluster: resumed actor; [^\n]*epoch = 1; frame = \d+/
+    );
   });
 });
 
@@ -3065,7 +3068,10 @@ test('cluster: an owner record write answered 503 after it landed counts as writ
           epoch: 1,
           from: 1,
         });
-        assert.match(node.stderr, /epoch 1 opens new/);
+        assert.match(
+          node.stderr,
+          /cluster: opened new actor; [^\n]*epoch = 1\b/
+        );
       },
       options
     );
@@ -3195,7 +3201,7 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
     // alike; resolves to the last one's time, once each node's schedule is
     // re-armed and any run has finished.
     await Promise.all(
-      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+      nodes.map((n) => n.waitForStderr(/cron armed; worker = "cron"/, 40_000))
     );
     const clock = async (ms) => {
       let now;
@@ -3240,7 +3246,7 @@ test('cluster: a cron occurrence does not run again on an owner whose clock lags
   const LAG_MS = 45_000;
   await withCluster(2, async ({ nodes }) => {
     await Promise.all(
-      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+      nodes.map((n) => n.waitForStderr(/cron armed; worker = "cron"/, 40_000))
     );
     // Moves one node's cron clock by `ms`, once its schedule is re-armed: its
     // time, and when the schedule's alarm is planned for, on its owner's.

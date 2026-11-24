@@ -333,7 +333,11 @@ impl ActorNamespace {
             .storage()
             .and_then(|s| Ok(ffi::actor_storage_clear(s, key)?));
         if let Err(e) = cleared {
-            tracing::warn!("removing {key}'s databases: {}", e.description());
+            tracing::warn!(
+                key,
+                error = e.description(),
+                "removing actor databases failed"
+            );
         }
     }
 
@@ -1519,8 +1523,8 @@ impl ActorContainer {
                  when hibernation timeout expired."
             ),
             Err(error) => tracing::error!(
-                "shutting down an idle Durable Object failed: {}",
-                error.description()
+                error = error.description(),
+                "shutting down an idle Durable Object failed"
             ),
         }
     }
@@ -1672,7 +1676,11 @@ impl ActorContainer {
                     ffi::factory_stop_container(ns.factory.raw(), unique_key, &self.key).await
             {
                 let e = crate::Error::from(e);
-                tracing::warn!("stopping {}'s container: {}", self.key, e.description());
+                tracing::warn!(
+                    key = self.key.as_str(),
+                    error = e.description(),
+                    "stopping actor container failed"
+                );
             }
             if let Some(owned) = owned
                 && owned.hand_off().await
