@@ -77,7 +77,7 @@ kj::Maybe<MimeType> MimeType::tryParse(kj::ArrayPtr<const char> input, ParseOpti
   if (options & ParseOptions::IGNORE_PARAMS) {
     return toMimeType(ffi::parse_essence(bytes(input)), kj::none);
   }
-  ffi::ParamSink sink;
+  ffi::MimeParamSink sink;
   auto essence = ffi::parse(bytes(input), sink);
   return toMimeType(essence, kj::mv(sink.params));
 }
@@ -184,7 +184,7 @@ const MimeType MimeType::PLAINTEXT_ASCII = MimeType::parse(PLAINTEXT_ASCII_STRIN
 
 kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   if (!useRust()) return legacy::extractMimeType(input);
-  ffi::ParamSink sink;
+  ffi::MimeParamSink sink;
   auto essence = ffi::extract(bytes(input), sink);
   return toMimeType(essence, kj::mv(sink.params));
 }

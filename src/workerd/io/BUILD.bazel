@@ -132,6 +132,7 @@ wd_cc_library(
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:crypto-endianness",
         "//src/workerd/api:data-url",
+        "//src/workerd/api:mimetype-js",
         "//src/workerd/api/node:exceptions",
         "//src/workerd/util:abortable",
         "//src/workerd/util:completion-membrane",

@@ -29,9 +29,14 @@ jsg::JsObject makeHelpers(jsg::Lock& js) {
       [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return BootstrapUtils::parseUrl(js, jsg::JsValue(info[0]));
   });
-  add("mimeTypeEssence"_kj,
+  add("mimeTypeParse"_kj,
       [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-    return BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(info[0]));
+    return BootstrapUtils::mimeTypeParse(js, jsg::JsValue(info[0]));
+  });
+  add("mimeTypeSerialize"_kj,
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    return BootstrapUtils::mimeTypeSerialize(
+        js, jsg::JsValue(info[0]), jsg::JsValue(info[1]), jsg::JsValue(info[2]));
   });
   add("readableStreamState"_kj,
       [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
@@ -76,18 +81,42 @@ KJ_TEST("parseUrl parses absolute URLs without a base, and serializes their orig
       "undefined"_kj);
 }
 
-KJ_TEST("mimeTypeEssence lowercases the type and subtype and drops the parameters") {
+KJ_TEST("mimeTypeParse lists the lowercased type, subtype and parameter names, and the values") {
   expectHelperScript(R"js(
     return [
       'text/event-stream',
-      'TEXT/Event-Stream; charset=utf-8',
+      'TEXT/Event-Stream; Charset=UTF-8',
+      'text/plain; a=1; A=2; b="x\\"y"',
       'text/event-stream;',
-      'text/plain',
       'bogus',
       '',
-    ].map((value) => String(helpers.mimeTypeEssence(value))).join();
+    ].map((value) => JSON.stringify(helpers.mimeTypeParse(value) ?? null)).join('\n');
   )js"_kj,
-      "text/event-stream,text/event-stream,text/event-stream,text/plain,undefined,undefined"_kj);
+      "[\"text\",\"event-stream\"]\n"
+      "[\"text\",\"event-stream\",\"charset\",\"UTF-8\"]\n"
+      "[\"text\",\"plain\",\"a\",\"1\",\"b\",\"x\\\"y\"]\n"
+      "[\"text\",\"event-stream\"]\n"
+      "null\n"
+      "null"_kj);
+}
+
+KJ_TEST("mimeTypeSerialize serializes what mimeTypeParse lists, quoting values as needed") {
+  expectHelperScript(R"js(
+    const roundTrip = (input) => {
+      const [type, subtype, ...params] = helpers.mimeTypeParse(input);
+      return helpers.mimeTypeSerialize(type, subtype, params);
+    };
+    return [
+      roundTrip('Text/HTML'),
+      roundTrip('text/plain;charset=utf-8;format="a b"'),
+      roundTrip('multipart/form-data;boundary=x'),
+      helpers.mimeTypeSerialize('text', 'plain', ['q', '', 'e', 'a"b']),
+    ].join('\n');
+  )js"_kj,
+      "text/html\n"
+      "text/plain;charset=utf-8;format=\"a b\"\n"
+      "multipart/form-data; boundary=x\n"
+      "text/plain;q=\"\";e=\"a\\\"b\""_kj);
 }
 
 KJ_TEST("readableStreamState tells streams' state, and anything else apart") {
@@ -119,10 +148,17 @@ KJ_TEST("isFetcher recognizes only Fetchers") {
       "false,false,false,false,false"_kj);
 }
 
-KJ_TEST("The string helpers reject anything but strings") {
+KJ_TEST("The helpers reject arguments of the wrong type") {
   expectHelperScript(R"js(
     const messages = [];
-    for (const fn of [() => helpers.parseUrl(1), () => helpers.mimeTypeEssence(null)]) {
+    for (const fn of [
+      () => helpers.parseUrl(1),
+      () => helpers.mimeTypeParse(null),
+      () => helpers.mimeTypeSerialize('text', 1, []),
+      () => helpers.mimeTypeSerialize('text', 'plain', {}),
+      () => helpers.mimeTypeSerialize('text', 'plain', ['a']),
+      () => helpers.mimeTypeSerialize('text', 'plain', ['a', 1]),
+    ]) {
       try {
         fn();
         messages.push('ok');
@@ -133,7 +169,11 @@ KJ_TEST("The string helpers reject anything but strings") {
     return messages.join('\n');
   )js"_kj,
       "TypeError: parseUrl() expects a string\n"
-      "TypeError: mimeTypeEssence() expects a string"_kj);
+      "TypeError: mimeTypeParse() expects a string\n"
+      "TypeError: mimeTypeSerialize() expects a string subtype\n"
+      "TypeError: mimeTypeSerialize() expects a parameter array\n"
+      "TypeError: mimeTypeSerialize() expects a name and a value for each parameter\n"
+      "TypeError: a MIME parameter list must hold only strings"_kj);
 }
 
 }  // namespace

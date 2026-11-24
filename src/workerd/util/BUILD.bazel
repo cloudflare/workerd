@@ -233,6 +233,8 @@ wd_rust_crate(
     ],
     cxx_bridge_hdrs = ["mimetype/ffi.h"],
     cxx_bridge_src = "mimetype/ffi.rs",
+    # api/mimetype-js.c++ calls the bridge directly for the TypeScript implementations.
+    cxx_bridge_visibility = ["//src/workerd/api:__pkg__"],
     visibility = ["//visibility:public"],
 )
 

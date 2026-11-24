@@ -318,6 +318,22 @@ wd_cc_library(
     ],
 )
 
+# MimeType for the TypeScript implementations of MIME types, in the per-isolate bootstrap and
+# node:util.
+wd_cc_library(
+    name = "mimetype-js",
+    srcs = ["mimetype-js.c++"],
+    hdrs = ["mimetype-js.h"],
+    implementation_deps = [
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:mimetype",
+        "//src/workerd/util:mimetype-rs",
+        "//src/workerd/util:mimetype/ffi.rs@cxx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//src/workerd/jsg"],
+)
+
 # Shared compression machinery (allocator, and the common codec core): the common home for
 # the primitives used by the web CompressionStream/DecompressionStream pair, node:zlib, and
 # the TypeScript streams implementation's codec handle.

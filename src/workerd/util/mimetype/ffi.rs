@@ -32,8 +32,8 @@ mod bridge {
     unsafe extern "C++" {
         include!("workerd/util/mimetype/ffi.h");
 
-        /// Stores parameters as `MimeType` does: names lowercased, the first value of a name
-        /// kept.
+        /// Receives the parameters the parser finds, in order: names as written, so a name can
+        /// repeat.
         type ParamSink;
 
         fn add(self: Pin<&mut ParamSink>, name: &[u8], value: &[u8]) -> Result<()>;

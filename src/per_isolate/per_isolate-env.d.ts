@@ -244,8 +244,12 @@ declare const utils: {
     ignoreCase: boolean
   ): unknown[];
   legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
-  // The lowercased `type/subtype`, or undefined if not a MIME type.
-  mimeTypeEssence(input: string): string | undefined;
+  // `[type, subtype, name0, value0, ...]`, lowercased but for the values, or
+  // undefined if not a MIME type (api/mimetype-js.h). Use mime/mime-type.
+  mimeTypeParse(input: string): string[] | undefined;
+  // A MIME type serialized; `params` lists names and values as mimeTypeParse()
+  // does after the subtype.
+  mimeTypeSerialize(type: string, subtype: string, params: string[]): string;
   // Undefined for anything but a ReadableStream of either implementation.
   readableStreamState(
     value: unknown

@@ -437,10 +437,18 @@ static void LegacyUrlPatternProcessInit(const v8::FunctionCallbackInfo<v8::Value
   });
 }
 
-static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void MimeTypeParse(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
-    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(args[0])));
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeParse(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void MimeTypeSerialize(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeSerialize(
+        js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2])));
   });
 }
 
@@ -668,7 +676,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "urlPatternProcessInit",
     "legacyUrlPatternCompile",
     "legacyUrlPatternProcessInit",
-    "mimeTypeEssence",
+    "mimeTypeParse",
+    "mimeTypeSerialize",
     "readableStreamState",
     "DOMExceptionBase",
     "structuredClone",
@@ -713,7 +722,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, UrlPatternProcessInit),
     getMethod(js, LegacyUrlPatternCompile),
     getMethod(js, LegacyUrlPatternProcessInit),
-    getMethod(js, MimeTypeEssence),
+    getMethod(js, MimeTypeParse),
+    getMethod(js, MimeTypeSerialize),
     getMethod(js, ReadableStreamState),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
     getMethod(js, StructuredClone),
