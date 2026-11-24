@@ -56,13 +56,7 @@ export default {
       ),
   },
   'mark-entry-constructor.any.js': { before: clearEntries },
-  'mark-errors.any.js': {
-    before: clearEntries,
-    comment: 'The PerformanceMark constructor accepts a negative startTime',
-    expectedFailures: [
-      '[new PerformanceMark]: Negative startTime in mark-options should be rejected',
-    ],
-  },
+  'mark-errors.any.js': { before: clearEntries },
   'mark-l3.any.js': {
     before: clearEntries,
     comment:
@@ -75,31 +69,12 @@ export default {
   'measure-with-dict.any.js': {
     before: clearEntries,
     comment:
-      'measure() does not throw a TypeError for an options object combined with an end mark or for a negative start or end. The customizable test is disabled because it finishes from a PerformanceObserver callback and PerformanceObserver.observe() is a no-op, so it hangs',
+      'The test finishes from a PerformanceObserver callback, but PerformanceObserver.observe() is a no-op in workerd, so the test hangs',
     disabledTests: ["measure entries' detail and start/end are customizable"],
-    expectedFailures: [
-      'measure should throw a TypeError when passed an invalid argument combination',
-    ],
   },
-  'measure_syntax_err.any.js': {
-    before: clearEntries,
-    comment:
-      'measure() does not throw a SyntaxError when a mark does not exist; it uses a default time instead',
-    expectedFailures: [
-      'self.performance.measure("measure", "mark"), where "mark" is a non-existent mark, throws a SyntaxError exception.',
-      'self.performance.measure("measure", "mark", "existing_mark"), where "mark" is a non-existent mark, throws a SyntaxError exception.',
-      'self.performance.measure("measure", "existing_mark", "mark"), where "mark" is a non-existent mark, throws a SyntaxError exception.',
-      'self.performance.measure("measure", "mark", "mark"), where "mark" is a non-existent mark, throws a SyntaxError exception.',
-    ],
-  },
+  'measure_syntax_err.any.js': { before: clearEntries },
   'performance-measure-invalid.worker.js': {
     before: clearEntries,
-    comment:
-      'measure() does not throw a TypeError for PerformanceTiming attribute names such as navigationStart outside a Window',
-    expectedFailures: [
-      "When converting 'navigationStart' to a timestamp, the global object has to be a Window object.",
-      "When converting 'navigationStart' to a timestamp and a mark named 'navigationStart' exists, the global object has to be a Window object.",
-    ],
     // importScripts() does not exist in workerd, and the test only uses it to load testharness.js.
     replace: (code): string =>
       code.replace('importScripts("/resources/testharness.js");', ''),
