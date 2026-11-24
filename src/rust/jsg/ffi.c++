@@ -1053,11 +1053,9 @@ MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& w
   return MaybeLocal{.ptr = 0};
 }
 
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
-  auto existing = wrappable_get_wrapper(isolate, *wrappable, wrappedElsewhere);
-  if (existing.ptr != 0 || wrappedElsewhere || exceptionPending(isolate)) {
-    return existing;
+MaybeLocal wrap_resource(Isolate* isolate, Wrappable& wrappable, const Global& tmpl) {
+  if (exceptionPending(isolate)) {
+    return MaybeLocal{.ptr = 0};
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -1070,7 +1068,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
   // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
-  wrappable->attachWrapper(isolate, object, true,
+  wrappable.attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
