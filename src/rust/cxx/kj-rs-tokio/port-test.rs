@@ -317,3 +317,76 @@ fn timeouts_are_accurate_to_the_wheel() {
         "woke far too late: {elapsed:?}"
     );
 }
+
+/// Counts the calls of each hook, and wakes `wake` from `before_park` while it has any left.
+#[derive(Default)]
+struct CountingHooks {
+    parks: std::cell::Cell<u32>,
+    unparks: std::cell::Cell<u32>,
+    wakes_left: std::cell::Cell<u32>,
+    wake: RefCell<Option<std::task::Waker>>,
+}
+
+impl ParkHooks for CountingHooks {
+    fn before_park(&self) {
+        self.parks.set(self.parks.get() + 1);
+        if self.wakes_left.get() > 0
+            && let Some(waker) = self.wake.borrow().as_ref()
+        {
+            self.wakes_left.set(self.wakes_left.get() - 1);
+            waker.wake_by_ref();
+        }
+    }
+
+    fn after_unpark(&self) {
+        self.unparks.set(self.unparks.get() + 1);
+    }
+}
+
+#[test]
+fn park_hooks_bracket_a_sleep() {
+    let port = TokioPort::new();
+    let hooks = Rc::new(CountingHooks::default());
+    assert!(set_park_hooks(Some(hooks.clone())).is_none());
+    // Nothing is ready, so the thread sleeps until the timeout.
+    port.wait_timeout_ns(5_000_000);
+    assert!(hooks.parks.get() >= 1);
+    assert_eq!(hooks.parks.get(), hooks.unparks.get());
+    // A pump that does not sleep parks nothing.
+    let parks = hooks.parks.get();
+    port.poll();
+    assert_eq!(hooks.parks.get(), parks);
+    assert!(set_park_hooks(None).is_some());
+    port.wait_timeout_ns(2_000_000);
+    assert_eq!(hooks.parks.get(), parks);
+}
+
+#[test]
+fn a_task_woken_before_parking_runs_instead_of_the_sleep() {
+    let port = TokioPort::new();
+    let hooks = Rc::new(CountingHooks::default());
+    set_park_hooks(Some(hooks.clone()));
+    // The task parks its waker with the hooks and ends the wait once it was polled three times:
+    // nothing but the hook wakes it.
+    let polls = Rc::new(std::cell::Cell::new(0u32));
+    let state = Arc::clone(&port.state);
+    spawn({
+        let hooks = Rc::clone(&hooks);
+        let polls = Rc::clone(&polls);
+        std::future::poll_fn(move |cx| {
+            polls.set(polls.get() + 1);
+            if polls.get() == 3 {
+                state.notify.notify_one();
+                return std::task::Poll::Ready(());
+            }
+            *hooks.wake.borrow_mut() = Some(cx.waker().clone());
+            std::task::Poll::Pending
+        })
+    });
+    hooks.wakes_left.set(2);
+    let start = std::time::Instant::now();
+    port.wait_timeout_ns(10_000_000_000);
+    assert_eq!(polls.get(), 3);
+    assert!(start.elapsed() < Duration::from_secs(5));
+    set_park_hooks(None);
+}

@@ -19,8 +19,10 @@
 // hand-written unsafe.
 
 pub use ffi::TokioAsyncIoContext;
+pub use port::ParkHooks;
 pub use port::TokioPort;
 pub use port::current_handle;
+pub use port::set_park_hooks;
 pub use port::spawn;
 pub use progress::Progress;
 pub use progress::WatchError;

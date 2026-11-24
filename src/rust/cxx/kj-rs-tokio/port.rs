@@ -47,6 +47,41 @@ thread_local! {
     /// The count the port's progress probe advances (`crate::Progress`), registered by
     /// `TokioPort::new` and cleared on drop.
     static LOOP_PROGRESS: RefCell<Option<Arc<AtomicU64>>> = const { RefCell::new(None) };
+
+    /// What this thread's loop tells as it goes to sleep and wakes ([`set_park_hooks`]).
+    static PARK_HOOKS: RefCell<Option<Rc<dyn ParkHooks>>> = const { RefCell::new(None) };
+}
+
+/// What a loop thread tells its owner about going to sleep ([`set_park_hooks`]).
+///
+/// The thread sleeps only once neither KJ nor tokio has anything ready to run on it: KJ waits on
+/// the port when its own queue is empty, and tokio then runs what it has ready before it parks.
+pub trait ParkHooks {
+    /// The thread has nothing to run and is about to sleep until an event arrives. Waking a task
+    /// of this thread from here keeps it from sleeping: tokio runs the task instead.
+    fn before_park(&self);
+
+    /// The thread woke, before it runs anything.
+    fn after_unpark(&self);
+}
+
+/// Installs `hooks` for the calling thread's loop, in place of the ones it had, which are
+/// returned. A thread without a `TokioEventPort` never calls them.
+pub fn set_park_hooks(hooks: Option<Rc<dyn ParkHooks>>) -> Option<Rc<dyn ParkHooks>> {
+    PARK_HOOKS.with(|slot| slot.replace(hooks))
+}
+
+/// Calls `f` with this thread's park hooks, if it has any. The hooks are not borrowed during the
+/// call, so one may replace them.
+fn with_park_hooks(f: impl FnOnce(&dyn ParkHooks)) {
+    // `try_with`: tokio may park a thread whose thread-locals are being destroyed.
+    let hooks = PARK_HOOKS
+        .try_with(|slot| slot.borrow().clone())
+        .ok()
+        .flatten();
+    if let Some(hooks) = hooks {
+        f(&*hooks);
+    }
 }
 
 /// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
@@ -183,6 +218,9 @@ impl TokioPort {
             // tokio-backed KJ streams). It is only *driven* while this runtime is inside
             // `block_on` (i.e. in `wait_*`/`poll`), which is exactly when the KJ loop sleeps.
             .enable_io()
+            // The runtime is driven by this thread alone, so these run on it.
+            .on_thread_park(|| with_park_hooks(|hooks| hooks.before_park()))
+            .on_thread_unpark(|| with_park_hooks(|hooks| hooks.after_unpark()))
             .build()
             .expect("failed to build current_thread tokio runtime");
         // Enter the runtime context for the life of the port (see EnteredRuntime): from here on,
