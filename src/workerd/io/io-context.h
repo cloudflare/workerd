@@ -130,7 +130,7 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
@@ -278,10 +278,13 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // Upstream span context that triggered this invocation, if any; consumed lazily by
+  // getInvocationSpanContext().
+  kj::Maybe<tracing::SpanContext> maybeTriggerSpanContext;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
-  kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
