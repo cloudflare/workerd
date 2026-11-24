@@ -82,6 +82,7 @@ use std::thread::JoinHandle;
 use futures::future::LocalBoxFuture;
 use kj_rs::KjArc;
 use kj_rs::KjOwn;
+use kj_rs_tokio::PortPaced;
 use tokio::io::DuplexStream;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -437,6 +438,16 @@ const SESSION_BUFFER_SIZE: usize = 256 * 1024;
 /// of it on its own loop.
 pub struct SessionEnd(DuplexStream);
 
+impl SessionEnd {
+    /// The pipe for the thread that uses this end. The other thread fills it whenever it is
+    /// ahead, so its reads are paced to this thread's port (`kj_rs_tokio::PortPace`): a thread
+    /// that reads a long message, such as the body of an upload to a Durable Object, still
+    /// serves everything else it has.
+    fn paced(self) -> PortPaced<DuplexStream> {
+        PortPaced::new(self.0)
+    }
+}
+
 /// The two ends of a session's pipe.
 #[must_use]
 pub fn session_pipe() -> (SessionEnd, SessionEnd) {
@@ -447,7 +458,7 @@ pub fn session_pipe() -> (SessionEnd, SessionEnd) {
 /// Serves, on the first loop thread, the session of replica `index` over `end`, until the
 /// replica drops its end.
 pub async fn serve_session(factory: Rc<Factory>, index: usize, end: SessionEnd) {
-    let stream = kj_hyper::into_kj_stream(end.0);
+    let stream = kj_hyper::into_kj_stream(end.paced());
     if let Err(error) = ffi::factory_accept_loop_session(factory.raw(), stream).await {
         let error = crate::Error::from(error);
         // The replica is told by its own end; this is for whoever reads the log.
@@ -476,7 +487,7 @@ impl FirstThread {
     /// The session over `end`, on the loop of `factory`, this replica's.
     pub fn connect(factory: &ffi::WorkerFactory, end: SessionEnd) -> Self {
         Self {
-            client: ffi::new_loop_session_client(factory, kj_hyper::into_kj_stream(end.0)),
+            client: ffi::new_loop_session_client(factory, kj_hyper::into_kj_stream(end.paced())),
         }
     }
 

@@ -151,7 +151,13 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   sleep, so an idle server keeps to a warm thread) and none that is awake. A loop serves what it took as it would serve its own
   connection (`listen/dispatch.rs`): bodies are read from and written to the connection's task
   a chunk at a time, an upgraded connection (WebSocket, CONNECT) is handed to the loop as the
-  transport itself, and a client that goes away drops the call's KJ promise. The first thread
+  transport itself, and a client that goes away drops the call's KJ promise. What another
+  thread supplies (a request's body, the bytes of an upgraded or TCP connection, the messages
+  of a session between loops) a loop reads paced to its own event port
+  (`kj_rs_tokio::PortPace`): such bytes are there whenever the other thread is ahead, and KJ
+  turns the continuation of a read that did not wait before anything else, so unpaced, one long
+  upload would keep its thread from every other request and, on the first thread, from the
+  Durable Object calls of all the others. The first thread
   alone reports config errors (a replica whose graph has one fails the
   process), handles SIGTERM and tells the front and the others to drain, writes the
   `--control-fd` events once every thread is ready, and serves the UDP sockets, cron triggers

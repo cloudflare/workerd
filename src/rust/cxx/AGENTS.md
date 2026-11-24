@@ -38,7 +38,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   `kj_rs_tokio::spawn()`, `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
   its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes),
   and `set_park_hooks` (`ParkHooks`: the thread's loop says when it is about to sleep, with
-  nothing ready in KJ or tokio, and when it woke);
+  nothing ready in KJ or tokio, and when it woke); `PortPace` / `PortPaced` hold an operation
+  back until the port has run since the one before, for a stream that a thread of another
+  runtime fills, whose reads would otherwise never have to wait and keep the loop to themselves;
   `kj_rs_tokio::watch_progress()` counts the loop's progress for a watchdog on another thread,
   busy or asleep, except through three kinds of busy stretch that `progress.rs` names
 - `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled

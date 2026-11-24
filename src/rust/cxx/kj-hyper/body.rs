@@ -41,6 +41,7 @@ use http_body::Frame;
 use http_body::SizeHint;
 use hyper::body::Incoming;
 use hyper::ext::HeaderCaseMap;
+use kj_rs_tokio::PortPace;
 use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -55,6 +56,8 @@ use crate::ffi::headers_from_block;
 struct BodyState {
     body: RefCell<Option<Incoming>>,
     buffered: RefCell<Bytes>,
+    /// Paces the frames of a body that another thread's runtime fills ([`RustBody::paced`]).
+    pace: Option<PortPace>,
 }
 
 /// An incoming body as a `kj::AsyncInputStream`. Each read owns a share of the body, which is
@@ -66,6 +69,20 @@ impl RustBody {
         Self(Rc::new(BodyState {
             body: RefCell::new(Some(body)),
             buffered: RefCell::new(Bytes::new()),
+            pace: None,
+        }))
+    }
+
+    /// The body of a connection that the runtime of another thread serves: a frame is taken
+    /// only once the reading thread's port has run since the one before
+    /// (`kj_rs_tokio::PortPace`). The other thread has the next frame ready whenever it is
+    /// ahead, where the frames of a connection of the reader's own runtime arrive only when
+    /// its port runs.
+    pub fn paced(body: Incoming) -> Self {
+        Self(Rc::new(BodyState {
+            body: RefCell::new(Some(body)),
+            buffered: RefCell::new(Bytes::new()),
+            pace: Some(PortPace::default()),
         }))
     }
 
@@ -90,8 +107,14 @@ impl RustBody {
                 let Some(incoming) = body.as_mut() else {
                     return Poll::Ready(Ok(buf.filled().len()));
                 };
+                if let Some(pace) = &state.pace {
+                    std::task::ready!(pace.poll_ready(cx));
+                }
                 match std::task::ready!(Pin::new(incoming).poll_frame(cx)) {
                     Some(Ok(frame)) => {
+                        if let Some(pace) = &state.pace {
+                            pace.completed();
+                        }
                         if let Ok(data) = frame.into_data() {
                             *buffered = data;
                         }

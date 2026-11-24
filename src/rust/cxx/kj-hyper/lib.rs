@@ -83,6 +83,7 @@ use cxx::KjError;
 pub use ffi::WebSocketCompression;
 pub use ffi::WebSocketErrorHandler;
 pub use handshake::accept_key;
+pub use io::BoxIo;
 pub use io::Hangup;
 pub use io::into_kj_stream;
 pub use io::into_kj_stream_with;

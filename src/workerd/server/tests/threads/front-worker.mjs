@@ -211,8 +211,11 @@ export default {
         // Reads the request body, the first `slow` bytes of it at `rate` bytes a second, and
         // tells the ledger how much it has read, every MiB while it reads slowly. The response
         // head goes out at once; its body says how much was read, once the request body ended.
+        // With `work`, it runs JavaScript for that many milliseconds per MiB it reads and waits
+        // for nothing but the body, so that the body arrives faster than it is read.
         const slow = Number(query.get('slow') ?? 0);
         const rate = Number(query.get('rate') ?? 1);
+        const work = Number(query.get('work') ?? 0);
         const reader = request.body.getReader();
         const consumed = (async () => {
           const start = Date.now();
@@ -222,6 +225,7 @@ export default {
             const { done, value } = await reader.read();
             if (done) break;
             total += value.byteLength;
+            while (Date.now() < start + (total / MiB) * work) {}
             if (total <= slow) {
               const wait = start + (total / rate) * 1000 - Date.now();
               if (wait > 0) await scheduler.wait(wait);

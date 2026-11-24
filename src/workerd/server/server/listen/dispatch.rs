@@ -14,7 +14,10 @@
 //!
 //! A loop takes an item when it has nothing else to run (`front::queue`): its event loop tells
 //! the queue when the thread is about to sleep (`ParkHooks`), and the item it then takes gets
-//! its first poll at once, in the turn that took it.
+//! its first poll at once, in the turn that took it. What the front's threads supply while the
+//! loop serves an item, a request's body or a connection's bytes, the loop reads paced to its
+//! own event port (`kj_rs_tokio::PortPace`), so that a client faster than the Worker that reads
+//! it does not keep the loop from everything else.
 //!
 //! Each call in flight is a future of the one [`serve`] returns, so dropping that future, which
 //! is how a loop that stops or fails ends, drops every call's KJ promise and gives up the
@@ -198,6 +201,7 @@ async fn tcp_call(
             io: work.io,
             hangup: work.hangup,
             starttls: work.starttls,
+            of_front: true,
         };
         tcp_connection(&context, worker, &authority, connection).await
     };

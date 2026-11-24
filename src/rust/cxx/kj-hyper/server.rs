@@ -30,14 +30,17 @@
 //! body, which that thread reads from hyper as the handler asks for it, and hyper's hand-over of
 //! the transport for an upgrade) and, on the way back, the response head and a body that
 //! holds a few chunks at most ([`crate::body::ChannelBody`]), so both bodies are bounded by
-//! what their reader takes. Two things follow from the threads. A response body of unknown
+//! what their reader takes. Three things follow from the threads. A response body of unknown
 //! length ends when its handler call has returned, not when its sink is dropped, since the
 //! connection could otherwise see the sink of a failing response dropped before the failure
 //! and frame the body as complete. And the `100 Continue` of a request with `Expect` is sent
 //! when the handler reads the body only if the response head has not gone out by then: a
 //! handler that sends its head first and reads afterwards gets none, where on one thread the
-//! read is seen first. An upgraded transport is used by the handler's thread directly, while it stays
-//! registered with the runtime that accepted it.
+//! read is seen first. And the handler's thread reads the request body, and an upgraded
+//! transport, paced to its own event port (`kj_rs_tokio::PortPace`): the connection's thread has
+//! the next bytes ready whenever it is ahead, and a read that never has to wait would keep KJ
+//! from everything else on the handler's thread. An upgraded transport is used by the handler's
+//! thread directly, while it stays registered with the runtime that accepted it.
 //!
 //! # Request parsing
 //!
@@ -612,7 +615,12 @@ async fn handle(
             return;
         }
         let url = parts.uri.to_string();
-        let mut body = new_body_stream(Box::new(RustBody::new(body)));
+        let body = if sender.link.remote {
+            RustBody::paced(body)
+        } else {
+            RustBody::new(body)
+        };
+        let mut body = new_body_stream(Box::new(body));
         let mut response = new_server_response(
             Box::new(ServerResponse(Rc::clone(&sender))),
             method,
@@ -707,7 +715,10 @@ impl ResponseSender {
         self.upgrade
             .borrow_mut()
             .take()
-            .map(|upgrade| Upgrading::new(upgrade, self.link.hangup.clone()))
+            .map(|upgrade| {
+                let io = Upgrading::new(upgrade, self.link.hangup.clone());
+                if self.link.remote { io.paced() } else { io }
+            })
             .ok_or_else(|| failed("this request does not upgrade the connection"))
     }
 

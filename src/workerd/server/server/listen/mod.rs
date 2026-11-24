@@ -682,6 +682,10 @@ struct TcpConnection {
     hangup: Hangup,
     /// The socket's TLS configuration if its `connect()` handler may upgrade the connection.
     starttls: Option<Arc<rustls::ServerConfig>>,
+    /// The connection is registered with the front's runtime, whose thread has its bytes ready
+    /// whenever it is ahead: its reads are paced to this thread's port
+    /// (`kj_rs_tokio::PortPace`).
+    of_front: bool,
 }
 
 /// Starts the `connect()` event of a TCP connection from `peer` on `channel`.
@@ -699,15 +703,20 @@ async fn tcp_connection(
     connection: TcpConnection,
 ) -> Result<()> {
     let hangup = Some(connection.hangup.shared());
+    let io: kj_hyper::BoxIo = if connection.of_front {
+        Box::new(kj_rs_tokio::PortPaced::new(connection.io))
+    } else {
+        Box::new(connection.io)
+    };
     // Without a STARTTLS config the settings carry no starter slot at all: an empty slot would
     // tell the service that its peer is waiting to be told about an upgrade, which a raw TCP
     // client is not.
     let (mut stream, mut starter) = match connection.starttls {
         Some(config) => {
-            let (io, starter) = kj_hyper::StartTlsIo::server(connection.io, config);
+            let (io, starter) = kj_hyper::StartTlsIo::server(io, config);
             (kj_hyper::into_kj_stream_with(io, hangup), Some(starter))
         }
-        None => (kj_hyper::into_kj_stream_with(connection.io, hangup), None),
+        None => (kj_hyper::into_kj_stream_with(io, hangup), None),
     };
     let mut response = ffi::new_null_connect_response();
     let headers = Headers::new(header_table(&context.factory));
@@ -758,6 +767,7 @@ pub async fn listen_tcp(
                 io,
                 hangup,
                 starttls,
+                of_front: false,
             };
             tcp_connection(&context, worker, &authority, connection).await
         }

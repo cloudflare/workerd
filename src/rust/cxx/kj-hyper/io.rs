@@ -25,6 +25,7 @@ use hyper::upgrade::OnUpgrade;
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
 use kj_rs::KjOwn;
+use kj_rs_tokio::PortPace;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::ReadBuf;
@@ -320,6 +321,8 @@ pub struct Upgrading {
     waiters: Vec<Waker>,
     /// The connection's, which the transport keeps.
     hangup: Shared<Hangup>,
+    /// Paces the reads of a transport that another thread's runtime fills ([`Self::paced`]).
+    pace: Option<PortPace>,
 }
 
 enum UpgradeState {
@@ -342,7 +345,17 @@ impl Upgrading {
             state: UpgradeState::Pending(upgrade),
             waiters: Vec::new(),
             hangup,
+            pace: None,
         }
+    }
+
+    /// For a transport registered with the runtime of another thread than the one that reads
+    /// it: a read waits for the reading thread's port to have run since the one before
+    /// (`kj_rs_tokio::PortPace`), as the reads of a transport of its own runtime do.
+    #[must_use]
+    pub fn paced(mut self) -> Self {
+        self.pace = Some(PortPace::default());
+        self
     }
 
     fn ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<&mut TokioIo<Upgraded>>> {
@@ -376,8 +389,16 @@ impl AsyncRead for Upgrading {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let io = std::task::ready!(self.get_mut().ready(cx))?;
-        Pin::new(io).poll_read(cx, buf)
+        let this = self.get_mut();
+        if let Some(pace) = &this.pace {
+            std::task::ready!(pace.poll_ready(cx));
+        }
+        let io = std::task::ready!(this.ready(cx))?;
+        let result = std::task::ready!(Pin::new(io).poll_read(cx, buf));
+        if let Some(pace) = &this.pace {
+            pace.completed();
+        }
+        Poll::Ready(result)
     }
 }
 

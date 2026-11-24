@@ -885,6 +885,59 @@ async function upload(server, { size, slow = 0, rate = 1 }) {
   return { ...JSON.parse(res.body), ahead, rssGrowth: rssMax - rssBefore };
 }
 
+// Uploads `size` bytes to `/upload` on the isolate `thread`, which runs JavaScript for `work`
+// milliseconds per MiB it reads and waits for nothing but the body. Resolves once the response
+// head is here, with `{ front, done }`; `done` resolves with what the Worker read, once it
+// answered.
+async function busyUpload(server, thread, { size, work }) {
+  const sent = await steer(
+    thread,
+    (headers) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          options(server.http, `/upload?work=${work}`, {
+            method: 'POST',
+            headers,
+          })
+        );
+        req.on('error', reject);
+        req.on('response', (res) => {
+          if (res.statusCode === 409) {
+            // The isolate that refuses reads no body.
+            res.resume();
+            res.on('end', () => {
+              req.destroy();
+              resolve(undefined);
+            });
+            return;
+          }
+          resolve({ req, res });
+        });
+        req.flushHeaders();
+      }),
+    { threads: server.threads, discard: ({ req }) => req.destroy() }
+  );
+  const { req, res } = sent;
+  let body = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => (body += chunk));
+  const done = new Promise((resolve, reject) => {
+    req.on('error', reject);
+    res.on('error', reject);
+    res.on('end', () => resolve(JSON.parse(body)));
+  });
+  done.catch(() => {});
+  const writer = (async () => {
+    const chunk = Buffer.alloc(256 * 1024, 120);
+    for (let written = 0; written < size; written += chunk.length) {
+      if (!req.write(chunk)) await drained(req);
+    }
+    req.end();
+  })();
+  writer.catch(() => {});
+  return { front: res.headers['x-front'], done };
+}
+
 // Downloads `size` bytes of the pattern from `/download`, the first `steps` times 4 MiB of them
 // slowly: a step reads 4 MiB, then reads nothing for a while, and samples how far the Worker's
 // production is ahead of what the client read (`ahead`) and the server's resident memory
@@ -1218,6 +1271,33 @@ for (const threads of [1, THREADS]) {
           assert(ahead < 48 * MiB, `the client wrote ${ahead} bytes ahead`);
           if (RSS)
             assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
+        }
+      );
+
+      test(
+        `a thread that reads a body without a pause serves what other threads ask of it ${on}`,
+        { skip: !several && 'one thread has no other' },
+        async () => {
+          const { server } = shared;
+          const threads = await threadsOf(server);
+          // The first thread reads 40 MiB in five seconds and runs JavaScript whenever it does
+          // not read. The front has the next chunk ready before the thread asks for it, so the
+          // thread always has something to do that it need not wait for.
+          const size = 40 * MiB;
+          const busy = await busyUpload(server, threads.first, {
+            size,
+            work: 125,
+          });
+          assert.strictEqual(busy.front, threads.first);
+          await scheduler.wait(500);
+          // Another thread asks the first for a value of the ledger, which lives there, and is
+          // answered long before the upload ends.
+          const asked = Date.now();
+          await get(server.http, '/ledger?key=nothing', away(threads));
+          const took = Date.now() - asked;
+          assert(took < 2500, `the ledger answered after ${took} ms`);
+          const { consumed } = await within(busy.done, 30_000, 'the upload');
+          assert.strictEqual(consumed, size);
         }
       );
 

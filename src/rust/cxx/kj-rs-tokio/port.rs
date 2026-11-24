@@ -1,5 +1,6 @@
 //! Per-thread tokio `current_thread` runtime management and the Rust half of `TokioEventPort`.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
@@ -50,6 +51,23 @@ thread_local! {
 
     /// What this thread's loop tells as it goes to sleep and wakes ([`set_park_hooks`]).
     static PARK_HOOKS: RefCell<Option<Rc<dyn ParkHooks>>> = const { RefCell::new(None) };
+
+    /// How many times this thread's port has run tokio ([`port_passes`]).
+    static PORT_PASSES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// How many times this thread's `TokioEventPort` has had tokio run its tasks and drivers so far,
+/// waiting or polling; zero on a thread without one. KJ calls the port once it has turned every
+/// event that was ready, so between two readings that differ, everything else on the thread had
+/// its turn.
+#[must_use]
+pub fn port_passes() -> u64 {
+    PORT_PASSES.with(Cell::get)
+}
+
+/// Counts a run of the port.
+fn count_port_pass() {
+    PORT_PASSES.with(|passes| passes.set(passes.get() + 1));
 }
 
 /// What a loop thread tells its owner about going to sleep ([`set_park_hooks`]).
@@ -323,6 +341,7 @@ impl TokioPort {
         let local =
             current_local_set().expect("TokioPort is driving without a registered LocalSet");
         state.in_wait.store(true, Ordering::Relaxed);
+        count_port_pass();
         local.block_on(&self.runtime, async {
             match timeout {
                 Some(t) => {
@@ -346,6 +365,7 @@ impl TokioPort {
         )]
         let local =
             current_local_set().expect("TokioPort is driving without a registered LocalSet");
+        count_port_pass();
         local.block_on(&self.runtime, async {
             for _ in 0..POLL_YIELD_BUDGET {
                 tokio::task::yield_now().await;
