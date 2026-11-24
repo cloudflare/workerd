@@ -165,13 +165,7 @@ export default {
   'Send-65K-data.any.js': {
     replace: removeUseCapture,
   },
-  'Send-before-open.any.js': {
-    comment:
-      'workerd throws TypeError instead of InvalidStateError DOMException for send() before open',
-    expectedFailures: [
-      'Send data on a WebSocket before connection is opened - INVALID_STATE_ERR is returned',
-    ],
-  },
+  'Send-before-open.any.js': {},
   'Send-binary-65K-arraybuffer.any.js': {
     replace: removeUseCapture,
   },

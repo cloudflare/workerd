@@ -1019,6 +1019,12 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
     return;
   }
 
+  if (native.state.is<AwaitingConnection>() && FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the WHATWG WebSocket spec, send() on a WebSocket that is still CONNECTING throws an
+    // InvalidStateError. See https://websockets.spec.whatwg.org/#dom-websocket-send step 1.
+    JSG_FAIL_REQUIRE(
+        DOMInvalidStateError, "Can't call WebSocket send() before the connection is open.");
+  }
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
       "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
