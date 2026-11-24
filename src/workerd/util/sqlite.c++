@@ -215,8 +215,9 @@ void appendErrorContext(kj::Exception& e, kj::Maybe<kj::StringPtr> errorContext)
   kj::throwException(kj::mv(e));
 }
 
-// Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
-// returned to SQLite.
+// Report that in a sqlite VFS callback, an exception was caught. The callback then returns
+// SQLITE_CANTOPEN from xOpen, SQLITE_OK from xClose and xShmUnmap (whose results SQLite ignores),
+// and an SQLITE_IOERR code from the other methods.
 //
 // The exception must be caught using `catch (kj::Exception& e)`, NOT using `catch (...)` followed
 // by kj::getCaughtExceptionAsKj(). This is because the latter truncates the stack trace to show
@@ -259,6 +260,16 @@ class SqliteCallScope {
 
   kj::Maybe<const kj::Exception&> getException() {
     return error;
+  }
+
+  // Whether `errorCode` is how SQLite reports a failed VFS call, so that an exception the VFS
+  // caught during the call is the cause. SQLite opens files in the middle of statements (journals,
+  // WALs, temp files), so SQLITE_CANTOPEN can come from any call, not just from opening the
+  // database. Comparing the primary code (the low byte) covers every SQLITE_IOERR_* and
+  // SQLITE_CANTOPEN_* code, whether or not extended result codes are enabled.
+  static bool isVfsErrorCode(int errorCode) {
+    int primary = errorCode & 0xff;
+    return primary == SQLITE_IOERR || primary == SQLITE_CANTOPEN;
   }
 
   // Hack to allow block syntax with for(); see SQLITE_CALL_SCOPE.
@@ -309,7 +320,9 @@ class SqliteCallScope {
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
     handleCriticalError(_ec, dbErrorMessage(_ec, db), sqliteCallScope.getException());             \
-    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                   \
+    if (SqliteCallScope::isVfsErrorCode(_ec)) {                                                    \
+      sqliteCallScope.rethrowVfsError(getErrorContext());                                          \
+    }                                                                                              \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
@@ -322,7 +335,9 @@ class SqliteCallScope {
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
-    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                 \
+    if (SqliteCallScope::isVfsErrorCode(error)) {                                                  \
+      sqliteCallScope.rethrowVfsError(getErrorContext());                                          \
+    }                                                                                              \
     SQLITE_REQUIRE_WITH_TAG(                                                                       \
         error != SQLITE_BUSY, error, "NOSENTRY"_kj, dbErrorMessage(error, db), ##__VA_ARGS__);     \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \

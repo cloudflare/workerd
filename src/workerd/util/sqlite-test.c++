@@ -1654,7 +1654,15 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 // kj::Directory that serves ErrorInjectableFiles to SQLite.
 class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRefcounted {
  public:
+  // When set, opening any file, including creating a temporary one, throws a copy of this
+  // exception, the way a directory that has revoked access to its files (such as a cluster node
+  // whose lease lapsed) refuses an open.
   kj::Maybe<kj::Exception> error;
+  // When true, a file that doesn't exist can't be created: opening it returns kj::none.
+  bool refuseCreate = false;
+  // The paths of the opens refused by `error` or `refuseCreate`; "<temporary>" for a temporary
+  // file.
+  mutable kj::Vector<kj::String> refusedOpens;
   // When set, counts the syncs of the files this creates, including removed ones.
   kj::Maybe<uint&> syncCount;
   kj::Maybe<kj::Own<ErrorInjectableFile>> dbFile;
@@ -1685,14 +1693,13 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   // implements kj::Directory
 
   kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
-    KJ_IF_SOME(e, error) {
-      kj::throwException(e.clone());
-    }
+    checkOpen(path.toString());
     return getSlot(path).map([](kj::Own<ErrorInjectableFile>& file) { return file->clone(); });
   }
 
   kj::Maybe<kj::Own<const kj::File>> tryOpenFile(
       kj::PathPtr path, kj::WriteMode mode) const override {
+    checkOpen(path.toString());
     auto& slot = getSlot(path);
 
     KJ_IF_SOME(file, slot) {
@@ -1702,6 +1709,10 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
         return kj::none;
       }
     } else {
+      if (refuseCreate) {
+        refusedOpens.add(path.toString());
+        return kj::none;
+      }
       if (kj::has(mode, kj::WriteMode::CREATE)) {
         auto& file = slot.emplace(kj::atomicRefcounted<ErrorInjectableFile>());
         KJ_IF_SOME(count, syncCount) {
@@ -1756,7 +1767,8 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
     KJ_UNIMPLEMENTED("this method is unused by SQLite");
   }
   kj::Own<const kj::File> createTemporary() const override {
-    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+    checkOpen(kj::str("<temporary>"));
+    return kj::newInMemoryFile(kj::nullClock());
   }
   kj::Maybe<kj::Own<kj::AppendableFile>> tryAppendFile(
       kj::PathPtr path, kj::WriteMode mode) const override {
@@ -1772,6 +1784,14 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
   bool trySymlink(kj::PathPtr linkpath, kj::StringPtr content, kj::WriteMode mode) const override {
     KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+
+ private:
+  void checkOpen(kj::String name) const {
+    KJ_IF_SOME(e, error) {
+      refusedOpens.add(kj::mv(name));
+      kj::throwException(e.clone());
+    }
   }
 };
 
@@ -1799,6 +1819,119 @@ KJ_TEST("SQLite open preserves directory VFS exceptions") {
   KJ_EXPECT(exception.getDescription() == "test-directory-vfs-error", exception);
   auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
   KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
+// Runs `code` on `db` with `dir` refusing every open, and checks that the refusal is what's thrown
+// and that it refused the file named `refusedPath`.
+void expectOpenRefusedMidStatement(SqliteDatabase& db,
+    ErrorInjectableDirectory& dir,
+    kj::StringPtr code,
+    kj::StringPtr refusedPath,
+    SqliteDatabase::StaticRegulator regulator = SqliteDatabase::TRUSTED) {
+  db.setErrorContext(kj::str("actorId = abc123"));
+  dir.error = KJ_EXCEPTION(DISCONNECTED, "test-directory-vfs-error");
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { db.run({.regulator = regulator}, code); }));
+  KJ_EXPECT(exception.getDescription() == "test-directory-vfs-error; actorId = abc123", exception);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::DISCONNECTED, exception);
+  expectDoSentryDisposition(exception);
+  KJ_EXPECT(dir.refusedOpens.size() == 1 && dir.refusedOpens[0] == refusedPath,
+      kj::strArray(dir.refusedOpens, ", "));
+}
+
+KJ_TEST("SQLite preserves VFS exceptions from opening a journal mid-statement") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Switching a new database to WAL mode writes its header through a rollback journal.
+  expectOpenRefusedMidStatement(db, *dir, "PRAGMA journal_mode=WAL;", "db-journal");
+}
+
+// Creates the WAL-mode database "db", with a table `things`, and closes it. Closing the last
+// connection checkpoints and removes the WAL, so the next statement on the database opens it again.
+void createWalDatabase(SqliteDatabase::Vfs& vfs) {
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.run("PRAGMA journal_mode=WAL;");
+  db.run("CREATE TABLE things (value INTEGER)");
+}
+
+KJ_TEST("SQLite preserves VFS exceptions from opening a WAL mid-statement") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  createWalDatabase(vfs);
+  KJ_ASSERT(dir->walFile == kj::none);
+
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::MODIFY);
+  expectOpenRefusedMidStatement(db, *dir, "SELECT * FROM things", "db-wal");
+}
+
+KJ_TEST("SQLite preserves VFS exceptions from a mid-statement open over a throwing Regulator") {
+  // Like SqlStorageRegulator, which turns every error it is given into a JS Error.
+  class ThrowingRegulator: public SqliteDatabase::Regulator {
+   public:
+    mutable bool called = false;
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override {
+      called = true;
+      KJ_FAIL_REQUIRE("test-regulator-error", message);
+    }
+  };
+  static ThrowingRegulator regulator;
+
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  createWalDatabase(vfs);
+  KJ_ASSERT(dir->walFile == kj::none);
+
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::MODIFY);
+  expectOpenRefusedMidStatement(db, *dir, "SELECT * FROM things", "db-wal", regulator);
+  KJ_EXPECT(!regulator.called);
+}
+
+KJ_TEST("SQLite preserves VFS exceptions from creating a temporary file mid-statement") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.run("PRAGMA temp_store=FILE;");
+  db.run("CREATE TABLE things (value BLOB)");
+  db.run("INSERT INTO things VALUES (randomblob(512))");
+  for (auto i KJ_UNUSED: kj::zeroTo(13)) {
+    db.run("INSERT INTO things SELECT randomblob(512) FROM things");
+  }
+
+  // Sorting the 4 MiB in `things`, more than the sorter keeps in memory, spills it to a temporary
+  // file.
+  expectOpenRefusedMidStatement(db, *dir, "SELECT value FROM things ORDER BY value", "<temporary>");
+}
+
+KJ_TEST("SQLite reports a mid-statement open failure without a VFS exception as SQLITE_CANTOPEN") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  createWalDatabase(vfs);
+  KJ_ASSERT(dir->walFile == kj::none);
+
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::MODIFY);
+  db.setErrorContext(kj::str("actorId = abc123"));
+  dir->refuseCreate = true;
+
+  class RecordingRegulator: public SqliteDatabase::Regulator {
+   public:
+    mutable kj::Maybe<int> errorCode;
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override {
+      errorCode = sqliteErrorCode;
+    }
+  };
+  static RecordingRegulator regulator;
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
+      [&]() { db.run({.regulator = regulator}, "SELECT * FROM things"); }));
+  KJ_EXPECT(exception.getDescription().contains(
+                "unable to open database file: SQLITE_CANTOPEN; actorId = abc123"),
+      exception);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED, exception);
+  expectDoSentryDisposition(exception);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(regulator.errorCode) == SQLITE_CANTOPEN);
+  KJ_EXPECT(dir->refusedOpens.size() == 1 && dir->refusedOpens[0] == "db-wal",
+      kj::strArray(dir->refusedOpens, ", "));
 }
 
 KJ_TEST("SQLite VFS skips syncs when its sync option is off") {
