@@ -33,13 +33,6 @@ const SIGTERM_DRAINS = {
 // How the server ends on SIGTERM, as `[code, signal]`.
 const SIGTERM_EXIT =
   process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
-// More than one thread is a usage error on Windows.
-const SEVERAL_THREADS = {
-  skip:
-    process.platform === 'win32' &&
-    'several threads are not supported on Windows',
-};
-
 // Starts `workerd serve` with `extraArgs` and returns the harness and the port it listens on.
 async function serve(extraArgs) {
   const workerd = new WorkerdServerHarness({
@@ -284,7 +277,7 @@ async function withServer(extraArgs, body) {
   assert.deepStrictEqual(await workerd.stop(), SIGTERM_EXIT);
 }
 
-test('every thread serves its own copy of the Workers', SEVERAL_THREADS, () =>
+test('every thread serves its own copy of the Workers', () =>
   withServer(['--experimental', `--threads=${THREADS}`], async (_, port) => {
     // Which `back` each `front` reached, by the isolates' identities.
     const backOf = new Map();
@@ -319,8 +312,7 @@ test('every thread serves its own copy of the Workers', SEVERAL_THREADS, () =>
     assert.strictEqual(backOf.size, THREADS, 'isolates of one Worker');
     // Every thread has its own `back`, too.
     assert.strictEqual(new Set(backOf.values()).size, backOf.size);
-  })
-);
+  }));
 
 test(
   'SIGTERM drains the requests in flight on every thread',
@@ -386,8 +378,7 @@ for (const extraArgs of [[], ['--threads=1']]) {
 test(
   'every thread serves the requests of an inherited socket',
   {
-    // `--socket-fd` names a socket handle there, which Node.js cannot pass to a child, and
-    // several threads are not supported there either.
+    // `--socket-fd` names a socket handle there, which Node.js cannot pass to a child.
     skip: process.platform === 'win32' && 'Node.js passes no socket on Windows',
   },
   async () => {
@@ -455,40 +446,19 @@ async function serveToExit(args) {
   return { code, signal, stderr };
 }
 
-test(
-  'options several threads do not support are usage errors',
-  SEVERAL_THREADS,
-  async () => {
-    for (const [args, message] of [
-      [['--threads=2'], /--threads: .*`--experimental`/],
-      [
-        ['--threads=2', '--experimental', '--inspector-addr=127.0.0.1:0'],
-        /--threads: --inspector-addr is not supported with more than one thread\./,
-      ],
-    ]) {
-      const { code, signal, stderr } = await serveToExit([
-        env.WORKERD_CONFIG,
-        ...args,
-      ]);
-      assert.deepStrictEqual([code, signal], [1, null], stderr);
-      assert.match(stderr, message);
-    }
-  }
-);
-
-test(
-  'several threads are a usage error on Windows',
-  { skip: process.platform !== 'win32' && 'only Windows refuses them' },
-  async () => {
+test('options several threads do not support are usage errors', async () => {
+  for (const [args, message] of [
+    [['--threads=2'], /--threads: .*`--experimental`/],
+    [
+      ['--threads=2', '--experimental', '--inspector-addr=127.0.0.1:0'],
+      /--threads: --inspector-addr is not supported with more than one thread\./,
+    ],
+  ]) {
     const { code, signal, stderr } = await serveToExit([
       env.WORKERD_CONFIG,
-      '--experimental',
-      '--threads=2',
+      ...args,
     ]);
     assert.deepStrictEqual([code, signal], [1, null], stderr);
-    assert.match(
-      stderr,
-      /--threads: Serving on more than one thread is not supported on Windows\./
-    );
+    assert.match(stderr, message);
   }
-);
+});

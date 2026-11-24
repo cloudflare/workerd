@@ -234,7 +234,7 @@ pub struct ServeArgs {
     /// cluster on that thread. A Durable Object does not see the trace span of a caller on
     /// another thread. --inspector-addr and the options that save a Python snapshot are not
     /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
-    /// served by one thread only. More than one thread is not supported on Windows.
+    /// served by one thread only.
     #[arg(
         long,
         value_name = "N",
@@ -582,39 +582,15 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
         })
 }
 
-/// The platform `serve` runs on, which decides what `--threads` it supports
-/// ([`threads_refused`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Platform {
-    Windows,
-    Unix,
-}
-
-impl Platform {
-    /// The platform this binary is built for.
-    pub const CURRENT: Self = if cfg!(windows) {
-        Self::Windows
-    } else {
-        Self::Unix
-    };
-}
-
-/// Why `serve` cannot run on the `--threads` asked for with the other options given on
-/// `platform`, if it cannot. The server reports the inspector as a config error, too
+/// Why `serve` cannot run on the `--threads` asked for with the other options given, if it
+/// cannot. The server reports the inspector as a config error, too
 /// (`workerd_server::threads::obstacles`).
-pub fn threads_refused(
-    serve: &ServeArgs,
-    serve_or_test: &ServeOrTestArgs,
-    platform: Platform,
-) -> Option<&'static str> {
+pub fn threads_refused(serve: &ServeArgs, serve_or_test: &ServeOrTestArgs) -> Option<&'static str> {
     if serve.threads <= 1 {
         // One thread accepts its connections itself.
         return serve.front_threads.map(
             |_| "--front-threads: There is a front only with more than one thread (--threads).",
         );
-    }
-    if platform == Platform::Windows {
-        return Some("--threads: Serving on more than one thread is not supported on Windows.");
     }
     if !serve_or_test.experimental {
         return Some(

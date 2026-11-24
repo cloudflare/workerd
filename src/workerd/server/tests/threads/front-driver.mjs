@@ -56,7 +56,8 @@ const SIGTERM_DRAINS = process.platform !== 'win32';
 // How the server ends on SIGTERM, as `[code, signal]`.
 const SIGTERM_EXIT =
   process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
-// More than one thread is a usage error on Windows.
+// The cases on several threads reset connections and read the server's memory use in ways that
+// have not been tried on Windows.
 const SEVERAL_THREADS = process.platform !== 'win32';
 // The resident memory of a process can be read on Linux.
 const RSS = process.platform === 'linux';
@@ -1054,7 +1055,7 @@ for (const threads of [1, THREADS]) {
       skip:
         several &&
         !SEVERAL_THREADS &&
-        'several threads are not supported on Windows',
+        'the cases on several threads have not been tried on Windows',
     },
     () => {
       const shared = sharedServer({ threads });
@@ -1688,9 +1689,7 @@ async function refused(port, ms = 10_000) {
 test(
   'a unix socket and an inherited socket serve on every thread',
   {
-    skip:
-      process.platform === 'win32' &&
-      'Node.js passes no socket on Windows, and several threads are not supported there',
+    skip: process.platform === 'win32' && 'Node.js passes no socket on Windows',
   },
   async () => {
     // Unix socket paths are short: the test's temporary directory may be too deep for one.
@@ -1724,7 +1723,11 @@ test(
 
 test(
   'every socket gets one listen event, and a burst of requests sent as one is read is served by every thread',
-  { skip: !SEVERAL_THREADS && 'several threads are not supported on Windows' },
+  {
+    skip:
+      !SEVERAL_THREADS &&
+      'the cases on several threads have not been tried on Windows',
+  },
   async () => {
     const burst = (port) =>
       Promise.all(
@@ -1779,7 +1782,7 @@ for (const threads of [THREADS, 1]) {
     (!SIGTERM_DRAINS && 'SIGTERM does not drain on Windows') ||
     (several &&
       !SEVERAL_THREADS &&
-      'several threads are not supported on Windows');
+      'the cases on several threads have not been tried on Windows');
 
   test(
     `SIGTERM finishes the requests in flight${several ? ' and queued' : ''}, closes idle connections and exits ${on}`,
@@ -1892,7 +1895,9 @@ for (const front of [1, 4]) {
   test(
     `--front-threads=${front} serves on every thread`,
     {
-      skip: !SEVERAL_THREADS && 'several threads are not supported on Windows',
+      skip:
+        !SEVERAL_THREADS &&
+        'the cases on several threads have not been tried on Windows',
     },
     () =>
       withServer({ args: [`--front-threads=${front}`] }, async (server) => {

@@ -41,13 +41,6 @@ const SIGTERM_DRAINS = {
 // How the server ends on SIGTERM, as `[code, signal]`.
 const SIGTERM_EXIT =
   process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
-// More than one thread is a usage error on Windows.
-const SEVERAL_THREADS = {
-  skip:
-    process.platform === 'win32' &&
-    'several threads are not supported on Windows',
-};
-
 // Starts `workerd serve` on `threads` threads with a new directory for the objects. `log` is
 // what the server has written so far.
 async function serve(threads) {
@@ -386,9 +379,8 @@ function webSocket(server, path, thread) {
 
 for (const threads of [THREADS, 1]) {
   const on = `on ${threads} thread${threads > 1 ? 's' : ''}`;
-  const supported = threads > 1 ? SEVERAL_THREADS : {};
 
-  test(`requests of every thread count in one object ${on}`, supported, () =>
+  test(`requests of every thread count in one object ${on}`, () =>
     withServer(threads, async (server) => {
       const { all, object } = await threadsOf(server, threads);
       const PER_THREAD = 40;
@@ -408,10 +400,9 @@ for (const threads of [THREADS, 1]) {
         counts.sort((a, b) => a - b),
         Array.from({ length: total }, (_, i) => i + 1)
       );
-    })
-  );
+    }));
 
-  test(`a stub does what stubs do ${on}`, supported, () =>
+  test(`a stub does what stubs do ${on}`, () =>
     withServer(threads, async (server) => {
       const { all, object } = await threadsOf(server, threads);
       const results = await Promise.all(
@@ -464,10 +455,9 @@ for (const threads of [THREADS, 1]) {
         assert.notStrictEqual(result.service.front, front);
         assert.strictEqual(result.service.front, results[0].service.front);
       }
-    })
-  );
+    }));
 
-  test(`bodies stream to an object and back ${on}`, supported, () =>
+  test(`bodies stream to an object and back ${on}`, () =>
     withServer(threads, async (server) => {
       const fronts = await threadsOf(server, threads);
       const front = away(fronts);
@@ -513,10 +503,9 @@ for (const threads of [THREADS, 1]) {
       const expected = Buffer.concat(sent).toString('latin1').toUpperCase();
       assert.strictEqual(size(), expected.length);
       assert(Buffer.concat(received).toString('latin1') === expected);
-    })
-  );
+    }));
 
-  test(`an alarm set through a stub fires once ${on}`, supported, () =>
+  test(`an alarm set through a stub fires once ${on}`, () =>
     withServer(threads, async (server) => {
       const fronts = await threadsOf(server, threads);
       const front = away(fronts);
@@ -527,37 +516,32 @@ for (const threads of [THREADS, 1]) {
       await scheduler.wait(1000);
       const later = await get(server, '/alarms?name=alarm', fronts.first);
       assert.strictEqual(later.alarms, 1);
-    })
-  );
+    }));
 
-  test(
-    `the hooks that end every object work on the first thread only ${on}`,
-    supported,
-    () =>
-      withServer(threads, async (server) => {
-        const { first, replicas, object } = await threadsOf(server, threads);
-        for (const hook of ['abort', 'delete']) {
-          const before = await get(server, `/where?name=${hook}`, first);
-          for (const front of replicas) {
-            const { error } = await get(server, `/${hook}-all`, front);
-            assert.strictEqual(
-              error,
-              `Cannot ${hook} Durable Objects from this thread: with --threads, Durable ` +
-                "Objects run on the server's first thread, and only a request that thread " +
-                'serves can do this.'
-            );
-            // The object was left as it was.
-            const still = await get(server, `/where?name=${hook}`, front);
-            assert.strictEqual(still.instance, before.instance);
-          }
-          const all = await get(server, `/${hook}-all`, first);
-          assert.strictEqual(all.error, null);
-          const after = await get(server, `/where?name=${hook}`, first);
-          assert.strictEqual(after.isolate, object);
-          assert.notStrictEqual(after.instance, before.instance);
+  test(`the hooks that end every object work on the first thread only ${on}`, () =>
+    withServer(threads, async (server) => {
+      const { first, replicas, object } = await threadsOf(server, threads);
+      for (const hook of ['abort', 'delete']) {
+        const before = await get(server, `/where?name=${hook}`, first);
+        for (const front of replicas) {
+          const { error } = await get(server, `/${hook}-all`, front);
+          assert.strictEqual(
+            error,
+            `Cannot ${hook} Durable Objects from this thread: with --threads, Durable ` +
+              "Objects run on the server's first thread, and only a request that thread " +
+              'serves can do this.'
+          );
+          // The object was left as it was.
+          const still = await get(server, `/where?name=${hook}`, front);
+          assert.strictEqual(still.instance, before.instance);
         }
-      })
-  );
+        const all = await get(server, `/${hook}-all`, first);
+        assert.strictEqual(all.error, null);
+        const after = await get(server, `/where?name=${hook}`, first);
+        assert.strictEqual(after.isolate, object);
+        assert.notStrictEqual(after.instance, before.instance);
+      }
+    }));
 
   test(
     `SIGTERM completes the object calls in flight ${on}`,
@@ -597,75 +581,71 @@ for (const threads of [THREADS, 1]) {
   );
 }
 
-test(
-  'an idle object is shut down and a hibernating WebSocket wakes it',
-  SEVERAL_THREADS,
-  () =>
-    withServer(THREADS, async (server) => {
-      const { object, replicas } = await threadsOf(server);
-      assert(replicas.length >= 2, 'two threads without the objects');
-      const [plainFront, hibernatingFront] = replicas;
-      const front = replicas.at(-1);
+test('an idle object is shut down and a hibernating WebSocket wakes it', () =>
+  withServer(THREADS, async (server) => {
+    const { object, replicas } = await threadsOf(server);
+    assert(replicas.length >= 2, 'two threads without the objects');
+    const [plainFront, hibernatingFront] = replicas;
+    const front = replicas.at(-1);
 
-      // A WebSocket the object holds itself.
-      const plain = await webSocket(server, '/ws?name=plain', plainFront);
-      assert.strictEqual(plain.front, plainFront);
-      plain.send('one');
-      const one = await plain.next();
-      assert.deepStrictEqual(
-        { echo: one.echo, messages: one.messages, isolate: one.isolate },
-        { echo: 'one', messages: 1, isolate: object }
-      );
-      plain.send('two');
-      assert.deepStrictEqual(await plain.next(), {
-        ...one,
-        echo: 'two',
-        messages: 2,
-      });
+    // A WebSocket the object holds itself.
+    const plain = await webSocket(server, '/ws?name=plain', plainFront);
+    assert.strictEqual(plain.front, plainFront);
+    plain.send('one');
+    const one = await plain.next();
+    assert.deepStrictEqual(
+      { echo: one.echo, messages: one.messages, isolate: one.isolate },
+      { echo: 'one', messages: 1, isolate: object }
+    );
+    plain.send('two');
+    assert.deepStrictEqual(await plain.next(), {
+      ...one,
+      echo: 'two',
+      messages: 2,
+    });
 
-      // A WebSocket the object hibernates with, which a thread without the object took.
-      const hibernating = await webSocket(
-        server,
-        '/ws?name=hibernating&hibernate',
-        hibernatingFront
-      );
-      assert.strictEqual(hibernating.front, hibernatingFront);
-      hibernating.send('before');
-      const before = await hibernating.next();
-      assert.strictEqual(before.echo, 'before');
-      assert.strictEqual(before.isolate, object);
+    // A WebSocket the object hibernates with, which a thread without the object took.
+    const hibernating = await webSocket(
+      server,
+      '/ws?name=hibernating&hibernate',
+      hibernatingFront
+    );
+    assert.strictEqual(hibernating.front, hibernatingFront);
+    hibernating.send('before');
+    const before = await hibernating.next();
+    assert.strictEqual(before.echo, 'before');
+    assert.strictEqual(before.isolate, object);
 
-      // An object nothing holds: the stub its request used is gone with the request.
-      const idle = await get(server, '/where?name=idle', front);
-      assert.strictEqual(idle.isolate, object);
+    // An object nothing holds: the stub its request used is gone with the request.
+    const idle = await get(server, '/where?name=idle', front);
+    assert.strictEqual(idle.isolate, object);
 
-      // Past the ten seconds after which an idle object is shut down.
-      await scheduler.wait(11500);
+    // Past the ten seconds after which an idle object is shut down.
+    await scheduler.wait(11500);
 
-      // Each was constructed again: nothing on another thread kept the first instance alive.
-      const again = await get(server, '/where?name=idle', front);
-      assert.notStrictEqual(again.instance, idle.instance);
-      assert.strictEqual(again.isolate, object);
+    // Each was constructed again: nothing on another thread kept the first instance alive.
+    const again = await get(server, '/where?name=idle', front);
+    assert.notStrictEqual(again.instance, idle.instance);
+    assert.strictEqual(again.isolate, object);
 
-      assert(!hibernating.isClosed());
-      hibernating.send('after');
-      const after = await hibernating.next();
-      assert.deepStrictEqual(
-        { echo: after.echo, messages: after.messages, isolate: after.isolate },
-        { echo: 'after', messages: 1, isolate: object }
-      );
-      assert.notStrictEqual(after.instance, before.instance);
+    assert(!hibernating.isClosed());
+    hibernating.send('after');
+    const after = await hibernating.next();
+    assert.deepStrictEqual(
+      { echo: after.echo, messages: after.messages, isolate: after.isolate },
+      { echo: 'after', messages: 1, isolate: object }
+    );
+    assert.notStrictEqual(after.instance, before.instance);
 
-      // The object with a WebSocket of its own could not hibernate, and was not shut down.
-      plain.send('three');
-      assert.deepStrictEqual(await plain.next(), {
-        ...one,
-        echo: 'three',
-        messages: 3,
-      });
+    // The object with a WebSocket of its own could not hibernate, and was not shut down.
+    plain.send('three');
+    assert.deepStrictEqual(await plain.next(), {
+      ...one,
+      echo: 'three',
+      messages: 3,
+    });
 
-      await plain.close();
-      await hibernating.close();
-      assert.doesNotMatch(server.log, /internal bug in hibernation/);
-    })
-);
+    await plain.close();
+    await hibernating.close();
+    assert.doesNotMatch(server.log, /internal bug in hibernation/);
+  }));

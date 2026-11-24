@@ -685,7 +685,7 @@ fn serve_options<T: CommandFactory>(
             "socket '{name}' is given both --socket-addr and --socket-fd; use one"
         ));
     }
-    if let Some(message) = args::threads_refused(&serve, serve_or_test, args::Platform::CURRENT) {
+    if let Some(message) = args::threads_refused(&serve, serve_or_test) {
         usage_error::<T>(message);
     }
     let mut inherited = Vec::with_capacity(serve.socket_fd_overrides.len());
