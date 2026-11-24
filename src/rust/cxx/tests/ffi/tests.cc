@@ -1301,6 +1301,46 @@ extern "C" const char *cxx_run_test() noexcept {
       ASSERT(trackedDisposals == disposals + 2);
     }
     ASSERT(trackedDisposals == disposals + 3);
+
+    // Setting a detail in Rust, or cloning the exception there, keeps the
+    // parts a KjError has no field for: a context, a remote trace and a stack
+    // trace.
+    auto traced = []() {
+      auto exception = cppException();
+      exception.wrapContext("caller.cc", 8, kj::str("while calling"));
+      exception.setRemoteTrace(kj::str("remote frames"));
+      exception.addTrace(reinterpret_cast<void *>(0x1234));
+      return exception;
+    };
+    // Returns the failed assertion, as ASSERT does, or nullptr.
+    auto expectTraced = [](const kj::Exception &exception) -> const char * {
+      ASSERT(exception.getRemoteTrace() == "remote frames");
+      KJ_IF_SOME(context, exception.getContext()) {
+        ASSERT(kj::StringPtr(context.file) == "caller.cc");
+        ASSERT(context.line == 8);
+        ASSERT(context.description == "while calling");
+      } else {
+        return "the exception lost its context";
+      }
+      ASSERT(exception.getStackTrace().size() == 1);
+      ASSERT(exception.getStackTrace()[0] == reinterpret_cast<void *>(0x1234));
+      return nullptr;
+    };
+    {
+      auto exception = r_set_detail_kj_exception(traced());
+      ASSERT(describeException(exception) ==
+             kj::str(cppDescription, ";77=set"));
+      if (auto failure = expectTraced(exception)) {
+        return failure;
+      }
+    }
+    {
+      auto exception = r_clone_kj_exception(traced());
+      ASSERT(describeException(exception) == cppDescription);
+      if (auto failure = expectTraced(exception)) {
+        return failure;
+      }
+    }
   }
 
   auto r = r_return_box();

@@ -74,6 +74,22 @@ pub mod repr {
             max_count: usize,
         );
 
+        #[link_name = "cxxbridge1$kjException$getDetail"]
+        pub fn kj_exception_get_detail(
+            err: *const KjException,
+            type_id: u64,
+            ptr: *mut *const u8,
+            len: *mut usize,
+        ) -> bool;
+
+        #[link_name = "cxxbridge1$kjException$setDetail"]
+        pub fn kj_exception_set_detail(
+            err: *mut KjException,
+            type_id: u64,
+            ptr: *const u8,
+            len: usize,
+        );
+
         #[link_name = "cxxbridge1$kjException$clone"]
         pub fn kj_exception_clone(err: *const KjException) -> *mut KjException;
 
@@ -241,6 +257,40 @@ impl KjException {
         }
 
         Some(result)
+    }
+
+    /// Returns the value of the detail `type_id`, if the exception has one, without copying it.
+    pub fn detail(&self, type_id: u64) -> Option<&[u8]> {
+        let mut ptr = core::ptr::null();
+        let mut len = 0;
+        // Safety: `self.err` is a live `kj::Exception*` that `self` owns, and the shim only
+        // writes `ptr` and `len`.
+        let found = unsafe {
+            repr::kj_exception_get_detail(self.err.as_ptr(), type_id, &raw mut ptr, &raw mut len)
+        };
+        if !found {
+            return None;
+        }
+        // An empty kj::Array has a null data pointer, which from_raw_parts rejects even when the
+        // length is zero.
+        if len == 0 {
+            return Some(&[]);
+        }
+        // Safety: the bytes belong to the detail, which lives as long as the exception does and
+        // changes only through `set_detail()`, which takes `&mut self` and so can't run while the
+        // returned slice borrows `self`.
+        Some(unsafe { core::slice::from_raw_parts(ptr, len) })
+    }
+
+    /// Sets the detail `type_id` to `value`, replacing any detail with that id, with
+    /// `kj::Exception::setDetail()`. Everything else the exception holds is kept: its context,
+    /// remote trace and stack trace included.
+    pub fn set_detail(&mut self, type_id: u64, value: &[u8]) {
+        // Safety: `self.err` is a live `kj::Exception*` that `self` owns, and the shim copies
+        // `value` before returning.
+        unsafe {
+            repr::kj_exception_set_detail(self.err.as_ptr(), type_id, value.as_ptr(), value.len());
+        }
     }
 
     /// Consumes the exception, returning the raw pointer.
