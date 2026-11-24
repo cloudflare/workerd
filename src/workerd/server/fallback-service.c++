@@ -78,6 +78,25 @@ ModuleOrRedirect handleReturnPayload(
 
 // ---- FallbackServiceClient implementation ----
 
+FallbackServiceClient::Request::Request(Version version,
+    ImportType type,
+    kj::StringPtr specifier,
+    kj::StringPtr rawSpecifier,
+    kj::StringPtr referrer,
+    const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes)
+    : version(version),
+      type(type),
+      specifier(kj::str(specifier)),
+      referrer(kj::str(referrer)) {
+  if (rawSpecifier != nullptr) {
+    this->rawSpecifier = kj::str(rawSpecifier);
+  }
+  this->attributes.reserve(attributes.size());
+  for (auto& attr: attributes) {
+    this->attributes.insert(kj::str(attr.key), kj::str(attr.value));
+  }
+}
+
 FallbackServiceClient::FallbackServiceClient(kj::String address)
     : ownedAddress(kj::mv(address)),
       thread([this]() { threadMain(); }) {}
@@ -95,18 +114,15 @@ ModuleOrRedirect FallbackServiceClient::tryResolve(Version version,
     kj::StringPtr rawSpecifier,
     kj::StringPtr referrer,
     const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes) {
+  Request request(version, type, specifier, rawSpecifier, referrer, attributes);
+
   // Submit request to background thread.
   {
     auto lock = state.lockExclusive();
     KJ_REQUIRE(!lock->shutdown, "FallbackServiceClient has been shut down");
-    KJ_ASSERT(!lock->hasRequest, "FallbackServiceClient does not support concurrent requests");
-    lock->version = version;
-    lock->type = type;
-    lock->specifier = kj::mv(specifier);
-    lock->rawSpecifier = kj::mv(rawSpecifier);
-    lock->referrer = kj::mv(referrer);
-    lock->attributes = &attributes;
-    lock->hasRequest = true;
+    KJ_ASSERT(
+        lock->request == kj::none, "FallbackServiceClient does not support concurrent requests");
+    lock->request = kj::mv(request);
   }
 
   // Block until the background thread has processed our request.
@@ -136,30 +152,20 @@ void FallbackServiceClient::threadMain() {
 
     while (true) {
       // Wait for a request or shutdown signal.
-      // We copy to owned kj::String locals so that lifetimes are robust -- the caller
-      // blocks on responseReady (not hasRequest), but owning the strings makes this
-      // safe against future refactors that might change that invariant.
-      Version version;
-      ImportType type;
-      kj::String specifier;
-      kj::Maybe<kj::String> rawSpecifier;
-      kj::String referrer;
-      const kj::HashMap<kj::StringPtr, kj::StringPtr>* attributes;
-      bool shouldExit = state.when([](const SharedState& s) { return s.hasRequest || s.shutdown; },
-          [&](SharedState& s) -> bool {
-        if (s.shutdown) return true;
-        version = s.version;
-        type = s.type;
-        specifier = kj::str(s.specifier);
-        if (s.rawSpecifier != nullptr) {
-          rawSpecifier = kj::str(s.rawSpecifier);
-        }
-        referrer = kj::str(s.referrer);
-        attributes = s.attributes;
-        s.hasRequest = false;
-        return false;
+      kj::Maybe<Request> maybeRequest = state.when([](const SharedState& s) {
+        return s.request != kj::none || s.shutdown;
+      }, [](SharedState& s) -> kj::Maybe<Request> {
+        if (s.shutdown) return kj::none;
+        return kj::mv(s.request);
       });
-      if (shouldExit) return;
+      if (maybeRequest == kj::none) return;
+      auto request = KJ_ASSERT_NONNULL(kj::mv(maybeRequest));
+      auto version = request.version;
+      auto type = request.type;
+      kj::StringPtr specifier = request.specifier;
+      auto& rawSpecifier = request.rawSpecifier;
+      kj::StringPtr referrer = request.referrer;
+      auto& attributes = request.attributes;
 
       // Process the request using the shared HTTP client.
       ModuleOrRedirect result = kj::none;
@@ -250,11 +256,10 @@ void FallbackServiceClient::threadMain() {
           requestMsg.setRawSpecifier(rs);
         }
 
-        KJ_ASSERT(attributes != nullptr);
-        if (attributes->size() > 0) {
-          auto attrs = requestMsg.initAttributes(attributes->size());
+        if (attributes.size() > 0) {
+          auto attrs = requestMsg.initAttributes(attributes.size());
           size_t n = 0;
-          for (auto& attr: *attributes) {
+          for (auto& attr: attributes) {
             attrs[n].setName(attr.key);
             attrs[n].setValue(attr.value);
             n++;
