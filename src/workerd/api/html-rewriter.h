@@ -60,12 +60,8 @@ class HTMLRewriter: public jsg::Object {
 
     JSG_STRUCT(element, comments, text);
 
-    JSG_STRUCT_TS_OVERRIDE({
-      element?(element: Element): void | Promise<void>;
-      comments?(comment: Comment): void | Promise<void>;
-      text?(element: Text): void | Promise<void>;
-    });
-    // Specify parameter types for callback functions
+    // Declared in types/defines/htmlrewriter.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type HTMLRewriterElementContentHandlers = never);
   };
 
   // A struct-like wrapper around document content handlers. See the doc comment on
@@ -78,13 +74,8 @@ class HTMLRewriter: public jsg::Object {
 
     JSG_STRUCT(doctype, comments, text, end);
 
-    JSG_STRUCT_TS_OVERRIDE({
-      doctype?(doctype: Doctype): void | Promise<void>;
-      comments?(comment: Comment): void | Promise<void>;
-      text?(text: Text): void | Promise<void>;
-      end?(end: DocumentEnd): void | Promise<void>;
-    });
-    // Specify parameter types for callback functions
+    // Declared in types/defines/htmlrewriter.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type HTMLRewriterDocumentContentHandlers = never);
   };
 
   jsg::Ref<HTMLRewriter> on(kj::String selector, ElementContentHandlers&& handlers);
@@ -107,6 +98,10 @@ class HTMLRewriter: public jsg::Object {
     JSG_METHOD(on);
     JSG_METHOD(onDocument);
     JSG_METHOD(transform);
+
+    // Declared in types/defines/htmlrewriter.d.ts, as are the token classes below, for both
+    // implementations.
+    JSG_TS_OVERRIDE(type HTMLRewriter = never);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -146,11 +141,9 @@ class Rewriter;
 // The Element content token also exposes an AttributesIterator type. This is not a content token
 // per se, but follows the same scoping rule.
 //
-// Note, when generating TypeScript types, definitions to include are collected before overrides are
-// applied. Because ElementCallbackFunction's parameter is always jsg::Ref<jsg::Object> and not the
-// token type, we would not include token types by default as these are only defined in overrides.
-// Therefore, we manually define each token type as a JSG_TS_ROOT(), so it gets visited when
-// collecting definitions.
+// The token types' TypeScript declarations are in types/defines/htmlrewriter.d.ts. Nothing the type
+// generation visits refers to these classes (ElementCallbackFunction takes a jsg::Object), so it
+// generates none from them.
 
 class HTMLRewriter::Token: public jsg::Object {
  public:
@@ -230,12 +223,6 @@ class Element final: public HTMLRewriter::Token {
     JSG_METHOD(removeAndKeepContent);
     JSG_METHOD(setInnerContent);
     JSG_METHOD(onEndTag);
-
-    JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-         onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
-    });
-    // Specify parameter type for onEndTag callback function
   }
 
  private:
@@ -305,8 +292,6 @@ class EndTag final: public HTMLRewriter::Token {
     JSG_METHOD(before);
     JSG_METHOD(after);
     JSG_METHOD(remove);
-
-    JSG_TS_ROOT();
   }
 
  private:
@@ -339,14 +324,6 @@ class Comment final: public HTMLRewriter::Token {
     JSG_METHOD(after);
     JSG_METHOD(replace);
     JSG_METHOD(remove);
-
-    JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      before(content: string, options?: ContentOptions): Comment;
-      after(content: string, options?: ContentOptions): Comment;
-      replace(content: string, options?: ContentOptions): Comment;
-    });
-    // Require content to be a string
   }
 
  private:
@@ -381,8 +358,6 @@ class Text final: public HTMLRewriter::Token {
     JSG_METHOD(after);
     JSG_METHOD(replace);
     JSG_METHOD(remove);
-
-    JSG_TS_ROOT();
   }
 
  private:
@@ -405,8 +380,6 @@ class Doctype final: public HTMLRewriter::Token {
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_READONLY_INSTANCE_PROPERTY(publicId, getPublicId);
     JSG_READONLY_INSTANCE_PROPERTY(systemId, getSystemId);
-
-    JSG_TS_ROOT();
   }
 
  private:
@@ -425,12 +398,6 @@ class DocumentEnd final: public HTMLRewriter::Token {
 
   JSG_RESOURCE_TYPE(DocumentEnd) {
     JSG_METHOD(append);
-
-    JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      append(content: string, options?: ContentOptions): DocumentEnd;
-    });
-    // Require content to be a string
   }
 
  private:

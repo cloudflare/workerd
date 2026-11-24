@@ -100,6 +100,10 @@ namespace workerd::util {
      (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
      api/urlpattern-standard.h. */                                                                 \
   V(TS_URL_PATTERN)                                                                                \
+  /* HTMLRewriter is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/htmlrewriter/), over the Rust handle in api/html-rewriter/, rather than      \
+     the C++ class in api/html-rewriter.h. */                                                      \
+  V(TS_HTML_REWRITER)                                                                              \
   /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \

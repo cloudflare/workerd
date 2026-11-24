@@ -33,3 +33,8 @@ The configs bind `SELF` to the worker itself. `main.js`'s default export is
   chunk sizes, so the cases count bytes, not reads.
 - The `SELF` handler runs in the same isolate as the caller, under the same
   implementation, so a round trip measures both ends.
+- `body-cpp-ts-rewriter` and `body-ts-ts-rewriter` run the `htmlRewriter`
+  group with the TypeScript HTMLRewriter (the `TS_HTML_REWRITER` autogate),
+  and only that group: `BUILD.bazel` passes the filter. Compare them with
+  `body-cpp` and `body-ts` run with the same filter, as in
+  `just wd-bench //src/bench/streams/body:body-cpp@ '*:htmlRewriter'`.

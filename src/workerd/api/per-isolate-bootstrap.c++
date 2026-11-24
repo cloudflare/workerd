@@ -438,6 +438,29 @@ static void LegacyUrlPatternProcessInit(const v8::FunctionCallbackInfo<v8::Value
   });
 }
 
+static void MimeTypeParameter(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::mimeTypeParameter(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void NewIdentityPipe(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::newIdentityPipe(js));
+  });
+}
+
+static void PumpTo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::pumpTo(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
 static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -693,7 +716,8 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
 // newCompressionCodec, keep their knowledge there and are wired here by name;
 // their callbacks may use the type wrapper at CALL time -- the isolate is fully
 // set up by then -- through jsg::Lock's type-handler lookup.)
-jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
+jsg::JsRef<jsg::JsObject> createUtilsObject(
+    jsg::Lock& js, kj::Maybe<jsg::JsObject> htmlRewriterUtils) {
   static constexpr std::string_view names[] = {
 #define V(Name) "is" #Name,
     // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
@@ -735,7 +759,12 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "legacyUrlPatternCompile",
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
+    "mimeTypeParameter",
+    "newIdentityPipe",
+    "pumpTo",
     "readableStreamState",
+    // A value, not a method; see Worker::Api::newHtmlRewriterUtils().
+    "htmlRewriter",
     "DOMExceptionBase",
     "structuredClone",
     "performanceNow",
@@ -799,7 +828,14 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, LegacyUrlPatternCompile),
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
+    getMethod(js, MimeTypeParameter),
+    getMethod(js, NewIdentityPipe),
+    getMethod(js, PumpTo),
     getMethod(js, ReadableStreamState),
+    htmlRewriterUtils
+        .map([](jsg::JsObject utils) -> v8::Local<v8::Value> {
+    return v8::Local<v8::Object>(utils);
+  }).orDefault(js.v8Undefined()),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
     getMethod(js, StructuredClone),
     performanceNow,
@@ -1158,11 +1194,16 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 }
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
-void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFlags::Reader flags) {
+void bootstrapFromScripts(
+    jsg::Lock& js, BootstrapState* state, const Worker::Api& api, TsHtmlRewriter tsHtmlRewriter) {
   // Build the compat flags and autogates objects.
-  state->compatFlagsObj = buildCompatFlagsObject(js, flags);
+  state->compatFlagsObj = buildCompatFlagsObject(js, api.getFeatureFlags());
   state->autogatesObj = buildAutogatesObject(js);
-  state->utilsObj = createUtilsObject(js);
+  kj::Maybe<jsg::JsObject> htmlRewriterUtils;
+  if (tsHtmlRewriter) {
+    htmlRewriterUtils = api.newHtmlRewriterUtils(js);
+  }
+  state->utilsObj = createUtilsObject(js, htmlRewriterUtils);
 
   state->requireFn = newRequireFunction(js, requireCallback);
   if (state->embedder != kj::none) {
@@ -1225,11 +1266,11 @@ kj::Maybe<jsg::Module::Reader> EmbedderBootstrap::tryGetScript(kj::StringPtr spe
   return kj::none;
 }
 
-void runPerIsolateBootstrap(jsg::Lock& js,
-    CompatibilityFlags::Reader flags,
-    kj::Maybe<const EmbedderBootstrap&> embedder,
-    const jsg::ModuleSource* moduleSource) {
+void runPerIsolateBootstrap(jsg::Lock& js, const Worker::Api& api, TsHtmlRewriter tsHtmlRewriter) {
   auto context = js.v8Context();
+  auto flags = api.getFeatureFlags();
+  auto embedder = api.getEmbedderBootstrap();
+  auto moduleSource = api.getModuleSource();
 
   // Get (or lazily build) the process-wide script lookup table.
   auto& scripts = getScriptTable();
@@ -1252,7 +1293,8 @@ void runPerIsolateBootstrap(jsg::Lock& js,
       TRACE_EVENT("workerd", "PerIsolateBootstrap::restore");
       restoreBootstrapState(js, allocateBootstrapState(js, scripts, embedder, moduleSource), bag);
     } else {
-      bootstrapFromScripts(js, allocateBootstrapState(js, scripts, embedder, moduleSource), flags);
+      bootstrapFromScripts(
+          js, allocateBootstrapState(js, scripts, embedder, moduleSource), api, tsHtmlRewriter);
     }
 
     if (!flags.getJsWeakRef()) {

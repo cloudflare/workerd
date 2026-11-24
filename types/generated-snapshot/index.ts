@@ -1819,112 +1819,6 @@ export declare class FormData {
   ): void;
   [Symbol.iterator](): IterableIterator<[key: string, value: File | string]>;
 }
-export interface ContentOptions {
-  html?: boolean;
-}
-export declare class HTMLRewriter {
-  constructor();
-  on(
-    selector: string,
-    handlers: HTMLRewriterElementContentHandlers,
-  ): HTMLRewriter;
-  onDocument(handlers: HTMLRewriterDocumentContentHandlers): HTMLRewriter;
-  transform(response: Response): Response;
-}
-export interface HTMLRewriterElementContentHandlers {
-  element?(element: Element): void | Promise<void>;
-  comments?(comment: Comment): void | Promise<void>;
-  text?(element: Text): void | Promise<void>;
-}
-export interface HTMLRewriterDocumentContentHandlers {
-  doctype?(doctype: Doctype): void | Promise<void>;
-  comments?(comment: Comment): void | Promise<void>;
-  text?(text: Text): void | Promise<void>;
-  end?(end: DocumentEnd): void | Promise<void>;
-}
-export interface Doctype {
-  readonly name: string | null;
-  readonly publicId: string | null;
-  readonly systemId: string | null;
-}
-export interface Element {
-  tagName: string;
-  readonly attributes: IterableIterator<string[]>;
-  readonly removed: boolean;
-  readonly namespaceURI: string;
-  getAttribute(name: string): string | null;
-  hasAttribute(name: string): boolean;
-  setAttribute(name: string, value: string): Element;
-  removeAttribute(name: string): Element;
-  before(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  after(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  prepend(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  append(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  replace(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  remove(): Element;
-  removeAndKeepContent(): Element;
-  setInnerContent(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Element;
-  onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
-}
-export interface EndTag {
-  name: string;
-  before(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): EndTag;
-  after(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): EndTag;
-  remove(): EndTag;
-}
-export interface Comment {
-  text: string;
-  readonly removed: boolean;
-  before(content: string, options?: ContentOptions): Comment;
-  after(content: string, options?: ContentOptions): Comment;
-  replace(content: string, options?: ContentOptions): Comment;
-  remove(): Comment;
-}
-export interface Text {
-  readonly text: string;
-  readonly lastInTextNode: boolean;
-  readonly removed: boolean;
-  before(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Text;
-  after(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Text;
-  replace(
-    content: string | ReadableStream | Response,
-    options?: ContentOptions,
-  ): Text;
-  remove(): Text;
-}
-export interface DocumentEnd {
-  append(content: string, options?: ContentOptions): DocumentEnd;
-}
 /**
  * This is the event type for fetch events dispatched on the service worker global scope. It contains information about the fetch, including the request and how the receiver will treat the response. It provides the event.respondWith() method, which allows us to provide a response to this fetch.
  *
@@ -15201,6 +15095,116 @@ export interface HelloWorldBinding {
    * Set a new stored value
    */
   set(value: string): Promise<void>;
+}
+// HTMLRewriter and the tokens its handlers receive, for both implementations:
+// the C++ one and the TypeScript one (src/per_isolate/htmlrewriter/, under
+// the TS_HTML_REWRITER autogate), which has no RTTI to generate them from.
+// The token types keep the names the C++ classes gave them.
+export interface ContentOptions {
+  html?: boolean;
+}
+export declare class HTMLRewriter {
+  constructor();
+  on(
+    selector: string,
+    handlers: HTMLRewriterElementContentHandlers,
+  ): HTMLRewriter;
+  onDocument(handlers: HTMLRewriterDocumentContentHandlers): HTMLRewriter;
+  transform(response: Response): Response;
+}
+export interface HTMLRewriterElementContentHandlers {
+  element?(element: Element): void | Promise<void>;
+  comments?(comment: Comment): void | Promise<void>;
+  text?(element: Text): void | Promise<void>;
+}
+export interface HTMLRewriterDocumentContentHandlers {
+  doctype?(doctype: Doctype): void | Promise<void>;
+  comments?(comment: Comment): void | Promise<void>;
+  text?(text: Text): void | Promise<void>;
+  end?(end: DocumentEnd): void | Promise<void>;
+}
+export interface Doctype {
+  readonly name: string | null;
+  readonly publicId: string | null;
+  readonly systemId: string | null;
+}
+export interface Element {
+  tagName: string;
+  readonly attributes: IterableIterator<string[]>;
+  readonly removed: boolean;
+  readonly namespaceURI: string;
+  getAttribute(name: string): string | null;
+  hasAttribute(name: string): boolean;
+  setAttribute(name: string, value: string): Element;
+  removeAttribute(name: string): Element;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  prepend(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  append(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  replace(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  remove(): Element;
+  removeAndKeepContent(): Element;
+  setInnerContent(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
+}
+export interface EndTag {
+  name: string;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): EndTag;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): EndTag;
+  remove(): EndTag;
+}
+export interface Comment {
+  text: string;
+  readonly removed: boolean;
+  before(content: string, options?: ContentOptions): Comment;
+  after(content: string, options?: ContentOptions): Comment;
+  replace(content: string, options?: ContentOptions): Comment;
+  remove(): Comment;
+}
+export interface Text {
+  readonly text: string;
+  readonly lastInTextNode: boolean;
+  readonly removed: boolean;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
+  replace(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
+  remove(): Text;
+}
+export interface DocumentEnd {
+  append(content: string, options?: ContentOptions): DocumentEnd;
 }
 export interface Hyperdrive {
   /**

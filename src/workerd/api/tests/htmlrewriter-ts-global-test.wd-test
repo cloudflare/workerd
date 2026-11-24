@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The HTMLRewriter global under the TypeScript HTMLRewriter (TS_HTML_REWRITER autogate), under
+# each streams implementation.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-ts-global-read",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-ts-global-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [(name = "TEST", text = "read")],
+      )
+    ),
+    ( name = "htmlrewriter-ts-global-read-ts-streams",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-ts-global-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "typescript_implemented_streams"],
+        bindings = [(name = "TEST", text = "read")],
+      )
+    ),
+    ( name = "htmlrewriter-ts-global-assign",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-ts-global-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [(name = "TEST", text = "assign")],
+      )
+    ),
+    ( name = "htmlrewriter-ts-global-frozen",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-ts-global-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [(name = "TEST", text = "frozen")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-html-rewriter"],
+);

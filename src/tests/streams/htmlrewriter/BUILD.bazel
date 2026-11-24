@@ -1,8 +1,13 @@
 load("//:build/wd_test.bzl", "wd_test")
 
-# The htmlrewriter streams suite runs the same test modules under two
-# configs: htmlrewriter-cpp against the C++ implementation,
-# htmlrewriter-ts against the TypeScript implementation.
+# The htmlrewriter streams suite runs the same test modules under four
+# configs: htmlrewriter-cpp against the C++ streams implementation,
+# htmlrewriter-ts against the TypeScript one, each with the C++ HTMLRewriter
+# and, in the -ts-rewriter cells, the TypeScript one.
+#
+# The C++ HTMLRewriter cells disable the @all-autogates variant: enabling
+# every autogate enables TS_HTML_REWRITER, which swaps in the TypeScript
+# HTMLRewriter under a cell whose USING_TS_REWRITER binding says C++.
 
 htmlrewriter_suite_srcs = glob(["*.js"]) + ["htmlrewriter-modules.capnp"]
 
@@ -10,11 +15,26 @@ wd_test(
     size = "large",
     src = "htmlrewriter-cpp.wd-test",
     data = htmlrewriter_suite_srcs,
+    generate_all_autogates_variant = False,
 )
 
 wd_test(
     size = "large",
     src = "htmlrewriter-ts.wd-test",
+    args = ["--experimental"],
+    data = htmlrewriter_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    size = "large",
+    src = "htmlrewriter-cpp-ts-rewriter.wd-test",
+    data = htmlrewriter_suite_srcs,
+)
+
+wd_test(
+    size = "large",
+    src = "htmlrewriter-ts-ts-rewriter.wd-test",
     args = ["--experimental"],
     data = htmlrewriter_suite_srcs,
 )

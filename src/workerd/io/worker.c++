@@ -164,7 +164,7 @@ void maybePerIsolateBootstrap(
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
     runPerIsolateBootstrap(
-        js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
+        js, api, TsHtmlRewriter(util::Autogate::isEnabled(util::AutogateKey::TS_HTML_REWRITER)));
   });
 }
 

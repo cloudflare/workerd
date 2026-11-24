@@ -9,7 +9,7 @@
 // replacement extension) reads that stream through the same machinery.
 
 import { strictEqual, ok, rejects } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingTsImpl, usingTsRewriter } from 'which-impl';
 
 const enc = new TextEncoder();
 
@@ -269,5 +269,39 @@ export const largeDocumentThroughHandler = {
       .text();
     strictEqual(elements, COUNT);
     strictEqual(result, doc);
+  },
+};
+
+// While a handler waits on a promise, the output before its element is
+// readable from the transformed body with the TypeScript HTMLRewriter, which
+// writes it as the handler starts; the C++ one writes it once the handler is
+// done, so the read waits for the handler.
+export const outputBeforeAWaitingHandler = {
+  async test() {
+    const { promise: gate, resolve: open } = Promise.withResolvers();
+    const reader = new HTMLRewriter()
+      .on('p', {
+        async element(element) {
+          await gate;
+          element.setAttribute('id', 'x');
+        },
+      })
+      .transform(new Response('<h1>head</h1><p>body</p>'))
+      .body.pipeThrough(new TextDecoderStream())
+      .getReader();
+    const first = reader.read();
+    const early = await Promise.race([
+      first.then(({ value }) => value),
+      scheduler.wait(50).then(() => undefined),
+    ]);
+    strictEqual(early, usingTsRewriter ? '<h1>head</h1>' : undefined);
+    open();
+    let result = (await first).value;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      result += value;
+    }
+    strictEqual(result, '<h1>head</h1><p id="x">body</p>');
   },
 };

@@ -2,7 +2,8 @@ load("//:build/wd_bench.bzl", "wd_bench")
 
 # The body benchmarks run the same modules under two configs: body-cpp
 # against the legacy C++ implementation, body-ts against the TypeScript
-# implementation.
+# implementation. The -ts-rewriter configs run only the htmlRewriter group,
+# with the TypeScript HTMLRewriter, under each.
 
 body_bench_srcs = glob(["*.js"]) + ["body-modules.capnp"]
 
@@ -17,4 +18,24 @@ wd_bench(
     src = "body-ts.wd-bench",
     args = ["--experimental"],
     data = body_bench_srcs,
+)
+
+wd_bench(
+    size = "large",
+    src = "body-cpp-ts-rewriter.wd-bench",
+    args = ["*:htmlRewriter"],
+    data = body_bench_srcs,
+    # The config enables TS_HTML_REWRITER; body-cpp covers @all-autogates.
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    size = "large",
+    src = "body-ts-ts-rewriter.wd-bench",
+    args = [
+        "--experimental",
+        "*:htmlRewriter",
+    ],
+    data = body_bench_srcs,
+    generate_all_autogates_variant = False,
 )

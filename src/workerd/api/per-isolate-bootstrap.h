@@ -5,13 +5,19 @@
 #pragma once
 
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/map.h>
 
 namespace workerd {
+
+// Whether the per-isolate bootstrap installs the TypeScript HTMLRewriter, as it does under the
+// TS_HTML_REWRITER autogate.
+WD_STRONG_BOOL(TsHtmlRewriter);
 
 // Bootstrap scripts contributed by the embedder: a bundle built with wd_ts_script_bundle() and an
 // `embedder_prefix`, so that every script in it is named under that prefix (e.g.
@@ -70,22 +76,22 @@ class EmbedderBootstrap {
 // classes beside the one the zygote's top-level code captured. Instead the
 // bootstrap state is rebuilt from the object the zygote pinned into the snapshot
 // (jsg::SnapshotArtifact::bootstrapStateIndex), which V8 hands out once; the
-// isolate's `embedder` must then be the zygote's.
+// isolate's embedder bootstrap must then be the zygote's.
 //
 // The bootstrap state (require cache, compat flags) is heap-allocated and stored
 // in the context's BOOTSTRAP_STATE embedder data slot, so that require() remains
 // usable for lazy evaluation after runPerIsolateBootstrap() returns. The state
-// refers to `embedder` and `moduleSource`, which must outlive the context.
+// refers to `api`'s embedder bootstrap and module source, which must outlive the context.
 //
-// `moduleSource`, if given, provides the storage V8 reads the scripts' source from, in place of
-// the compiled-in bytes; see jsg/module-source.h.
+// `api`'s module source, if any, provides the storage V8 reads the scripts' source from, in place
+// of the compiled-in bytes; see jsg/module-source.h.
 //
 // Throws kj::Exception on failure (compilation errors, missing scripts, cycles).
 // This is fatal for isolate creation since these are runtime-owned scripts.
-void runPerIsolateBootstrap(jsg::Lock& js,
-    CompatibilityFlags::Reader flags,
-    kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
-    const jsg::ModuleSource* moduleSource = nullptr);
+//
+// With `tsHtmlRewriter`, a bootstrap from the scripts gives them `api.newHtmlRewriterUtils()` as
+// `utils.htmlRewriter`; a context from a startup snapshot already has it.
+void runPerIsolateBootstrap(jsg::Lock& js, const Worker::Api& api, TsHtmlRewriter tsHtmlRewriter);
 
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).

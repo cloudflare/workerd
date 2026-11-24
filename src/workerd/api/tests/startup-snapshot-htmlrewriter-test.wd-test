@@ -1,0 +1,52 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The TypeScript HTMLRewriter across a startup snapshot; see
+# startup-snapshot-htmlrewriter-test.js.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker.js", esModule = embed "startup-snapshot-htmlrewriter-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "request-time", service = "request-time"),
+          (name = "top-level", service = "top-level"),
+        ],
+      )
+    ),
+    ( name = "request-time",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [(name = "MODE", json = "\"request-time\"")],
+      )
+    ),
+    ( name = "top-level",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [(name = "MODE", json = "\"top-level\"")],
+      )
+    ),
+  ],
+  # Both halves in every variant, so that a Worker that falls back fails the test rather than
+  # quietly testing only plain Workers.
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-startup-snapshot",
+    "workerd-autogate-ts-html-rewriter",
+  ],
+);

@@ -17,6 +17,7 @@
 import type { UrlAttributes, UrlBackend } from '../url/backend';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
+import type { WebIdlHelpers } from '../webidl';
 
 const {
   ObjectDefineProperty,
@@ -37,6 +38,7 @@ const adaUrl = require('url/ada-backend') as UrlBackend<unknown>;
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
+const { isObject } = require('webidl') as WebIdlHelpers;
 
 const kStandard = compatFlags['urlpattern_standard'] === true;
 
@@ -129,12 +131,6 @@ type PatternResult = {
 
 // ---------------------------------------------------------------------------
 // WebIDL conversions
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
 
 // ToString, which throws for a Symbol, then lone surrogates to U+FFFD.
 function toUSVString(value: unknown): string {

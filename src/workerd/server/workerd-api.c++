@@ -8,6 +8,7 @@
 
 #include <workerd/api/bench-api/ffi.rs.h>
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/html-rewriter/ffi.rs.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
@@ -233,6 +234,15 @@ kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners
 }
 kj::Maybe<const EmbedderBootstrap&> WorkerdApi::getEmbedderBootstrap() const {
   return embedderBootstrap;
+}
+kj::Maybe<jsg::JsObject> WorkerdApi::newHtmlRewriterUtils(jsg::Lock& js) const {
+  v8::Local<v8::Value> utils;
+  if (!::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+          api::html_rewriter::new_utils(js.v8Isolate))
+           .ToLocal(&utils)) {
+    throw jsg::JsExceptionThrown();
+  }
+  return jsg::JsObject(utils.As<v8::Object>());
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {

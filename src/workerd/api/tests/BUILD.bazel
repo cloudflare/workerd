@@ -1006,6 +1006,41 @@ wd_test(
     tags = ["no-asan"],
 )
 
+# Under both HTMLRewriter implementations. The C++ cell disables @all-autogates, which would swap
+# in the TypeScript HTMLRewriter under a cell whose USING_TS_REWRITER binding says C++.
+wd_test(
+    src = "htmlrewriter-esi-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-esi-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "htmlrewriter-esi-ts-rewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-esi-test.js"],
+)
+
+# Under both HTMLRewriter implementations, as htmlrewriter-esi-test is.
+wd_test(
+    src = "htmlrewriter-inspect-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-inspect-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "htmlrewriter-inspect-ts-rewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-inspect-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-ts-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-ts-global-test.js"],
+)
+
 wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
@@ -1421,6 +1456,16 @@ wd_test(
         "startup-snapshot-wrappables-test.js",
         "startup-snapshot-wrappables-webfs-test.js",
     ],
+)
+
+# The TypeScript HTMLRewriter across a startup snapshot. The config turns the pipeline and the
+# TypeScript rewriter on in every variant. The @all-compat-flags variant would turn
+# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline.
+wd_test(
+    src = "startup-snapshot-htmlrewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-htmlrewriter-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 # Capability bindings captured at module scope and used at request time, and the kinds that keep
@@ -2045,6 +2090,11 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-legacy-streams-test.wd-test",
+    data = ["htmlrewriter-legacy-streams-test.js"],
 )
 
 wd_test(

@@ -154,6 +154,10 @@ class JsReadableStream final {
   // True if this is a null / empty stream ("no body"). Inspects only C++-side state; a
   // jsg::Lock& is not required because it never dispatches to the JS backend.
   bool isNull() const;
+
+  // The JavaScript object of the stream, for C++ code that has no TypeWrapper to wrap it with, as
+  // a per-isolate bootstrap utility has none. Consumes this. Precondition: !isNull().
+  jsg::JsObject toJsObject(jsg::Lock& js) &&;
   operator bool() const {
     return !isNull();
   }

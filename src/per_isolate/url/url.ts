@@ -23,6 +23,7 @@ import type {
 import type { InternalArrayHelpers } from './internal-array';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
+import type { WebIdlHelpers } from '../webidl';
 
 const {
   BlobPrototypeSlice,
@@ -56,6 +57,7 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
+const { isObject } = require('webidl') as WebIdlHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
 
 // Only the selected backend is loaded.
@@ -89,12 +91,6 @@ const kInvalidHref =
 
 // ---------------------------------------------------------------------------
 // WebIDL conversions
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
 
 // ToString, which throws for a Symbol, then lone surrogates to U+FFFD.
 function toUSVString(value: unknown): string {

@@ -615,6 +615,7 @@ dependencies = [
  "libc",
  "libm",
  "libz-rs-sys",
+ "lol_html",
  "lol_html_c_api",
  "nix",
  "notify",
