@@ -34,9 +34,12 @@ js_test(
     tags = ["js-test"],
 )
 
+# Moves more than half a gigabyte through a server built for debugging, which takes most of a
+# minute on a slow machine: `timeout` is the longest there is.
 js_test(
     name = "threads-front-test",
     size = "large",
+    timeout = "eternal",
     data = [
         ":front-config.capnp",
         ":front-worker.mjs",

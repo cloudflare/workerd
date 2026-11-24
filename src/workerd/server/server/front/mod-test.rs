@@ -142,6 +142,9 @@ fn a_drained_front_closes_its_queue_once_its_connections_have_ended() {
     });
 }
 
+// A reset is noticed while nothing is read from the connection, which Windows has no way to do
+// (`kj_rs_io::when_write_disconnected`).
+#[cfg(unix)]
 #[test]
 fn the_request_of_a_client_that_went_away_leaves_the_queue() {
     run(async {
@@ -162,6 +165,7 @@ fn the_request_of_a_client_that_went_away_leaves_the_queue() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn a_client_that_went_away_drops_the_call_a_loop_took() {
     run(async {

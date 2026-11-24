@@ -59,8 +59,15 @@ const SIGTERM_EXIT =
 // The cases on several threads reset connections and read the server's memory use in ways that
 // have not been tried on Windows.
 const SEVERAL_THREADS = process.platform !== 'win32';
-// The resident memory of a process can be read on Linux.
-const RSS = process.platform === 'linux';
+// The resident memory of a process can be read on Linux. Under a sanitizer it says little of
+// what the server holds: freed memory stays in quarantine, and every byte touched has a shadow.
+const RSS =
+  process.platform === 'linux' &&
+  env.ASAN_OPTIONS === undefined &&
+  env.TSAN_OPTIONS === undefined;
+// On Windows a server does not notice a client that goes away while nothing is read from or
+// written to its connection.
+const SEES_RESETS = process.platform !== 'win32';
 
 // A marker no other request has: requests carry one so that the Worker can note what it saw.
 function unique(what) {
@@ -1390,25 +1397,31 @@ for (const threads of [1, THREADS]) {
       // -------------------------------------------------------------------------------
       // Cancellation and failure
 
-      test(`a client that resets before the head aborts request.signal ${on}`, async () => {
-        const { server } = shared;
-        const marker = unique('abort');
-        const socket = await connect(server.http.port);
-        await write(
-          socket,
-          `GET /wait?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
-        );
-        const front = await ledgerValue(server, `arrived:${marker}`);
-        socket.resetAndDestroy();
-        await notesOf(server, front, marker, (notes) =>
-          notes.includes('aborted')
-        );
-        await until(
-          () => server.log.includes(`front-test: ${marker} aborted`),
-          5000,
-          'the log line of the abort'
-        );
-      });
+      test(
+        `a client that resets before the head aborts request.signal ${on}`,
+        {
+          skip: !SEES_RESETS && 'Windows does not notice the reset',
+        },
+        async () => {
+          const { server } = shared;
+          const marker = unique('abort');
+          const socket = await connect(server.http.port);
+          await write(
+            socket,
+            `GET /wait?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
+          );
+          const front = await ledgerValue(server, `arrived:${marker}`);
+          socket.resetAndDestroy();
+          await notesOf(server, front, marker, (notes) =>
+            notes.includes('aborted')
+          );
+          await until(
+            () => server.log.includes(`front-test: ${marker} aborted`),
+            5000,
+            'the log line of the abort'
+          );
+        }
+      );
 
       test(
         `a queued request whose client resets never reaches a Worker ${on}`,
