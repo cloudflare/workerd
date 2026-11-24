@@ -526,7 +526,8 @@ impl Shared {
         let response = self
             .http
             .send(method.into(), url, headers, body, None, (timeout, timeout))
-            .await?;
+            .await
+            .map_err(|error| error.message)?;
         let retryable = response.status == 429 || response.status >= 500;
         let flavor = matches!(self.source, Source::Metadata { flavor: true, .. });
         if flavor && !retryable && response.metadata_flavor != "Google" {

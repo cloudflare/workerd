@@ -213,6 +213,45 @@ fn rc_taken_from_a_cell_keeps_the_values_its_resource_traces() {
     });
 }
 
+/// A resource made in Rust adds its first strong reference without visiting its value, since
+/// everything in a value that no resource holds yet is strong. A `jsg::Rc` and a `TracedGlobal`
+/// taken out of traced cells are, so the new resources keep the task's wrapper and the payload.
+#[test]
+fn new_resource_keeps_what_was_taken_from_traced_cells() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let scheduler = setup(lock, ctx);
+        let task = scheduler.get(lock).pending.take(lock);
+        let payload = scheduler.get(lock).queue.borrow()[0]
+            .get(lock)
+            .payload
+            .take(lock);
+        let holder = jsg::Rc::new(
+            lock,
+            Scheduler {
+                pending: jsg::Cell::new(task),
+                queue: jsg::RefCell::new(Vec::new()),
+            },
+        );
+        let task = jsg::Rc::new(
+            lock,
+            Task {
+                payload: jsg::Cell::new(payload),
+                drops: crate::DropCounter(&TASK_DROPS),
+            },
+        );
+        crate::Harness::request_gc(lock);
+        crate::Harness::request_gc(lock);
+        let held = holder.get(lock).pending.take(lock).expect("taken above");
+        assert_marked(lock, &held, "scheduled");
+        let payload = task.get(lock).payload.take(lock).expect("taken above");
+        let payload = v8::Local::<v8::Object>::try_from(payload.as_local(lock)).unwrap();
+        let of = payload.get(lock, "of").unwrap();
+        assert_eq!(String::from_js(lock, of).unwrap(), "queued");
+        Ok(())
+    });
+}
+
 /// A `TracedGlobal` taken out of a `jsg::Cell` after a visit put it in traced mode is strong
 /// again, so a GC leaves its value alone even though nothing traces the handle.
 #[test]

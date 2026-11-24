@@ -406,6 +406,62 @@ KJ_TEST("JsReadableStream tee carries the buffer and nullifies the original") {
   });
 }
 
+// The isolate's external memory, including adjustments not yet applied.
+int64_t getExternalMemory(jsg::Lock& js) {
+  js.getExternalMemoryTarget()->applyDeferredMemoryUpdate();
+  return js.v8Isolate->GetExternalMemory();
+}
+
+KJ_TEST("JsReadableStream reports its retransmit buffer as external memory, once") {
+  TestFixture testFixture(
+      {.autogateKeys = kj::arr(util::AutogateKey::BODY_BUFFER_EXTERNAL_MEMORY)});
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    constexpr size_t size = 1024 * 1024;
+    auto source = jsg::JsArrayBuffer::create(js, size);
+
+    auto before = getExternalMemory(js);
+    JsReadableStream stream(js, jsg::JsBufferSource(source).addRef(js));
+    auto created = getExternalMemory(js) - before;
+    KJ_EXPECT(created >= size, created);
+    // The stream itself only adds bookkeeping on top of the copied bytes.
+    KJ_EXPECT(created < size + 64 * 1024, created);
+
+    // Clones and tee branches share the one buffer, so they don't count it again.
+    auto clone = KJ_ASSERT_NONNULL(stream.tryClone(js));
+    auto tee = stream.tee(js);
+    auto shared = getExternalMemory(js) - before;
+    KJ_EXPECT(shared < size + 64 * 1024, shared);
+  });
+}
+
+KJ_TEST("JsReadableStream retransmit buffer releases its external memory") {
+  TestFixture testFixture(
+      {.autogateKeys = kj::arr(util::AutogateKey::BODY_BUFFER_EXTERNAL_MEMORY)});
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    constexpr size_t size = 1024 * 1024;
+
+    auto before = getExternalMemory(js);
+    auto buffer = kj::rc<JsReadableStream::Buffer>(js, kj::heapArray<kj::byte>(size));
+    KJ_EXPECT(getExternalMemory(js) - before == size);
+    buffer = nullptr;
+    KJ_EXPECT(getExternalMemory(js) == before);
+  });
+}
+
+KJ_TEST("JsReadableStream retransmit buffer reports no external memory with its autogate off") {
+  TestFixture testFixture({.ignoreAllAutogatesEnv = true});
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    constexpr size_t size = 1024 * 1024;
+
+    auto before = getExternalMemory(js);
+    auto buffer = kj::rc<JsReadableStream::Buffer>(js, kj::heapArray<kj::byte>(size));
+    KJ_EXPECT(getExternalMemory(js) == before);
+  });
+}
+
 KJ_TEST("JsReadableStream detach takes over the stream, leaving a disturbed husk") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {

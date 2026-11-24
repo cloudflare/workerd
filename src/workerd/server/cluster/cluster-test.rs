@@ -77,13 +77,13 @@ fn the_lease_holds_however_long_startup_takes_after_join() {
 fn a_bucket_that_ignores_preconditions_is_refused() {
     block_on(async {
         assert!(
-            check_conditional_writes(&Bucket::memory(""), "n.probe")
+            check_conditional_writes(&Bucket::memory(""), "n.probe", Duration::ZERO)
                 .await
                 .is_ok()
         );
         let message = |store: Memory| async {
             let bucket = Bucket::new(store, "");
-            match check_conditional_writes(&bucket, "n.probe").await {
+            match check_conditional_writes(&bucket, "n.probe", Duration::ZERO).await {
                 Err(Error::Config(message)) => message,
                 other => panic!("expected a config error, not {other:?}"),
             }
@@ -105,35 +105,54 @@ fn a_bucket_that_ignores_preconditions_is_refused() {
     });
 }
 
-/// Each probe write's outcome unknown: what the object holds says which
+/// Every probe write's outcome unknown: what the object holds says which
 /// landed, so a store that keeps preconditions passes and one that ignores
-/// them does not.
+/// them does not. A store whose versions never match is refused even so:
+/// its refusals of a write whose guard held read as a copy still in
+/// progress, which the write waits out, `PAUSE` at a time, and is refused.
 #[test]
 fn probe_writes_of_unknown_outcome_are_settled_by_reading_the_probe() {
-    block_on(async {
+    const PAUSE: Duration = Duration::from_millis(1);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        // More unknown outcomes than the probe's writes take, so that none
+        // ends because they ran out; `check` counts the writes.
+        const INJECTED: usize = 32;
         let check = |store: Memory| async {
             store
                 .unknown
                 .borrow_mut()
-                .extend(["n.probe"; 4].map(str::to_owned));
+                .extend(["n.probe"; INJECTED].map(str::to_owned));
             let unknown = store.unknown.clone();
-            let checked = check_conditional_writes(&Bucket::new(store, ""), "n.probe").await;
-            assert!(unknown.borrow().is_empty());
-            checked
+            let checked = check_conditional_writes(&Bucket::new(store, ""), "n.probe", PAUSE).await;
+            let writes = INJECTED - unknown.borrow().len();
+            (checked, writes)
         };
-        check(Memory::default()).await.unwrap();
+        let refused = |checked: &crate::Result<()>| match checked {
+            Err(Error::Config(message)) => message.clone(),
+            other => panic!("expected a config error, not {other:?}"),
+        };
+        let (checked, writes) = check(Memory::default()).await;
+        checked.unwrap();
+        assert_eq!(writes, 4);
         let lax = Memory::default();
         lax.ignores_guards.set(true);
-        let Err(Error::Config(message)) = check(lax).await else {
-            panic!("a store that ignores preconditions passed");
-        };
-        assert!(message.starts_with("the bucket ignores conditional writes"));
+        let (checked, writes) = check(lax).await;
+        assert!(refused(&checked).starts_with("the bucket ignores conditional writes"));
+        assert_eq!(writes, 4);
+        // Each write whose guard held, the replacement and the stale one,
+        // is written three times.
         let weak = Memory::default();
         weak.never_matches.set(true);
-        let Err(Error::Config(message)) = check(weak).await else {
-            panic!("a store whose versions never match passed");
-        };
-        assert!(message.starts_with("the bucket refused a conditional write whose condition held"));
+        let (checked, writes) = check(weak).await;
+        assert!(
+            refused(&checked)
+                .starts_with("the bucket refused a conditional write whose condition held")
+        );
+        assert_eq!(writes, 8);
     });
 }
 

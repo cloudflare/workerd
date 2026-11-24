@@ -4,12 +4,17 @@
 
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use bytes::Bytes;
 
 use crate::Error;
 use crate::Result;
 pub use crate::http::Payload;
+
+/// The most writes `Bucket::put_if_settled` makes of one write whose
+/// refusals may be of its own copies in progress.
+pub const SETTLE_WRITES: u32 = 3;
 
 /// The identity of one stored version of an object: what a conditional
 /// write names to replace exactly that version: an S3 `ETag`, a Cloud
@@ -30,6 +35,7 @@ impl Version {
 }
 
 /// The precondition of a conditional write.
+#[derive(Clone)]
 pub enum Guard {
     /// The object must not exist.
     Absent,
@@ -354,27 +360,61 @@ impl Bucket {
 
     /// `put_if`, with an unknown outcome (`Error::OutcomeUnknown`) settled by
     /// reading the object back: the write counts as landed, at the version
-    /// read, if the object holds `body`, and as refused otherwise. For
-    /// writes whose bytes no other writer puts at `key`, or where it means
-    /// the same if one does, and whose body differs from what the guarded
-    /// version holds: on a store whose versions do not follow content, a
-    /// refused write of those same bytes would read back as landed. Not for
-    /// a write `http::prompt` may send twice (`http::Repeat::GuardedWrite`):
-    /// the other copy can land after the read.
+    /// read, if the object holds `body`, and as refused if it holds another
+    /// version than the guarded one. If it still holds the guarded version,
+    /// or is still absent, the refusal was of a copy of this write that the
+    /// bucket had not yet applied, and may yet: one sent before a lost
+    /// connection or a 503 (`Client::exchange`), or beside it
+    /// (`http::prompt`), which R2 answers with a conflict (409) while it is
+    /// in progress. The write is then sent again under the same guard after
+    /// `pause`, of which at most one copy lands, and a refusal of it is
+    /// settled the same way, up to `SETTLE_WRITES` writes in all; after
+    /// those, or when a write sent again or the read after it fails, the
+    /// outcome stays unknown. For writes whose bytes no other writer puts
+    /// at `key`, or where it means the same if one does, and whose body
+    /// differs from what the guarded version holds: on a store whose
+    /// versions do not follow content, a refused write of those same bytes
+    /// would read back as landed.
     pub async fn put_if_settled(
         &self,
         key: &str,
         body: Vec<u8>,
         guard: Guard,
+        pause: Duration,
     ) -> Result<Option<Version>> {
-        match self.put_if(key, body.clone(), guard).await {
-            Err(Error::OutcomeUnknown(_)) => {}
-            written => return written,
+        let mut writes = 0;
+        loop {
+            writes += 1;
+            // Once a write's outcome is unknown, it stays so whatever fails.
+            let unsettled = |error: Error| match error {
+                error @ Error::OutcomeUnknown(_) => error,
+                error if writes > 1 => Error::OutcomeUnknown(format!(
+                    "PUT {key}: {error}, after a write of unknown outcome"
+                )),
+                error => error,
+            };
+            let unknown = match self.put_if(key, body.clone(), guard.clone()).await {
+                Err(unknown @ Error::OutcomeUnknown(_)) => unknown,
+                // Perhaps refused against an earlier copy that landed since.
+                Ok(None) if writes > 1 => Error::OutcomeUnknown(format!(
+                    "PUT {key}: refused after a write of unknown outcome"
+                )),
+                Err(error) => return Err(unsettled(error)),
+                written => return written,
+            };
+            let current = self.get(key).await.map_err(unsettled)?;
+            let guarded = match (&guard, &current) {
+                (Guard::Absent, None) => true,
+                (Guard::Match(guarded), Some((_, version))) => version == guarded,
+                _ => false,
+            };
+            match current {
+                Some((current, version)) if current == body => return Ok(Some(version)),
+                _ if !guarded => return Ok(None),
+                _ if writes == SETTLE_WRITES => return Err(unknown),
+                _ => tokio::time::sleep(pause).await,
+            }
         }
-        Ok(match self.get(key).await? {
-            Some((current, version)) if current == body => Some(version),
-            _ => None,
-        })
     }
 
     /// Write `body` unconditionally, with user metadata.

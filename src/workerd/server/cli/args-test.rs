@@ -441,3 +441,66 @@ fn help_pages_are_complete() {
     compiled.build();
     check(&mut compiled, "compiled");
 }
+
+#[test]
+fn repl_config_to_load() {
+    let repl = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl
+    };
+    let none = repl(&["repl", "--experimental"]);
+    assert_eq!(none.config_file, None);
+    let config = repl(&["repl", "--experimental", "config.capnp", "dev"]);
+    assert_eq!(config.config_file.as_deref(), Some("config.capnp"));
+    assert_eq!(config.const_name.as_deref(), Some("dev"));
+}
+
+#[test]
+fn repl_input_timeout() {
+    let timeout = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl.input_timeout
+    };
+    assert_eq!(timeout(&["repl", "--experimental"]), None);
+    assert_eq!(
+        timeout(&["repl", "--experimental", "--input-timeout=30"]),
+        Some(Duration::from_secs(30))
+    );
+    assert_eq!(
+        timeout(&["repl", "--experimental", "--input-timeout", "0.5"]),
+        Some(Duration::from_millis(500))
+    );
+    for seconds in ["0", "-1", "NaN", "inf", "soon"] {
+        let arg = format!("--input-timeout={seconds}");
+        assert!(
+            Main::try_parse_from(["workerd", "repl", "--experimental", &arg]).is_err(),
+            "{arg}"
+        );
+    }
+}
+
+#[test]
+fn repl_process_wide_settings() {
+    let main = parse(&[
+        "repl",
+        "--experimental",
+        "--autogate=compression-rs",
+        "--autogate",
+        "ts-url",
+        "--v8-flag=--expose-gc",
+        // A V8 flag looks like an option of its own.
+        "--v8-flag",
+        "--jitless",
+        "config.capnp",
+    ]);
+    let Command::Repl { repl } = main.command else {
+        panic!("not repl");
+    };
+    assert_eq!(repl.autogates, ["compression-rs", "ts-url"]);
+    assert_eq!(repl.v8_flags, ["--expose-gc", "--jitless"]);
+    assert_eq!(repl.config_file.as_deref(), Some("config.capnp"));
+}

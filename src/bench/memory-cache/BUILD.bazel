@@ -1,0 +1,23 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The MemoryCache benchmarks, against the C++ implementation and the Rust one
+# (RUST_MEMORY_CACHE). Enabling every autogate enables RUST_MEMORY_CACHE, so
+# the C++ config has no @all-autogates variant; the Rust config enables it
+# itself.
+
+wd_bench(
+    src = "memory-cache-cpp.wd-bench",
+    args = ["--experimental"],
+    data = ["memory-cache.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "memory-cache-rust.wd-bench",
+    args = ["--experimental"],
+    data = [
+        "memory-cache.js",
+        "memory-cache-cpp.wd-bench",
+    ],
+    lint = False,
+)

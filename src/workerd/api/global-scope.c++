@@ -80,13 +80,32 @@ jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
   return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
 }
 
-jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
-  // Hook for the embedding application to provide a CacheContext.
-  // The default Worker::Api implementation returns kj::none.
+CacheContextRef::CacheContextRef(jsg::Ref<CacheContext> cache): value(kj::mv(cache)) {}
+CacheContextRef::CacheContextRef(RustCacheContext cache): value(kj::mv(cache)) {}
+CacheContextRef::CacheContextRef(CacheContextRef&&) = default;
+CacheContextRef::~CacheContextRef() noexcept(false) = default;
+
+jsg::Optional<CacheContextRef> currentCacheContext(jsg::Lock& js) {
   if (IoContext::hasCurrent()) {
-    return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
+    auto& api = Worker::Isolate::from(js).getApi();
+    KJ_IF_SOME(cache, api.getCtxCacheRustProperty(js)) {
+      return CacheContextRef(kj::mv(cache));
+    }
+    KJ_IF_SOME(cache, api.getCtxCacheProperty(js)) {
+      return CacheContextRef(kj::mv(cache));
+    }
   }
   return kj::none;
+}
+
+jsg::Optional<CacheContextRef> ExecutionContext::getCache(jsg::Lock& js) {
+  return currentCacheContext(js);
+}
+
+kj::Maybe<bool> CacheContextTag::isInstance(v8::Isolate* isolate, rust::jsg_cpp::Local value) {
+  auto& js = jsg::Lock::from(isolate);
+  return Worker::Isolate::from(js).getApi().isCtxCacheRustInstance(
+      isolate, rust::jsg::local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
 jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
@@ -351,6 +370,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
+    kj::Maybe<kj::String> clientAddress,
     DatagramChannel& channel,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
@@ -372,8 +392,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    jsg::Ref<Socket> jsSocket = setupDatagramSocket(
-        js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
+    jsg::Ref<Socket> jsSocket =
+        setupDatagramSocket(js, ownChannel.addRef().toOwn(), kj::mv(clientAddress), kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());

@@ -28,7 +28,7 @@ jobs:
       arch_name: 'X64'
       suffix: 'coverage'
       bazelflare: true
-      developer_flags: '--config=bazelflare-coverage'
+      developer_flags: '--config=bazelflare --config=coverage'
       extra_bazel_args: '--config=ci-bazelflare-coverage'
       runner_developer_flags: '--config=coverage'
       runner_extra_bazel_args: '--config=ci-linux-common'

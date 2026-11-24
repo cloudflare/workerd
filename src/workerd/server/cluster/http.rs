@@ -57,6 +57,49 @@ pub struct HttpResponse {
     pub stream: Option<Chunks>,
 }
 
+/// Why a request has no response.
+#[derive(Debug)]
+pub struct HttpError {
+    pub message: String,
+    pub failure: Failure,
+}
+
+/// How a request without a response failed, as sending it again goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// Its connection failed before the request was handed to it: a new
+    /// connection that closed before it was ready, or one that hyper found
+    /// closed and handed the request back from unwritten. hyper-util sends
+    /// such a request again by itself only on a pooled connection. None of
+    /// it left this process.
+    Unsent,
+    /// Its connection failed after hyper's dispatcher took the request,
+    /// before the answer's head came: writing it, reading the answer, or
+    /// parsing it. hyper cannot tell how much of the request reached the
+    /// server, which may have read none of it, or all of it and applied it.
+    /// A server closing an idle pooled connection as a request goes out on
+    /// it fails the request this way, before reading any of it.
+    Lost,
+    /// Anything else: no connection to the server, a timeout, a body this
+    /// end could not read or write, an answer's body cut short.
+    Other,
+}
+
+impl From<String> for HttpError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            failure: Failure::Other,
+        }
+    }
+}
+
+impl std::fmt::Display for HttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 /// A body read chunk by chunk as the caller asks for them.
 pub type Chunks = Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>;
 
@@ -101,7 +144,7 @@ impl Http {
         payload: Payload,
         to: Option<&Path>,
         (head, idle): (Duration, Duration),
-    ) -> Result<HttpResponse, String> {
+    ) -> Result<HttpResponse, HttpError> {
         let response = self.request(method, url, headers, payload, head).await?;
         collect(response, to, idle).await
     }
@@ -116,7 +159,7 @@ impl Http {
         headers: Vec<String>,
         payload: Payload,
         (head, idle): (Duration, Duration),
-    ) -> Result<HttpResponse, String> {
+    ) -> Result<HttpResponse, HttpError> {
         let response = self.request(method, url, headers, payload, head).await?;
         if !response.status().is_success() {
             return collect(response, None, idle).await;
@@ -136,7 +179,7 @@ impl Http {
         headers: Vec<String>,
         payload: Payload,
         head: Duration,
-    ) -> Result<http::Response<Incoming>, String> {
+    ) -> Result<http::Response<Incoming>, HttpError> {
         let mut request = http::Request::builder().method(method.as_str()).uri(url);
         for pair in headers.chunks(2) {
             request = request.header(&pair[0], &pair[1]);
@@ -146,11 +189,49 @@ impl Http {
             Payload::File(path) => Body::file(&path).map_err(|e| e.to_string())?,
         };
         let request = request.body(body).map_err(|e| e.to_string())?;
-        tokio::time::timeout(head, self.client.request(request))
+        let response = tokio::time::timeout(head, self.client.request(request))
             .await
-            .map_err(|_| "timed out".to_owned())?
-            .map_err(|e| e.to_string())
+            .map_err(|_| "timed out".to_owned())?;
+        response.map_err(|e| HttpError {
+            message: describe(&e),
+            failure: failure(&e),
+        })
     }
+}
+
+/// How `error` failed its request (`Failure`). A connection's failure has
+/// hyper's own error as its source: of the connection's I/O, of an answer
+/// cut short or one that does not parse. A `Connect` error's source is the
+/// connector's, and a failure of the request's own body is hyper's user
+/// error. Once a pooled connection took the request, the error carries the
+/// connection's info, which one of a new connection that never got ready
+/// does not; hyper's error is a cancellation when it handed the request
+/// back unwritten.
+fn failure(error: &legacy::Error) -> Failure {
+    let source = std::error::Error::source(error);
+    let hyper = source.and_then(|source| source.downcast_ref::<hyper::Error>());
+    match hyper {
+        Some(hyper) if !error.is_connect() && !hyper.is_user() => {
+            if error.connect_info().is_none() || hyper.is_canceled() {
+                Failure::Unsent
+            } else {
+                Failure::Lost
+            }
+        }
+        _ => Failure::Other,
+    }
+}
+
+/// `error` and each of its sources: hyper-util's own text names only the
+/// error's kind.
+fn describe(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(error) = source {
+        text = format!("{text}: {error}");
+        source = error.source();
+    }
+    text
 }
 
 /// A response without its body.
@@ -176,7 +257,7 @@ async fn collect(
     response: http::Response<Incoming>,
     to: Option<&Path>,
     idle: Duration,
-) -> Result<HttpResponse, String> {
+) -> Result<HttpResponse, HttpError> {
     let (parts, mut incoming) = response.into_parts();
     let mut response = head_of(parts.status.as_u16(), parts.headers);
     let to = to
@@ -206,7 +287,7 @@ async fn collect(
         if writer.is_none() {
             // Records, listings, deployments and errors: an endpoint sending more is broken.
             if body.len() + chunk.len() > MAX_BODY {
-                return Err(TOO_LARGE.to_owned());
+                return Err(TOO_LARGE.to_owned().into());
             }
             body.extend(chunk);
         } else if tx.send(chunk).await.is_err() {
@@ -266,8 +347,10 @@ pub enum Repeat {
     /// bucket client reports a refusal of one sent twice as of unknown
     /// outcome (`Attempt::sent_twice`, `Error::OutcomeUnknown`). Safe only
     /// where the caller's answer to that holds when the other copy lands
-    /// later still, as a renewal's reread does: a read back, as
-    /// `Bucket::put_if_settled` makes, may come before it lands.
+    /// later still, as a renewal's reread does. `Bucket::put_if_settled`
+    /// writes again while the read back finds the guarded version, which
+    /// settles most such writes, but can still answer unknown with a copy
+    /// yet to land; its caller's answer to that must hold the same way.
     GuardedWrite,
 }
 

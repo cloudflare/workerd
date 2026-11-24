@@ -446,6 +446,31 @@ fn malformed_data_throws() {
 }
 
 #[test]
+fn a_reader_that_runs_javascript_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        eval(
+            lock,
+            ctx,
+            "globalThis.getterCalls = 0;
+             globalThis.probeGetter = function () { getterCalls++; return 1; }",
+        );
+        // A native error, of type Error, with the message "m", whose own properties are read from
+        // a TestCppGetter (tag 0). Reading them would call its getter.
+        let mut data = header(lock);
+        data.extend_from_slice(b"\\\x0a\x01\"\x01m\\\x00");
+        assert_deserialization_throws(
+            lock,
+            ctx,
+            &data,
+            "DataCloneError",
+            "Deserialization failed: the value can't be read without running JavaScript.",
+        );
+        assert!(ctx.eval::<bool>(lock, "getterCalls === 0").unwrap());
+        Ok(())
+    });
+}
+
+#[test]
 fn missing_or_unsupported_header_is_an_internal_error() {
     Harness::new().run_in_context(|lock, _ctx| {
         for data in [&b""[..], b"\x49\x02", b"\xff\x7f\x49\x02"] {

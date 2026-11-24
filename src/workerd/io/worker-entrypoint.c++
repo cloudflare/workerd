@@ -104,7 +104,6 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
   Frankenvalue props;
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
-  kj::Maybe<kj::String> clientAddress;
 
   // Hacky members used to hold some temporary state while processing a request.
   // See gory details in WorkerEntrypoint::request().
@@ -123,7 +122,8 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+      kj::Maybe<kj::String> clientAddress);
 
   kj::Promise<void> requestImpl(kj::HttpMethod method,
       kj::StringPtr url,
@@ -155,8 +155,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<Worker::VersionInfo> versionInfo,
-      kj::Maybe<kj::String> clientAddress);
+      kj::Maybe<Worker::VersionInfo> versionInfo);
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
@@ -271,10 +270,11 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, kj::mv(entrypointName),
-      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientAddress));
+      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory),
+      kj::mv(clientAddress));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -288,8 +288,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<Worker::VersionInfo> versionInfo,
-    kj::Maybe<kj::String> clientAddress)
+    kj::Maybe<Worker::VersionInfo> versionInfo)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
       canceler(canceler),
@@ -298,8 +297,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       entrypointName(kj::mv(entrypointName)),
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
-      versionInfo(kj::mv(versionInfo)),
-      clientAddress(kj::mv(clientAddress)) {}
+      versionInfo(kj::mv(versionInfo)) {}
 
 void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -310,7 +308,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::String> clientAddress) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -341,7 +340,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
       kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
-      kj::mv(selfTokenFactory))
+      kj::mv(selfTokenFactory), kj::mv(clientAddress))
                         .attach(kj::mv(actor));
 }
 
@@ -802,7 +801,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
           .run([weakThis = addWeakToThis(), &headers, &connection,
                    weakResponse = wrappedResponse->addWeak(),
                    entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-                   host = kj::str(host), clientAddress = kj::mv(clientAddress),
+                   host = kj::str(host), clientAddress = kj::mv(incomingRequestRef.clientAddress),
                    settings = kj::mv(settings)](Worker::Lock& lock, IoContext& context) mutable {
     auto traceScope = context.makeRequestTraceScope(lock);
 
