@@ -121,8 +121,8 @@ declare const tracing: {
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
 
-  // Returns the span associated with the current async context. Returns undefined
-  // outside an invocation or when execution is detached into the root async context.
+  // Returns the span associated with the current async context, or the invocation span when no
+  // user-created span is active. Returns undefined outside an invocation.
   getActiveSpan(): Span | undefined;
 
   // Makes `span` the active span while invoking `callback(...args)`, then restores the previous

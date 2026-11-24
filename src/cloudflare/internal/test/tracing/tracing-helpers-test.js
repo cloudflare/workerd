@@ -7,7 +7,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
 
 assert.strictEqual(publicTracing.getActiveSpan(), undefined);
-const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
+// Bound outside every request, so it runs with no trace context of its own.
+const getActiveSpanBoundAtModuleScope = AsyncLocalStorage.bind(() =>
   publicTracing.getActiveSpan()
 );
 const spanCreatedOutsideInvocationContext =
@@ -403,7 +404,8 @@ export const getActiveSpan = {
     // All the ways to get the active span should return the same reference
     assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
-    assert.strictEqual(getActiveSpanOutsideInvocationContext(), undefined);
+    // Code with no trace context of its own gets the current request's root span.
+    assert.strictEqual(getActiveSpanBoundAtModuleScope(), invocationSpan);
     assert.strictEqual(invocationSpan.isTraced, true);
     // This is ignored since we control the lifecycle
     invocationSpan.end();
