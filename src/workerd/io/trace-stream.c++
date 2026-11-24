@@ -2,13 +2,18 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/trace-stream.h>
+#include <workerd/io/trace-stream/ffi.rs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 #include <workerd/util/strings.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/util/uuid.h>
 
 #include <capnp/membrane.h>
+#include <capnp/message.h>
 
 #include <algorithm>
 
@@ -797,6 +802,154 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
   return kj::none;
 }
 
+// The events of one TailStreamTarget::report() call, as a tail worker's handlers receive them.
+// Creating a batch checks every event, so a bad batch reaches no handler.
+class TailEventBatch {
+ public:
+  virtual ~TailEventBatch() noexcept(false) = default;
+
+  // Converts the events with the Rust crate trace-stream if the RUST_TRACE_STREAM autogate is
+  // enabled, and with the ToJs() functions above otherwise.
+  static kj::Own<TailEventBatch> create(rpc::TailStreamTarget::TailStreamParams::Reader params);
+
+  virtual size_t size() const = 0;
+  virtual bool isOnset(size_t index) const = 0;
+  virtual bool isOutcome(size_t index) const = 0;
+
+  // The name of the method of a handler object that receives the event at `index`. Throws for
+  // the onset event, which only the tailStream() handler receives.
+  virtual jsg::JsValue handlerName(jsg::Lock& js, size_t index) const = 0;
+
+  // The JavaScript value of the event at `index`.
+  virtual jsg::JsValue toJs(jsg::Lock& js, size_t index) = 0;
+};
+
+// A batch decoded into TailEvents and converted by the ToJs() functions above.
+// Decodes the events of `params`. Throws where an event is one that TailEvent can't represent.
+kj::Array<TailEvent> decodeTailEvents(rpc::TailStreamTarget::TailStreamParams::Reader params) {
+  KJ_ASSERT(params.hasEvents(), "Events are required.");
+  auto eventReaders = params.getEvents();
+  return KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
+}
+
+class CppTailEventBatch final: public TailEventBatch {
+ public:
+  explicit CppTailEventBatch(rpc::TailStreamTarget::TailStreamParams::Reader params)
+      : events(decodeTailEvents(params)) {}
+
+  size_t size() const override {
+    return events.size();
+  }
+  bool isOnset(size_t index) const override {
+    return events[index].event.is<kj::Own<Onset>>();
+  }
+  bool isOutcome(size_t index) const override {
+    return events[index].event.is<Outcome>();
+  }
+  jsg::JsValue handlerName(jsg::Lock& js, size_t index) const override {
+    return js.strIntern(KJ_ASSERT_NONNULL(getHandlerName(events[index])));
+  }
+  jsg::JsValue toJs(jsg::Lock& js, size_t index) override {
+    return ToJs(js, events[index], stringCache);
+  }
+
+ private:
+  kj::Array<TailEvent> events;
+  StringCache stringCache;
+};
+
+// A batch converted by the Rust crate trace-stream: a copy of the TailStreamParams, in a single
+// segment that the crate reads in place. Where the crate rejects an event, this fails with the
+// exception the C++ conversion fails with.
+class RustTailEventBatch final: public TailEventBatch {
+ public:
+  explicit RustTailEventBatch(rpc::TailStreamTarget::TailStreamParams::Reader params)
+      : message(copy(params)),
+        segment(message->getSegmentsForOutput()[0]),
+        count(check(params, bytes())) {}
+
+  size_t size() const override {
+    return count;
+  }
+  bool isOnset(size_t index) const override {
+    return trace_stream::tail_event_kind(bytes(), index) == trace_stream::TailEventKind::Onset;
+  }
+  bool isOutcome(size_t index) const override {
+    return trace_stream::tail_event_kind(bytes(), index) == trace_stream::TailEventKind::Outcome;
+  }
+  jsg::JsValue handlerName(jsg::Lock& js, size_t index) const override {
+    if (isOnset(index)) {
+      KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
+    }
+    auto name = trace_stream::tail_event_handler_name(bytes(), index);
+    return js.str(kj::arrayPtr(name.data(), name.size()));
+  }
+  jsg::JsValue toJs(jsg::Lock& js, size_t index) override {
+    auto failure = trace_stream::ConvertFailure::None;
+    auto result = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+        trace_stream::tail_event_to_js(js.v8Isolate, bytes(), index, *keys, failure));
+    v8::Local<v8::Value> value;
+    if (result.ToLocal(&value)) return jsg::JsValue(value);
+    switch (failure) {
+      case trace_stream::ConvertFailure::None:
+        throw jsg::JsExceptionThrown();
+      case trace_stream::ConvertFailure::Unreachable:
+        KJ_UNREACHABLE;
+      case trace_stream::ConvertFailure::DiagnosticChannelHeader: {
+        // Throws the exception jsg::Deserializer throws for the data.
+        auto event = message->getRoot<rpc::TailStreamTarget::TailStreamParams>().asReader();
+        jsg::Deserializer deserializer(
+            js, event.getEvents()[index].getEvent().getDiagnosticChannelEvent().getMessage());
+        KJ_FAIL_ASSERT("jsg::Deserializer accepts diagnostics channel data the crate rejects");
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  kj::Own<capnp::MallocMessageBuilder> message;
+  kj::ArrayPtr<const capnp::word> segment;
+  size_t count;
+  // The property names the conversion of this batch's events has made so far.
+  ::rust::Box<trace_stream::Keys> keys = trace_stream::new_keys();
+
+  // Checks the batch with the crate, and returns how many events it has. Where the crate rejects
+  // the batch, decoding it into TailEvents throws the exception that the C++ conversion throws.
+  static size_t check(
+      rpc::TailStreamTarget::TailStreamParams::Reader params, ::rust::Slice<const uint8_t> bytes) {
+    size_t count = 0;
+    KJ_IF_SOME(exception,
+        kj::runCatchingExceptions([&]() { count = trace_stream::check_tail_events(bytes); })) {
+      decodeTailEvents(params);
+      kj::throwFatalException(kj::mv(exception));
+    }
+    return count;
+  }
+
+  // Copies `params` into a message whose first segment fits it and the root pointer, so the copy
+  // is a single segment.
+  static kj::Own<capnp::MallocMessageBuilder> copy(
+      rpc::TailStreamTarget::TailStreamParams::Reader params) {
+    auto message = kj::heap<capnp::MallocMessageBuilder>(params.totalSize().wordCount + 1);
+    message->setRoot(params);
+    KJ_ASSERT(message->getSegmentsForOutput().size() == 1);
+    return message;
+  }
+
+  ::rust::Slice<const uint8_t> bytes() const {
+    auto bytes = segment.asBytes();
+    return ::rust::Slice<const uint8_t>(bytes.begin(), bytes.size());
+  }
+};
+
+kj::Own<TailEventBatch> TailEventBatch::create(
+    rpc::TailStreamTarget::TailStreamParams::Reader params) {
+  if (util::Autogate::isEnabled(util::AutogateKey::RUST_TRACE_STREAM)) {
+    return kj::heap<RustTailEventBatch>(params);
+  }
+  return kj::heap<CppTailEventBatch>(params);
+}
+
 class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::Refcounted {
  public:
   TailStreamTarget(IoContext& ioContext,
@@ -845,10 +998,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
         ioContext.run([self = addRefToThis(), sharedResults = sharedResults.addRef(), reportContext,
                           ownReportContext = ownReportContext->addRef()](
                           Worker::Lock& lock, IoContext& ioContext) mutable -> kj::Promise<void> {
-      auto params = reportContext.getParams();
-      KJ_ASSERT(params.hasEvents(), "Events are required.");
-      auto eventReaders = params.getEvents();
-      kj::Array<TailEvent> events = KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
+      auto events = TailEventBatch::create(reportContext.getParams());
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
@@ -935,18 +1085,15 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
   // shutdown.
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
-      kj::Array<TailEvent> events,
+      kj::Own<TailEventBatch> events,
       kj::Rc<SharedResults> results) {
     // There should be only a single onset event in this batch.
-    KJ_ASSERT(events.size() == 1 && events[0].event.is<kj::Own<Onset>>(),
-        "Expected only a single onset event");
-    auto& event = events[0];
+    KJ_ASSERT(events->size() == 1 && events->isOnset(0), "Expected only a single onset event");
 
     auto handler =
         KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointNamePtr, kj::mv(versionInfo),
                                kj::mv(props), ioContext.getActor(), isDynamicDispatch),
             "Failed to get handler to worker.");
-    StringCache stringCache;
 
     jsg::Lock& js = lock;
     auto target = jsg::JsObject(handler->self.getHandle(js));
@@ -972,7 +1119,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
           lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, kj::mv(hCtx)));
     }
     v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
-    handlerArgs[0] = ToJs(js, event, stringCache);
+    handlerArgs[0] = events->toJs(js, 0);
     handlerArgs[1] = handler->env.getHandle(js);
     KJ_IF_SOME(ctx, maybeCtx) {
       handlerArgs[2] = ctx;
@@ -1043,18 +1190,17 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
   kj::Promise<void> handleEvents(Worker::Lock& lock,
       const jsg::JsValue& handler,
       IoContext& ioContext,
-      kj::Array<TailEvent> events,
+      kj::Own<TailEventBatch> events,
       kj::Rc<SharedResults> results) {
     jsg::Lock& js = lock;
 
     // Should not ever happen but let's handle it anyway.
-    if (events.size() == 0) return kj::READY_NOW;
+    if (events->size() == 0) return kj::READY_NOW;
 
     // Take the received set of events and dispatch them to the correct handler.
 
     v8::Local<v8::Value> h = handler;
     v8::LocalVector<v8::Value> returnValues(js.v8Isolate);
-    StringCache stringCache;
 
     // If any of the events delivered are an outcome event, we will signal that
     // the stream should be stopped and will fulfill the done promise.
@@ -1065,11 +1211,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
     // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
     bool doFulfill = false;
 
-    for (auto& event: events) {
+    for (auto i: kj::zeroTo(events->size())) {
       // If we already received an outcome event, we will stop processing any
       // further events.
       if (finishing) break;
-      if (event.event.is<Outcome>()) {
+      if (events->isOutcome(i)) {
         finishing = true;
         results->setStop(true);
         doneReceiving = true;
@@ -1078,7 +1224,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
         doFulfill = true;
       };
 
-      v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
+      v8::Local<v8::Value> eventObj = events->toJs(js, i);
       if (h->IsFunction()) {
         // If the handler is a function, then we'll just pass all of the events to that
         // function. If the function returns a promise and there are multiple events we
@@ -1091,14 +1237,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
         // If the handler is an object, then we need to know what kind of events
         // we have and look for a specific handler function for each.
         KJ_ASSERT(h->IsObject());
-        KJ_IF_SOME(name, getHandlerName(event)) {
-          jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
-          v8::Local<v8::Value> val = obj.get(js, name);
-          // If the value is not a function, we'll ignore it entirely.
-          if (val->IsFunction()) {
-            auto fn = val.As<v8::Function>();
-            returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
-          }
+        jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
+        v8::Local<v8::Value> val = obj.get(js, events->handlerName(js, i));
+        // If the value is not a function, we'll ignore it entirely.
+        if (val->IsFunction()) {
+          auto fn = val.As<v8::Function>();
+          returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
         }
       }
     }
