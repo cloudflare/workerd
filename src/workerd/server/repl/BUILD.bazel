@@ -75,6 +75,14 @@ wd_cc_library(
 )
 
 kj_test(
+    src = "repl-api-test.c++",
+    deps = [
+        ":repl-api",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     size = "large",
     src = "repl-environment-test.c++",
     deps = [

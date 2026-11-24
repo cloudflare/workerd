@@ -8,6 +8,9 @@
 
 namespace workerd::server {
 
+ReplServer::ReplServer(kj::Own<ReplServerHost> host)
+    : host(IoContext::current().addObject(kj::mv(host))) {}
+
 kj::Array<kj::String> ReplServer::getWarnings() {
   return KJ_MAP(warning, host->getWarnings()) { return kj::str(warning); };
 }
@@ -79,6 +82,9 @@ jsg::Promise<jsg::Ref<ReplServer>> ReplControl::loadConfig(
     return handle;
   });
 }
+
+ReplEnvironmentHandle::ReplEnvironmentHandle(kj::Own<ReplEnvironmentHost> host)
+    : host(IoContext::current().addObject(kj::mv(host))) {}
 
 kj::Array<kj::String> ReplEnvironmentHandle::getCompatibilityFlags() {
   return KJ_MAP(flag, host->getCompatibilityFlags()) { return kj::str(flag); };

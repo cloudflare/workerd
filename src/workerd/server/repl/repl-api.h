@@ -21,6 +21,7 @@
 #include <workerd/api/unsafe.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/async.h>
@@ -140,7 +141,8 @@ class ReplHost {
 // A config the REPL serves: `await workerd.loadConfig(path)`.
 class ReplServer final: public jsg::Object {
  public:
-  explicit ReplServer(kj::Own<ReplServerHost> host): host(kj::mv(host)) {}
+  // In an IoContext, which holds `host` for the handle.
+  explicit ReplServer(kj::Own<ReplServerHost> host);
 
   struct ServiceOptions {
     jsg::Optional<kj::String> entrypoint;
@@ -202,18 +204,21 @@ class ReplServer final: public jsg::Object {
     JSG_METHOD(close);
   }
 
-  bool isClosed() const {
+  bool isClosed() {
     return host->isClosed();
   }
 
  private:
-  kj::Own<ReplServerHost> host;
+  // Held by the IoContext, not by the handle: the handle can be the last to hold the server, and
+  // a garbage-collected JavaScript object must not destroy KJ I/O objects.
+  IoOwn<ReplServerHost> host;
 };
 
 // An environment the REPL started: `await workerd.environment({ compatibilityDate })`.
 class ReplEnvironmentHandle final: public jsg::Object {
  public:
-  explicit ReplEnvironmentHandle(kj::Own<ReplEnvironmentHost> host): host(kj::mv(host)) {}
+  // In an IoContext, which holds `host` for the handle.
+  explicit ReplEnvironmentHandle(kj::Own<ReplEnvironmentHost> host);
 
   kj::StringPtr getCompatibilityDate() {
     return host->getCompatibilityDate();
@@ -237,7 +242,8 @@ class ReplEnvironmentHandle final: public jsg::Object {
   }
 
  private:
-  kj::Own<ReplEnvironmentHost> host;
+  // Held by the IoContext, as ReplServer's host is.
+  IoOwn<ReplEnvironmentHost> host;
 };
 
 // The `workerd` global of the REPL.

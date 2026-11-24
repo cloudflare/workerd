@@ -518,7 +518,9 @@ Compiling the script in a class static block, where `await` can't be a name, tel
 an event, compiled on the REPL's isolate under the new module registry. One `IoContext` serves the
 whole session, so I/O objects created by one input stay usable in the next. The `workerd` global
 and the server handles are C++ JSG types (`repl/repl-api.h`), registered with the workerd API
-isolate but not part of the Workers API's types.
+isolate but not part of the Workers API's types. A handle holds its server or environment through
+the `IoContext` (`IoOwn`), so that collecting it, though it may be the last to hold it, destroys
+no KJ I/O objects.
 
 **Loaded configs.** `workerd.loadConfig()` reads the config as `workerd serve` does
 (`repl_load_config`, `cli/repl/session.rs`), then builds a `WorkerFactory` for it over the REPL's
@@ -545,7 +547,8 @@ request started on one is held through a revoker: closing the server revokes the
 server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
 
 **Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text,
-with watches the test fires; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
+with watches the test fires; `repl/repl-api-test.c++` drops handles where JavaScript objects are
+destroyed; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
 the command line, the console and the file watcher do;
 `cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line
 editor, the history file and the input heuristics; `server/in_process/host-test.rs` covers
