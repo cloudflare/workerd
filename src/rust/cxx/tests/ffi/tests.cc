@@ -1513,6 +1513,14 @@ extern "C" const char *cxx_run_test() noexcept {
                        "panic in cxx_test_suite::ffi::r_panic: foobar") == 0);
   }
 
+  try {
+    r_panic_literal();
+    ASSERT(false);
+  } catch (const kj::Exception &e) {
+    ASSERT(std::strcmp(e.getDescription().cStr(),
+                       "panic in cxx_test_suite::ffi::r_panic_literal: literal panic") == 0);
+  }
+
   // Test C++->Rust CanceledException roundtrip
   try {
     c_cancel_via_rust_return_primitive();
