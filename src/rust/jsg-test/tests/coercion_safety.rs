@@ -621,6 +621,39 @@ fn object_set_from_throwing_setter_returns_err() {
     });
 }
 
+/// `Object::set_by_name` sets the property a `Global` name names, and throws what a setter, on
+/// the object or its prototype chain, or a Proxy `set` trap threw.
+#[test]
+fn object_set_by_name_from_throwing_setter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
+            .expect("setup should evaluate");
+        let name = v8::String::new_internalized_from_str(lock, "x").unwrap();
+        let name = v8::Global::<v8::Name>::new(lock, name.into());
+        for expr in [
+            "({ set x(v) { throw thrown; } })",
+            "Object.create({ set x(v) { throw thrown; } })",
+            "new Proxy({}, { set() { throw thrown; } })",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+            let one = 1_u32.to_js(lock)?;
+            let caught = thrown_by(lock, |lock| obj.set_by_name(lock, &name, one));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let obj: v8::Local<'_, v8::Object> =
+            ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
+        let one = 1_u32.to_js(lock)?;
+        obj.set_by_name(lock, &name, one)?;
+        let x = obj.get(lock, "x")?;
+        assert_eq!(u32::from_js(lock, x)?, 1);
+        Ok(())
+    });
+}
+
 /// `Array::set` throws what an element's setter, on the array or `Array.prototype`, threw.
 #[test]
 fn array_set_from_throwing_setter_returns_err() {
