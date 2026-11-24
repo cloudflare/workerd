@@ -363,6 +363,13 @@ wpt_test(
 )
 
 wpt_test(
+    name = "wasm/serialization",
+    config = "wasm/serialization-test.ts",
+    include_tentative = True,
+    wpt_directory = "@wpt//:wasm/serialization@module",
+)
+
+wpt_test(
     name = "FileAPI",
     config = "FileAPI-test.ts",
     wpt_directory = "@wpt//:FileAPI@module",
