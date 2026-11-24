@@ -32,10 +32,12 @@ function cacheKey(url) {
 
 export default {
   async fetch(request, env) {
-    // A request for another isolate is refused before its body is read, so that the client can
-    // send it again until the isolate it names serves it. The refusal is held for a while: the
-    // front gives the next request to a sleeping thread with the fewest requests in flight, so
-    // the client's other attempts at once go to other threads.
+    // A request for another isolate is refused, for the client to send it again until the
+    // isolate it names serves it. Its body is read first and dropped: a client still writing a
+    // body to a connection that the refusal closed may see the write fail before it reads the
+    // refusal. The refusal is held for a while: the front gives the next request to a sleeping
+    // thread with the fewest requests in flight, so the client's other attempts at once go to
+    // other threads.
     //
     // The attempts of one request carry one `x-attempt`, and the isolate named acts on the
     // first it gets only: it refuses the others too.
@@ -45,6 +47,7 @@ export default {
       wanted !== null &&
       (wanted !== isolateId() || (attempt !== null && attempts.has(attempt)))
     ) {
+      await request.arrayBuffer();
       await scheduler.wait(100);
       return Response.json(
         { front: isolateId() },
