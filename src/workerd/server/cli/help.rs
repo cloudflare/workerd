@@ -13,7 +13,8 @@
 
 macro_rules! config_arg {
     () => {
-        "<config> is a wrangler.json or wrangler.jsonc; see workerd -h.\n"
+        "<config> is a wrangler.json or wrangler.jsonc, or a directory with\n\
+         one; see workerd -h.\n"
     };
 }
 
@@ -183,7 +184,8 @@ Cluster (experimental):
   so keep peers on a private network. Setup: workerd serve --help.
 
 Config:
-  A wrangler.json or wrangler.jsonc, as for wrangler dev, with fields:
+  A wrangler.json or wrangler.jsonc, as for wrangler dev, or a project
+  directory, which uses its wrangler.json, else wrangler.jsonc. Fields:
     $schema, name, main, compatibility_date, compatibility_flags, vars,
     durable_objects, exports, migrations, no_bundle
     with --experimental: kv_namespaces, queues, triggers, workflows,
