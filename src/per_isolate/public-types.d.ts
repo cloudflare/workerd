@@ -17,3 +17,8 @@ export type {
   URLPatternResult,
   URLPatternOptions,
 } from './urlpattern/urlpattern';
+export type {
+  MessagePort,
+  MessageChannel,
+  MessagePortPostMessageOptions,
+} from './messagechannel/messagechannel.public';
