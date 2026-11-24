@@ -244,10 +244,7 @@ URLSearchParams::URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery,
       maybeUrl(url) {}
 
 kj::Maybe<kj::Own<jsg::Wrappable>> URLSearchParams::snapshotClone() const {
-  // Parsed back from its serialization, which keeps every name-value pair and their order.
-  jsg::UrlSearchParams copy;
-  copy.reset(inner.toStr().asPtr());
-  return ownAsWrappable(kj::refcounted<URLSearchParams>(kj::mv(copy)));
+  return ownAsWrappable(kj::refcounted<URLSearchParams>(inner.clone()));
 }
 
 uint URLSearchParams::getSize() {

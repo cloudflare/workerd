@@ -634,11 +634,46 @@ CryptoKey::CryptoKey(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
 CryptoKey::~CryptoKey() noexcept(false) {}
 
 kj::Maybe<kj::Own<jsg::Wrappable>> CryptoKey::snapshotClone() const {
-  if (algorithmProperty != kj::none || usagesProperty != kj::none) return kj::none;
-  KJ_IF_SOME(copy, impl->snapshotClone()) {
-    return ownAsWrappable(kj::refcounted<CryptoKey>(kj::mv(copy)));
+  KJ_IF_SOME(copyImpl, impl->snapshotClone()) {
+    auto copy = kj::refcounted<CryptoKey>(kj::mv(copyImpl));
+    uint8_t cached = snapshotCachedProps;
+    KJ_IF_SOME(alg, algorithmProperty) {
+      if (alg.isMemoized()) cached |= SNAPSHOT_CACHED_ALGORITHM;
+    }
+    if (usagesProperty != kj::none) cached |= SNAPSHOT_CACHED_USAGES;
+    copy->snapshotCachedProps = cached;
+    return ownAsWrappable(kj::mv(copy));
   }
   return kj::none;
+}
+
+kj::Array<v8::Local<v8::Value>> CryptoKey::snapshotValues(jsg::Lock& js) const {
+  kj::Vector<v8::Local<v8::Value>> values;
+  KJ_IF_SOME(alg, algorithmProperty) {
+    KJ_IF_SOME(handle, alg.tryGetMemoizedHandle(js.v8Isolate)) {
+      values.add(handle);
+    }
+  }
+  KJ_IF_SOME(usages, usagesProperty) {
+    values.add(usages.getHandle(js));
+  }
+  return values.releaseAsArray();
+}
+
+void CryptoKey::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  size_t i = 0;
+  if (snapshotCachedProps & SNAPSHOT_CACHED_ALGORITHM) {
+    KJ_ASSERT(i < values.size());
+    algorithmProperty =
+        jsg::MemoizedIdentity<AlgorithmVariant>::fromMemoizedValue(js.v8Isolate, values[i++]);
+  }
+  if (snapshotCachedProps & SNAPSHOT_CACHED_USAGES) {
+    KJ_ASSERT(i < values.size());
+    usagesProperty = jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(values[i++]));
+  }
+  KJ_ASSERT(i == values.size());
+  snapshotCachedProps = 0;
 }
 
 kj::StringPtr CryptoKey::getAlgorithmName() const {

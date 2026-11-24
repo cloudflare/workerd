@@ -103,6 +103,12 @@ switch (MODE) {
       },
     };
     app.addEventListener('pong', handlerObject);
+    // Dead EventTarget whose listener closes over an unclonable FormData: must not resurrect it.
+    (() => {
+      const dead = new EventTarget();
+      const fd = new FormData();
+      dead.addEventListener('ping', () => fd.get('a'));
+    })();
     kept = {
       target,
       onceListener,
@@ -133,6 +139,15 @@ switch (MODE) {
     const abortedController = new AbortController();
     const abortedSignal = abortedController.signal;
     abortedController.abort(reasonObject);
+    // Controllers whose signal JavaScript read (creating a wrapper) and mutated/aborted, without
+    // keeping a separate JS reference to the signal.
+    const unretainedAborted = new AbortController();
+    void unretainedAborted.signal;
+    unretainedAborted.abort('unretained-reason');
+    const unretainedListened = new AbortController();
+    unretainedListened.signal.addEventListener('abort', () =>
+      kept.aborts.push('unretained-listener')
+    );
     kept = {
       used,
       signal,
@@ -143,6 +158,8 @@ switch (MODE) {
       domException: new DOMException('top-level message', 'DataError'),
       abortedController,
       abortedSignal,
+      unretainedAborted,
+      unretainedListened,
       reasonObject,
       aborts: [],
     };
@@ -163,10 +180,9 @@ switch (MODE) {
     kept = { caches, defaultCache: caches.default, scheduler };
     break;
   case 'abort-unread-aborted':
-    // Aborted before JavaScript got its signal: the signal has no wrapper of its own to carry
-    // the abort.
+    // Aborted before JavaScript got its signal: transfers via AbortController's own snapshotValues.
     kept = new AbortController();
-    kept.abort();
+    kept.abort('unread-reason');
     break;
   case 'midstream-decoder':
     // A decoder with the first byte of a two-byte character pending.
@@ -227,19 +243,25 @@ switch (MODE) {
     };
     break;
   }
-  case 'crypto-key-algorithm':
-    // A key whose `algorithm` object JavaScript has seen: its identity cannot be carried.
-    kept = await subtle.importKey(
+  case 'crypto-key-algorithm': {
+    // A key whose `algorithm` and `usages` objects JavaScript has already read: their identity and
+    // custom properties travel via snapshotValues().
+    const key = await subtle.importKey(
       'raw',
       encoder.encode('0123456789abcdef'),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['sign']
     );
-    kept.algorithm.seen = true;
+    const alg = key.algorithm;
+    const usages = key.usages;
+    alg.seen = true;
+    usages.seen = true;
+    kept = { key, alg, usages };
     break;
+  }
   case 'crypto-key-rsa':
-    // An RSA key's algorithm holds its public exponent in a V8 buffer, which a copy cannot.
+    // An RSA key transfers by sharing its EVP_PKEY and copying its public exponent bytes.
     kept = await subtle.importKey(
       'jwk',
       { kty: 'RSA', n: RSA_N, e: 'AQAB' },
@@ -395,13 +417,19 @@ async function checks() {
       app.dispatchEvent(new Event('pong'));
       app.removeEventListener('pong', handlerObject);
       app.dispatchEvent(new Event('pong'));
+      // Legacy on<type> property reflection still works on a restored EventTarget.
+      let onPingFired = false;
+      empty.onping = () => {
+        onPingFired = true;
+      };
+      empty.dispatchEvent(new Event('ping'));
       result.eventTargetCalls =
         kept.calls.join() === 'ping:ping,once,ping:ping,object:true:pong';
       result.eventTargetSubclass =
         app instanceof App &&
         app instanceof EventTarget &&
         app.constructor.name === 'App';
-      result.eventTargetEmpty = empty.dispatchEvent(new Event('x'));
+      result.eventTargetEmpty = empty.dispatchEvent(new Event('x')) && onPingFired;
       break;
     }
     case 'event-target-signal':
@@ -441,6 +469,13 @@ async function checks() {
       result.abortObjectReason =
         abortedController.signal === abortedSignal &&
         abortedSignal.reason === reasonObject;
+      result.abortUnretainedAborted =
+        kept.unretainedAborted.signal.aborted &&
+        kept.unretainedAborted.signal.reason === 'unretained-reason';
+      kept.unretainedListened.abort();
+      result.abortUnretainedListener =
+        kept.unretainedListened.signal.aborted &&
+        kept.aborts.includes('unretained-listener');
       try {
         abortedSignal.throwIfAborted();
         result.abortThrows = false;
@@ -472,7 +507,8 @@ async function checks() {
       result.scheduler = typeof kept.scheduler.wait === 'function';
       break;
     case 'abort-unread-aborted':
-      result.abortUnread = kept.signal.aborted;
+      result.abortUnread =
+        kept.signal.aborted && kept.signal.reason === 'unread-reason';
       break;
     case 'searchparams':
     case 'searchparams-url-standard':
@@ -501,10 +537,23 @@ async function checks() {
       Object.assign(result, await cryptoKeyChecks(kept));
       break;
     case 'crypto-key-algorithm':
-      result.algorithmIdentity = kept.algorithm.seen === true;
+      result.algorithmIdentity =
+        kept.key.algorithm === kept.alg &&
+        kept.key.algorithm.seen === true &&
+        kept.key.usages === kept.usages &&
+        kept.key.usages.seen === true;
       break;
     case 'crypto-key-rsa':
-      result.rsa = kept.type === 'public';
+      result.rsa =
+        kept.type === 'public' &&
+        kept.algorithm.modulusLength === 2048 &&
+        new Uint8Array(kept.algorithm.publicExponent).join() === '1,0,1' &&
+        !(await subtle.verify(
+          'RSASSA-PKCS1-v1_5',
+          kept,
+          new Uint8Array(256),
+          encoder.encode('abc')
+        ));
       break;
     case 'gc':
       collect();
@@ -717,7 +766,10 @@ async function test(ctrl, env) {
     'fs',
     'streamed-decoder',
     'crypto-keys',
+    'crypto-key-algorithm',
+    'crypto-key-rsa',
     'event-targets',
+    'abort-unread-aborted',
     'searchparams',
     'searchparams-url-standard',
     'caches-scheduler',
@@ -733,10 +785,7 @@ async function test(ctrl, env) {
     'cpp-streams-pending-cancel',
     // A recorded performance entry is JavaScript state the clone cannot carry.
     'performance-entries',
-    'crypto-key-algorithm',
-    'crypto-key-rsa',
     'event-target-signal',
-    'abort-unread-aborted',
   ];
 
   const run = async (name, expectedSnapshotUsed) => {

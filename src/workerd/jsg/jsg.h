@@ -1911,9 +1911,27 @@ class MemoizedIdentity {
     return *this;
   }
 
+  bool isMemoized() const {
+    return value.template is<Value>();
+  }
+
+  // Returns the memoized JS value if this identity has already been wrapped into JS.
+  kj::Maybe<v8::Local<v8::Value>> tryGetMemoizedHandle(v8::Isolate* isolate) const {
+    KJ_IF_SOME(handle, value.template tryGet<Value>()) {
+      return handle.getHandle(isolate);
+    }
+    return kj::none;
+  }
+
+  // Reconstructs a MemoizedIdentity directly from a JS value restored from a startup snapshot.
+  static MemoizedIdentity fromMemoizedValue(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
+    return MemoizedIdentity(Value(isolate, handle));
+  }
+
   void visitForGc(GcVisitor& visitor);
 
   JSG_MEMORY_INFO(MemoizedIdentity) {
+
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(val, T) {
         if constexpr (MemoryRetainer<T>) {
@@ -1929,6 +1947,7 @@ class MemoizedIdentity {
   }
 
  private:
+  explicit MemoizedIdentity(Value val): value(kj::mv(val)) {}
   kj::OneOf<T, Value> value;
 
   friend class MemoizedIdentityWrapper;

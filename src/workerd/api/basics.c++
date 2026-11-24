@@ -187,8 +187,9 @@ bool EventTarget::copyEventTargetForSnapshot(EventTarget& copy) const {
     // so that the shapes line up with the values.
     for (auto& entry: typeMap) {
       for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
-        // The signal's abort algorithm that would remove the listener belongs to the signal.
-        if (handler->abortHandler != kj::none) return false;
+        // A listener registered with a `signal` (its removal belongs to the signal) or backed by
+        // a native C++ function cannot transfer through a startup snapshot.
+        if (handler->abortHandler != kj::none || !handler->callback.isJs()) return false;
         shapes.add(SnapshotListenerShape{kj::str(entry.key), handler->once, handler->passive});
       }
     }
@@ -215,7 +216,11 @@ void EventTarget::addEventTargetSnapshotValues(
     values.add(listener.receiver);
   });
   if (values.size() > 0) {
-    KJ_REQUIRE(Worker::Api::current().tryGetEventListenerCallbackTypeHandler(js) != kj::none,
+    bool hasHandler = false;
+    KJ_IF_SOME(api, Worker::Api::tryCurrent()) {
+      hasHandler = api.tryGetEventListenerCallbackTypeHandler(js) != kj::none;
+    }
+    KJ_REQUIRE(hasHandler,
         "startup snapshot: this runtime cannot restore the listeners of an EventTarget");
   }
 }
@@ -798,7 +803,7 @@ void AbortSignal::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
   }
 }
 
-kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
+kj::Maybe<kj::Own<AbortSignal>> AbortSignal::cloneForSnapshot() const {
   // Followers, sources, abort algorithms and native actions are other objects' state, and the RPC
   // state belongs to an I/O context. `aborting` stays set once an abort completes, which the
   // copy's abort exception stands for; without one it means an abort is under way.
@@ -811,7 +816,12 @@ kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
   auto copy = kj::refcounted<AbortSignal>(
       maybeAbortException.map([](const kj::Exception& e) { return e.clone(); }), kj::none, flag);
   if (!copyEventTargetForSnapshot(*copy)) return kj::none;
-  return ownAsWrappable(kj::mv(copy));
+  return kj::mv(copy);
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
+  return cloneForSnapshot().map(
+      [](kj::Own<AbortSignal>&& copy) { return ownAsWrappable(kj::mv(copy)); });
 }
 
 kj::Array<v8::Local<v8::Value>> AbortSignal::snapshotValues(jsg::Lock& js) const {
@@ -1564,16 +1574,29 @@ bool AbortSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> AbortController::snapshotClone() const {
-  // A signal JavaScript got transfers on its own and is relinked; the copy's fresh one stands in
-  // until then. One without a wrapper is only this fresh copy, which must not lose an abort.
   auto& s = *signal;
-  if (!snapshotHasWrapper(s) &&
-      (s.maybeAbortException != kj::none || s.reason != kj::none ||
-          s.snapshotClone() == kj::none)) {
-    return kj::none;
+  if (snapshotHasWrapper(s)) {
+    // The signal transfers on its own (kept alive by snapshotReferences()) and is swapped in by
+    // snapshotRelink(); a fresh signal stands in only until then.
+    return ownAsWrappable(kj::refcounted<AbortController>(
+        jsg::Ref<AbortSignal>(kj::refcounted<AbortSignal>(kj::none, kj::none, s.flag))));
   }
-  return ownAsWrappable(kj::refcounted<AbortController>(
-      jsg::Ref<AbortSignal>(kj::refcounted<AbortSignal>(kj::none, kj::none, s.flag))));
+  // JavaScript never read controller.signal (or this is the stored clone being cloned for a
+  // restored Worker): clone the signal directly.
+  KJ_IF_SOME(copy, s.cloneForSnapshot()) {
+    return ownAsWrappable(kj::refcounted<AbortController>(jsg::Ref<AbortSignal>(kj::mv(copy))));
+  }
+  return kj::none;
+}
+
+kj::Array<v8::Local<v8::Value>> AbortController::snapshotValues(jsg::Lock& js) const {
+  if (snapshotHasWrapper(*signal)) return nullptr;
+  return signal->snapshotValues(js);
+}
+
+void AbortController::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  signal->snapshotRestoreValues(js, values);
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {

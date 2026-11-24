@@ -164,14 +164,14 @@ long as the isolate does. In order:
 3. `v8::Context::New()` deserializes the context. `deserializeInternalFields()` restores the
    wrapper-tag marker of every wrapper; `deserializeApiWrapperCallback()` links each wrapper to
    the shim pre-allocated for its payload's slot (`HeapTracer::linkRestoredWrapper()`). Then
+   `checkDeserializedSlots()` verifies every serialized slot was linked exactly once before
    `relinkReferences()` hands each restored object that referred to other transferred objects
    (`Wrappable::snapshotReferences()`, such as `Crypto`'s `subtle`) their restored instances
    (`snapshotRelink()`), `restoreValues()` hands each one whose original held JavaScript values
-   (`Wrappable::snapshotValues()`) those values (`snapshotRestoreValues()`), and
-   `releaseSlotsWithChecks()` verifies every serialized slot was linked
-   exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
-   `Error.stackTraceLimit` and `SharedArrayBuffer` state and deletions on top of the defaults V8
-   just installed.
+   (`Wrappable::snapshotValues()`) those values (`snapshotRestoreValues()`), `releaseSlots()` drops
+   the temporary persistent roots, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the
+   recorded `Error.stackTraceLimit` and `SharedArrayBuffer` state and deletions on top of the
+   defaults V8 just installed.
 4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
    pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), hands the
    fresh global scope the recorded `process`/`Buffer` state (`restoreSnapshotState()`),
@@ -251,12 +251,13 @@ also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Cry
 than to the one behind the restored wrapper.
 
 A type whose state includes JavaScript values (`EventTarget`'s listeners, an `AbortSignal`'s
-reason) also overrides `Wrappable::snapshotValues()`, which returns them in the zygote, and
-`snapshotRestoreValues()`, which takes them back on the restored instance. The values are pinned
-into the context snapshot, so the restored instance holds the zygote's own objects. A subclass that
-inherits its base's `snapshotClone()` without overriding it is unclonable: its clone would be of
-the base type.
-
+reason, a `CryptoKey`'s cached `algorithm`/`usages`) also overrides `Wrappable::snapshotValues()`,
+which returns them in the zygote, and `snapshotRestoreValues()`, which takes them back on the
+restored instance. The values (and any live wrappers named by `snapshotReferences()`) are attached
+to the wrapper object via private symbols, so they travel if and only if the wrapper itself
+survives `CreateBlob()`'s GC, and the restored instance holds the zygote's own objects. A subclass
+that inherits its base's `snapshotClone()` without overriding it is unclonable: its clone would be
+of the base type.
 `jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
 two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
 `snapshot_references()` and `snapshot_relink()` for their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
@@ -373,7 +374,7 @@ once.
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder (also one streaming between characters), crypto, navigator, CryptoKeys, EventTargets with their listeners, AbortControllers and AbortSignals (also one aborted with the default reason), DOMExceptions, URLSearchParams (also a URL's, which still shares its query), `caches` (and the identity of `caches.default`), `scheduler`, URLPatterns (both implementations), performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, a `TextDecoder` holding part of a character, a CryptoKey whose `algorithm` was read, an RSA key, a listener registered with a `signal`, a controller aborted before its signal was read, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder (also one streaming between characters), crypto, navigator, CryptoKeys (including RSA and keys with cached `algorithm`/`usages`), EventTargets with their listeners, AbortControllers and AbortSignals (also aborted before `signal` was read, or with an unretained `signal`, or with the default reason), DOMExceptions, URLSearchParams (also a URL's, which still shares its query), `caches` (and the identity of `caches.default`), `scheduler`, URLPatterns (both implementations), performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, a `TextDecoder` holding part of a character, a listener registered with a `signal`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

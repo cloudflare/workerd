@@ -23,6 +23,19 @@ SnapshotArtifact::~SnapshotArtifact() noexcept(false) {
 
 constexpr size_t internalFieldTagSizeInBytes = sizeof(Wrappable::WORKERD_WRAPPABLE_TAG);
 
+namespace {
+constexpr auto SNAPSHOT_VALUES_KEY = "workerd:snapshotValues"_kj;
+constexpr auto SNAPSHOT_REFS_KEY = "workerd:snapshotRefs"_kj;
+
+v8::Local<v8::Private> snapshotValuesKey(v8::Isolate* isolate) {
+  return v8::Private::ForApi(isolate, v8StrIntern(isolate, SNAPSHOT_VALUES_KEY));
+}
+
+v8::Local<v8::Private> snapshotRefsKey(v8::Isolate* isolate) {
+  return v8::Private::ForApi(isolate, v8StrIntern(isolate, SNAPSHOT_REFS_KEY));
+}
+}  // namespace
+
 // The zygote's half of the live-wrappable transfer, under the isolate lock and before
 // destroyLiveWrappableInstances(). A snapshotClone() that throws propagates out of
 // IsolateBase::createSnapshotBlob() and fails the zygote; the Worker then starts without a
@@ -38,14 +51,18 @@ void WrappablesSerializeMetadata::recordLiveWrappables(Lock& js,
   kj::HashMap<const Wrappable*, size_t> slotOf;
   struct PendingReferences {
     size_t slot;
+    v8::Local<v8::Object> holder;
     kj::Array<const Wrappable*> references;
   };
   kj::Vector<PendingReferences> pending;
-  // The values each clone's original holds, pinned once every live wrapper is recorded: building
-  // the arrays allocates on the V8 heap, and a GC during the walk could sweep a shim it has yet
-  // to visit.
+  // The values each clone's original holds, attached to its JS wrapper via a v8::Private once
+  // every live wrapper is recorded: building the arrays allocates on the V8 heap, and a GC during
+  // the walk could sweep a shim it has yet to visit. Attaching to the wrapper (instead of
+  // context AddData) ties reachability to the wrapper itself so dead objects are collected cleanly
+  // by CreateBlob()'s GC instead of being resurrected.
   struct PendingValues {
     size_t slot;
+    v8::Local<v8::Object> holder;
     kj::Array<v8::Local<v8::Value>> values;
   };
   kj::Vector<PendingValues> pendingValues;
@@ -74,14 +91,15 @@ void WrappablesSerializeMetadata::recordLiveWrappables(Lock& js,
         index = slot;
         artifact.liveWrappables.add(LiveWrappable{kj::mv(transfer), tag, nullptr});
         slotOf.insert(&wrappable, slot);
+        auto holder = wrappable.tryGetHandle(js.v8Isolate);
         auto references = wrappable.snapshotReferences();
         if (references.size() > 0) {
-          pending.add(PendingReferences{slot, kj::mv(references)});
+          pending.add(PendingReferences{slot, KJ_ASSERT_NONNULL(holder), kj::mv(references)});
         }
         if (hasClone) {
           auto values = wrappable.snapshotValues(js);
           if (values.size() > 0) {
-            pendingValues.add(PendingValues{slot, kj::mv(values)});
+            pendingValues.add(PendingValues{slot, KJ_ASSERT_NONNULL(holder), kj::mv(values)});
           }
         }
       }
@@ -97,21 +115,36 @@ void WrappablesSerializeMetadata::recordLiveWrappables(Lock& js,
           .typeName = kj::str(wrappable.jsgGetMemoryName()),
           .shim = cppgc::Persistent<v8::Object::Wrappable>(&shim)});
   });
+  auto refsKey = snapshotRefsKey(js.v8Isolate);
   for (auto& owner: pending) {
     auto slots = kj::heapArrayBuilder<kj::Maybe<size_t>>(owner.references.size());
+    kj::Vector<v8::Local<v8::Value>> refWrappers;
     for (auto reference: owner.references) {
       kj::Maybe<size_t> slot;
       KJ_IF_SOME(found, slotOf.find(reference)) {
         slot = found;
       }
       slots.add(slot);
+      // Keep any wrapped child reachable from the owner's JS wrapper across
+      // destroyLiveWrappableInstances() and CreateBlob()'s GC (preserving the C++ visitForGc edge
+      // so a child like AbortController.signal is neither silently dropped nor exempted from
+      // unclonable checks when JS holds only the parent).
+      KJ_IF_SOME(refHandle, const_cast<Wrappable*>(reference)->tryGetHandle(js.v8Isolate)) {
+        refWrappers.add(refHandle);
+      }
     }
     artifact.liveWrappables[owner.slot].references = slots.finish();
+    if (refWrappers.size() > 0) {
+      auto array = v8::Array::New(js.v8Isolate, refWrappers.begin(), refWrappers.size());
+      KJ_REQUIRE(check(owner.holder->SetPrivate(context, refsKey, array)));
+      artifact.liveWrappables[owner.slot].hasRefKeepalive = true;
+    }
   }
-  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  auto valuesKey = snapshotValuesKey(js.v8Isolate);
   for (auto& owner: pendingValues) {
     auto array = v8::Array::New(js.v8Isolate, owner.values.begin(), owner.values.size());
-    artifact.liveWrappables[owner.slot].valuesIndex = isolateBase.pinIntoSnapshot(context, array);
+    KJ_REQUIRE(check(owner.holder->SetPrivate(context, valuesKey, array)));
+    artifact.liveWrappables[owner.slot].hasValues = true;
   }
 }
 
@@ -184,10 +217,40 @@ void WrappableDeserializeMetadata::preallocateCppgcShims(Lock& js,
   instances = instancesBuilder.finish();
 }
 
-void WrappableDeserializeMetadata::relinkReferences(const SnapshotArtifact& artifact) {
+void WrappableDeserializeMetadata::checkDeserializedSlots() const {
+  KJ_REQUIRE(badPayloadsCount == 0,
+      "START_FROM_SNAPSHOT: API wrapper payloads in the deserialized context do not match the "
+      "artifact",
+      badPayloadsCount);
+
+  KJ_REQUIRE(duplicateLinksCount == 0,
+      "START_FROM_SNAPSHOT: an artifact slot was referenced by more than one deserialized wrapper",
+      duplicateLinksCount);
+
   for (auto i: kj::indices(slots)) {
-    auto& references = artifact.liveWrappables[i].references;
-    if (references.size() == 0 || !slots[i].linked) continue;
+    auto& slot = slots[i];
+    KJ_REQUIRE(slot.shim.Get() == nullptr || slot.linked,
+        "START_FROM_SNAPSHOT: a serialized wrapper slot was never restored", i);
+  }
+}
+
+void WrappableDeserializeMetadata::releaseSlots() {
+  slots = nullptr;
+}
+
+void WrappableDeserializeMetadata::relinkReferences(
+    Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact) {
+  auto refsKey = snapshotRefsKey(js.v8Isolate);
+  for (auto i: kj::indices(slots)) {
+    if (!slots[i].linked) continue;
+    auto& stored = artifact.liveWrappables[i];
+    if (stored.hasRefKeepalive) {
+      v8::HandleScope scope(js.v8Isolate);
+      auto holder = KJ_ASSERT_NONNULL(instances[i]->tryGetHandle(js.v8Isolate));
+      KJ_ASSERT(check(holder->DeletePrivate(context, refsKey)));
+    }
+    auto& references = stored.references;
+    if (references.size() == 0) continue;
     auto restored = kj::heapArrayBuilder<Wrappable*>(references.size());
     for (auto& reference: references) {
       Wrappable* target = nullptr;
@@ -202,39 +265,20 @@ void WrappableDeserializeMetadata::relinkReferences(const SnapshotArtifact& arti
 
 void WrappableDeserializeMetadata::restoreValues(
     Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact) {
-  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  auto valuesKey = snapshotValuesKey(js.v8Isolate);
   for (auto i: kj::indices(slots)) {
-    KJ_IF_SOME(index, artifact.liveWrappables[i].valuesIndex) {
-      // Taken out even for an unlinked slot, so that the snapshot heap does not keep them.
-      auto array = isolateBase.extractValueOnceFromSnapshot(context, index).As<v8::Array>();
-      if (!slots[i].linked) continue;
-      auto values = kj::heapArrayBuilder<v8::Local<v8::Value>>(array->Length());
-      for (uint32_t j = 0; j < array->Length(); ++j) {
-        values.add(check(array->Get(context, j)));
-      }
-      instances[i]->snapshotRestoreValues(js, values.finish());
+    if (!slots[i].linked || !artifact.liveWrappables[i].hasValues) continue;
+    v8::HandleScope scope(js.v8Isolate);
+    auto holder = KJ_ASSERT_NONNULL(instances[i]->tryGetHandle(js.v8Isolate));
+    auto raw = check(holder->GetPrivate(context, valuesKey));
+    KJ_ASSERT(check(holder->DeletePrivate(context, valuesKey)));
+    KJ_ASSERT(raw->IsArray(), "startup snapshot: missing snapshotValues array on restored wrapper");
+    auto array = raw.As<v8::Array>();
+    auto values = kj::heapArrayBuilder<v8::Local<v8::Value>>(array->Length());
+    for (uint32_t j = 0; j < array->Length(); ++j) {
+      values.add(check(array->Get(context, j)));
     }
-  }
-}
-
-void WrappableDeserializeMetadata::releaseSlotsWithChecks() {
-  // Release the roots whichever way this returns: linked shims are reachable from their
-  // wrappers, and unlinked ones must not outlive a failed restore.
-  KJ_DEFER(slots = nullptr);
-
-  KJ_REQUIRE(badPayloadsCount == 0,
-      "START_FROM_SNAPSHOT: API wrapper payloads in the deserialized context do not match the "
-      "artifact",
-      badPayloadsCount);
-
-  KJ_REQUIRE(duplicateLinksCount == 0,
-      "START_FROM_SNAPSHOT: an artifact slot was referenced by more than one deserialized wrapper",
-      duplicateLinksCount);
-
-  for (auto i: kj::indices(slots)) {
-    auto& slot = slots[i];
-    KJ_REQUIRE(slot.shim.Get() == nullptr || slot.linked,
-        "START_FROM_SNAPSHOT: a serialized wrapper slot was never restored", i);
+    instances[i]->snapshotRestoreValues(js, values.finish());
   }
 }
 

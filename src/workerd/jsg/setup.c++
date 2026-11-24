@@ -798,12 +798,15 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // consumes it.
   defaultContextHandle.Reset();
 
-  // 8. Reject a heap holding a suspended generator, such as an async function the top level left
-  // awaiting a promise: CreateBlob(kClear) discards the bytecode it would resume in. Checked last,
-  // when only what CreateBlob() serializes is left to reach it.
+  // 8. Reject a heap holding a suspended generator (CreateBlob(kClear) discards its bytecode) or
+  // an unsupported managed V8 object (which the fast serializer cannot carry). Checked last, when
+  // only what CreateBlob() serializes is left to reach them.
   KJ_REQUIRE(!getSnapshotCreator()->HasSuspendedGenerators(),
       "PREPARE_SNAPSHOT: a generator or async function is suspended in the zygote's heap");
-
+  if (const char* unsupported = getSnapshotCreator()->FindUnsupportedManagedObject()) {
+    KJ_FAIL_REQUIRE(
+        "PREPARE_SNAPSHOT: heap holds a managed V8 object the snapshot cannot carry", unsupported);
+  }
   artifact.blob =
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
   artifact.v8NativeState = getSnapshotCreator()->TakeNativeState();

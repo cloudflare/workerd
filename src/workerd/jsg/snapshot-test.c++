@@ -605,6 +605,56 @@ struct ReflectingThing: public Object {
   JSG_REFLECTION(label);
 };
 
+// Owns another wrappable (ValueThing or OpaqueThing) through a C++ Ref and names it in
+// snapshotReferences() so it stays reachable across destroyLiveWrappableInstances() even when
+// JavaScript only keeps the owner.
+struct RefOwnerThing: public Object {
+  kj::Maybe<Ref<ValueThing>> child;
+  kj::Maybe<Ref<OpaqueThing>> opaqueChild;
+
+  static Ref<RefOwnerThing> constructor(Lock& js) {
+    return js.alloc<RefOwnerThing>();
+  }
+
+  void setChild(Ref<ValueThing> c) {
+    child = kj::mv(c);
+  }
+  void setOpaqueChild(Ref<OpaqueThing> c) {
+    opaqueChild = kj::mv(c);
+  }
+  kj::Maybe<Ref<ValueThing>> getChild() {
+    return child.map([](Ref<ValueThing>& c) { return c.addRef(); });
+  }
+
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<RefOwnerThing>());
+  }
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    KJ_IF_SOME(c, child) {
+      return kj::arr(snapshotReferenceTo(*c));
+    }
+    KJ_IF_SOME(o, opaqueChild) {
+      return kj::arr(snapshotReferenceTo(*o));
+    }
+    return nullptr;
+  }
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(c, snapshotRelinkedRef<ValueThing>(restored[0])) {
+      child = kj::mv(c);
+    }
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(child, opaqueChild);
+  }
+
+  JSG_RESOURCE_TYPE(RefOwnerThing) {
+    JSG_METHOD(setChild);
+    JSG_METHOD(setOpaqueChild);
+    JSG_METHOD(getChild);
+  }
+};
+
 struct SnapshotTransferContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(SnapshotTransferContext) {
     JSG_NESTED_TYPE(StatelessThing);
@@ -614,6 +664,7 @@ struct SnapshotTransferContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(HolderThing);
     JSG_NESTED_TYPE(ValueThing);
     JSG_NESTED_TYPE(ReflectingThing);
+    JSG_NESTED_TYPE(RefOwnerThing);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
@@ -624,8 +675,8 @@ JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
     OpaqueThing,
     HolderThing,
     ValueThing,
-    ReflectingThing);
-
+    ReflectingThing,
+    RefOwnerThing);
 // Runs `topLevel` in a zygote's context and serializes the context the way Worker::Worker does:
 // the serializer callbacks are registered with the context, the top level runs, the
 // FinalizationRegistry cleanups it left due are settled, the restore-time globals are removed,
@@ -760,18 +811,50 @@ KJ_TEST("the JavaScript values a transferred object holds come back as the zygot
   });
 }
 
-KJ_TEST("the values of an object dropped from the artifact do not fail the restore") {
-  // As in the test above for HolderThing: the ValueThing is recorded, with its value, and then
-  // becomes garbage before CreateBlob().
-  auto artifact =
-      bakeSnapshot("globalThis.holder = new HolderThing();"
-                   "(() => { const t = new ValueThing(); t.hold({}); holder.hold(t); })();"
-                   "globalThis.kept = new ValueThing();"
-                   "kept.hold('kept');"_kj);
-  KJ_EXPECT(countTransfers(*artifact) == 2, countTransfers(*artifact));
+KJ_TEST("the values of an object dropped from the artifact are not resurrected") {
+  // Both dropped ValueThings are held only by HolderThing (whose clone drops them): one holds an
+  // unclonable OpaqueThing and one holds itself. Because snapshotValues() are attached to the
+  // wrapper via a private symbol rather than pinned as context AddData roots, CreateBlob()'s GC
+  // collects both along with the OpaqueThing instead of resurrecting them or failing the zygote.
+  auto artifact = bakeSnapshot("globalThis.holder = new HolderThing();"
+                               "globalThis.holder2 = new HolderThing();"
+                               "(() => {"
+                               "  const t = new ValueThing();"
+                               "  t.hold(new OpaqueThing());"
+                               "  holder.hold(t);"
+                               "  const self = new ValueThing();"
+                               "  self.hold(self);"
+                               "  holder2.hold(self);"
+                               "})();"
+                               "globalThis.kept = new ValueThing();"
+                               "kept.hold('kept');"
+                               "Object.freeze(kept);"_kj);
+  KJ_EXPECT(countTransfers(*artifact) == 3, countTransfers(*artifact));
   auto restored = newIsolateFromSnapshot(*artifact);
-  inRestoredContext(
-      *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "kept.get()"_kj) == "kept"_kj); });
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "kept.get()"_kj) == "kept"_kj);
+    KJ_EXPECT(eval(js, "Object.isFrozen(kept)"_kj) == "true"_kj);
+  });
+}
+
+KJ_TEST("snapshotReferences() keeps an unretained child alive across destroyLiveWrappableInstances") {
+  // JS retains only `owner`, not `child`. The private keepalive preserves the C++ visitForGc edge
+  // across destroyLiveWrappableInstances() so `child` and its snapshotValues survive and relink.
+  auto artifact = bakeSnapshot("globalThis.owner = new RefOwnerThing();"
+                               "(() => {"
+                               "  const c = new ValueThing();"
+                               "  c.hold('from-child');"
+                               "  owner.setChild(c);"
+                               "})();"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "owner.getChild().get()"_kj) == "from-child"_kj);
+  });
+  // An unclonable child referenced only through `owner` still reaches the serializer and fails
+  // the zygote instead of being silently dropped.
+  KJ_EXPECT_THROW_MESSAGE("OpaqueThing",
+      bakeSnapshot("globalThis.owner = new RefOwnerThing();"
+                   "owner.setOpaqueChild(new OpaqueThing());"_kj));
 }
 
 KJ_TEST("SharedArrayBuffer and one the top level made survive a snapshot round trip") {
@@ -945,16 +1028,16 @@ KJ_TEST("checkCallbackFindings() raises what the serializer callback could only 
   }
 }
 
-KJ_TEST("releaseSlotsWithChecks() raises the deserializer's findings and an unlinked slot") {
+KJ_TEST("checkDeserializedSlots() raises the deserializer's findings and an unlinked slot") {
   {
     WrappableDeserializeMetadata metadata;
     metadata.badPayloadsCount = 1;
-    KJ_EXPECT_THROW_MESSAGE("do not match the artifact", metadata.releaseSlotsWithChecks());
+    KJ_EXPECT_THROW_MESSAGE("do not match the artifact", metadata.checkDeserializedSlots());
   }
   {
     WrappableDeserializeMetadata metadata;
     metadata.duplicateLinksCount = 1;
-    KJ_EXPECT_THROW_MESSAGE("more than one", metadata.releaseSlotsWithChecks());
+    KJ_EXPECT_THROW_MESSAGE("more than one", metadata.checkDeserializedSlots());
   }
   // A slot whose shim was pre-allocated but never linked by the deserializer callback: the blob
   // did not reference it.
@@ -967,8 +1050,8 @@ KJ_TEST("releaseSlotsWithChecks() raises the deserializer's findings and an unli
     metadata.slots[0].shim = HeapTracer::getTracer(lock.v8Isolate)
                                  .allocateShimForSnapshotRestore(
                                      StatefulThing::freshForRestore(1), Wrappable::WRAPPABLE_TAG);
-    KJ_EXPECT_THROW_MESSAGE("never restored", metadata.releaseSlotsWithChecks());
-    // The check released the root either way.
+    KJ_EXPECT_THROW_MESSAGE("never restored", metadata.checkDeserializedSlots());
+    metadata.releaseSlots();
     KJ_EXPECT(metadata.slots == nullptr);
   });
 }

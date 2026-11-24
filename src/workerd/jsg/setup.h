@@ -1559,15 +1559,14 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
-        {
-          // snapshotRelink() and snapshotRestoreValues() run with the new context entered.
-          auto contextHandle = context.getHandle(v8Isolate);
-          v8::Context::Scope contextScope(contextHandle);
-          auto& artifact = jsgIsolate.finalizedSnapshotArtifact();
-          metadata.relinkReferences(artifact);
-          metadata.restoreValues(*this, contextHandle, artifact);
-        }
-        metadata.releaseSlotsWithChecks();
+        KJ_DEFER(metadata.releaseSlots());
+        metadata.checkDeserializedSlots();
+        // snapshotRelink() and snapshotRestoreValues() run with the new context entered.
+        auto contextHandle = context.getHandle(v8Isolate);
+        v8::Context::Scope contextScope(contextHandle);
+        auto& artifact = jsgIsolate.finalizedSnapshotArtifact();
+        metadata.relinkReferences(*this, contextHandle, artifact);
+        metadata.restoreValues(*this, contextHandle, artifact);
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and
       // adds them to a context restored from the snapshot, see

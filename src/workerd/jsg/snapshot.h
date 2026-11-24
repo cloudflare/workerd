@@ -111,9 +111,11 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     // The slots of the objects the original's snapshotReferences() named, in its order; none for
     // one the snapshot carries no slot for.
     kj::Array<kj::Maybe<size_t>> references;
-    // The context-level AddData index of an array of the values the original's snapshotValues()
-    // returned, when it returned any.
-    kj::Maybe<size_t> valuesIndex;
+    // True if the original's JS wrapper had its snapshotValues() attached via a v8::Private.
+    bool hasValues = false;
+    // True if the original's JS wrapper had its snapshotReferences() wrappers attached via a
+    // v8::Private to preserve reachability across destroyLiveWrappableInstances().
+    bool hasRefKeepalive = false;
   };
   kj::Vector<LiveWrappable> liveWrappables;
 
@@ -273,18 +275,23 @@ struct WrappableDeserializeMetadata {
       kj::FunctionParam<kj::Maybe<SnapshotInitReflectionFn>(v8::CppHeapPointerTag)>
           initReflectionFnFor);
 
-  // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
-  // original named references (Wrappable::snapshotReferences()) the linked instances of those.
-  void relinkReferences(const SnapshotArtifact& artifact);
+  // After creating a context, before relinkReferences()/restoreValues(): verifies that every
+  // serialized slot was linked exactly once and that the deserializer callbacks reported no
+  // bad payloads or duplicate links.
+  void checkDeserializedSlots() const;
 
-  // After relinkReferences(), inside `context`: hands each linked instance whose original
-  // returned values from Wrappable::snapshotValues() those values. The values of a slot no
-  // wrapper linked are taken out of the snapshot and dropped.
+  // Releases the persistent roots that kept pre-allocated shims alive during deserialization.
+  // Linked shims stay alive through their restored wrappers.
+  void releaseSlots();
+
+  // After checkDeserializedSlots(), inside `context`: deletes transient reference-keepalive
+  // private properties and hands each linked instance whose original named references
+  // (Wrappable::snapshotReferences()) the linked instances of those.
+  void relinkReferences(Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact);
+
+  // After relinkReferences(), inside `context`: extracts and deletes each linked instance's
+  // snapshotValues() private property and hands those values to snapshotRestoreValues().
   void restoreValues(Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact);
-
-  // After creating a context: verifies that every serialized slot was linked exactly once and that
-  // the callback reported nothing else, then releases the roots that kept unlinked shims alive.
-  void releaseSlotsWithChecks();
 };
 
 // V8 runs the deserializer callbacks below under DisallowGarbageCollection, which only a debug

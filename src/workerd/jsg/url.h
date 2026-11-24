@@ -232,6 +232,7 @@ class UrlSearchParams final {
   EntryIterator getEntries() const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   kj::Array<const char> toStr() const KJ_WARN_UNUSED_RESULT;
+  UrlSearchParams clone() const KJ_WARN_UNUSED_RESULT;
 
   JSG_MEMORY_INFO(Url) {
     tracker.trackField("inner", toStr());

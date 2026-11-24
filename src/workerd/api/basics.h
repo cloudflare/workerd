@@ -834,6 +834,10 @@ class AbortSignal final: public EventTarget {
   void snapshotRestoreValues(
       jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
 
+  // Clones this signal for snapshot transfer (used by both AbortSignal::snapshotClone() and
+  // AbortController::snapshotClone() when the signal has no wrapper of its own).
+  kj::Maybe<kj::Own<AbortSignal>> cloneForSnapshot() const;
+
  private:
   Flag flag;
 
@@ -1029,10 +1033,10 @@ class AbortController final: public jsg::Object {
     return js.alloc<AbortController>(js);
   }
 
-  // Transfers through a startup snapshot. The restored controller takes the restored signal
-  // behind the wrapper of its own (snapshotRelink()). When JavaScript never got that signal, it has
-  // no wrapper and so no transfer of its own: the copy holds a fresh signal with the same flag,
-  // which is only right while the signal has not been aborted.
+  // Transfers through a startup snapshot. When JavaScript has a wrapper for `signal`, the signal
+  // transfers on its own (kept alive by snapshotReferences()) and snapshotRelink() swaps it in.
+  // When JavaScript never read `signal`, the controller clones the signal and carries its snapshot
+  // values directly.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
   kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
     return kj::arr(snapshotReferenceTo(*signal));
@@ -1042,6 +1046,9 @@ class AbortController final: public jsg::Object {
       signal = kj::mv(restoredSignal);
     }
   }
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
 
   jsg::Ref<AbortSignal> getSignal() {
     return signal.addRef();

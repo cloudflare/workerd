@@ -214,19 +214,6 @@ class CryptoKey: public jsg::Object {
     // The hash algorithm that is used with this key.
     jsg::Optional<KeyAlgorithm> hash;
 
-    RsaKeyAlgorithm clone(jsg::Lock& js) const {
-      auto pe = publicExponent.getHandle(js);
-      auto data = pe.asArrayPtr();
-      // Should only happen if the flag is enabled and an algorithm field is cloned twice.
-      if (FeatureFlags::get(js).getCryptoPreservePublicExponent()) {
-        auto exp = jsg::JsUint8Array::create(js, data);
-        return {name, modulusLength, jsg::JsBufferSource(exp).addRef(js), hash};
-      } else {
-        auto exp = jsg::JsArrayBuffer::create(js, data);
-        return {name, modulusLength, jsg::JsBufferSource(exp).addRef(js), hash};
-      }
-    }
-
     JSG_STRUCT(name, modulusLength, publicExponent, hash);
 
     JSG_MEMORY_INFO(RsaKeyAlgorithm) {}
@@ -335,20 +322,26 @@ class CryptoKey: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
   // A key transfers through a startup snapshot as a copy of its Impl, for the kinds of key whose
-  // Impl implements snapshotClone(). One whose `algorithm` or `usages` JavaScript has read does
-  // not: those objects' identity, and whatever the script set on them, cannot be carried.
+  // Impl implements snapshotClone(). Cached `algorithm` and `usages` objects (if JavaScript has
+  // already read them) travel as snapshotValues() so their identity and properties survive.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
 
   bool verifyX509Public(const X509* x509) const;
   bool verifyX509Private(const X509* x509) const;
 
  private:
+  static constexpr uint8_t SNAPSHOT_CACHED_ALGORITHM = 1 << 0;
+  static constexpr uint8_t SNAPSHOT_CACHED_USAGES = 1 << 1;
+
   jsg::TracedOwn<Impl> impl;
   kj::Maybe<jsg::MemoizedIdentity<AlgorithmVariant>> algorithmProperty;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> usagesProperty;
+  uint8_t snapshotCachedProps = 0;
 
   void visitForGc(jsg::GcVisitor& visitor);
-
   friend class SubtleCrypto;
   friend class EllipticKey;
   friend class EdDsaKey;

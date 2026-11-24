@@ -31,10 +31,18 @@ diff --git a/include/v8-isolate.h b/include/v8-isolate.h
 diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
 --- a/include/v8-snapshot.h
 +++ b/include/v8-snapshot.h
-@@ -290,6 +290,14 @@ class V8_EXPORT SnapshotCreator {
+@@ -290,6 +290,22 @@ class V8_EXPORT SnapshotCreator {
     */
    bool HasSuspendedGenerators();
  
++  /**
++   * Returns the type name of an unsupported managed V8 object (e.g. a mutable
++   * CppGCManaged<IcuBreakIteratorWithText> behind an Intl.Segments object, or a
++   * shared Managed<T>) reachable in the heap that CreateBlob() with
++   * --fast-serializer cannot carry, or nullptr if none is reachable.
++   */
++  const char* FindUnsupportedManagedObject();
++
 +  /**
 +   * After CreateBlob() with --fast-serializer: the C++ objects of the managed
 +   * objects the blob holds (Intl's and Temporal's), which the blob refers to,
@@ -49,10 +57,14 @@ diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
 diff --git a/src/api/api.cc b/src/api/api.cc
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -473,6 +473,10 @@ StartupData SnapshotCreator::CreateBlob(
+@@ -473,6 +473,14 @@ StartupData SnapshotCreator::CreateBlob(
    return impl_->CreateBlob(function_code_handling);
  }
  
++const char* SnapshotCreator::FindUnsupportedManagedObject() {
++  return nullptr;
++}
++
 +std::shared_ptr<void> SnapshotCreator::TakeNativeState() {
 +  return std::move(impl_->native_state_);
 +}
@@ -60,7 +72,7 @@ diff --git a/src/api/api.cc b/src/api/api.cc
  bool SnapshotCreator::HasSuspendedGenerators() {
    i::Isolate* i_isolate = impl_->isolate();
    // Only what CreateBlob() would serialize counts: it collects all garbage
-@@ -10437,6 +10441,7 @@ void Isolate::Initialize(Isolate* v8_isolate,
+@@ -10437,6 +10445,7 @@ void Isolate::Initialize(Isolate* v8_isolate,
    }
  
    i_isolate->set_api_external_references(params.external_references);
