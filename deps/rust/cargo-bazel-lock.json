@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "fcfa1a9642445927d27ba7795d203ef1bf43abcc1924b1fb9e8f9728b40327bb",
+  "checksum": "fb001bc3f2609661f1a6a340a4c5c64cd2c15ad3e0cf738fe9794030279c5430",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -308,7 +308,6 @@
     "aho-corasick 1.1.5": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "perf-literal",
           "std"
         ],
@@ -964,51 +963,6 @@
         }
       ],
       "version": "0.12.1"
-    },
-    "bstr 1.14.0": {
-      "common_attrs": {
-        "crate_features": [
-          "alloc",
-          "default",
-          "std",
-          "unicode"
-        ],
-        "deps": [
-          {
-            "id": "memchr 2.8.3",
-            "target": "memchr"
-          },
-          {
-            "id": "regex-automata 0.4.19",
-            "target": "regex_automata"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "bstr",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "bstr",
-      "package_url": "https://github.com/BurntSushi/bstr",
-      "repository": {
-        "Http": {
-          "sha256": "a680398c10c7bc0488067c4612226ea905a85f607134b69f3068d505d58c4214",
-          "url": "https://static.crates.io/crates/bstr/1.14.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "bstr",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "1.14.0"
     },
     "bumpalo 3.20.4": {
       "common_attrs": {
@@ -1741,66 +1695,6 @@
         }
       ],
       "version": "0.7.1"
-    },
-    "compact_str 0.9.1": {
-      "common_attrs": {
-        "crate_features": [
-          "default",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "castaway 0.2.4",
-            "target": "castaway"
-          },
-          {
-            "id": "cfg-if 1.0.5",
-            "target": "cfg_if"
-          },
-          {
-            "id": "itoa 1.0.19",
-            "target": "itoa"
-          },
-          {
-            "id": "ryu 1.0.23",
-            "target": "ryu"
-          },
-          {
-            "id": "static_assertions 1.1.0",
-            "target": "static_assertions"
-          }
-        ],
-        "edition": "2021",
-        "proc_macro_deps": [
-          {
-            "id": "rustversion 1.0.23",
-            "target": "rustversion"
-          }
-        ]
-      },
-      "library_target_name": "compact_str",
-      "license": "MIT",
-      "license_file": "LICENSE",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "compact_str",
-      "package_url": "https://github.com/ParkMyCar/compact_str",
-      "repository": {
-        "Http": {
-          "sha256": "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab",
-          "url": "https://static.crates.io/crates/compact_str/0.9.1/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "compact_str",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.9.1"
     },
     "const-oid 0.10.3": {
       "common_attrs": {
@@ -2946,14 +2840,6 @@
           {
             "id": "ring 0.17.14",
             "target": "ring"
-          },
-          {
-            "id": "ruff_python_ast 0.0.0",
-            "target": "ruff_python_ast"
-          },
-          {
-            "id": "ruff_python_parser 0.0.0",
-            "target": "ruff_python_parser"
           },
           {
             "id": "rust_icu_sys 5.8.0",
@@ -4254,50 +4140,8 @@
       ],
       "version": "0.14.7"
     },
-    "getopts 0.2.24": {
-      "common_attrs": {
-        "crate_features": [
-          "default",
-          "unicode"
-        ],
-        "deps": [
-          {
-            "id": "unicode-width 0.2.3",
-            "target": "unicode_width"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "getopts",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "getopts",
-      "package_url": "https://github.com/rust-lang/getopts",
-      "repository": {
-        "Http": {
-          "sha256": "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df",
-          "url": "https://static.crates.io/crates/getopts/0.2.24/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "getopts",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.2.24"
-    },
     "getrandom 0.2.17": {
       "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
         "deps": {
           "common": [
             {
@@ -6117,46 +5961,6 @@
         }
       ],
       "version": "0.3.8"
-    },
-    "itertools 0.14.0": {
-      "common_attrs": {
-        "crate_features": [
-          "default",
-          "use_alloc",
-          "use_std"
-        ],
-        "deps": [
-          {
-            "id": "either 1.19.0",
-            "target": "either"
-          }
-        ],
-        "edition": "2018"
-      },
-      "library_target_name": "itertools",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "itertools",
-      "package_url": "https://github.com/rust-itertools/itertools",
-      "repository": {
-        "Http": {
-          "sha256": "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285",
-          "url": "https://static.crates.io/crates/itertools/0.14.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "itertools",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.14.0"
     },
     "itertools 0.15.0": {
       "common_attrs": {
@@ -8043,44 +7847,6 @@
       ],
       "version": "0.14.0"
     },
-    "phf_codegen 0.11.3": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "phf_generator 0.11.3",
-            "target": "phf_generator"
-          },
-          {
-            "id": "phf_shared 0.11.3",
-            "target": "phf_shared"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "phf_codegen",
-      "license": "MIT",
-      "license_file": "LICENSE",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "phf_codegen",
-      "package_url": "https://github.com/rust-phf/rust-phf",
-      "repository": {
-        "Http": {
-          "sha256": "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a",
-          "url": "https://static.crates.io/crates/phf_codegen/0.11.3/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "phf_codegen",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.11.3"
-    },
     "phf_generator 0.11.3": {
       "common_attrs": {
         "deps": [
@@ -8260,7 +8026,6 @@
     "phf_shared 0.11.3": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "std"
         ],
         "deps": [
@@ -8795,53 +8560,14 @@
     "rand 0.8.8": {
       "common_attrs": {
         "crate_features": [
-          "alloc",
-          "default",
-          "getrandom",
-          "libc",
-          "rand_chacha",
-          "small_rng",
-          "std",
-          "std_rng"
+          "small_rng"
         ],
-        "deps": {
-          "common": [
-            {
-              "id": "rand_chacha 0.3.1",
-              "target": "rand_chacha"
-            },
-            {
-              "id": "rand_core 0.6.4",
-              "target": "rand_core"
-            }
-          ],
-          "selects": {
-            "aarch64-apple-darwin": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "aarch64-unknown-linux-gnu": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "x86_64-apple-darwin": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "x86_64-unknown-linux-gnu": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ]
+        "deps": [
+          {
+            "id": "rand_core 0.6.4",
+            "target": "rand_core"
           }
-        },
+        ],
         "edition": "2018"
       },
       "library_target_name": "rand",
@@ -8915,48 +8641,6 @@
       ],
       "version": "0.9.5"
     },
-    "rand_chacha 0.3.1": {
-      "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "ppv-lite86 0.2.21",
-            "target": "ppv_lite86"
-          },
-          {
-            "id": "rand_core 0.6.4",
-            "target": "rand_core"
-          }
-        ],
-        "edition": "2018"
-      },
-      "library_target_name": "rand_chacha",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "rand_chacha",
-      "package_url": "https://github.com/rust-random/rand",
-      "repository": {
-        "Http": {
-          "sha256": "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88",
-          "url": "https://static.crates.io/crates/rand_chacha/0.3.1/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "rand_chacha",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.3.1"
-    },
     "rand_chacha 0.9.0": {
       "common_attrs": {
         "crate_features": [
@@ -9001,17 +8685,6 @@
     },
     "rand_core 0.6.4": {
       "common_attrs": {
-        "crate_features": [
-          "alloc",
-          "getrandom",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "getrandom 0.2.17",
-            "target": "getrandom"
-          }
-        ],
         "edition": "2018"
       },
       "library_target_name": "rand_core",
@@ -9149,7 +8822,6 @@
         "crate_features": [
           "alloc",
           "dfa-onepass",
-          "dfa-search",
           "hybrid",
           "meta",
           "nfa-backtrack",
@@ -9378,282 +9050,6 @@
         }
       ],
       "version": "0.17.14"
-    },
-    "ruff_python_ast 0.0.0": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "aho-corasick 1.1.5",
-            "target": "aho_corasick"
-          },
-          {
-            "id": "bitflags 2.13.2",
-            "target": "bitflags"
-          },
-          {
-            "id": "compact_str 0.9.1",
-            "target": "compact_str"
-          },
-          {
-            "id": "itertools 0.14.0",
-            "target": "itertools"
-          },
-          {
-            "id": "memchr 2.8.3",
-            "target": "memchr"
-          },
-          {
-            "id": "ruff_python_trivia 0.0.0",
-            "target": "ruff_python_trivia"
-          },
-          {
-            "id": "ruff_source_file 0.0.0",
-            "target": "ruff_source_file"
-          },
-          {
-            "id": "ruff_text_size 0.0.0",
-            "target": "ruff_text_size"
-          },
-          {
-            "id": "rustc-hash 2.1.3",
-            "target": "rustc_hash"
-          },
-          {
-            "id": "thiserror 2.0.21",
-            "target": "thiserror"
-          }
-        ],
-        "edition": "2024",
-        "proc_macro_deps": [
-          {
-            "id": "is-macro 0.3.8",
-            "target": "is_macro"
-          }
-        ]
-      },
-      "library_target_name": "ruff_python_ast",
-      "license": "MIT",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "ruff_python_ast",
-      "package_url": "https://github.com/astral-sh/ruff",
-      "repository": {
-        "Git": {
-          "commitish": {
-            "Rev": "32c54189cb45a9d0409a1140265ce6d5fcec214d"
-          },
-          "remote": "https://github.com/astral-sh/ruff",
-          "strip_prefix": "crates/ruff_python_ast"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ruff_python_ast",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.0.0"
-    },
-    "ruff_python_parser 0.0.0": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "bitflags 2.13.2",
-            "target": "bitflags"
-          },
-          {
-            "id": "bstr 1.14.0",
-            "target": "bstr"
-          },
-          {
-            "id": "compact_str 0.9.1",
-            "target": "compact_str"
-          },
-          {
-            "id": "memchr 2.8.3",
-            "target": "memchr"
-          },
-          {
-            "id": "ruff_python_ast 0.0.0",
-            "target": "ruff_python_ast"
-          },
-          {
-            "id": "ruff_python_trivia 0.0.0",
-            "target": "ruff_python_trivia"
-          },
-          {
-            "id": "ruff_text_size 0.0.0",
-            "target": "ruff_text_size"
-          },
-          {
-            "id": "rustc-hash 2.1.3",
-            "target": "rustc_hash"
-          },
-          {
-            "id": "static_assertions 1.1.0",
-            "target": "static_assertions"
-          },
-          {
-            "id": "unicode-ident 1.0.27",
-            "target": "unicode_ident"
-          },
-          {
-            "id": "unicode-normalization 0.1.26",
-            "target": "unicode_normalization"
-          },
-          {
-            "id": "unicode_names2 1.3.0",
-            "target": "unicode_names2"
-          }
-        ],
-        "edition": "2024"
-      },
-      "library_target_name": "ruff_python_parser",
-      "license": "MIT",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "ruff_python_parser",
-      "package_url": "https://github.com/astral-sh/ruff",
-      "repository": {
-        "Git": {
-          "commitish": {
-            "Rev": "32c54189cb45a9d0409a1140265ce6d5fcec214d"
-          },
-          "remote": "https://github.com/astral-sh/ruff",
-          "strip_prefix": "crates/ruff_python_parser"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ruff_python_parser",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.0.0"
-    },
-    "ruff_python_trivia 0.0.0": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "itertools 0.14.0",
-            "target": "itertools"
-          },
-          {
-            "id": "ruff_source_file 0.0.0",
-            "target": "ruff_source_file"
-          },
-          {
-            "id": "ruff_text_size 0.0.0",
-            "target": "ruff_text_size"
-          },
-          {
-            "id": "unicode-ident 1.0.27",
-            "target": "unicode_ident"
-          }
-        ],
-        "edition": "2024"
-      },
-      "library_target_name": "ruff_python_trivia",
-      "license": "MIT",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "ruff_python_trivia",
-      "package_url": "https://github.com/astral-sh/ruff",
-      "repository": {
-        "Git": {
-          "commitish": {
-            "Rev": "32c54189cb45a9d0409a1140265ce6d5fcec214d"
-          },
-          "remote": "https://github.com/astral-sh/ruff",
-          "strip_prefix": "crates/ruff_python_trivia"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ruff_python_trivia",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.0.0"
-    },
-    "ruff_source_file 0.0.0": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "memchr 2.8.3",
-            "target": "memchr"
-          },
-          {
-            "id": "ruff_text_size 0.0.0",
-            "target": "ruff_text_size"
-          }
-        ],
-        "edition": "2024"
-      },
-      "library_target_name": "ruff_source_file",
-      "license": "MIT",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "ruff_source_file",
-      "package_url": "https://github.com/astral-sh/ruff",
-      "repository": {
-        "Git": {
-          "commitish": {
-            "Rev": "32c54189cb45a9d0409a1140265ce6d5fcec214d"
-          },
-          "remote": "https://github.com/astral-sh/ruff",
-          "strip_prefix": "crates/ruff_source_file"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ruff_source_file",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.0.0"
-    },
-    "ruff_text_size 0.0.0": {
-      "common_attrs": {
-        "edition": "2024"
-      },
-      "library_target_name": "ruff_text_size",
-      "license": "MIT",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "ruff_text_size",
-      "package_url": "https://github.com/astral-sh/ruff",
-      "repository": {
-        "Git": {
-          "commitish": {
-            "Rev": "32c54189cb45a9d0409a1140265ce6d5fcec214d"
-          },
-          "remote": "https://github.com/astral-sh/ruff",
-          "strip_prefix": "crates/ruff_text_size"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ruff_text_size",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.0.0"
     },
     "rust_icu_release 5.8.0": {
       "common_attrs": {
@@ -13379,40 +12775,6 @@
       ],
       "version": "0.8.5"
     },
-    "tinyvec 1.13.3": {
-      "common_attrs": {
-        "crate_features": [
-          "alloc",
-          "default"
-        ],
-        "edition": "2018"
-      },
-      "library_target_name": "tinyvec",
-      "license": "Zlib OR Apache-2.0 OR MIT",
-      "license_file": "LICENSE-APACHE.md",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT",
-        "Zlib"
-      ],
-      "name": "tinyvec",
-      "package_url": "https://github.com/Lokathor/tinyvec",
-      "repository": {
-        "Http": {
-          "sha256": "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee",
-          "url": "https://static.crates.io/crates/tinyvec/1.13.3/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "tinyvec",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "1.13.3"
-    },
     "tokio 1.54.1": {
       "common_attrs": {
         "crate_features": {
@@ -13897,46 +13259,6 @@
       ],
       "version": "1.0.27"
     },
-    "unicode-normalization 0.1.26": {
-      "common_attrs": {
-        "crate_features": [
-          "default",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "tinyvec 1.13.3",
-            "target": "tinyvec"
-          }
-        ],
-        "edition": "2018"
-      },
-      "library_target_name": "unicode_normalization",
-      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT",
-        "Unicode-3.0"
-      ],
-      "name": "unicode-normalization",
-      "package_url": "https://github.com/unicode-rs/unicode-normalization",
-      "repository": {
-        "Http": {
-          "sha256": "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d",
-          "url": "https://static.crates.io/crates/unicode-normalization/0.1.26/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "unicode_normalization",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.1.26"
-    },
     "unicode-width 0.2.3": {
       "common_attrs": {
         "crate_features": [
@@ -13969,112 +13291,6 @@
         }
       ],
       "version": "0.2.3"
-    },
-    "unicode_names2 1.3.0": {
-      "build_script_attrs": {
-        "deps": [
-          {
-            "id": "unicode_names2_generator 1.3.0",
-            "target": "unicode_names2_generator"
-          }
-        ]
-      },
-      "common_attrs": {
-        "crate_features": [
-          "default"
-        ],
-        "deps": [
-          {
-            "id": "phf 0.11.3",
-            "target": "phf"
-          }
-        ],
-        "edition": "2018",
-        "extra_deps": [
-          ":build_script_build"
-        ]
-      },
-      "library_target_name": "unicode_names2",
-      "license": "(MIT OR Apache-2.0) AND Unicode-DFS-2016",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT",
-        "Unicode-DFS-2016"
-      ],
-      "name": "unicode_names2",
-      "package_url": "https://github.com/progval/unicode_names2",
-      "repository": {
-        "Http": {
-          "sha256": "d1673eca9782c84de5f81b82e4109dcfb3611c8ba0d52930ec4a9478f547b2dd",
-          "url": "https://static.crates.io/crates/unicode_names2/1.3.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "unicode_names2",
-            "crate_root": "src/lib.rs"
-          }
-        },
-        {
-          "BuildScript": {
-            "crate_name": "build_script_build",
-            "crate_root": "build.rs"
-          }
-        }
-      ],
-      "version": "1.3.0"
-    },
-    "unicode_names2_generator 1.3.0": {
-      "common_attrs": {
-        "crate_features": [
-          "default"
-        ],
-        "deps": [
-          {
-            "id": "getopts 0.2.24",
-            "target": "getopts"
-          },
-          {
-            "id": "log 0.4.35",
-            "target": "log"
-          },
-          {
-            "id": "phf_codegen 0.11.3",
-            "target": "phf_codegen"
-          },
-          {
-            "id": "rand 0.8.8",
-            "target": "rand"
-          }
-        ],
-        "edition": "2018"
-      },
-      "library_target_name": "unicode_names2_generator",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "unicode_names2_generator",
-      "package_url": "https://github.com/progval/unicode_names2",
-      "repository": {
-        "Http": {
-          "sha256": "b91e5b84611016120197efd7dc93ef76774f4e084cd73c9fb3ea4a86c570c56e",
-          "url": "https://static.crates.io/crates/unicode_names2_generator/1.3.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "unicode_names2_generator",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "1.3.0"
     },
     "untrusted 0.9.0": {
       "common_attrs": {
@@ -16019,8 +15235,6 @@
     "rand 0.9.5",
     "regex 1.13.2",
     "ring 0.17.14",
-    "ruff_python_ast 0.0.0",
-    "ruff_python_parser 0.0.0",
     "rust_icu_sys 5.8.0",
     "rustls 0.23.46",
     "rustls-platform-verifier 0.7.1",
