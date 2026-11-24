@@ -802,6 +802,10 @@ returns `None` for a resource the snapshot did not carry, such as one the contex
 through Rust, which the instance then rebuilds from its own `Snapshot`; see
 `jsg-test/tests/startup_snapshot.rs`.
 
+A function that `v8::Function::from_callback` creates carries over a snapshot. One that
+`v8::Function::new` creates, and a pending promise reaction, fail the zygote, as a function
+that C++ JSG wraps does: the Wrappable that owns their data has no snapshot form.
+
 ## V8 Handle Types
 
 ### `Lock<'s>` and handle scopes
