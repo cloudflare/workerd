@@ -45,6 +45,9 @@ export function previewEntries(value: unknown): PreviewedEntries | undefined;
 
 export function getConstructorName(value: unknown): string;
 
+// Makes serializing `value` throw DataCloneError.
+export function markUncloneable(value: object): void;
+
 export function isArrayBufferView(value: unknown): value is ArrayBufferView;
 export function isArgumentsObject(value: unknown): value is IArguments;
 export function isArrayBuffer(value: unknown): value is ArrayBuffer;

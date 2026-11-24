@@ -210,6 +210,16 @@ wd_test(
 )
 
 wd_test(
+    src = "perf-hooks-histogram-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "perf-hooks-histogram-golden.json",
+        "perf-hooks-histogram-nodejs-test.js",
+        "perf-hooks-histogram-scenarios.js",
+    ],
+)
+
+wd_test(
     src = "path-test.wd-test",
     args = ["--experimental"],
     data = ["path-test.js"],

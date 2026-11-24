@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 
 #include <kj/vector.h>
 
@@ -60,6 +61,11 @@ jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(
 
 jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value) {
   return js.str(value.getConstructorName());
+}
+
+void UtilModule::markUncloneable(jsg::Lock& js, jsg::JsObject value) {
+  // Any mark but a cloneable class's descriptor makes the instance uncloneable (see jsg/ser.h).
+  value.setPrivate(js, jsg::JS_SERIALIZE_MODE_KEY, js.num(0));
 }
 
 #define V(Type)                                                                                    \
