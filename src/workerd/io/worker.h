@@ -1150,11 +1150,14 @@ class Worker::Actor final: public kj::Refcounted {
   // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
   // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
   //
-  // `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's requests.
+  // `triggerContext` is the user trace that the handler runs in. Without one, the handler starts a
+  // trace of its own. `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's
+  // requests.
   kj::Promise<void> runOnHibernate(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<tracing::InvocationSpanContext> triggerContext,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
@@ -1310,6 +1313,7 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<tracing::InvocationSpanContext> triggerContext,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 };
 
