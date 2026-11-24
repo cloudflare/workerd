@@ -439,9 +439,29 @@ pub fn named_config(path: &str) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
     if !given.is_file() {
-        return Err(format!("{path}: No such file."));
+        return Err(missing_config(path));
     }
     Ok(Some(given.to_owned()))
+}
+
+/// The error for a wrangler config at `path` that does not exist, naming a wrangler config next to
+/// it under another of the names wrangler looks for, if there is one.
+fn missing_config(path: &str) -> String {
+    let given = Path::new(path);
+    let dir = given.parent().unwrap_or_else(|| Path::new(""));
+    let other = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.as_path() != given && candidate.is_file());
+    match other {
+        Some(other) if other.extension().is_some_and(|ext| ext == "toml") => format!(
+            "{path}: No such file. There is a {}, but wrangler.toml is not supported. Convert it \
+             to wrangler.jsonc.",
+            other.display()
+        ),
+        Some(other) => format!("{path}: No such file. Did you mean {}?", other.display()),
+        None => format!("{path}: No such file."),
+    }
 }
 
 /// What a wrangler config is translated into.
