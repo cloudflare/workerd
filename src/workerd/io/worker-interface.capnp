@@ -595,7 +595,7 @@ enum SerializationTag {
 
   jsSerializable @23;
   # An instance of a class implemented in JavaScript by the runtime: its "module:Export"
-  # deserializeInfo, flags and, for an error, stack, with its data following the top-level value.
+  # deserializeInfo, with its data following the top-level value.
   # Keep in sync with jsg::SERIALIZATION_TAG_JS_SERIALIZABLE in /src/workerd/jsg/ser.h, which
   # describes the format.
 

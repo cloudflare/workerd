@@ -220,12 +220,6 @@ class IsolateBase {
   // uses: looked up once per isolate, rather than once per Serializer.
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
 
-  // Returns the Error.prototype of `context`, found without making an error, which would capture
-  // a stack trace. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception
-  // pending.
-  static v8::MaybeLocal<v8::Value> getErrorPrototype(
-      v8::Isolate* isolate, v8::Local<v8::Context> context);
-
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -957,10 +951,6 @@ class IsolateBase {
 
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
-
-  // A template of an object whose one property is its context's Error.prototype, which
-  // getErrorPrototype() reads.
-  v8::Global<v8::ObjectTemplate> errorPrototypeTemplate;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;

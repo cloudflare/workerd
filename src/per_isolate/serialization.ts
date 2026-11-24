@@ -48,23 +48,23 @@
 // itself, even of a subclass: an Array, ArrayBuffer, SharedArrayBuffer,
 // typed array, DataView, Date, Map, Set, RegExp, or Boolean, Number or String
 // object is cloned as the built-in. makeCloneable() rejects a class that
-// inherits from one.
+// inherits from one, and one that inherits from Error: the deserializer makes
+// an ordinary object, never an error.
 //
 // The deserializer makes the instance from Export.prototype WITHOUT calling
-// the constructor (making a native error if it inherits from
-// Error.prototype), marks it
-// with the class's Cloneable, and calls deserialize() once the whole value
-// has been read, in the order the instances were read. So:
+// the constructor, marks it with the class's Cloneable, and calls
+// deserialize() once the whole value has been read, in the order the
+// instances were read. So:
 //
 // - Keep the state deserialize() restores under private symbols
 //   (utils.getPrivateSymbol), not #private fields, which an instance made
 //   without the constructor lacks; and brand-check it the same way, not with
 //   `#field in`.
-// - Define the instance's other properties, such as an error's `message`,
-//   with ObjectDefineProperty(), not `=`, which calls any setter on the
-//   prototype chain, where user code may have installed one: on the class's
-//   prototype if user code can reach it, or on Error.prototype. Assigning
-//   with a private symbol is safe: V8 never looks one up the prototype chain.
+// - Define the instance's other properties with ObjectDefineProperty(), not
+//   `=`, which calls any setter on the prototype chain, where user code may
+//   have installed one: on the class's prototype if user code can reach it,
+//   or on Object.prototype. Assigning with a private symbol is safe: V8 never
+//   looks one up the prototype chain.
 // - Validate the data completely: it may come from an untrusted source, such
 //   as an RPC peer, and need not be anything clone() returned. Check the type
 //   of every value read from it: over RPC, a value in the data may be a stub,
@@ -77,12 +77,6 @@
 //   have installed a getter.
 // - Don't use other objects in the data: their deserialize() may not have
 //   run yet.
-// - Leave an error's `stack` out of the data, and don't set it in
-//   deserialize(). The serializer writes it if it is a string, and the
-//   deserializer restores it, as it does a native error's, or else keeps the
-//   stack it captured, which begins with the error's name and the writer's
-//   message. Still set `message` in deserialize(): the serializer writes the
-//   message only for the stack.
 
 const {
   Array,
@@ -91,6 +85,7 @@ const {
   Boolean,
   DataView,
   Date,
+  Error,
   Map,
   Number,
   ObjectFreeze,
@@ -181,7 +176,7 @@ function isSharedArrayBufferPrototype(proto: object): boolean {
 // Returns the Cloneable with which the constructor of `ctor` marks each
 // instance: see the top of this file. An instance of a subclass is
 // serialized as one of `ctor`. Throws if `ctor` inherits from a built-in that
-// V8 serializes itself.
+// V8 serializes itself, or from Error.
 function makeCloneable<T extends object>(
   ctor: abstract new (...args: never[]) => T,
   deserializeInfo: string,
@@ -200,6 +195,11 @@ function makeCloneable<T extends object>(
       throw new TypeError(
         `${deserializeInfo} inherits from a built-in that V8 serializes ` +
           'itself, so it cannot be cloneable.'
+      );
+    }
+    if (proto === Error.prototype) {
+      throw new TypeError(
+        `${deserializeInfo} inherits from Error, so it cannot be cloneable.`
       );
     }
   }

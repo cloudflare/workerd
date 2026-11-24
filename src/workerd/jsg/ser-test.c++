@@ -236,54 +236,27 @@ struct SerTestContext: public ContextGlobalObject {
     }
   };
 
-  // Writes the record of an instance of a class implemented in JavaScript as it is given, as a
-  // peer could: its deserializeInfo, its flags and, if given, its message and its stack. The
-  // instance's data is written separately (roundTripWithData()).
+  // Writes the record of an instance of a class implemented in JavaScript, its deserializeInfo, as
+  // a peer could, without the instance's data.
   struct RawJsSerializable: public jsg::Object {
     kj::String deserializeInfo;
-    uint32_t flags;
-    kj::Maybe<JsRef<JsValue>> stack;
-    kj::Maybe<JsRef<JsValue>> message;
-    RawJsSerializable(kj::String deserializeInfo,
-        uint32_t flags,
-        kj::Maybe<JsRef<JsValue>> stack,
-        kj::Maybe<JsRef<JsValue>> message)
-        : deserializeInfo(kj::mv(deserializeInfo)),
-          flags(flags),
-          stack(kj::mv(stack)),
-          message(kj::mv(message)) {}
+    explicit RawJsSerializable(kj::String deserializeInfo)
+        : deserializeInfo(kj::mv(deserializeInfo)) {}
 
-    static jsg::Ref<RawJsSerializable> constructor(jsg::Lock& js,
-        kj::String deserializeInfo,
-        uint32_t flags,
-        jsg::Optional<JsRef<JsValue>> stack,
-        jsg::Optional<JsRef<JsValue>> message) {
-      return js.alloc<RawJsSerializable>(
-          kj::mv(deserializeInfo), flags, kj::mv(stack), kj::mv(message));
+    static jsg::Ref<RawJsSerializable> constructor(jsg::Lock& js, kj::String deserializeInfo) {
+      return js.alloc<RawJsSerializable>(kj::mv(deserializeInfo));
     }
 
     JSG_RESOURCE_TYPE(RawJsSerializable) {}
 
     void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       serializer.writeLengthDelimited(deserializeInfo);
-      serializer.writeRawUint32(flags);
-      KJ_IF_SOME(m, message) {
-        serializer.write(js, m.getHandle(js));
-      }
-      KJ_IF_SOME(s, stack) {
-        serializer.write(js, s.getHandle(js));
-      }
     }
     static jsg::Ref<RawJsSerializable> deserialize(
         Lock& js, SerializationTag tag, Deserializer& deserializer) {
       KJ_UNREACHABLE;
     }
     JSG_SERIALIZABLE(SerializationTag::JS_SERIALIZABLE);
-
-   private:
-    void visitForGc(GcVisitor& visitor) {
-      visitor.visit(stack, message);
-    }
   };
 
   // Stands in for the per-isolate bootstrap's modules: one module, "test", whose exports
@@ -361,21 +334,6 @@ struct SerTestContext: public ContextGlobalObject {
     auto first = deser.readValue(js);
     auto second = deser.readValue(js);
     return js.arr(first, second);
-  }
-
-  // Writes `raw`, a RawJsSerializable, followed by `data` as its instance's data, and reads them
-  // back, with preserveStackInErrors unless it is false.
-  JsValue roundTripWithData(
-      Lock& js, JsValue raw, JsValue data, jsg::Optional<bool> preserveStackInErrors) {
-    auto content = ({
-      Serializer ser(js);
-      ser.write(js, raw);
-      ser.write(js, data);
-      ser.release();
-    });
-    Deserializer deser(js, content,
-        Deserializer::Options{.preserveStackInErrors = preserveStackInErrors.orDefault(true)});
-    return deser.readValue(js);
   }
 
   // Writes `in`, cuts the last `drop` bytes off, and reads what is left, as a peer could send it.
@@ -502,7 +460,6 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(roundTrip);
     JSG_METHOD(roundTripStrict);
     JSG_METHOD(roundTripTwo);
-    JSG_METHOD(roundTripWithData);
     JSG_METHOD(roundTripTruncated);
     JSG_METHOD(foreignRoundTrip);
     JSG_METHOD(foreignMatchesSerializer);
@@ -784,15 +741,6 @@ constexpr kj::StringPtr JS_CLASSES = R"(
   const holderCloneable = makeCloneable(Holder, 'test:Holder', (h) => ({ value: h[kX] }),
       (h, data) => { h[kX] = data.value; });
 
-  class TestError extends Error {
-    constructor(message) { super(message); this[kMode] = testErrorCloneable; }
-  }
-  TestError.prototype.name = 'TestError';
-  const testErrorCloneable = makeCloneable(TestError, 'test:TestError', (e) => e.message,
-      (e, data) => {
-    Object.defineProperty(e, 'message', { value: data, writable: true, configurable: true });
-  });
-
   // Accepts only a number as its data.
   class Strict {
     constructor(x) { this[kMode] = strictCloneable; this[kX] = x; }
@@ -823,8 +771,8 @@ constexpr kj::StringPtr JS_CLASSES = R"(
   class NoDeserializeFunction {}
   NoDeserializeFunction.prototype[kCloneable] = descriptor('test:NoDeserializeFunction', () => 1);
 
-  setModule({ Point, Holder, TestError, Strict, Throws, NoDeserialize, NotADescriptor,
-      NoDeserializeFunction, notAFunction: 1 });
+  setModule({ Point, Holder, Strict, Throws, NoDeserialize, NotADescriptor, NoDeserializeFunction,
+      notAFunction: 1 });
 )"_kj;
 
 KJ_TEST("a deserializer that tries to run JavaScript fails the read with a DataCloneError") {
@@ -971,91 +919,13 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "log.join()",
       "string", "clone 1,clone 3,clone 2,deserialize 1,deserialize 3,deserialize 2");
 
-  // A class inheriting from Error makes native errors, with no own message until initialized.
-  expectEval("const err = roundTrip(new TestError('boom'));\n"
-             "`${err instanceof TestError} ${Object.prototype.toString.call(err)} ${err.message}`",
-      "string", "true [object Error] boom");
-
-  // Its stack is written as a native error's is, and restored as an own data property that, like
-  // the stack it replaces, is not enumerable.
-  expectEval("const e = new TestError('boom');\n"
-             "e.stack = 'sender stack';\n"
-             "const copy = roundTrip(e);\n"
-             "const { value, enumerable } = Object.getOwnPropertyDescriptor(copy, 'stack');\n"
-             "`${value} ${enumerable} ${Object.keys(copy).includes('stack')}`",
-      "string", "sender stack false false");
-  // Without one, it keeps the stack captured when it was made, whose first line, as a native
-  // error's does, gives its name and the writer's message. It is not enumerable either.
-  expectEval("const e = new TestError('boom');\n"
-             "delete e.stack;\n"
-             "const copy = roundTrip(e);\n"
-             "const { enumerable } = Object.getOwnPropertyDescriptor(copy, 'stack');\n"
-             "`${copy.stack.split('\\n')[0]} ${enumerable}`",
-      "string", "TestError: boom false");
-  // A stack that is not a string is not written, so one that refers back to the error, which a
-  // reader could not resolve, does not make the error unreadable.
-  expectEval("const e = new TestError('boom');\n"
-             "e.stack = { e };\n"
-             "roundTrip(e).stack.split('\\n')[0]",
-      "string", "TestError: boom");
-
-  // The record's flags say whether a stack follows (1), whether the writer was not using enhanced
-  // error serialization (2), and whether a message follows (4). Without preserveStackInErrors, the
-  // reader keeps the stack only with flag 2, whatever its own setting (off, here); otherwise the
-  // stack it captured begins with the record's message, not the one deserialize() sets. A stack
-  // or message of a class that doesn't inherit from Error is ignored, a stack or message that
-  // isn't a string is rejected, and so are flags this version doesn't know.
-  expectEval("const e = roundTripWithData(\n"
-             "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm');\n"
-             "`${e.stack} ${e.message}`",
-      "string", "forged stack m");
-  expectEval(
-      "const e = roundTripWithData(\n"
-      "    new RawJsSerializable('test:TestError', 5, 'forged stack', 'header'), 'm', false);\n"
-      "`${e.stack.split('\\n')[0]} ${e.stack.includes('forged')} ${e.message}`",
-      "string", "TestError: header false m");
-  expectEval("const e = roundTripWithData(\n"
-             "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm', false);\n"
-             "`${e.stack.split('\\n')[0]} ${e.message}`",
-      "string", "TestError m");
-  expectEval("const e = roundTripWithData(\n"
-             "    new RawJsSerializable('test:TestError', 3, 'forged stack'), 'm', false);\n"
-             "`${e.stack} ${e.message}`",
-      "string", "forged stack m");
-  expectEval("const p = roundTripWithData(\n"
-             "    new RawJsSerializable('test:Point', 5, 'stack', 'message'), 1);\n"
-             "`${Object.hasOwn(p, 'stack')} ${Object.hasOwn(p, 'message')} ${p.x}`",
-      "string", "false false 2");
-  expectEval("try {\n"
-             "  roundTripWithData(new RawJsSerializable('test:TestError', 4, undefined, 1), 'm');\n"
-             "} catch (e) {\n"
-             "  `${e.name}: ${e.message}`\n"
-             "}",
-      "string",
-      "DataCloneError: Deserialization failed: message of an object implemented in JavaScript is "
-      "not a string.");
-  expectEval("try {\n"
-             "  roundTripWithData(new RawJsSerializable('test:TestError', 1, {}), 'm');\n"
-             "} catch (e) {\n"
-             "  `${e.name}: ${e.message}`\n"
-             "}",
-      "string",
-      "DataCloneError: Deserialization failed: stack of an object implemented in JavaScript is "
-      "not a string.");
-  expectEval("try { roundTripWithData(new RawJsSerializable('test:Point', 8), 1); } catch (e) {\n"
-             "  `${e.name}: ${e.message}`\n"
-             "}",
-      "string",
-      "DataCloneError: Deserialization failed: unsupported object implemented in "
-      "JavaScript.");
-
-  // A record that ends too soon is a DataCloneError wherever it ends: in the flags, in the
-  // deserializeInfo, in its length, or in the tag before them. After the header and V8's host
-  // object tag, the record is its tag, the length 10, 'test:Point' and the flags, a byte each but
-  // the name. Cut off before V8's tag, it is V8's own error for malformed data.
-  for (auto drop: {1, 2, 12, 13}) {
+  // A record that ends too soon is a DataCloneError wherever it ends: in the deserializeInfo, in
+  // its length, or in the tag before them. After the header and V8's host object tag, the record
+  // is its tag, the length 10 and 'test:Point', a byte each but the name. Cut off before V8's tag,
+  // it is V8's own error for malformed data.
+  for (auto drop: {1, 11, 12}) {
     expectEval(kj::str("try {\n"
-                       "  roundTripTruncated(new RawJsSerializable('test:Point', 0), ",
+                       "  roundTripTruncated(new RawJsSerializable('test:Point'), ",
                    drop,
                    ");\n"
                    "} catch (e) {\n"
@@ -1063,7 +933,7 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
                    "}"),
         "string", "DataCloneError: Deserialization failed: the data is malformed.");
   }
-  expectEval("roundTripTruncated(new RawJsSerializable('test:Point', 0), 14)", "throws",
+  expectEval("roundTripTruncated(new RawJsSerializable('test:Point'), 13)", "throws",
       "Error: Unable to deserialize cloned data.");
 
   // Instances serialize the same with class instances otherwise not serializable, as for RPC.
@@ -1206,8 +1076,7 @@ KJ_TEST("deserialization of arbitrary classes implemented in JavaScript") {
       seed = (seed * 48271) % 2147483647;
       return seed % n;
     }
-    const names = ['test:Point', 'test:Holder', 'test:TestError', 'test:Strict', 'test:Throws',
-        'test:NoDeserialize', 'test:NotADescriptor', 'test:NoDeserializeFunction',
+    const names = ['test:Point', 'test:Holder', 'test:Strict', 'test:Throws', 'test:NoDeserialize', 'test:NotADescriptor', 'test:NoDeserializeFunction',
         'test:notAFunction', 'test:Missing', 'test:toString', 'other:Point', 'test', '', ':',
         'test:', 'test:Point:', '\0test:Point'];
     function randomName() {
@@ -1219,7 +1088,7 @@ KJ_TEST("deserialization of arbitrary classes implemented in JavaScript") {
     const values = [
       () => undefined, () => null, () => random(100), () => -0.5, () => 'x', () => ({}),
       () => [], () => ({ value: new Point(1) }), () => new Point(2), () => new Holder(null),
-      () => new Strict(3), () => new TestError('e'), () => new Error('e'), () => new Uint8Array(2),
+      () => new Strict(3), () => new Error('e'), () => new Uint8Array(2),
       () => new Map([[1, new Point(4)]]), () => new Forged(randomName(), random(10)),
       () => new Forged(randomName(), new Forged(randomName())),
     ];

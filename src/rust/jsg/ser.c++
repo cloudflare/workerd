@@ -28,10 +28,6 @@
 namespace workerd::rust::jsg {
 namespace {
 
-using ::workerd::jsg::JS_SERIALIZABLE_HAS_MESSAGE;
-using ::workerd::jsg::JS_SERIALIZABLE_HAS_STACK;
-using ::workerd::jsg::JS_SERIALIZABLE_KEEP_STACK;
-using ::workerd::jsg::JS_SERIALIZABLE_KNOWN_FLAGS;
 using ::workerd::jsg::SERIALIZATION_TAG_JS_SERIALIZABLE;
 
 // jsg::Serializer's tag for a native error written as a host object. A uint32 error tag follows:
@@ -282,8 +278,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
     // An instance of a class implemented in JavaScript is checked for first, as jsg::Serializer
-    // checks for it, since such a class may make native errors and DOMExceptions. It has no
-    // internal fields, unlike a workerd API object, and no mark is undefined.
+    // checks for it. It has no internal fields, unlike a workerd API object, and no mark is
+    // undefined.
     v8::Local<v8::Value> mark = v8::Undefined(isolate);
     if (object->InternalFieldCount() == 0 &&
         !object->GetPrivate(isolate->GetCurrentContext(), jsSerializeModeKey).ToLocal(&mark)) {
@@ -363,8 +359,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // Writes `object`, an instance of a class implemented in JavaScript whose mark is `mark`, as
   // jsg::Serializer does (SERIALIZATION_TAG_JS_SERIALIZABLE in workerd/jsg/ser.h), and queues the
   // data that its class's `clone` returns for it to follow the top-level value. Calling `clone`
-  // runs JavaScript, as can reading an error's `message` and `stack`. Returns nothing if one
-  // throws, or if the mark describes no class (a DataCloneError), leaving the exception pending.
+  // runs JavaScript. Returns nothing if it throws, or if the mark describes no class (a
+  // DataCloneError), leaving the exception pending.
   v8::Maybe<bool> writeJsSerializable(v8::Local<v8::Object> object, v8::Local<v8::Value> mark) {
     auto context = isolate->GetCurrentContext();
     JsSerializableClass* cls;
@@ -378,19 +374,10 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     if (!clone->Call(context, v8::Undefined(isolate), 1, &arg).ToLocal(&data)) {
       return v8::Nothing<bool>();
     }
-    ErrorFields error;
-    if (!getErrorFields(object).To(&error)) return v8::Nothing<bool>();
 
     ser.WriteUint32(SERIALIZATION_TAG_JS_SERIALIZABLE);
     ser.WriteUint32(static_cast<uint32_t>(deserializeInfo.size()));
     ser.WriteRawBytes(deserializeInfo.begin(), deserializeInfo.size());
-    ser.WriteUint32(error.flags);
-    if (!error.message.IsEmpty() && ser.WriteValue(context, error.message).IsNothing()) {
-      return v8::Nothing<bool>();
-    }
-    if (!error.stack.IsEmpty() && ser.WriteValue(context, error.stack).IsNothing()) {
-      return v8::Nothing<bool>();
-    }
     pendingJsSerializableData.add(isolate, data);
     return v8::Just(true);
   }
@@ -435,50 +422,6 @@ class Serializer final: public v8::ValueSerializer::Delegate {
       .clone = v8::Global<v8::Function>(isolate, clone.As<v8::Function>()),
       .deserializeInfo = toKjString(isolate, deserializeInfo.As<v8::String>()),
     }));
-  }
-
-  // What writeJsSerializable() writes of an instance's error fields: its flags, and the `message`
-  // and `stack` that they say follow.
-  struct ErrorFields {
-    uint32_t flags = 0;
-    v8::Local<v8::Value> message;
-    v8::Local<v8::Value> stack;
-  };
-
-  // Reads the error fields of `object` as jsg::Serializer does. They are those of a native error:
-  // its `message` and its own `stack`, each if it is a string. Anything else could refer back to
-  // the instance, which a reader cannot resolve while it is still reading the instance's record.
-  // Reading them can run JavaScript. Returns nothing if it throws, leaving the exception pending.
-  v8::Maybe<ErrorFields> getErrorFields(v8::Local<v8::Object> object) {
-    auto context = isolate->GetCurrentContext();
-    ErrorFields result;
-    if (!object->IsNativeError()) return v8::Just(result);
-
-    v8::Local<v8::Value> message;
-    if (!object->Get(context, newString(isolate, "message"_kj)).ToLocal(&message)) {
-      return v8::Nothing<ErrorFields>();
-    }
-    if (message->IsString()) {
-      result.flags |= JS_SERIALIZABLE_HAS_MESSAGE;
-      result.message = message;
-    }
-
-    auto stackKey = newString(isolate, "stack"_kj);
-    bool hasStack;
-    if (!object->HasOwnProperty(context, stackKey).To(&hasStack)) {
-      return v8::Nothing<ErrorFields>();
-    }
-    if (!hasStack) return v8::Just(result);
-    v8::Local<v8::Value> stack;
-    if (!object->Get(context, stackKey).ToLocal(&stack)) return v8::Nothing<ErrorFields>();
-    if (stack->IsString()) {
-      result.flags |= JS_SERIALIZABLE_HAS_STACK;
-      // Without enhanced error serialization, a native error is written in V8's own format, which
-      // keeps its stack whatever the reader's options, so this one keeps its stack too.
-      if (!errorsAreHostObjects) result.flags |= JS_SERIALIZABLE_KEEP_STACK;
-      result.stack = stack;
-    }
-    return v8::Just(result);
   }
 
   // Whether `object` carries the private property `key`, jsg::JS_SERIALIZE_MODE_KEY on an instance
@@ -621,30 +564,14 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   v8::MaybeLocal<v8::Object> readJsSerializable() {
     uint64_t size;
     const void* bytes;
-    uint32_t flags;
-    if (!deser.ReadUint64(&size) || !deser.ReadRawBytes(size, &bytes) ||
-        !deser.ReadUint32(&flags)) {
-      return throwMalformed();
-    }
+    if (!deser.ReadUint64(&size) || !deser.ReadRawBytes(size, &bytes)) return throwMalformed();
     auto deserializeInfo = kj::str(kj::arrayPtr(static_cast<const char*>(bytes), size));
-    if ((flags & ~JS_SERIALIZABLE_KNOWN_FLAGS) != 0) {
-      throwDataCloneError(
-          isolate, "Deserialization failed: unsupported object implemented in JavaScript."_kj);
-      return {};
-    }
-    v8::Local<v8::String> message;
-    v8::Local<v8::String> stack;
-    if ((flags & JS_SERIALIZABLE_HAS_MESSAGE) && !readErrorField("message"_kj, message)) return {};
-    if ((flags & JS_SERIALIZABLE_HAS_STACK) && !readErrorField("stack"_kj, stack)) return {};
 
     size_t classIndex;
     if (!findJsSerializableClass(kj::mv(deserializeInfo)).To(&classIndex)) return {};
-    // As for a native error, the instance keeps the writer's stack only if the reader keeps
-    // errors' stacks or the writer was not using enhanced error serialization.
-    if (!preserveStackInErrors && !(flags & JS_SERIALIZABLE_KEEP_STACK)) stack = {};
     auto& cls = jsSerializableClasses[classIndex];
     v8::Local<v8::Object> instance;
-    if (!newInstance(cls, message, stack).ToLocal(&instance)) return {};
+    if (!newInstance(cls).ToLocal(&instance)) return {};
     // It was cloneable when written, and so is the copy.
     auto modeKey =
         v8::Private::ForApi(isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY));
@@ -659,35 +586,12 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     return instance;
   }
 
-  // Reads the `message` or `stack`, named by `field`, of an instance of a class implemented in
-  // JavaScript into `string`. Returns false if reading it throws, or it is not a string (a
-  // DataCloneError), leaving the exception pending.
-  bool readErrorField(kj::StringPtr field, v8::Local<v8::String>& string) {
-    v8::Local<v8::Value> value;
-    if (!::workerd::jsg::readValueInHostObject(isolate, deser).ToLocal(&value)) return false;
-    if (!value->IsString()) {
-      throwDataCloneError(isolate,
-          kj::str("Deserialization failed: ", field,
-              " of an object implemented in JavaScript is not a string."));
-      return false;
-    }
-    string = value.As<v8::String>();
-    return true;
-  }
-
   // A class implemented in JavaScript that findJsSerializableClass() found.
   struct JsSerializableClass {
     kj::String deserializeInfo;
     v8::Global<v8::Object> prototype;
     v8::Global<v8::Object> descriptor;
     v8::Global<v8::Function> deserialize;
-    // What readJsSerializable() makes the class's instances as, which the prototype decides.
-    enum class Kind : uint8_t {
-      OBJECT,
-      // The prototype inherits from Error.prototype.
-      NATIVE_ERROR,
-    };
-    Kind kind;
   };
 
   // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or throws
@@ -748,65 +652,21 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     }
     if (deserialize.IsEmpty() || !deserialize->IsFunction()) return v8::Just<Result>(kj::none);
 
-    JsSerializableClass::Kind kind;
-    if (!kindOf(prototype.As<v8::Object>()).To(&kind)) return v8::Nothing<Result>();
     return v8::Just<Result>(JsSerializableClass{
       .prototype = v8::Global<v8::Object>(isolate, prototype.As<v8::Object>()),
       .descriptor = v8::Global<v8::Object>(isolate, descriptor.As<v8::Object>()),
       .deserialize = v8::Global<v8::Function>(isolate, deserialize.As<v8::Function>()),
-      .kind = kind,
     });
   }
 
-  // What readJsSerializable() makes the instances of a class whose prototype is `prototype` as,
-  // as jsg::Deserializer decides. Runs no JavaScript: V8 calls no Proxy trap to read a private
-  // property, and a Proxy ends the prototype chain. Returns nothing if V8 throws, leaving the
-  // exception pending.
-  v8::Maybe<JsSerializableClass::Kind> kindOf(v8::Local<v8::Object> prototype) {
-    using Kind = JsSerializableClass::Kind;
-    auto context = isolate->GetCurrentContext();
-    v8::Local<v8::Value> errorPrototype;
-    if (!::workerd::jsg::IsolateBase::getErrorPrototype(isolate, context)
-             .ToLocal(&errorPrototype)) {
-      return v8::Nothing<Kind>();
-    }
-    for (v8::Local<v8::Value> current = prototype; current->IsObject();
-         current = current.As<v8::Object>()->GetPrototype()) {
-      if (current == errorPrototype) return v8::Just(Kind::NATIVE_ERROR);
-    }
-    return v8::Just(Kind::OBJECT);
-  }
-
   // What calling the constructor of `cls` would make, minus whatever the constructor does, which
-  // the class's `deserialize` does: a native error, if the kind of the class says so, or else an
-  // object, whose prototype is the class's. An error's `stack` is `stack` if it is given, or else
-  // the one V8 captures now, and either way not enumerable. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception pending.
-  v8::MaybeLocal<v8::Object> newInstance(
-      const JsSerializableClass& cls, v8::Local<v8::String> message, v8::Local<v8::String> stack) {
-    using Kind = JsSerializableClass::Kind;
-    auto context = isolate->GetCurrentContext();
-    auto prototype = cls.prototype.Get(isolate);
-    v8::Local<v8::Object> instance;
-    switch (cls.kind) {
-      case Kind::NATIVE_ERROR:
-        // The message is what the stack captured now begins with, after the error's name, as for a
-        // native error.
-        instance = v8::Exception::Error(message.IsEmpty() ? v8::String::Empty(isolate) : message)
-                       .As<v8::Object>();
-        // Error() always gives the error an own `message`, which a class's instance does not have
-        // until it is initialized.
-        if (instance->Delete(context, newString(isolate, "message"_kj)).IsNothing()) return {};
-        break;
-      case Kind::OBJECT:
-        // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
-        // given a new prototype, as by Object.setPrototypeOf(), keeps fast properties.
-        instance = v8::Object::New(isolate);
-        break;
-    }
-    if (instance->SetPrototype(context, prototype).IsNothing()) return {};
-    if (cls.kind == Kind::OBJECT) return instance;
-    if (!stack.IsEmpty() &&
-        instance->DefineOwnProperty(context, newString(isolate, "stack"_kj), stack, v8::DontEnum)
+  // the class's `deserialize` does: an object whose prototype is the class's. Runs no JavaScript.
+  // Returns nothing if V8 throws, leaving the exception pending.
+  v8::MaybeLocal<v8::Object> newInstance(const JsSerializableClass& cls) {
+    // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
+    // given a new prototype, as by Object.setPrototypeOf(), keeps fast properties.
+    auto instance = v8::Object::New(isolate);
+    if (instance->SetPrototype(isolate->GetCurrentContext(), cls.prototype.Get(isolate))
             .IsNothing()) {
       return {};
     }

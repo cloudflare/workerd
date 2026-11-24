@@ -31,13 +31,6 @@ constexpr uint32_t DOM_EXCEPTION_HAS_STACK = 1;
 constexpr uint32_t QUOTA_EXCEEDED_ERROR_HAS_QUOTA = 1;
 constexpr uint32_t QUOTA_EXCEEDED_ERROR_HAS_REQUESTED = 2;
 
-// The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see Serializer).
-constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
-constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
-constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
-constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
-    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
-
 // The names of the V8 private properties of the protocol by which classes implemented in
 // JavaScript are serialized (see Serializer). src/per_isolate/serialization.ts uses the same names.
 constexpr kj::StringPtr JS_SERIALIZE_MODE_KEY = "workerd:serializeMode"_kj;
@@ -148,26 +141,16 @@ WD_STRONG_BOOL(EnhancedErrorSerialization);
 //   prototype is Object.prototype or null is not checked for the property, which keeps plain
 //   objects cheap, so it is never an instance. Nor is an instance of a built-in that V8
 //   serializes itself, such as a Map, even of a subclass: V8 never offers it to the Serializer.
+//   Nor is an error: makeCloneable() rejects a class that inherits from Error.
 //
-// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
-// of flags, followed, if it is a native error, by its `message` (flag 4) and its own `stack`
-// (flag 1), each if it is a string. Flag 2 says that the writer was not using enhanced error
-// serialization. A reader rejects flags it doesn't know, so that later versions can add fields.
-// The instance's `data` follows the top-level value (as in Node.js), so that it can refer back to
-// the instance.
+// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE and its `deserializeInfo`. The
+// instance's `data` follows the top-level value (as in Node.js), so that it can refer back to the
+// instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
 // constructor's `prototype` without calling the constructor, marks it with the descriptor, and
 // calls `deserialize`, in the order the instances were read, once the top-level value and every
-// instance's `data` have been read. If the prototype inherits from Error.prototype, the instance
-// is a native error. The data may come from an untrusted source, so `deserialize` validates it.
-//
-// The deserializer, not the class, decides whether an error made this way keeps the writer's
-// stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
-// whenever the writer was not using enhanced error serialization (flag 2), as a native error that
-// such a writer writes in V8's own format does. Otherwise it keeps the stack captured when it was
-// made, whose first line gives the error's name and the writer's message, as a native error's
-// does. Either way, `stack` is not enumerable. The message is only for the stack: `deserialize`
-// sets the instance's `message`. A class does not serialize `stack` itself.
+// instance's `data` have been read. The data may come from an untrusted source, so `deserialize`
+// validates it.
 //
 // A `deserializeInfo` is part of the format, which persisted data depends on.
 class Serializer final: v8::ValueSerializer::Delegate {
@@ -536,13 +519,6 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     V8Ref<v8::Object> prototype;
     V8Ref<v8::Object> descriptor;
     V8Ref<v8::Function> deserialize;
-    // What readJsSerializable() makes the class's instances as, which the prototype decides.
-    enum class Kind : uint8_t {
-      OBJECT,
-      // The prototype inherits from Error.prototype.
-      NATIVE_ERROR,
-    };
-    Kind kind;
   };
 
   // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or
@@ -593,8 +569,6 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   uint readDepth = 0;
   // Whether finishRead() is calling the callbacks that afterRead() was given, which must give none.
   bool callingAfterReadCallbacks = false;
-  // Error.prototype of the current context, once findJsSerializableClass() needs it.
-  kj::Maybe<V8Ref<v8::Value>> errorPrototype;
   // The classes that findJsSerializableClass() has found during the current top-level
   // readValue(). No JavaScript runs while it reads, so none of them can change before it ends.
   kj::Vector<JsSerializableClass> jsSerializableClasses;
