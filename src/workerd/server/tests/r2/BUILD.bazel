@@ -7,6 +7,12 @@ wd_test(
     data = ["r2-test.js"],
 )
 
+wd_test(
+    src = "r2-listing-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-listing-test.js"],
+)
+
 # `workerd serve` of a wrangler.jsonc's r2_buckets.
 js_test(
     name = "r2-wrangler-test",
