@@ -46,6 +46,8 @@ const dataAtTopLevel = env.DATA;
 let controller = null;
 let params = null;
 let kept = null;
+let blob = null;
+let file = null;
 // The C++ streams cases: a promise the top level leaves pending, and the stream parked on it.
 let gate = null;
 let resolveGate = null;
@@ -71,6 +73,13 @@ switch (MODE) {
     // A decoder with the first byte of a two-byte character pending.
     kept = new TextDecoder();
     kept.decode(new Uint8Array([0xc3]), { stream: true });
+    break;
+  case 'blob':
+    // The TypeScript Blob and File (the TS_BLOB autogate) are JavaScript objects whose state is
+    // under V8-private properties, and travel. The C++ ones have no snapshot transfer.
+    blob = new Blob(['abc'], { type: 'A/B' });
+    file = new File([blob, 'd'], 'f.txt', { type: 't/x', lastModified: 7 });
+    kept = blob.slice(1);
     break;
   case 'searchparams':
     // The C++ URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
@@ -221,6 +230,40 @@ async function checks() {
       result.paramsShared =
         params === url.searchParams && url.search === '?query=string&x=2';
       break;
+    case 'blob': {
+      result.blob =
+        blob instanceof Blob &&
+        blob.type === 'a/b' &&
+        blob.size === 3 &&
+        (await blob.text()) === 'abc';
+      result.file =
+        file instanceof File &&
+        file.name === 'f.txt' &&
+        file.type === 't/x' &&
+        file.lastModified === 7 &&
+        (await file.text()) === 'abcd';
+      result.slice = (await kept.text()) === 'bc';
+      // C++ reads and makes them through api/blob-bridge.h.
+      const response = new Response(blob);
+      result.blobBody =
+        response.headers.get('content-type') === 'a/b' &&
+        (await response.text()) === 'abc';
+      const form = new FormData();
+      form.append('f', file);
+      form.append('b', blob, 'b.txt');
+      result.formData =
+        form.get('f') === file &&
+        form.get('b').name === 'b.txt' &&
+        (await form.get('b').text()) === 'abc';
+      result.clone = (await structuredClone(blob).text()) === 'abc';
+      try {
+        structuredClone(file);
+        result.fileUncloneable = false;
+      } catch (e) {
+        result.fileUncloneable = e.name === 'DataCloneError';
+      }
+      break;
+    }
     case 'midstream-decoder':
       result.midStreamDecoder = kept.decode(new Uint8Array([0xa9])) === 'é';
       break;
@@ -350,6 +393,10 @@ async function test(ctrl, env) {
   const tsUrl = !Function.prototype.toString
     .call(URL)
     .includes('[native code]');
+  // The same for Blob (the TS_BLOB autogate), which decides whether the blob case can be carried.
+  const tsBlob = !Function.prototype.toString
+    .call(Blob)
+    .includes('[native code]');
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
@@ -374,11 +421,13 @@ async function test(ctrl, env) {
     // (src/rust/api/url.rs) marked snapshot_stateless.
     'fs',
     ...(tsUrl ? ['searchparams'] : []),
+    ...(tsBlob ? ['blob'] : []),
   ];
   // Cases that fail the zygote: always plain Workers.
   const fallback = [
     'unclonable',
     ...(tsUrl ? [] : ['searchparams']),
+    ...(tsBlob ? [] : ['blob']),
     'midstream-decoder',
     // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
     'cpp-streams-pending-pull',

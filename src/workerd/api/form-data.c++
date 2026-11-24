@@ -66,34 +66,26 @@ constexpr auto contentDispositionParam = p::sequence(p::exactChar<';'>(),
 constexpr auto contentDisposition = p::sequence(
     p::discardWhitespace, httpIdentifier, p::discardWhitespace, p::many(contentDispositionParam));
 
-kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
+kj::OneOf<JsFile, kj::String> blobToFile(jsg::Lock& js,
     kj::StringPtr name,
-    kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+    kj::OneOf<JsBlob, kj::String> value,
     jsg::Optional<kj::String> filename) {
-  auto fromBlob = [&](jsg::Ref<Blob> blob) {
-    kj::String fn;
-    KJ_IF_SOME(f, filename) {
-      fn = kj::mv(f);
-    } else {
-      fn = kj::str(name);
-    }
-    // The file is created with the same data as the blob (essentially as just
-    // a view of the same blob) to avoid copying the data.
-    return js.alloc<File>(
-        js, blob.addRef(), blob->getData(js), kj::mv(fn), kj::str(blob->getType()), dateNow());
-  };
-
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(file, jsg::Ref<File>) {
+    KJ_CASE_ONEOF(blob, JsBlob) {
       if (filename == kj::none) {
-        return kj::mv(file);
-      } else {
-        // Need to substitute filename.
-        return fromBlob(kj::mv(file));
+        KJ_IF_SOME(file, blob.tryGetFile(js)) {
+          return kj::mv(file);
+        }
       }
-    }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      return fromBlob(kj::mv(blob));
+      // A File is made with the same data as the blob (essentially as just a view of the same
+      // blob), with the filename substituted, to avoid copying the data.
+      kj::String fn;
+      KJ_IF_SOME(f, filename) {
+        fn = kj::mv(f);
+      } else {
+        fn = kj::str(name);
+      }
+      return JsFile::fromBlob(js, blob, kj::mv(fn));
     }
     KJ_CASE_ONEOF(string, kj::String) {
       return kj::mv(string);
@@ -272,7 +264,7 @@ void FormData::parse(jsg::Lock& js,
           } else {
             auto bytes = jsg::JsArrayBuffer::create(js, message);
             data.add(FormData::Entry{.name = kj::str(name),
-              .value = js.alloc<File>(js, jsg::JsBufferSource(bytes), kj::str(filename),
+              .value = JsFile::create(js, jsg::JsBufferSource(bytes), kj::str(filename),
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {
@@ -328,18 +320,18 @@ kj::Array<kj::byte> FormData::serialize(jsg::Lock& js, kj::ArrayPtr<const char> 
         builder.addAll("\"\r\n\r\n"_kj);
         builder.addAll(text);
       }
-      KJ_CASE_ONEOF(file, jsg::Ref<File>) {
+      KJ_CASE_ONEOF(file, JsFile) {
         builder.addAll("\"; filename=\""_kj);
-        addEscapingQuotes(builder, file->getName());
+        addEscapingQuotes(builder, file.getName(js));
         builder.addAll("\"\r\nContent-Type: "_kj);
-        auto type = file->getType();
+        auto type = file.getType(js);
         if (type == nullptr) {
           builder.addAll(MimeType::OCTET_STREAM.toString());
         } else {
           builder.addAll(type);
         }
         builder.addAll("\r\n\r\n"_kj);
-        builder.addAll(file->getData(js).asChars());
+        builder.addAll(file.getData(js).asChars());
       }
     }
     builder.addAll("\r\n"_kj);
@@ -353,8 +345,8 @@ kj::Array<kj::byte> FormData::serialize(jsg::Lock& js, kj::ArrayPtr<const char> 
 
 FormData::EntryType FormData::clone(jsg::Lock& js, FormData::EntryType& value) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(file, jsg::Ref<File>) {
-      return file.addRef();
+    KJ_CASE_ONEOF(file, JsFile) {
+      return file.addRef(js);
     }
     KJ_CASE_ONEOF(string, kj::String) {
       auto data = kj::heapArray<char>(string);
@@ -370,7 +362,7 @@ jsg::Ref<FormData> FormData::constructor(jsg::Lock& js) {
 
 void FormData::append(jsg::Lock& js,
     kj::String name,
-    kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+    kj::OneOf<JsBlob, kj::String> value,
     jsg::Optional<kj::String> filename) {
   auto filifiedValue = blobToFile(js, name, kj::mv(value), kj::mv(filename));
   data.add(Entry{kj::mv(name), kj::mv(filifiedValue)});
@@ -382,7 +374,7 @@ void FormData::delete_(kj::String name) {
   data.truncate(pivot - data.begin());
 }
 
-kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(jsg::Lock& js, kj::String name) {
+kj::Maybe<kj::OneOf<JsFile, kj::String>> FormData::get(jsg::Lock& js, kj::String name) {
   for (auto& [k, v]: data) {
     if (k == name) {
       return clone(js, v);
@@ -391,8 +383,8 @@ kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(jsg::Lock& js, kj
   return kj::none;
 }
 
-kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(jsg::Lock& js, kj::String name) {
-  kj::Vector<kj::OneOf<jsg::Ref<File>, kj::String>> result;
+kj::Array<kj::OneOf<JsFile, kj::String>> FormData::getAll(jsg::Lock& js, kj::String name) {
+  kj::Vector<kj::OneOf<JsFile, kj::String>> result;
   for (auto& [k, v]: data) {
     if (k == name) {
       result.add(clone(js, v));
@@ -413,7 +405,7 @@ bool FormData::has(kj::String name) {
 // Set the first element named `name` to `value`, then remove all the rest matching that name.
 void FormData::set(jsg::Lock& js,
     kj::String name,
-    kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+    kj::OneOf<JsBlob, kj::String> value,
     jsg::Optional<kj::String> filename) {
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
   auto firstFound = std::find_if(data.begin(), data.end(), predicate);

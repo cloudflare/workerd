@@ -1621,7 +1621,7 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
             if (binaryType_ == BinaryType::BLOB) {
               // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
               auto ab = jsg::JsArrayBuffer::create(js, data);
-              auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
+              auto blob = JsBlob::create(js, jsg::JsBufferSource(ab), kj::str());
               dispatchWithFailFast(js, shell,
                   js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob), kj::String(),
                       kj::none, kj::none, Trusted::YES));

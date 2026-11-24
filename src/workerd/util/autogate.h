@@ -118,6 +118,10 @@ namespace workerd::util {
   /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
      performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
   V(TS_PERFORMANCE_NOW)                                                                            \
+  /* Blob and File are the TypeScript implementations from the per-isolate bootstrap               \
+     (src/per_isolate/blob/) rather than the C++ classes in api/blob.h. C++ takes and makes        \
+     them through api/blob-bridge.h, and both serialize alike. */                                  \
+  V(TS_BLOB)                                                                                       \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

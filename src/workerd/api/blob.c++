@@ -403,17 +403,29 @@ jsg::Ref<File> File::constructor(
   return js.alloc<File>(kj::mv(name), kj::mv(type), lastModified);
 }
 
-void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+namespace {
+void writeBlob(jsg::Serializer& serializer, kj::StringPtr type, kj::ArrayPtr<const byte> bytes) {
   // TODO(perf): For JSRPC, copying the data is necessary. For
   // structuredClone, we should find a way for the clones to
   // just share the same backend data to avoid the copy.
   serializer.writeLengthDelimited(type);
-  auto bytes = getData(js);
   serializer.writeRawUint64(bytes.size());
   serializer.writeRawBytes(bytes);
 }
+}  // namespace
 
-jsg::Ref<Blob> Blob::deserialize(
+void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  writeBlob(serializer, type, getData(js));
+}
+
+void Blob::serializeStandIn(
+    jsg::Lock& js, v8::Local<v8::Object> instance, jsg::Serializer& serializer) {
+  auto blob = KJ_ASSERT_NONNULL(JsBlob::tryUnwrap(js, jsg::JsValue(instance)),
+      "a stand-in for a Blob is not a TypeScript Blob");
+  writeBlob(serializer, blob.getType(js), blob.getData(js));
+}
+
+JsBlob Blob::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto type = normalizeType(deserializer.readLengthDelimitedString());
 
@@ -424,12 +436,12 @@ jsg::Ref<Blob> Blob::deserialize(
       size, ")");
 
   if (size == 0) {
-    return js.alloc<Blob>(kj::mv(type));
+    return JsBlob::createEmpty(js, kj::mv(type));
   }
 
   auto bytes = deserializer.readRawBytes(size);
   auto ab = jsg::JsArrayBuffer::create(js, bytes);
-  return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(type));
+  return JsBlob::create(js, jsg::JsBufferSource(ab), kj::mv(type));
 }
 
 }  // namespace workerd::api

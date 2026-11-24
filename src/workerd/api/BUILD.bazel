@@ -14,6 +14,7 @@ filegroup(
         "actor-state.c++",
         "basics.c++",
         "blob.c++",
+        "blob-bridge.c++",
         "bootstrap-utils.c++",
         "cache.c++",
         "container.c++",
@@ -75,6 +76,7 @@ filegroup(
         "actor-state.h",
         "basics.h",
         "blob.h",
+        "blob-bridge.h",
         "bootstrap-utils.h",
         "cache.h",
         "cache-context-ref.h",
@@ -822,6 +824,14 @@ kj_test(
 
 kj_test(
     src = "serialization-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "blob-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

@@ -15,7 +15,7 @@ namespace workerd::api {
 // https://xhr.spec.whatwg.org/#interface-formdata
 class FormData: public jsg::Object {
 private:
-  using EntryType = kj::OneOf<jsg::Ref<File>, kj::String>;
+  using EntryType = kj::OneOf<JsFile, kj::String>;
   using EntryIteratorType = kj::Array<EntryType>;
   using KeyIteratorType = kj::String;
   using ValueIteratorType = EntryType;
@@ -71,12 +71,12 @@ public:
 
   struct Entry {
     kj::String name;
-    kj::OneOf<jsg::Ref<File>, kj::String> value;
+    kj::OneOf<JsFile, kj::String> value;
 
     JSG_MEMORY_INFO(Entry) {
       tracker.trackField("name", name);
       KJ_SWITCH_ONEOF(value) {
-        KJ_CASE_ONEOF(file, jsg::Ref<File>) {
+        KJ_CASE_ONEOF(file, JsFile) {
           tracker.trackField("value", file);
         }
         KJ_CASE_ONEOF(str, kj::String) {
@@ -97,19 +97,19 @@ public:
   static jsg::Ref<FormData> constructor(jsg::Lock& js);
 
   void append(jsg::Lock& js, kj::String name,
-              kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+              kj::OneOf<JsBlob, kj::String> value,
               jsg::Optional<kj::String> filename);
 
   void delete_(kj::String name);
 
-  kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> get(jsg::Lock& js, kj::String name);
+  kj::Maybe<kj::OneOf<JsFile, kj::String>> get(jsg::Lock& js, kj::String name);
 
-  kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> getAll(jsg::Lock& js, kj::String name);
+  kj::Array<kj::OneOf<JsFile, kj::String>> getAll(jsg::Lock& js, kj::String name);
 
   bool has(kj::String name);
 
   void set(jsg::Lock& js, kj::String name,
-           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+           kj::OneOf<JsBlob, kj::String> value,
            jsg::Optional<kj::String> filename);
 
   JSG_ITERATOR(EntryIterator, entries,
@@ -186,6 +186,14 @@ public:
   }
 
 private:
+  void visitForGc(jsg::GcVisitor& visitor) {
+    for (auto& entry: data) {
+      KJ_IF_SOME(file, entry.value.tryGet<JsFile>()) {
+        visitor.visit(file);
+      }
+    }
+  }
+
   kj::Vector<Entry> data;
 
   // Tracks heap used by parsed URL-encoded entries so V8's per-isolate memory limit can

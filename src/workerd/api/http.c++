@@ -108,13 +108,13 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     KJ_CASE_ONEOF(bytesRef, jsg::JsRef<jsg::JsBufferSource>) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(bytesRef)));
     }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+    KJ_CASE_ONEOF(blob, JsBlob) {
       // Blobs always have a type, but it defaults to an empty string. We should NOT set
       // Content-Type when the blob type is empty.
       kj::Maybe<kj::String> contentType;
-      kj::StringPtr blobType = blob->getType();
+      kj::String blobType = blob.getType(js);
       if (blobType != nullptr) {
-        contentType = kj::str(blobType);
+        contentType = kj::mv(blobType);
       }
       return ExtractedBody(js, JsReadableStream(js, kj::mv(blob)), kj::mv(contentType));
     }
@@ -278,7 +278,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
   return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
 }
 
-jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
+jsg::Promise<JsBlob> Body::blob(jsg::Lock& js) {
   // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
@@ -294,7 +294,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
       }).orDefault(nullptr);
     }
 
-    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
+    return JsBlob::create(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }
 

@@ -2,6 +2,7 @@
 
 #include "basics.h"
 
+#include <workerd/api/blob-bridge.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 
@@ -152,7 +153,7 @@ class MessageEvent final: public Event {
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
-      kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
+      kj::OneOf<jsg::JsRef<jsg::JsValue>, JsBlob> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<messageevent::MessagePort> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
@@ -200,7 +201,7 @@ class MessageEvent final: public Event {
   static jsg::Ref<MessageEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer);
 
-  kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
+  kj::OneOf<jsg::JsValue, JsBlob> getData(jsg::Lock& js);
 
   kj::Maybe<kj::StringPtr> getOrigin();
 
@@ -234,7 +235,7 @@ class MessageEvent final: public Event {
 
  private:
   // Blob is used only by web-socket.h/c++
-  kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
+  kj::OneOf<jsg::JsRef<jsg::JsValue>, JsBlob> data;
   kj::String lastEventId;
   kj::Maybe<messageevent::MessagePort> maybeSource;
   kj::Maybe<kj::String> maybeOrigin;

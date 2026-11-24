@@ -107,6 +107,7 @@ declare const utils: {
   isArrayBufferView(value: unknown): value is ArrayBufferView;
   isDataView(value: unknown): value is DataView;
   isPromise(value: unknown): value is Promise<unknown>;
+  isProxy(value: unknown): boolean;
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
@@ -264,6 +265,20 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The largest Blob the isolate allows, in bytes.
+  blobSizeLimit(): number;
+  // A ReadableStream over a copy of `bytes`, as the C++ Blob's stream() makes
+  // one. Throws outside a request.
+  blobStream(bytes: Uint8Array): ReadableStream<Uint8Array>;
+  // Records a use of a Blob's contents with the FeatureObserver: 0 for
+  // arrayBuffer() or bytes(), 1 for text(), 2 for stream().
+  recordBlobUse(kind: 0 | 1 | 2): void;
+  // Whether a BufferSource's buffer is resizable or growable by user code
+  // (JsBufferSource::isResizable()).
+  isResizableBufferSource(value: ArrayBuffer | ArrayBufferView): boolean;
+  // A string's bytes as JSG makes a kj::String of it: WTF-8, a lone
+  // surrogate as its own three bytes.
+  encodeWtf8(value: string): Uint8Array;
   // The structured clone of `value` (jsg::structuredClone), transferring the
   // objects in `transfer`, a dense array the caller built. The native
   // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,

@@ -1104,8 +1104,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       }
     }
 
-    JSG_NESTED_TYPE(Blob);
-    JSG_NESTED_TYPE(File);
+    // Under the TS_BLOB autogate, the per-isolate bootstrap installs the TypeScript Blob and File
+    // instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_BLOB)) {
+      JSG_NESTED_TYPE(Blob);
+      JSG_NESTED_TYPE(File);
+    }
     JSG_NESTED_TYPE(FormData);
 
     JSG_NESTED_TYPE(Crypto);

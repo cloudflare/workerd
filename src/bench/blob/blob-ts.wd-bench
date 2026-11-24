@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the Blob benchmarks against the TypeScript implementation
+# (src/per_isolate/blob/). No compatibilityDate, so that the variants supply
+# it: the oldest date has the legacy layout, with the attributes as own
+# properties of each instance.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "blob-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "blob.js")],
+        compatibilityFlags = ["formdata_parser_supports_files"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-blob"],
+);

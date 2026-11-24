@@ -96,6 +96,14 @@ JsValue JsObject::getPrivate(Lock& js, kj::StringPtr name) {
   return JsValue(check(inner->GetPrivate(js.v8Context(), p)));
 }
 
+void JsObject::setPrivate(Lock& js, v8::Local<v8::Private> key, const JsValue& value) {
+  check(inner->SetPrivate(js.v8Context(), key, value.inner));
+}
+
+JsValue JsObject::getPrivate(Lock& js, v8::Local<v8::Private> key) {
+  return JsValue(check(inner->GetPrivate(js.v8Context(), key)));
+}
+
 bool JsObject::hasPrivate(Lock& js, kj::StringPtr name) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   return check(inner->HasPrivate(js.v8Context(), p));

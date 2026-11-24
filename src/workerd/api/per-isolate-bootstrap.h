@@ -120,6 +120,19 @@ jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
     jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name);
 
+// What C++ that reads the bootstrap's state often derives from it once per context, such as the
+// V8-private keys and the exports it reads on every call. It is destroyed with the bootstrap
+// state (cleanupPerIsolateBootstrap()), under the isolate lock, so it may hold handles.
+class BootstrapCache {
+ public:
+  virtual ~BootstrapCache() noexcept(false) = default;
+};
+
+// The cache whose key is `key` (the address of something of the caller's own) for the current
+// context, made by `create` the first time. None if the context has no bootstrap state.
+kj::Maybe<BootstrapCache&> tryGetBootstrapCache(
+    jsg::Lock& js, const void* key, kj::FunctionParam<kj::Own<BootstrapCache>()> create);
+
 // Makes `exports` the exports of the bootstrap module `specifier`, as though the module had been
 // required, so that a test can define classes that the deserializer finds by their
 // deserializeInfo.

@@ -125,7 +125,12 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   are constants, neither writable nor configurable, as freezing it makes them.
 // * An instance carries a mark under JS_SERIALIZE_MODE_KEY. If the instance is cloneable, the mark
 //   is its class's descriptor, so the class that marked an instance decides how it is written,
-//   whatever its prototype is now. Any other mark makes serializing it throw DataCloneError,
+//   whatever its prototype is now. If the mark is a positive integer, the instance stands in for
+//   the JSG_SERIALIZABLE type whose tag that is, and is written as an instance of that type is,
+//   by the type's serializeStandIn() (see HasSerializeStandIn in resource.h): the reader makes
+//   whatever that type's deserialize() makes. This is how a class that replaces a C++ class
+//   under a flag keeps the C++ class's format, which readers without the flag must read. Any
+//   other mark makes serializing it throw DataCloneError,
 //   unless the ExternalHandler serializes it (trySerializeClassInstance()). An object whose
 //   prototype is Object.prototype or null is not checked for the property, which keeps plain
 //   objects cheap, so it is never an instance. Nor is an instance of a built-in that V8

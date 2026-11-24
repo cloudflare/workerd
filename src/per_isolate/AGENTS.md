@@ -30,6 +30,9 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_BLOB` autogate, `main.ts` installs the TypeScript `Blob`
+  and `File` (`blob/`), which replace the C++ ones (`api/blob.h`); see
+  `blob/AGENTS.md`.
 - Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
   TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
   the native `utils.structuredClone()`), which replaces the C++ method; its
@@ -49,6 +52,7 @@ at context creation, before any user code. C++ entry point:
   TypeScript `performance.now()`/`timeOrigin`; see `performance/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
+- Shared type checks (`isObject()`) come from `type-checks`, a leaf.
 - Modules get `DOMException` from `require('dom-exception')`, which
   `main.ts` loads first, not from the global or `primordials`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob

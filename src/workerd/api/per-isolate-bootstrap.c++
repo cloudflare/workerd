@@ -131,6 +131,8 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // Functions found by tryGetBootstrapFunction(), by module specifier, then name.
   kj::HashMap<kj::String, kj::HashMap<kj::String, jsg::JsRef<jsg::JsFunction>>> functionCache;
   kj::HashSet<kj::String> loading;
+  // See tryGetBootstrapCache().
+  kj::HashMap<const void*, kj::Own<BootstrapCache>> caches;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
   jsg::JsRef<jsg::JsObject> utilsObj;
@@ -150,6 +152,7 @@ struct BootstrapState final: public jsg::BootstrapModules {
   V(ArrayBufferView)                                                                               \
   V(DataView)                                                                                      \
   V(Promise)                                                                                       \
+  V(Proxy)                                                                                         \
   V(SharedArrayBuffer)                                                                             \
   V(Uint8Array)
 
@@ -453,6 +456,53 @@ static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args)
   });
 }
 
+static void BlobSizeLimit(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.num(api::BootstrapUtils::blobSizeLimit(js));
+  });
+}
+
+static void BlobStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::blobStream(js, jsg::JsValue(args[0])));
+  });
+}
+
+// Whether a BufferSource's buffer can be resized or grown by user code, as JsBufferSource reports
+// it: a resizable ArrayBuffer, a growable SharedArrayBuffer, or a view over either.
+static void IsResizableBufferSource(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto source = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsBufferSource>(),
+        TypeError, "isResizableBufferSource() expects a BufferSource");
+    return js.boolean(source.isResizable());
+  });
+}
+
+// A string's bytes as JSG makes a kj::String of it (JsString::toString()): WTF-8, so a lone
+// surrogate is written as its own three bytes.
+static void EncodeWtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    JSG_REQUIRE(args[0]->IsString(), TypeError, "encodeWtf8() expects a string");
+    auto string = args[0].As<v8::String>();
+    auto bytes = jsg::JsUint8Array::create(js, string->Utf8Length(js.v8Isolate));
+    auto out = bytes.asArrayPtr().asChars();
+    string->WriteUtf8(js.v8Isolate, out.begin(), out.size(), v8::String::WriteFlags::kNone);
+    return v8::Local<v8::Value>(bytes);
+  });
+}
+
+static void RecordBlobUse(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    api::BootstrapUtils::recordBlobUse(js, jsg::JsValue(args[0]));
+    return v8::Local<v8::Value>(js.undefined());
+  });
+}
+
 // Structured-clones a MessagePort message as postMessage() does: serializes it (which can throw
 // a DataCloneError, and runs any getters on it), rejects a SharedArrayBuffer anywhere in it, and
 // returns the deserialized copy.
@@ -736,6 +786,11 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "readableStreamState",
+    "blobSizeLimit",
+    "blobStream",
+    "recordBlobUse",
+    "isResizableBufferSource",
+    "encodeWtf8",
     "DOMExceptionBase",
     "structuredClone",
     "performanceNow",
@@ -800,6 +855,11 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
+    getMethod(js, BlobSizeLimit),
+    getMethod(js, BlobStream),
+    getMethod(js, RecordBlobUse),
+    getMethod(js, IsResizableBufferSource),
+    getMethod(js, EncodeWtf8),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
     getMethod(js, StructuredClone),
     performanceNow,
@@ -1340,6 +1400,15 @@ kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
         return func;
       }
     }
+  }
+  return kj::none;
+}
+
+kj::Maybe<BootstrapCache&> tryGetBootstrapCache(
+    jsg::Lock& js, const void* key, kj::FunctionParam<kj::Own<BootstrapCache>()> create) {
+  KJ_IF_SOME(state, tryGetBootstrapState(js.v8Context())) {
+    return *state.caches.findOrCreate(
+        key, [&]() -> decltype(state.caches)::Entry { return {key, create()}; });
   }
   return kj::none;
 }

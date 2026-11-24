@@ -844,6 +844,10 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   JsValue getPrivate(Lock& js, const jsg::JsString& name) KJ_WARN_UNUSED_RESULT;
   JsValue getPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
   bool hasPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  // With a key looked up once, for callers that read or write the same private property often:
+  // the overloads above look the key up on every call.
+  void setPrivate(Lock& js, v8::Local<v8::Private> key, const JsValue& value);
+  JsValue getPrivate(Lock& js, v8::Local<v8::Private> key) KJ_WARN_UNUSED_RESULT;
 
   int hashCode() const;
 

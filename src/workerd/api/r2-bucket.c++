@@ -1121,9 +1121,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(data.size()));
         }
-        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+        KJ_CASE_ONEOF(blob, JsBlob) {
           traceContext.setTag(
-              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(blob->getSize()));
+              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(blob.getSize(js)));
         }
       }
     }
@@ -1739,7 +1739,7 @@ jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
   return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
 }
 
-jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
+jsg::Promise<JsBlob> R2Bucket::GetResult::blob(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
@@ -1748,7 +1748,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
         KJ_REQUIRE_NONNULL(self->httpMetadata).contentType.clone().orDefault(nullptr);
-    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
+    return JsBlob::create(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }
 
