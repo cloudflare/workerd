@@ -4199,10 +4199,14 @@ struct Worker::Actor::Impl {
                          public ActorCache::Hooks,
                          private kj::TaskSet::ErrorHandler {
    public:
-    HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
+    HooksImpl(kj::Own<Loopback> loopback,
+        TimerChannel& timerChannel,
+        ActorObserver& metrics,
+        kj::Duration outputGateTimeout)
         : loopback(kj::mv(loopback)),
           timerChannel(timerChannel),
-          metrics(metrics) {}
+          metrics(metrics),
+          outputGateTimeout(outputGateTimeout) {}
 
     void inputGateLocked() override {
       metrics.inputGateLocked();
@@ -4219,11 +4223,8 @@ struct Worker::Actor::Impl {
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
-      // This really only protects against total hangs. Lowering the timeout drastically is risky,
-      // since low timeouts can spuriously fire when under heavy CPU load, failing requests that
-      // would otherwise succeed.
-      auto timeout = 30 * kj::SECONDS;
-      co_await timerChannel.afterLimitTimeout(timeout);
+      // See IsolateLimitEnforcer::getOutputGateTimeout() for why this is long.
+      co_await timerChannel.afterLimitTimeout(outputGateTimeout);
 
       auto e = KJ_EXCEPTION(OVERLOADED,
           "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
@@ -4265,6 +4266,7 @@ struct Worker::Actor::Impl {
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+    kj::Duration outputGateTimeout;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
 
@@ -4367,7 +4369,10 @@ struct Worker::Actor::Impl {
         container(kj::mv(container)),
         containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
-        hooks(loopback->addRef(), timerChannel, *metrics),
+        hooks(loopback->addRef(),
+            timerChannel,
+            *metrics,
+            self.worker->getIsolate().getLimitEnforcer().getOutputGateTimeout()),
         inputGate(hooks),
         outputGate(hooks),
         loopback(kj::mv(loopback)),
