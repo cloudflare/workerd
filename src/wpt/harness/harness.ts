@@ -133,6 +133,12 @@ class RunnerState {
   // The test covering the whole file, if it called setup({single_test: true})
   singleTest?: Test;
 
+  // The range of subsetTest() calls that run, numbered from 1, as selected by a variant
+  subsetRange: SubsetRange;
+
+  // The number of subsetTest() calls so far
+  subsetTestCount = 0;
+
   constructor(
     testUrl: URL,
     testFileName: string,
@@ -145,6 +151,10 @@ class RunnerState {
     this.wptPath = wptPath;
     this.env = env;
     this.options = options;
+    this.subsetRange = parseSubsetRange(testUrl.search) ?? {
+      start: 1,
+      end: Infinity,
+    };
   }
 
   async validate(): Promise<void> {
@@ -207,8 +217,68 @@ class RunnerState {
 declare global {
   // Current RunnerState
   var state: RunnerState;
-  // All RunnerStates (to get results later)
-  var results: { [file: string]: RunnerState };
+  // All RunnerStates (to get results later), by unitKey()
+  var results: { [unit: string]: RunnerState };
+}
+
+type SubsetRange = {
+  start: number;
+  end: number;
+};
+
+// Parses a variant query that selects a range of subsetTest() calls, as /common/subset-tests.js
+// does: `?1-10` runs the first ten, and `?151-last` all from the 151st on.
+function parseSubsetRange(variant: string): SubsetRange | undefined {
+  const match = /^\?(\d+)-(\d+|last)$/.exec(variant);
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    start: Number(match[1]),
+    end: match[2] === 'last' ? Infinity : Number(match[2]),
+  };
+}
+
+// A test file, or one of its variants, which runs as a separate unit with its own results.
+type TestUnit = {
+  file: string;
+  // The variant's query string, or '' for the whole file
+  variant: string;
+};
+
+function unitKey(unit: TestUnit): string {
+  return unit.file + unit.variant;
+}
+
+// A file whose variants all select ranges of subsetTest() calls runs each variant as a separate
+// unit, as WPT does, so that a sharded target can divide a file's subtests among its shards.
+// Files with expected failures run whole, so that each expected failure is checked against all of
+// their subtests.
+function testUnits(
+  file: string,
+  options: TestRunnerOptions | undefined,
+  env: Env
+): TestUnit[] {
+  const whole = [{ file, variant: '' }];
+  if (
+    options === undefined ||
+    options.expectedFailures !== undefined ||
+    options.disabledTests === true ||
+    options.omittedTests === true
+  ) {
+    return whole;
+  }
+
+  const { variants } = parseWptMetadata(String(env[file]));
+  if (
+    variants.length === 0 ||
+    !variants.every((v) => parseSubsetRange(v) !== undefined)
+  ) {
+    return whole;
+  }
+
+  return variants.map((variant) => ({ file, variant }));
 }
 
 const COLORS = {
@@ -255,8 +325,9 @@ class WPTMetadata {
   timeout?: string;
   // Sets a human-readable title for the entire test file. (Not currently supported.)
   title?: string;
-  // Specifies a variant of this test, which can be used in subsetTestByKey (Not currently supported.)
-  variants: URLSearchParams[] = [];
+  // Query strings (e.g. `?1-10`) for variants of this test. Variants that select a range of
+  // subsetTest() calls run as separate units (see testUnits()); others are not supported.
+  variants: string[] = [];
 }
 
 function parseWptMetadata(code: string): WPTMetadata {
@@ -288,7 +359,7 @@ function parseWptMetadata(code: string): WPTMetadata {
         break;
 
       case 'variant':
-        meta.variants.push(new URLSearchParams(groups.value));
+        meta.variants.push(groups.value);
         break;
     }
   }
@@ -377,11 +448,16 @@ type Runner = {
 // generated output. `wptPath` is the tested directory's path within the WPT
 // tree (e.g. `fetch/api`); test URLs are rooted there so relative resource
 // URLs resolve against the WPT server's layout regardless of the target name.
+// `env` is the worker's environment, as imported from `cloudflare:workers`. A
+// target with Bazel's `shard_count` runs as TEST_TOTAL_SHARDS shards, and the
+// shard numbered TEST_SHARD_INDEX runs every TEST_TOTAL_SHARDS-th test unit
+// (see testUnits()), starting at TEST_SHARD_INDEX.
 export function createRunner(
   config: TestRunnerConfig,
   moduleBase: string,
   wptPath: string,
-  allTestFiles: string[]
+  allTestFiles: string[],
+  env: Env
 ): Runner {
   const testsNotFound = new Set(Object.keys(config)).difference(
     new Set(allTestFiles)
@@ -393,11 +469,23 @@ export function createRunner(
     );
   }
 
+  const shardCount = Number(env.TEST_TOTAL_SHARDS ?? 1);
+  const shardIndex = Number(env.TEST_SHARD_INDEX ?? 0);
+  const shardUnits = allTestFiles
+    .flatMap((file) => testUnits(file, config[file], env))
+    .filter((_, i) => i % shardCount === shardIndex);
+
   const onlyFlagUsed = Object.values(config).some((options) => options.only);
   globalThis.results = {};
 
   return {
     run(file: string): TestCase | Record<string, never> {
+      const units = shardUnits.filter((unit) => unit.file === file);
+      if (units.length === 0) {
+        // The file runs in another shard.
+        return {};
+      }
+
       if (onlyFlagUsed && !config[file]?.only) {
         // Return an empty object to avoid printing extra output from all the other disabled test cases.
         return {};
@@ -405,14 +493,28 @@ export function createRunner(
 
       return {
         async test(_: unknown, env: Env): Promise<void> {
-          return runTest(config[file], env, wptPath, file);
+          // Run every unit even if one fails, so that each has results to report.
+          const failures = [];
+          for (const unit of units) {
+            try {
+              await runTest(config[file], env, wptPath, unit);
+            } catch (err) {
+              failures.push(err);
+            }
+          }
+
+          if (failures.length > 0) {
+            throw failures.length === 1
+              ? failures[0]
+              : new AggregateError(failures, `${file} failed`);
+          }
         },
       };
     },
     printResults(): TestCase {
       return {
         test(_: unknown, env: Env): void {
-          printResults(config, allTestFiles, moduleBase, env);
+          printResults(config, allTestFiles, shardUnits, moduleBase, env);
         },
       };
     },
@@ -423,8 +525,9 @@ async function runTest(
   options: TestRunnerOptions | undefined,
   env: Env,
   wptPath: string,
-  file: string
+  unit: TestUnit
 ): Promise<void> {
+  const { file } = unit;
   if (!options) {
     throw new Error(
       `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
@@ -439,9 +542,16 @@ async function runTest(
   // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
   // Update the URL's port so we can connect to it
   testUrl.port = env.HTTP_PORT ?? '';
+  testUrl.search = unit.variant;
 
-  globalThis.state = new RunnerState(testUrl, file, wptPath, env, options);
-  globalThis.results[file] = globalThis.state;
+  globalThis.state = new RunnerState(
+    testUrl,
+    unitKey(unit),
+    wptPath,
+    env,
+    options
+  );
+  globalThis.results[unitKey(unit)] = globalThis.state;
 
   if (options.disabledTests === true) {
     console.warn(
@@ -510,6 +620,7 @@ async function runTest(
 function printResults(
   config: TestRunnerConfig,
   allTestFiles: string[],
+  shardUnits: TestUnit[],
   moduleBase: string,
   env: Env
 ): void {
@@ -519,12 +630,18 @@ function printResults(
     results.push(generateConfig(config, allTestFiles, moduleBase));
   }
 
+  // The report and stats cover the units this shard ran.
+  const units = shardUnits.flatMap((unit): [TestUnit, TestRunnerOptions][] => {
+    const options = config[unit.file];
+    return options ? [[unit, options]] : [];
+  });
+
   if (env.GEN_TEST_REPORT) {
-    results.push(generateReport(config));
+    results.push(generateReport(units));
   }
 
   if (env.GEN_TEST_STATS) {
-    results.push(generateStats(moduleBase, config));
+    results.push(generateStats(moduleBase, units));
   }
 
   console.log(results.join('\n\n***\n\n'));
@@ -594,13 +711,13 @@ class WPTSubtestResult {
   }
 }
 
-function generateReport(config: TestRunnerConfig): string {
+function generateReport(units: [TestUnit, TestRunnerOptions][]): string {
   const results: WPTTestResult[] = [];
-  for (const [file, options] of Object.entries(config)) {
-    const testResult = globalThis.results[file];
+  for (const [unit, options] of units) {
+    const testResult = globalThis.results[unitKey(unit)];
     if (!testResult) {
       throw new Error(
-        `Unable to find test results for ${file}. This is probably a harness bug`
+        `Unable to find test results for ${unitKey(unit)}. This is probably a harness bug`
       );
     }
 
@@ -664,21 +781,24 @@ class PassStats {
   }
 }
 
-function generateStats(moduleBase: string, config: TestRunnerConfig): string {
+function generateStats(
+  moduleBase: string,
+  units: [TestUnit, TestRunnerOptions][]
+): string {
   const stats = new Stats(moduleBase);
 
-  for (const [file, options] of Object.entries(config)) {
+  for (const [unit, options] of units) {
     if (options.disabledTests === true) {
       stats.coverage.disabled++;
     } else if (options.omittedTests !== true) {
       stats.coverage.ok++;
     }
 
-    const testResult = globalThis.results[file];
+    const testResult = globalThis.results[unitKey(unit)];
 
     if (!testResult) {
       throw new Error(
-        `Unable to find test results for ${file}. This is probably a harness bug`
+        `Unable to find test results for ${unitKey(unit)}. This is probably a harness bug`
       );
     }
 
