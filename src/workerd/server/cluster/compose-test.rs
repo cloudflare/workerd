@@ -219,6 +219,10 @@ fn a_deployment_may_contain_only_services() {
         "deployment \"app\" sets `sockets`, `structuredLogging`, `cluster`. A deployment may \
          contain only `services`. Put other settings in the instance's config."
     );
+    let config = build(&[("app", WORKER)], |mut root| {
+        root.set_shutdown_delay_ms(20_000);
+    });
+    assert!(refusal(deployment_config("app", &config)).contains("sets `shutdownDelayMs`"));
     let config = build(&[("app", WORKER)], |root| {
         root.init_extensions(0);
     });

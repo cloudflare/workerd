@@ -47,6 +47,16 @@ void setDomExceptionStack(Lock& js, JsObject object, kj::Maybe<JsString> stack) 
     check(v8::Exception::CaptureStackTrace(context, handle));
   }
 }
+// The own property `name` of `object`, which the deserializer made, or undefined. A deserializer
+// can't get() it: that would look a missing property up the prototype chain, which can run
+// JavaScript, and none can run while V8 reads a value.
+JsValue getOwnWhileReading(Lock& js, JsObject object, kj::StringPtr name) {
+  v8::Local<v8::Object> handle = object;
+  v8::Local<v8::String> key = js.strIntern(name);
+  if (!check(handle->HasRealNamedProperty(js.v8Context(), key))) return js.undefined();
+  return JsValue(check(handle->GetRealNamedProperty(js.v8Context(), key)));
+}
+
 }  // namespace
 
 kj::Maybe<JsObject> tryGetBootstrapDomExceptionPrototype(Lock& js) {
@@ -187,14 +197,16 @@ JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& d
         JSG_FAIL_REQUIRE(
             DOMDataCloneError, "Deserialization failed: DOMException payload is not an object");
       });
-      auto messageJs = KJ_UNWRAP_OR(errorForStack.get(js, "message"_kj).tryCast<JsString>(), {
-        JSG_FAIL_REQUIRE(
-            DOMDataCloneError, "Deserialization failed: DOMException message is not a string");
-      });
-      auto stackJs = KJ_UNWRAP_OR(errorForStack.get(js, "stack").tryCast<JsString>(), {
-        JSG_FAIL_REQUIRE(
-            DOMDataCloneError, "Deserialization failed: DOMException stack is not a string");
-      });
+      auto messageJs =
+          KJ_UNWRAP_OR(getOwnWhileReading(js, errorForStack, "message"_kj).tryCast<JsString>(), {
+            JSG_FAIL_REQUIRE(
+                DOMDataCloneError, "Deserialization failed: DOMException message is not a string");
+          });
+      auto stackJs =
+          KJ_UNWRAP_OR(getOwnWhileReading(js, errorForStack, "stack"_kj).tryCast<JsString>(), {
+            JSG_FAIL_REQUIRE(
+                DOMDataCloneError, "Deserialization failed: DOMException stack is not a string");
+          });
       kj::String message = messageJs.toString(js);
       kj::String stack = stackJs.toString(js);
       return js.domException(kj::mv(name), kj::mv(message), kj::mv(stack));

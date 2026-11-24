@@ -11,9 +11,10 @@ and CopyRaw() then calls memcpy() with a null destination, which is
 undefined behavior even for a zero length, and which UBSan reports.
 
 diff --git a/src/snapshot/snapshot-source-sink.h b/src/snapshot/snapshot-source-sink.h
+index b82238830b7340affa673af003d0fc1ef6ce5785..1bd3a43eb05ee805eb2fb167779f9b65c603977e 100644
 --- a/src/snapshot/snapshot-source-sink.h
 +++ b/src/snapshot/snapshot-source-sink.h
-@@ -58,6 +58,9 @@
+@@ -58,6 +58,9 @@ class SnapshotByteSource final {
  
    void CopyRaw(void* to, size_t number_of_bytes) {
      DCHECK_LE(position_ + number_of_bytes, length_);

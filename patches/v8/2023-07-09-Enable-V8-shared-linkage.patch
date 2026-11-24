@@ -6,7 +6,7 @@ Subject: Enable V8 shared linkage
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d4672d52fd7a1dfbe458665bc45cf669db075082..d2ff5969960d5a6dbc5a9bec36fa548f8160e5f5 100644
+index 10ffc0d981dc80c315f4836689d7fd74fbd53406..2aab193b9a8936a1198d6d939ff88a190c0d96ac 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -1581,6 +1581,7 @@ filegroup(
@@ -42,7 +42,7 @@ index d4672d52fd7a1dfbe458665bc45cf669db075082..d2ff5969960d5a6dbc5a9bec36fa548f
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -4304,6 +4301,7 @@ filegroup(
+@@ -4298,6 +4295,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -50,7 +50,7 @@ index d4672d52fd7a1dfbe458665bc45cf669db075082..d2ff5969960d5a6dbc5a9bec36fa548f
      ],
  )
  
-@@ -4414,6 +4412,10 @@ filegroup(
+@@ -4408,6 +4406,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -61,7 +61,7 @@ index d4672d52fd7a1dfbe458665bc45cf669db075082..d2ff5969960d5a6dbc5a9bec36fa548f
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4431,6 +4433,7 @@ filegroup(
+@@ -4425,6 +4427,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",

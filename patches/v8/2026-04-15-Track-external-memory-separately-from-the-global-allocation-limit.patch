@@ -28,6 +28,7 @@ flag and all of its conditional branches.
 Co-authored-by: Divy Srivastava <divy@cloudflare.com>
 
 diff --git a/src/heap/heap-controller.cc b/src/heap/heap-controller.cc
+index 12b4139eca1ad1448f18273edd3966560b988d0d..3861e1a30d6ecfa44529cf26579715968c96f3c7 100644
 --- a/src/heap/heap-controller.cc
 +++ b/src/heap/heap-controller.cc
 @@ -279,7 +279,7 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
@@ -89,6 +90,7 @@ diff --git a/src/heap/heap-controller.cc b/src/heap/heap-controller.cc
  
  size_t HeapLimits::PromotedSinceLastGC(size_t old_generation_size) const {
 diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+index c6c40398d4c54e0bcd61cbf272f56d2c8c4d4758..4023988154a915b33c338c7fdb5c0a46153edba1 100644
 --- a/src/heap/heap.cc
 +++ b/src/heap/heap.cc
 @@ -1387,6 +1387,50 @@ void Heap::PreciseCollectAllGarbage(GCFlags gc_flags,
@@ -289,6 +291,7 @@ diff --git a/src/heap/heap.cc b/src/heap/heap.cc
    // Ensure that sweeping is also completed for the C++ managed heap if it's
    // out of work.
 diff --git a/src/heap/heap.h b/src/heap/heap.h
+index 0a763b72ed6156fc73f523b6fb7e3f4060c9f13c..2bd83f7c801d60bb5dcc68fa85e0c3e7d43dc499 100644
 --- a/src/heap/heap.h
 +++ b/src/heap/heap.h
 @@ -1029,6 +1029,10 @@ class Heap final {

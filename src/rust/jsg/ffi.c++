@@ -661,11 +661,17 @@ MaybeLocal local_function_call(
   return maybe_local_to_ffi(fn->Call(context, receiver, static_cast<int>(args.size()), v8Args));
 }
 
-MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
+static_assert(static_cast<int>(ConstructorBehavior::Throw) ==
+    static_cast<int>(v8::ConstructorBehavior::kThrow));
+static_assert(static_cast<int>(ConstructorBehavior::Allow) ==
+    static_cast<int>(v8::ConstructorBehavior::kAllow));
+
+MaybeLocal function_new(
+    Isolate* isolate, size_t callback, const Local& data, ConstructorBehavior behavior) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
-      local_as_ref_from_ffi<v8::Value>(data)));
+      local_as_ref_from_ffi<v8::Value>(data), 0, static_cast<v8::ConstructorBehavior>(behavior)));
 }
 
 // Local<Object>
@@ -819,6 +825,20 @@ MaybeLocal local_promise_then_or_catch(
   return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
       isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled),
       local_as_ref_from_ffi<v8::Function>(on_rejected)));
+}
+
+MaybeLocal local_promise_then_callback(
+    Isolate* isolate, const Local& promise, size_t callback, const Local& data) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Function> function;
+  if (!v8::Function::New(context,
+          reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+          local_as_ref_from_ffi<v8::Value>(data), 0, v8::ConstructorBehavior::kThrow)
+           .ToLocal(&function)) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(context, function));
 }
 
 // Local<PromiseResolver>
@@ -1053,11 +1073,9 @@ MaybeLocal wrappable_get_wrapper(Isolate* isolate, Wrappable& wrappable, bool& w
   return MaybeLocal{.ptr = 0};
 }
 
-MaybeLocal wrap_resource(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
-  auto existing = wrappable_get_wrapper(isolate, *wrappable, wrappedElsewhere);
-  if (existing.ptr != 0 || wrappedElsewhere || exceptionPending(isolate)) {
-    return existing;
+MaybeLocal wrap_resource(Isolate* isolate, Wrappable& wrappable, const Global& tmpl) {
+  if (exceptionPending(isolate)) {
+    return MaybeLocal{.ptr = 0};
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -1070,7 +1088,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
   // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
-  wrappable->attachWrapper(isolate, object, true,
+  wrappable.attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
@@ -1343,8 +1361,7 @@ kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
 }
 
 void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
-  wrappable.trait_object = kj::mv(ptr);
-  wrappable.addStrongRef();
+  wrappable.init(ptr);
 }
 
 void wrappable_init_unreferenced(Wrappable& wrappable, TraitObjectPtr ptr) {

@@ -24,10 +24,10 @@ index bca245b6d666d134fe55939cd8426f10bf0fd69d..61e2d8f212af5096ec2c935976633130
  
  #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 544e7a46fe57f848f780598f4babb1a71962349e..822c07be73aa91d6f9101ea6517d4068b08dd43a 100644
+index 26272489eb2348b1ae3960d7cbd39cc8fdc3c919..2b4eb9c3df147c96078bf619bd92a8e44cd5855c 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1919,6 +1919,9 @@ class V8_EXPORT Isolate {
+@@ -1929,6 +1929,9 @@ class V8_EXPORT Isolate {
     */
    uint64_t GetHashSeed();
  
@@ -37,7 +37,7 @@ index 544e7a46fe57f848f780598f4babb1a71962349e..822c07be73aa91d6f9101ea6517d4068
    Isolate() = delete;
    ~Isolate() = delete;
    Isolate(const Isolate&) = delete;
-@@ -1965,6 +1968,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+@@ -1975,6 +1978,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
    return {};
  }
  
@@ -58,10 +58,10 @@ index 544e7a46fe57f848f780598f4babb1a71962349e..822c07be73aa91d6f9101ea6517d4068
  
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index e15d0c096f8ee9f3834274ca8edacf98aeb754df..ca9d6a20144ce9aa1f2f74f61f0c5b4e5b4cafa9 100644
+index 07bca31a38d110cc7d49c9103223ac06d305cbe6..2b7a7508b1f58ef50e62679327eda0c596bb22b7 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12791,6 +12791,25 @@ std::string SourceLocation::ToString() const {
+@@ -12799,6 +12799,25 @@ std::string SourceLocation::ToString() const {
        .str();
  }
  

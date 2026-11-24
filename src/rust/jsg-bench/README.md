@@ -15,10 +15,11 @@ JSG_BENCH_VERIFY=1 bazel-bin/src/rust/jsg-bench/bench-jsg --benchmark_dry_run=tr
 bazel-bin/src/rust/jsg-bench/bench-jsg --benchmark_filter='/dispatch/'
 ```
 
-These commands use the [optimized benchmark configuration](../../../docs/benchmarking.md); see
-there for machine setup. The `bazel-bin` symlink points to the most recently used build
-configuration. The executable is marked `manual` and has no short-run arguments, so `bazel run`
-measures normally; this also excludes it from CodSpeed.
+These commands use the [optimized benchmark configuration](../../../docs/benchmarking.md); see there
+for machine setup. On Linux, add `--config=cross-lto`, so that Rust takes part in ThinLTO and calls
+between Rust and C++ can be inlined; without it, Rust/C++ ratios are larger. The `bazel-bin` symlink
+points to the most recently used build configuration. The executable is marked `manual` and has no
+short-run arguments, so `bazel run` measures normally; this also excludes it from CodSpeed.
 
 With `JSG_BENCH_VERIFY` set, the executable counts Fast API calls and aborts at the first wrong
 result or missed fast callback. Counting adds work to every call, so don't set it when measuring.
@@ -58,6 +59,33 @@ case.
 It exits with an error if a case failed, or if a C++ case has no Rust counterpart from the same
 processes, so a filter must select both versions of a case. Other cases, such as `Metadata/`,
 are ignored.
+
+## Run on a remote executor
+
+`bazel test` runs benchmarks only once, without measuring, and `bazel run` on macOS with
+`--config=bazelflare` builds a Linux executable that can't run locally. The manual `bench-report`
+target runs the benchmark on the test executor instead and keeps the reports as test outputs:
+
+```sh
+bazel test --config=bazelflare --config=benchmark --config=cross-lto \
+  --test_size_filters= --test_tag_filters= --build_tag_filters= \
+  --remote_download_outputs=toplevel --test_timeout=3600 \
+  --test_env=BENCH_FILTER='/dispatch/' --test_env=BENCH_PROCESSES=3 \
+  //src/rust/jsg-bench:bench-report
+out=.local/rust-jsg-bench/remote
+rm -rf "$out" && mkdir -p "$out"
+cp bazel-testlogs/src/rust/jsg-bench/bench-report/test.outputs/process-*.json "$out"
+python3 src/rust/jsg-bench/analyze.py "$out"
+```
+
+`BENCH_FILTER` is passed to `--benchmark_filter` and defaults to every case; `BENCH_PROCESSES`
+defaults to 3. One test must finish within `--test_timeout`, and the full suite takes about 13
+minutes per process on a 4-vCPU executor, so select the cases you need. Bazel caches a passed test,
+so add `--nocache_test_results` to repeat a run.
+
+Executors differ in speed, so compare only reports from the same run. Two executables that differ
+only in code layout can differ by 10-15% in a Rust case, so repeat a run before treating a change
+of that size as real.
 
 ## How measurements work
 
@@ -99,6 +127,11 @@ are ignored.
   converts with the slow path's checks, while C++ JSG receives it as a `uint32_t`, so the
   `dispatch/u32` cases compare different argument conversions as well. The Rust callback checks and casts `Local<Value>` to `Function`.
   The C++ callback benchmark calls V8 directly, not through `jsg::Function`.
+- The `promise/` cases call methods that return a Rust `jsg::Promise` or a C++ `jsg::Promise`,
+  and each call also runs the microtasks, so the reactions it adds run inside the timed loop.
+  `untyped-void` returns a promise without a typed value to convert, as a floor for the others.
+  Both isolates capture throws as rejections, as the `capture_async_api_throws` compatibility
+  flag makes them do; `throw-captured` measures a method whose callback throws.
 - `allocate-collect/N` times the creation of N objects followed by garbage collection. Other
   collection benchmarks keep objects alive. `native/lifetime/N` times the creation of one
   object, N reference clones, and cleanup.

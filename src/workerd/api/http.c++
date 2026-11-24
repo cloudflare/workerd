@@ -851,7 +851,19 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  // The constructor clones `cf` with JSON.stringify(), which can run JavaScript, and none can run
+  // while V8 reads a value. So the request is made without it, and given the clone once the value
+  // has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto request = Request::constructor(js, kj::mv(url), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([request = request.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      request->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return request;
 }
 
 // =======================================================================================
@@ -1456,7 +1468,17 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     }
   }
 
-  return Response::constructor(js, kj::mv(body), kj::mv(init));
+  // As for a Request (Request::deserialize()), `cf` is cloned once the value has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto response = Response::constructor(js, kj::mv(body), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([response = response.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      response->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return response;
 }
 
 // =======================================================================================

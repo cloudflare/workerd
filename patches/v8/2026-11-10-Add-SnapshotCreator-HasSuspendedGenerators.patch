@@ -18,6 +18,7 @@ refrain from creating such a snapshot. Only objects reachable from the
 roots count: CreateBlob() collects all garbage first.
 
 diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
+index 8c8390bab18f36bb0578c21d123f71c704acc383..a6a9632ae8f3b7f26ca033375e90a3ca632e42af 100644
 --- a/include/v8-snapshot.h
 +++ b/include/v8-snapshot.h
 @@ -275,6 +275,15 @@ class V8_EXPORT SnapshotCreator {
@@ -37,6 +38,7 @@ diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
    SnapshotCreator(const SnapshotCreator&) = delete;
    void operator=(const SnapshotCreator&) = delete;
 diff --git a/src/api/api.cc b/src/api/api.cc
+index 1da12cc5ceeaeb025d33689f2803ad5e948fd6d1..b65302af06294fb1e45baea617f4f0df0c1c08a0 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -107,6 +107,7 @@

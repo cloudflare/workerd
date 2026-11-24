@@ -286,6 +286,15 @@ class Wrappable: public kj::Refcounted {
 
   void addStrongRef();
   void removeStrongRef();
+
+ protected:
+  // addStrongRef() for a Wrappable that was just made. It has no wrapper and has never been
+  // traced, so everything it references is strong already and there is nothing to visit.
+  void addFirstStrongRef() {
+    strongRefcount = 1;
+  }
+
+ public:
   uint getStrongRefcount() const {
     return strongRefcount;
   }
@@ -522,6 +531,8 @@ class Wrappable: public kj::Refcounted {
   // Whenever the value of the boolean expression (strongRefcount > 0 && !hasWrapper()) changes, a
   // GC visitation is needed to update all outgoing refs. The four places that can change it --
   // attachWrapper(), detachWrapper(), addStrongRef() and removeStrongRef() -- each run one.
+  // addFirstStrongRef() changes it too, but only for a Wrappable that was just made, whose refs
+  // are all strong already.
   //
   // cppgc clearing `weakShim` behind our back does not count, and needs no visitation: clearing
   // requires the wrapper to have been collected, which requires `strongWrapper` to be empty (see

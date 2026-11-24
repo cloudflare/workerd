@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import email.utils
 import hashlib
 import json
 import os
@@ -376,6 +377,12 @@ def prepare_update(target):
     return True
 
 
+def _author_date(patch):
+    """Return the author date in a patch's Date header, as YYYY-MM-DD."""
+    header = re.search(r"^Date: (.+)$", patch.read_text(), re.MULTILINE)[1]
+    return email.utils.parsedate_to_datetime(header).date().isoformat()
+
+
 def finish_update(target):
     with tempfile.TemporaryDirectory() as patch_dir:
         run(
@@ -387,6 +394,7 @@ def finish_update(target):
                 "--no-signature",
                 "--no-stat",
                 "--zero-commit",
+                "--filename-max-length=200",
                 "--output-directory",
                 patch_dir,
                 target,
@@ -396,12 +404,18 @@ def finish_update(target):
         generated = sorted(Path(patch_dir).glob("*.patch"))
         for patch in PATCHES.glob("*.patch"):
             patch.unlink()
+        # A patch is named <author date>-<subject>.patch rather than with the
+        # number format-patch gives it, so adding or removing a patch renames no
+        # other. Patches apply in name order, which is author date order; to move
+        # a patch in the stack, change its author date.
+        names = []
         for patch in generated:
+            names.append(f"{_author_date(patch)}-{patch.name.split('-', 1)[1]}")
             # copy2 preserves the patch's timestamps and other file metadata.
-            shutil.copy2(patch, PATCHES / patch.name)
-        patch_names = [patch.name for patch in generated]
+            shutil.copy2(patch, PATCHES / names[-1])
 
-    _update_module(target, patch_names)
+    # Bazel applies the patches in list order, and prepare_update in name order.
+    _update_module(target, sorted(names))
     _update_aligned_dependencies()
     # The Rust ICU pin must match the ICU that Bazel builds, so regenerate the
     # ICU repository from its new commit before deriving the pin.

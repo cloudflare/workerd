@@ -34,8 +34,12 @@ To update the version of V8 used by workerd, the steps are:
 
    ```sh
    git checkout -b workerd-patches
-   git am --keep-non-patch <path_to_workerd>/patches/v8/*
+   export LC_ALL=C
+   git am --keep-non-patch --committer-date-is-author-date <path_to_workerd>/patches/v8/*.patch
    ```
+
+   The patches apply in name order, as Bazel applies them. `LC_ALL=C` makes the shell
+   sort the names the same way, with uppercase letters before lowercase ones.
 
    `--keep-non-patch` is the counterpart of the `-k` in step 7. It keeps subject
    prefixes such as the `[wasm]` that upstream V8 commits carry, so the patches
@@ -56,8 +60,22 @@ To update the version of V8 used by workerd, the steps are:
 7. Re-generate workerd's V8 patches.
 
    ```sh
-   git format-patch --full-index -k --no-signature --no-stat --zero-commit <new_version>
+   git format-patch --full-index -k --no-signature --no-stat --zero-commit \
+     --filename-max-length=200 <new_version>
    ```
+
+   A patch is named `<author date>-<subject>.patch`, so no patch is renamed when another
+   is added or removed. Replace the
+   number that `format-patch` puts at the start of each name with the author date of its
+   commit:
+
+   ```sh
+   paste <(ls 0*.patch) <(git log --reverse --no-merges --format=%as <new_version>..) |
+     while read -r patch date; do mv "$patch" "$date-${patch#*-}"; done
+   ```
+
+   The patches apply in name order, which is author date order. To move a patch in the
+   stack, change its author date (`git commit --amend --date=...`).
 
 8. Remove the existing patches from `<path_to_workerd>/patches/v8` and copy over the latest generated patches
 from the V8 directory.
@@ -65,7 +83,7 @@ from the V8 directory.
 9. Update the `VERSION` for V8 in `build/deps/v8.MODULE.bazel`.
 
     The list of patches should be refreshed if new patches are being added or existing
-    patches are being removed.
+    patches are being removed. It lists them in name order (`LC_ALL=C ls patches/v8`).
 
     `INTEGRITY` needs to be updated to the new value. You can get the new value in
     bazel's preferred format just by looking into the mismatch error while trying to compile
@@ -161,8 +179,8 @@ the update:
 python3 ci/v8_update.py finish <new_version>
 ```
 
-Do not run `finish` until the rebase has completed. It regenerates the patches and
-updates the pins listed above.
+Do not run `finish` until the rebase has completed. It regenerates the patches, named
+as in step 7, and updates the pins listed above.
 
 The helper runs `update-deps.py` only for ICU. Compare the old and new V8 `DEPS` files for
 changes to `dragonbox`, `fast_float`, `fp16`, `highway`, `perfetto`, and `simdutf`, then
