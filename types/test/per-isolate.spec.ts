@@ -160,6 +160,79 @@ export type { Thing };
   );
 });
 
+// A hand-written declaration file in the standard library's form.
+const kGadget = `// A header that is not part of the declarations.
+
+/** A gadget. */
+interface Gadget extends Error {
+    readonly code: number; // A trailing note.
+    // A note on the constants.
+    readonly FIRST: 1;
+    /* Another note. */
+}
+declare var Gadget: {
+    prototype: Gadget;
+    new (message?: string): Gadget;
+    readonly FIRST: 1;
+};
+export type { Gadget };
+`;
+
+test('collectPerIsolateDeclarations: prints an interface with its constructor variable', () => {
+  const printed = collect({
+    'public-types.d.ts': `export type { Gadget } from './gadget.public';\n`,
+    'gadget.public.d.ts': kGadget,
+  });
+  assert.strictEqual(
+    printed,
+    `/** A gadget. */
+interface Gadget extends Error {
+    readonly code: number;
+    readonly FIRST: 1;
+}
+declare var Gadget: {
+    prototype: Gadget;
+    new (message?: string): Gadget;
+    readonly FIRST: 1;
+};`
+  );
+});
+
+test('collectPerIsolateDeclarations: rejects a variable that is not an interface constructor', () => {
+  const message =
+    'Gadget: a published variable declares the constructor of an interface, which has no other declarations';
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Gadget } from './gadget';\n`,
+        'gadget.d.ts': `declare var Gadget: number;\nexport type { Gadget };\n`,
+      }),
+    { message }
+  );
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Gadget } from './gadget';\n`,
+        'gadget.d.ts': `type Gadget = string;
+declare var Gadget: { new (): Gadget };
+export type { Gadget };
+`,
+      }),
+    { message }
+  );
+  assert.throws(
+    () =>
+      collect({
+        'public-types.d.ts': `export type { Gadget } from './gadget';\n`,
+        'gadget.d.ts': `interface Gadget {}
+declare var Gadget: { new (): Gadget }, gadgets: Gadget[];
+export type { Gadget };
+`,
+      }),
+    { message: 'Gadget: a published variable is declared on its own' }
+  );
+});
+
 function rootWith(structureName?: string): StructureGroups {
   const root = new Message().initRoot(StructureGroups);
   if (structureName !== undefined) {

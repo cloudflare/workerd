@@ -52,8 +52,8 @@ Types in this project come from four layers. Changes must be made in the correct
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest (`URL`, `URLSearchParams`, `URLPattern`); their C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
-| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for two APIs the bootstrap implements: `DOMException` (`dom-exception.d.ts`), whose published declaration takes forms its implementation cannot (see below), and `structuredClone()` (`structured-clone.d.ts`), a global scope method, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override |
+| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest (`URL`, `URLSearchParams`, `URLPattern`), and `DOMException`, which V8 implements, from a hand-written declaration; their C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
+| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for `structuredClone()` (`structured-clone.d.ts`), a global scope method the bootstrap implements, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override |
 
 Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, the per-isolate implementation, or `defines/`).
 
@@ -81,17 +81,22 @@ emits is what users get:
   the class's, if the class has none.
 - **Member form is API.** A getter and a property are not interchangeable:
   a subclass overriding one as the other fails to compile (TS2610, TS2611),
-  so changing a member's form is a breaking type change. `DOMException` is
-  declared by its define because its declaration has `readonly` properties
-  and `stack` accessors, as the C++ class does, which the TypeScript class,
-  with prototype getters and no `stack`, cannot emit.
+  so changing a member's form is a breaking type change.
+- **A declaration the class cannot emit is written by hand.** When the
+  published declaration takes a form TypeScript does not emit for a class,
+  such as the standard library's interface with a `declare var` for its
+  constructor, it is a declaration file beside the implementation
+  (`<module>.public.d.ts`), which the manifest publishes in place of the
+  module's. The implementation checks that it agrees with the declaration,
+  with `satisfies`, so that the two cannot drift. `DOMException`, which V8
+  implements, has the declaration file alone (`dom-exception.public.d.ts`).
 - **A published declaration refers only to globals and published
   declarations.** The generator rejects a reference to another of the
   bootstrap's declarations, and a published name that RTTI or a define also
   declares.
-- `#private` members, `//` comments and `@internal` members do not reach the
-  output. JSDoc does, and the comments transform adds the standard MDN
-  comments by name.
+- `#private` members, `@internal` members and comments other than JSDoc do
+  not reach the output, from a hand-written declaration file either. JSDoc
+  does, and the comments transform adds the standard MDN comments by name.
 
 ### Naming conventions
 

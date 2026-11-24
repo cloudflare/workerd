@@ -4143,6 +4143,91 @@ export interface TracingSpanContext {
   traceFlags: number;
 }
 /**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+export interface DOMException extends Error {
+  /**
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
+  readonly name: string;
+  /**
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
+  readonly message: string;
+  /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
+   */
+  readonly code: number;
+  readonly INDEX_SIZE_ERR: 1;
+  readonly DOMSTRING_SIZE_ERR: 2;
+  readonly HIERARCHY_REQUEST_ERR: 3;
+  readonly WRONG_DOCUMENT_ERR: 4;
+  readonly INVALID_CHARACTER_ERR: 5;
+  readonly NO_DATA_ALLOWED_ERR: 6;
+  readonly NO_MODIFICATION_ALLOWED_ERR: 7;
+  readonly NOT_FOUND_ERR: 8;
+  readonly NOT_SUPPORTED_ERR: 9;
+  readonly INUSE_ATTRIBUTE_ERR: 10;
+  readonly INVALID_STATE_ERR: 11;
+  readonly SYNTAX_ERR: 12;
+  readonly INVALID_MODIFICATION_ERR: 13;
+  readonly NAMESPACE_ERR: 14;
+  readonly INVALID_ACCESS_ERR: 15;
+  readonly VALIDATION_ERR: 16;
+  readonly TYPE_MISMATCH_ERR: 17;
+  readonly SECURITY_ERR: 18;
+  readonly NETWORK_ERR: 19;
+  readonly ABORT_ERR: 20;
+  readonly URL_MISMATCH_ERR: 21;
+  readonly QUOTA_EXCEEDED_ERR: 22;
+  readonly TIMEOUT_ERR: 23;
+  readonly INVALID_NODE_TYPE_ERR: 24;
+  readonly DATA_CLONE_ERR: 25;
+}
+/**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+export declare var DOMException: {
+  prototype: DOMException;
+  new (message?: string, name?: string): DOMException;
+  readonly INDEX_SIZE_ERR: 1;
+  readonly DOMSTRING_SIZE_ERR: 2;
+  readonly HIERARCHY_REQUEST_ERR: 3;
+  readonly WRONG_DOCUMENT_ERR: 4;
+  readonly INVALID_CHARACTER_ERR: 5;
+  readonly NO_DATA_ALLOWED_ERR: 6;
+  readonly NO_MODIFICATION_ALLOWED_ERR: 7;
+  readonly NOT_FOUND_ERR: 8;
+  readonly NOT_SUPPORTED_ERR: 9;
+  readonly INUSE_ATTRIBUTE_ERR: 10;
+  readonly INVALID_STATE_ERR: 11;
+  readonly SYNTAX_ERR: 12;
+  readonly INVALID_MODIFICATION_ERR: 13;
+  readonly NAMESPACE_ERR: 14;
+  readonly INVALID_ACCESS_ERR: 15;
+  readonly VALIDATION_ERR: 16;
+  readonly TYPE_MISMATCH_ERR: 17;
+  readonly SECURITY_ERR: 18;
+  readonly NETWORK_ERR: 19;
+  readonly ABORT_ERR: 20;
+  readonly URL_MISMATCH_ERR: 21;
+  readonly QUOTA_EXCEEDED_ERR: 22;
+  readonly TIMEOUT_ERR: 23;
+  readonly INVALID_NODE_TYPE_ERR: 24;
+  readonly DATA_CLONE_ERR: 25;
+};
+/**
  * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
@@ -15109,60 +15194,6 @@ export declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
-/**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
-export declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  /**
-   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
-   */
-  readonly message: string;
-  /**
-   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
-   */
-  readonly name: string;
-  /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
-   */
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: number;
-  static readonly DOMSTRING_SIZE_ERR: number;
-  static readonly HIERARCHY_REQUEST_ERR: number;
-  static readonly WRONG_DOCUMENT_ERR: number;
-  static readonly INVALID_CHARACTER_ERR: number;
-  static readonly NO_DATA_ALLOWED_ERR: number;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
-  static readonly NOT_FOUND_ERR: number;
-  static readonly NOT_SUPPORTED_ERR: number;
-  static readonly INUSE_ATTRIBUTE_ERR: number;
-  static readonly INVALID_STATE_ERR: number;
-  static readonly SYNTAX_ERR: number;
-  static readonly INVALID_MODIFICATION_ERR: number;
-  static readonly NAMESPACE_ERR: number;
-  static readonly INVALID_ACCESS_ERR: number;
-  static readonly VALIDATION_ERR: number;
-  static readonly TYPE_MISMATCH_ERR: number;
-  static readonly SECURITY_ERR: number;
-  static readonly NETWORK_ERR: number;
-  static readonly ABORT_ERR: number;
-  static readonly URL_MISMATCH_ERR: number;
-  static readonly QUOTA_EXCEEDED_ERR: number;
-  static readonly TIMEOUT_ERR: number;
-  static readonly INVALID_NODE_TYPE_ERR: number;
-  static readonly DATA_CLONE_ERR: number;
-  get stack(): any;
-  set stack(value: any);
-}
 /**
  * The returned data after sending an email
  */

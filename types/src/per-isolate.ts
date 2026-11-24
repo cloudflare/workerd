@@ -14,8 +14,11 @@ import { printer } from './print';
 // The bootstrap's manifest, as a path relative to src/per_isolate.
 export const PER_ISOLATE_MANIFEST = 'public-types.d.ts';
 
-type PublishedDeclaration = ts.Statement &
-  (ts.ClassDeclaration | ts.InterfaceDeclaration | ts.TypeAliasDeclaration);
+type PublishedDeclaration =
+  | ts.ClassDeclaration
+  | ts.InterfaceDeclaration
+  | ts.TypeAliasDeclaration
+  | ts.VariableDeclaration;
 
 // A program of the manifest and the declaration files its module specifiers
 // reach, and no others: the directory may also hold the modules' sources,
@@ -25,8 +28,11 @@ function createDeclarationProgram(
   manifestPath: string,
   readFile: (fileName: string) => string | undefined
 ): ts.Program {
-  const read = (fileName: string): string | undefined =>
-    fileName.endsWith('.d.ts') ? readFile(fileName) : undefined;
+  const read = (fileName: string): string | undefined => {
+    if (!fileName.endsWith('.d.ts')) return undefined;
+    const text = readFile(fileName);
+    return text === undefined ? undefined : withOnlyJSDoc(fileName, text);
+  };
   const host: ts.CompilerHost = {
     getSourceFile(fileName, languageVersion) {
       const text = read(fileName);
@@ -57,12 +63,45 @@ function createDeclarationProgram(
   );
 }
 
+// `text` with its comments blanked out, but for JSDoc. A declaration file
+// that TypeScript emits has only JSDoc; the other comments in a hand-written
+// one are notes for its readers, which must not print with its declarations.
+function withOnlyJSDoc(fileName: string, text: string): string {
+  const file = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest);
+  let result = text;
+  // Every comment is in the trivia before some token: on the line that the
+  // previous token ends (a trailing comment), or after it (a leading one).
+  const visit = (node: ts.Node): void => {
+    if (ts.isJSDoc(node)) return;
+    const children = node.getChildren(file);
+    if (children.length > 0) {
+      children.forEach(visit);
+      return;
+    }
+    for (const { pos, end } of [
+      ...(ts.getTrailingCommentRanges(text, node.pos) ?? []),
+      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
+    ]) {
+      const comment = text.slice(pos, end);
+      if (!/^\/\*\*[^/]/.test(comment)) {
+        result =
+          result.slice(0, pos) +
+          comment.replace(/[^\n]/g, ' ') +
+          result.slice(end);
+      }
+    }
+  };
+  visit(file);
+  return result;
+}
+
 // Returns the declarations `manifestPath` publishes, in its order, as
 // ambient TypeScript source. `manifestPath` is absolute, and `readFile`
 // reads the declaration files its module specifiers resolve to. Throws if
-// the manifest publishes something other than a class, interface or type
-// alias, or if a published declaration refers to one of the bootstrap's
-// declarations that the manifest does not publish.
+// the manifest publishes something other than a class, an interface (with
+// or without a variable for its constructor) or a type alias, or if a
+// published declaration refers to one of the bootstrap's declarations that
+// the manifest does not publish.
 export function collectPerIsolateDeclarations(
   manifestPath: string,
   readFile: (fileName: string) => string | undefined
@@ -149,10 +188,11 @@ function publishedDeclarationsOf(
     if (
       !ts.isClassDeclaration(declaration) &&
       !ts.isInterfaceDeclaration(declaration) &&
-      !ts.isTypeAliasDeclaration(declaration)
+      !ts.isTypeAliasDeclaration(declaration) &&
+      !ts.isVariableDeclaration(declaration)
     ) {
       throw new Error(
-        `${name} is a ${ts.SyntaxKind[declaration.kind]}; only classes, interfaces and type aliases can be published`
+        `${name} is a ${ts.SyntaxKind[declaration.kind]}; only classes, interfaces, their constructors' variables and type aliases can be published`
       );
     }
   }
@@ -227,6 +267,24 @@ function mergeDeclarations(
   const classes = declarations.filter(ts.isClassDeclaration);
   const interfaces = declarations.filter(ts.isInterfaceDeclaration);
   const aliases = declarations.filter(ts.isTypeAliasDeclaration);
+  const variables = declarations.filter(ts.isVariableDeclaration);
+  if (variables.length > 0) {
+    if (
+      variables.length > 1 ||
+      interfaces.length === 0 ||
+      classes.length > 0 ||
+      aliases.length > 0
+    ) {
+      throw new Error(
+        `${name}: a published variable declares the constructor of an interface, which has no other declarations`
+      );
+    }
+    return declarations.map((declaration) =>
+      ts.isVariableDeclaration(declaration)
+        ? variableStatement(name, declaration)
+        : interfaceWithoutExport(declaration as ts.InterfaceDeclaration)
+    );
+  }
   if (aliases.length > 0) {
     if (declarations.length > 1) {
       throw new Error(`${name} is a type alias with other declarations`);
@@ -246,18 +304,45 @@ function mergeDeclarations(
     throw new Error(`${name} has more than one class declaration`);
   }
   if (classes.length === 0) {
-    return interfaces.map((declaration) =>
-      f.updateInterfaceDeclaration(
-        declaration,
-        withoutExport(declaration.modifiers),
-        declaration.name,
-        declaration.typeParameters,
-        declaration.heritageClauses,
-        declaration.members
-      )
-    );
+    return interfaces.map(interfaceWithoutExport);
   }
   return [foldInterfaces(name, classes[0], interfaces)];
+}
+
+function interfaceWithoutExport(
+  declaration: ts.InterfaceDeclaration
+): ts.InterfaceDeclaration {
+  return f.updateInterfaceDeclaration(
+    declaration,
+    withoutExport(declaration.modifiers),
+    declaration.name,
+    declaration.typeParameters,
+    declaration.heritageClauses,
+    declaration.members
+  );
+}
+
+// The statement that declares the variable, which must declare nothing else:
+// the standard library's form of an interface that has a constructor, such
+// as `interface DOMException` with `declare var DOMException: { ... }`.
+function variableStatement(
+  name: string,
+  declaration: ts.VariableDeclaration
+): ts.VariableStatement {
+  const list = declaration.parent;
+  const statement = list.parent;
+  if (
+    !ts.isVariableDeclarationList(list) ||
+    !ts.isVariableStatement(statement) ||
+    list.declarations.length !== 1
+  ) {
+    throw new Error(`${name}: a published variable is declared on its own`);
+  }
+  return f.updateVariableStatement(
+    statement,
+    withoutExport(statement.modifiers),
+    list
+  );
 }
 
 // The class's declaration as a declaration file would write it with the
