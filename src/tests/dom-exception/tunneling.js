@@ -6,7 +6,12 @@
 // with its name and message: through the kj::Exception it tunnels as
 // (`jsg.DOMException(Name): message`), or serialized over RPC.
 
-import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
+import {
+  deepStrictEqual,
+  notStrictEqual,
+  rejects,
+  strictEqual,
+} from 'node:assert';
 import { env } from 'cloudflare:workers';
 import { assertDomException } from 'helpers';
 
@@ -47,6 +52,9 @@ export const returnedOverRpc = {
       'Symbol(Symbol.dispose)'
     );
     strictEqual(error.extra, undefined);
+    // RPC drops the received stack and uses the local one.
+    strictEqual(typeof error.stack, 'string');
+    notStrictEqual(error.stack, 'returned stack');
   },
 };
 

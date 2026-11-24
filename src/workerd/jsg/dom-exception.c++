@@ -180,12 +180,17 @@ void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 }
 
 JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+  // Without preserveStackInErrors, the received stack is dropped and the local stack is used.
+  auto keptStack = [&](kj::String stack) -> kj::Maybe<kj::String> {
+    if (!deserializer.getPreserveStackInErrors()) return kj::none;
+    return kj::mv(stack);
+  };
   switch (tag) {
     case SERIALIZATION_TAG_V2: {
       kj::String name = deserializer.readLengthDelimitedString();
       kj::String message = deserializer.readLengthDelimitedString();
       kj::String stack = deserializer.readLengthDelimitedString();
-      return js.domException(kj::mv(name), kj::mv(message), kj::mv(stack));
+      return js.domException(kj::mv(name), kj::mv(message), keptStack(kj::mv(stack)));
     }
     case SERIALIZATION_TAG: {
       // This is the original serialization of DOMException. It was only
@@ -209,7 +214,7 @@ JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& d
           });
       kj::String message = messageJs.toString(js);
       kj::String stack = stackJs.toString(js);
-      return js.domException(kj::mv(name), kj::mv(message), kj::mv(stack));
+      return js.domException(kj::mv(name), kj::mv(message), keptStack(kj::mv(stack)));
     }
     default:
       KJ_UNREACHABLE;

@@ -715,10 +715,14 @@ Deserializer::Deserializer(
           released.sharedArrayBuffers.asPtr(),
           kj::mv(maybeOptions)) {}
 
-Deserializer::Deserializer(
-    Lock& js, v8::ValueDeserializer& deser, AfterReadCallbacks& afterReadCallbacks, Borrowed)
+Deserializer::Deserializer(Lock& js,
+    v8::ValueDeserializer& deser,
+    AfterReadCallbacks& afterReadCallbacks,
+    Borrowed,
+    PreserveStackInErrors preserveStackInErrors)
     : totalInputSize(0),
       deser(deser),
+      preserveStackInErrors(preserveStackInErrors.toBool()),
       foreignAfterReadCallbacks(afterReadCallbacks),
       readDepth(1) {}
 
@@ -1142,13 +1146,15 @@ v8::Maybe<bool> writeApiObject(
 v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
     v8::ValueDeserializer& deser,
     uint32_t tag,
-    AfterReadCallbacks& afterReadCallbacks) {
+    AfterReadCallbacks& afterReadCallbacks,
+    PreserveStackInErrors preserveStackInErrors) {
   return readHostObjectWithoutJs(isolate, tag, [&]() -> v8::MaybeLocal<v8::Object> {
     try {
       auto& js = Lock::from(isolate);
       js.setDisallowJavascriptExecution(true);
       KJ_DEFER(js.setDisallowJavascriptExecution(false));
-      Deserializer deserializer(js, deser, afterReadCallbacks, Deserializer::Borrowed{});
+      Deserializer deserializer(
+          js, deser, afterReadCallbacks, Deserializer::Borrowed{}, preserveStackInErrors);
       return deserializer.readApiObject(js, tag);
     } catch (JsExceptionThrown&) {
       return {};

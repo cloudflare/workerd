@@ -565,7 +565,8 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
         return tag == SERIALIZATION_TAG_NATIVE_ERROR ? readError() : readJsSerializable();
       });
     }
-    return ::workerd::jsg::readApiObject(isolate, deser, tag, afterReadCallbacks);
+    return ::workerd::jsg::readApiObject(isolate, deser, tag, afterReadCallbacks,
+        ::workerd::jsg::PreserveStackInErrors(preserveStackInErrors));
   }
 
   // V8's GetSharedArrayBufferFromId() throws for a SharedArrayBuffer, which the data only refers

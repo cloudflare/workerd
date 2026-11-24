@@ -205,6 +205,37 @@ fn errors_without_their_stacks() {
     });
 }
 
+/// With `preserve_stack_in_errors`, a `DOMException` keeps the received stack. Without it, the
+/// received stack is dropped and the local stack is used.
+#[test]
+fn dom_exceptions_without_their_stacks() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let exception = serialize_exception(lock, ctx, "() => 1");
+        ctx.set_global(lock, "exception", exception);
+        let value = eval(lock, ctx, "exception.stack = 'original', exception");
+        let data = jsg::ser::serialize(lock, value)?;
+
+        let kept = jsg::ser::deserialize(lock, &data)?;
+        ctx.set_global(lock, "v", kept);
+        assert!(ctx.eval::<bool>(lock, "v.stack === 'original'").unwrap());
+
+        let options = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+        };
+        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+        ctx.set_global(lock, "v", copy);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "v.name === 'DataCloneError' && v.message === '() => 1 could not be cloned.' && \
+                 typeof v.stack === 'string' && v.stack !== 'original'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
 /// that the bytes stay the same.
 #[test]

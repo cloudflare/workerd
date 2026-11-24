@@ -390,6 +390,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
 // callback throws, leaving the exception pending.
 using AfterReadCallbacks = kj::Vector<kj::Function<bool(v8::Isolate*)>>;
 
+// Deserializer::Options::preserveStackInErrors, as readApiObject() takes it.
+WD_STRONG_BOOL(PreserveStackInErrors);
+
 // Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
 // the stack.
@@ -405,14 +408,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     kj::Maybe<uint32_t> version;
     bool readHeader = true;
 
-    // When the enahnced error serialization feature is enabled, and we are deserializing
-    // a serialized error, this option controls whether to include the serialized stack
-    // property in the deserialized error, including an instance of a class implemented in
-    // JavaScript that inherits from Error. If false, the stack property is not restored
-    // and will instead be set to the captured stack at the time of deserialization.
-    // This flag has no effect on errors that were serialized with the enhanced error
-    // serialization feature disabled, which keep their stacks, or if the values being
-    // deserialized are not errors (or do not contain any error objects).
+    // If true, a deserialized error keeps the received stack. If false, the received stack is
+    // dropped and the local stack is used. This applies to every DOMException, and to other
+    // errors serialized with enhanced error serialization; other errors serialized without it
+    // always keep the received stack.
     bool preserveStackInErrors = true;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
@@ -481,15 +480,24 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     return deser.GetWireFormatVersion();
   }
 
+  // Options::preserveStackInErrors, for a type's `deserialize()` that reads an error.
+  inline bool getPreserveStackInErrors() const {
+    return preserveStackInErrors;
+  }
+
  private:
   // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
   struct Borrowed {};
-  Deserializer(
-      Lock& js, v8::ValueDeserializer& deser, AfterReadCallbacks& afterReadCallbacks, Borrowed);
+  Deserializer(Lock& js,
+      v8::ValueDeserializer& deser,
+      AfterReadCallbacks& afterReadCallbacks,
+      Borrowed,
+      PreserveStackInErrors preserveStackInErrors);
   friend v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
       v8::ValueDeserializer& deser,
       uint32_t tag,
-      AfterReadCallbacks& afterReadCallbacks);
+      AfterReadCallbacks& afterReadCallbacks,
+      PreserveStackInErrors preserveStackInErrors);
 
   // Reads the workerd API object that `tag` names through its type's deserializer.
   v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
@@ -586,15 +594,16 @@ v8::Maybe<bool> writeApiObject(
 
 // Reads the workerd API object that `tag` names, as Deserializer's ReadHostObject() does once it
 // has read a tag other than a native error's or SERIALIZATION_TAG_JS_SERIALIZABLE, which the
-// caller reads itself. JavaScript execution is disallowed meanwhile: an attempt to run it throws
-// DataCloneError, as it does under Deserializer. Adds to `afterReadCallbacks` the callbacks
-// that the type's deserializer gives Deserializer::afterRead(), which the caller calls, in order,
-// once it has read the whole value and initialized its own instances of classes implemented in
-// JavaScript.
+// caller reads itself, with the caller's Deserializer::Options::preserveStackInErrors.
+// JavaScript execution is disallowed meanwhile: an attempt to run it throws DataCloneError, as it
+// does under Deserializer. Adds to `afterReadCallbacks` the callbacks that the type's deserializer
+// gives Deserializer::afterRead(), which the caller calls, in order, once it has read the whole
+// value and initialized its own instances of classes implemented in JavaScript.
 v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
     v8::ValueDeserializer& deser,
     uint32_t tag,
-    AfterReadCallbacks& afterReadCallbacks);
+    AfterReadCallbacks& afterReadCallbacks,
+    PreserveStackInErrors preserveStackInErrors);
 
 // Calls `read`, which reads the host object that `tag` names for a v8::ValueDeserializer delegate,
 // so that an attempt to run JavaScript fails the read with DataCloneError, as it does under

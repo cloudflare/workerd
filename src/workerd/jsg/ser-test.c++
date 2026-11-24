@@ -420,7 +420,7 @@ struct SerTestContext: public ContextGlobalObject {
     v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override {
       uint32_t tag;
       KJ_ASSERT(deser.ReadUint32(&tag));
-      return readApiObject(isolate, deser, tag, afterReadCallbacks);
+      return readApiObject(isolate, deser, tag, afterReadCallbacks, PreserveStackInErrors::YES);
     }
     AfterReadCallbacks afterReadCallbacks;
     v8::ValueDeserializer deser;

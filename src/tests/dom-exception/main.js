@@ -116,6 +116,7 @@ export class DomExceptionRpc extends WorkerEntrypoint {
   returnDomException() {
     const error = new DOMException('returned', 'AbortError');
     error.extra = 1;
+    error.stack = 'returned stack';
     return error;
   }
 
