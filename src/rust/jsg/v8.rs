@@ -194,6 +194,14 @@ pub mod ffi {
         Info,
     }
 
+    /// Mirrors `v8::ConstructorBehavior`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ConstructorBehavior {
+        /// The function throws when called with `new`, and V8 creates no prototype object for it.
+        Throw = 0,
+        Allow = 1,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -613,6 +621,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             callback: usize,
             data: &Local,
+            behavior: ConstructorBehavior,
         ) -> MaybeLocal;
 
         // Struct shapes; see `structs.rs`.
@@ -687,6 +696,12 @@ pub mod ffi {
             promise: &Local,
             on_fulfilled: &Local,
             on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_callback(
+            isolate: *mut Isolate,
+            promise: &Local,
+            callback: usize,
+            data: &Local,
         ) -> MaybeLocal;
 
         // Local<PromiseResolver>
@@ -2463,7 +2478,12 @@ impl Function {
                 &mut FunctionCallbackInfo<'a>,
             ) -> Result<Local<'a, Value>, Error>,
     {
-        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        let [function] = Self::new_sharing_data(
+            lock,
+            data,
+            [Self::callback::<T, F>(f)],
+            ffi::ConstructorBehavior::Allow,
+        )?;
         Ok(function)
     }
 
@@ -2495,6 +2515,7 @@ impl Function {
                 lock.isolate().as_ffi(),
                 callback as usize,
                 undefined.raw(),
+                ffi::ConstructorBehavior::Allow,
             ))
         }
         .ok_or_else(Error::pending)
@@ -2510,6 +2531,7 @@ impl Function {
         lock: &Lock<'s>,
         data: T,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Self>; N]>
     where
         T: Traced + 'static,
@@ -2517,7 +2539,7 @@ impl Function {
         // As in `jsg::Rc::new`, the Wrappable owns the data, which is dropped when the Wrappable
         // is destroyed.
         let (mut wrappable, _) = WrappableRc::new(FunctionData(data));
-        let functions = wrappable.new_functions(lock, callbacks);
+        let functions = wrappable.new_functions(lock, callbacks, behavior);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
         wrappable.remove_strong_ref();
@@ -6059,6 +6081,7 @@ impl WrappableRc {
         &self,
         lock: &Lock<'s>,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
         let data = self.attach_opaque_wrapper(lock)?;
@@ -6068,7 +6091,12 @@ impl WrappableRc {
             // (guaranteed by Lock); `callback` is a V8 function callback and `data` a handle in
             // the lock's scope, in which the function is created.
             let function = unsafe {
-                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
+                Local::from_ffi_maybe(ffi::function_new(
+                    isolate,
+                    callback as usize,
+                    data.raw(),
+                    behavior,
+                ))
             };
             functions.push(function.ok_or_else(Error::pending)?);
         }
