@@ -126,6 +126,19 @@ class UtilModule final: public jsg::Object {
   };
   kj::Array<CallSiteEntry> getCallSites(jsg::Lock& js, jsg::Optional<int> frames);
 
+  // MIME types for node:util MIMEType (src/node/internal/internal_mime.ts), which keeps the
+  // parameters in a list of names and values with `paramCount` parameters; see
+  // api/mimetype-js.h. parseMimeType() returns undefined if `input` is not a MIME type.
+  jsg::JsValue parseMimeType(jsg::Lock& js, jsg::JsString input);
+  jsg::JsString serializeMimeType(jsg::Lock& js,
+      jsg::JsString type,
+      jsg::JsString subtype,
+      jsg::JsObject params,
+      int paramCount);
+  jsg::JsString serializeMimeParams(jsg::Lock& js, jsg::JsObject params, int paramCount);
+  bool isMimeToken(kj::String s);
+  bool isMimeParamValue(kj::String s);
+
 #define V(Type) bool is##Type(jsg::JsValue value);
   JS_UTIL_IS_TYPES(V)
 #undef V
@@ -148,6 +161,12 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
+
+    JSG_METHOD(parseMimeType);
+    JSG_METHOD(serializeMimeType);
+    JSG_METHOD(serializeMimeParams);
+    JSG_METHOD(isMimeToken);
+    JSG_METHOD(isMimeParamValue);
 
     JSG_NESTED_TYPE(Performance);
     JSG_NESTED_TYPE(PerformanceEntry);

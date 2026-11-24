@@ -38,10 +38,6 @@ kj::ArrayPtr<const char> chars(::rust::Slice<const uint8_t> s) {
   return kj::arrayPtr(reinterpret_cast<const char*>(s.data()), s.size());
 }
 
-bool isToken(kj::ArrayPtr<const char> s) {
-  return useRust() ? ffi::is_token(bytes(s)) : legacy::isMimeToken(s);
-}
-
 kj::Maybe<MimeType> toMimeType(ffi::Essence essence, kj::Maybe<MimeType::MimeParams> params) {
   if (essence.type_.empty()) return kj::none;
   return MimeType(toLower(chars(essence.type_)), toLower(chars(essence.subtype)), kj::mv(params));
@@ -117,10 +113,16 @@ const MimeType::MimeParams& MimeType::params() const {
   return params_;
 }
 
+bool MimeType::isToken(kj::ArrayPtr<const char> s) {
+  return useRust() ? ffi::is_token(bytes(s)) : legacy::isMimeToken(s);
+}
+
+bool MimeType::isParamValue(kj::ArrayPtr<const char> s) {
+  return useRust() ? ffi::is_param_value(bytes(s)) : legacy::isMimeParamValue(s);
+}
+
 bool MimeType::addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> value) {
-  bool valid = useRust() ? ffi::is_token(bytes(name)) && ffi::is_param_value(bytes(value))
-                         : legacy::isMimeToken(name) && legacy::isMimeParamValue(value);
-  if (!valid) return false;
+  if (!isToken(name) || !isParamValue(value)) return false;
   params_.upsert(toLower(name), kj::str(value), [](auto&, auto&&) {});
   return true;
 }

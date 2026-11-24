@@ -73,6 +73,12 @@ class MimeType final {
   // be preferred for most cases.
   static MimeType parse(kj::StringPtr input, ParseOptions options = ParseOptions::DEFAULT);
 
+  // Whether `s` is a valid type, subtype or parameter name: a nonempty HTTP token.
+  static bool isToken(kj::ArrayPtr<const char> s);
+
+  // Whether `s` is a valid parameter value: made of HTTP quoted-string token code points.
+  static bool isParamValue(kj::ArrayPtr<const char> s);
+
   explicit MimeType(
       kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params = kj::none);
   explicit MimeType(kj::String type, kj::String subtype, kj::Maybe<MimeParams> params = kj::none);
