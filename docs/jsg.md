@@ -1683,6 +1683,56 @@ private:
 - Tag enum values must never change once data has been serialized
 - `deserialize()` receives the tag so it can handle multiple versions
 
+### Running No JavaScript While Reading
+
+`deserialize()` runs while V8 reads the value, and no JavaScript may run then.
+
+`deserialize()` may read raw data and nested values, check their types, create
+objects, define properties on them, and unwrap a `JSG_STRUCT`, which reads only
+own properties during a read.
+
+It must not get a property that may be inherited, assign one, convert an object
+to a primitive or JSON, call a function, or serialize a value. Nor may it call
+C++ that does any of these, such as `jsg::Lock::exceptionToKj()` on a value it
+read. Such work goes in a callback given to `deserializer.afterRead()`:
+
+```cpp
+static jsg::Ref<MyType> deserialize(
+    jsg::Lock& js, SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto reason = deserializer.readValue(js);
+  auto result = js.alloc<MyType>();
+  deserializer.afterRead(
+      [result = result.addRef(), reason = jsg::JsRef(js, reason)](jsg::Lock& js) {
+    // May run JavaScript: reads properties of `reason`.
+    result->setReason(js, reason.getHandle(js));
+  });
+  return result;
+}
+```
+
+The callbacks run once the top-level `readValue()` has read the whole value
+and initialized the instances of classes implemented in JavaScript that it
+holds. JavaScript is allowed when they run. A callback must not call
+`afterRead()`; the top-level `readValue()` fails if one does.
+
+They run in the order they were given. So when a type gives its callback after
+reading its nested values, the callbacks of the objects in those values run
+first. Even so, JavaScript that an earlier callback runs can reach any object
+in the value, including one whose own callback has not run yet. So the object
+that `deserialize()` returns must be in a consistent state from the start.
+
+If a callback throws, the read fails and the remaining callbacks are not
+called. If the read itself fails, none is called. Where the caller has
+disallowed JavaScript execution, the read throws `DataCloneError`. A Rust
+deserializer calls the callbacks at the same point, through the
+`AfterReadCallbacks` that `readApiObject()` takes.
+
+If a `deserialize()` tries to run JavaScript anyway, the read fails with
+`DataCloneError`, and the attempt is logged. That check is a safety net, not
+permission to look up properties during a read: a `deserialize()` still reads
+only own properties, and leaves anything that may run JavaScript to
+`afterRead()`.
+
 ### Classes Implemented in JavaScript
 
 Classes that the runtime implements in JavaScript, in the per-isolate bootstrap

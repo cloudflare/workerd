@@ -626,6 +626,73 @@ export const rpcAbortSignalAbort = {
   },
 };
 
+// The receiver of an already-aborted signal derives its abort exception from the reason, which
+// reads properties of the reason, and so can run getters it inherits. It does that once the whole
+// value has been read: while V8 reads a value, no JavaScript can run.
+export const rpcAbortedSignalReasonReachesPrototypeGetters = {
+  async test(ctrl, env, ctx) {
+    let calls = 0;
+    const getter = {
+      get() {
+        calls++;
+        return undefined;
+      },
+      configurable: true,
+    };
+    const nameDescriptor = Object.getOwnPropertyDescriptor(
+      Error.prototype,
+      'name'
+    );
+    const results = [];
+    Object.defineProperty(Object.prototype, 'retryable', getter);
+    Object.defineProperty(Object.prototype, 'overloaded', getter);
+    Object.defineProperty(Error.prototype, 'name', {
+      get() {
+        calls++;
+        return 'Error';
+      },
+      configurable: true,
+    });
+    try {
+      for (const reason of [
+        { code: 1 },
+        new Error('error reason'),
+        new RangeError('range reason'),
+        new DOMException('dom reason', 'AbortError'),
+      ]) {
+        calls = 0;
+        // Read by the receiver, and again, when it is returned, by the sender.
+        const signal = await env.RpcRemoteEnd.echo(AbortSignal.abort(reason));
+        results.push({ signal, calls });
+      }
+    } finally {
+      delete Object.prototype.retryable;
+      delete Object.prototype.overloaded;
+      Object.defineProperty(Error.prototype, 'name', nameDescriptor);
+    }
+
+    const [plain, error, rangeError, domException] = results;
+    for (const { signal } of results) {
+      ok(signal.aborted);
+      throws(
+        () => signal.throwIfAborted(),
+        (e) => e === signal.reason
+      );
+    }
+    deepStrictEqual(plain.signal.reason, { code: 1 });
+    // Serializing a plain object reads none of its prototype's properties, so only the readers
+    // ran the getters.
+    ok(plain.calls > 0);
+    ok(error.signal.reason instanceof Error);
+    strictEqual(error.signal.reason.message, 'error reason');
+    ok(rangeError.signal.reason instanceof RangeError);
+    strictEqual(rangeError.signal.reason.message, 'range reason');
+    ok(domException.signal.reason instanceof DOMException);
+    strictEqual(domException.signal.reason.name, 'AbortError');
+    strictEqual(domException.signal.reason.message, 'dom reason');
+  },
+};
+
 export const rpcAbortControllerSignal = {
   async test(ctrl, env, ctx) {
     const ac = new AbortController();

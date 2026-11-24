@@ -1399,8 +1399,7 @@ class Isolate: public IsolateBase {
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
       return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
         KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
-          return newBootstrapDomException(*this, prototype, name, message,
-              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
+          return newBootstrapDomException(*this, prototype, name, message, maybeStack);
         }
 
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
@@ -1654,6 +1653,16 @@ class Isolate: public IsolateBase {
 
       KJ_ASSERT(proto.isObject());
       return scope.Escape(v8::Local<v8::Value>(proto).As<v8::Object>());
+    }
+
+    virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) override {
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tmpl;
+    }
+
+    virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(
+        const std::type_info& type) override {
+      v8::HandleScope scope(v8Isolate);
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tagRange;
     }
   };
 

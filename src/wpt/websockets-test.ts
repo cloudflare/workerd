@@ -129,13 +129,7 @@ export default {
     disabledTests: true,
   },
   'Create-protocol-with-space.any.js': {},
-  'Create-protocols-repeated-case-insensitive.any.js': {
-    comment:
-      'workerd does not throw for case-insensitive duplicate protocols (allows "Echo" and "echo")',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and an array of protocol strings with repeated values but different case - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-protocols-repeated-case-insensitive.any.js': {},
   'Create-protocols-repeated.any.js': {},
   'Create-url-with-space.any.js': {},
   'Create-valid-url-array-protocols.any.js': {

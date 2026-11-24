@@ -215,7 +215,7 @@ kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
       }
       KJ_UNREACHABLE;
     });
-    auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
+    kj::Maybe<kj::StringPtr> actorIdPtr = actorId;
     AsyncTraceSinks sinks;
     isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
     if (isAsyncTracePerfettoEnabled()) {
@@ -302,8 +302,10 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
-    : context(kj::mv(contextParam)),
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::String> clientAddress)
+    : clientAddress(kj::mv(clientAddress)),
+      context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
@@ -320,9 +322,7 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   }
 
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource());
+      maybeTriggerInvocationSpan, context->getEntropySource());
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
@@ -696,9 +696,8 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
       auto userSpan = request.getRootUserTraceSpan();
       auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
 
-      auto errorInfo =
-          tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
-              error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+      auto errorInfo = tracing::ErrorInfo::fromErrorProperties(
+          kj::str(error.name), kj::str(error.message), error.stack);
       t.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
           kj::mv(errorInfo.stack));
     }

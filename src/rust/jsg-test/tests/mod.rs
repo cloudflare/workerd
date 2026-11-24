@@ -59,6 +59,7 @@ mod resource_template;
 mod resource_this;
 mod rest_arguments;
 mod serialization;
+mod set_prototype;
 mod signature_callback;
 mod startup_snapshot;
 mod string;
@@ -75,3 +76,12 @@ mod unwrap;
 mod wasm_module_object;
 mod weak_condemned;
 mod wildcard_property;
+
+/// The message of a panic caught with `std::panic::catch_unwind`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("<non-string panic payload>")
+}

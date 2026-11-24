@@ -18,6 +18,7 @@ use super::header;
 use super::serialize_exception;
 use crate::EvalContext;
 use crate::Harness;
+use crate::cpp_interop::ffi;
 
 /// Classes implemented in JavaScript, as the per-isolate bootstrap's `serialization.ts` sets them
 /// up. Evaluates to the exports of the module "test", among which the deserializers look them up
@@ -431,6 +432,15 @@ fn errors_round_trip() {
             "new Error('outer', { cause: [new Point(1), error] })",
             "v.cause[0] instanceof Point && v.cause[0].x === 2 && v.cause[1].amount === 5",
         );
+        // So can a Map or a Set, which V8 fills by calling builtins, holding objects and instances.
+        assert_round_trip(
+            lock,
+            ctx,
+            "new Error('outer', { cause: new Map([\
+               ['k', { a: 1 }], ['point', new Point(1)], ['set', new Set([{ b: [2] }])]]) })",
+            "v.cause.get('k').a === 1 && v.cause.get('point').x === 2 && \
+             [...v.cause.get('set')][0].b[0] === 2",
+        );
         Ok(())
     });
 }
@@ -781,6 +791,111 @@ fn instances_cannot_be_read_while_javascript_is_disallowed() {
             );
         }
         assert_eq!(take_log(lock, ctx), "");
+        Ok(())
+    });
+}
+
+/// A workerd API object whose deserializer leaves work that runs JavaScript until the value is read
+/// (`Deserializer::afterRead()`), as C++ JSG runs it: once the instances are initialized, in
+/// order, failing the read if it throws, and not where JavaScript execution is disallowed.
+#[test]
+fn api_objects_finish_once_instances_are_initialized() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_up_classes(lock, ctx);
+        eval(
+            lock,
+            ctx,
+            "globalThis.seen = [];\n\
+             globalThis.afterRead = (v) => {\n\
+               seen.push(v instanceof Point ? v.x : v);\n\
+               if (v === 'throw') throw new Error('boom');\n\
+             };",
+        );
+        for (global, expr) in [
+            ("point", "new Point(1)"),
+            ("a", "'a'"),
+            ("b", "'b'"),
+            ("throws", "'throw'"),
+            (
+                "map",
+                "new Map([['k', { a: 1 }], ['set', new Set([{ b: [2] }])]])",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            // SAFETY: called with the lock's isolate, in its scope, with a handle in that scope.
+            let finisher: v8::Local<v8::Value> = unsafe {
+                v8::Local::from_ffi_maybe(ffi::test_cpp_finisher_new(
+                    lock.isolate().as_ffi(),
+                    value.into_ffi(),
+                ))
+            }
+            .expect("the C++ constructor threw");
+            ctx.set_global(lock, global, finisher);
+        }
+
+        // The Point that one holds is read through the Rust deserializer, and initialized first.
+        assert_round_trip(
+            lock,
+            ctx,
+            "[point, a, b]",
+            "seen.splice(0).join() === '2,a,b'",
+        );
+        // V8 fills a Map or a Set that one holds by calling builtins.
+        assert_round_trip(
+            lock,
+            ctx,
+            "[map]",
+            "(m => m.get('k').a === 1 && [...m.get('set')][0].b[0] === 2)(seen.splice(0)[0])",
+        );
+
+        // One that throws fails the read, and the rest are not called.
+        let value = eval(lock, ctx, "[a, throws, b]");
+        let data = jsg::ser::serialize(lock, value)?;
+        let rust = lock
+            .try_catch(|lock| jsg::ser::deserialize(lock, &data))
+            .unwrap();
+        assert!(
+            ctx.eval::<bool>(lock, "seen.splice(0).join() === 'a,throw'")
+                .unwrap()
+        );
+        let cpp = lock
+            .try_catch(|lock| Harness::cpp_try_deserialize(lock, &data))
+            .unwrap();
+        assert!(
+            ctx.eval::<bool>(lock, "seen.splice(0).join() === 'a,throw'")
+                .unwrap()
+        );
+        for caught in [rust, cpp] {
+            assert_error(
+                lock,
+                ctx,
+                caught.expect_err("the read should throw"),
+                "Error",
+                "boom",
+            );
+        }
+
+        // None is called where JavaScript execution is disallowed.
+        let value = eval(lock, ctx, "a");
+        let data = jsg::ser::serialize(lock, value)?;
+        Harness::set_javascript_execution_disallowed(lock, true);
+        let rust = lock
+            .try_catch(|lock| jsg::ser::deserialize(lock, &data))
+            .unwrap();
+        let cpp = lock
+            .try_catch(|lock| Harness::cpp_try_deserialize(lock, &data))
+            .unwrap();
+        Harness::set_javascript_execution_disallowed(lock, false);
+        for caught in [rust, cpp] {
+            assert_error(
+                lock,
+                ctx,
+                caught.expect_err("the read should throw"),
+                "DataCloneError",
+                "This value cannot be deserialized here.",
+            );
+        }
+        assert!(ctx.eval::<bool>(lock, "seen.length === 0").unwrap());
         Ok(())
     });
 }

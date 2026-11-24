@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Robinson <arobinson@cloudflare.com>
+Date: Wed, 2 Mar 2022 15:58:04 -0600
+Subject: Allow manually setting ValueDeserializer format version
+
+For many years, V8's serialization version didn't change. In the meantime,
+we accidentally stored data that was missing a version header. This patch
+allows us to start using a header while still being able to correctly
+interpret our existing stored data that was missing a header, using code
+like:
+
+  auto maybeHeader = deserializer.ReadHeader(isolate->GetCurrentContext());
+  KJ_ASSERT(maybeHeader.IsNothing() || maybeHeader.FromJust());
+  if (deserializer.GetWireFormatVersion() == 0) {
+    deserializer.SetWireFormatVersion(13);
+  }
+  auto maybeValue = deserializer.ReadValue(isolate->GetCurrentContext());
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
+diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
+index 731965722fb310fec7aa503c0866f923266f374e..923a13a76f5220cbb106447f84c279b9a1df3079 100644
+--- a/include/v8-value-serializer.h
++++ b/include/v8-value-serializer.h
+@@ -323,6 +323,13 @@ class V8_EXPORT ValueDeserializer {
+    */
+   uint32_t GetWireFormatVersion() const;
+ 
++  /**
++   * Sets the underlying wire format version. Should only be used if there's no
++   * header specifying the wire format version but you're confident you know
++   * what version was used to serialize the data.
++   */
++  void SetWireFormatVersion(uint32_t version);
++
+   /**
+    * Reads raw data in various common formats to the buffer.
+    * Note that integer types are read in base-128 varint format, not with a
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 1290662e9856e4cf822d0d1322797ef3d7d102ca..9ca46dc69dc67b7d5d64cdc97e9dd9cdd8a9fec6 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -3873,6 +3873,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
+   return private_->deserializer.GetWireFormatVersion();
+ }
+ 
++void ValueDeserializer::SetWireFormatVersion(uint32_t version) {
++  private_->deserializer.SetWireFormatVersion(version);
++}
++
+ MaybeLocal<Value> ValueDeserializer::ReadValue(Local<Context> context) {
+   PrepareForExecutionScope api_scope{context,
+                                      RCCId::kAPI_ValueDeserializer_ReadValue};
+diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
+index 1f2d20062549815c0ea3b2c8b4be5393017f40b9..1c870f97ec02e3ce541b46ad0c0ce0f30bc10bf0 100644
+--- a/src/objects/value-serializer.h
++++ b/src/objects/value-serializer.h
+@@ -242,6 +242,13 @@ class ValueDeserializer {
+    */
+   uint32_t GetWireFormatVersion() const { return version_; }
+ 
++  /*
++   * Sets the underlying wire format version. Should only be used if there's no
++   * header specifying the wire format version but you're confident you know
++   * what version was used to serialize the data.
++   */
++  void SetWireFormatVersion(uint32_t version) { version_ = version; }
++
+   /*
+    * Deserializes a V8 object from the buffer.
+    */

@@ -46,6 +46,8 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate,
     cpp_interop_test::TestCppBase,
     cpp_interop_test::TestCppDerived,
     cpp_interop_test::TestCppHolder,
+    cpp_interop_test::TestCppFinisher,
+    cpp_interop_test::TestCppGetter,
     jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>);
 
 namespace rust::jsg_test {
