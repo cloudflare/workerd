@@ -73,15 +73,40 @@ kj::Maybe<kj::String> fromWorkingDirectory(const kj::Filesystem& fs, kj::StringP
   return resolved;
 }
 
-// What a server of the config `words` would hold that no other server may (ReplServerClaims): the
-// directory of each durable Durable Object namespace, as the server finds it, the path of the
-// worker's `localDisk` service from the working directory, then the namespace's `uniqueKey`.
+// Whether the UDP socket address `address` names a port, rather than leaving the system to choose
+// one each time it is bound: whether it ends in a port other than 0, after a host, or after an
+// IPv6 address in brackets. A bare IPv6 address has colons of its own.
+bool namesPort(kj::StringPtr address) {
+  kj::StringPtr host = address;
+  if (address.startsWith("[")) {
+    KJ_IF_SOME(end, address.findFirst(']')) {
+      host = address.slice(end + 1);
+      if (!host.startsWith(":")) return false;
+    }
+  }
+  KJ_IF_SOME(colon, host.findLast(':')) {
+    if (host.first(colon).findFirst(':') != kj::none) return false;
+    // Port 0, however it is written, leaves the choice to the system.
+    for (char c: host.slice(colon + 1)) {
+      if (c != '0') return true;
+    }
+  }
+  return false;
+}
+
+// What a server of the config `words` would hold that no other server may (ReplServerClaims):
+//
+// - The directory of each durable Durable Object namespace, as the server finds it: the path of
+//   the worker's `localDisk` service from the working directory, then the namespace's
+//   `uniqueKey`.
+// - The address of each UDP socket that names a port, as the config writes it.
 kj::Array<kj::String> exclusiveResources(
     const kj::Filesystem& fs, kj::ArrayPtr<const capnp::word> words) {
   capnp::ReaderOptions options;
   options.traversalLimitInWords = kj::maxValue;
   capnp::FlatArrayMessageReader message(words, options);
-  auto services = message.getRoot<config::Config>().getServices();
+  auto config = message.getRoot<config::Config>();
+  auto services = config.getServices();
   auto diskPath = [&](kj::StringPtr name) -> kj::Maybe<kj::StringPtr> {
     for (auto service: services) {
       if (service.getName() == name && service.isDisk() && service.getDisk().hasPath()) {
@@ -104,6 +129,11 @@ kj::Array<kj::String> exclusiveResources(
           }
         }
       }
+    }
+  }
+  for (auto socket: config.getSockets()) {
+    if (socket.isUdp() && socket.hasAddress() && namesPort(socket.getAddress())) {
+      held.add(kj::str("listens for UDP datagrams on ", socket.getAddress()));
     }
   }
   return held.releaseAsArray();

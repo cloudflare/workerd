@@ -28,9 +28,14 @@ namespace workerd::server {
 class WorkerFactory;
 struct InProcessServer;
 
-// What no two servers of a REPL session may hold at once: the directory of each of their durable
-// Durable Object namespaces. Two servers over one such directory would run two instances of each
-// of its Durable Objects on one database. One for the session, whose environments share it.
+// What no two servers of a REPL session may hold at once:
+//
+// - The directory of each of their durable Durable Object namespaces. Two servers over one such
+//   directory would run two instances of each of its Durable Objects on one database.
+// - The address of each of their UDP sockets that names a port. Both servers would bind it, and the
+//   later would take every datagram sent to it.
+//
+// One for the session, whose environments share it.
 class ReplServerClaims {
  public:
   // What one server holds, until it is destroyed.
@@ -115,8 +120,9 @@ WD_STRONG_BOOL(ReportReloadOutcome);
 
 // A config `workerd.loadConfig()` loaded, served in-process by the Rust server (in_process.rs) as
 // `workerd serve` serves a config, on a worker factory of its own over the session's V8 and event
-// loop. Its sockets listen on in-process (loopback) names instead of their addresses, so that the
-// REPL can load configs whose ports are taken, or load one config twice. The process-wide parts of
+// loop. Its stream sockets (HTTP, HTTPS, TCP) listen on in-process (loopback) names instead of
+// their addresses, so that the REPL can load configs whose ports are taken, or load one config
+// twice. Its UDP sockets bind their addresses. The process-wide parts of
 // a config, its V8 flags and autogates, are ignored with a warning: the REPL's process has its own.
 // Outbound connections reach the network, as `workerd serve`'s do.
 //
@@ -128,15 +134,15 @@ WD_STRONG_BOOL(ReportReloadOutcome);
 //
 // Reloading loads the config again and builds a new Rust server on it. The old one is revoked and
 // closed as closing would, and then the new one serves in its place: two servers of one config at
-// once would run two instances of each of its Durable Objects. A config that doesn't load, or
-// whose server would store Durable Objects where another server does, leaves the old server
-// running. A server that doesn't start leaves nothing serving until a reload starts one. Reloads
+// once would run two instances of each of its Durable Objects, and bind its UDP addresses twice.
+// A config that doesn't load, or that another server holds part of (ReplServerClaims), leaves the
+// old server running. A server that doesn't start leaves nothing serving until a reload starts one. Reloads
 // run one at a time, in the order asked for. A watched config is reloaded whenever a file the last
 // load read changes, so one that failed is reloaded once it is fixed; the outcome is printed to
 // stderr.
 //
-// Loading a config refuses it if its server would store Durable Objects where another server of
-// the session does (ReplServerClaims), until that server's close is done.
+// Loading a config refuses it if another server of the session holds what its server would
+// (ReplServerClaims), until that server's close is done.
 class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
  public:
   // Loads the config `source` names and starts serving it. Resolves once every socket listens.

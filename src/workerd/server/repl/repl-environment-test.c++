@@ -872,6 +872,57 @@ KJ_TEST("REPL refuses a config whose Durable Objects another server stores") {
       "'1/1'");
 }
 
+// A config whose socket "udp" listens for UDP datagrams on `address`.
+kj::String udpConfig(kj::StringPtr address) {
+  return kj::str(R"((
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [ (name = "worker.js", esModule = "export default { connect() {} };") ],
+      ),
+    ),
+  ],
+  sockets = [ (name = "udp", address = ")",
+      address, R"(", udp = (), service = "main") ],
+))");
+}
+
+KJ_TEST("REPL refuses a config a UDP address another server listens on") {
+  Fixture fixture;
+  // A port that was free a moment ago.
+  auto port = fixture.io.provider->getNetwork()
+                  .parseAddress("127.0.0.1")
+                  .wait(fixture.io.waitScope)
+                  ->bindDatagramPort()
+                  ->getPort();
+  auto address = kj::str("127.0.0.1:", port);
+  fixture.setConfig("udp.capnp", udpConfig(address));
+  fixture.evalAwait("s = await workerd.loadConfig('udp.capnp')");
+  auto refused = kj::str("Uncaught Error: udp.capnp listens for UDP datagrams on ", address,
+      ", as the server for udp.capnp does. Close that server first.");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('udp.capnp')"), refused);
+  KJ_EXPECT(fixture.eval("workerd.servers.length") == "1");
+
+  // A reload claims what the server it replaces held.
+  KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('udp.capnp')"), refused);
+
+  // Once that server has closed, another may listen there.
+  fixture.evalAwait("await s.close()");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('udp.capnp')"),
+      "ReplServer {\n  path: 'udp.capnp',");
+
+  // On port 0, or none, each server listens on a port of the system's choosing.
+  for (const auto& unclaimed: {"127.0.0.1:0"_kj, "127.0.0.1"_kj}) {
+    fixture.setConfig("any-port.capnp", udpConfig(unclaimed));
+    for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+      KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('any-port.capnp')"),
+          "ReplServer {\n  path: 'any-port.capnp',");
+    }
+  }
+}
+
 KJ_TEST("REPL reports configs that do not load") {
   Fixture fixture;
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.loadConfig('missing.capnp')"),

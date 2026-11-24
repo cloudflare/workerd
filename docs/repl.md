@@ -250,11 +250,17 @@ whenever a file it was loaded from changes.
 
 Each config is served by a server of its own, as `workerd serve` would serve it, in the REPL's
 process. A config can be loaded more than once, and several configs can be loaded at the same time,
-as long as no two of them store the same [Durable Objects](#durable-objects).
+as long as no two of them store the same [Durable Objects](#durable-objects) or listen on the same
+UDP address.
 
 - The config's HTTP, HTTPS and TCP sockets listen on in-process names instead of their addresses.
   A config whose ports are in use still loads, and nothing outside the process can connect to it.
-  Use `socket()` to send it requests. A UDP socket listens on its address.
+  Use `socket()` to send it requests.
+- A UDP socket listens on its address, as under `workerd serve`. Two servers on one address would
+  both bind it, and the later would take every datagram. So a config is refused if one of its UDP
+  sockets has the address, as written, of a loaded server's UDP socket:
+  `Error: <path> listens for UDP datagrams on <address>, as the server for <other path> does.`
+  An address with port 0, or with no port, binds a port the system chooses, and is never refused.
 - Outbound connections, such as those of a `network` or `external` service, reach the network as
   they do under `workerd serve`.
 - The config's `v8Flags` and `autogates` are ignored, with a warning: those are set once per
