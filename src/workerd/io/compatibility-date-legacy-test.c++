@@ -38,7 +38,8 @@ struct Reporter final: public ValidationErrorReporter {
 };
 
 // The Rust compiler must agree with the C++ one, output and diagnostics alike. With the
-// RUST_COMPAT_DATE autogate on, compatibility-date.h is the Rust compiler and compat_date_legacy:: the C++ one.
+// RUST_COMPAT_DATE autogate on, compatibility-date.h is the Rust compiler and
+// compat_date_legacy:: the C++ one.
 KJ_TEST("the Rust compiler agrees with the C++ compiler") {
   util::Autogate::initAutogateForTest({util::AutogateKey::RUST_COMPAT_DATE});
   KJ_DEFER(util::Autogate::deinitAutogate());
@@ -66,7 +67,7 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
       dates.add(kj::str(d.first(8), day - 1 < 10 ? "0" : "", day - 1));
     }
   }
-  for (kj::StringPtr d: {"abcd"_kj, "2021-05-1-"_kj, ""_kj, "2000-01-01"_kj, "2999-12-31"_kj,
+  for (const kj::StringPtr& d: {"abcd"_kj, "2021-05-1-"_kj, ""_kj, "2000-01-01"_kj, "2999-12-31"_kj,
          "2252-04-01"_kj, "3000-01-01"_kj, "2021-\xfe"_kj, "\xff\xfe"_kj}) {
     dates.add(kj::str(d));
   }
@@ -150,32 +151,42 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
     return KJ_MAP(f, flags) { return kj::str(f); };
   };
 
-  // Every date, with no flags.
+  // Every date under each validation, which decides only the date's errors. The flags that follow
+  // depend on the date alone, so each is compiled under CODE_VERSION, which reports the most.
   for (auto& date: dates) {
     KJ_EXPECT(normalizeCompatDate(date) == compat_date_legacy::normalizeCompatDate(date), date);
     for (auto validation: validations) {
       check(date, nullptr, validation, false, nullptr, MainModuleIsPython::NO);
-      check(date, list({"nodejs_compat"_kj}), validation, false, nullptr, MainModuleIsPython::NO);
-      for (auto python: {MainModuleIsPython::NO, MainModuleIsPython::YES}) {
-        check(date, list({"auto_inject_python_workers"_kj}), validation, true, nullptr, python);
-      }
+    }
+    auto codeVersion = CompatibilityDateValidation::CODE_VERSION;
+    check(date, list({"nodejs_compat"_kj}), codeVersion, false, nullptr, MainModuleIsPython::NO);
+    for (auto python: {MainModuleIsPython::NO, MainModuleIsPython::YES}) {
+      check(date, list({"auto_inject_python_workers"_kj}), codeVersion, true, nullptr, python);
     }
   }
 
-  // Every flag alone, at a spread of dates.
-  for (kj::StringPtr date: {"2000-01-01"_kj, "2022-10-31"_kj, "2024-09-23"_kj, "2026-11-17"_kj,
-         "2999-12-31"_kj, "abcd"_kj}) {
+  // Every flag alone, at a spread of dates, which decide whether it is redundant and what it
+  // implies. The rest of the options decide only how a flag is reported, whatever the date, so
+  // they vary at a single date.
+  for (const kj::StringPtr& date: {"2000-01-01"_kj, "2022-10-31"_kj, "2024-09-23"_kj,
+         "2026-11-17"_kj, "2999-12-31"_kj, "abcd"_kj}) {
     for (auto& flag: flagNames) {
-      auto flags = list({flag});
-      kj::StringPtr allowlist[] = {"some_other_flag"_kj, flag};
-      for (auto validation: validations) {
-        check(date, flags, validation, false, nullptr, MainModuleIsPython::NO);
-      }
-      check(date, flags, CompatibilityDateValidation::CODE_VERSION, true, nullptr,
-          MainModuleIsPython::NO);
-      check(date, flags, CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, allowlist,
+      check(date, list({flag}), CompatibilityDateValidation::CODE_VERSION, false, nullptr,
           MainModuleIsPython::NO);
     }
+  }
+  for (auto& flag: flagNames) {
+    auto flags = list({flag});
+    kj::StringPtr allowlist[] = {"some_other_flag"_kj, flag};
+    kj::StringPtr date = "2024-09-23"_kj;
+    check(date, flags, CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, nullptr,
+        MainModuleIsPython::NO);
+    check(date, flags, CompatibilityDateValidation::FUTURE_FOR_TEST, false, nullptr,
+        MainModuleIsPython::NO);
+    check(date, flags, CompatibilityDateValidation::CODE_VERSION, true, nullptr,
+        MainModuleIsPython::NO);
+    check(date, flags, CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, allowlist,
+        MainModuleIsPython::NO);
   }
 
   // Many flags at once, with duplicates, unknown flags and contradictions, in several orders.
@@ -202,7 +213,7 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
       }
     }
   }
-  for (kj::StringPtr date: {"2000-01-01"_kj, "2024-09-23"_kj, "2999-12-31"_kj, "abcd"_kj}) {
+  for (const kj::StringPtr& date: {"2000-01-01"_kj, "2024-09-23"_kj, "2999-12-31"_kj, "abcd"_kj}) {
     for (auto validation: validations) {
       for (bool experimental: {false, true}) {
         for (auto python: {MainModuleIsPython::NO, MainModuleIsPython::YES}) {

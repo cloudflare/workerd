@@ -764,8 +764,8 @@ kj_test(
 )
 
 # Checks that the Rust compiler agrees with the C++ one in compatibility-date-legacy.c++.
-# It compiles about 14,000 configurations twice, which takes 20-50 s in a fastbuild, more than
-# the 15 s .bazelrc gives a medium test.
+# It compiles about 5,400 configurations twice, which takes 10-25 s in a fastbuild and longer in
+# some debug builds, more than the 15 s .bazelrc gives a medium test.
 kj_test(
     size = "large",
     src = "compatibility-date-legacy-test.c++",
