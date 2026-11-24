@@ -457,7 +457,9 @@ fn load_config<T: CommandFactory>(
         binary,
         config_file,
     } = config;
-    if data_dir.is_some() && (binary || !wrangler::is_wrangler_config(&config_file)) {
+    let wrangler_path =
+        std::path::Path::new(&config_file).is_dir() || wrangler::is_wrangler_config(&config_file);
+    if data_dir.is_some() && (binary || !wrangler_path) {
         usage_error::<T>(
             "--data-dir: only a wrangler config keeps its state there. A Cap'n Proto config names \
              its disk services' directories, or takes them from --directory-path.",
@@ -485,16 +487,16 @@ fn load_config<T: CommandFactory>(
     if config_file == "-" {
         usage_error::<T>("-: Reading config from stdin is only allowed with --binary.");
     }
-    if wrangler::is_wrangler_config(&config_file) {
+    if let Some(path) =
+        wrangler::named_config(&config_file).unwrap_or_else(|error| usage_error::<T>(error))
+    {
         if let Some(name) = const_name {
             usage_error::<T>(format!("{name}: A wrangler config has no named constants."));
         }
-        if !std::path::Path::new(&config_file).is_file() {
-            usage_error::<T>(format!("{config_file}: No such file."));
-        }
+        let path = path.to_string_lossy();
         let data_dir = data_dir.map(std::path::Path::new);
-        return wrangler::load(&config_file, process, options, data_dir, experimental)
-            .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
+        return wrangler::load(&path, process, options, data_dir, experimental)
+            .unwrap_or_else(|error| config_errors(&[format!("{path}: {error}")], process));
     }
 
     let compiled = ffi::compile_config(
