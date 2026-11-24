@@ -151,6 +151,13 @@ wd_cc_benchmark(
     deps = [":test-fixture"],
 )
 
+# Requests minor GCs, which needs --expose-gc.
+wd_cc_benchmark(
+    name = "bench-scavenge-wrappers",
+    srcs = ["bench-scavenge-wrappers.c++"],
+    deps = [":test-fixture-expose-gc"],
+)
+
 wd_cc_benchmark(
     name = "bench-regex",
     srcs = ["bench-regex.c++"],

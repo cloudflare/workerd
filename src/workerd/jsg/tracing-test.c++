@@ -88,10 +88,79 @@ class InstancePropertyGcDetector: public jsg::Object {
     return 2;
   }
 
+  int value = 0;
+
+  int getValue() {
+    return value;
+  }
+
+  void setValue(int newValue) {
+    value = newValue;
+  }
+
   JSG_RESOURCE_TYPE(InstancePropertyGcDetector) {
     JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
     JSG_READONLY_INSTANCE_PROPERTY(eager, getEager);
     JSG_LAZY_INSTANCE_PROPERTY(lazy, getLazy);
+    JSG_INSTANCE_PROPERTY(value, getValue, setValue);
+  }
+};
+
+// Adds an instance property of its own to those it inherits, as Request does to Body's when its
+// compatibility date predates workers_api_getters_setters_on_prototype.
+class InheritedInstancePropertyGcDetector: public InstancePropertyGcDetector {
+ public:
+  int getChildEager() {
+    return 3;
+  }
+
+  JSG_RESOURCE_TYPE(InheritedInstancePropertyGcDetector) {
+    JSG_INHERIT(InstancePropertyGcDetector);
+    JSG_READONLY_INSTANCE_PROPERTY(childEager, getChildEager);
+  }
+};
+
+// Redefines an instance property it inherits. V8 installs only one property under the name, so
+// the wrapper never holds every accessor in its templates.
+class ShadowingInstancePropertyGcDetector: public InstancePropertyGcDetector {
+ public:
+  int getShadowedEager() {
+    return 4;
+  }
+
+  JSG_RESOURCE_TYPE(ShadowingInstancePropertyGcDetector) {
+    JSG_INHERIT(InstancePropertyGcDetector);
+    JSG_READONLY_INSTANCE_PROPERTY(eager, getShadowedEager);
+  }
+};
+
+// Holds an InstancePropertyGcDetector through a traced reference, so the detector outlives its
+// wrapper if V8 drops the wrapper, and a later read of `inner` wraps it again.
+class InstancePropertyGcDetectorBox: public jsg::Object {
+ public:
+  explicit InstancePropertyGcDetectorBox(jsg::Lock& js)
+      : inner(js.alloc<InstancePropertyGcDetector>()) {}
+
+  jsg::Ref<InstancePropertyGcDetector> inner;
+
+  jsg::Ref<InstancePropertyGcDetector> getInner() {
+    return inner.addRef();
+  }
+
+  bool getInnerWrapped(jsg::Lock& js) {
+    // Wrappable::tryGetHandle() is out of reach of a jsg::Object subclass; this returns its
+    // result, or an empty handle when there is no wrapper.
+    return !inner->jsgGetMemoryInfoWrapperObject(js.v8Isolate).IsEmpty();
+  }
+
+  JSG_RESOURCE_TYPE(InstancePropertyGcDetectorBox) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(inner, getInner);
+    JSG_READONLY_PROTOTYPE_PROPERTY(innerWrapped, getInnerWrapped);
+  }
+
+ private:
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(inner);
   }
 };
 
@@ -213,13 +282,32 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
-  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeInstancePropertyGcDetectorPair(
-      jsg::Lock& js) {
-    auto obj1 = js.alloc<InstancePropertyGcDetector>();
-    auto obj2 = js.alloc<InstancePropertyGcDetector>();
+  template <typename Detector>
+  static kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeDetectorPair(jsg::Lock& js) {
+    jsg::Ref<InstancePropertyGcDetector> obj1 = js.alloc<Detector>();
+    jsg::Ref<InstancePropertyGcDetector> obj2 = js.alloc<Detector>();
     obj1->sibling = *obj2;
     obj2->sibling = *obj1;
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
+  }
+
+  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeInstancePropertyGcDetectorPair(
+      jsg::Lock& js) {
+    return makeDetectorPair<InstancePropertyGcDetector>(js);
+  }
+
+  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeInheritedInstancePropertyGcDetectorPair(
+      jsg::Lock& js) {
+    return makeDetectorPair<InheritedInstancePropertyGcDetector>(js);
+  }
+
+  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeShadowingInstancePropertyGcDetectorPair(
+      jsg::Lock& js) {
+    return makeDetectorPair<ShadowingInstancePropertyGcDetector>(js);
+  }
+
+  jsg::Ref<InstancePropertyGcDetectorBox> makeInstancePropertyGcDetectorBox(jsg::Lock& js) {
+    return js.alloc<InstancePropertyGcDetectorBox>(js);
   }
 
   kj::Array<jsg::Ref<GcDetectorBox>> makeGcDetectorBoxPair(jsg::Lock& js) {
@@ -249,8 +337,11 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_METHOD(putBack);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
-    JSG_METHOD(wrapOpaquely);
     JSG_METHOD(makeInstancePropertyGcDetectorPair);
+    JSG_METHOD(makeInheritedInstancePropertyGcDetectorPair);
+    JSG_METHOD(makeShadowingInstancePropertyGcDetectorPair);
+    JSG_METHOD(makeInstancePropertyGcDetectorBox);
+    JSG_METHOD(wrapOpaquely);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -262,6 +353,9 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBoxHolder,
     GcDetector,
     InstancePropertyGcDetector,
+    InheritedInstancePropertyGcDetector,
+    ShadowingInstancePropertyGcDetector,
+    InstancePropertyGcDetectorBox,
     GcDetectorBox,
     ValueBox,
     ItemQueue);
@@ -386,63 +480,138 @@ KJ_TEST("GC collects objects when expected") {
       "undefined", "undefined");
 }
 
+// Makes a pair of detectors with `factory`, runs `change` on the first, drops it and runs a minor
+// GC, then expects the first to have been collected or not, as `collected` says.
+void expectMinorGcCollects(Evaluator<TraceTestContext, TraceTestIsolate>& e,
+    bool collected,
+    kj::StringPtr change,
+    kj::StringPtr factory = "makeInstancePropertyGcDetectorPair"_kj) {
+  KJ_CONTEXT(change, factory);
+  // `change` runs in a function that takes the wrapper as an argument, so no variable of the
+  // script's still holds it at the GC.
+  e.expectEval(kj::str("let pair = ", factory,
+                   R"(();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    ((a) => {
+      )",
+                   change, R"(
+    })(a);
+    a = null;
+    gc({type: "minor"});
+    b.siblingCollected;
+  )"),
+      "boolean", collected ? "true" : "false");
+}
+
 KJ_TEST("minor GC collects wrappers with instance properties") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
 
   // The instance properties alone don't make the wrapper "modified".
-  e.expectEval(R"(
-    let pair = makeInstancePropertyGcDetectorPair();
-    let a = pair[0];
-    let b = pair[1];
-    pair = null;
-    a = null;
-    gc({type: "minor"});
-    assert(b.siblingCollected, "minor GC did not collect a wrapper with instance properties");
-  )",
-      "undefined", "undefined");
+  expectMinorGcCollects(e, true, "");
 
-  // Reading an eager instance property leaves the wrapper as it was.
-  e.expectEval(R"(
-    let pair = makeInstancePropertyGcDetectorPair();
-    let a = pair[0];
-    let b = pair[1];
-    pair = null;
-    (() => {
-      assert(a.eager === 1);
-    })();
-    a = null;
-    gc({type: "minor"});
-    assert(b.siblingCollected, "minor GC did not collect a wrapper after an eager read");
-  )",
-      "undefined", "undefined");
+  // Neither does reading an eager instance property.
+  expectMinorGcCollects(e, true, "assert(a.eager === 1);");
 
-  // Reading a lazy instance property stores its value on the wrapper, which modifies it.
-  e.expectEval(R"(
-    let pair = makeInstancePropertyGcDetectorPair();
-    let a = pair[0];
-    let b = pair[1];
-    pair = null;
-    (() => {
-      assert(a.lazy === 2);
-    })();
-    a = null;
-    gc({type: "minor"});
-    assert(!b.siblingCollected, "minor GC collected a wrapper holding a lazy property's value");
-  )",
-      "undefined", "undefined");
+  // Nor writing one with a setter, which stores the value in the C++ object.
+  expectMinorGcCollects(e, true, "a.value = 7; assert(a.value === 7);");
 
-  // So does deleting an instance property.
+  // Nor a write to a readonly one, which sloppy mode ignores.
+  expectMinorGcCollects(e, true, "a.eager = 5; assert(a.eager === 1);");
+
+  // A type's wrappers hold the instance properties of its parent types too.
+  expectMinorGcCollects(e, true, "", "makeInheritedInstancePropertyGcDetectorPair");
+  expectMinorGcCollects(e, true, "assert(a.eager === 1 && a.childEager === 3);",
+      "makeInheritedInstancePropertyGcDetectorPair");
+}
+
+KJ_TEST("minor GC keeps wrappers that hold more than their instance properties") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // Reading a lazy instance property stores its value on the wrapper.
+  expectMinorGcCollects(e, false, "assert(a.lazy === 2);");
+
+  // So does writing one, which replaces it with a data property.
+  expectMinorGcCollects(e, false, "a.lazy = 3;");
+
+  // Each of these changes the wrapper's map in a way a fresh instance can't have.
+  expectMinorGcCollects(e, false, "delete a.lazy;");
+  expectMinorGcCollects(e, false, "a.foo = 1;");
+  expectMinorGcCollects(e, false, "a[0] = 1;");
+  expectMinorGcCollects(e, false, "Object.setPrototypeOf(a, {});");
+  expectMinorGcCollects(e, false, "Object.preventExtensions(a);");
+  expectMinorGcCollects(e, false, "Object.seal(a);");
+  expectMinorGcCollects(e, false, "Object.freeze(a);");
+  expectMinorGcCollects(e, false, "Object.defineProperty(a, 'eager', {enumerable: false});");
+
+  // A private field, added through a base class constructor that returns the wrapper.
+  expectMinorGcCollects(e, false, R"(
+      class Base { constructor(o) { return o; } }
+      class WithField extends Base { #x = 1; }
+      new WithField(a);
+  )");
+
+  // Using the wrapper as a WeakMap key gives it an identity hash.
+  expectMinorGcCollects(e, false, "globalThis.keys = new WeakMap(); keys.set(a, 1);");
+
+  // A type that redefines an inherited instance property has one property fewer than its
+  // templates have accessors, so its wrappers are never taken for fresh instances.
+  expectMinorGcCollects(e, false, "", "makeShadowingInstancePropertyGcDetectorPair");
+}
+
+KJ_TEST("minor GC drops the wrapper of a live object with instance properties") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // The box keeps the detector alive through a traced reference, so a minor GC can drop the
+  // detector's wrapper, and reading `box.inner` again wraps it anew.
   e.expectEval(R"(
-    let pair = makeInstancePropertyGcDetectorPair();
-    let a = pair[0];
-    let b = pair[1];
-    pair = null;
-    delete a.lazy;
-    a = null;
+    let box = makeInstancePropertyGcDetectorBox();
+    ((d) => {
+      d.value = 7;
+      assert(d.eager === 1);
+    })(box.inner);
+    assert(box.innerWrapped);
     gc({type: "minor"});
-    assert(!b.siblingCollected, "minor GC collected a wrapper missing an instance property");
+    assert(!box.innerWrapped, "minor GC did not drop the wrapper of a traced object");
+    ((d) => {
+      assert(d.value === 7, "the new wrapper does not reach the C++ object's state");
+      assert(d.eager === 1);
+      assert(d.lazy === 2);
+    })(box.inner);
+    assert(box.innerWrapped);
   )",
       "undefined", "undefined");
+}
+
+KJ_TEST("minor GC keeps the wrapper a WeakRef points to") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    lock.withinHandleScope([&] {
+      // Both scripts run in one context, which has the WeakRef global.
+      auto context = lock.newContext<TraceTestContext>(NewContextOptions{.enableWeakRef = true})
+                         .getHandle(lock);
+      JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](Lock& js) {
+        auto run = [&](kj::StringPtr code) {
+          auto script = check(v8::Script::Compile(js.v8Context(), v8Str(js.v8Isolate, code)));
+          return check(script->Run(js.v8Context()));
+        };
+        run(R"(
+          globalThis.box = makeInstancePropertyGcDetectorBox();
+          globalThis.ref = new WeakRef(box.inner);
+        )");
+        // A new WeakRef keeps its target alive until the job that made it ends.
+        js.v8Isolate->ClearKeptObjects();
+        // If V8 dropped the wrapper, the WeakRef would come back empty while the detector lives,
+        // and `box.inner` would be a new wrapper.
+        auto result = run(R"(
+          gc({type: "minor"});
+          ref.deref() === box.inner;
+        )");
+        KJ_EXPECT(result->IsTrue(), "minor GC dropped the wrapper a WeakRef points to");
+      });
+    });
+  });
 }
 
 KJ_TEST("TracedOwn keeps an object's handles alive after it leaves the owner that visited it") {
