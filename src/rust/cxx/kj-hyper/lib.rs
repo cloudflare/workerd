@@ -9,7 +9,9 @@
 //!   a C++ `WorkerInterface`, and [`server::Handler::connect`] takes a [`server::Connect`] that is
 //!   answered in Rust ([`server::Connect::accept`] hands back the tunnel as tokio I/O,
 //!   [`server::Connect::reject`]) or handed to C++ ([`server::Connect::into_kj`]). A call that
-//!   fails unanswered gets a bare 500.
+//!   fails unanswered gets a bare 500. [`server::serve_connection_remote`] serves the connection
+//!   on one thread and hands each request, as a `Send` [`server::RemoteRequest`], to whichever
+//!   thread has the handler.
 //! - [`client`]: [`client::Client`], a pooled HTTP/1.1 client over hyper-util's legacy client
 //!   implementing `kj::http::Service`, so C++ can make outbound requests through it. Its
 //!   connections are a [`client::ClientPool`], which owns no header table, so a caller keeps one
@@ -39,6 +41,8 @@
 //!
 //! Everything is single-threaded state (`Rc`, `RefCell`, `Cell`), bound to the tokio runtime
 //! thread it was created on, as kj's own HTTP objects are bound to their event loop's thread.
+//! The exceptions are the connection half of [`server::serve_connection_remote`], a `Send`
+//! future, and the [`server::RemoteRequest`]s it makes, which travel to the handler's thread.
 //! Transports must be `Send` (hyper's upgrade path and the legacy client's connection tasks
 //! require it); handlers, settings and header tables need not be. hyper's timers (header timeout,
 //! pool idle eviction) and the client's connection tasks (`tokio::spawn`) need the thread's tokio

@@ -20,6 +20,19 @@
 //! Responses are written as kj writes them ([`crate::body::Head`]): `Connection: close` and the
 //! body's framing first, then the application's headers in kj's order.
 //!
+//! # A connection and its handler on different threads
+//!
+//! [`serve_connection_remote`] runs the connection (hyper: parsing, framing, the transport) on
+//! the calling task, which may belong to a runtime of several threads, and gives each request to
+//! its caller as a [`RemoteRequest`], which is `Send`. The thread that has the handler calls
+//! [`RemoteRequest::handle`], and the request is answered by the code that answers a local one:
+//! everything above holds for it. What crosses threads is hyper's own request (the head, the
+//! body, which that thread reads from hyper as the handler asks for it, and hyper's hand-over of
+//! the transport for an upgrade) and, on the way back, the response head and a body of one
+//! chunk at a time ([`crate::body::ChannelBody`]), so both bodies are bounded by what their
+//! reader takes. An upgraded transport is used by the handler's thread directly, while it stays
+//! registered with the runtime that accepted it.
+//!
 //! # Request parsing
 //!
 //! Request parsing is hyper's. Framing is strict per RFC 9112: a request with both
@@ -46,6 +59,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::error::Error;
+use std::fmt;
 use std::future::Future;
 use std::future::pending;
 use std::future::poll_fn;
@@ -53,6 +67,12 @@ use std::io;
 use std::pin::Pin;
 use std::pin::pin;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -60,6 +80,7 @@ use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use futures::future::LocalBoxFuture;
 use futures::future::Shared;
 use futures::stream::FuturesUnordered;
@@ -196,24 +217,44 @@ impl Shutdown {
     }
 }
 
+/// What the requests of a local connection share: the application they are for.
 struct Connection<'t> {
     table: &'t HeaderTable,
     settings: Rc<ServerSettings>,
     handler: Rc<dyn Handler + 't>,
+}
+
+/// What a connection shares with the response side of each of its requests. The two may be on
+/// different threads ([`serve_connection_remote`]).
+#[derive(Clone)]
+struct Link {
     /// Set by the response that upgrades the connection: hyper hands the transport over and is
-    /// done, while a call keeps using it. Each request's [`ResponseSender`] sets it and the serve
-    /// loop reads it, all on the connection's thread.
-    upgraded: Rc<Cell<bool>>,
+    /// done, while a call keeps using it. A request's [`ResponseSender`] sets it and the serve
+    /// loop reads it.
+    upgraded: Arc<AtomicBool>,
     /// The transport's hang-up signal, which an upgraded transport keeps.
     hangup: Shared<Hangup>,
     /// True once the server drains: the connection closes after its next response.
     draining: Option<watch::Receiver<bool>>,
 }
 
-/// The handler calls in flight (see the module docs). Owned by [`serve_connection`]'s future,
-/// not by the [`Connection`] the calls themselves hold, so dropping the future drops the calls.
-/// hyper's service pushes to it and the serve loop polls it, each borrowing it only for that.
-type Calls<'t> = Rc<RefCell<FuturesUnordered<LocalBoxFuture<'t, ()>>>>;
+/// The way back to a request's connection: where its response head goes, and hyper's hand-over
+/// of the transport for a request that may upgrade the connection.
+struct Responder {
+    head: oneshot::Sender<Response>,
+    upgrade: Option<OnUpgrade>,
+    link: Link,
+}
+
+/// The handler calls in flight (see the module docs). Owned by the serve loop's future, so
+/// dropping that future drops the calls. hyper's service pushes to it and the serve loop polls
+/// it, each locking it only for that; the lock is never contended, since both happen inside the
+/// serve loop's poll.
+type Calls<F> = Arc<Mutex<FuturesUnordered<F>>>;
+
+fn lock<F>(calls: &Calls<F>) -> MutexGuard<'_, FuturesUnordered<F>> {
+    calls.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Serves HTTP/1.1 on `io` until the peer is done with the connection (or `shutdown` says so)
 /// and every handler call has finished.
@@ -240,45 +281,185 @@ pub async fn serve_connection<'t, IO>(
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let hangup = hangup.shared();
+    let header_timeout = settings.header_timeout;
     let conn = Rc::new(Connection {
         table,
         settings,
         handler,
-        upgraded: Rc::default(),
-        hangup: hangup.clone(),
-        draining: shutdown.subscribe(),
     });
-    let calls: Calls<'_> = Rc::default();
-    let service = {
+    let start = move |parts: Parts, body: Incoming, responder: Responder| {
         let conn = Rc::clone(&conn);
-        let calls = Rc::clone(&calls);
-        service_fn(move |request| {
-            dispatch(Rc::clone(&conn), Rc::clone(&calls), request).boxed_local()
+        let call: LocalBoxFuture<'t, ()> = Box::pin(async move {
+            let sender = Rc::new(ResponseSender::new(responder, &parts));
+            handle(
+                conn.table,
+                &conn.settings,
+                &*conn.handler,
+                parts,
+                body,
+                sender,
+            )
+            .await;
+        });
+        call
+    };
+    serve(io, hangup, header_timeout, shutdown, start).await
+}
+
+/// One request of a connection that [`serve_connection_remote`] serves, on its way to the thread
+/// that handles it.
+///
+/// It is the request as hyper parsed it: the head, the body, which is read from the connection
+/// as the handler reads it, and the way back for the response. Dropping it unhandled closes the
+/// connection without an answer.
+pub struct RemoteRequest {
+    parts: Parts,
+    body: Incoming,
+    responder: Responder,
+}
+
+impl RemoteRequest {
+    /// Calls `handler` with the request, on the calling thread, and answers the connection as
+    /// [`serve_connection`] answers its own (module docs): the response the handler sends, the
+    /// upgraded transport it takes, or the answer of a call that sends none.
+    ///
+    /// Resolves when the call has finished. Dropping the future cancels the call; a response
+    /// whose head went out is then cut short.
+    pub async fn handle(
+        self,
+        table: &HeaderTable,
+        settings: &ServerSettings,
+        handler: &dyn Handler,
+    ) {
+        let Self {
+            parts,
+            body,
+            responder,
+        } = self;
+        let sender = Rc::new(ResponseSender::new(responder, &parts));
+        // A call dropped after its head went out must not leave a body hyper would frame as
+        // complete.
+        let mut unfinished = AbortOnDrop(Some(Rc::clone(&sender)));
+        handle(table, settings, handler, parts, body, sender).await;
+        unfinished.0 = None;
+    }
+}
+
+/// Fails the response body of a call that is dropped before it finished.
+struct AbortOnDrop(Option<Rc<ResponseSender>>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = &self.0 {
+            sender.abort();
+        }
+    }
+}
+
+/// [`serve_connection`] for a server whose handlers are on other threads.
+///
+/// hyper serves `io` on the calling task, which may be one of a runtime with several threads,
+/// and each request goes to `dispatch` as a [`RemoteRequest`] for another thread to
+/// [`RemoteRequest::handle`].
+///
+/// The future `dispatch` returns stands for the handler call: it resolves once the call has
+/// finished, wherever it ran, and dropping it cancels the call. It is dropped when the peer
+/// hangs up or the connection fails, as [`serve_connection`] cancels its calls then, and
+/// otherwise awaited before the connection is done.
+///
+/// # Errors
+///
+/// As [`serve_connection`].
+pub async fn serve_connection_remote<IO, D>(
+    io: IO,
+    hangup: Hangup,
+    header_timeout: Duration,
+    shutdown: &Shutdown,
+    dispatch: D,
+) -> Result<()>
+where
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    D: Fn(RemoteRequest) -> BoxFuture<'static, ()>,
+{
+    let start = move |parts: Parts, body: Incoming, responder: Responder| {
+        dispatch(RemoteRequest {
+            parts,
+            body,
+            responder,
         })
     };
+    serve(io, hangup, header_timeout, shutdown, start).await
+}
+
+/// hyper's settings for a served connection.
+fn http1(header_timeout: Duration) -> http1::Builder {
     let mut builder = http1::Builder::new();
     builder
         .timer(TokioTimer::new())
-        .header_read_timeout(conn.settings.header_timeout)
+        .header_read_timeout(header_timeout)
         // A client may shut down its side once its request is sent.
         .half_close(true)
         .title_case_headers(true)
         .preserve_header_case(true)
         .max_headers(MAX_HEADERS)
         .auto_date_header(false);
+    builder
+}
+
+/// The serve loop of a connection: hyper on `io`, and the handler calls `start` makes of its
+/// requests, wherever they run.
+async fn serve<IO, S, F>(
+    io: IO,
+    hangup: Hangup,
+    header_timeout: Duration,
+    shutdown: &Shutdown,
+    start: S,
+) -> Result<()>
+where
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: Fn(Parts, Incoming, Responder) -> F,
+    F: Future<Output = ()> + Unpin,
+{
+    let hangup = hangup.shared();
+    let link = Link {
+        upgraded: Arc::default(),
+        hangup: hangup.clone(),
+        draining: shutdown.subscribe(),
+    };
+    let calls: Calls<F> = Arc::default();
+    let service = {
+        let link = link.clone();
+        let calls = Arc::clone(&calls);
+        service_fn(move |mut request: http::Request<Incoming>| {
+            let may_upgrade = request.method() == http::Method::CONNECT
+                || request.headers().contains_key(UPGRADE);
+            let upgrade = may_upgrade.then(|| upgrade::on(&mut request));
+            let (parts, body) = request.into_parts();
+            let (head, sent) = oneshot::channel();
+            let responder = Responder {
+                head,
+                upgrade,
+                link: link.clone(),
+            };
+            // The call starts alongside the connection; hyper waits for the response head it
+            // sends. A call that ends without one closes the connection.
+            lock(&calls).push(start(parts, body, responder));
+            async move { sent.await.map_err(|_| Unanswered) }
+        })
+    };
     let mut serving = pin!(
-        builder
+        http1(header_timeout)
             .serve_connection(TokioIo::new(io), service)
             .with_upgrades()
     );
-    let mut drain = conn.draining.clone();
+    let mut drain = link.draining.clone();
     let mut drained = pin!(async move {
         match drain.as_mut() {
             Some(drain) => drop(drain.wait_for(|draining| *draining).await),
             None => pending().await,
         }
     });
+    let upgraded = || link.upgraded.load(Ordering::Acquire);
     let mut hangup = pin!(hangup);
     let mut draining = false;
     let mut served: Option<hyper::Result<()>> = None;
@@ -286,14 +467,14 @@ where
         // Only while hyper serves: hyper shuts down its side once it is done, so a hang-up after
         // that is the close it started, not a peer going away mid-call.
         if served.is_none()
-            && !conn.upgraded.get()
+            && !upgraded()
             && let Poll::Ready(hung_up) = hangup.as_mut().poll(cx)
         {
             // A failure to watch the transport fails the serve, as under kj's `exclusiveJoin`.
             hung_up?;
             // The peer is gone: nothing a call does can reach it.
             served = Some(Ok(()));
-            calls.borrow_mut().clear();
+            lock(&calls).clear();
         }
         if !draining && drained.as_mut().poll(cx).is_ready() {
             draining = true;
@@ -305,28 +486,28 @@ where
         // the service), which then gets its first poll in this same turn.
         loop {
             let mut progressed = false;
-            while calls.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {
+            while lock(&calls).poll_next_unpin(cx) == Poll::Ready(Some(())) {
                 progressed = true;
             }
-            let before = calls.borrow().len();
+            let before = lock(&calls).len();
             if served.is_none()
                 && let Poll::Ready(result) = serving.as_mut().poll(cx)
             {
-                if result.is_err() && !conn.upgraded.get() {
+                if result.is_err() && !upgraded() {
                     // The connection failed: nothing a call does can reach the peer.
-                    calls.borrow_mut().clear();
+                    lock(&calls).clear();
                 }
                 served = Some(result);
                 progressed = true;
             }
-            if calls.borrow().len() != before {
+            if lock(&calls).len() != before {
                 progressed = true;
             }
             if !progressed {
                 break;
             }
         }
-        if served.is_some() && calls.borrow().is_empty() {
+        if served.is_some() && lock(&calls).is_empty() {
             Poll::Ready(Result::<()>::Ok(()))
         } else {
             Poll::Pending
@@ -344,6 +525,19 @@ where
     }
 }
 
+/// The failure of a request whose handler call ended, or was dropped, without a response:
+/// hyper closes the connection.
+#[derive(Debug)]
+struct Unanswered;
+
+impl fmt::Display for Unanswered {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the handler sent no response")
+    }
+}
+
+impl Error for Unanswered {}
+
 /// The I/O error behind a hyper error, if that is what it is.
 fn transport_error(error: &hyper::Error) -> Option<KjError> {
     let mut source = Error::source(error);
@@ -356,44 +550,16 @@ fn transport_error(error: &hyper::Error) -> Option<KjError> {
     None
 }
 
-/// hyper's service: starts the handler call alongside the connection and waits for the response
-/// head it sends. A call that ends without one closes the connection.
-async fn dispatch<'t>(
-    conn: Rc<Connection<'t>>,
-    calls: Calls<'t>,
-    mut request: http::Request<Incoming>,
-) -> Result<Response, io::Error> {
-    let may_upgrade =
-        request.method() == http::Method::CONNECT || request.headers().contains_key(UPGRADE);
-    let upgrade = may_upgrade.then(|| upgrade::on(&mut request));
-    let (parts, body) = request.into_parts();
-    let (head_tx, head_rx) = oneshot::channel();
-    let sender = Rc::new(ResponseSender {
-        head: RefCell::new(Some(head_tx)),
-        head_request: parts.method == http::Method::HEAD,
-        websocket_key: parts.headers.get(SEC_WEBSOCKET_KEY).cloned(),
-        upgrade: RefCell::new(upgrade),
-        upgraded: Rc::clone(&conn.upgraded),
-        hangup: conn.hangup.clone(),
-        body_abort: RefCell::new(None),
-        closing: Cell::new(false),
-        draining: conn.draining.clone(),
-    });
-    let call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, sender));
-    calls.borrow_mut().push(call);
-    head_rx
-        .await
-        .map_err(|_| io::Error::other("the handler sent no response"))
-}
-
 /// One handler call, and the answer when it sends none (module docs).
 async fn handle(
-    conn: Rc<Connection<'_>>,
+    table: &HeaderTable,
+    settings: &ServerSettings,
+    handler: &dyn Handler,
     parts: Parts,
     body: Incoming,
     sender: Rc<ResponseSender>,
 ) {
-    let headers = match HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(conn.table) {
+    let headers = match HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(table) {
         Ok(headers) => headers,
         Err(e) => {
             let _ = sender.send_error(400, b"Bad Request", format!("ERROR: {}", e.description()));
@@ -413,7 +579,7 @@ async fn handle(
             sender: Rc::clone(&sender),
             tunnel,
         };
-        conn.handler
+        handler
             .connect(host.as_bytes(), HeadersRef::from(&*headers), connect)
             .await
     } else {
@@ -432,10 +598,10 @@ async fn handle(
             Box::new(ServerResponse(Rc::clone(&sender))),
             method,
             &headers,
-            conn.settings.websocket_compression,
-            conn.settings.websocket_errors(),
+            settings.websocket_compression,
+            settings.websocket_errors(),
         );
-        conn.handler
+        handler
             .request(
                 method,
                 url.as_bytes(),
@@ -479,17 +645,39 @@ struct ResponseSender {
     websocket_key: Option<http::HeaderValue>,
     /// For a request that may upgrade the connection: hyper's hand-over of the transport.
     upgrade: RefCell<Option<OnUpgrade>>,
-    upgraded: Rc<Cell<bool>>,
-    hangup: Shared<Hangup>,
     /// Fails the response body a `send()` opened, for a failure after the head went out.
     body_abort: RefCell<Option<BodyAbort>>,
     /// The connection closes after this response (kj's `closeAfterSend`), which says so.
     closing: Cell<bool>,
-    /// As the connection's: a response sent while the server drains says so too.
-    draining: Option<watch::Receiver<bool>>,
+    /// The connection's: its upgrade flag, its hang-up signal, and whether the server drains (a
+    /// response sent while it does says that the connection closes).
+    link: Link,
 }
 
 impl ResponseSender {
+    /// The response side of the request with the head `parts`.
+    fn new(responder: Responder, parts: &Parts) -> Self {
+        Self {
+            head: RefCell::new(Some(responder.head)),
+            head_request: parts.method == http::Method::HEAD,
+            websocket_key: parts.headers.get(SEC_WEBSOCKET_KEY).cloned(),
+            upgrade: RefCell::new(responder.upgrade),
+            body_abort: RefCell::new(None),
+            closing: Cell::new(false),
+            link: responder.link,
+        }
+    }
+
+    /// Sends the head of a response that upgrades the connection. The connection learns that it
+    /// is upgraded no later than it gets the head, wherever it is served.
+    fn send_upgrade(&self, status: u32, status_text: &[u8], head: Head) -> Result<()> {
+        if self.sent() {
+            return Err(failed("response already sent"));
+        }
+        self.link.upgraded.store(true, Ordering::Release);
+        self.send_head(status, status_text, head, ChannelBody::empty())
+    }
+
     /// The head went out.
     fn sent(&self) -> bool {
         self.head.borrow().is_none()
@@ -500,14 +688,14 @@ impl ResponseSender {
         self.upgrade
             .borrow_mut()
             .take()
-            .map(|upgrade| Upgrading::new(upgrade, self.hangup.clone()))
+            .map(|upgrade| Upgrading::new(upgrade, self.link.hangup.clone()))
             .ok_or_else(|| failed("this request does not upgrade the connection"))
     }
 
     /// Says `Connection: close` when the connection closes after this response: the response
     /// refuses a CONNECT, or the server is draining.
     fn announce_close(&self, head: &mut Head) {
-        if self.closing.get() || self.draining.as_ref().is_some_and(|d| *d.borrow()) {
+        if self.closing.get() || self.link.draining.as_ref().is_some_and(|d| *d.borrow()) {
             head.set(Builtin::Connection, http::HeaderValue::from_static("close"));
         }
     }
@@ -586,9 +774,7 @@ impl ResponseSender {
     fn accept_connect(&self, status: u32, status_text: &[u8], headers: &HttpHeaders) -> Result<()> {
         let mut head = Head::new(headers);
         head.claim(Protocol::Message);
-        self.send_head(status, status_text, head, ChannelBody::empty())?;
-        self.upgraded.set(true);
-        Ok(())
+        self.send_upgrade(status, status_text, head)
     }
 
     /// A plain-text response that closes the connection once sent.
@@ -691,9 +877,7 @@ impl ServerResponse {
                     .map_err(|e| failed(format!("invalid extensions: {e}")))?,
             );
         }
-        self.0
-            .send_head(101, b"Switching Protocols", head, ChannelBody::empty())?;
-        self.0.upgraded.set(true);
+        self.0.send_upgrade(101, b"Switching Protocols", head)?;
         Ok(Box::new(RustIo::from(io)))
     }
 }
