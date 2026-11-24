@@ -270,7 +270,7 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
 fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
 `src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
-`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`readApiObject`, `readHostObjectWithoutJs`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
@@ -851,12 +851,13 @@ for _ in 0..calls {
 }
 ```
 
-To return a handle of the new scope, as a C++ `js.runInHandleScope()` callback that returns a
+To return a handle of the new scope, as a C++ `js.withinHandleScope()` callback that returns a
 `v8::Local` does, `lock.with_escapable_handle_scope(|lock, scope| ...)` opens a
 `v8::EscapableHandleScope` instead. Its closure gets a `jsg::EscapableScope<'t, 's>`, which is
 proof of the same bound as `NestedScope`, and whose `escape(local)` turns one `Local<'t, T>` into
-a `Local<'s, T>`. `escape` consumes it, since V8 lets a scope escape one handle, and the closure
-can return what it returns in a `Result` or `Option`.
+a `Local<'s, T>`. `escape` consumes it, since a scope can escape one handle (V8 only
+debug-checks a second escape, which in a release build overwrites the first escaped handle), and
+the closure can return what it returns in a `Result` or `Option`.
 
 ```rust
 let object = lock.with_escapable_handle_scope(|lock, scope| -> jsg::Result<_> {
@@ -1242,9 +1243,11 @@ Instances of the runtime's classes implemented in JavaScript, such as `QuotaExce
 written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
 that the class's `clone` function returns follows the value. Reading one makes the copy from the
 class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
-with the class's `deserialize` function once the whole value is read. That function is the only
-JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
-such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+with the class's `deserialize` function once the whole value is read. That function, and the work
+that a workerd API object's deserializer leaves until then, are the only JavaScript
+deserialization runs, and where C++ code has disallowed JavaScript execution, reading such an
+instance or API object throws `DataCloneError`. A reader that tries to run JavaScript while the
+value is read fails the read with `DataCloneError`, as in C++ JSG. A `SharedArrayBuffer` is written as a reference to a
 buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
 given only the bytes can resolve, so data containing one can't be read back.
 

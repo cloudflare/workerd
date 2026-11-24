@@ -194,6 +194,14 @@ pub mod ffi {
         Info,
     }
 
+    /// Mirrors `v8::ConstructorBehavior`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ConstructorBehavior {
+        /// The function throws when called with `new`, and V8 creates no prototype object for it.
+        Throw = 0,
+        Allow = 1,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -613,6 +621,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             callback: usize,
             data: &Local,
+            behavior: ConstructorBehavior,
         ) -> MaybeLocal;
 
         // Struct shapes; see `structs.rs`.
@@ -687,6 +696,12 @@ pub mod ffi {
             promise: &Local,
             on_fulfilled: &Local,
             on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_callback(
+            isolate: *mut Isolate,
+            promise: &Local,
+            callback: usize,
+            data: &Local,
         ) -> MaybeLocal;
 
         // Local<PromiseResolver>
@@ -768,6 +783,7 @@ pub mod ffi {
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
+        #[nothrow]
         pub unsafe fn wrappable_clear_trait_object(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_strong_refcount(wrappable: &Wrappable) -> u32;
 
@@ -777,7 +793,9 @@ pub mod ffi {
             align: usize,
             storage: &mut usize,
         ) -> KjRc<Wrappable>;
+        #[nothrow]
         pub unsafe fn wrappable_init(wrappable: Pin<&mut Wrappable>, ptr: TraitObjectPtr);
+        #[nothrow]
         pub unsafe fn wrappable_init_unreferenced(
             wrappable: Pin<&mut Wrappable>,
             ptr: TraitObjectPtr,
@@ -1243,12 +1261,11 @@ pub mod ffi {
         // Leaves what creating the wrapper throws pending; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
-            wrappable: KjRc<Wrappable>,
+            wrappable: Pin<&mut Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            wrapped_elsewhere: &mut bool,
         ) -> MaybeLocal /* v8::Local<Value> */;
 
-        // The existing wrapper, as `wrap_resource` returns it, without creating one; see `ffi.h`.
+        // See `ffi.h`.
         pub unsafe fn wrappable_get_wrapper(
             isolate: *mut Isolate,
             wrappable: Pin<&mut Wrappable>,
@@ -2461,7 +2478,12 @@ impl Function {
                 &mut FunctionCallbackInfo<'a>,
             ) -> Result<Local<'a, Value>, Error>,
     {
-        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        let [function] = Self::new_sharing_data(
+            lock,
+            data,
+            [Self::callback::<T, F>(f)],
+            ffi::ConstructorBehavior::Allow,
+        )?;
         Ok(function)
     }
 
@@ -2493,6 +2515,7 @@ impl Function {
                 lock.isolate().as_ffi(),
                 callback as usize,
                 undefined.raw(),
+                ffi::ConstructorBehavior::Allow,
             ))
         }
         .ok_or_else(Error::pending)
@@ -2508,6 +2531,7 @@ impl Function {
         lock: &Lock<'s>,
         data: T,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Self>; N]>
     where
         T: Traced + 'static,
@@ -2515,7 +2539,7 @@ impl Function {
         // As in `jsg::Rc::new`, the Wrappable owns the data, which is dropped when the Wrappable
         // is destroyed.
         let (mut wrappable, _) = WrappableRc::new(FunctionData(data));
-        let functions = wrappable.new_functions(lock, callbacks);
+        let functions = wrappable.new_functions(lock, callbacks, behavior);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
         wrappable.remove_strong_ref();
@@ -5888,19 +5912,12 @@ impl WrappableRc {
             return Ok(Some(wrapper));
         }
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
-        // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
-        let handle = unsafe {
-            ffi::wrap_resource(
-                lock.isolate().as_ffi(),
-                self.handle.clone(),
-                &constructor,
-                &mut wrapped_elsewhere,
-            )
-        };
-        if wrapped_elsewhere {
-            return Ok(None);
-        }
+        // SAFETY: isolate is valid and locked; the Wrappable has no wrapper, as checked above, or
+        // an exception is pending and `wrap_resource` returns before it attaches one; the
+        // constructor is a function template of the isolate, which the Realm's template cache
+        // keeps alive.
+        let handle =
+            unsafe { ffi::wrap_resource(lock.isolate().as_ffi(), self.as_pin_mut(), &constructor) };
         // SAFETY: the wrapper is created in the scope of `lock`.
         let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
         Ok(Some(wrapper))
@@ -6064,6 +6081,7 @@ impl WrappableRc {
         &self,
         lock: &Lock<'s>,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
         let data = self.attach_opaque_wrapper(lock)?;
@@ -6073,7 +6091,12 @@ impl WrappableRc {
             // (guaranteed by Lock); `callback` is a V8 function callback and `data` a handle in
             // the lock's scope, in which the function is created.
             let function = unsafe {
-                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
+                Local::from_ffi_maybe(ffi::function_new(
+                    isolate,
+                    callback as usize,
+                    data.raw(),
+                    behavior,
+                ))
             };
             functions.push(function.ok_or_else(Error::pending)?);
         }

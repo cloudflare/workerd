@@ -21,6 +21,7 @@
 // #include "hibernatable-adapter.h"
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/strings.h>
 
 #include <kj/compat/url.h>
 
@@ -506,8 +507,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Check if we have a valid URL
   constexpr auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
+  bool standard = FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions();
 
-  if (FeatureFlags::get(js).getWebsocketStandardUrlAndExtensions()) {
+  if (standard) {
     // https://websockets.spec.whatwg.org/#dom-websocket-websocket. A Worker has no base URL, so a
     // relative URL fails to parse. The serialized URL then takes the same path as without the flag.
     auto parsed = JSG_REQUIRE_NONNULL(
@@ -564,16 +566,18 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
         // Per the WebSocket spec, an empty protocols array is valid and equivalent to not
         // specifying any protocols - we simply don't set the Sec-WebSocket-Protocol header.
         if (protoArr.size() > 0) {
-          // Search for duplicates by checking for their presence in the set.
+          // Search for duplicates by checking for their presence in the set. The spec compares
+          // protocols case-insensitively.
           kj::HashSet<kj::String> present;
 
           for (const auto& proto: protoArr) {
             JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
                 "One of the protocol header tokens is invalid.");
-            JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
+            auto key = standard ? toLower(proto) : kj::str(proto);
+            JSG_REQUIRE(!present.contains(key), DOMSyntaxError, wsErr,
                 "The protocols header cannot have repeating values.");
 
-            present.insert(kj::str(proto));
+            present.insert(kj::mv(key));
           }
           constexpr auto delim = ", "_kj;
           maybeProtoString = kj::str(kj::delimited(protoArr, delim));
@@ -1199,15 +1203,15 @@ kj::Maybe<kj::String> LegacyWebSocketAdapter::getPreferredExtensions(
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getUrl() {
-  return url.map([](kj::StringPtr value) { return value; });
+  return url;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getProtocol() {
-  return protocol.map([](kj::StringPtr value) { return value; });
+  return protocol;
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getExtensions() {
-  return extensions.map([](kj::StringPtr value) { return value; });
+  return extensions;
 }
 
 kj::Maybe<jsg::JsValue> LegacyWebSocketAdapter::deserializeAttachment(jsg::Lock& js) {

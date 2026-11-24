@@ -88,7 +88,14 @@ llvm.sysroot(
     label = "@sysroot_linux_aarch64//sysroot",
     targets = ["linux-aarch64"],
 )
-use_repo(llvm, "llvm_linux_aarch64", "llvm_linux_x86_64")
+
+# llvm_linux_x86_64_llvm is the x64 distribution itself, whose llvm-profdata merges PGO training
+# profiles (build/pgo).
+use_repo(llvm, "llvm_linux_aarch64", "llvm_linux_x86_64", "llvm_linux_x86_64_llvm")
+
+# The PGO profile that the Linux release builds are optimized with (build/pgo/README.md).
+pgo_profile = use_extension("//build/pgo:profile.bzl", "pgo_profile")
+use_repo(pgo_profile, "workerd_pgo_profile")
 
 register_toolchains(
     "@llvm_linux_x86_64//:all",

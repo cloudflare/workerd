@@ -292,6 +292,12 @@ wd_test(
     sidecar_randomize_ip = False,
 )
 
+wd_test(
+    src = "connect-handler-starttls-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-handler-starttls-lifetime-test.js"],
+)
+
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
 # NeuterableIoStream when the handler promise resolves, preventing use-after-free.
 wd_test(
@@ -790,6 +796,12 @@ wd_test(
     src = "abortsignal-test.wd-test",
     args = ["--experimental"],
     data = ["abortsignal-test.js"],
+)
+
+wd_test(
+    src = "deserialize-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["deserialize-pollution-test.js"],
 )
 
 wd_test(
@@ -1670,6 +1682,16 @@ wd_test(
     args = ["--experimental"],
     data = [
         "new-module-registry-stack-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-lazy-globals-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-lazy-globals-request-test.js",
+        "new-module-registry-lazy-globals-top-level-test.js",
+        "new-module-registry-lazy-globals-warning-test.js",
     ],
 )
 

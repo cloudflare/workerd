@@ -96,10 +96,39 @@ struct Config {
   # Console and Stdio logging configuration options.
 
   cluster @7 :ClusterConfig;
-  # Set when this instance should join a cluster. Requires `--experimental`.
+  # Set when this instance should join a cluster. Requires `--experimental`. `workerd serve
+  # --cluster-addr=<addr>` joins a config without it, such as a wrangler config, to a cluster as if
+  # it were `(address = "<addr>")`: every other field at its default, so `key` and `bucket` come
+  # from the environment. A config compiled into a binary by `workerd compile` cannot join this
+  # way; compile one that sets `cluster`. Nor can a config without the writable disk service
+  # `do-storage`, which holds the Durable Objects of the cluster's deployments on each instance.
+  #
+  # A wrangler config joined this way defines the disk service `do-storage`, which holds its
+  # Durable Objects and those of the cluster's deployments, even if it has none of its own (see
+  # `ClusterConfig`), in `do/` of its state directory: `.wrangler/state/workerd` next to it, or
+  # the one that `--data-dir` names.
 
   tracing @8 :TracingOptions;
   # Where the spans of Worker invocations are exported.
+
+  shutdownDelayMs @9 :UInt32 = 0;
+  # How long `workerd serve` keeps serving after SIGTERM (Ctrl-Break on Windows) before it drains.
+  # Load balancers can go on sending new connections for a while after they learn a server is
+  # stopping: a cloud load balancer in front of Kubernetes, for up to about 20 seconds. Until the
+  # delay ends, the listeners accept and serve connections as before; then the server drains as it
+  # does at once with the default of 0. A second SIGTERM starts the drain at once. So does a SIGTERM
+  # that arrives before the server serves: it was never ready, so nothing sends it traffic.
+  #
+  # `serve`, and a binary that `workerd compile` builds, take it from the environment variable
+  # `WORKERD_SHUTDOWN_DELAY_MS` instead when that is set; a blank variable counts as unset. The
+  # variable holds a whole number of milliseconds in digits, and trailing whitespace is ignored;
+  # any other value ends the process at startup. So does a delay above 3600000 (an hour), from the
+  # variable or, when that is unset, from here.
+  #
+  # A cluster instance keeps its lease, its membership and its Durable Objects through the delay,
+  # while `GET /ready` on its cluster port answers 503. `ClusterConfig.stopTimeoutMs` runs from the
+  # end of the delay, so the supervisor's grace period (Kubernetes' `terminationGracePeriodSeconds`)
+  # must cover the delay plus the stop timeout.
 }
 
 struct ClusterConfig {
@@ -199,6 +228,10 @@ struct ClusterConfig {
   # that is never completed or aborted, such as an R2 put cut off mid-stream, otherwise keeps its
   # parts, and their storage, forever.
   #
+  # `serve` takes it from the environment variable `WORKERD_CLUSTER_BUCKET` instead when that is
+  # set, ignoring trailing whitespace; a blank variable counts as unset. A bucket set nowhere is an
+  # error.
+  #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
   # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
@@ -265,6 +298,12 @@ struct ClusterConfig {
   # channel tokens, which pass service and Durable Object stubs over RPC. Traffic is not
   # encrypted: run the cluster on a private network (a VPC, WireGuard, Tailscale).
   #
+  # `serve` takes the key from the environment variable `WORKERD_CLUSTER_KEY` instead when that is
+  # set, or reads it at startup from the file that `WORKERD_CLUSTER_KEY_FILE` names, such as a
+  # mounted secret, ignoring trailing whitespace; a blank variable or file counts as unset. Set
+  # only one of the two. The key is text, so the file must be UTF-8. A config, or a binary that
+  # `workerd compile` builds, can then hold no key. A key set nowhere is an error.
+  #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 
   unsafePublicAddress @5 :Bool = false;
@@ -273,20 +312,21 @@ struct ClusterConfig {
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
 
   stopTimeoutMs @6 :UInt32 = 8000;
-  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
-  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
-  # while it keeps serving the rest: each object takes no new requests but those that the work of
-  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
-  # its requests in flight finish, and it is released for the next request anywhere to claim.
-  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
-  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
-  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
-  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, its
-  # peers' last, and then stops its containers' Docker containers. Once its other connections have
-  # finished, it starts none of its peers' requests, and closes each peer's connection once the
-  # requests it started on that connection have ended, so that the peer sends those it did not
-  # start where their Durable Objects run next.
+  # How long an instance takes to stop, from SIGTERM, or from the end of its shutdown delay
+  # (`Config.shutdownDelayMs`), to exit. Rather than leave its Durable Objects to wait for its lease
+  # to expire, a stopping instance hands them to its peers, busiest first, while it keeps serving
+  # the rest: each object takes no new requests but those that the work of an object being handed
+  # off makes, here or on a peer, directly or through other Durable Objects, its requests in flight
+  # finish, and it is released for the next request anywhere to claim. Requests that arrive
+  # meanwhile, other Durable Objects' calls included, wait for the object and then go where it runs
+  # next. While a Durable Object serves a call of a handoff's work, all the calls it makes count as
+  # that work. Then the instance leaves the cluster, keeps accepting requests until at least five
+  # seconds after SIGTERM or the end of the shutdown delay (or until the handoff deadline, if that
+  # comes sooner), as load balancers take a while to stop sending them, lets its connections finish,
+  # its peers' last, and then stops its containers' Docker containers. Once its other connections
+  # have finished, it starts none of its peers' requests, and closes each peer's connection once the
+  # requests it started on that connection have ended, so that the peer sends those it did not start
+  # where their Durable Objects run next.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
@@ -321,6 +361,18 @@ struct ClusterConfig {
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+  #
+  # `Config.shutdownDelayMs` puts a delay between SIGTERM and all of this, during which the instance
+  # serves as before and keeps its objects, but `GET /ready` answers 503: for load balancers that go
+  # on sending requests for a while, as a cloud load balancer in front of Kubernetes does. The
+  # supervisor's grace period must then cover the delay plus this timeout.
+  #
+  # `serve`, and a binary that `workerd compile` builds, take this from the environment variable
+  # `WORKERD_CLUSTER_STOP_TIMEOUT_MS` instead when that is set, as they take
+  # `Config.shutdownDelayMs` from `WORKERD_SHUTDOWN_DELAY_MS`, so the two timings that the grace
+  # period must cover are set in one place. A blank variable counts as unset. It holds a whole
+  # number of milliseconds in digits, and trailing whitespace is ignored; any other value, or one
+  # above 3600000 (an hour), ends the process at startup.
 
   unsafeTimeDivisor @7 :UInt32 = 1;
   # For tests: divides by this the times that a takeover and a stop wait out, which tests would

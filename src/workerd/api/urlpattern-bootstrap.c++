@@ -217,7 +217,7 @@ jsg::JsValue UrlPatternBootstrap::compileLegacy(
     jsg::Lock& js, jsg::JsValue input, jsg::JsValue base, jsg::JsValue ignoreCase) {
   auto baseString = toOptionalUsvString(js, base, "base"_kj);
   jsg::UrlPattern::CompileOptions options{
-    .baseUrl = baseString.map([](jsg::USVString& b) { return b.asPtr(); }),
+    .baseUrl = baseString,
     .ignoreCase = toBoolean(js, ignoreCase, "ignoreCase"_kj),
   };
 

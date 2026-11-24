@@ -93,10 +93,12 @@ type Handler = dyn Fn(&Request, usize) -> Answer + Send + Sync;
 /// fails: far longer than any stall of a busy machine.
 pub const WATCHDOG: Duration = Duration::from_secs(10);
 
-/// Each server's host, with where to send the server's end of a new
-/// in-memory connection to it.
-static IN_MEMORY: Mutex<BTreeMap<String, mpsc::UnboundedSender<DuplexStream>>> =
-    Mutex::new(BTreeMap::new());
+/// Where to send the server's end of a new in-memory connection to a
+/// server, and how many more of them it hangs up on (`Server::hang_up`).
+type Accept = (mpsc::UnboundedSender<DuplexStream>, Arc<AtomicUsize>);
+
+/// Each server's host, with its `Accept`.
+static IN_MEMORY: Mutex<BTreeMap<String, Accept>> = Mutex::new(BTreeMap::new());
 
 /// How many bytes an in-memory connection holds in each direction before a
 /// write waits for the other end to read.
@@ -105,9 +107,15 @@ const IN_MEMORY_BUFFER: usize = 64 << 10;
 /// A new in-memory connection to the server at `host`, `ip:port`, if one
 /// serves there.
 pub fn connect(host: &str) -> Option<DuplexStream> {
-    let accept = IN_MEMORY.lock().unwrap().get(host)?.clone();
+    let (accept, hang_ups) = IN_MEMORY.lock().unwrap().get(host)?.clone();
     let (client, server) = tokio::io::duplex(IN_MEMORY_BUFFER);
-    accept.send(server).ok()?;
+    let hang_up = hang_ups.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+    if hang_up.is_ok() {
+        // Closed before the client reads from it or writes to it.
+        drop(server);
+    } else {
+        accept.send(server).ok()?;
+    }
     Some(client)
 }
 
@@ -116,6 +124,7 @@ pub struct Server {
     pub host: String,
     received: Arc<Mutex<Vec<Request>>>,
     connections: Arc<AtomicUsize>,
+    hang_ups: Arc<AtomicUsize>,
     abandoned: Arc<Abandoned>,
     progress: Arc<Progress>,
 }
@@ -134,7 +143,7 @@ impl Drop for Registered {
         // A later server on the same port replaced this one's entry.
         if servers
             .get(&self.host)
-            .is_some_and(|s| s.same_channel(&self.accept))
+            .is_some_and(|(s, _)| s.same_channel(&self.accept))
         {
             servers.remove(&self.host);
         }
@@ -207,10 +216,11 @@ impl Server {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let host = listener.local_addr().unwrap().to_string();
         let (accept, mut accepted) = mpsc::unbounded_channel();
+        let hang_ups = Arc::new(AtomicUsize::new(0));
         IN_MEMORY
             .lock()
             .unwrap()
-            .insert(host.clone(), accept.clone());
+            .insert(host.clone(), (accept.clone(), hang_ups.clone()));
         let registered = Registered {
             host: host.clone(),
             accept,
@@ -243,9 +253,22 @@ impl Server {
             host,
             received,
             connections,
+            hang_ups,
             abandoned,
             progress,
         }
+    }
+
+    /// The next `n` in-memory connections to the server close as they open,
+    /// before the client can send anything on them. They are not accepted,
+    /// nor counted in `connections`.
+    pub fn hang_up(&self, n: usize) {
+        self.hang_ups.store(n, Ordering::SeqCst);
+    }
+
+    /// How many of the connections `hang_up` named are still to open.
+    pub fn hang_ups(&self) -> usize {
+        self.hang_ups.load(Ordering::SeqCst)
     }
 
     /// The connections accepted so far.

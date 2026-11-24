@@ -55,8 +55,8 @@ class Blob: public jsg::Object {
   }
 
   jsg::Ref<Blob> slice(jsg::Lock& js,
-      jsg::Optional<int> start,
-      jsg::Optional<int> end,
+      jsg::Optional<double> start,
+      jsg::Optional<double> end,
       jsg::Optional<kj::String> type);
 
   // Each of the consumption methods (arrayBuffer, bytes, text) create copies of

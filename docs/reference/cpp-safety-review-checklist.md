@@ -75,6 +75,10 @@ These checkists are to be used when performing code reviews for memory safety, t
 
 **MEDIUM (safety-related):**
 
+- **JavaScript during deserialization**: A `JSG_SERIALIZABLE` type's `deserialize()`, or code it
+  calls, doing something that can run JavaScript outside a `deserializer.afterRead()` callback. The
+  read then fails with `DataCloneError`. Walk it as "Reviewing a `deserialize()`" below
+  describes.
 - **Broad capture in async lambda**: Lambda passed to `.then()` or stored for deferred execution
   using `[&]` or `[this]` when only specific members are needed. Prefer explicit captures and
   carefully consider captured variable lifetimes.
@@ -87,6 +91,72 @@ These checkists are to be used when performing code reviews for memory safety, t
   directly. `IoOwn`'s destructor creates a matching `AllowAsyncDestructorsScope` to permit safe
   destruction. When reviewing code that introduces new GC or destructor paths, verify these scopes
   are correctly nested.
+
+### Reviewing a `deserialize()`
+
+A `JSG_SERIALIZABLE` type's `deserialize()` runs while V8 reads a value, where no JavaScript may
+run (the rule is in `jsg/ser.h`, above `class Serializer`; `docs/jsg.md`, "Running No JavaScript
+While Reading", has the details). A property lookup that may reach a prototype, an assignment,
+and a conversion of an object (`toJSON`, `toString`, `valueOf`, `Symbol.toPrimitive`) can each
+run JavaScript. An attempt to run JavaScript fails the read with `DataCloneError`. Decide whether
+a `deserialize()` is safe by walking it statically:
+
+1. **Find the roots.** Every `deserialize()` the change adds or touches, and anything else that
+   runs during a read: `jsg/ser.c++`'s own readers (errors, classes implemented in JavaScript),
+   the Rust deserializer in `src/rust/jsg/ser.c++`, and the RPC external handlers' `read()` and
+   `claimPrebuilt*()` in `api/worker-rpc.c++`.
+2. **Walk every call**, following each callee whose body you can read, until each path ends at a
+   primitive that runs no JavaScript, or at an operation that can.
+   - **Runs no JavaScript:**
+     - raw reads (`readRawUint32()`, `readRawBytes()`, `readLengthDelimitedString()`, ...) and a
+       nested `deserializer.readValue(js)`;
+     - `getExternalHandler()`, and the handlers' `read()` and `claimPrebuilt*()`;
+     - `tryCast<T>()` and type checks;
+     - creating values (`js.obj()`, `js.str()`, `js.alloc<T>()` with a constructor that only
+       stores what it is given) and `JsObject::createDataProperty()`;
+     - `addRef()`, `JsRef`/`V8Ref`, `getHandle()`, `FeatureFlags::get(js)` and
+       `IoContext::current()`;
+     - `TypeHandler<T>::tryUnwrap()` where `T` is a `jsg::Ref<U>`, a `Js*` handle, or a
+       `JSG_STRUCT`. A struct reads only own properties during a read. Its string and number
+       fields still convert their values: the primitives that a serializer writes there convert
+       without JavaScript, and a payload that holds an object there fails the read.
+   - **Can run JavaScript, and so is a finding outside an `afterRead()` callback:**
+     - `JsObject::get()`, `has()` without `HasOption::OWN`, `set()`, and any lookup that may reach
+       a prototype;
+     - converting an object to a string or number (`toString(js)` of a value not known to be a
+       string, `TypeHandler<kj::String>`, numbers and their arrays and dictionaries);
+     - JSON (`serializeJson()`, `jsg::deepClone()`, `V8Ref::deepClone()`,
+       `CfProperty::deepClone()`: `JSON.stringify()` looks up `toJSON`);
+     - `js.exceptionToKj()`, which reads the value's properties and serializes it;
+     - calling a function (`jsg::Function`, `JsFunction::call()`), resolving a promise, and
+       `Serializer::write()`;
+     - a constructor or helper that does any of these, such as `Request::constructor()` or
+       `AbortSignal::abort()`.
+   - **Unknown:** a virtual call, a `kj::Function`, or a callee you cannot read. Say so in the
+     review; don't assume it is safe.
+3. **Check each deferral.**
+   - The work runs in the lambda given to `deserializer.afterRead()`, not directly.
+   - The object that `deserialize()` returns is consistent before its callback runs, since
+     JavaScript that an earlier callback runs can reach it. For example, an aborted
+     `AbortSignal` starts with the exception of a signal aborted without a reason.
+   - The lambda captures owned values (`addRef()`, `JsRef`), never references to locals or to
+     the deserializer, and it does not read from the deserializer.
+   - It may use the value's instances of classes implemented in JavaScript, which are
+     initialized before any callback runs.
+   - Anything it calls may throw. The read then fails with that exception, and the remaining
+     callbacks are not called.
+   - It needs no `JSG_VISITABLE_LAMBDA`: the deserializer drops it once it has been called.
+4. **Recognize the accepted patterns.**
+   - JavaScript work done before the read: the RPC external handlers hydrate streams and sockets
+     in `prepare()`, and `deserialize()` only claims the result.
+   - `WrappedBinding::deserialize()` runs its wrapper module under an explicit
+     `v8::Isolate::AllowJavascriptExecutionScope` once its own input has been read, because it
+     returns what the module makes. Flag any other `AllowJavascriptExecutionScope` in a
+     deserializer, and ask why `afterRead()` doesn't fit.
+5. **Ask for a test.** A reader that does work that can run JavaScript needs a test that
+   checks that the work waits until the value has been read, and that the value reads back
+   intact. `api/tests/abortsignal-test.js` has one. Add a new serializable type to
+   `api/tests/deserialize-pollution-test.js`.
 
 ### Runtime-Specific Safety Notes
 

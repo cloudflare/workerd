@@ -496,13 +496,71 @@ build:opt --@capnp-cpp//src/kj:debug_memory=False
 build:release --config=opt
 build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
+# Enable architecture-specific flags for building with advanced ISA extensions. Not enabled by
+# default since bazel offers no good way to tell the architecture from within .bazelrc. Intended for
+# release builds, but also safe to enable elsewhere as long as we know which architecture we're on.
+# This also allows us to enable the CRC32 hash for capnproto.
+build:arm64-release --@capnp-cpp//src/kj:kj_crc32_hash=True
+build:arm64-release --copt=-mcrc --host_copt=-mcrc
+build:x64-release --@capnp-cpp//src/kj:kj_crc32_hash=True
+# msse4.2 already includes CRC32C and SSSE3 extensions
+build:x64-release --copt=-msse4.2 --host_copt=-msse4.2
+build:x64-cross-release --@capnp-cpp//src/kj:kj_crc32_hash=True
+build:x64-cross-release --copt=-msse4.2 --host_copt=-mcrc
+
 # enable -O3 for the release configuration. Based on benchmarking there is little difference in
 # performance, but -O3 should generally be expected to be faster for at least parts of the workerd API.
 build:release_unix --copt='-O3'
 build:release_unix --config=release
 
-build:release_linux --config=release_unix
-build:release_linux --linkopt="-Wl,-O2"
+# The Linux release build is optimized with ThinLTO and Clang's instrumentation-based PGO, with a
+# profile that Bazel downloads (build/pgo/README.md). release_linux-without-pgo is the same build
+# without either, for comparisons.
+build:release_linux-without-pgo --config=release_unix
+build:release_linux-without-pgo --linkopt="-Wl,-O2"
+build:release_linux --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:release_linux --config=pgo-use
+build:release_linux_arm64 --config=release_linux --config=arm64-release
+build:release_linux_x64 --config=release_linux --config=x64-release
+
+# pgo-instrument builds the binary that build/pgo/train.sh runs to train the profile. V8 is
+# compiled in this build, so the same profile covers it.
+build:pgo-instrument --config=release_linux-without-pgo --config=thin-lto --config=rust-lto
+build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
+# The instrumented tests run slower and also merge their profiles (build/pgo/profile-env.sh). In
+# training, the serving workload takes about a minute against its 15 s limit, and the eventsource
+# tests 10-12 s. A test that times out loses its profile.
+build:pgo-instrument --test_timeout=30,240,600,1200
+# Instrument the Rust code too. Its counters go into the same profile, written by the profile
+# runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
+# only accepts -Zno-profiler-runtime with RUSTC_BOOTSTRAP. extra_rustc_env and extra_rustc_flag
+# apply to target-config rustc actions only, so build scripts and proc macros aren't instrumented.
+build:pgo-instrument --@rules_rust//rust/settings:extra_rustc_env=RUSTC_BOOTSTRAP=1
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Cprofile-generate
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Zno-profiler-runtime
+
+# rules_cc's fdo_optimize feature adds -fprofile-use and silences Clang's warnings about files the
+# profile doesn't cover.
+build:pgo-use --fdo_optimize=//build/pgo:profile
+# Functions changed since the profile was trained compile without profile data. Don't warn about
+# each of them.
+build:pgo-use --copt=-mllvm=-no-pgo-warn-mismatch
+# Under PGO, LoopIdiomRecognize can take the address of a coroutine frame variable before
+# coro.begin, which CoroSplit doesn't rewrite (https://github.com/llvm/llvm-project/pull/240036).
+# A ThinLTO compile leaves coroutines unsplit, so the linker's LTO backends need it too.
+build:pgo-use --copt=-mllvm=-disable-loop-idiom-all --linkopt=-Wl,-mllvm,-disable-loop-idiom-all
+# The Rust code is optimized with the same profile. extra_rustc_inputs makes it an input of every
+# Rustc action, and ${extra_rustc_inputs} stands for its path.
+build:pgo-use --@rules_rust//rust/settings:extra_rustc_inputs=//build/pgo:profdata
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cprofile-use=${extra_rustc_inputs}
+build:pgo-use --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
+
+# Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
+# Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
+# major version (build/deps/rust.MODULE.bazel). rules_rust's lto setting isn't used: it also passes
+# -Clto to binaries, which then don't emit the object file that rules_rust's cc_common link
+# expects.
+build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
@@ -511,9 +569,11 @@ build:release_macos --config=release_unix
 # data in releases.
 build:release_macos --linkopt="-Wl,-no_data_in_code_info"
 build:release_macos --linkopt="-Wl,-no_function_starts"
+build:release_macos_arm64 --config=release_macos --config=arm64-release
+build:release_macos_x64 --config=release_macos --config=x64-release
 
 # Cross-compiled release build for x86_64.
-build:release_macos_cross_x86_64 --config=release_macos
+build:release_macos_cross_x86_64 --config=release_macos --config=x64-cross-release
 build:release_macos_cross_x86_64 --config=macos-cross-x86_64
 
 # On macOS, optionally compile using LLD (19 or higher is compatible with the default flags added by
@@ -546,6 +606,8 @@ build:release_windows --per_file_copt="src/workerd/server/container-client"@/cla
 build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
 # Work around clang-cl crashes with LLVM 22
 build:windows --per_file_copt=src/workerd/io/worker@/clang:-fno-inline
+# We assume that all Windows builds are for x64.
+build:release_windows --config=x64-release
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
@@ -672,6 +734,11 @@ common:bazelflare --remote_cache_compression --remote_timeout=600
 # bazelflare sends nothing while an action runs, so only pings notice a connection that died
 # without closing; Bazel then retries on a new one instead of waiting forever.
 common:bazelflare --grpc_keepalive_time=30s --grpc_keepalive_timeout=20s
+# A remote call that still fails UNAVAILABLE after its retries aborts the whole build, even with
+# --keep_going. Bazel's default 5 retries, from 100 ms doubling, give up after about 3 s, less than a
+# busy bazelflare shard can take to recover. 10 retries of up to 10 s each ride out about 40 s; only
+# UNAVAILABLE and similar transient errors are retried, so other failures still surface at once.
+common:bazelflare --remote_retries=10 --remote_retry_max_delay=10s
 common:bazelflare --jobs=200
 # Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
 # streams onto each connection, each served by one bazelflare Worker invocation.
@@ -691,7 +758,7 @@ build:bazelflare-tsan --copt=-g1
 test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 # The release build of the Linux x64 binary and the types, on bazelflare.
-build:bazelflare-release --config=release_linux --config=bazelflare --strip=always
+build:bazelflare-release --config=release_linux_x64 --config=bazelflare --strip=always
 # `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
 # The report lands in bazel-out/_coverage/_coverage_report.dat.
 build:bazelflare-coverage --config=coverage --config=bazelflare

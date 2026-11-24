@@ -33,6 +33,8 @@ fn load_project(files: &[(&str, &str)]) -> Result<Config, String> {
     load(
         dir.join("wrangler.jsonc").to_str().unwrap(),
         &Process::new(None, None, Vec::new()),
+        &RunOptions::default(),
+        None,
         true,
     )
 }
@@ -191,7 +193,7 @@ fn a_deployment_holds_only_the_worker() {
         else {
             panic!("expected local disk storage")
         };
-        assert_eq!(disk.unwrap(), DEPLOYMENT_STORAGE);
+        assert_eq!(disk.unwrap(), CLUSTER_STORAGE);
     }
     assert!(!dir.join(".wrangler/state").exists());
 
@@ -209,6 +211,375 @@ fn a_deployment_holds_only_the_worker() {
     assert!(error.contains("--name"), "{error}");
     let (name, _) = load_deployment(path.to_str().unwrap(), Some("app"), &process).unwrap();
     assert_eq!(name, "app");
+}
+
+/// A project named `name` with a Counter Durable Object.
+fn counter_project(name: &str) -> PathBuf {
+    project(&[
+        (
+            "wrangler.jsonc",
+            &format!(
+                r#"{{ "name": "{name}", "main": "index.js", "compatibility_date": "2026-01-01",
+                     "no_bundle": true,
+                     "durable_objects": {{ "bindings": [{{ "name": "C", "class_name": "Counter" }}] }} }}"#
+            ),
+        ),
+        ("index.js", "export class Counter {}"),
+    ])
+}
+
+/// The options of `serve --cluster-addr`.
+fn joining() -> RunOptions {
+    RunOptions {
+        cluster_address: Some("127.0.0.1:0".to_owned()),
+        ..RunOptions::default()
+    }
+}
+
+/// A directory for `--data-dir`, not yet created, outside any project.
+fn data_dir() -> PathBuf {
+    std::path::absolute(project(&[]).join("data")).unwrap()
+}
+
+/// The name and path of the disk service that the worker in `config` stores Durable Objects on.
+fn storage_of(config: Config) -> (String, String) {
+    let message = read(config);
+    let config = message.get_root::<config::Reader>().unwrap();
+    let services = config.get_services().unwrap();
+    let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
+        panic!("expected a worker service")
+    };
+    let worker::durable_object_storage::Which::LocalDisk(disk) = worker
+        .unwrap()
+        .get_durable_object_storage()
+        .which()
+        .unwrap()
+    else {
+        panic!("expected local disk storage")
+    };
+    let storage = services.get(1);
+    assert_eq!(storage.get_name().unwrap(), disk.unwrap());
+    let service::Which::Disk(path) = storage.which().unwrap() else {
+        panic!("expected a disk service")
+    };
+    (
+        storage.get_name().unwrap().to_string().unwrap(),
+        path.unwrap().get_path().unwrap().to_string().unwrap(),
+    )
+}
+
+#[test]
+fn durable_objects_in_a_cluster_are_stored_on_do_storage() {
+    let dir = counter_project("counter");
+    let path = dir.join("wrangler.jsonc");
+    let process = Process::new(None, None, Vec::new());
+    let config = load(path.to_str().unwrap(), &process, &joining(), None, true).unwrap();
+    // As the translation makes it: absolute, not canonical, so on Windows not `\\?\`.
+    let state = std::path::absolute(&dir)
+        .unwrap()
+        .join(".wrangler/state/workerd");
+    assert_eq!(
+        storage_of(config),
+        (
+            CLUSTER_STORAGE.to_owned(),
+            state.join("do").to_string_lossy().into_owned()
+        )
+    );
+    assert!(state.join("do").is_dir());
+}
+
+#[test]
+fn a_data_dir_holds_durable_objects_outside_the_project() {
+    let process = Process::new(None, None, Vec::new());
+    // Joined, apart from the bundled services' directories, which a deployment's storage key could
+    // name.
+    for (options, service, dir) in [
+        (joining(), CLUSTER_STORAGE, Some("do")),
+        (RunOptions::default(), "counter-do-storage", None),
+    ] {
+        let project = counter_project("counter");
+        let path = project.join("wrangler.jsonc");
+        let data = data_dir();
+        let config = load(
+            path.to_str().unwrap(),
+            &process,
+            &options,
+            Some(&data),
+            true,
+        )
+        .unwrap();
+        let disk = dir.map_or_else(|| data.clone(), |dir| data.join(dir));
+        assert_eq!(
+            storage_of(config),
+            (service.to_owned(), disk.to_string_lossy().into_owned())
+        );
+        assert!(disk.is_dir());
+        assert!(!project.join(".wrangler").exists());
+    }
+}
+
+#[test]
+fn a_relative_data_dir_is_made_absolute() {
+    let project = std::path::absolute(counter_project("counter")).unwrap();
+    let path = project.join("wrangler.jsonc");
+    let process = Process::new(None, None, Vec::new());
+    // Relative to the working directory, which the crate's tests, run one at a time, may change.
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&project).unwrap();
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        Some(Path::new("data")),
+        true,
+    );
+    std::env::set_current_dir(cwd).unwrap();
+    assert_eq!(
+        storage_of(config.unwrap()).1,
+        project.join("data").to_string_lossy().into_owned()
+    );
+}
+
+#[test]
+fn a_project_in_a_cluster_cannot_be_named_after_its_storage() {
+    let path = counter_project(CLUSTER_STORAGE).join("wrangler.jsonc");
+    let process = Process::new(None, None, Vec::new());
+    let Err(error) = load(path.to_str().unwrap(), &process, &joining(), None, true) else {
+        panic!("expected an error")
+    };
+    assert_eq!(
+        error,
+        "name: \"do-storage\" is the name of the disk service that holds the Durable Objects in a \
+         cluster. Choose another name."
+    );
+    // Outside a cluster, the disk is named after the worker.
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        true,
+    )
+    .unwrap();
+    assert_eq!(storage_of(config).0, "do-storage-do-storage");
+}
+
+/// A project named `name` without Durable Objects, with `files` besides its config and module.
+fn plain_project(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let config = format!(
+        r#"{{ "name": "{name}", "main": "index.js", "compatibility_date": "2026-01-01",
+             "no_bundle": true }}"#
+    );
+    let mut all = vec![
+        ("wrangler.jsonc", config.as_str()),
+        ("index.js", "export default {}"),
+    ];
+    all.extend_from_slice(files);
+    project(&all)
+}
+
+/// The names and paths of the disk services in `config`.
+fn disks_of(config: Config) -> Vec<(String, String)> {
+    let message = read(config);
+    let config = message.get_root::<config::Reader>().unwrap();
+    let services = config.get_services().unwrap();
+    services
+        .iter()
+        .filter_map(|service| match service.which().unwrap() {
+            service::Which::Disk(disk) => Some((
+                service.get_name().unwrap().to_string().unwrap(),
+                disk.unwrap().get_path().unwrap().to_string().unwrap(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_project_without_durable_objects_in_a_cluster_defines_do_storage() {
+    let process = Process::new(None, None, Vec::new());
+    let dir = plain_project("hello", &[]);
+    let path = dir.join("wrangler.jsonc");
+    let path = path.to_str().unwrap();
+    // Outside a cluster, there is no disk. Without --experimental there is no Cache API either,
+    // which would keep its entries in the state directory.
+    let config = load(path, &process, &RunOptions::default(), None, false).unwrap();
+    assert_eq!(disks_of(config), []);
+    assert!(!dir.join(".wrangler").exists());
+    // In one, the disk holds deployments' Durable Objects, in the --data-dir if given.
+    let data = data_dir();
+    let config = load(path, &process, &joining(), Some(&data), true).unwrap();
+    assert_eq!(
+        disks_of(config),
+        [(
+            CLUSTER_STORAGE.to_owned(),
+            data.join("do").to_string_lossy().into_owned()
+        )]
+    );
+    assert!(!dir.join(".wrangler").exists());
+    let config = load(path, &process, &joining(), None, true).unwrap();
+    // As the translation makes it: absolute, not canonical, so on Windows not `\\?\`.
+    let state = std::path::absolute(&dir)
+        .unwrap()
+        .join(".wrangler/state/workerd");
+    assert_eq!(
+        disks_of(config),
+        [(
+            CLUSTER_STORAGE.to_owned(),
+            state.join("do").to_string_lossy().into_owned()
+        )]
+    );
+    assert!(state.join("do").is_dir());
+    // So the worker cannot take its name.
+    let path = plain_project(CLUSTER_STORAGE, &[]).join("wrangler.jsonc");
+    let Err(error) = load(path.to_str().unwrap(), &process, &joining(), None, true) else {
+        panic!("expected an error")
+    };
+    assert!(
+        error.starts_with("name: \"do-storage\" is the name"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_state_directory_that_cannot_be_created_is_an_error() {
+    let process = Process::new(None, None, Vec::new());
+    for dir in [plain_project("hello", &[]), counter_project("counter")] {
+        // A file where the directory would be.
+        fs::write(dir.join(".wrangler"), "").unwrap();
+        let path = dir.join("wrangler.jsonc");
+        let Err(error) = load(path.to_str().unwrap(), &process, &joining(), None, true) else {
+            panic!("expected an error")
+        };
+        assert!(
+            error.ends_with(". Pass --data-dir <dir> to keep state elsewhere."),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn a_data_dir_holds_the_state_of_every_bundled_service() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "kv_namespaces": [{ "binding": "KV" }],
+                 "r2_buckets": [{ "binding": "R2", "bucket_name": "files" }],
+                 "triggers": { "crons": ["0 * * * *"] },
+                 "queues": { "consumers": [{ "queue": "jobs" }] },
+                 "workflows": [{ "binding": "R", "name": "reports", "class_name": "Report" }],
+                 "d1_databases": [{ "binding": "DB", "database_id": "db" }] }"#,
+        ),
+        ("index.js", "export default {}"),
+    ]);
+    let path = dir.join("wrangler.jsonc");
+    let data = data_dir();
+    let process = Process::new(None, None, Vec::new());
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        Some(&data),
+        true,
+    )
+    .unwrap();
+    let message = read(config);
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let mut paths = Vec::new();
+    for service in services {
+        match service.which().unwrap() {
+            service::Which::Disk(disk) => paths.push(disk.unwrap().get_path().unwrap()),
+            service::Which::Cache(cache) => paths.push(cache.unwrap().get_path().unwrap()),
+            _ => {}
+        }
+    }
+    // KV's two, R2, cron, Queues, Workflows, D1, and the Cache API.
+    assert_eq!(paths.len(), 8);
+    for path in paths {
+        let path = path.to_str().unwrap();
+        assert!(Path::new(path).starts_with(&data), "{path}");
+        assert!(Path::new(path).is_dir(), "{path}");
+    }
+    assert!(!dir.join(".wrangler").exists());
+}
+
+#[test]
+fn a_project_in_a_cluster_cannot_have_kv_namespaces_or_queues_but_can_have_crons() {
+    let process = Process::new(None, None, Vec::new());
+    for (field, json) in [
+        ("kv_namespaces", r#""kv_namespaces": [{ "binding": "KV" }]"#),
+        (
+            "queues",
+            r#""queues": { "producers": [{ "binding": "Q", "queue": "jobs" }] }"#,
+        ),
+    ] {
+        let dir = project(&[
+            (
+                "wrangler.jsonc",
+                format!(
+                    r#"{{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                         "no_bundle": true, {json} }}"#
+                )
+                .as_str(),
+            ),
+            ("index.js", "export default {}"),
+        ]);
+        let path = dir.join("wrangler.jsonc");
+        let Err(error) = load(path.to_str().unwrap(), &process, &joining(), None, true) else {
+            panic!("expected an error")
+        };
+        assert_eq!(
+            error,
+            format!("A config that joins a cluster with --cluster-addr cannot have {field} yet.")
+        );
+    }
+    let cron = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "triggers": { "crons": ["0 * * * *"] } }"#,
+        ),
+        ("index.js", "export default {}"),
+    ]);
+    let path = cron.join("wrangler.jsonc");
+    let data = data_dir();
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &joining(),
+        Some(&data),
+        true,
+    )
+    .unwrap();
+    let names: Vec<String> = disks_of(config).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(names, [CLUSTER_STORAGE, "app-cron-storage"]);
+    assert!(!cron.join(".wrangler").exists());
+}
+
+#[test]
+fn a_bundle_directory_that_cannot_be_created_suggests_no_bundle() {
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01" }"#,
+        ),
+        ("index.js", "export default {}"),
+        (".wrangler", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(
+        error.ends_with(
+            ". esbuild bundles `main` there. Set \"no_bundle\": true in the wrangler config to \
+             serve the modules as they are."
+        ),
+        "{error}"
+    );
 }
 
 #[test]
@@ -375,7 +746,15 @@ fn kv_namespaces_require_experimental() {
     ]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("kv_namespaces"), "{error}");
     assert!(error.contains("--experimental"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
@@ -399,6 +778,8 @@ fn kv_namespaces_bind_the_kv_worker() {
     let config = load(
         dir.join("wrangler.jsonc").to_str().unwrap(),
         &Process::new(None, None, Vec::new()),
+        &RunOptions::default(),
+        None,
         true,
     )
     .unwrap();
@@ -478,7 +859,16 @@ fn caches_are_served_by_the_cache_service() {
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
     let names = |experimental| {
-        let message = read(load(path.to_str().unwrap(), &process, experimental).unwrap());
+        let message = read(
+            load(
+                path.to_str().unwrap(),
+                &process,
+                &RunOptions::default(),
+                None,
+                experimental,
+            )
+            .unwrap(),
+        );
         let conf = message.get_root::<config::Reader>().unwrap();
         let services = conf.get_services().unwrap();
         let service::Which::Worker(w) = services.get(0).which().unwrap() else {
@@ -523,10 +913,25 @@ fn r2_buckets_bind_the_r2_worker() {
     ]);
     let path = dir.join("wrangler.jsonc");
     let process = Process::new(None, None, Vec::new());
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("r2_buckets"), "{error}");
     assert!(error.contains("--experimental"), "{error}");
-    let config = load(path.to_str().unwrap(), &process, true).unwrap();
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        true,
+    )
+    .unwrap();
     let message = read(config);
     let conf = message.get_root::<config::Reader>().unwrap();
     let services = conf.get_services().unwrap();
@@ -596,13 +1001,30 @@ fn d1_databases_bind_the_d1_worker() {
     ]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("d1_databases"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
         .err()
         .unwrap();
     assert!(error.contains("d1_databases"), "{error}");
-    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let message = read(
+        load(
+            path.to_str().unwrap(),
+            &process,
+            &RunOptions::default(),
+            None,
+            true,
+        )
+        .unwrap(),
+    );
     let services = message
         .get_root::<config::Reader>()
         .unwrap()
@@ -666,13 +1088,30 @@ fn secrets_store_secrets_bind_the_secrets_store_worker() {
     let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("secrets_store_secrets"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
         .err()
         .unwrap();
     assert!(error.contains("secrets_store_secrets"), "{error}");
-    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let message = read(
+        load(
+            path.to_str().unwrap(),
+            &process,
+            &RunOptions::default(),
+            None,
+            true,
+        )
+        .unwrap(),
+    );
     let services = message
         .get_root::<config::Reader>()
         .unwrap()
@@ -816,13 +1255,30 @@ fn ratelimits_bind_the_ratelimit_worker() {
     let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("ratelimits"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
         .err()
         .unwrap();
     assert!(error.contains("ratelimits"), "{error}");
-    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let message = read(
+        load(
+            path.to_str().unwrap(),
+            &process,
+            &RunOptions::default(),
+            None,
+            true,
+        )
+        .unwrap(),
+    );
     let services = message
         .get_root::<config::Reader>()
         .unwrap()
@@ -890,7 +1346,15 @@ fn triggers_crons_require_experimental() {
     ]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("triggers.crons"), "{error}");
     assert!(error.contains("--experimental"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
@@ -911,7 +1375,15 @@ fn triggers_crons_refuse_a_worker_named_like_their_bindings() {
     ]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, true).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        true,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("named CRONS"), "{error}");
 }
 
@@ -928,6 +1400,8 @@ fn triggers_crons_run_on_the_cron_worker() {
     let config = load(
         dir.join("wrangler.jsonc").to_str().unwrap(),
         &Process::new(None, None, Vec::new()),
+        &RunOptions::default(),
+        None,
         true,
     )
     .unwrap();
@@ -971,10 +1445,13 @@ fn queues_run_on_the_queues_worker() {
         ("index.js", ""),
     ]);
     let process = Process::new(None, None, Vec::new());
+    let options = RunOptions::default();
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(path.to_str().unwrap(), &process, &options, None, false)
+        .err()
+        .unwrap();
     assert!(error.contains("queues"), "{error}");
-    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let message = read(load(path.to_str().unwrap(), &process, &options, None, true).unwrap());
     let services = message
         .get_root::<config::Reader>()
         .unwrap()
@@ -1040,10 +1517,13 @@ fn workflows_run_on_the_workflows_worker() {
         ("index.js", ""),
     ]);
     let process = Process::new(None, None, Vec::new());
+    let options = RunOptions::default();
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(path.to_str().unwrap(), &process, &options, None, false)
+        .err()
+        .unwrap();
     assert!(error.contains("workflows"), "{error}");
-    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let message = read(load(path.to_str().unwrap(), &process, &options, None, true).unwrap());
     let services = message
         .get_root::<config::Reader>()
         .unwrap()
@@ -1285,7 +1765,15 @@ fn assets_require_experimental() {
     ]);
     let process = Process::new(None, None, Vec::new());
     let path = dir.join("wrangler.jsonc");
-    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    let error = load(
+        path.to_str().unwrap(),
+        &process,
+        &RunOptions::default(),
+        None,
+        false,
+    )
+    .err()
+    .unwrap();
     assert!(error.contains("assets"), "{error}");
     assert!(error.contains("--experimental"), "{error}");
     let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)

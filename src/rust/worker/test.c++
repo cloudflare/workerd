@@ -7,12 +7,15 @@
 #include <workerd/io/worker.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/rust/worker/error.rs.h>
+#include <workerd/rust/worker/failure.rs.h>
 #include <workerd/rust/worker/kill_switch.rs.h>
 #include <workerd/rust/worker/ok.rs.h>
 #include <workerd/util/exception.h>
 
 #include <kj-rs/kj-rs.h>
 
+#include <capnp/message.h>
+#include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
@@ -446,7 +449,75 @@ class StubWorker final: public WorkerInterface {
     testCalled = true;
     return true;
   }
+
+  bool benchCalled = false;
+  kj::String benchCaseFilter;
+  bool benchQuick = false;
+  uint32_t benchSamples = 0;
+
+  // Records the params and fills every part of the group a handler fills.
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    benchCalled = true;
+    benchCaseFilter = kj::str(params.getCaseFilter());
+    benchQuick = params.getQuick();
+    benchSamples = params.getDefaults().getSamples();
+    report.setError("stub error");
+    report.initOverhead().setSyncNs(1.5);
+    auto cases = report.initCases(2);
+    cases[0].setName("first");
+    cases[0].setIterationsPerSample(7);
+    cases[0].initWallNs().initSamples(3).set(2, 42.5);
+    cases[1].setName("second");
+    cases[1].setStatus(bench::BenchReport::Case::Status::FAILED);
+    cases[1].setError("case failed");
+    return kj::READY_NOW;
+  }
 };
+
+// Bench params and a report group, as `workerd bench` provides them.
+struct BenchCall {
+  capnp::MallocMessageBuilder paramsMessage;
+  capnp::MallocMessageBuilder reportMessage;
+  bench::BenchParams::Builder params = paramsMessage.initRoot<bench::BenchParams>();
+  bench::BenchReport::Group::Builder report = reportMessage.initRoot<bench::BenchReport::Group>();
+
+  BenchCall() {
+    params.setCaseFilter("first*");
+    params.setQuick(true);
+    params.initDefaults().setSamples(9);
+    report.setName("caller's name");
+    report.setStartup(true);
+  }
+
+  kj::Promise<void> run(WorkerInterface& worker) {
+    return worker.bench(params.asReader(), report);
+  }
+};
+
+// Checks that `stub` got `call`'s params and `call`'s report holds the group the stub filled in,
+// with the caller's name and startup flag kept.
+void expectBenchForwarded(StubWorker& stub, BenchCall& call) {
+  KJ_ASSERT(stub.benchCalled);
+  KJ_EXPECT(stub.benchCaseFilter == "first*");
+  KJ_EXPECT(stub.benchQuick);
+  KJ_EXPECT(stub.benchSamples == 9);
+
+  auto report = call.report.asReader();
+  KJ_EXPECT(report.getName() == "caller's name");
+  KJ_EXPECT(report.getStartup());
+  KJ_EXPECT(report.getError() == "stub error");
+  KJ_EXPECT(report.getOverhead().getSyncNs() == 1.5);
+  auto cases = report.getCases();
+  KJ_ASSERT(cases.size() == 2);
+  KJ_EXPECT(cases[0].getName() == "first");
+  KJ_EXPECT(cases[0].getIterationsPerSample() == 7);
+  KJ_ASSERT(cases[0].getWallNs().getSamples().size() == 3);
+  KJ_EXPECT(cases[0].getWallNs().getSamples()[2] == 42.5);
+  KJ_EXPECT(cases[1].getName() == "second");
+  KJ_EXPECT(cases[1].getStatus() == bench::BenchReport::Case::Status::FAILED);
+  KJ_EXPECT(cases[1].getError() == "case failed");
+}
 
 }  // namespace
 
@@ -524,6 +595,63 @@ KJ_TEST("cxx_worker delegates customEvent (ownership transfer) to the wrapped C+
   auto result = worker->customEvent(kj::heap<TestCustomEvent>()).wait(waitScope);
   KJ_ASSERT(stubRef.customEventCalled);
   KJ_ASSERT(result.outcome == workerd::EventOutcome::OK);
+}
+
+KJ_TEST("cxx_worker delegates bench to the wrapped C++ worker") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  // The call crosses the C++ wrapper of a Rust interface (RustWorkerInterface), then the Rust
+  // wrapper of a C++ interface (CxxWorkerInterface), each encoding and decoding the messages.
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::mv(stub)));
+
+  BenchCall call;
+  call.run(*worker).wait(waitScope);
+  expectBenchForwarded(stubRef, call);
+}
+
+KJ_TEST("cxx_worker passes on the wrapped C++ worker's bench failure") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  class NoBenchWorker final: public WorkerInterface {
+   public:
+    kj::Promise<void> request(kj::HttpMethod method,
+        kj::StringPtr url,
+        const kj::HttpHeaders& headers,
+        kj::AsyncInputStream& requestBody,
+        Response& response) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<void> connect(kj::StringPtr host,
+        const kj::HttpHeaders& headers,
+        kj::AsyncIoStream& connection,
+        ConnectResponse& response,
+        kj::HttpConnectSettings settings) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<void> prewarm(kj::StringPtr url) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+      KJ_UNIMPLEMENTED();
+    }
+  };
+
+  auto worker = kj::from<Rust>(new_cxx_worker(kj::heap<NoBenchWorker>()));
+  BenchCall call;
+  auto exception = kj::runCatchingExceptions([&]() { call.run(*worker).wait(waitScope); });
+  auto& e = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(e.getType() == kj::Exception::Type::UNIMPLEMENTED);
+  KJ_EXPECT(e.getDescription() == "this service doesn't support bench()");
 }
 
 KJ_TEST("cxx_worker delegates request to the wrapped C++ worker") {
@@ -639,8 +767,8 @@ class FailingWorker final: public WorkerInterface {
   }
 };
 
-// The response and connection arguments of request() and connect(). FailingWorker never uses
-// them.
+// The response and connection arguments of request() and connect(). The failing workers never
+// use them.
 class UnusedResponse final: public kj::HttpService::Response {
  public:
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
@@ -895,12 +1023,148 @@ KJ_TEST("promised interface delegates abandonAlarm before and after its target s
   KJ_ASSERT(KJ_ASSERT_NONNULL(stored) == StubWorker::STORED_ALARM_TIME);
 }
 
+KJ_TEST("promised interface delegates bench before and after its target starts") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+  auto worker = newPromisedInterface(kj::mv(paf.promise));
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+
+  // Before the target has started, the call must wait for it instead of failing as the default
+  // does.
+  BenchCall pendingCall;
+  auto pending = pendingCall.run(*worker);
+  KJ_ASSERT(!pending.poll(waitScope));
+  KJ_ASSERT(!stubRef.benchCalled);
+  paf.fulfiller->fulfill(kj::mv(stub));
+  pending.wait(waitScope);
+  expectBenchForwarded(stubRef, pendingCall);
+
+  // Once started, calls go straight to the target.
+  stubRef.benchCalled = false;
+  BenchCall call;
+  call.run(*worker).wait(waitScope);
+  expectBenchForwarded(stubRef, call);
+}
+
+KJ_TEST("a Rust interface's default bench fails as unimplemented") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_ok_worker());
+  BenchCall call;
+  auto exception = kj::runCatchingExceptions([&]() { call.run(*worker).wait(waitScope); });
+  auto& e = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(e.getType() == kj::Exception::Type::UNIMPLEMENTED);
+  KJ_EXPECT(e.getDescription() == "this service doesn't support bench()");
+  // The report is left as the caller made it.
+  KJ_EXPECT(!call.report.hasCases());
+  KJ_EXPECT(!call.report.hasError());
+}
+
 KJ_TEST("a Rust interface's default abandonAlarm reports no stored alarm") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   auto worker = kj::from<Rust>(new_ok_worker());
   KJ_ASSERT(worker->abandonAlarm(kj::UNIX_EPOCH).wait(waitScope) == kj::none);
+}
+
+// ======================================================================================
+// failure worker
+
+// Every event of a WorkerInterface but prewarm() and customEvent(), each called on a worker of
+// its own.
+kj::Vector<kj::Function<void(WorkerInterface&, kj::WaitScope&)>> failingEvents() {
+  kj::Vector<kj::Function<void(WorkerInterface&, kj::WaitScope&)>> events;
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    kj::NullStream body;
+    UnusedResponse response;
+    worker.request(kj::HttpMethod::GET, "http://test/"_kj, headers, body, response).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    auto pipe = kj::newTwoWayPipe();
+    UnusedConnectResponse response;
+    worker.connect("example.com:443"_kj, headers, *pipe.ends[0], response, {}).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.runScheduled(kj::UNIX_EPOCH, "* * * * *"_kj).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.runAlarm(kj::UNIX_EPOCH, 0).wait(waitScope);
+  });
+  events.add([](WorkerInterface& worker, kj::WaitScope& waitScope) {
+    worker.abandonAlarm(kj::UNIX_EPOCH).wait(waitScope);
+  });
+  return events;
+}
+
+// Expects `worker` to tell a custom event tracedFailure() and then fail with it.
+void expectCustomEventFails(WorkerInterface& worker, kj::WaitScope& waitScope) {
+  bool failedCalled = false;
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        .customEvent(kj::heap<RecordingEvent>([&](const kj::Exception& e) {
+      failedCalled = true;
+      expectTracedFailure(e);
+    })).wait(waitScope);
+  });
+  expectTracedFailure(KJ_ASSERT_NONNULL(exception));
+  KJ_EXPECT(failedCalled);
+}
+
+KJ_TEST("failure worker fails every event with the whole exception, every time") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_failure_worker(tracedFailure()));
+  for (int attempt = 0; attempt < 2; attempt++) {
+    for (auto& event: failingEvents()) {
+      expectTracedFailure(
+          KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event(*worker, waitScope); })));
+    }
+    expectTracedFailure(
+        KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { worker->test().wait(waitScope); })));
+    expectCustomEventFails(*worker, waitScope);
+  }
+  worker->prewarm("/warm"_kj).wait(waitScope);
+}
+
+KJ_TEST("failure worker rejects a customEvent with the exception its failed() throws") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_failure_worker(tracedFailure()));
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        ->customEvent(kj::heap<RecordingEvent>([](const kj::Exception&) {
+      KJ_FAIL_REQUIRE("failed() threw");
+    })).wait(waitScope);
+  });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getDescription().contains("failed() threw"));
+}
+
+// Holds for both implementations of fromException(): the Rust worker when the
+// RUST_FAILURE_WORKER_INTERFACE autogate is enabled, as in the @all-autogates variant, and the C++
+// one otherwise. The C++ one gives its exception away at its first failure, so each event gets a
+// worker of its own.
+KJ_TEST("WorkerInterface::fromException() fails each event with the whole exception") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  for (auto& event: failingEvents()) {
+    auto worker = WorkerInterface::fromException(tracedFailure());
+    expectTracedFailure(
+        KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { event(*worker, waitScope); })));
+  }
+  expectCustomEventFails(*WorkerInterface::fromException(tracedFailure()), waitScope);
+  WorkerInterface::fromException(tracedFailure())->prewarm("/warm"_kj).wait(waitScope);
 }
 
 }  // namespace

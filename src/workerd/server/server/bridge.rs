@@ -42,6 +42,7 @@ pub use crate::log::thread_body_run;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
+pub use crate::worker::bench_clock_now;
 
 #[cxx::bridge(namespace = "workerd::server")]
 #[expect(
@@ -913,6 +914,11 @@ pub mod ffi {
         /// Ends the server's tasks and drops the factory, logging an error if a service still
         /// holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
+
+        /// A reading of the monotonic and thread CPU clocks that `workerd bench` times with
+        /// (`bench_core::clock::now()`): the difference of two readings is how long the code
+        /// between them took. The factory times the phases of a throwaway start with it.
+        fn bench_clock_now() -> StartupPhaseTiming;
 
         /// A background task of the server, run by the factory's task set (`factory_spawn`);
         /// `task_run` is the promise the task set holds.

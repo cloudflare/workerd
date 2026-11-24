@@ -165,7 +165,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     KJ_CASE_ONEOF(str, kj::String) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
                           jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .baseUrl = base,
                             .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -179,7 +179,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     KJ_CASE_ONEOF(init, URLPatternInit) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
                           jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .baseUrl = base,
                             .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -215,9 +215,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(string, kj::String) {
-      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase.map([](kj::String& s) {
-        return s.asPtr();
-      }))) {
+      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase)) {
         auto p = url.getProtocol();
         protocol = kj::str(p.first(p.size() - 1));
         username = kj::str(url.getUsername());

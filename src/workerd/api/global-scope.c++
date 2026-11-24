@@ -38,6 +38,8 @@
 
 #include <v8-microtask-queue.h>
 
+#include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -938,30 +940,31 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
-jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
+jsg::Promise<kj::Array<capnp::word>> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     bench::BenchParams::Reader params) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Benchmarks are not currently supported with Service Workers syntax.");
   jsg::Lock& js = lock;
-  auto& typeHandler = lock.getWorker().getIsolate().getApi().getBenchTypeHandler(lock);
-  auto handlers = JSG_REQUIRE_NONNULL(typeHandler.tryUnwrap(js, eh.self.getHandle(js)), Error,
-      "Entrypoint does not export a bench() function.");
-  auto benchHandler = JSG_REQUIRE_NONNULL(
-      kj::mv(handlers.bench), Error, "Entrypoint does not export a bench() function.");
-  auto controller = js.alloc<BenchController>(params);
-  return js
-      .tryCatch(
-          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
-          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
-      .then(js,
-          IoContext::current().addFunctor(
-              [controller = controller.addRef()](
-                  jsg::Lock& js) mutable { return controller->runCases(js); }),
-          [](jsg::Lock& js, jsg::Value exception) {
-    return js.resolvedPromise(BenchGroupResult{
-      .error = describeBenchException(js, exception),
-    });
+  auto& api = lock.getWorker().getIsolate().getApi();
+  v8::Local<v8::Value> ctx = js.v8Undefined();
+  KJ_IF_SOME(c, eh.getCtx()) {
+    ctx = api.wrapExecutionContext(js, kj::mv(c));
+  }
+  capnp::MallocMessageBuilder paramsMessage;
+  paramsMessage.setRoot(params);
+  auto group = api.runBench(js, eh.self.getHandle(js), eh.env.getHandle(js), ctx,
+      capnp::messageToFlatArray(paramsMessage));
+  return js.toPromise(group).then(js, [](jsg::Lock& js, jsg::Value value) {
+    auto handle = value.getHandle(js);
+    KJ_ASSERT(handle->IsArrayBuffer(), "the bench runner resolves with an ArrayBuffer");
+    auto buffer = handle.As<v8::ArrayBuffer>();
+    auto bytes = kj::arrayPtr(static_cast<const kj::byte*>(buffer->Data()), buffer->ByteLength());
+    KJ_ASSERT(bytes.size() % sizeof(capnp::word) == 0);
+    // Copied, so that the message is aligned to words.
+    auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+    words.asBytes().copyFrom(bytes);
+    return words;
   });
 }
 
@@ -1130,7 +1133,7 @@ void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip
 }
 
 kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
-  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+  return dnsOverrides.find(hostname);
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
@@ -1380,6 +1383,14 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
     return p.getHandle(js);
   }
   constexpr auto kSpecifier = "node:buffer"_kj;
+  // This loads the module on first access. With the new module registry, a require() at
+  // evaluation depth 0 drains the microtask queue, so a first access during a request would run
+  // the Worker's pending microtasks inside this getter. node:buffer is a synchronous built-in
+  // that settles without a drain, so it is resolved as if nested in a module evaluation.
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     KJ_IF_SOME(p, bufferValue) {
       // There's a chance that resolving the module caused side-effects
@@ -1448,6 +1459,11 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
     }
   })();
 
+  // Resolved as if nested in a module evaluation, for the reason given in getBuffer().
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveInternalModule(specifier)) {
     KJ_IF_SOME(p, processValue) {
       // There's a chance that resolving the module caused side-effects

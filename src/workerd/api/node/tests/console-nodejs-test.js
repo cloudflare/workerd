@@ -882,3 +882,23 @@ export const testConsoleInspectOptionsMap = {
     strictEqual(err.take(), '{\n  a: 1\n}\n');
   },
 };
+
+export const testConsoleStdio = {
+  test() {
+    for (const name of ['stdout', 'stderr']) {
+      const key = `_${name}`;
+      const stream = consoleModule[key];
+      strictEqual(typeof stream.write, 'function');
+      strictEqual(consoleModule[key], stream);
+      // The legacy process object has no stdio streams.
+      if (process[name] !== undefined) {
+        strictEqual(stream, process[name]);
+      }
+
+      const replacement = new Writable({ write() {} });
+      consoleModule[key] = replacement;
+      strictEqual(consoleModule[key], replacement);
+      consoleModule[key] = stream;
+    }
+  },
+};

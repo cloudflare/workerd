@@ -1534,7 +1534,7 @@ impl Server {
         if let Some(cluster) = &cluster {
             // Actor databases open only under a lease, which the lease thread keeps from here on,
             // however long linking takes: it watches the event loop only once the node serves
-            // (`ClusterNode::serving`).
+            // (`ClusterNode::ready`).
             cluster
                 .cluster
                 .join()
@@ -2184,7 +2184,11 @@ fn make_cluster(
     let conf = config.get_cluster().map_err(capnp_error)?;
     // The MAC's other inputs cross the wire, so a short key falls to an offline search.
     if text(conf.get_key())?.len() < 32 {
-        report.error("cluster.key must be at least 32 bytes.".to_owned());
+        report.error(
+            "cluster.key must be at least 32 bytes. Fix it in the config, or set \
+             WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE, which override it."
+                .to_owned(),
+        );
         return Ok(None);
     }
     Ok(Some(ClusterNode::new(Rc::clone(factory), conf, address)?))

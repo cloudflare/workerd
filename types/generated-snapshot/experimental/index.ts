@@ -3630,12 +3630,16 @@ export interface SqlStorage {
 }
 export declare abstract class SqlStorageStatement {}
 export type SqlStorageValue = ArrayBuffer | string | number | null;
+export interface SqlStorageCursor<
+  T extends Record<string, SqlStorageValue>,
+> extends Disposable {}
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
   next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
+  close(): void;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
   columnNames: string[];
   get rowsRead(): number;
@@ -13030,16 +13034,49 @@ export type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   excludeExternalLinks?: boolean;
 };
 export type BrowserRunSnapshotFormat =
-  "content" | "screenshot" | "markdown" | "accessibilityTree";
-export type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
-  /** Which representations of the page to return. At least two distinct formats
-   * are required; request a single format from its dedicated action instead.
-   * @default ["content","screenshot"]
-   */
-  formats?: BrowserRunSnapshotFormat[];
-  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
-  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
-};
+  | "content"
+  | "screenshot"
+  | "markdown"
+  | "accessibilityTree"
+  | "pdf"
+  | "links"
+  | "scrape"
+  | "json";
+export type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions & {
+    /** Which representations of the page to return. At least two distinct formats
+     * are required; request a single format from its dedicated action instead.
+     * @default ["content","screenshot"]
+     */
+    formats?: BrowserRunSnapshotFormat[];
+    /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+    screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+    /** CSS selectors to scrape. Required when `formats` includes `scrape`. */
+    elements?: BrowserRunScrapeOptions["elements"];
+    /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+    pdfOptions?: BrowserRunPDFOptions["pdfOptions"];
+    /** When true, only return links that are visible on the page. @default false */
+    visibleLinksOnly?: BrowserRunLinksOptions["visibleLinksOnly"];
+    /** When true, exclude links pointing to external domains. @default false */
+    excludeExternalLinks?: BrowserRunLinksOptions["excludeExternalLinks"];
+    /** When true, prune accessibility nodes that carry no semantic meaning.
+     * @default true
+     */
+    interestingOnly?: BrowserRunAccessibilityTreeOptions["interestingOnly"];
+    /** CSS selector limiting the accessibility tree to the matching element's
+     * subtree.
+     */
+    root?: BrowserRunAccessibilityTreeOptions["root"];
+    /** Natural-language prompt describing what data to extract. Required when
+     * `formats` includes `json`, unless `response_format` is set.
+     */
+    prompt?: string;
+    /** Structured output schema for the AI model. Required when `formats`
+     * includes `json`, unless `prompt` is set.
+     * @see https://developers.cloudflare.com/workers-ai/json-mode/
+     */
+    response_format?: AiTextGenerationResponseFormat;
+  };
 /** Options for the `accessibilityTree` quick action. */
 export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
   /** When true, prune nodes that carry no semantic meaning, such as generic
@@ -13217,6 +13254,14 @@ export type BrowserRunSnapshotSuccessResponse = {
     markdown?: string;
     /** Root of the page's accessibility tree. */
     accessibilityTree?: BrowserRunSerializedAXNode;
+    /** Base64-encoded PDF. */
+    pdf?: string;
+    /** Links found on the page. */
+    links?: string[];
+    /** Elements matched by the requested selectors. */
+    scrape?: BrowserRunScrapeSuccessResponse["result"];
+    /** JSON data extracted from the page using an AI model. */
+    json?: Record<string, unknown> | unknown[] | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -13593,8 +13638,9 @@ export declare abstract class BrowserRun {
   /**
    * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including the `formats` to return and
-   * screenshot settings (encoding is always base64).
+   * @param options - Snapshot options: the `formats` to return, plus the
+   * per-format options for screenshots, PDFs, scraped elements, links, the
+   * accessibility tree, and JSON extraction.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -15150,15 +15196,15 @@ export interface EmailMessage {
    * Envelope To attribute of the email message.
    */
   readonly to: string;
+  /**
+   * Stream of the email message content.
+   */
+  readonly raw: ReadableStream<Uint8Array>;
 }
 /**
  * An email message that is sent to a consumer Worker and can be rejected/forwarded.
  */
 export interface ForwardableEmailMessage extends EmailMessage {
-  /**
-   * Stream of the email message content.
-   */
-  readonly raw: ReadableStream<Uint8Array>;
   /**
    * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    */
@@ -16163,6 +16209,19 @@ export declare class MessageChannel {
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+/**
+ * An `oidc_token` binding: issues OpenID Connect tokens for the Worker's own
+ * identity, to exchange for cloud credentials or send to an API as a bearer
+ * token. Each binding has one audience, set in its config.
+ */
+export interface OidcTokenBinding {
+  /**
+   * Returns a newly signed JWT for the configured audience, valid for 5
+   * minutes. Each call gets a new `jti`. Call it when you need a token; don't
+   * store the token across requests.
+   */
+  getToken(): Promise<string>;
+}
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
@@ -16259,6 +16318,381 @@ export interface RateLimit {
    * @returns A promise that resolves with the outcome of the rate limit.
    */
   limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
+}
+/** Main interface for creating meetings in the app configured for your binding. */
+export interface RealtimeKitBinding {
+  /**
+   * Creates a meeting and returns its details along with a method for adding
+   * participants.
+   */
+  createMeeting(
+    options?: RealtimeKitCreateMeetingOptions,
+  ): Promise<RealtimeKitMeeting>;
+}
+/** Settings for creating a meeting. */
+export interface RealtimeKitCreateMeetingOptions {
+  /** Human-readable meeting title. */
+  title?: string | null;
+  /**
+   * Start recording when a participant joins.
+   * @default false
+   */
+  record_on_start?: boolean | null;
+  /**
+   * Start livestreaming when the meeting starts.
+   * @default false
+   */
+  live_stream_on_start?: boolean | null;
+  /** Meeting recording settings, which take precedence over app settings. */
+  recording_config?: RealtimeKitRecordingConfig;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /**
+   * Retain meeting chat for a week.
+   * @default false
+   */
+  persist_chat?: boolean;
+  /**
+   * Generate a meeting summary; requires transcription.
+   * @default false
+   */
+  summarize_on_end?: boolean;
+  /**
+   * Generate a transcript when the meeting ends.
+   * @default false
+   */
+  transcribe_on_end?: boolean;
+  /**
+   * Seconds a session stays active after its last participant leaves.
+   * Between 60 and 600.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+}
+/** Details of the participant to add to a meeting. */
+export interface RealtimeKitAddParticipantOptions {
+  /** Your unique identifier for the participant, such as a user ID or email. */
+  custom_participant_id: string;
+  /** Name of an existing preset to apply, such as group_call_host. */
+  preset_name: string;
+  /** Participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** Validity window for the participant authentication token. */
+  token?: RealtimeKitParticipantTokenValidity;
+}
+/**
+ * Controls when a participant's join token can be used.
+ * The token is valid from not_before up to, but not including, expires_on.
+ * The validity period cannot exceed 100 days and defaults to 100 days from now.
+ */
+export interface RealtimeKitParticipantTokenValidity {
+  /** RFC 3339 timestamp with a timezone; defaults to now and may be in the past. */
+  not_before?: string;
+  /**
+   * RFC 3339 timestamp with a timezone; must be in the future when issued.
+   * Defaults to not_before plus 100 days.
+   */
+  expires_on?: string;
+}
+/** Participant details and the authentication token needed to join the meeting. */
+export interface RealtimeKitParticipant {
+  /** Participant UUID. */
+  id: string;
+  /** The unique participant identifier you provided when adding the participant. */
+  custom_participant_id: string;
+  /** Preset applied to the participant. */
+  preset_name: string;
+  /** Supplied participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** When the participant was created, as an ISO date-time string. */
+  created_at: string;
+  /** When the participant was last updated, as an ISO date-time string. */
+  updated_at: string;
+  /** Sensitive authentication token used to join the meeting. Do not log it. */
+  token: string;
+  /** Time from which the token is valid, as a UTC date-time string. */
+  not_before?: string;
+  /** Time at which the token expires, as a UTC date-time string. */
+  expires_on?: string;
+}
+/**
+ * Meeting details captured when the meeting was created.
+ * Use addParticipant() to add participants to this meeting.
+ * Use `using` to release the meeting handle when finished.
+ */
+export interface RealtimeKitMeeting extends Disposable {
+  /** Unique identifier of the meeting. */
+  readonly id: string;
+  /** Human-readable meeting title. */
+  title?: string;
+  /** When the meeting was created, as an ISO date-time string. */
+  readonly created_at: string;
+  /** When the meeting was last updated, as an ISO date-time string. */
+  readonly updated_at: string;
+  /** Whether recording starts when a participant joins. */
+  record_on_start?: boolean;
+  /** Whether livestreaming starts when the meeting starts. */
+  live_stream_on_start?: boolean;
+  /** Whether meeting chat persists for a week. */
+  persist_chat?: boolean;
+  /** Whether a meeting summary is generated using transcripts. */
+  summarize_on_end?: boolean;
+  /** Whether a transcript is generated when the meeting ends. */
+  transcribe_on_end?: boolean;
+  /** Recording settings for the meeting. Storage credentials are not included. */
+  recording_config?: RealtimeKitRecordingConfigResponse;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /** Participants cannot join an INACTIVE meeting. */
+  status?: "ACTIVE" | "INACTIVE";
+  /**
+   * Session keep-alive duration, 60 to 600 seconds.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+  /**
+   * Adds a participant to this meeting and returns their details and join token.
+   */
+  addParticipant(
+    options: RealtimeKitAddParticipantOptions,
+  ): Promise<RealtimeKitParticipant>;
+}
+/** Meeting-level recording settings, overriding the app's recording settings. */
+export interface RealtimeKitRecordingConfig {
+  /** Maximum recording duration in seconds, between 60 and 86400. */
+  max_seconds?: number;
+  /** Prefix added to the recording file name. */
+  file_name_prefix?: string;
+  /** Recorded video encoding, dimensions, and watermark settings. */
+  video_config?: RealtimeKitVideoConfig;
+  /** Recorded audio encoding and channel settings. */
+  audio_config?: RealtimeKitAudioConfig;
+  /** Storage destination and credentials for uploading recordings. */
+  storage_config?: RealtimeKitStorageConfig;
+  /** Whether recordings are uploaded to RealtimeKit's bucket. */
+  realtimekit_bucket_config?: RealtimeKitBucketConfig;
+  /** Destination for live-streaming the recording. */
+  live_streaming_config?: RealtimeKitLivestreamingConfig;
+}
+/** Recording settings for a meeting, with storage credentials omitted. */
+export interface RealtimeKitRecordingConfigResponse extends Omit<
+  RealtimeKitRecordingConfig,
+  "storage_config"
+> {
+  /** Destination storage with access keys, secrets, passwords, and keys omitted. */
+  storage_config?: RealtimeKitStorageConfigResponse;
+}
+/** Video settings for meeting recordings. */
+export interface RealtimeKitVideoConfig {
+  /**
+   * Video codec.
+   * @default 'H264'
+   */
+  codec?: "H264" | "VP8" | "VP9";
+  /**
+   * Video width in pixels, between 1 and 1920.
+   * @default 1280
+   */
+  width?: number;
+  /**
+   * Video height in pixels, between 1 and 1920.
+   * @default 720
+   */
+  height?: number;
+  /** Watermark image, dimensions, and placement. */
+  watermark?: {
+    /** URL of the watermark image. */
+    url?: string;
+    /** Watermark dimensions in pixels. */
+    size?: {
+      /** Watermark width; minimum 1 pixel. */
+      width?: number;
+      /** Watermark height; minimum 1 pixel. */
+      height?: number;
+    };
+    /**
+     * Watermark placement.
+     * @default 'left top'
+     */
+    position?: "left top" | "right top" | "left bottom" | "right bottom";
+  };
+  /**
+   * Export a separate video file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Audio settings for meeting recordings. */
+export interface RealtimeKitAudioConfig {
+  /**
+   * Audio codec. VP8/VP9 video automatically uses Vorbis audio, and the audio
+   * codec cannot be changed.
+   * @default 'AAC'
+   */
+  codec?: "MP3" | "AAC";
+  /**
+   * Audio channel layout.
+   * @default 'stereo'
+   */
+  channel?: "mono" | "stereo";
+  /**
+   * Export a separate audio file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Destination and authentication settings for external recording storage. */
+export interface RealtimeKitStorageConfigBase {
+  /** Destination bucket name. */
+  bucket: string;
+  /**
+   * Storage access key; required and nonempty except for Google Cloud Storage.
+   * Not included in returned storage details.
+   */
+  access_key?: string;
+  /** Secret key for the storage provider. Not included in returned details. */
+  secret?: string;
+  /** Storage region; required and nonempty except for Google Cloud Storage. */
+  region?: string;
+  /** Recording path relative to the bucket root. */
+  path?: string;
+  /** Authentication method for SFTP storage. */
+  auth_method?: "KEY" | "PASSWORD";
+  /** Destination SSH username for SFTP. */
+  username?: string;
+  /**
+   * SFTP login password, or SSH private-key passphrase when using KEY.
+   * Not included in returned storage details.
+   */
+  password?: string;
+  /** Destination SSH hostname for SFTP. */
+  host?: string;
+  /** Destination SSH port for SFTP. */
+  port?: number;
+  /** SSH private key for SFTP key authentication. Not included in returned details. */
+  private_key?: string;
+}
+/** Recording destination in Google Cloud Storage, AWS, Azure, DigitalOcean, or SFTP. */
+export type RealtimeKitStorageConfig =
+  | (RealtimeKitStorageConfigBase &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            access_key: string;
+            region: string;
+          }
+        | ({
+            type: "sftp";
+            access_key: string;
+            region: string;
+            username: string;
+            host: string;
+            port: number;
+          } & (
+            | {
+                auth_method: "KEY";
+                private_key: string;
+              }
+            | {
+                auth_method: "PASSWORD";
+                password: string;
+              }
+          ))
+      ))
+  | null;
+/** Recording destination details, without access keys, secrets, passwords, or private keys. */
+export type RealtimeKitStorageConfigResponse =
+  | (Omit<
+      RealtimeKitStorageConfigBase,
+      "access_key" | "secret" | "password" | "private_key"
+    > &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            region: string;
+          }
+        | {
+            type: "sftp";
+            region: string;
+            auth_method: "KEY" | "PASSWORD";
+            username: string;
+            host: string;
+            port: number;
+          }
+      ))
+  | null;
+/** Controls uploading recordings to RealtimeKit's managed bucket. */
+export interface RealtimeKitBucketConfig {
+  /**
+   * Enable managed-bucket uploads. If false, recording download URLs and
+   * their expiry are not generated.
+   */
+  enabled: boolean;
+}
+/** Live-streaming destination for a recording. */
+export interface RealtimeKitLivestreamingConfig {
+  /** RTMP destination URL. */
+  rtmp_url?: string;
+}
+/** Transcription and summary customization for a meeting. */
+export interface RealtimeKitAIConfig {
+  /** Transcription options. */
+  transcription?: RealtimeKitTranscriptionConfig;
+  /** Summary options. */
+  summarization?: RealtimeKitSummarizationConfig;
+}
+/** Meeting transcription settings. */
+export interface RealtimeKitTranscriptionConfig {
+  /** Terms to recognize more accurately during transcription. */
+  keywords?: string[];
+  /**
+   * Language used for transcription. If omitted, post-meeting transcription
+   * detects the language automatically.
+   */
+  language?:
+    "en-US" | "en-IN" | "de" | "hi" | "sv" | "ru" | "pl" | "el" | "fr" | "nl";
+  /**
+   * Filter offensive language in transcripts.
+   * @default false
+   */
+  profanity_filter?: boolean;
+}
+/** Meeting summarization settings. */
+export interface RealtimeKitSummarizationConfig {
+  /**
+   * Maximum words in the summary, between 150 and 1000.
+   * @default 500
+   */
+  word_limit?: number;
+  /**
+   * Summary text format.
+   * @default 'markdown'
+   */
+  text_format?: "plain_text" | "markdown";
+  /**
+   * Summary style.
+   * @default 'general'
+   */
+  summary_type?:
+    | "general"
+    | "team_meeting"
+    | "sales_call"
+    | "client_check_in"
+    | "interview"
+    | "daily_standup"
+    | "one_on_one_meeting"
+    | "lecture"
+    | "code_review";
 }
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
