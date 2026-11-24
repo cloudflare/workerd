@@ -2,19 +2,27 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Ctrl+C while an input runs. The terminal is out of raw mode then (terminal.rs), so Ctrl+C
-//! raises SIGINT. While an [`AbandonOnInterrupt`] is held, the first SIGINT abandons the input
-//! rather than ending the process: the session stops awaiting it. A second comes only if the
-//! session could not abandon the input, because its JavaScript runs without yielding, and ends the
-//! process as SIGINT does by default, as does a SIGINT while no input runs. A process that ignores
-//! SIGINT when the REPL starts goes on ignoring it: [`keep_ignoring`] ignores it again once the
-//! process context is set up, since debug builds of KJ install a crash handler for SIGINT then.
+//! Signals: Ctrl+C while an input runs, and the signals that end the process.
 //!
-//! [`take_interrupts`] blocks SIGINT before the REPL starts any other thread, so that every thread
-//! blocks it, and starts a thread that takes each one with `sigwait()`. A SIGINT is taken at once
-//! whatever the other threads are doing. A handler would instead run on a thread the kernel picks,
-//! often the one running JavaScript, and `ThreadSanitizer` defers a handler until the thread it
-//! interrupted calls into the C library, which JavaScript running without yielding never does.
+//! The terminal is out of raw mode while an input runs (terminal.rs), so Ctrl+C raises SIGINT.
+//! While an [`AbandonOnInterrupt`] is held, the first SIGINT abandons the input rather than ending
+//! the process: the session stops awaiting it. A second comes only if the session could not
+//! abandon the input, because its JavaScript runs without yielding, and ends the process as SIGINT
+//! does by default, as does a SIGINT while no input runs.
+//!
+//! SIGTERM, SIGHUP and SIGQUIT end the process as they do by default, as SIGINT does, but only
+//! once the terminal is out of raw mode ([`super::terminal::restore_for_exit`]): neither the shell
+//! nor a program that runs the REPL on a pseudo-terminal need restore it. A process that ignores
+//! one of these signals when the REPL starts, as `nohup` ignores SIGHUP, goes on ignoring it. For
+//! SIGINT, [`keep_ignoring`] ignores it again once the process context is set up, since debug
+//! builds of KJ install a crash handler for SIGINT then.
+//!
+//! [`take_signals`] blocks the signals before the REPL starts any other thread, so that every
+//! thread blocks them, and starts a thread that takes each one with `sigwait()`. A signal is taken
+//! at once whatever the other threads are doing. A handler would instead run on a thread the
+//! kernel picks, often the one running JavaScript, and `ThreadSanitizer` defers a handler until the
+//! thread it interrupted calls into the C library, which JavaScript running without yielding never
+//! does. A handler also could not take a lock, as restoring the terminal does.
 
 #![allow(
     unsafe_code,
@@ -42,36 +50,44 @@ enum State {
 
 static STATE: Mutex<State> = Mutex::new(State::Idle);
 
-/// Whether a thread of [`take_interrupts`] takes SIGINT. Set before the console's thread starts.
+/// The signals [`take_signals`] takes, unless ignored.
+const SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
+
+/// Whether a thread of [`take_signals`] takes SIGINT. Set before the console's thread starts.
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// Whether SIGINT was ignored when the REPL started, so that [`keep_ignoring`] ignores it again.
 static IGNORED: AtomicBool = AtomicBool::new(false);
 
-/// Blocks SIGINT and starts the thread that takes it, unless SIGINT is ignored. Must be called
-/// before the process starts any other thread, which would not block SIGINT, and could be the one
-/// it is delivered to. If SIGINT is ignored or the thread cannot start, SIGINT does what it would
-/// otherwise, and no input is abandoned.
-pub fn take_interrupts() {
-    if ignored() {
-        IGNORED.store(true, Ordering::Relaxed);
+/// Blocks SIGINT, SIGTERM, SIGHUP and SIGQUIT, except those ignored, and starts the thread that
+/// takes them. Must be called before the process starts any other thread, which would not block
+/// them, and could be the one a signal is delivered to. If the thread cannot start, each signal
+/// does what it would otherwise: no input is abandoned, and the terminal is left as it is.
+pub fn take_signals() {
+    let taken: Vec<libc::c_int> = SIGNALS
+        .into_iter()
+        .filter(|&number| !ignored(number))
+        .collect();
+    let sigint = taken.contains(&libc::SIGINT);
+    IGNORED.store(!sigint, Ordering::Relaxed);
+    if taken.is_empty() {
         return;
     }
-    let signals = sigint();
+    let signals = signal_set(&taken);
     if !set_blocked(&signals, true) {
         return;
     }
     let started = std::thread::Builder::new()
-        .name("repl-interrupts".to_owned())
+        .name("repl-signals".to_owned())
         .spawn(move || take(&signals));
     if started.is_err() {
         set_blocked(&signals, false);
         return;
     }
-    TAKEN.store(true, Ordering::Relaxed);
+    TAKEN.store(sigint, Ordering::Relaxed);
 }
 
-/// Ignores SIGINT again if it was ignored when [`take_interrupts`] ran. Must be called once the
+/// Ignores SIGINT again if it was ignored when [`take_signals`] ran. Must be called once the
 /// process context is set up, which in debug builds installs KJ's crash handler for SIGINT in
 /// place of the disposition the process started with.
 pub fn keep_ignoring() {
@@ -107,24 +123,27 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Whether SIGINT is ignored, as it is in a background job of a shell without job control.
-fn ignored() -> bool {
+/// Whether signal `number` is ignored, as SIGINT is in a background job of a shell without job
+/// control.
+fn ignored(number: libc::c_int) -> bool {
     let mut current = MaybeUninit::<libc::sigaction>::uninit();
     // SAFETY: with no new action, sigaction() only reports the current one, filling in `current`
     // when it succeeds, the only case in which it is read.
     unsafe {
-        libc::sigaction(libc::SIGINT, std::ptr::null(), current.as_mut_ptr()) == 0
+        libc::sigaction(number, std::ptr::null(), current.as_mut_ptr()) == 0
             && current.assume_init().sa_sigaction == libc::SIG_IGN
     }
 }
 
-/// The set of SIGINT alone.
-fn sigint() -> libc::sigset_t {
+/// The set of the signals `numbers`.
+fn signal_set(numbers: &[libc::c_int]) -> libc::sigset_t {
     let mut signals = MaybeUninit::<libc::sigset_t>::uninit();
-    // SAFETY: sigemptyset() initializes the set, which sigaddset() then adds a valid signal to.
+    // SAFETY: sigemptyset() initializes the set, which sigaddset() then adds valid signals to.
     unsafe {
         libc::sigemptyset(signals.as_mut_ptr());
-        libc::sigaddset(signals.as_mut_ptr(), libc::SIGINT);
+        for &number in numbers {
+            libc::sigaddset(signals.as_mut_ptr(), number);
+        }
         signals.assume_init()
     }
 }
@@ -140,14 +159,15 @@ fn set_blocked(signals: &libc::sigset_t, blocked: bool) -> bool {
     unsafe { libc::pthread_sigmask(how, signals, std::ptr::null_mut()) == 0 }
 }
 
-/// Takes each SIGINT, which every thread blocks.
+/// Takes each of `signals`, which every thread blocks.
 fn take(signals: &libc::sigset_t) {
     loop {
-        let mut signal = 0;
-        // SAFETY: `signals` is an initialized set, and `signal` is where sigwait() stores the one
-        // it took.
-        match unsafe { libc::sigwait(signals, &raw mut signal) } {
-            0 => interrupted(signals),
+        let mut number = 0;
+        // SAFETY: `signals` is an initialized set, and `number` is where sigwait() stores the
+        // signal it took.
+        match unsafe { libc::sigwait(signals, &raw mut number) } {
+            0 if number == libc::SIGINT => interrupted(),
+            0 => end_process(number),
             libc::EINTR => {}
             // Only a set that is not valid fails.
             _ => return,
@@ -156,25 +176,28 @@ fn take(signals: &libc::sigset_t) {
 }
 
 /// What a SIGINT does, on the thread that takes it.
-fn interrupted(signals: &libc::sigset_t) {
+fn interrupted() {
     let mut state = state();
     match std::mem::replace(&mut *state, State::Abandoning) {
         State::Running(abandon) => {
             // A session that has replied meanwhile has nothing to abandon.
             let _ = abandon.send(());
         }
-        State::Idle | State::Abandoning => end_process(signals),
+        State::Idle | State::Abandoning => end_process(libc::SIGINT),
     }
 }
 
-/// Ends the process as SIGINT does by default. A handler installed for SIGINT, as KJ installs one
-/// in debug builds, would run on this thread instead.
-fn end_process(signals: &libc::sigset_t) {
-    // SAFETY: with the default disposition, SIGINT ends the process once this thread, which raises
-    // it, unblocks it.
+/// Ends the process as signal `number` does by default, once the terminal is out of raw mode. A
+/// handler installed for the signal, as KJ installs one for SIGINT in debug builds, would run on
+/// this thread instead.
+fn end_process(number: libc::c_int) {
+    let _restored = super::terminal::restore_for_exit();
+    let signals = signal_set(&[number]);
+    // SAFETY: with the default disposition, the signal ends the process once this thread, which
+    // raises it, unblocks it.
     unsafe {
-        libc::signal(libc::SIGINT, libc::SIG_DFL);
-        set_blocked(signals, false);
-        libc::raise(libc::SIGINT);
+        libc::signal(number, libc::SIG_DFL);
+        set_blocked(&signals, false);
+        libc::raise(number);
     }
 }

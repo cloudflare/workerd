@@ -224,6 +224,10 @@ no input runs ends the REPL, unless the terminal is editing a line, which takes 
 A REPL started with SIGINT ignored, as a shell without job control starts a background job,
 ignores it: SIGINT neither stops awaiting an input nor ends the REPL.
 
+SIGTERM, SIGHUP and SIGQUIT end the REPL as they end other programs, and a REPL started with one of
+them ignored, as `nohup` ignores SIGHUP, ignores it. A signal that ends the REPL while it edits a
+line first gives the terminal back the modes it had, and turns bracketed paste mode off.
+
 With `--input-timeout=<seconds>`, the REPL stops awaiting an input once it has taken that long, as
 Ctrl+C does, and says `Timed out`. The input counts as failed. As for Ctrl+C, JavaScript that runs
 without awaiting runs on.
