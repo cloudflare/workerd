@@ -76,6 +76,7 @@ use crate::cluster::moved;
 use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
+use crate::moved::MovedWatcher;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -976,7 +977,7 @@ impl Channel for RoutedChannel {
                 Resolved::Here(container) => match container.start_request(metadata) {
                     Ok(interface) => {
                         let interface = attach(interface, container.count_cause(cause));
-                        Ok(ffi::worker_interface_watch_moved(interface, Box::new(hook)))
+                        Ok(MovedWatcher::local(interface, hook))
                     }
                     Err(e) => {
                         if is_moved(&e) {
@@ -987,9 +988,9 @@ impl Channel for RoutedChannel {
                 },
                 // Checked again as it starts: resolving can take long.
                 Resolved::Remote(..) if passed(relay_by) => Err(handed_off(&hook.key)),
-                Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_peer(
+                Resolved::Remote(connection, _) => Ok(MovedWatcher::peer(
                     attach(connection.start_request(metadata), Rc::clone(connection)),
-                    Box::new(hook),
+                    hook,
                 )),
             }
             .map(|interface| attach(interface, counted))
