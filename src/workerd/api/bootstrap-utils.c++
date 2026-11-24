@@ -44,42 +44,39 @@ jsg::JsValue BootstrapUtils::mimeTypeEssence(jsg::Lock& js, jsg::JsValue input) 
   return js.undefined();
 }
 
-jsg::JsValue BootstrapUtils::atob(jsg::Lock& js, jsg::JsValue input) {
+jsg::JsValue BootstrapUtils::base64(jsg::Lock& js, jsg::JsValue input, Base64Decode decode) {
   auto str =
-      JSG_REQUIRE_NONNULL(input.tryCast<jsg::JsString>(), TypeError, "atob() expects a string");
-  v8::Local<v8::String> handle = str;
-  // Three bytes for every four characters, rounded up: no less than
-  // simdutf::maximal_binary_length_from_base64() gives for an input of this length.
-  auto maxSize = (static_cast<size_t>(handle->Length()) + 3) / 4 * 3;
-  KJ_STACK_ARRAY(kj::byte, decoded, maxSize, 1024, 1024);
-  simdutf::result result;
-  {
-    // The string's characters in place, which nothing may allocate on the V8 heap while the
-    // view lives. A code unit above 0x7F is not base64 in either representation.
-    v8::String::ValueView view(js.v8Isolate, handle);
-    if (view.is_one_byte()) {
-      result = simdutf::base64_to_binary(reinterpret_cast<const char*>(view.data8()), view.length(),
-          decoded.asChars().begin(), simdutf::base64_default);
-    } else {
-      result = simdutf::base64_to_binary(reinterpret_cast<const char16_t*>(view.data16()),
-          view.length(), decoded.asChars().begin(), simdutf::base64_default);
-    }
-  }
-  if (result.error != simdutf::SUCCESS) return js.undefined();
-  KJ_ASSERT(result.count <= decoded.size());
-  return js.str(decoded.first(result.count));
-}
-
-jsg::JsValue BootstrapUtils::btoa(jsg::Lock& js, jsg::JsValue input) {
-  auto str =
-      JSG_REQUIRE_NONNULL(input.tryCast<jsg::JsString>(), TypeError, "btoa() expects a string");
-  if (!str.containsOnlyOneByte()) return js.undefined();
+      JSG_REQUIRE_NONNULL(input.tryCast<jsg::JsString>(), TypeError, "base64() expects a string");
   v8::Local<v8::String> handle = str;
   auto length = static_cast<size_t>(handle->Length());
+
+  if (decode) {
+    // Three bytes for every four characters, rounded up: no less than
+    // simdutf::maximal_binary_length_from_base64() gives for an input of this length.
+    KJ_STACK_ARRAY(kj::byte, decoded, (length + 3) / 4 * 3, 1024, 1024);
+    simdutf::result result;
+    {
+      // The string's characters in place, which nothing may allocate on the V8 heap while the
+      // view lives. A code unit above 0x7F is not base64 in either representation.
+      v8::String::ValueView view(js.v8Isolate, handle);
+      if (view.is_one_byte()) {
+        result = simdutf::base64_to_binary(reinterpret_cast<const char*>(view.data8()), length,
+            decoded.asChars().begin(), simdutf::base64_default);
+      } else {
+        result = simdutf::base64_to_binary(reinterpret_cast<const char16_t*>(view.data16()), length,
+            decoded.asChars().begin(), simdutf::base64_default);
+      }
+    }
+    if (result.error != simdutf::SUCCESS) return js.undefined();
+    KJ_ASSERT(result.count <= decoded.size());
+    return js.str(decoded.first(result.count));
+  }
+
+  if (!str.containsOnlyOneByte()) return js.undefined();
   KJ_STACK_ARRAY(kj::byte, encoded, simdutf::base64_length_from_binary(length), 1024, 1024);
   size_t written;
   {
-    // As in atob(), the characters in place.
+    // As when decoding, the characters in place.
     v8::String::ValueView view(js.v8Isolate, handle);
     if (view.is_one_byte()) {
       written = simdutf::binary_to_base64(

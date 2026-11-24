@@ -8,6 +8,9 @@
 
 namespace workerd::api {
 
+// Whether BootstrapUtils::base64() decodes (the global atob()) or encodes (btoa()).
+WD_STRONG_BOOL(Base64Decode);
+
 // Helpers that the per-isolate bootstrap's API implementations need from C++, exposed as utils
 // members. They are stateless and run no user code.
 class BootstrapUtils {
@@ -26,15 +29,12 @@ class BootstrapUtils {
   // a string.
   static jsg::JsValue mimeTypeEssence(jsg::Lock& js, jsg::JsValue input);
 
-  // The global atob() for an argument already converted: `input` (a string) decoded as
-  // forgiving-base64 (WHATWG Infra), each byte a code unit of the result, or undefined if it is
-  // not forgiving-base64. Throws a TypeError if `input` is not a string.
-  static jsg::JsValue atob(jsg::Lock& js, jsg::JsValue input);
-
-  // The global btoa() for an argument already converted: the base64 encoding of the bytes that
-  // the code units of `input` (a string) are, or undefined if a code unit is above 0xFF. Throws a
-  // TypeError if `input` is not a string.
-  static jsg::JsValue btoa(jsg::Lock& js, jsg::JsValue input);
+  // The globals atob() and btoa() for an argument already converted to a string. Decoding
+  // (atob()) gives `input` decoded as forgiving-base64 (WHATWG Infra), each byte a code unit of
+  // the result, or undefined if it is not forgiving-base64. Encoding (btoa()) gives the base64
+  // encoding of the bytes that the code units of `input` are, or undefined if a code unit is
+  // above 0xFF. Throws a TypeError if `input` is not a string.
+  static jsg::JsValue base64(jsg::Lock& js, jsg::JsValue input, Base64Decode decode);
 
   // Undefined if `value` is not a ReadableStream of either implementation, else "locked",
   // "disturbed" (unlocked, but read from) or "readable".

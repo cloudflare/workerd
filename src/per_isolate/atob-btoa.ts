@@ -4,7 +4,7 @@
 // main.ts installs them under the TS_ATOB_BTOA autogate. The receiver and
 // the argument are checked and converted here, as JSG does for the C++
 // methods (api/global-scope.h), with its messages; simdutf does the base64
-// behind utils.atob() and utils.btoa().
+// behind utils.base64().
 
 import type { DomExceptionModule } from './dom-exception';
 import type { RuntimeClassHelpers } from './runtime-class';
@@ -19,7 +19,7 @@ const {
 const { DOMException } = require('dom-exception') as DomExceptionModule;
 const { setNameAndLength } = require('runtime-class') as RuntimeClassHelpers;
 
-const { atob: decodeBase64, btoa: encodeBase64 } = utils;
+const { base64 } = utils;
 
 const kGlobal = globalThis;
 
@@ -89,14 +89,15 @@ function toStringArgument(
 // Methods, which unlike function declarations are not constructors.
 const functions = {
   atob(this: unknown, data: unknown): string {
-    const result = decodeBase64(
+    const result = base64(
       toStringArgument(
         this,
         arguments.length,
         data,
         kAtobMissingArgument,
         functions.atob
-      )
+      ),
+      true
     );
     if (result === undefined) {
       throw invalidCharacterError(kInvalidBase64, functions.atob);
@@ -105,14 +106,15 @@ const functions = {
   },
 
   btoa(this: unknown, data: unknown): string {
-    const result = encodeBase64(
+    const result = base64(
       toStringArgument(
         this,
         arguments.length,
         data,
         kBtoaMissingArgument,
         functions.btoa
-      )
+      ),
+      false
     );
     if (result === undefined) {
       throw invalidCharacterError(kNotLatin1, functions.btoa);

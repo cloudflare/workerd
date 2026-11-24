@@ -444,17 +444,12 @@ static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
-static void Atob(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// The second argument is `true` to decode (atob()); anything else encodes (btoa()).
+static void Base64(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
-    return v8::Local<v8::Value>(api::BootstrapUtils::atob(js, jsg::JsValue(args[0])));
-  });
-}
-
-static void Btoa(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    auto& js = jsg::Lock::from(args.GetIsolate());
-    return v8::Local<v8::Value>(api::BootstrapUtils::btoa(js, jsg::JsValue(args[0])));
+    auto decode = args[1]->IsTrue() ? api::Base64Decode::YES : api::Base64Decode::NO;
+    return v8::Local<v8::Value>(api::BootstrapUtils::base64(js, jsg::JsValue(args[0]), decode));
   });
 }
 
@@ -621,8 +616,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "readableStreamState",
-    "atob",
-    "btoa",
+    "base64",
     "DOMExceptionBase",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
@@ -666,8 +660,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
-    getMethod(js, Atob),
-    getMethod(js, Btoa),
+    getMethod(js, Base64),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
   };
 
