@@ -174,6 +174,15 @@ def _capnp_bundles_file_group():
 def _capnp_rules():
     return ["//src/pyodide/tests:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
 
+# workerd arguments that make it read Pyodide bundles from the directory that `PYODIDE_BUNDLE_DATA`
+# puts in a test's runfiles, rather than download them.
+PYODIDE_BUNDLE_ARGS = [
+    "--pyodide-bundle-disk-cache-dir",
+    "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
+]
+
+PYODIDE_BUNDLE_DATA = _capnp_rules()
+
 def python_test_setup():
     _capnp_bundles_file_group()
     _snapshot_file_group()
@@ -216,10 +225,8 @@ def py_wd_test(
         name = directory
     elif name == None:
         name = src.removesuffix(".wd-test")
-    data += _capnp_rules()
-    args = args + [
-        "--pyodide-bundle-disk-cache-dir",
-        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
+    data += PYODIDE_BUNDLE_DATA
+    args = args + PYODIDE_BUNDLE_ARGS + [
         "--experimental",
         "--python-snapshot-dir",
         ".",
