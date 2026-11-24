@@ -28,9 +28,15 @@
 //! [`RemoteRequest::handle`], and the request is answered by the code that answers a local one:
 //! everything above holds for it. What crosses threads is hyper's own request (the head, the
 //! body, which that thread reads from hyper as the handler asks for it, and hyper's hand-over of
-//! the transport for an upgrade) and, on the way back, the response head and a body of one
-//! chunk at a time ([`crate::body::ChannelBody`]), so both bodies are bounded by what their
-//! reader takes. An upgraded transport is used by the handler's thread directly, while it stays
+//! the transport for an upgrade) and, on the way back, the response head and a body that
+//! holds a few chunks at most ([`crate::body::ChannelBody`]), so both bodies are bounded by
+//! what their reader takes. Two things follow from the threads. A response body of unknown
+//! length ends when its handler call has returned, not when its sink is dropped, since the
+//! connection could otherwise see the sink of a failing response dropped before the failure
+//! and frame the body as complete. And the `100 Continue` of a request with `Expect` is sent
+//! when the handler reads the body only if the response head has not gone out by then: a
+//! handler that sends its head first and reads afterwards gets none, where on one thread the
+//! read is seen first. An upgraded transport is used by the handler's thread directly, while it stays
 //! registered with the runtime that accepted it.
 //!
 //! # Request parsing
@@ -119,7 +125,7 @@ use crate::body::HeaderBlock;
 use crate::body::MAX_HEADERS;
 use crate::body::Protocol;
 use crate::body::RustBody;
-use crate::body::channel;
+use crate::body::channel_of;
 use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::WebSocketCompression;
@@ -236,6 +242,10 @@ struct Link {
     hangup: Shared<Hangup>,
     /// True once the server drains: the connection closes after its next response.
     draining: Option<watch::Receiver<bool>>,
+    /// How many chunks of a response body may wait for hyper before a write waits.
+    body_chunks: usize,
+    /// The requests are handled on other threads than the connection's.
+    remote: bool,
 }
 
 /// The way back to a request's connection: where its response head goes, and hyper's hand-over
@@ -303,7 +313,7 @@ where
         });
         call
     };
-    serve(io, hangup, header_timeout, shutdown, start).await
+    serve(io, hangup, header_timeout, shutdown, None, start).await
 }
 
 /// One request of a connection that [`serve_connection_remote`] serves, on its way to the thread
@@ -388,8 +398,14 @@ where
             responder,
         })
     };
-    serve(io, hangup, header_timeout, shutdown, start).await
+    let chunks = Some(REMOTE_BODY_CHUNKS);
+    serve(io, hangup, header_timeout, shutdown, chunks, start).await
 }
+
+/// How many chunks of a response body a handler on another thread may have written ahead of
+/// hyper. With one, every chunk would wait for the connection's thread to take the one before,
+/// two thread wake-ups per chunk; a few let the writer run ahead while that thread writes.
+const REMOTE_BODY_CHUNKS: usize = 4;
 
 /// hyper's settings for a served connection.
 fn http1(header_timeout: Duration) -> http1::Builder {
@@ -413,6 +429,7 @@ async fn serve<IO, S, F>(
     hangup: Hangup,
     header_timeout: Duration,
     shutdown: &Shutdown,
+    remote_body_chunks: Option<usize>,
     start: S,
 ) -> Result<()>
 where
@@ -425,6 +442,8 @@ where
         upgraded: Arc::default(),
         hangup: hangup.clone(),
         draining: shutdown.subscribe(),
+        body_chunks: remote_body_chunks.unwrap_or(1),
+        remote: remote_body_chunks.is_some(),
     };
     let calls: Calls<F> = Arc::default();
     let service = {
@@ -612,7 +631,7 @@ async fn handle(
             .await
     };
     match result {
-        Ok(()) if sender.sent() => {}
+        Ok(()) if sender.sent() => sender.finish(),
         Ok(()) => {
             let _ = sender.send_error(
                 500,
@@ -763,7 +782,7 @@ impl ResponseSender {
             self.send_head(status, status_text, head, ChannelBody::empty())?;
             return Ok(BodySink::discarding());
         }
-        let (sink, abort, body) = channel(length);
+        let (sink, abort, body) = channel_of(length, self.link.body_chunks, self.link.remote);
         self.send_head(status, status_text, head, body)?;
         *self.body_abort.borrow_mut() = Some(abort);
         Ok(sink)
@@ -811,6 +830,12 @@ impl ResponseSender {
             ChannelBody::full(body)
         };
         self.send_head(status, status_text, head, body)
+    }
+
+    /// Says that the call ended well: the response body a `send()` opened, which a connection
+    /// on another thread holds open until it knows, ends where its sink was dropped.
+    fn finish(&self) {
+        self.body_abort.borrow_mut().take();
     }
 
     /// Fails the response in flight, dropping the connection, for a failure after the head.

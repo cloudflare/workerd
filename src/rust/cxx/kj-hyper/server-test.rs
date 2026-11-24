@@ -1,6 +1,7 @@
 use std::future::pending;
 use std::future::ready;
 use std::str::from_utf8;
+use std::time::Duration;
 
 use futures::future::Either;
 use futures::future::select;
@@ -13,6 +14,7 @@ use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::time::sleep;
 
 use super::*;
 use crate::Result;
@@ -43,6 +45,15 @@ impl Handler for Echo<'_> {
     ) -> Result<()> {
         if url == b"/fail" {
             return Err(failed("the handler failed"));
+        }
+        if url == b"/end-then-fail" || url == b"/end-then-return" {
+            // A body of unknown length whose sink is dropped well before the call ends.
+            drop(response.send(200, "OK", &Headers::new(self.0), None)?);
+            sleep(Duration::from_millis(100)).await;
+            return match url {
+                b"/end-then-fail" => Err(failed("the handler failed after its body")),
+                _ => Ok(()),
+            };
         }
         if url == b"/hang" {
             // The head of a body of unknown length, and then nothing.
@@ -535,4 +546,15 @@ fn a_request_dropped_unhandled_closes_the_connection_unanswered() {
     drop(requests.blocking_recv().unwrap());
     front.block_on(served).unwrap().unwrap();
     assert!(front.block_on(client).unwrap().is_empty());
+}
+
+#[test]
+fn a_body_handled_on_another_thread_ends_as_its_call_does() {
+    // The connection sees the sink dropped long before the call fails, and must not take the
+    // body for complete.
+    let failed = exchange_remote(b"GET /end-then-fail HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    assert!(!failed.contains("0\r\n\r\n"), "{failed}");
+    let returned = exchange_remote(b"GET /end-then-return HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    assert!(returned.starts_with("HTTP/1.1 200 OK\r\n"), "{returned}");
+    assert!(returned.ends_with("\r\n\r\n0\r\n\r\n"), "{returned}");
 }

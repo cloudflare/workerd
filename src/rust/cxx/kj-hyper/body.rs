@@ -197,7 +197,8 @@ impl BodySink {
 
 /// Ends a [`ChannelBody`] with an error, so hyper drops the connection instead of framing what
 /// was written as a complete message. Its clones share the one abort, the first to abort wins,
-/// and dropping all of them unused has no effect.
+/// and dropping all of them unused has no effect, except on a body whose end they confirm
+/// ([`channel_of`]).
 #[derive(Clone)]
 pub struct BodyAbort(Rc<Cell<Option<oneshot::Sender<()>>>>);
 
@@ -214,6 +215,8 @@ pub struct ChannelBody {
     rx: Option<mpsc::Receiver<Bytes>>,
     abort: Option<oneshot::Receiver<()>>,
     length: Option<u64>,
+    /// The body has not ended until its [`BodyAbort`] is gone ([`channel_of`]).
+    confirmed: bool,
 }
 
 impl ChannelBody {
@@ -223,6 +226,7 @@ impl ChannelBody {
             rx: None,
             abort: None,
             length: Some(0),
+            confirmed: false,
         }
     }
 
@@ -237,6 +241,7 @@ impl ChannelBody {
             rx: Some(rx),
             abort: None,
             length,
+            confirmed: false,
         }
     }
 
@@ -249,6 +254,7 @@ impl ChannelBody {
             rx: self.rx.as_ref().map(|_| mpsc::channel(1).1),
             abort: None,
             length: self.length,
+            confirmed: false,
         }
     }
 }
@@ -257,7 +263,24 @@ impl ChannelBody {
 /// if known.
 #[must_use]
 pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
-    let (tx, rx) = mpsc::channel(1);
+    channel_of(length, 1, false)
+}
+
+/// [`channel`] whose body holds up to `chunks` written chunks that hyper has not taken yet,
+/// before a write waits.
+///
+/// A `confirmed` body does not end when its sink is dropped, but once its [`BodyAbort`] is
+/// gone too, the sink's clone and the one returned here: used, and the body fails, or dropped,
+/// and the body ends. Whoever feeds the body from another thread than hyper's needs that: the
+/// sink of a response that fails is dropped before the failure is known, and hyper, seeing the
+/// drop first, would end the body as complete.
+#[must_use]
+pub fn channel_of(
+    length: Option<u64>,
+    chunks: usize,
+    confirmed: bool,
+) -> (BodySink, BodyAbort, ChannelBody) {
+    let (tx, rx) = mpsc::channel(chunks);
     let (abort_tx, abort_rx) = oneshot::channel();
     let abort = BodyAbort(Rc::new(Cell::new(Some(abort_tx))));
     (
@@ -271,6 +294,7 @@ pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
             rx: Some(rx),
             abort: Some(abort_rx),
             length,
+            confirmed,
         },
     )
 }
@@ -307,8 +331,19 @@ impl Body for ChannelBody {
         let Some(rx) = &mut this.rx else {
             return Poll::Ready(None);
         };
-        rx.poll_recv(cx)
-            .map(|chunk| chunk.map(|data| Ok(Frame::data(data))))
+        if let Some(data) = std::task::ready!(rx.poll_recv(cx)) {
+            return Poll::Ready(Some(Ok(Frame::data(data))));
+        }
+        // The sink is gone. A confirmed body ends only once it is known not to have failed.
+        if this.confirmed
+            && let Some(abort) = this.abort.as_mut()
+        {
+            if std::task::ready!(abort.poll_unpin(cx)).is_ok() {
+                return Poll::Ready(Some(Err(Aborted)));
+            }
+            this.abort = None;
+        }
+        Poll::Ready(None)
     }
 
     // Only a body that was built empty: hyper drops the `Content-Length: 0` of a message whose
