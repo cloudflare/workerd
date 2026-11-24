@@ -33,3 +33,27 @@ js_test(
     },
     tags = ["js-test"],
 )
+
+js_test(
+    name = "threads-front-test",
+    size = "large",
+    data = [
+        ":front-config.capnp",
+        ":front-worker.mjs",
+        "//src/workerd/api/tests:connect-handler-server.key",
+        "//src/workerd/api/tests:connect-handler-server.pem",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "front-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_FRONT_CA": "$(rootpath //src/workerd/api/tests:connect-handler-server.pem)",
+        "WORKERD_FRONT_CONFIG": "$(rootpath :front-config.capnp)",
+    },
+    # The config embeds the certificate and key by their paths in the source tree.
+    no_copy_to_bin = [
+        "//src/workerd/api/tests:connect-handler-server.key",
+        "//src/workerd/api/tests:connect-handler-server.pem",
+    ],
+    tags = ["js-test"],
+)
