@@ -193,7 +193,7 @@ impl BenchController {
 impl BenchController {
     /// A controller for `params`, an encoded `BenchParams` message, in words.
     fn read(params: &[u64]) -> capnp::Result<Self> {
-        let bytes: Vec<u8> = params.iter().flat_map(|word| word.to_ne_bytes()).collect();
+        let bytes = bench_core::words_to_bytes(params);
         let message =
             capnp::serialize::read_message(bytes.as_slice(), capnp::message::ReaderOptions::new())?;
         let params: bench_capnp::bench_params::Reader<'_> = message.get_root()?;

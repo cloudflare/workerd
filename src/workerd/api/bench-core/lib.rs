@@ -162,11 +162,25 @@ pub fn fill_group(
     Ok(())
 }
 
-/// `result` as an encoded `BenchReport.Group` message (segment table, then segments) in words.
-pub fn encode_group(result: &GroupResult) -> Result<Vec<u64>, Error> {
+/// `result` as an encoded `BenchReport.Group` message (segment table, then segments), as the
+/// bytes of the `ArrayBuffer` the runner resolves with.
+pub fn encode_group(result: &GroupResult) -> Result<Vec<u8>, Error> {
     let mut message = capnp::message::TypedBuilder::<bench_report::group::Owned>::new_default();
     fill_group(result, message.init_root())?;
-    to_words(&message)
+    Ok(capnp::serialize::write_message_to_words(
+        message.borrow_inner(),
+    ))
+}
+
+/// `words`, an encoded message, as the bytes that hold it, for a reader or a buffer that takes
+/// bytes. Copied a word at a time: the messages can be tens of megabytes.
+#[must_use]
+pub fn words_to_bytes(words: &[u64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(size_of_val(words));
+    for word in words {
+        bytes.extend_from_slice(&word.to_ne_bytes());
+    }
+    bytes
 }
 
 /// `message`, encoded (segment table, then segments) in words.
