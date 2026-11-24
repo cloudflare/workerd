@@ -465,6 +465,47 @@ fn then_and_catch_pass_the_other_outcome_through() {
     });
 }
 
+/// `pass_through` settles with what the promise settles with, the same value or reason, one
+/// microtask after it, as C++ JSG follows a promise that a method returns: a reaction that the
+/// promise had before it runs first, and its own reactions run in the tick after.
+#[test]
+fn pass_through_settles_as_the_promise_does_one_microtask_later() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        for (source, settled) in [
+            ("Promise.resolve(globalThis.value = {})", "passed: true"),
+            (
+                "Promise.reject(globalThis.value = new TypeError('nope'))",
+                "caught: true",
+            ),
+        ] {
+            let promise = ctx.eval_raw(lock, source).unwrap();
+            ctx.set_global(lock, "promise", promise);
+            ctx.eval_raw(
+                lock,
+                "globalThis.log = [];
+                 globalThis.tick = (n) => () => log.push(`tick ${n}`);
+                 promise.then(tick(1), tick(1)).then(tick(2)).then(tick(3));",
+            )
+            .unwrap();
+            let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
+            let passed = promise.pass_through(lock).unwrap();
+            assert_eq!(passed.state(), PromiseState::Pending);
+            ctx.set_global(lock, "passed", passed);
+            ctx.eval_raw(
+                lock,
+                "passed.then(
+                   (v) => log.push(`passed: ${v === value}`),
+                   (e) => log.push(`caught: ${e === value}`));",
+            )
+            .unwrap();
+            crate::Harness::run_microtasks(lock);
+            let log: String = ctx.eval(lock, "log.join('|')").unwrap();
+            assert_eq!(log, format!("tick 1|tick 2|{settled}|tick 3"));
+        }
+        Ok(())
+    });
+}
+
 /// As with C++ JSG's `catch_()`, and unlike a native `promise.catch()`, the fulfillment that
 /// `catch` passes through resolves the returned promise: an object's `then` is read then, once,
 /// and a thenable is followed.
