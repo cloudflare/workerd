@@ -144,7 +144,11 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
+     string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
+     isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
+  V(BODY_BUFFER_EXTERNAL_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
