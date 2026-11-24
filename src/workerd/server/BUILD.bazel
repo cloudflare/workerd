@@ -427,12 +427,14 @@ wd_capnp_library(
 )
 
 kj_test(
-    size = "enormous",
+    size = "large",
     src = "server-test.c++",
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
     }),
+    # Its cases each start a server, which is slow under sanitizers; shards run them in parallel.
+    shard_count = 12,
     deps = [
         ":workerd_capnp",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",

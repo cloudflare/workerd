@@ -9,6 +9,7 @@ def kj_test(
         deps = [],
         tags = [],
         size = "medium",
+        shard_count = None,
         target_compatible_with = None,
         **kwargs):
     test_name = src.removesuffix(".c++")
@@ -37,6 +38,7 @@ def kj_test(
         binary = binary_name,
         data = data,
         size = size,
+        shard_count = shard_count,
         **test_attrs(tags, size, target_compatible_with)
     )
 
@@ -47,6 +49,7 @@ def kj_test(
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         # Tag with no-coverage to reduce coverage CI time
         size = size,
+        shard_count = shard_count,
         **test_attrs(tags + ["no-coverage"], size, target_compatible_with)
     )
 
