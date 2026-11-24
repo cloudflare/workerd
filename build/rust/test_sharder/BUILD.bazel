@@ -1,0 +1,13 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# Runs one Bazel test shard of a Rust test binary, for wd_rust_test's shard_count
+# (//build:wd_rust_test.bzl).
+wd_rust_binary(
+    name = "sharder",
+    srcs = [
+        "sharder.rs",
+        "sharder-test.rs",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@rules_rust//rust/runfiles"],
+)

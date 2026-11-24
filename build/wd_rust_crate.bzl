@@ -73,6 +73,7 @@ def wd_rust_crate(
         test_proc_macro_deps = [],
         test_compile_data = [],
         test_size = "medium",
+        test_shard_count = None,
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
@@ -103,8 +104,10 @@ def wd_rust_crate(
         test_proc_macro_deps: test-only proc_macro dependencies.
         test_compile_data: files the unit tests read at compile time (include_str!, include_bytes!),
             such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
-        test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
-            crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
+        test_size: Bazel test size (default "medium"); affects test timeout.
+        test_shard_count: the number of shards to split the unit tests between, for crates
+            whose many tests together take long, since RUST_TEST_THREADS=1 runs them serially.
+            See wd_rust_test.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
@@ -193,6 +196,7 @@ def wd_rust_crate(
         crate = ":" + name,
         env = test_env,
         size = test_size,
+        shard_count = test_shard_count,
         tags = test_tags,
         crate_features = crate_features,
         rustc_env = rustc_env,
@@ -211,7 +215,7 @@ def wd_rust_crate(
     if len(test_proc_macro_deps) > 0:
         rust_unpretty(
             name = name + "_test@expand",
-            deps = [":" + name + "_test"],
+            deps = [":" + name + ("_test@unsharded" if test_shard_count else "_test")],
             tags = ["manual", "off-by-default"],
             testonly = True,
         )
