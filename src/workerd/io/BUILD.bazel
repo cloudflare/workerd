@@ -812,6 +812,23 @@ kj_test(
     ],
 )
 
+# The JavaScript values a streaming tail worker receives for each tail event.
+kj_test(
+    src = "trace-stream-js-test.c++",
+    deps = [
+        ":io",
+        ":trace-stream-js-test-golden",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+wd_cc_embed(
+    name = "trace-stream-js-test-golden",
+    testonly = True,
+    src = "trace-stream-js-test.golden.txt",
+    base_name = "trace-stream-js-test.golden",
+)
+
 kj_test(
     src = "invocation-span-test.c++",
     deps = [
