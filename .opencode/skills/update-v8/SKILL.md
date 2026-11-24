@@ -87,8 +87,8 @@ paste <(ls 0*.patch) <(git log --reverse --no-merges --format=%as <new_version>.
 ```
 
 This produces `.patch` files in the current directory, named `<author date>-<subject>.patch`.
-The patches apply in name order, which is author date order; a rebase keeps author dates, so
-it normally keeps the names. To move a patch in the stack, change its author date
+The patches apply in name order, which is author date order. A rebase keeps author dates, so
+it keeps the names unless it changes a subject. To move a patch in the stack, change its author date
 (`git commit --amend --date=...`).
 
 ### Step 6: Replace patches in workerd

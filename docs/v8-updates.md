@@ -64,8 +64,8 @@ To update the version of V8 used by workerd, the steps are:
      --filename-max-length=200 <new_version>
    ```
 
-   A patch is named `<author date>-<subject>.patch`, so its name changes only when its
-   subject does, and no patch is renamed when another is added or removed. Replace the
+   A patch is named `<author date>-<subject>.patch`, so no patch is renamed when another
+   is added or removed. Replace the
    number that `format-patch` puts at the start of each name with the author date of its
    commit:
 
@@ -75,9 +75,7 @@ To update the version of V8 used by workerd, the steps are:
    ```
 
    The patches apply in name order, which is author date order. To move a patch in the
-   stack, change its author date (`git commit --amend --date=...`). If you add a commit
-   whose author date sorts it below the top of the stack, such as a cherry-picked
-   upstream commit, check that the patches still apply in name order (step 5).
+   stack, change its author date (`git commit --amend --date=...`).
 
 8. Remove the existing patches from `<path_to_workerd>/patches/v8` and copy over the latest generated patches
 from the V8 directory.
@@ -182,11 +180,7 @@ python3 ci/v8_update.py finish <new_version>
 ```
 
 Do not run `finish` until the rebase has completed. It regenerates the patches, named
-as in step 7, and updates the pins listed above. It warns if the commits in the
-checkout are not in the order their patches apply, e.g. after a commit whose author
-date sorts it below the top of the stack was added. Then check that the patches apply in
-name order, or change the commits' author dates so that they sort in stack order, and run
-`finish` again.
+as in step 7, and updates the pins listed above.
 
 The helper runs `update-deps.py` only for ICU. Compare the old and new V8 `DEPS` files for
 changes to `dragonbox`, `fast_float`, `fp16`, `highway`, `perfetto`, and `simdutf`, then

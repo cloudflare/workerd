@@ -3,8 +3,7 @@
 
 import argparse
 import base64
-import collections
-import difflib
+import email.utils
 import hashlib
 import json
 import os
@@ -378,46 +377,10 @@ def prepare_update(target):
     return True
 
 
-def dated_patch_names(generated, dates):
-    """Return the name of each patch that format-patch wrote, in stack order.
-
-    A patch is named <author date>-<subject>.patch, so its name changes only when
-    its subject does, and no patch is renamed when another is added or removed.
-    Patches apply in name order, which is author date order; to move a patch in
-    the stack, change its author date (git commit --amend --date=...).
-
-    `generated` holds format-patch's names, and `dates` the author date of each
-    commit, both in stack order.
-    """
-    names = [
-        f"{date}-{name.split('-', 1)[1]}"
-        for date, name in zip(dates, generated, strict=True)
-    ]
-    duplicates = sorted(
-        name for name, count in collections.Counter(names).items() if count > 1
-    )
-    if duplicates:
-        raise ValueError(
-            "patches with the same author date and subject: " + ", ".join(duplicates)
-        )
-    return names
-
-
-def _warn_misordered(stack_order):
-    print(
-        f"WARNING: the commits in {CHECKOUT} are not in the order their patches apply:",
-        file=sys.stderr,
-    )
-    for line in difflib.unified_diff(
-        stack_order, sorted(stack_order), "commits", "patches", lineterm=""
-    ):
-        print(line, file=sys.stderr)
-    print(
-        "Check that the patches apply in that order, e.g. with `git am` onto the new "
-        "version, or change the author dates of the commits so that they sort in "
-        "stack order, and run finish again.",
-        file=sys.stderr,
-    )
+def _author_date(patch):
+    """Return the author date in a patch's Date header, as YYYY-MM-DD."""
+    header = re.search(r"^Date: (.+)$", patch.read_text(), re.MULTILINE)[1]
+    return email.utils.parsedate_to_datetime(header).date().isoformat()
 
 
 def finish_update(target):
@@ -439,28 +402,17 @@ def finish_update(target):
             cwd=CHECKOUT,
         )
         generated = sorted(Path(patch_dir).glob("*.patch"))
-        # format-patch numbers the patches in stack order and leaves out merge
-        # commits, as this log does.
-        dates = run(
-            [
-                "git",
-                "log",
-                "--reverse",
-                "--no-merges",
-                "--format=%as",
-                f"{target}..HEAD",
-            ],
-            cwd=CHECKOUT,
-            stdout=subprocess.PIPE,
-        ).stdout.split()
-        names = dated_patch_names([patch.name for patch in generated], dates)
-        if names != sorted(names):
-            _warn_misordered(names)
         for patch in PATCHES.glob("*.patch"):
             patch.unlink()
-        for patch, name in zip(generated, names, strict=True):
+        # A patch is named <author date>-<subject>.patch rather than with the
+        # number format-patch gives it, so adding or removing a patch renames no
+        # other. Patches apply in name order, which is author date order; to move
+        # a patch in the stack, change its author date.
+        names = []
+        for patch in generated:
+            names.append(f"{_author_date(patch)}-{patch.name.split('-', 1)[1]}")
             # copy2 preserves the patch's timestamps and other file metadata.
-            shutil.copy2(patch, PATCHES / name)
+            shutil.copy2(patch, PATCHES / names[-1])
 
     # Bazel applies the patches in list order, and prepare_update in name order.
     _update_module(target, sorted(names))
