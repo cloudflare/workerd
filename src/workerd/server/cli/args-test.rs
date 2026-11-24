@@ -219,6 +219,8 @@ fn bad_values_are_usage_errors() {
         &["serve", "c.capnp", "--threads=257"],
         &["serve", "c.capnp", "--threads=two"],
         &["serve", "c.capnp", "--threads"],
+        &["serve", "c.capnp", "--front-threads=0"],
+        &["serve", "c.capnp", "--front-threads=257"],
         // Only `serve` has threads.
         &["test", "c.capnp", "--threads=2"],
         &["bench", "c.capnp", "--threads=2"],
@@ -539,6 +541,27 @@ fn threads_default_to_one() {
 }
 
 #[test]
+fn the_front_has_threads_only_with_several_loop_threads() {
+    let (serve, _) = serve_args(&["--threads=4", "--front-threads=3"]);
+    assert_eq!(serve.front_threads, Some(3));
+    let (serve, _) = serve_args(&["--threads=4"]);
+    assert_eq!(serve.front_threads, None);
+    // One thread has no front.
+    for args in [
+        &["--front-threads=2"][..],
+        &["--threads=1", "--front-threads=2"],
+    ] {
+        let (serve, serve_or_test) = serve_args(args);
+        let message = threads_refused(&serve, &serve_or_test, Platform::Unix).unwrap();
+        assert!(message.starts_with("--front-threads: "), "{message}");
+    }
+    // It is part of serving on several threads, which is experimental.
+    let (serve, serve_or_test) = serve_args(&["--threads=2", "--front-threads=2"]);
+    let message = threads_refused(&serve, &serve_or_test, Platform::Unix).unwrap();
+    assert!(message.contains("`--experimental`"), "{message}");
+}
+
+#[test]
 fn one_thread_is_refused_nothing() {
     // One thread is the server as it is without the flag, whatever else is given.
     for args in [
@@ -591,6 +614,8 @@ fn several_threads_refuse_what_they_do_not_support() {
         &["--threads=2", "--experimental", "--debug-port=127.0.0.1:0"],
         &["--threads=2", "--experimental", "--python-load-snapshot=x"],
         &["--threads=2", "--experimental", "--async-trace=trace"],
+        &["--threads=2", "--experimental", "--front-threads=1"],
+        &["--threads=2", "--experimental", "--front-threads=256"],
     ] {
         assert_eq!(refused(args), None, "{args:?}");
     }

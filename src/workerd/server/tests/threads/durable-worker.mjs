@@ -47,6 +47,7 @@ export class Counter extends DurableObject {
   #instance = crypto.randomUUID();
   #messages = 0;
   #order = [];
+  #slowCalls = 0;
 
   where() {
     return { isolate: isolateId(), instance: this.#instance };
@@ -63,8 +64,14 @@ export class Counter extends DurableObject {
   }
 
   async incrementSlowly(ms) {
+    this.#slowCalls++;
     await scheduler.wait(ms);
     return await this.increment();
+  }
+
+  // How many calls of `incrementSlowly()` this instance has had.
+  slowCalls() {
+    return this.#slowCalls;
   }
 
   record(n) {
@@ -335,10 +342,20 @@ async function features(env, ctx, name) {
 
 export default {
   async fetch(request, env, ctx) {
+    const front = isolateId();
+    // A request for another isolate is refused before anything else is done with it (its body
+    // is not read, an upgrade not accepted), so that the client can send it again until the
+    // isolate it names serves it.
+    const wanted = request.headers.get('x-thread');
+    if (wanted !== null && wanted !== front) {
+      return Response.json(
+        { front },
+        { status: 409, headers: { 'x-front': front } }
+      );
+    }
     const url = new URL(request.url);
     const name = url.searchParams.get('name') ?? 'default';
     const counter = env.COUNTER.getByName(name);
-    const front = isolateId();
     switch (url.pathname) {
       case '/spin': {
         // Keeps this isolate's thread from serving anything else for a while.
@@ -355,6 +372,8 @@ export default {
         const ms = Number(url.searchParams.get('ms'));
         return Response.json({ front, ...(await counter.incrementSlowly(ms)) });
       }
+      case '/slow-calls':
+        return Response.json({ front, calls: await counter.slowCalls() });
       case '/where':
         return Response.json({ front, ...(await counter.where()) });
       case '/features':

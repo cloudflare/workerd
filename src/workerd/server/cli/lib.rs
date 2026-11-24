@@ -718,6 +718,7 @@ fn serve_options<T: CommandFactory>(
         cluster_address: serve.cluster_address,
         cluster_advertise: serve.cluster_advertise,
         replicas: serve.threads.saturating_sub(1) as usize,
+        front_threads: serve.front_threads.unwrap_or(0) as usize,
         ..run_options(serve_or_test)
     };
     (options, inherited)

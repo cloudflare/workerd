@@ -8,7 +8,8 @@
 // exception propagate, so the test can assert on the message.
 //
 // The worker itself answers `/thread`, which tells the threads of a node that
-// serves on several apart (`threadRequest`).
+// serves on several apart, and refuses a request that names another thread's
+// isolate (`threadRequest`).
 //
 // The DO supports the following request paths:
 //   /increment       Increments and returns the current counter value.
@@ -109,13 +110,17 @@ import {
 // thread.
 let thread;
 
-// Answers `/thread` with this isolate's identity, after keeping its thread
-// busy for `spin` milliseconds if given; nothing for any other path.
-function threadRequest(url) {
-  if (url.pathname !== '/thread') return undefined;
+// Answers `/thread` with this isolate's identity, and a request whose
+// `x-thread` header names another isolate with 409 and this one's identity,
+// before anything else is done with it, for the client to send it again until
+// that isolate serves it; nothing for any other request.
+function threadRequest(request, url) {
   thread ??= crypto.randomUUID();
-  const until = Date.now() + Number(url.searchParams.get('spin') ?? 0);
-  while (Date.now() < until) {}
+  const wanted = request.headers.get('x-thread');
+  if (wanted !== null && wanted !== thread) {
+    return Response.json({ thread }, { status: 409 });
+  }
+  if (url.pathname !== '/thread') return undefined;
   return Response.json({ thread });
 }
 
@@ -128,7 +133,7 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
-    const answer = threadRequest(url);
+    const answer = threadRequest(request, url);
     if (answer !== undefined) return answer;
     if (url.pathname === '/cron-clock') {
       return env.CRON.fetch(`http://cron/clock${url.search}`, {

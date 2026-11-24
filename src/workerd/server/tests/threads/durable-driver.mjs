@@ -5,9 +5,12 @@
 // Durable Objects under `workerd serve --threads`: every object runs on the server's first
 // thread, and a request another thread serves reaches it over that thread's session.
 //
-// A connection stays with the thread that accepted it, so the tests keep connections open,
-// learn which thread each belongs to, and send what they test over one of a thread that has no
-// objects.
+// Whichever thread takes a request serves it, whatever connection it came on, so the tests learn
+// the threads by the identities of their isolates and have the thread they choose serve what they
+// test: a request names the isolate it is for (`x-thread`), any other isolate refuses it before
+// doing anything with it (409), and the test sends it again until the one it names serves it.
+// The server wakes its idle threads in turn, so that takes about as many tries as there are
+// threads.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
@@ -76,9 +79,25 @@ async function serve(threads) {
     child.on('close', (code, signal) => resolve([code, signal]));
   });
   server.closed = () => closed;
-  server.stop = async () => {
+  // How the server ends, as `[code, signal]`, once it was told to stop. A server still running
+  // after `ms` is killed, and fails the test.
+  server.exited = async (ms = 15_000) => {
+    let timer;
+    const late = new Promise((resolve) => {
+      timer = setTimeout(resolve, ms, 'late');
+    });
+    const result = await Promise.race([closed, late]);
+    clearTimeout(timer);
+    if (result === 'late') {
+      child.kill('SIGKILL');
+      await closed;
+      assert.fail(`the server still ran ${ms} ms after it was told to stop`);
+    }
+    return result;
+  };
+  server.stop = () => {
     child.kill('SIGTERM');
-    return await closed;
+    return server.exited();
   };
 
   const control = child.stdio[3];
@@ -107,199 +126,210 @@ async function withServer(threads, body) {
   assert.deepStrictEqual(await server.stop(), SIGTERM_EXIT);
 }
 
-// One connection to the server, kept open: every request on it is served by the thread that
-// accepted it.
-class Connection {
-  constructor(port) {
-    this.port = port;
-    this.agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
-    // The identity of the isolate of `front` that serves this connection.
-    this.front = undefined;
-  }
+// How many requests a test sends for one isolate before it gives up.
+const TRIES = 200;
 
-  options(path, more = {}) {
-    return {
-      agent: this.agent,
-      host: '127.0.0.1',
-      port: this.port,
-      path,
-      ...more,
-    };
+// Sends a request until the isolate of `front` whose identity is `thread` serves it, or any
+// isolate if `thread` is undefined. `attempt(headers)` sends the request once with `headers`
+// and resolves with what it got, or with undefined if another isolate refused it.
+async function steer(thread, attempt) {
+  const headers = thread === undefined ? {} : { 'x-thread': thread };
+  for (let tries = 0; tries < TRIES; tries++) {
+    const answer = await attempt(headers);
+    if (answer !== undefined) return answer;
   }
+  assert.fail(`isolate ${thread} served none of ${TRIES} requests`);
+}
 
-  // The parsed JSON response to a GET of `path`.
-  get(path) {
-    return new Promise((resolve, reject) => {
-      const req = http.request(this.options(path), (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => (body += chunk));
-        res.on('error', reject);
-        res.on('end', () => {
-          try {
-            assert.strictEqual(res.statusCode, 200, body);
-            resolve(JSON.parse(body));
-          } catch (error) {
-            reject(error);
+// The options of a request for `path` on a connection of its own.
+function options(server, path, more = {}) {
+  return { agent: false, host: '127.0.0.1', port: server.port, path, ...more };
+}
+
+// The parsed JSON response to a GET of `path`, served by the isolate `thread` (any if
+// undefined).
+function get(server, path, thread) {
+  return steer(
+    thread,
+    (headers) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(options(server, path, { headers }), (res) => {
+          let body = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => (body += chunk));
+          res.on('error', reject);
+          res.on('end', () => {
+            try {
+              if (res.statusCode === 409 && thread !== undefined) {
+                resolve(undefined);
+                return;
+              }
+              assert.strictEqual(res.statusCode, 200, body);
+              const answer = JSON.parse(body);
+              if (thread !== undefined) {
+                assert.strictEqual(answer.front, thread);
+              }
+              resolve(answer);
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+        req.setTimeout(20_000, () => {
+          req.destroy(new Error(`no response to ${path} in 20 seconds`));
+        });
+        req.on('error', reject);
+        req.end();
+      })
+  );
+}
+
+// A request for `path` whose response head the isolate `thread` sent, with its body still to
+// write: `{ req, res }`.
+function open(server, path, thread, more) {
+  return steer(
+    thread,
+    (headers) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(options(server, path, { ...more, headers }));
+        req.on('error', reject);
+        req.on('response', (res) => {
+          if (res.statusCode === 409) {
+            res.resume();
+            req.destroy();
+            resolve(undefined);
+          } else {
+            resolve({ req, res });
           }
         });
-      });
-      req.on('error', reject);
-      req.end();
-    });
-  }
-
-  close() {
-    this.agent.destroy();
-  }
+        req.flushHeaders();
+      })
+  );
 }
 
-// Connections to the server by the thread that serves them: `first` to the first thread, which
-// has the objects, `replicas` to the others, by isolate. `object` is the identity of the isolate
-// the objects run in.
-async function connect(server, threads = THREADS) {
-  const { port } = server;
-  const all = [];
-  const byFront = new Map();
+// The isolates of `front`, one per thread, by identity: `first` is the first thread's, whose
+// copy of the Worker runs the objects, so it is also `object`, the identity the objects report;
+// `replicas` are the others'. Requests go to the threads in turn, so a few find them all.
+async function threadsOf(server, threads = THREADS) {
+  const fronts = new Set();
   let object;
-  // Which thread accepts a connection is the kernel's choice, so open them while a thread is
-  // busy until enough threads have one.
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const busy = new Connection(port);
-    const spin = busy.get('/spin?ms=200');
-    const opened = Array.from({ length: 8 }, () => new Connection(port));
-    all.push(busy, ...opened);
-    await scheduler.wait(20);
-    for (const [connection, where] of await Promise.all(
-      opened.map(async (c) => [c, await c.get('/where?name=probe')])
-    )) {
-      assert.match(where.front, UUID);
-      assert.strictEqual(object ?? where.isolate, where.isolate);
-      object = where.isolate;
-      connection.front = where.front;
-      if (!byFront.has(where.front)) byFront.set(where.front, connection);
-    }
-    busy.front = (await spin).front;
-    if (!byFront.has(busy.front)) byFront.set(busy.front, busy);
-    if (byFront.has(object) && byFront.size >= Math.min(threads, 3)) break;
+  for (let tries = 0; tries < TRIES && fronts.size < threads; tries++) {
+    const where = await get(server, '/where?name=probe');
+    assert.match(where.front, UUID);
+    assert.strictEqual(object ?? where.isolate, where.isolate);
+    object = where.isolate;
+    fronts.add(where.front);
   }
-  assert(byFront.size <= threads, `${byFront.size} isolates of one Worker`);
-  const first = byFront.get(object);
-  assert(first !== undefined, 'the first thread served no connection');
-  const replicas = [...byFront.values()].filter((c) => c !== first);
-  assert.strictEqual(replicas.length > 0, threads > 1, 'threads that served');
-  for (const connection of all) {
-    if (
-      !byFront.has(connection.front) ||
-      byFront.get(connection.front) !== connection
-    ) {
-      connection.close();
-    }
-  }
-  return {
-    object,
-    first,
-    replicas,
-    all: [first, ...replicas],
-    close: () => [first, ...replicas].forEach((c) => c.close()),
-  };
+  assert.strictEqual(fronts.size, threads, 'isolates that served requests');
+  assert(fronts.has(object), 'the first thread served no request');
+  const replicas = [...fronts].filter((front) => front !== object);
+  return { object, first: object, replicas, all: [object, ...replicas] };
 }
 
-// The connection the tests send over: one of a thread without the objects, if there is one.
+// The isolate the tests send to: one of a thread without the objects, if there is one.
 function away({ first, replicas }) {
   return replicas[0] ?? first;
 }
 
-// A WebSocket over `connection`, opened with a request for `path`: just enough of the protocol
-// for short text messages.
-function webSocket(connection, path) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      connection.options(path, {
-        headers: {
-          Connection: 'Upgrade',
-          Upgrade: 'websocket',
-          'Sec-WebSocket-Version': '13',
-          'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-        },
-      })
-    );
-    req.on('error', reject);
-    req.on('response', (res) => {
-      reject(new Error(`no upgrade: ${res.statusCode}`));
-    });
-    req.on('upgrade', (res, socket, head) => {
-      const received = [];
-      const waiting = [];
-      let closed = false;
-      let buffer = head;
-      const deliver = (message) => {
-        const waiter = waiting.shift();
-        if (waiter === undefined) received.push(message);
-        else waiter(message);
-      };
-      const parse = () => {
-        while (buffer.length >= 2) {
-          const opcode = buffer[0] & 0x0f;
-          let length = buffer[1] & 0x7f;
-          let offset = 2;
-          assert(length < 127, 'a long frame');
-          if (length === 126) {
-            if (buffer.length < 4) return;
-            length = buffer.readUInt16BE(2);
-            offset = 4;
-          }
-          if (buffer.length < offset + length) return;
-          const payload = buffer.subarray(offset, offset + length);
-          buffer = buffer.subarray(offset + length);
-          if (opcode === 1) deliver(payload.toString('utf8'));
-          if (opcode === 8) closed = true;
-        }
-      };
-      socket.on('data', (data) => {
-        buffer = Buffer.concat([buffer, data]);
-        parse();
-      });
-      socket.on('close', () => {
-        closed = true;
-        while (waiting.length > 0) waiting.shift()(null);
-      });
-      parse();
-      const frame = (opcode, payload) => {
-        const mask = randomBytes(4);
-        const masked = Buffer.from(payload);
-        for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % 4];
-        assert(masked.length < 126);
-        socket.write(
-          Buffer.concat([
-            Buffer.from([0x80 | opcode, 0x80 | masked.length]),
-            mask,
-            masked,
-          ])
+// A WebSocket opened with a request for `path` that the isolate `thread` served: just enough
+// of the protocol for short text messages.
+function webSocket(server, path, thread) {
+  return steer(
+    thread,
+    (headers) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          options(server, path, {
+            headers: {
+              ...headers,
+              Connection: 'Upgrade',
+              Upgrade: 'websocket',
+              'Sec-WebSocket-Version': '13',
+              'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+            },
+          })
         );
-      };
-      resolve({
-        front: res.headers['x-front'],
-        isClosed: () => closed,
-        send: (text) => frame(1, Buffer.from(text)),
-        // The next message, parsed; null once the socket closed.
-        next: () =>
-          new Promise((resolve) => {
-            if (received.length > 0) resolve(JSON.parse(received.shift()));
-            else if (closed) resolve(null);
-            else
-              waiting.push((m) => resolve(m === null ? null : JSON.parse(m)));
-          }),
-        // Closes the WebSocket, then the connection once the server answered.
-        close: async () => {
-          frame(8, Buffer.from([0x03, 0xe8]));
-          for (let i = 0; i < 100 && !closed; i++) await scheduler.wait(10);
-          socket.destroy();
-        },
-      });
-    });
-    req.end();
-  });
+        req.on('error', reject);
+        req.on('response', (res) => {
+          res.resume();
+          if (res.statusCode === 409) resolve(undefined);
+          else reject(new Error(`no upgrade: ${res.statusCode}`));
+        });
+        req.on('upgrade', (res, socket, head) => {
+          const received = [];
+          const waiting = [];
+          let closed = false;
+          let buffer = head;
+          const deliver = (message) => {
+            const waiter = waiting.shift();
+            if (waiter === undefined) received.push(message);
+            else waiter(message);
+          };
+          const parse = () => {
+            while (buffer.length >= 2) {
+              const opcode = buffer[0] & 0x0f;
+              let length = buffer[1] & 0x7f;
+              let offset = 2;
+              assert(length < 127, 'a long frame');
+              if (length === 126) {
+                if (buffer.length < 4) return;
+                length = buffer.readUInt16BE(2);
+                offset = 4;
+              }
+              if (buffer.length < offset + length) return;
+              const payload = buffer.subarray(offset, offset + length);
+              buffer = buffer.subarray(offset + length);
+              if (opcode === 1) deliver(payload.toString('utf8'));
+              if (opcode === 8) closed = true;
+            }
+          };
+          socket.on('data', (data) => {
+            buffer = Buffer.concat([buffer, data]);
+            parse();
+          });
+          socket.on('close', () => {
+            closed = true;
+            while (waiting.length > 0) waiting.shift()(null);
+          });
+          parse();
+          const frame = (opcode, payload) => {
+            const mask = randomBytes(4);
+            const masked = Buffer.from(payload);
+            for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % 4];
+            assert(masked.length < 126);
+            socket.write(
+              Buffer.concat([
+                Buffer.from([0x80 | opcode, 0x80 | masked.length]),
+                mask,
+                masked,
+              ])
+            );
+          };
+          resolve({
+            front: res.headers['x-front'],
+            isClosed: () => closed,
+            send: (text) => frame(1, Buffer.from(text)),
+            // The next message, parsed; null once the socket closed.
+            next: () =>
+              new Promise((resolve) => {
+                if (received.length > 0) resolve(JSON.parse(received.shift()));
+                else if (closed) resolve(null);
+                else
+                  waiting.push((m) =>
+                    resolve(m === null ? null : JSON.parse(m))
+                  );
+              }),
+            // Closes the WebSocket, then the connection once the server answered.
+            close: async () => {
+              frame(8, Buffer.from([0x03, 0xe8]));
+              for (let i = 0; i < 100 && !closed; i++) await scheduler.wait(10);
+              socket.destroy();
+            },
+          });
+        });
+        req.end();
+      })
+  );
 }
 
 for (const threads of [THREADS, 1]) {
@@ -308,42 +338,41 @@ for (const threads of [THREADS, 1]) {
 
   test(`requests of every thread count in one object ${on}`, supported, () =>
     withServer(threads, async (server) => {
-      const connections = await connect(server, threads);
-      const { all, object } = connections;
-      const PER_CONNECTION = 40;
+      const { all, object } = await threadsOf(server, threads);
+      const PER_THREAD = 40;
       const counts = await Promise.all(
-        all.flatMap((connection) =>
-          Array.from({ length: PER_CONNECTION }, async () => {
-            const answer = await connection.get('/count?name=shared');
-            assert.strictEqual(answer.front, connection.front);
+        all.flatMap((front) =>
+          Array.from({ length: PER_THREAD }, async () => {
+            const answer = await get(server, '/count?name=shared', front);
+            assert.strictEqual(answer.front, front);
             // One object, in the isolate of the thread that has the objects.
             assert.strictEqual(answer.isolate, object);
             return answer.count;
           })
         )
       );
-      const total = all.length * PER_CONNECTION;
+      const total = all.length * PER_THREAD;
       assert.deepStrictEqual(
         counts.sort((a, b) => a - b),
         Array.from({ length: total }, (_, i) => i + 1)
       );
-      connections.close();
     })
   );
 
   test(`a stub does what stubs do ${on}`, supported, () =>
     withServer(threads, async (server) => {
-      const connections = await connect(server, threads);
-      const { object } = connections;
+      const { all, object } = await threadsOf(server, threads);
       const results = await Promise.all(
-        connections.all.map((c, i) => c.get(`/features?name=features-${i}`))
+        all.map((front, i) =>
+          get(server, `/features?name=features-${i}`, front)
+        )
       );
       for (const [i, result] of results.entries()) {
-        const connection = connections.all[i];
+        const front = all[i];
         const at = { isolate: object };
         assert.match(result.service.front, UUID);
         assert.deepStrictEqual(result, {
-          front: connection.front,
+          front,
           // The name the id was made from reaches the object.
           name: `features-${i}`,
           // A stub the object returned, called in order.
@@ -357,7 +386,7 @@ for (const threads of [THREADS, 1]) {
           // An entrypoint with props, passed to the object, runs on the object's thread.
           greeter: { greeting: 'hello, object', ...at },
           // A function passed to the object runs where it was made.
-          callBack: { object, front: connection.front },
+          callBack: { object, front },
           facet: [
             { bumps: 1, ...at },
             { bumps: 2, ...at },
@@ -380,33 +409,33 @@ for (const threads of [THREADS, 1]) {
           restoredChain: 6,
         });
         // A service binding passed to the object is the binding of the object's thread.
-        assert.notStrictEqual(result.service.front, connection.front);
+        assert.notStrictEqual(result.service.front, front);
         assert.strictEqual(result.service.front, results[0].service.front);
       }
-      connections.close();
     })
   );
 
   test(`bodies stream to an object and back ${on}`, supported, () =>
     withServer(threads, async (server) => {
-      const connections = await connect(server, threads);
-      const connection = away(connections);
+      const fronts = await threadsOf(server, threads);
+      const front = away(fronts);
+      // The response head comes before any of the body was sent.
+      const { req, res } = await open(server, '/echo', front, {
+        method: 'POST',
+      });
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.headers['x-front'], front);
+      assert.strictEqual(res.headers['x-object'], fronts.object);
       const received = [];
       let waiter;
-      const req = http.request(connection.options('/echo', { method: 'POST' }));
       const done = new Promise((resolve, reject) => {
         req.on('error', reject);
-        req.on('response', (res) => {
-          assert.strictEqual(res.statusCode, 200);
-          assert.strictEqual(res.headers['x-front'], connection.front);
-          assert.strictEqual(res.headers['x-object'], connections.object);
-          res.on('data', (chunk) => {
-            received.push(chunk);
-            waiter?.();
-          });
-          res.on('error', reject);
-          res.on('end', resolve);
+        res.on('data', (chunk) => {
+          received.push(chunk);
+          waiter?.();
         });
+        res.on('error', reject);
+        res.on('end', resolve);
       });
       const size = () => received.reduce((n, chunk) => n + chunk.length, 0);
       const receivedAtLeast = async (bytes) => {
@@ -432,22 +461,20 @@ for (const threads of [THREADS, 1]) {
       const expected = Buffer.concat(sent).toString('latin1').toUpperCase();
       assert.strictEqual(size(), expected.length);
       assert(Buffer.concat(received).toString('latin1') === expected);
-      connections.close();
     })
   );
 
   test(`an alarm set through a stub fires once ${on}`, supported, () =>
     withServer(threads, async (server) => {
-      const connections = await connect(server, threads);
-      const connection = away(connections);
-      await connection.get('/alarm?name=alarm&ms=300');
+      const fronts = await threadsOf(server, threads);
+      const front = away(fronts);
+      await get(server, '/alarm?name=alarm&ms=300', front);
       await scheduler.wait(1500);
-      const { alarms } = await connection.get('/alarms?name=alarm');
+      const { alarms } = await get(server, '/alarms?name=alarm', front);
       assert.strictEqual(alarms, 1);
       await scheduler.wait(1000);
-      const later = await connections.first.get('/alarms?name=alarm');
+      const later = await get(server, '/alarms?name=alarm', fronts.first);
       assert.strictEqual(later.alarms, 1);
-      connections.close();
     })
   );
 
@@ -456,12 +483,11 @@ for (const threads of [THREADS, 1]) {
     supported,
     () =>
       withServer(threads, async (server) => {
-        const connections = await connect(server, threads);
-        const { first, object } = connections;
+        const { first, replicas, object } = await threadsOf(server, threads);
         for (const hook of ['abort', 'delete']) {
-          const before = await first.get(`/where?name=${hook}`);
-          for (const connection of connections.replicas) {
-            const { error } = await connection.get(`/${hook}-all`);
+          const before = await get(server, `/where?name=${hook}`, first);
+          for (const front of replicas) {
+            const { error } = await get(server, `/${hook}-all`, front);
             assert.strictEqual(
               error,
               `Cannot ${hook} Durable Objects from this thread: with --threads, Durable ` +
@@ -469,15 +495,15 @@ for (const threads of [THREADS, 1]) {
                 'serves can do this.'
             );
             // The object was left as it was.
-            const still = await connection.get(`/where?name=${hook}`);
+            const still = await get(server, `/where?name=${hook}`, front);
             assert.strictEqual(still.instance, before.instance);
           }
-          assert.strictEqual((await first.get(`/${hook}-all`)).error, null);
-          const after = await first.get(`/where?name=${hook}`);
+          const all = await get(server, `/${hook}-all`, first);
+          assert.strictEqual(all.error, null);
+          const after = await get(server, `/where?name=${hook}`, first);
           assert.strictEqual(after.isolate, object);
           assert.notStrictEqual(after.instance, before.instance);
         }
-        connections.close();
       })
   );
 
@@ -486,25 +512,35 @@ for (const threads of [THREADS, 1]) {
     SIGTERM_DRAINS,
     async () => {
       const server = await serve(threads);
-      const connections = await connect(server, threads);
-      // Each connection has a request in its object when the server is told to stop, and the
-      // object answers after that.
-      const slow = connections.all.map((c) =>
-        c.get('/slow?name=drain&ms=1500')
-      );
-      await scheduler.wait(500);
-      server.child.kill('SIGTERM');
-      const answers = await Promise.all(slow);
-      assert.deepStrictEqual(
-        answers.map((a) => a.front),
-        connections.all.map((c) => c.front)
-      );
-      assert.deepStrictEqual(
-        answers.map((a) => a.count).sort((a, b) => a - b),
-        answers.map((_, i) => i + 1)
-      );
-      connections.close();
-      assert.deepStrictEqual(await server.closed(), [0, null]);
+      try {
+        const { all } = await threadsOf(server, threads);
+        // Each thread has a request in the object when the server is told to stop, and the
+        // object answers after that.
+        const slow = all.map((front) =>
+          get(server, '/slow?name=drain&ms=1500', front)
+        );
+        for (let tries = 0; ; tries++) {
+          const { calls } = await get(server, '/slow-calls?name=drain');
+          if (calls === all.length) break;
+          assert(tries < TRIES, `${calls} of ${all.length} calls arrived`);
+          await scheduler.wait(10);
+        }
+        server.child.kill('SIGTERM');
+        const answers = await Promise.all(slow);
+        assert.deepStrictEqual(
+          answers.map((a) => a.front),
+          all
+        );
+        assert.deepStrictEqual(
+          answers.map((a) => a.count).sort((a, b) => a - b),
+          answers.map((_, i) => i + 1)
+        );
+        assert.deepStrictEqual(await server.exited(), [0, null]);
+      } catch (error) {
+        server.child.kill('SIGKILL');
+        await server.closed();
+        throw error;
+      }
     }
   );
 }
@@ -514,18 +550,14 @@ test(
   SEVERAL_THREADS,
   () =>
     withServer(THREADS, async (server) => {
-      const connections = await connect(server);
-      const { object } = connections;
-      assert(
-        connections.replicas.length >= 2,
-        'two threads without the objects'
-      );
-      const [plainConnection, hibernatingConnection] = connections.replicas;
-      const connection = connections.replicas.at(-1);
+      const { object, replicas } = await threadsOf(server);
+      assert(replicas.length >= 2, 'two threads without the objects');
+      const [plainFront, hibernatingFront] = replicas;
+      const front = replicas.at(-1);
 
       // A WebSocket the object holds itself.
-      const plain = await webSocket(plainConnection, '/ws?name=plain');
-      assert.strictEqual(plain.front, plainConnection.front);
+      const plain = await webSocket(server, '/ws?name=plain', plainFront);
+      assert.strictEqual(plain.front, plainFront);
       plain.send('one');
       const one = await plain.next();
       assert.deepStrictEqual(
@@ -539,26 +571,27 @@ test(
         messages: 2,
       });
 
-      // A WebSocket the object hibernates with, on a connection of a thread without the object.
+      // A WebSocket the object hibernates with, which a thread without the object took.
       const hibernating = await webSocket(
-        hibernatingConnection,
-        '/ws?name=hibernating&hibernate'
+        server,
+        '/ws?name=hibernating&hibernate',
+        hibernatingFront
       );
-      assert.strictEqual(hibernating.front, hibernatingConnection.front);
+      assert.strictEqual(hibernating.front, hibernatingFront);
       hibernating.send('before');
       const before = await hibernating.next();
       assert.strictEqual(before.echo, 'before');
       assert.strictEqual(before.isolate, object);
 
       // An object nothing holds: the stub its request used is gone with the request.
-      const idle = await connection.get('/where?name=idle');
+      const idle = await get(server, '/where?name=idle', front);
       assert.strictEqual(idle.isolate, object);
 
       // Past the ten seconds after which an idle object is shut down.
       await scheduler.wait(11500);
 
       // Each was constructed again: nothing on another thread kept the first instance alive.
-      const again = await connection.get('/where?name=idle');
+      const again = await get(server, '/where?name=idle', front);
       assert.notStrictEqual(again.instance, idle.instance);
       assert.strictEqual(again.isolate, object);
 
@@ -581,7 +614,6 @@ test(
 
       await plain.close();
       await hibernating.close();
-      connections.close();
       assert.doesNotMatch(server.log, /internal bug in hibernation/);
     })
 );

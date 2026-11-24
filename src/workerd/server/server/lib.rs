@@ -20,6 +20,7 @@ pub mod cluster;
 pub mod config;
 pub mod cron;
 pub mod entry;
+pub mod front;
 pub mod in_process;
 pub mod listen;
 pub mod loader;

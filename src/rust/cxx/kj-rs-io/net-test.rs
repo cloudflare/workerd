@@ -12,7 +12,7 @@ use super::*;
 assert_impl_all!(TokioListener: Send, Sync);
 assert_impl_all!(TokioAddress: Send, Sync);
 assert_impl_all!(TokioDatagram: Send, Sync);
-assert_impl_all!(ListenerDuplicate: Send, Sync);
+assert_impl_all!(ListenerSockets: Send, Sync);
 
 fn parse_once(text: &[u8], port_hint: u16) -> Option<Result<TokioAddress>> {
     let mut fut = std::pin::pin!(TokioAddress::parse(text, port_hint));
@@ -543,41 +543,37 @@ fn accept(
         .expect("no connection arrived")
 }
 
-/// A duplicate goes to another loop thread, which accepts from the same socket: the port is the
-/// one bound (here chosen by the system), and a connection goes to whichever listener accepts.
+/// A listener's sockets go to another loop thread, which makes its own listener of them: the
+/// port is the one bound (here chosen by the system), and a connection made in between waits in
+/// the socket's queue.
 #[test]
-fn a_duplicate_accepts_on_another_loop_thread() {
-    let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
+fn sockets_move_to_another_loop_thread() {
+    let _port = kj_rs_tokio::TokioPort::new();
     let listener = TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
         .listen()
         .unwrap();
     let port = listener.port().unwrap();
     assert_ne!(port, 0);
-    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
+    let sockets = listener.into_sockets().map_err(KjError::from).unwrap();
+    let early = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
 
-    let other = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
-        let listener = duplicate.listen().map_err(KjError::from).unwrap();
+        let listener = sockets.listen().map_err(KjError::from).unwrap();
         assert_eq!(listener.port().unwrap(), port);
+        let (_, peer) = accept(&mut runtime, &listener);
+        assert_eq!(peer, Some(early.local_addr().unwrap()));
         let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let (_, peer) = accept(&mut runtime, &listener);
         assert_eq!(peer, Some(client.local_addr().unwrap()));
-    });
-    other.join().unwrap();
-
-    // The original still accepts, on its own loop, and the queue is one: the connection the
-    // other thread's listener took is not this one's too.
-    let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    let (_, peer) = accept(&mut runtime, &listener);
-    assert_eq!(peer, Some(client.local_addr().unwrap()));
-    let brief = std::time::Duration::from_millis(50);
-    assert!(accept_within(&mut runtime, &listener, brief).is_none());
+    })
+    .join()
+    .unwrap();
 }
 
-/// A duplicate carries every socket of the listener, and outlives it: the sockets stay bound
-/// while any descriptor for them is open.
+/// Every socket of the listener moves.
 #[test]
-fn a_duplicate_has_every_socket_and_outlives_the_listener() {
+fn every_socket_of_a_listener_moves() {
     let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
     let (v4, v6) = loopback_on_both_families();
     let addrs = [v6, v4];
@@ -585,10 +581,9 @@ fn a_duplicate_has_every_socket_and_outlives_the_listener() {
     let listener = TokioAddress::from_socket_addrs(addrs.to_vec())
         .listen()
         .unwrap();
-    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
-    drop(listener);
+    let sockets = listener.into_sockets().map_err(KjError::from).unwrap();
 
-    let listener = duplicate.listen().map_err(KjError::from).unwrap();
+    let listener = sockets.listen().map_err(KjError::from).unwrap();
     assert_eq!(socket_count(&listener), 2);
     assert_eq!(listener.port().unwrap(), port);
     for addr in addrs {
@@ -598,22 +593,21 @@ fn a_duplicate_has_every_socket_and_outlives_the_listener() {
     }
 }
 
-/// A Unix listener duplicates like a TCP one.
+/// A Unix listener moves like a TCP one.
 #[cfg(unix)]
 #[test]
-fn a_unix_listener_duplicates() {
+fn a_unix_listener_moves() {
     let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
     // Not `TEST_TMPDIR`, whose path is longer than a socket address holds.
-    let name = format!("kj-rs-io-duplicate-{}.sock", std::process::id());
+    let name = format!("kj-rs-io-sockets-{}.sock", std::process::id());
     let path = PathBuf::from("/tmp").join(name);
     let _ = std::fs::remove_file(&path);
     let listener = parse_ok(&format!("unix:{}", path.display()), 0)
         .listen()
         .unwrap();
-    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
-    drop(listener);
+    let sockets = listener.into_sockets().map_err(KjError::from).unwrap();
 
-    let listener = duplicate.listen().map_err(KjError::from).unwrap();
+    let listener = sockets.listen().map_err(KjError::from).unwrap();
     let _client = std::os::unix::net::UnixStream::connect(&path).unwrap();
     let (socket, peer) = accept(&mut runtime, &listener);
     assert!(matches!(socket, Socket::Unix(_)));
@@ -621,16 +615,72 @@ fn a_unix_listener_duplicates() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// Making a listener of a duplicate registers its sockets, so it needs a loop thread.
+/// A listener that something else still accepts from keeps its sockets.
 #[test]
-fn a_duplicate_listens_only_on_a_loop_thread() {
+fn a_listener_with_another_handle_keeps_its_sockets() {
     let _port = kj_rs_tokio::TokioPort::new();
     let listener = TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
         .listen()
         .unwrap();
-    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
-    let err = std::thread::spawn(move || err_of(duplicate.listen()))
+    let other = listener_clone(&listener);
+    let err = err_of(listener.into_sockets());
+    assert!(err.description().contains("an accept is pending"));
+    drop(other);
+}
+
+/// The sockets become a listener of a tokio runtime that is no loop's, whose threads all accept
+/// from it; a thread with no runtime at all has nothing to register them with, and a loop thread
+/// does not wait on that runtime's listener.
+#[test]
+fn sockets_listen_on_a_runtime_that_is_no_loop() {
+    let port_thread = kj_rs_tokio::TokioPort::new();
+    let bind = || {
+        TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
+            .listen()
+            .unwrap()
+    };
+    let sockets = bind().into_sockets().map_err(KjError::from).unwrap();
+    let err = std::thread::spawn(move || err_of(sockets.listen()))
         .join()
         .unwrap();
     assert!(err.description().contains("no TokioEventPort"));
+
+    let listener = bind();
+    let port = listener.port().unwrap();
+    let sockets = listener.into_sockets().map_err(KjError::from).unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener: Arc<TokioListener> = runtime
+        .block_on(runtime.spawn(async move { sockets.listen() }))
+        .unwrap()
+        .map_err(KjError::from)
+        .unwrap()
+        .into();
+    assert_eq!(listener.port().unwrap(), port);
+    for _ in 0..4 {
+        let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let listener = Arc::clone(&listener);
+        let (_, peer) = runtime
+            .block_on(runtime.spawn(async move { listener.accept().await }))
+            .unwrap()
+            .map_err(KjError::from)
+            .unwrap();
+        assert_eq!(peer, Some(client.local_addr().unwrap()));
+    }
+
+    // The loop thread's runtime is not the listener's.
+    let mut accept = Box::pin(listener.accept());
+    let mut cx = Context::from_waker(Waker::noop());
+    match accept.as_mut().poll(&mut cx) {
+        Poll::Ready(Err(e)) => assert!(
+            KjError::from(e)
+                .description()
+                .contains("belongs to a different TokioEventPort")
+        ),
+        _ => panic!("accept on another runtime's listener must fail at once"),
+    }
+    drop(port_thread);
 }

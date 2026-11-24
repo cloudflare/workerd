@@ -222,7 +222,10 @@ pub struct ServeArgs {
 
     /// Serve on <N> event-loop threads; more than one requires --experimental.
     ///
-    /// Every thread accepts connections from the config's sockets and runs its own copy of every
+    /// The threads take requests from one queue, each when it has nothing else to run, so the
+    /// requests of one connection are served by different threads; a separate front
+    /// (--front-threads) accepts the connections of the config's HTTP, HTTPS and TCP sockets and
+    /// speaks TLS and HTTP for them. Every thread runs its own copy of every
     /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
     /// a service binding reaches the Worker of the same thread. Each thread loads its own dynamic
     /// Workers too, so threads can run different code under one name if a Worker Loader's
@@ -239,6 +242,19 @@ pub struct ServeArgs {
         value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
     )]
     pub threads: u32,
+
+    /// With --threads above one: run the front that accepts connections for the event-loop
+    /// threads on <N> threads of its own (default: 2).
+    ///
+    /// The front accepts from the config's HTTP, HTTPS and TCP sockets, performs the TLS
+    /// handshakes and reads and writes HTTP; the event-loop threads run the Workers. It needs
+    /// more threads only when it, not the Workers, is what limits throughput.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub front_threads: Option<u32>,
 }
 
 /// The most `--threads`: every thread compiles its own copy of every Worker, so more than a
@@ -592,7 +608,10 @@ pub fn threads_refused(
     platform: Platform,
 ) -> Option<&'static str> {
     if serve.threads <= 1 {
-        return None;
+        // One thread accepts its connections itself.
+        return serve.front_threads.map(
+            |_| "--front-threads: There is a front only with more than one thread (--threads).",
+        );
     }
     if platform == Platform::Windows {
         return Some("--threads: Serving on more than one thread is not supported on Windows.");

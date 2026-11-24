@@ -45,10 +45,11 @@
 //! workerd's Rust server uses the same addresses without the C++ adapter and without a filter:
 //! [`TokioAddress::parse_str`], then `listen` and [`TokioListener::accept`], `connect_first` or
 //! `bind_udp`; [`wrap_listener`] for an inherited socket. It gets tokio's own sockets back
-//! ([`Socket`], `UdpSocket`) and serves them itself. For several loop threads to accept from the
-//! same sockets, the thread that listens hands each of the others a
-//! [`TokioListener::duplicate`], of which that thread makes a listener of its own
-//! ([`ListenerDuplicate::listen`]): the sockets are shared, the registrations are per loop.
+//! ([`Socket`], `UdpSocket`) and serves them itself. A listener can change runtimes:
+//! [`TokioListener::into_sockets`] takes its sockets out of the loop that bound them, and
+//! [`ListenerSockets::listen`] makes a listener of them on the runtime of the thread that calls
+//! it, which need not be a loop thread's: a server that accepts on a tokio runtime of its own
+//! (workerd's front runtime) gets its listeners this way.
 //!
 //! # Runtime and ownership
 //!
@@ -811,14 +812,14 @@ impl ListenerInner {
         }
     }
 
-    /// A second descriptor for the same socket, registered with no loop.
-    fn duplicate(&self) -> Result<socket2::Socket> {
+    /// The socket itself, registered with no runtime any more.
+    fn into_socket(self) -> Result<socket2::Socket> {
         match self {
-            Self::Tcp(listener) => socket2::SockRef::from(listener).try_clone(),
+            Self::Tcp(listener) => listener.into_std().map(socket2::Socket::from),
             #[cfg(unix)]
-            Self::Unix(listener) => socket2::SockRef::from(listener).try_clone(),
+            Self::Unix(listener) => listener.into_std().map(socket2::Socket::from),
         }
-        .map_err(op("dup()"))
+        .map_err(op("deregistering a listener"))
     }
 
     fn local_addr(&self) -> Result<SocketAddress> {
@@ -933,7 +934,7 @@ impl ListenerShared {
 
     /// One accepted socket and its peer; KJ's transient errors are retried here.
     async fn accept_socket(&self) -> Result<(Socket, SocketAddress)> {
-        crate::ensure_owner_loop(self.owner)?;
+        crate::ensure_owner_runtime(self.owner)?;
         let ListenerBackend { inners, next } = &self.backend;
         loop {
             let (socket, peer) =
@@ -982,40 +983,48 @@ impl TokioListener {
         self.shared.backend.inners[0].local_addr()
     }
 
-    /// Duplicates of this listener's sockets, for another loop thread to accept from: the
-    /// duplicates share the sockets' accept queues, so each connection goes to one of the
-    /// listeners. Needs no loop: nothing is registered until [`ListenerDuplicate::listen`].
-    pub fn duplicate(&self) -> Result<ListenerDuplicate> {
-        let sockets = self
-            .shared
+    /// The listener's sockets, bound and listening as they are and registered with no runtime,
+    /// for [`ListenerSockets::listen`] to make a listener of elsewhere. Connections that arrive
+    /// meanwhile wait in the sockets' queues.
+    ///
+    /// # Errors
+    ///
+    /// An accept is pending on the listener, or a socket could not be deregistered.
+    pub fn into_sockets(self) -> Result<ListenerSockets> {
+        let shared = Arc::try_unwrap(self.shared)
+            .map_err(|_| KjIoError::other("listener", "an accept is pending on this listener"))?;
+        let sockets = shared
             .backend
             .inners
-            .iter()
-            .map(ListenerInner::duplicate);
-        Ok(ListenerDuplicate {
+            .into_iter()
+            .map(ListenerInner::into_socket);
+        Ok(ListenerSockets {
             sockets: sockets.collect::<Result<_>>()?,
         })
     }
 }
 
-/// The sockets of a [`TokioListener`], duplicated ([`TokioListener::duplicate`]) and not yet
-/// registered with a loop, so that they may go to another thread, which makes its own listener
-/// of them.
-pub struct ListenerDuplicate {
+/// The sockets of a [`TokioListener`] ([`TokioListener::into_sockets`]), registered with no
+/// runtime, so that they may go to another thread, which makes a listener of them.
+pub struct ListenerSockets {
     /// Never empty.
     sockets: Vec<socket2::Socket>,
 }
 
-impl ListenerDuplicate {
-    /// A listener over these sockets, registered with the calling thread's loop.
+impl ListenerSockets {
+    /// A listener over these sockets, registered with the calling thread's runtime: its loop's,
+    /// or on a thread that is not a loop thread, the tokio runtime entered on it. A listener of
+    /// a runtime with several threads accepts on any of them.
     pub fn listen(self) -> Result<Box<TokioListener>> {
-        ensure_loop_thread()?;
+        let owner = crate::current_runtime_id()?;
         let inners = self.sockets.into_iter().map(|socket| {
             let local = socket.local_addr().map_err(op("getsockname()"))?;
             listener_inner(socket, &local, "listen()")
         });
         let backend = ListenerBackend::sockets(inners.collect::<Result<_>>()?);
-        Ok(Box::new(TokioListener::new(backend)?))
+        Ok(Box::new(TokioListener {
+            shared: Arc::new(ListenerShared { backend, owner }),
+        }))
     }
 }
 

@@ -7,9 +7,10 @@
 //!
 //! `workerd serve --threads=<N>` does this on the process's first loop thread (`run`), which
 //! then starts the others, the replicas (`threads.rs`); each builds the graph again for itself
-//! and listens on duplicates of the first thread's sockets (`run_replica`). The Durable Objects
-//! and the cluster are the first thread's alone, which the replicas reach over their sessions
-//! with it.
+//! (`run_replica`). No loop then accepts from a stream socket: the first thread gives the ones it
+//! bound to the front (`front/mod.rs`), and every loop serves the work it takes from the front's
+//! queue (`listen::dispatch`). The Durable Objects and the cluster are the first thread's alone,
+//! which the replicas reach over their sessions with it.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -52,13 +53,16 @@ use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
 use crate::config::text;
+use crate::front;
+use crate::front::Front;
 use crate::listen;
 use crate::listen::BoundSocket;
-use crate::listen::DuplicateSockets;
+use crate::listen::FrontSockets;
 use crate::listen::HttpSocket;
 use crate::listen::ListenContext;
 use crate::listen::StreamListener;
 use crate::listen::TcpTls;
+use crate::listen::dispatch;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
@@ -103,6 +107,9 @@ pub struct RunOptions {
     pub drain_at_once: bool,
     /// `--threads`, less the thread the server starts on: the loop threads to start besides it.
     pub replicas: usize,
+    /// `--front-threads`: the threads of the front that several loop threads are served by;
+    /// zero for the default.
+    pub front_threads: usize,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -158,16 +165,73 @@ struct Running {
     /// The listeners; the replicas, if any, are one of them (`threads::Started::watch`).
     listeners: Listeners,
     drain: watch::Sender<bool>,
-    /// The other loop threads of the run, which end with it.
-    replicas: Option<Replicas>,
+    /// The other threads of the run, if it has several loop threads; they end with it.
+    threads: Option<Threads>,
+}
+
+/// The other threads of a run on several loop threads. The front is the first field, so it is
+/// dropped first: it has stopped, and dropped its connections, before the loops it queues work
+/// for end.
+struct Threads {
+    /// What accepts for the loop threads.
+    front: Front,
+    /// The loop threads besides the first.
+    replicas: Replicas,
+}
+
+impl Threads {
+    /// Starts `replicas`, which serve what they take from `queue` for the stream sockets among
+    /// `ports`, waits until each can, and makes the front that accepts from `sockets`. Its
+    /// runtime exists, with the listeners registered, before the process says it listens; it
+    /// accepts once told to serve.
+    async fn start(
+        replicas: Replicas,
+        server: &Server,
+        options: &RunOptions,
+        queue: front::Queue,
+        sockets: Vec<front::FrontSocket>,
+        ports: &Ports,
+    ) -> Result<(Self, threads::Started)> {
+        let deployments = server.report().replica_deployments();
+        let overrides = &options.overrides;
+        let started = replicas
+            .start(
+                server.factory(),
+                &ports.front_sockets(),
+                &queue,
+                overrides,
+                &deployments,
+            )
+            .await?;
+        let threads = match options.front_threads {
+            0 => front::DEFAULT_THREADS,
+            threads => threads,
+        };
+        let front = Front::new(threads, queue, sockets).await?;
+        Ok((Self { front, replicas }, started))
+    }
+
+    /// Lets the replicas serve and the front accept.
+    fn serve(&self) {
+        self.replicas.serve();
+        self.front.serve();
+    }
+
+    /// Tells the replicas that the server drains, and the front to stop accepting; the front
+    /// closes its queue once its connections have ended, which is what ends the loops' takers.
+    fn drain(&self) {
+        self.replicas.drain();
+        self.front.drain();
+    }
 }
 
 /// The loop thread a server is started on.
 enum Role {
     /// The process's first: it binds the sockets and has everything a process has one of.
     First,
-    /// Another, which listens on duplicates of the first's sockets.
-    Replica(DuplicateSockets),
+    /// Another, which serves what it takes from the front's queue: the stream sockets as the
+    /// first thread bound them, and the queue.
+    Replica(FrontSockets, front::Queue),
 }
 
 /// Binds the sockets, starts the inspector, builds the service graph, and starts the listeners;
@@ -191,7 +255,10 @@ async fn start(
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
     let mut control = Control(options.control.take(), options.announce.take());
 
-    let is_replica = matches!(role, Role::Replica(_));
+    let (is_replica, queue) = match &role {
+        Role::First => (false, None),
+        Role::Replica(_, queue) => (true, Some(queue.clone())),
+    };
     let bound = sockets(role, config, &mut options, &factory, &report).await?;
 
     // What several threads cannot serve is a config error. A reporter that serves despite errors
@@ -233,12 +300,11 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let replica_count = replicas.as_ref().map_or(0, Replicas::count);
-    let SocketListeners {
-        listening,
+    let Sockets {
         mut listeners,
-        duplicates,
-    } = socket_listeners(&context, config, bound.sockets, &server, replica_count)?;
+        ports,
+        fronted,
+    } = Sockets::new(config, bound.sockets, &context, &server)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
@@ -246,19 +312,19 @@ async fn start(
     // The replicas build their graphs once this thread accepted the config, and are ready
     // before the process says it listens. Without a stream socket they would have nothing to
     // serve.
-    let serves_streams = |sockets: &DuplicateSockets| sockets.iter().any(Option::is_some);
-    let replicas =
-        replicas.filter(|_| !server.report().had_errors() && duplicates.iter().any(serves_streams));
-    let mut started = match &replicas {
-        Some(replicas) => {
-            let deployments = server.report().replica_deployments();
-            Some(
-                replicas
-                    .start(&factory, duplicates, &options.overrides, &deployments)
-                    .await?,
-            )
+    let replicas = replicas.filter(|_| !server.report().had_errors() && fronted.any());
+    // With several loops the front accepts for all of them, and each serves what it takes from
+    // the queue; otherwise this thread accepts for itself.
+    let queue = queue.or_else(|| replicas.is_some().then(front::Queue::new));
+    let front_sockets = fronted.serve(queue.as_ref(), &context, &mut listeners)?;
+    let (mut threads, mut started) = match (replicas, queue) {
+        (Some(replicas), Some(queue)) => {
+            let sockets = front_sockets;
+            let (threads, started) =
+                Threads::start(replicas, &server, &options, queue, sockets, &ports).await?;
+            (Some(threads), Some(started))
         }
-        None => None,
+        _ => (None, None),
     };
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
@@ -272,8 +338,14 @@ async fn start(
         started.check()?;
         listeners.push(started.watch());
     }
-    for socket in listening {
-        control.listen(&socket.name, socket.port, socket.url);
+    if let Some(threads) = &mut threads {
+        listeners.push(threads.front.watch());
+    }
+    for Port {
+        name, number, url, ..
+    } in &ports.0
+    {
+        control.listen(name, *number, url.clone());
     }
     if !is_replica {
         listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
@@ -300,14 +372,14 @@ async fn start(
         let _ = started.send(Rc::downgrade(&server));
     }
 
-    if let Some(replicas) = &replicas {
-        replicas.serve();
+    if let Some(threads) = &threads {
+        threads.serve();
     }
     Ok(Some(Running {
         server,
         listeners,
         drain,
-        replicas,
+        threads,
     }))
 }
 
@@ -320,7 +392,7 @@ async fn sockets(
     factory: &Factory,
     report: &Reporter,
 ) -> Result<listen::BoundSockets> {
-    if let Role::Replica(sockets) = role {
+    if let Role::Replica(sockets, _) = role {
         return listen::adopt_sockets(config, sockets);
     }
     let bound = listen::bind_sockets(
@@ -364,127 +436,271 @@ fn start_cluster(
     Ok(())
 }
 
-/// A socket that listens, as its `listen` event reports it.
-struct ListeningSocket {
+/// A bound socket's name and port, for the control channel's `listen` event.
+struct Port {
     name: String,
-    port: u16,
+    number: u16,
+    /// What `serve` tells a person the socket's URL is, for an HTTP(S) socket.
     url: Option<String>,
+    /// Of a stream socket: its index in the config, and the address it is bound to.
+    stream: Option<(usize, String)>,
 }
 
-/// What `socket_listeners` makes of the bound sockets.
-struct SocketListeners {
-    /// The sockets that listen, for their `listen` events.
-    listening: Vec<ListeningSocket>,
-    listeners: Listeners,
-    /// For each replica, its duplicates of the stream sockets.
-    duplicates: Vec<DuplicateSockets>,
-}
+/// The bound sockets, in the config's order.
+struct Ports(Vec<Port>);
 
-/// Starts the listener of every socket of the config that bound, and makes `replicas` duplicates
-/// of each. A socket whose service does not resolve is a config error.
-fn socket_listeners(
-    context: &Rc<ListenContext>,
-    config: config::Reader<'_>,
-    bound: Vec<Option<(BoundSocket, String)>>,
-    server: &Server,
-    replicas: usize,
-) -> Result<SocketListeners> {
-    let mut listening = Vec::new();
-    let listeners = Listeners::new();
-    let mut duplicates: Vec<DuplicateSockets> = Vec::new();
-    duplicates.resize_with(replicas, Vec::new);
-    let sockets = config.get_sockets().map_err(capnp_error)?;
-    for (sock, bound) in sockets.iter().zip(bound) {
-        // A socket that failed to bind already reported its error; a replica has no datagram
-        // sockets.
-        let Some((bound, address)) = bound else {
-            for sockets in &mut duplicates {
-                sockets.push(None);
-            }
-            continue;
+impl Ports {
+    /// The stream sockets as a replica is told of them.
+    fn front_sockets(&self) -> FrontSockets {
+        let streams = || {
+            self.0
+                .iter()
+                .filter_map(|port| Some((port, port.stream.as_ref()?)))
         };
-        for sockets in &mut duplicates {
-            let duplicate = listen::duplicate_listener(&bound)?;
-            sockets.push(duplicate.map(|duplicate| (duplicate, address.clone())));
+        let count = streams().map(|(_, (index, _))| index + 1).max();
+        let mut sockets = vec![None; count.unwrap_or(0)];
+        for (port, (index, address)) in streams() {
+            sockets[*index] = Some((address.clone(), port.number));
         }
-        let name = text(sock.get_name())?;
-        let mut errors = Vec::new();
-        let designator = Designator::from_reader(
-            sock.get_service().map_err(capnp_error)?,
-            format!("Socket \"{name}\""),
-            &mut errors,
-        )
-        .map_err(capnp_error)?;
-        for error in errors {
-            server.report().error(error);
-        }
-        let channel = server.lookup(&designator);
-        let port = listen::bound_port(&bound)?;
-        let url = listen::url(sock, &address, port);
-        listening.push(ListeningSocket { name, port, url });
-        if let Some(listener) =
-            listener(Rc::clone(context), sock, bound, &address, channel, server)?
-        {
-            listeners.push(listener);
-        }
+        sockets
     }
-    Ok(SocketListeners {
-        listening,
-        listeners,
-        duplicates,
-    })
 }
 
-/// The listener for one bound socket, or none for a socket whose type is unknown (reported).
-fn listener(
+/// What the bound sockets of the config serve.
+struct Sockets {
+    /// The listeners of the sockets only this thread serves: the datagram sockets.
+    listeners: Listeners,
+    ports: Ports,
+    /// The stream sockets, which this thread accepts from itself or the front accepts from.
+    fronted: StreamSockets,
+}
+
+impl Sockets {
+    /// What each socket of the config that is bound serves, as the config says.
+    fn new(
+        config: config::Reader<'_>,
+        bound: Vec<Option<(BoundSocket, String)>>,
+        context: &Rc<ListenContext>,
+        server: &Server,
+    ) -> Result<Self> {
+        let listeners = FuturesUnordered::new();
+        let mut ports = Vec::new();
+        let mut fronted = StreamSockets(Vec::new());
+        let sockets = config.get_sockets().map_err(capnp_error)?;
+        for (index, (sock, bound)) in sockets.iter().zip(bound).enumerate() {
+            // A socket that failed to bind already reported its error; a replica has no
+            // datagram sockets.
+            let Some((bound, address)) = bound else {
+                continue;
+            };
+            let name = text(sock.get_name())?;
+            let mut errors = Vec::new();
+            let designator = Designator::from_reader(
+                sock.get_service().map_err(capnp_error)?,
+                format!("Socket \"{name}\""),
+                &mut errors,
+            )
+            .map_err(capnp_error)?;
+            for error in errors {
+                server.report().error(error);
+            }
+            let channel = server.lookup(&designator);
+            let port = listen::bound_port(&bound)?;
+            let url = listen::url(sock, &address, port);
+            let stream =
+                (!matches!(bound, BoundSocket::Datagram(_))).then(|| (index, address.clone()));
+            ports.push(Port {
+                name,
+                number: port,
+                url,
+                stream,
+            });
+            match socket_service(Rc::clone(context), sock, bound, &address, channel, server)? {
+                Some(SocketService::Datagram(listener)) => listeners.push(listener),
+                Some(SocketService::Stream(socket, protocol)) => {
+                    fronted.0.push((index, socket, protocol));
+                }
+                None => {}
+            }
+        }
+        Ok(Self {
+            listeners,
+            ports: Ports(ports),
+            fronted,
+        })
+    }
+}
+
+/// What a bound socket serves.
+enum SocketService {
+    /// A datagram socket's listener.
+    Datagram(LocalBoxFuture<'static, Result<()>>),
+    /// A stream socket, and what its connections are served as.
+    Stream(BoundSocket, Serves),
+}
+
+/// What the connections of a stream socket are served as.
+enum Serves {
+    Http(Rc<HttpSocket>),
+    /// `connect()` events on the channel, addressed to the socket as bound, with its TLS.
+    Tcp(Rc<dyn Channel>, Option<TcpTls>, String),
+}
+
+/// The stream sockets of the config that are bound: each one's index in the config, the socket,
+/// and what it serves.
+struct StreamSockets(Vec<(usize, BoundSocket, Serves)>);
+
+impl StreamSockets {
+    fn any(&self) -> bool {
+        !self.0.is_empty()
+    }
+
+    /// The listeners of this thread over the sockets, which it bound.
+    fn listen(
+        self,
+        context: &Rc<ListenContext>,
+    ) -> Result<Vec<LocalBoxFuture<'static, Result<()>>>> {
+        let listen = |(_, socket, serves)| {
+            let BoundSocket::Stream(listener) = socket else {
+                return Err(kj::failed!(
+                    "a socket of the front has no front to accept from it"
+                ));
+            };
+            let context = Rc::clone(context);
+            let listener: LocalBoxFuture<'static, Result<()>> = match serves {
+                Serves::Http(socket) => Box::pin(listen::listen_http(context, listener, socket)),
+                Serves::Tcp(channel, tls, authority) => Box::pin(listen::listen_tcp(
+                    context, listener, channel, tls, authority,
+                )),
+            };
+            Ok(listener)
+        };
+        self.0.into_iter().map(listen).collect()
+    }
+
+    /// Has this thread serve the sockets. With a `queue`, the front's, a listener is added to
+    /// `listeners` that serves what the thread takes from it, and the sockets are returned for
+    /// the front to accept from; without one, the thread's own listeners over the sockets are
+    /// added.
+    fn serve(
+        self,
+        queue: Option<&front::Queue>,
+        context: &Rc<ListenContext>,
+        listeners: &mut Listeners,
+    ) -> Result<Vec<front::FrontSocket>> {
+        let Some(queue) = queue else {
+            listeners.extend(self.listen(context)?);
+            return Ok(Vec::new());
+        };
+        let (sockets, services) = self.split()?;
+        let serving = dispatch::serve(Rc::clone(context), queue.worker(), services);
+        listeners.push(Box::pin(serving));
+        Ok(sockets)
+    }
+
+    /// The sockets for the front to accept from, which only the thread that bound them has, and
+    /// what this loop serves of the work the front queues for each, by the socket's index.
+    fn split(self) -> Result<(Vec<front::FrontSocket>, Vec<Option<dispatch::Service>>)> {
+        let mut sockets = Vec::new();
+        let mut services = Vec::new();
+        for (index, socket, serves) in self.0 {
+            let (protocol, service) = match serves {
+                Serves::Http(socket) => (
+                    front::Protocol::Http {
+                        tls: socket.tls.clone(),
+                        peer_cf_blob: !socket.rewriter.has_cf_blob_header(),
+                    },
+                    dispatch::Service::Http(socket),
+                ),
+                Serves::Tcp(channel, tls, authority) => (
+                    front::Protocol::Tcp { tls },
+                    dispatch::Service::Tcp(channel, authority.into()),
+                ),
+            };
+            match socket {
+                BoundSocket::Stream(StreamListener::Socket(listener)) => {
+                    sockets.push(front::FrontSocket {
+                        index,
+                        sockets: listener.into_sockets()?,
+                        protocol,
+                    });
+                }
+                BoundSocket::Stream(StreamListener::Loopback(_)) => {
+                    return Err(kj::failed!(
+                        "a loopback socket is served by one loop thread"
+                    ));
+                }
+                BoundSocket::Front(_) | BoundSocket::Datagram(_) => {}
+            }
+            if services.len() <= index {
+                services.resize_with(index + 1, || None);
+            }
+            services[index] = Some(service);
+        }
+        Ok((sockets, services))
+    }
+}
+
+/// What one bound socket serves, or nothing for a socket whose type is unknown (reported).
+fn socket_service(
     context: Rc<ListenContext>,
     sock: socket::Reader<'_>,
     bound: BoundSocket,
     address: &str,
     channel: Rc<dyn Channel>,
     server: &Server,
-) -> Result<Option<LocalBoxFuture<'static, Result<()>>>> {
+) -> Result<Option<SocketService>> {
     let name = text(sock.get_name())?;
     let tls = |options: workerd_capnp::tls_options::Reader<'_>| {
         kj_hyper::tls::server_config(&tls_options(options)?)
     };
-    let http = |listener: StreamListener,
-                options: workerd_capnp::http_options::Reader<'_>,
+    let http = |options: workerd_capnp::http_options::Reader<'_>,
                 physical_protocol: &'static str,
                 tls: Option<std::sync::Arc<rustls::ServerConfig>>,
-                context: Rc<ListenContext>,
                 channel: Rc<dyn Channel>| {
-        let socket = Rc::new(HttpSocket {
+        Ok::<_, crate::Error>(Serves::Http(Rc::new(HttpSocket {
             channel,
             rewriter: Rc::new(HttpRewriter::new(options)?),
             physical_protocol,
             tls,
-        });
-        let listener: LocalBoxFuture<'static, Result<()>> =
-            Box::pin(listen::listen_http(context, listener, socket));
-        Ok::<_, crate::Error>(listener)
+        })))
     };
-    Ok(Some(match (sock.which(), bound) {
-        (Ok(socket::Which::Http(options)), BoundSocket::Stream(listener)) => http(
-            listener,
-            options.map_err(capnp_error)?,
-            "http",
-            None,
-            context,
-            channel,
-        )?,
-        (Ok(socket::Which::Https(https)), BoundSocket::Stream(listener)) => {
-            let tls = tls(https.get_tls_options().map_err(capnp_error)?)?;
-            http(
-                listener,
-                https.get_options().map_err(capnp_error)?,
-                "https",
-                Some(tls),
-                context,
-                channel,
-            )?
+    let protocol = match (sock.which(), &bound) {
+        (Ok(socket::Which::Udp(udp)), BoundSocket::Datagram(_)) => {
+            let BoundSocket::Datagram(socket) = bound else {
+                unreachable!("matched a datagram socket");
+            };
+            return Ok(Some(SocketService::Datagram(Box::pin(
+                listen::udp::listen_udp(
+                    context,
+                    socket,
+                    channel,
+                    address.to_owned(),
+                    Duration::from_millis(udp.get_idle_timeout_ms().into()),
+                    udp.get_max_pending_bytes() as usize,
+                ),
+            ))));
         }
-        (Ok(socket::Which::Tcp(tcp)), BoundSocket::Stream(listener)) => {
+        (Err(capnp::NotInSchema(_)), _) => {
+            server.report().error(format!(
+                "Encountered unknown socket type in \"{name}\". Was the config compiled with a \
+                 newer version of the schema?"
+            ));
+            return Ok(None);
+        }
+        // bind_sockets binds a datagram socket for UDP and a stream listener otherwise.
+        (Ok(socket::Which::Udp(_)), _) | (_, BoundSocket::Datagram(_)) => {
+            return Err(kj::failed!("socket \"{name}\" was bound as the wrong kind"));
+        }
+        (Ok(socket::Which::Http(options)), _) => {
+            http(options.map_err(capnp_error)?, "http", None, channel)?
+        }
+        (Ok(socket::Which::Https(https)), _) => {
+            let tls = tls(https.get_tls_options().map_err(capnp_error)?)?;
+            let options = https.get_options().map_err(capnp_error)?;
+            http(options, "https", Some(tls), channel)?
+        }
+        (Ok(socket::Which::Tcp(tcp)), _) => {
             let tls = if tcp.has_tls_options() {
                 let config = tls(tcp.get_tls_options().map_err(capnp_error)?)?;
                 Some(match tcp.get_tls_mode() {
@@ -502,31 +718,12 @@ fn listener(
             };
             // The authority handed to the connect() handler is the endpoint as bound, so it is
             // truthful for a configured port of 0.
-            let authority = format!("{}:{}", listen::host_of_address(address), listener.port()?);
-            Box::pin(listen::listen_tcp(
-                context, listener, channel, tls, authority,
-            ))
+            let port = listen::bound_port(&bound)?;
+            let authority = format!("{}:{port}", listen::host_of_address(address));
+            Serves::Tcp(channel, tls, authority)
         }
-        (Ok(socket::Which::Udp(udp)), BoundSocket::Datagram(socket)) => {
-            Box::pin(listen::udp::listen_udp(
-                context,
-                socket,
-                channel,
-                address.to_owned(),
-                Duration::from_millis(udp.get_idle_timeout_ms().into()),
-                udp.get_max_pending_bytes() as usize,
-            ))
-        }
-        (Err(capnp::NotInSchema(_)), _) => {
-            server.report().error(format!(
-                "Encountered unknown socket type in \"{name}\". Was the config compiled with a \
-                 newer version of the schema?"
-            ));
-            return Ok(None);
-        }
-        // bind_sockets binds a datagram socket for UDP and a stream listener otherwise.
-        _ => return Err(kj::failed!("socket \"{name}\" was bound as the wrong kind")),
-    }))
+    };
+    Ok(Some(SocketService::Stream(bound, protocol)))
 }
 
 /// Reports the `--external-addr` and `--directory-path` overrides that name no service of their
@@ -594,10 +791,11 @@ async fn serve_listeners(listeners: &mut Listeners) -> Result<()> {
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
 /// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
 ///
-/// The replicas, if any, serve through all of that as this thread's listeners do: they stop
-/// accepting when it does, and it waits for them, with its actors and their sessions up, as it
-/// waits for its own connections. A request a replica has in an object that is handed off, or
-/// sends to one, is this thread's own to the object (`ActorNamespace::channel`).
+/// The front and the replicas, if any, serve through all of that as this thread's listeners
+/// do: the front stops accepting when this thread would, and this thread waits for what the
+/// front's connections and the replicas still have, with its actors and their sessions up, as it
+/// waits for its own. A request a replica has in an object that is handed off, or sends to one,
+/// is this thread's own to the object (`ActorNamespace::channel`).
 #[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
@@ -610,13 +808,13 @@ pub async fn run(
     } else {
         shutdown_delay(&factory)?
     };
-    // The replicas are bound last, so they are dropped, and with that stopped and joined, before
-    // this thread's server.
+    // The other threads are bound last, so they are dropped first: the front, and with that
+    // stopped, then the replicas, stopped and joined, and only then this thread's server.
     let Some(Running {
         server,
         mut listeners,
         drain: draining,
-        replicas,
+        threads,
     }) = start(factory, options, report, false, Role::First).await?
     else {
         return Ok(());
@@ -695,8 +893,8 @@ pub async fn run(
                 stop = Some((Rc::clone(node), deadlines));
             }
             draining.send_replace(true);
-            if let Some(replicas) = &replicas {
-                replicas.drain();
+            if let Some(threads) = &threads {
+                threads.drain();
             }
             if let Some((node, deadlines)) = &stop {
                 let finished = async {
@@ -781,8 +979,9 @@ async fn drain_due(
 
 /// `workerd serve` on a loop thread other than the first (see `threads.rs`).
 ///
-/// Builds the graph of `factory`'s config for this thread and, once the process serves, accepts
-/// from `sockets` until it drains, then lets the open connections finish.
+/// Builds the graph of `factory`'s config for this thread and, once the process serves, serves
+/// what it takes from `queue`, the front's, for `sockets`, until the queue has ended and what it
+/// took is done.
 ///
 /// The first thread accepted the config, so an error in it here is this thread's failure. The
 /// errors and warnings are the ones the first thread reported, and are not reported again.
@@ -790,7 +989,8 @@ pub async fn run_replica(
     factory: Rc<Factory>,
     overrides: Overrides,
     deployments: Deployments,
-    sockets: DuplicateSockets,
+    sockets: FrontSockets,
+    queue: front::Queue,
     signals: &Signals,
 ) -> Result<()> {
     let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -809,7 +1009,7 @@ pub async fn run_replica(
         overrides,
         ..RunOptions::default()
     };
-    let role = Role::Replica(sockets);
+    let role = Role::Replica(sockets, queue);
     let Some(Running {
         server: _server,
         mut listeners,

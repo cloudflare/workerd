@@ -445,33 +445,57 @@ const SEVERAL_THREADS = {
     'several threads are not supported on Windows',
 };
 
-// One connection to a node, kept open. A node that serves on several threads
-// (`--threads`) serves every request on it on the thread that accepted it.
-class ThreadConnection {
-  #agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+// How many requests a test sends for one thread before it gives up.
+const THREAD_TRIES = 200;
+
+// One of the loop threads a node serves on (`--threads`), by the identity of
+// its isolate (`thread`). Each request goes to whichever thread takes it, so a
+// request names the isolate it is for (`x-thread`), the node's worker refuses
+// it on any other thread (409, before doing anything with it), and it is sent
+// again until this thread serves it.
+class NodeThread {
   #port;
 
-  constructor(port) {
+  constructor(port, thread) {
     this.#port = port;
+    this.thread = thread;
   }
 
-  // As `fetchJson`, over this connection.
-  fetchJson(path, { timeoutMs = 30_000 } = {}) {
+  // As `fetchJson`, served by this thread.
+  async fetchJson(path, { timeoutMs = 30_000 } = {}) {
+    for (let tries = 0; tries < THREAD_TRIES; tries++) {
+      const answer = await this.#send(path, timeoutMs);
+      if (answer.status !== 409 || answer.body.thread === this.thread) {
+        return answer;
+      }
+    }
+    assert.fail(`thread ${this.thread} served none of ${THREAD_TRIES} ${path}`);
+  }
+
+  #send(path, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const options = { agent: this.#agent, host: '127.0.0.1', path };
-      const req = http.request({ ...options, port: this.#port }, (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => (text += chunk));
-        res.on('error', reject);
-        res.on('end', () => {
-          try {
-            resolve({ status: res.statusCode, body: JSON.parse(text) });
-          } catch (err) {
-            reject(new Error(`Non-JSON response to ${path}: ${text}`));
-          }
-        });
-      });
+      const req = http.request(
+        {
+          agent: false,
+          host: '127.0.0.1',
+          port: this.#port,
+          path,
+          headers: { 'x-thread': this.thread },
+        },
+        (res) => {
+          let text = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => (text += chunk));
+          res.on('error', reject);
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(text) });
+            } catch (err) {
+              reject(new Error(`Non-JSON response to ${path}: ${text}`));
+            }
+          });
+        }
+      );
       req.setTimeout(timeoutMs, () => {
         req.destroy(
           new Error(`${path} did not complete within ${timeoutMs}ms`)
@@ -481,46 +505,39 @@ class ThreadConnection {
       req.end();
     });
   }
-
-  close() {
-    this.#agent.destroy();
-  }
 }
 
-// A connection to each of the loop threads `node` serves on, however many
-// connections that takes: which thread accepts one is the kernel's choice.
-// The node's worker answers `/thread` with its isolate's identity, which
-// every thread has its own of.
-async function threadConnections(node, threads = THREADS) {
-  const byThread = new Map();
-  const spare = [];
-  for (let attempt = 0; attempt < 50 && byThread.size < threads; attempt++) {
-    // A busy thread accepts nothing, so the others get the connections.
-    const busy = new ThreadConnection(node.httpPort);
-    const spin = busy.fetchJson('/thread?spin=200');
-    await sleep(20);
-    const opened = Array.from(
-      { length: 2 * threads },
-      () => new ThreadConnection(node.httpPort)
-    );
-    const answers = await Promise.all([
-      spin,
-      ...opened.map((c) => c.fetchJson('/thread')),
-    ]);
-    for (const [i, connection] of [busy, ...opened].entries()) {
-      const { status, body } = answers[i];
-      assert.strictEqual(status, 200, JSON.stringify(body));
-      if (byThread.has(body.thread)) spare.push(connection);
-      else byThread.set(body.thread, connection);
-    }
+// Each of the loop threads `node` serves on. The node's worker answers
+// `/thread` with its isolate's identity, which every thread has its own of,
+// and the node wakes its idle threads in turn, so a few requests find them all.
+async function nodeThreads(node, threads = THREADS) {
+  const found = new Set();
+  for (let tries = 0; tries < THREAD_TRIES && found.size < threads; tries++) {
+    const { status, body } = await fetchJson(node.httpPort, '/thread');
+    assert.strictEqual(status, 200, JSON.stringify(body));
+    found.add(body.thread);
   }
-  for (const connection of spare) connection.close();
   assert.strictEqual(
-    byThread.size,
+    found.size,
     threads,
-    `${node.nodeId} served connections on ${byThread.size} threads`
+    `${node.nodeId} served requests on ${found.size} threads`
   );
-  return [...byThread.values()];
+  return [...found].map((thread) => new NodeThread(node.httpPort, thread));
+}
+
+// Resolves once DO `name` has had `count` /hold-increment requests, asked
+// through `node`.
+async function holding(node, name, count) {
+  for (let tries = 0; ; tries++) {
+    const { status, body } = await fetchJson(
+      node.httpPort,
+      `/holding?name=${name}`
+    );
+    assert.strictEqual(status, 200, JSON.stringify(body));
+    if (body.holding === count) return;
+    assert(tries < THREAD_TRIES, `${body.holding} of ${count} requests held`);
+    await sleep(10);
+  }
 }
 
 // The fake S3 the cluster's state lives in (fake-s3.mjs), or in its "gcs"
@@ -3475,8 +3492,8 @@ test(
       async ({ nodes, bucket, nodeKeys }) => {
         // The threads of the DO's owner, and those of the other node, whose
         // requests go through its own first thread to the owner's.
-        const connections = (
-          await Promise.all(nodes.map((node) => threadConnections(node)))
+        const threads = (
+          await Promise.all(nodes.map((node) => nodeThreads(node)))
         ).flat();
         const ROUNDS = 4;
         const observed = [];
@@ -3484,7 +3501,7 @@ test(
         let id;
         for (let round = 0; round < ROUNDS; round++) {
           const answers = await Promise.all(
-            connections.map((c) => c.fetchJson('/increment?name=threads'))
+            threads.map((t) => t.fetchJson('/increment?name=threads'))
           );
           for (const { status, body } of answers) {
             assert.strictEqual(status, 200, JSON.stringify(body));
@@ -3505,8 +3522,8 @@ test(
         assert.strictEqual(await bucket.owner(id), nodeKeys.get(owner));
 
         // JS RPC from every thread, too.
-        for (const connection of connections) {
-          const { status, body } = await connection.fetchJson(
+        for (const thread of threads) {
+          const { status, body } = await thread.fetchJson(
             '/rpc-identity?name=threads'
           );
           assert.strictEqual(status, 200, JSON.stringify(body));
@@ -3515,7 +3532,6 @@ test(
 
         // Only a node's first thread is a member of the cluster.
         assert.strictEqual((await bucket.nodes()).length, nodes.length);
-        for (const connection of connections) connection.close();
       },
       THREADED
     );
@@ -3529,29 +3545,28 @@ test(
     await withCluster(
       2,
       async ({ nodes, bucket }) => {
-        const connections = (
-          await Promise.all(nodes.map((node) => threadConnections(node)))
+        const threads = (
+          await Promise.all(nodes.map((node) => nodeThreads(node)))
         ).flat();
         const q = (params) => new URLSearchParams(params);
         // Each thread writes a value large enough to go in the bucket, through
         // its node's `bucket` service, which is the first thread's.
         const size = 2 * 1024 * 1024;
-        for (const [i, connection] of connections.entries()) {
-          const put = await connection.fetchJson(
+        for (const [i, thread] of threads.entries()) {
+          const put = await thread.fetchJson(
             `/kv/put?${q({ key: `large-${i}`, size })}`
           );
           assert.strictEqual(put.status, 200, JSON.stringify(put.body));
         }
         const blobs = await bucket.list('services/kv/');
-        assert(blobs.length >= connections.length, blobs.join(', '));
+        assert(blobs.length >= threads.length, blobs.join(', '));
         // And every thread reads the value another wrote.
-        for (const [i, connection] of connections.entries()) {
-          const key = `large-${(i + 1) % connections.length}`;
-          const got = await connection.fetchJson(`/kv/get?${q({ key })}`);
+        for (const [i, thread] of threads.entries()) {
+          const key = `large-${(i + 1) % threads.length}`;
+          const got = await thread.fetchJson(`/kv/get?${q({ key })}`);
           assert.strictEqual(got.status, 200, JSON.stringify(got.body));
           assert.strictEqual(got.body.value.length, size);
         }
-        for (const connection of connections) connection.close();
       },
       THREADED
     );
@@ -3573,28 +3588,25 @@ test(
         assert.strictEqual(initial.status, 200);
         const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
         const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
-        const holders = await threadConnections(owner);
-        const followers = [
-          ...(await threadConnections(owner)),
-          ...(await threadConnections(peer)),
-        ];
+        const holders = await nodeThreads(owner);
+        const followers = [...holders, ...(await nodeThreads(peer))];
 
         // Each of the owner's threads has a request in the DO as the owner
         // starts to drain, which the handoff lets finish.
-        const holding = holders.map((c) =>
-          c.fetchJson(`/hold-increment?name=${name}&ms=1000`)
+        const held = holders.map((t) =>
+          t.fetchJson(`/hold-increment?name=${name}&ms=1000`)
         );
-        await sleep(250);
+        await holding(owner, name, holders.length);
         const exit = owner.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
         await sleep(100);
         // Requests that arrive meanwhile, on any thread of either node, wait
         // for the handoff and run where the DO went.
-        const following = followers.map((c) =>
-          c.fetchJson(`/increment?name=${name}`, { timeoutMs: 15_000 })
+        const following = followers.map((t) =>
+          t.fetchJson(`/increment?name=${name}`, { timeoutMs: 15_000 })
         );
 
         const counts = [initial.body.count];
-        for (const { status, body } of await Promise.all(holding)) {
+        for (const { status, body } of await Promise.all(held)) {
           assert.strictEqual(status, 200, JSON.stringify(body));
           assert.strictEqual(body.nodeId, owner.nodeId);
           counts.push(body.count);
@@ -3610,7 +3622,6 @@ test(
           counts,
           counts.map((_, i) => i + 1)
         );
-        for (const connection of [...holders, ...followers]) connection.close();
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
       },
       THREADED
@@ -3625,17 +3636,16 @@ test(
     await withCluster(
       1,
       async ({ nodes: [node] }) => {
-        const increment = async (connections) => {
+        const increment = async (threads) => {
           const answers = await Promise.all(
-            connections.map((c) => c.fetchJson('/increment?name=restart'))
+            threads.map((t) => t.fetchJson('/increment?name=restart'))
           );
           for (const { status, body } of answers) {
             assert.strictEqual(status, 200, JSON.stringify(body));
           }
-          for (const connection of connections) connection.close();
           return answers.map((a) => a.body.count).sort((a, b) => a - b);
         };
-        const before = await increment(await threadConnections(node));
+        const before = await increment(await nodeThreads(node));
         assert.deepStrictEqual(before, [1, 2, 3]);
 
         const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
@@ -3643,7 +3653,7 @@ test(
         await node.start();
 
         // The new instance claims what the old one handed off.
-        const after = await increment(await threadConnections(node));
+        const after = await increment(await nodeThreads(node));
         assert.deepStrictEqual(after, [4, 5, 6]);
       },
       THREADED
@@ -3660,13 +3670,13 @@ test(
       async ({ nodes: [node], bucket, nodeKeys }) => {
         const key = nodeKeys.get(node.nodeId);
         // Every thread has a request in a DO, which outlasts the lease.
-        const connections = await threadConnections(node);
-        const held = connections.map((c) =>
-          c
+        const threads = await nodeThreads(node);
+        const held = threads.map((t) =>
+          t
             .fetchJson(`/hold-increment?name=lapse&ms=${4 * LEASE_MS}`)
             .catch((error) => ({ error }))
         );
-        await sleep(250);
+        await holding(node, 'lapse', threads.length);
         // The node cannot renew its lease from here on.
         await bucket.setFaults([
           {
@@ -3691,7 +3701,6 @@ test(
         for (const answer of await Promise.all(held)) {
           assert(answer.error !== undefined, JSON.stringify(answer));
         }
-        for (const connection of connections) connection.close();
       },
       THREADED
     );
@@ -3928,12 +3937,12 @@ test(
       async ({ nodes: [node] }) => {
         // The deployments' errors are no thread's failure: each serves what the
         // first does.
-        const connections = await threadConnections(node);
+        const threads = await nodeThreads(node);
         const counts = [];
-        for (const connection of connections) {
-          let { status, body } = await connection.fetchJson('/own');
+        for (const thread of threads) {
+          let { status, body } = await thread.fetchJson('/own');
           assert.strictEqual(status, 200, JSON.stringify(body));
-          ({ status, body } = await connection.fetchJson(
+          ({ status, body } = await thread.fetchJson(
             '/MAIN/increment?name=beside-threads'
           ));
           assert.strictEqual(status, 200, JSON.stringify(body));
@@ -3944,7 +3953,7 @@ test(
             '/UNKNOWN/',
             '/BROKEN_DO/x',
           ]) {
-            ({ status, body } = await connection.fetchJson(path));
+            ({ status, body } = await thread.fetchJson(path));
             assert.strictEqual(status, 500, path);
             assert.match(
               body.error,
@@ -3952,7 +3961,6 @@ test(
               path
             );
           }
-          connection.close();
         }
         assert.deepStrictEqual(counts, [1, 2, 3]);
         // The errors are reported once, by the first thread.

@@ -6,10 +6,18 @@
 //!
 //! The first loop thread is the process's main thread and has everything a process has one of:
 //! it binds the sockets, reports the config's errors, handles SIGTERM, writes the `--control-fd`
-//! events, and serves the UDP sockets, the cron triggers and the debug port. It also has the
+//! events, owns the front, and serves the UDP sockets, the cron triggers and the debug port. It
+//! also has the
 //! Durable Objects: every actor with its storage, alarms, facets, container and hibernated
 //! WebSockets, and in cluster mode the instance's whole part in the cluster (its lease, the
 //! objects it owns, the peer port and sessions, the bucket's client).
+//!
+//! No loop thread accepts from a stream socket. The front does (`front/mod.rs`): a tokio runtime
+//! of its own that owns the HTTP, HTTPS and TCP sockets the first thread bound, accepts, performs
+//! the TLS handshakes and speaks HTTP, and queues each request and each TCP connection. Every
+//! loop thread, the first like the others, takes an item from that queue whenever it has nothing
+//! else to run and serves it on the socket's service (`listen/dispatch.rs`), so the requests of
+//! one connection are served by whichever threads are free.
 //!
 //! A replica is a thread with its own event loop (`kj_rs_tokio::Runtime`), its own
 //! `WorkerFactory` over the process's `SharedFactory` (`bootstrap_loop`), and its own copy of the
@@ -18,9 +26,7 @@
 //! per thread, and a service binding reaches the Worker of the same thread. So are the dynamic
 //! Workers of a `workerLoader`: each thread loads its own, and under one name the code its
 //! `getCode` callback returned on that thread, so if the callback can return different code for
-//! one name, threads can run different code under it. It accepts
-//! connections from duplicates of the first thread's stream sockets, which share their accept
-//! queues, so a connection is served by whichever thread accepts it.
+//! one name, threads can run different code under it.
 //!
 //! What a replica lacks it reaches on the first thread, over its session with it
 //! ([`FirstThread`]): a capnp `WorkerdDebugPort` session, as a cluster instance keeps with a
@@ -46,8 +52,9 @@
 //!   error gets replicas ([`Replicas::start`]), which build theirs at the same time; an error in
 //!   a replica's graph is that thread's failure, not a config error reported again. (What the
 //!   first thread attributed to a cluster deployment, a replica attributes to it too, and
-//!   serves.) Once every replica is ready the first thread writes its `listen` events and
-//!   [`Replicas::serve`] lets the replicas accept, as it then does itself.
+//!   serves.) Once every replica is ready, and so can take work, the first thread makes the
+//!   front, which registers the listeners, and writes its `listen` events; then
+//!   [`Replicas::serve`] lets the replicas serve and the front accepts.
 //! - **Failure.** A replica that fails, or stops serving before the server drains, fails the
 //!   future [`Started::watch`] makes, which the first thread serves as one of its listeners:
 //!   the process ends with that error as it does with a listener's. One that has ended before
@@ -55,17 +62,22 @@
 //!   start instead ([`Started::check`]). Its pipe closes with its
 //!   loop, which cancels what it had in flight on the first thread, as a client hanging up
 //!   does. A replica whose session ends while it serves fails the same way.
-//! - **Drain.** [`Replicas::drain`] has every replica stop accepting and finish its connections
-//!   as the first thread does; that future resolves once they all have. The first thread keeps
-//!   its actors and serves the sessions until then, so a replica's requests in flight finish as
-//!   its own do; only then does it stop its containers. In a cluster the replicas accept for as
-//!   long as the first thread does, through its handoff and the grace period after it.
+//! - **Drain.** The first thread tells the replicas ([`Replicas::drain`]) and the front, which
+//!   stops accepting and shuts its connections down gracefully: an idle one closes, one with a
+//!   request in flight after its response. Requests still queued are served. Once every
+//!   connection has ended the front closes its queue, and a loop is done when the queue has
+//!   ended and what it took has finished. The first thread keeps its actors and serves the
+//!   sessions until every replica is, so a replica's requests in flight finish as its own do;
+//!   only then does it stop its containers. In a cluster the front accepts for as long as the
+//!   first thread serves on, through its handoff and the grace period after it.
 //! - **Teardown.** A replica drops its server, then its factory, then its loop, on its own
 //!   thread, and waits for nothing of the first thread to do so: what it has in flight there are
-//!   futures it drops, and the pipe's wake-ups cross threads without waiting. Dropping the
-//!   `Replicas` tells those still running to stop at once and joins every thread, so the first
-//!   thread's server, which serves the sessions, and its factory, and with it the process's
-//!   `SharedFactory` and V8, outlive every other loop.
+//!   futures it drops, and the pipe's wake-ups cross threads without waiting. The first thread
+//!   stops the front first, which drops every connection and joins the front's threads, then
+//!   drops the `Replicas`, which tells those still running to stop at once and joins every
+//!   thread, so the first thread's server, which serves the sessions, and its factory, and with
+//!   it the process's `SharedFactory` and V8, outlive every other loop. A loop that stops drops
+//!   the calls it had taken, whose connections close, and leaves what is queued to the others.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -83,16 +95,17 @@ use crate::bridge::ffi;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
-use crate::listen::DuplicateSockets;
+use crate::front;
+use crate::listen::FrontSockets;
 
 /// Where the process is in its life, for the replicas to follow. It only advances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Phase {
-    /// The threads are building their graphs; none accepts connections.
+    /// The threads are building their graphs; no connection is accepted.
     Starting,
-    /// Every thread accepts connections.
+    /// The front accepts connections, and every thread serves what it takes from its queue.
     Serving,
-    /// No thread accepts connections; each finishes the ones it has.
+    /// No connection is accepted; what is queued and in flight is finished.
     Draining,
     /// The process is ending without waiting for connections.
     Stopping,
@@ -161,25 +174,28 @@ impl Replicas {
         self.count
     }
 
-    /// Starts the threads, one for each of `sockets`, and waits until each has built its graph.
-    /// A thread that fails to, or has ended by then, is the error.
+    /// Starts the threads and waits until each has built its graph and can take work from
+    /// `queue`, the front's, for `sockets`. A thread that fails to, or has ended by then, is
+    /// the error.
     ///
     /// What it returns watches the threads from then on ([`Started`]).
     pub async fn start(
         &self,
         factory: &Rc<Factory>,
-        sockets: Vec<DuplicateSockets>,
+        sockets: &FrontSockets,
+        queue: &front::Queue,
         overrides: &Overrides,
         deployments: &Deployments,
     ) -> Result<Started> {
         let (events, received) = mpsc::unbounded_channel();
-        let count = sockets.len();
-        for (index, sockets) in (1..).zip(sockets) {
+        let count = self.count;
+        for index in 1..=count {
             let (ours, theirs) = session_pipe();
             factory.spawn_detached(serve_session(Rc::clone(factory), index, ours));
             let replica = Replica {
                 shared: self.shared.clone(),
-                sockets,
+                sockets: sockets.clone(),
+                queue: queue.clone(),
                 overrides: overrides.clone(),
                 deployments: deployments.clone(),
                 signals: Signals {
@@ -363,7 +379,9 @@ impl Drop for ExitReport {
 /// One replica, on its way to its thread.
 struct Replica {
     shared: KjArc<ffi::SharedFactory>,
-    sockets: DuplicateSockets,
+    /// The stream sockets the front accepts from, and the queue it puts their work in.
+    sockets: FrontSockets,
+    queue: front::Queue,
     overrides: Overrides,
     /// The services of the config that came from cluster deployments.
     deployments: Deployments,
@@ -392,6 +410,7 @@ impl Replica {
     async fn serve(self, factory: KjOwn<ffi::WorkerFactory>) -> Result<()> {
         let Self {
             sockets,
+            queue,
             overrides,
             deployments,
             signals,
@@ -401,8 +420,9 @@ impl Replica {
         let factory = Rc::new(Factory::new(factory));
         factory.forward_to_first_thread(session);
         let serving = Rc::clone(&factory);
-        let result =
-            crate::run::run_replica(serving, overrides, deployments, sockets, &signals).await;
+        let replica =
+            crate::run::run_replica(serving, overrides, deployments, sockets, queue, &signals);
+        let result = replica.await;
         let shutdown = crate::entry::shutdown(factory).await;
         result?;
         shutdown
