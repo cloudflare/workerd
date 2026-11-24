@@ -401,6 +401,8 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_buffer_data(view: &Local) -> *mut u8;
         pub unsafe fn local_array_buffer_view_data(view: &Local, byte_length: &mut usize) -> usize;
+        #[nothrow]
+        pub unsafe fn local_array_buffer_view_copy_to(view: &Local, out: &mut [u8]) -> usize;
         pub unsafe fn local_array_buffer_view_get_buffer(
             isolate: *mut Isolate,
             view: &Local,
@@ -3276,6 +3278,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// no JavaScript (which could detach, resize or write to the buffer) can run while
     /// it is live.
     ///
+    /// For a view over a `SharedArrayBuffer`, another agent may write the bytes while the slice
+    /// is live; [`to_vec`](Self::to_vec) copies them without borrowing.
+    ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
@@ -3313,9 +3318,17 @@ impl<'s> Local<'s, ArrayBufferView> {
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
+    ///
+    /// The view's buffer may be a `SharedArrayBuffer`, which another agent may write to at any
+    /// time, so C++ copies the bytes and Rust never borrows them.
     pub fn to_vec(&self) -> Vec<u8> {
-        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
-        unsafe { &*self.as_raw_slice() }.to_vec()
+        let mut bytes = vec![0; self.as_raw_slice().len()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_array_buffer_view_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the view can't have
+        // shrunk.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
     }
 
     /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with

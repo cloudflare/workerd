@@ -563,6 +563,9 @@ uint8_t* local_array_buffer_view_buffer_data(const Local& view);
 // Returns the address of the first byte the view covers and sets `byte_length` to how many it
 // covers, which is zero for a view that is detached or that does not lie within its buffer.
 uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length);
+// Copies the first `out.size()` bytes the view covers, or all of them if it covers fewer, into
+// `out`, and returns how many it copied.
+size_t local_array_buffer_view_copy_to(const Local& view, ::rust::Slice<uint8_t> out);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
 size_t local_array_buffer_view_element_size(const Local& view);
 bool local_array_buffer_view_is_integer_type(const Local& view);

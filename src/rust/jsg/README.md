@@ -917,8 +917,10 @@ lock, and can be handed to C++ with `into_ffi()` as a `kj::Own<v8::CompiledWasmM
 which C++ makes another module object without recompiling. As in C++, RTTI describes the module
 as `unknown`; a TypeScript override names it `WebAssembly.Module`.
 
-A `Local<SharedArrayBuffer>` is not a `Local<ArrayBuffer>`, as in V8. Its `to_vec()` copies its
-bytes in C++, so Rust never borrows memory that another agent may write.
+A `Local<SharedArrayBuffer>` is not a `Local<ArrayBuffer>`, as in V8. Its `to_vec()`, like that
+of a `Local<ArrayBufferView>`, whose buffer may be shared, copies the bytes in C++, so it never
+borrows memory that another agent may write. The `as_slice()` of an `ArrayBufferView` or a typed
+array does borrow its bytes, so it suits only a view whose buffer isn't shared.
 
 ### `Global<T>`
 
