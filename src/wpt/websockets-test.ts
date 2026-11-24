@@ -203,9 +203,7 @@ export default {
     replace: removeUseCapture,
   },
   'Send-binary-blob.any.js': {
-    comment:
-      'workerd send() does not accept a Blob, so no message is received and the test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-data.any.js': {
     replace: removeUseCapture,
