@@ -182,6 +182,10 @@ class TextEncoder final: public jsg::Object {
 
 jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str);
 
+// The Rust TextEncoderUtil class (src/rust/encoding/text_encoder.rs), whose static encode() and
+// encodeInto() the TypeScript TextEncoder (src/per_isolate/text-encoder.ts) calls.
+jsg::JsValue getTextEncoderUtil(jsg::Lock& js);
+
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \
       api::TextDecoder::DecodeOptions, api::TextEncoder::EncodeIntoResult

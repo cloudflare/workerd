@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# encoding-test.js against the TypeScript TextEncoder (src/per_isolate/text-encoder.ts).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "encoding-ts-text-encoder-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "encoding-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "text_decoder_cjk_decoder"]
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-ts-text-encoder",
+  ],
+);

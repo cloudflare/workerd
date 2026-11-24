@@ -916,6 +916,18 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-ts-text-encoder-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-test.js"],
+)
+
+wd_test(
+    src = "text-encoder-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["text-encoder-global-test.js"],
+)
+
+wd_test(
     src = "autovuln-63-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-63-test.js"],
@@ -2078,6 +2090,11 @@ wd_sh_test(
 
 wd_bench(
     src = "text-encoder-bench.wd-bench",
+    data = ["text-encoder-bench.js"],
+)
+
+wd_bench(
+    src = "text-encoder-ts-bench.wd-bench",
     data = ["text-encoder-bench.js"],
 )
 

@@ -115,5 +115,26 @@ KJ_TEST("MessagePort loaded after EventTarget.prototype is replaced still extend
   });
 }
 
+KJ_TEST("MessagePort loaded after Object.prototype gains flag names keeps the Worker's flags") {
+  runWith(ExposeGlobals::YES, [](jsg::Lock& js) {
+    // The module reads its flags when it loads. Neither flag is on here: set_tostring_tag would
+    // give the prototype a tag, and spec_compliant_property_attributes would name the setter
+    // and give it a length.
+    KJ_EXPECT(eval(js, R"js(
+      Object.prototype.set_tostring_tag = true;
+      Object.prototype.spec_compliant_property_attributes = true;
+      try {
+        const { set } = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage');
+        [Object.hasOwn(MessagePort.prototype, Symbol.toStringTag), set.name, set.length].join()
+      } finally {
+        delete Object.prototype.set_tostring_tag;
+        delete Object.prototype.spec_compliant_property_attributes;
+      }
+    )js"_kj)
+                  .strictEquals(js.str("false,,0"_kj)));
+    KJ_EXPECT(isLoaded(js));
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

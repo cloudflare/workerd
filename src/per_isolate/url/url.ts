@@ -21,6 +21,7 @@ import type {
   UrlBackend,
 } from './backend';
 import type { InternalArrayHelpers } from './internal-array';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
 
@@ -79,10 +80,7 @@ const { getPrivateSymbol } = utils;
 const kUrlBrand = getPrivateSymbol('workerd:URL');
 const kSearchParamsBrand = getPrivateSymbol('workerd:URLSearchParams');
 
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const { kIllegalInvocation } = require('jsg-errors') as JsgErrorMessages;
 const kInvalidHref =
   "Failed to set the 'href' property on 'URL': the provided value is not " +
   "of type 'valid URL string'.";

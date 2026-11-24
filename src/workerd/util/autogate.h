@@ -148,7 +148,10 @@ namespace workerd::util {
   /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
      string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
      isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
-  V(BODY_BUFFER_EXTERNAL_MEMORY)
+  V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
+  /* Expose the TypeScript TextEncoder (src/per_isolate/text-encoder.ts), which encodes in Rust    \
+     (src/rust/encoding/text_encoder.rs), instead of the C++ one (api/encoding.h). */              \
+  V(TS_TEXT_ENCODER)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
