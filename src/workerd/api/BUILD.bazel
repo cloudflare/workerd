@@ -237,6 +237,7 @@ wd_cc_library(
         "crypto/crc-impl.h",
     ],
     visibility = ["//visibility:public"],
+    deps = ["//src/rust/crc"],
 )
 
 wd_cc_library(
@@ -694,6 +695,11 @@ wd_cc_library(
         "crypto/prime-test.c++",
     ]
 ]
+
+kj_test(
+    src = "crypto/crc-impl-test.c++",
+    deps = [":crypto-crc-impl"],
+)
 
 [
     kj_test(
