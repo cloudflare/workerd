@@ -911,9 +911,13 @@ ObjectDefineProperties(EventSource, {
     configurable: true,
   },
 });
-// The class agrees with its published declaration: its constructor and
-// instances here, and from() above. The constants above are the numbers it
-// declares.
+// The class agrees with its published declaration: the names and types of
+// the constants that the constructor gets above, its constructor and
+// instances here, and from() above.
+({ CONNECTING, OPEN, CLOSED }) satisfies Pick<
+  typeof PublishedEventSource,
+  'CONNECTING' | 'OPEN' | 'CLOSED'
+>;
 setNameAndLength(
   EventSource satisfies new (
     url: string,
