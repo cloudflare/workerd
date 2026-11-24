@@ -1,8 +1,7 @@
 //! The bridge that `workerd/io/compatibility-date.c++` wraps.
 //!
 //! Strings cross as bytes, since a `kj::String` need not be UTF-8, and diagnostics quote them
-//! byte for byte, as the C++ compiler did: a list crosses as its strings' bytes, end to end, and
-//! their lengths.
+//! byte for byte, as the C++ compiler did.
 
 #![allow(
     unsafe_code,
@@ -15,7 +14,6 @@ use compatibility_date_capnp::compatibility_flags;
 
 use crate::compile;
 use crate::date::CompatDate;
-use crate::table::FlagTable;
 
 #[cxx::bridge(namespace = "workerd::rust::compat_date")]
 mod ffi {
@@ -28,6 +26,11 @@ mod ffi {
     enum Decompile {
         All,
         NeededByFl,
+    }
+
+    /// One string of a list, borrowed from C++.
+    struct Bytes<'a> {
+        bytes: &'a [u8],
     }
 
     struct CompileOptions {
@@ -55,24 +58,17 @@ mod ffi {
     }
 
     extern "Rust" {
-        /// Compiles a date and flags; `flags` and `allowed_experimental_flags` are lists as the
-        /// module comment describes. Fails only if the schema could not be read.
+        /// Compiles a date and flags. Fails only if the schema could not be read.
         fn compile_compatibility_flags(
             compat_date: &[u8],
-            flag_bytes: &[u8],
-            flag_lengths: &[usize],
-            allowed_experimental_bytes: &[u8],
-            allowed_experimental_lengths: &[usize],
+            flags: &[Bytes<'_>],
+            allowed_experimental_flags: &[Bytes<'_>],
             options: &CompileOptions,
         ) -> Result<CompileResult>;
 
         /// Returns the field indices of the set flags that have an enable flag, in code order.
         /// `canonical` is `capnp::canonicalize()` of a `CompatibilityFlags`.
         fn decompile_compatibility_flags(canonical: &[u8], which: Decompile) -> Result<Vec<u16>>;
-
-        /// The `$compatEnableFlag` of a field that has one. It lives in the schema, which is
-        /// static, and is followed by a NUL, as Cap'n Proto text always is.
-        fn enable_flag_name(field_index: u16) -> Result<&'static str>;
 
         /// Returns the date in canonical form, or an empty string if it is not a valid date.
         fn normalize_compat_date(date: &[u8]) -> String;
@@ -89,42 +85,17 @@ enum Error {
     Schema(#[from] crate::table::SchemaError),
     #[error("reading CompatibilityFlags: {0}")]
     Capnp(#[from] capnp::Error),
-    #[error("a list of {lengths} lengths that sum to more than its {bytes} bytes")]
-    List { bytes: usize, lengths: usize },
-    #[error("field {0} has no enable flag")]
-    NoEnableFlag(u16),
     #[error("unknown enum value {0}")]
     UnknownEnum(u8),
 }
 
-fn split<'a>(bytes: &'a [u8], lengths: &[usize]) -> Result<Vec<&'a [u8]>, Error> {
-    let error = || Error::List {
-        bytes: bytes.len(),
-        lengths: lengths.len(),
-    };
-    let mut rest = bytes;
-    let mut strings = Vec::with_capacity(lengths.len());
-    for &len in lengths {
-        let (head, tail) = rest.split_at_checked(len).ok_or_else(error)?;
-        strings.push(head);
-        rest = tail;
-    }
-    if !rest.is_empty() {
-        return Err(error());
-    }
-    Ok(strings)
-}
-
 fn compile_compatibility_flags(
     compat_date: &[u8],
-    flag_bytes: &[u8],
-    flag_lengths: &[usize],
-    allowed_experimental_bytes: &[u8],
-    allowed_experimental_lengths: &[usize],
+    flags: &[ffi::Bytes<'_>],
+    allowed_experimental_flags: &[ffi::Bytes<'_>],
     options: &ffi::CompileOptions,
 ) -> Result<ffi::CompileResult, Error> {
-    let flags = split(flag_bytes, flag_lengths)?;
-    let allowed = split(allowed_experimental_bytes, allowed_experimental_lengths)?;
+    let allowed: Vec<&[u8]> = allowed_experimental_flags.iter().map(|f| f.bytes).collect();
     let date_validation = match options.date_validation {
         ffi::DateValidation::CodeVersion => compile::DateValidation::CodeVersion,
         ffi::DateValidation::CurrentDateForCloudflare => {
@@ -135,7 +106,7 @@ fn compile_compatibility_flags(
     };
     let compiled = compile::compile(
         compat_date,
-        flags,
+        flags.iter().map(|f| f.bytes),
         &compile::CompileOptions {
             date_validation,
             allow_experimental: options.allow_experimental,
@@ -176,14 +147,6 @@ fn decompile_compatibility_flags(
     let message = capnp::message::Reader::new(SegmentArray::new(&segments), ReaderOptions::new());
     let input = message.get_root::<compatibility_flags::Reader<'_>>()?;
     Ok(compile::decompile_fields(input, which)?)
-}
-
-fn enable_flag_name(field_index: u16) -> Result<&'static str, Error> {
-    FlagTable::get()?
-        .fields
-        .get(usize::from(field_index))
-        .and_then(|info| info.enable_flag)
-        .ok_or(Error::NoEnableFlag(field_index))
 }
 
 fn normalize_compat_date(date: &[u8]) -> String {

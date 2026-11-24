@@ -1,13 +1,17 @@
 //! Compiling a compatibility date and a list of flags into `CompatibilityFlags`, and back.
 
+use std::collections::HashSet;
+
 use capnp::dynamic_struct;
 use capnp::dynamic_value;
 use compatibility_date_capnp::compatibility_flags;
 
 use crate::date::CompatDate;
 use crate::table::FlagInfo;
+use crate::table::FlagKind;
 use crate::table::FlagTable;
 use crate::table::SchemaError;
+use crate::table::slot;
 
 /// The dates a compatibility date may name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,16 +95,34 @@ impl Compiled {
 /// The flags a configuration names that the compiler has not yet matched to a field.
 ///
 /// Diagnostics name the flags left at the end in the order they are left, which is the order
-/// C++'s `kj::HashSet` left them in: matching a flag moves the last one into its place.
+/// C++'s `kj::HashSet` left them in: matching a flag moves the last one into its place. The
+/// list is the Worker's, of any length, so each of its flags is looked up once, in
+/// `FlagTable::slots`, and matching a field's flag is then O(1).
 struct PendingFlags<'a> {
-    flags: Vec<&'a [u8]>,
+    /// Each flag, and the slot it names if it names one.
+    flags: Vec<(&'a [u8], Option<usize>)>,
+    /// Indexed by slot: where in `flags` the flag naming it is, if it is there.
+    positions: Vec<Option<usize>>,
 }
 
 impl<'a> PendingFlags<'a> {
-    fn new(flags: impl IntoIterator<Item = &'a [u8]>, diagnostics: &mut Vec<Diagnostic>) -> Self {
-        let mut unique: Vec<&[u8]> = Vec::new();
+    fn new(
+        table: &FlagTable,
+        flags: impl IntoIterator<Item = &'a [u8]>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Self {
+        let mut pending = Self {
+            flags: Vec::new(),
+            positions: vec![None; 2 * table.fields.len()],
+        };
+        let mut unknown = HashSet::new();
         for flag in flags {
-            if unique.contains(&flag) {
+            let slot = table.slots.get(flag).copied();
+            let first = match slot {
+                Some(slot) => pending.positions[slot].is_none(),
+                None => unknown.insert(flag),
+            };
+            if !first {
                 diagnostics.push(Diagnostic::Error(
                     [
                         b"Compatibility flag specified multiple times: ".as_slice(),
@@ -108,20 +130,26 @@ impl<'a> PendingFlags<'a> {
                     ]
                     .concat(),
                 ));
-            } else {
-                unique.push(flag);
+                continue;
             }
+            if let Some(slot) = slot {
+                pending.positions[slot] = Some(pending.flags.len());
+            }
+            pending.flags.push((flag, slot));
         }
-        Self { flags: unique }
+        pending
     }
 
-    fn take(&mut self, flag: &str) -> bool {
-        if let Some(pos) = self.flags.iter().position(|f| *f == flag.as_bytes()) {
-            self.flags.swap_remove(pos);
-            true
-        } else {
-            false
+    /// Matches the flag in `slot`, if the configuration names it.
+    fn take(&mut self, slot: usize) -> bool {
+        let Some(pos) = self.positions[slot].take() else {
+            return false;
+        };
+        self.flags.swap_remove(pos);
+        if let Some(&(_, Some(moved))) = self.flags.get(pos) {
+            self.positions[moved] = Some(pos);
         }
+        true
     }
 }
 
@@ -272,7 +300,7 @@ pub(crate) fn compile_with_today<'a>(
 ) -> Result<Compiled, SchemaError> {
     let table = FlagTable::get()?;
     let mut diagnostics = Vec::new();
-    let mut pending = PendingFlags::new(flags, &mut diagnostics);
+    let mut pending = PendingFlags::new(table, flags, &mut diagnostics);
 
     let date = CompatDate::parse_bytes(compat_date).unwrap_or_else(|| {
         diagnostics.push(Diagnostic::Error(
@@ -295,14 +323,15 @@ pub(crate) fn compile_with_today<'a>(
     let mut implied: Vec<(usize, u16)> = Vec::new();
 
     for (index, info) in table.fields.iter().enumerate() {
-        let mut take = |flag: Option<&str>| flag.is_some_and(|f| pending.take(f));
-        let (enable_by_flag, disable_by_flag) = if info.disable_flag_first {
-            let disable = take(info.disable_flag);
-            (take(info.enable_flag), disable)
-        } else {
-            let enable = take(info.enable_flag);
-            (enable, take(info.disable_flag))
-        };
+        let mut enable_by_flag = false;
+        let mut disable_by_flag = false;
+        for (_, kind) in info.flags_in_match_order() {
+            let named = pending.take(slot(index, kind));
+            match kind {
+                FlagKind::Enable => enable_by_flag = named,
+                FlagKind::Disable => disable_by_flag = named,
+            }
+        }
         let enable_by_date = info.enabled_by_date(date);
 
         if !disable_by_flag {
@@ -339,7 +368,7 @@ pub(crate) fn compile_with_today<'a>(
         }
     }
 
-    for flag in pending.flags {
+    for (flag, _) in pending.flags {
         diagnostics.push(Diagnostic::Error(
             [b"No such compatibility flag: ".as_slice(), flag].concat(),
         ));

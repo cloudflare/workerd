@@ -1,6 +1,7 @@
 //! The compatibility flags as `compatibility-date.capnp` annotates them, read once from the
 //! schema compiled into the `compatibility_date_capnp` crate.
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use capnp::introspect::Introspect;
@@ -90,6 +91,18 @@ pub struct FlagInfo {
 }
 
 impl FlagInfo {
+    /// The field's flags, in the order the compiler matches them to the configuration's.
+    pub fn flags_in_match_order(&self) -> impl Iterator<Item = (&'static str, FlagKind)> {
+        let enable = self.enable_flag.map(|f| (f, FlagKind::Enable));
+        let disable = self.disable_flag.map(|f| (f, FlagKind::Disable));
+        let (first, second) = if self.disable_flag_first {
+            (disable, enable)
+        } else {
+            (enable, disable)
+        };
+        first.into_iter().chain(second)
+    }
+
     /// The last `$compatEnableDate` date, which a warning about a redundant flag names.
     pub fn enable_date(&self) -> Option<CompatDate> {
         self.date_rules.iter().rev().find_map(|rule| match rule {
@@ -115,8 +128,23 @@ impl FlagInfo {
 #[derive(Debug)]
 pub struct FlagTable {
     pub fields: Vec<FlagInfo>,
+    /// The slot (see `slot`) of each flag name. A name the schema gives more than once maps to
+    /// the slot the compiler matches first, as only that one can ever match it.
+    pub slots: HashMap<&'static [u8], usize>,
     pub auto_inject_python_workers: u16,
     pub python_workers: u16,
+}
+
+/// Which of a field's two flags a slot is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlagKind {
+    Enable,
+    Disable,
+}
+
+/// Numbers each field's enable and disable flags, from 0 to `2 * fields.len()`.
+pub fn slot(field: usize, kind: FlagKind) -> usize {
+    2 * field + usize::from(kind == FlagKind::Disable)
 }
 
 static TABLE: LazyLock<Result<FlagTable, SchemaError>> = LazyLock::new(FlagTable::read);
@@ -150,7 +178,16 @@ impl FlagTable {
                 .map(|f| f.get_index())
                 .ok_or(SchemaError::MissingField(name))
         };
+        let mut slots = HashMap::new();
+        for (index, info) in fields.iter().enumerate() {
+            for (name, kind) in info.flags_in_match_order() {
+                slots
+                    .entry(name.as_bytes())
+                    .or_insert_with(|| slot(index, kind));
+            }
+        }
         Ok(Self {
+            slots,
             auto_inject_python_workers: index_of("autoInjectPythonWorkers")?,
             python_workers: index_of("pythonWorkers")?,
             fields,

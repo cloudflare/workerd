@@ -11,7 +11,6 @@
 #include <capnp/schema.h>
 #include <kj/debug.h>
 #include <kj/test.h>
-#include <kj/time.h>
 #include <kj/vector.h>
 
 namespace workerd {
@@ -39,7 +38,7 @@ struct Reporter final: public ValidationErrorReporter {
 };
 
 // The Rust compiler must agree with the C++ one, output and diagnostics alike. With the
-// RUST_COMPAT_DATE autogate on, compatibility-date.h is the Rust compiler and legacy:: the C++ one.
+// RUST_COMPAT_DATE autogate on, compatibility-date.h is the Rust compiler and compat_date_legacy:: the C++ one.
 KJ_TEST("the Rust compiler agrees with the C++ compiler") {
   util::Autogate::initAutogateForTest({util::AutogateKey::RUST_COMPAT_DATE});
   KJ_DEFER(util::Autogate::deinitAutogate());
@@ -73,10 +72,11 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
   }
   // A NUL inside the text, which a kj::String may hold.
   dates.add(kj::heapString("2021-05-17\0x", 12));
+  // Both read today's date from the clock, so they differ only if the day ends in between.
+  KJ_EXPECT(currentDateStr() == compat_date_legacy::currentDateStr());
+  KJ_EXPECT(newestCompatDateStr() == compat_date_legacy::newestCompatDateStr());
   dates.add(currentDateStr());
-  dates.add(legacy::currentDateStr());
   dates.add(newestCompatDateStr());
-  dates.add(legacy::newestCompatDateStr());
   dates.add(kj::str(MAXIMUM_COMPATIBILITY_DATE));
 
   constexpr CompatibilityDateValidation validations[] = {
@@ -85,28 +85,34 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
     CompatibilityDateValidation::FUTURE_FOR_TEST,
   };
 
-  unsigned cases = 0;
-  auto rustTime = 0 * kj::NANOSECONDS;
-  auto legacyTime = 0 * kj::NANOSECONDS;
-  auto& clock = kj::systemPreciseMonotonicClock();
+  // Every other case passes the flags as a capnp::List<capnp::Text>::Reader, as the config does,
+  // rather than as kj::Strings, as Worker Loader does: the two overloads convert them apart.
+  bool asCapnpList = false;
   auto check = [&](kj::StringPtr date, kj::ArrayPtr<const kj::String> flags,
                    CompatibilityDateValidation validation, bool experimental,
                    kj::ArrayPtr<const kj::StringPtr> allowlist, MainModuleIsPython python) {
-    ++cases;
+    asCapnpList = !asCapnpList;
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
     auto actual = orphanage.newOrphan<CompatibilityFlags>();
     auto expected = orphanage.newOrphan<CompatibilityFlags>();
     Reporter actualReporter;
     Reporter expectedReporter;
-    auto start = clock.now();
-    compileCompatibilityFlags(
-        date, flags, actual.get(), actualReporter, experimental, validation, allowlist, python);
-    auto middle = clock.now();
-    legacy::compileCompatibilityFlags(
-        date, flags, expected.get(), expectedReporter, experimental, validation, allowlist, python);
-    rustTime += middle - start;
-    legacyTime += clock.now() - middle;
+    if (asCapnpList) {
+      auto list = orphanage.newOrphan<capnp::List<capnp::Text>>(flags.size());
+      for (auto i: kj::indices(flags)) {
+        list.get().set(i, kj::StringPtr(flags[i]));
+      }
+      compileCompatibilityFlags(date, list.getReader(), actual.get(), actualReporter, experimental,
+          validation, allowlist, python);
+      compat_date_legacy::compileCompatibilityFlags(date, list.getReader(), expected.get(),
+          expectedReporter, experimental, validation, allowlist, python);
+    } else {
+      compileCompatibilityFlags(
+          date, flags, actual.get(), actualReporter, experimental, validation, allowlist, python);
+      compat_date_legacy::compileCompatibilityFlags(date, flags, expected.get(), expectedReporter,
+          experimental, validation, allowlist, python);
+    }
 
     auto same = [](auto& a, auto& b) {
       if (a.size() != b.size()) return false;
@@ -117,7 +123,7 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
     };
     auto context = [&]() {
       return kj::str(date, " [", kj::strArray(flags, ", "), "] ", static_cast<int>(validation), " ",
-          experimental, " ", kj::strArray(allowlist, ","), " ", python.toBool());
+          experimental, " ", kj::strArray(allowlist, ","), " ", python.toBool(), " ", asCapnpList);
     };
     auto actualBytes = capnp::canonicalize(actual.getReader());
     auto expectedBytes = capnp::canonicalize(expected.getReader());
@@ -133,10 +139,10 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
           kj::strArray(expectedReporter.warnings, "\n"));
     }
     auto all = decompileCompatibilityFlags(actual.getReader());
-    auto legacyAll = legacy::decompileCompatibilityFlags(expected.getReader());
+    auto legacyAll = compat_date_legacy::decompileCompatibilityFlags(expected.getReader());
     KJ_ASSERT(same(all, legacyAll), context());
     auto fl = decompileCompatibilityFlagsForFl(actual.getReader());
-    auto legacyFl = legacy::decompileCompatibilityFlagsForFl(expected.getReader());
+    auto legacyFl = compat_date_legacy::decompileCompatibilityFlagsForFl(expected.getReader());
     KJ_ASSERT(same(fl, legacyFl), context());
   };
 
@@ -146,7 +152,7 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
 
   // Every date, with no flags.
   for (auto& date: dates) {
-    KJ_EXPECT(normalizeCompatDate(date) == legacy::normalizeCompatDate(date), date);
+    KJ_EXPECT(normalizeCompatDate(date) == compat_date_legacy::normalizeCompatDate(date), date);
     for (auto validation: validations) {
       check(date, nullptr, validation, false, nullptr, MainModuleIsPython::NO);
       check(date, list({"nodejs_compat"_kj}), validation, false, nullptr, MainModuleIsPython::NO);
@@ -209,7 +215,15 @@ KJ_TEST("the Rust compiler agrees with the C++ compiler") {
     }
   }
 
-  KJ_LOG(INFO, "compared compilations", cases, rustTime, legacyTime);
+  // A Worker Loader Worker's list may be of any length, and both compilers take time linear in it.
+  kj::Vector<kj::String> huge;
+  for (auto i: kj::zeroTo(100'000u)) {
+    huge.add(kj::str("unknown_flag_", i));
+    if (i % 1000 == 0) huge.add(kj::str("unknown_flag_", i / 2));
+    if (i < flagNames.size()) huge.add(kj::str(flagNames[i]));
+  }
+  check("2024-09-23", huge, CompatibilityDateValidation::CODE_VERSION, false, nullptr,
+      MainModuleIsPython::NO);
 }
 
 }  // namespace

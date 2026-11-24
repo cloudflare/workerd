@@ -10,7 +10,7 @@
 
 #include <workerd/io/compatibility-date.h>
 
-namespace workerd::legacy {
+namespace workerd::compat_date_legacy {
 
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     capnp::List<capnp::Text>::Reader compatFlags,
@@ -34,4 +34,4 @@ kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date);
 kj::String currentDateStr();
 kj::String newestCompatDateStr();
 
-}  // namespace workerd::legacy
+}  // namespace workerd::compat_date_legacy

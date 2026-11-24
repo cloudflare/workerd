@@ -17,7 +17,6 @@
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/debug.h>
-#include <kj/vector.h>
 
 namespace workerd {
 
@@ -25,29 +24,14 @@ namespace ffi = rust::compat_date;
 
 namespace {
 
-// A list of strings as the bridge takes one: their bytes, end to end, and their lengths.
-struct FlatStrings {
-  kj::Vector<char> bytes;
-  kj::Vector<size_t> lengths;
-
-  template <typename T>
-  explicit FlatStrings(const T& strings) {
-    for (kj::StringPtr s: strings) {
-      bytes.addAll(s);
-      lengths.add(s.size());
-    }
-  }
-
-  ::rust::Slice<const uint8_t> bytesSlice() const {
-    return {reinterpret_cast<const uint8_t*>(bytes.begin()), bytes.size()};
-  }
-  ::rust::Slice<const size_t> lengthsSlice() const {
-    return {lengths.begin(), lengths.size()};
-  }
-};
-
 ::rust::Slice<const uint8_t> bytesOf(kj::StringPtr s) {
   return {reinterpret_cast<const uint8_t*>(s.begin()), s.size()};
+}
+
+// A list as the bridge takes one: a view of each string, which the list still owns.
+template <typename T>
+kj::Array<ffi::Bytes> bytesOfEach(const T& strings) {
+  return KJ_MAP(s, strings) { return ffi::Bytes{bytesOf(s)}; };
 }
 
 ffi::DateValidation toFfi(CompatibilityDateValidation v) {
@@ -62,17 +46,17 @@ ffi::DateValidation toFfi(CompatibilityDateValidation v) {
   KJ_UNREACHABLE;
 }
 
-void compileFlatFlags(kj::StringPtr compatDate,
-    const FlatStrings& flags,
+void compileFlags(kj::StringPtr compatDate,
+    kj::ArrayPtr<const ffi::Bytes> flags,
     CompatibilityFlags::Builder output,
     ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
     MainModuleIsPython mainModuleIsPython) {
-  FlatStrings allowed(allowedExperimentalFlags);
-  auto result = ffi::compile_compatibility_flags(bytesOf(compatDate), flags.bytesSlice(),
-      flags.lengthsSlice(), allowed.bytesSlice(), allowed.lengthsSlice(),
+  auto allowed = bytesOfEach(allowedExperimentalFlags);
+  auto result = ffi::compile_compatibility_flags(bytesOf(compatDate), {flags.begin(), flags.size()},
+      {allowed.begin(), allowed.size()},
       ffi::CompileOptions{
         .date_validation = toFfi(dateValidation),
         .allow_experimental = allowExperimentalFeatures,
@@ -97,15 +81,24 @@ void compileFlatFlags(kj::StringPtr compatDate,
   }
 }
 
+// The field's $compatEnableFlag, which lives in the schema, and so outlives every caller.
+kj::StringPtr enableFlagName(capnp::StructSchema::Field field) {
+  for (auto annotation: field.getProto().getAnnotations()) {
+    if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+      return annotation.getValue().getText();
+    }
+  }
+  KJ_FAIL_ASSERT("decompiled a field without a $compatEnableFlag", field.getProto().getName());
+}
+
 kj::Array<kj::StringPtr> decompileFlags(CompatibilityFlags::Reader input, ffi::Decompile which) {
   auto canonical = capnp::canonicalize(input);
   auto bytes = canonical.asBytes();
   auto indices = ffi::decompile_compatibility_flags({bytes.begin(), bytes.size()}, which);
+  auto fields = capnp::Schema::from<CompatibilityFlags>().getFields();
   auto names = kj::heapArrayBuilder<kj::StringPtr>(indices.size());
   for (auto index: indices) {
-    auto name = ffi::enable_flag_name(index);
-    // Text in the schema is NUL-terminated, as all Cap'n Proto text is, and static.
-    names.add(kj::StringPtr(name.data(), name.size()));
+    names.add(enableFlagName(fields[index]));
   }
   return names.finish();
 }
@@ -117,12 +110,12 @@ bool useRust() {
 }  // namespace
 
 kj::String currentDateStr() {
-  if (!useRust()) return legacy::currentDateStr();
+  if (!useRust()) return compat_date_legacy::currentDateStr();
   return kj::str(ffi::current_date_str());
 }
 
 kj::String newestCompatDateStr() {
-  if (!useRust()) return legacy::newestCompatDateStr();
+  if (!useRust()) return compat_date_legacy::newestCompatDateStr();
   return kj::str(ffi::newest_compat_date_str());
 }
 
@@ -135,10 +128,11 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
     MainModuleIsPython mainModuleIsPython) {
   if (!useRust()) {
-    return legacy::compileCompatibilityFlags(compatDate, compatFlags, output, errorReporter,
-        allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
+    return compat_date_legacy::compileCompatibilityFlags(compatDate, compatFlags, output,
+        errorReporter, allowExperimentalFeatures, dateValidation, allowedExperimentalFlags,
+        mainModuleIsPython);
   }
-  compileFlatFlags(compatDate, FlatStrings(compatFlags), output, errorReporter,
+  compileFlags(compatDate, bytesOfEach(compatFlags), output, errorReporter,
       allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
 
@@ -151,25 +145,26 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
     MainModuleIsPython mainModuleIsPython) {
   if (!useRust()) {
-    return legacy::compileCompatibilityFlags(compatDate, compatFlags, output, errorReporter,
-        allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
+    return compat_date_legacy::compileCompatibilityFlags(compatDate, compatFlags, output,
+        errorReporter, allowExperimentalFeatures, dateValidation, allowedExperimentalFlags,
+        mainModuleIsPython);
   }
-  compileFlatFlags(compatDate, FlatStrings(compatFlags), output, errorReporter,
+  compileFlags(compatDate, bytesOfEach(compatFlags), output, errorReporter,
       allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
-  if (!useRust()) return legacy::decompileCompatibilityFlagsForFl(input);
+  if (!useRust()) return compat_date_legacy::decompileCompatibilityFlagsForFl(input);
   return decompileFlags(input, ffi::Decompile::NeededByFl);
 }
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlags(CompatibilityFlags::Reader input) {
-  if (!useRust()) return legacy::decompileCompatibilityFlags(input);
+  if (!useRust()) return compat_date_legacy::decompileCompatibilityFlags(input);
   return decompileFlags(input, ffi::Decompile::All);
 }
 
 kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date) {
-  if (!useRust()) return legacy::normalizeCompatDate(date);
+  if (!useRust()) return compat_date_legacy::normalizeCompatDate(date);
   auto normalized = ffi::normalize_compat_date(bytesOf(date));
   if (normalized.empty()) return kj::none;
   return kj::str(normalized);

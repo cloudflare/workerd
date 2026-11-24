@@ -17,7 +17,7 @@
 
 #include <cstdio>
 
-namespace workerd::legacy {
+namespace workerd::compat_date_legacy {
 
 using kj::uint;
 
@@ -399,4 +399,4 @@ kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date) {
   return CompatDate::parse(date).map([](auto v) { return v.toString(); });
 }
 
-}  // namespace workerd::legacy
+}  // namespace workerd::compat_date_legacy

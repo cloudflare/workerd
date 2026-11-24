@@ -764,9 +764,13 @@ kj_test(
 )
 
 # Checks that the Rust compiler agrees with the C++ one in compatibility-date-legacy.c++.
+# It compiles about 14,000 configurations twice, which takes 20-50 s in a fastbuild, more than
+# the 15 s .bazelrc gives a medium test.
 kj_test(
     size = "large",
     src = "compatibility-date-legacy-test.c++",
+    # The test turns RUST_COMPAT_DATE on itself.
+    generate_all_autogates_variant = False,
     deps = [
         ":compatibility-date",
         ":maximum-compatibility-date",
