@@ -60,6 +60,7 @@
 // doesn't count a symbol that only a macro from another header uses.
 // NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/setup.h>
+#include <workerd/rust/jsg-cpp/jsg-cpp.h>
 #include <workerd/server/workerd-debug-port-client.h>
 
 namespace workerd::server {
@@ -129,6 +130,7 @@ namespace workerd::server {
   EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,           \
   EW_WRAPPED_BINDING_ISOLATE_TYPES,                     \
   workerd::api::EnvModule,                              \
+  jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>, \
   jsg::TypeWrapperExtension<PromiseWrapper>,            \
   jsg::InjectConfiguration<CompatibilityFlags::Reader>, \
   Worker::Api::ErrorInterface
