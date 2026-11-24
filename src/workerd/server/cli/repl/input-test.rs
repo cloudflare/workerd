@@ -106,25 +106,45 @@ fn scanning_continues_across_lines() {
     assert!(!scanner.is_unfinished());
 }
 
+fn rewritten(source: &str, declarations: &str, ends_with_declaration: bool) -> Rewritten {
+    Rewritten {
+        source: source.to_owned(),
+        declarations: declarations.to_owned(),
+        ends_with_declaration,
+    }
+}
+
 #[test]
 fn rewrites_top_level_declarations() {
     assert_eq!(
         rewrite_declarations("const w = await f()"),
-        "      w = await f()"
+        rewritten("      w = await f()", "let w;", true)
     );
     assert_eq!(
-        rewrite_declarations("let a=1; var b = 2"),
-        "    a=1;     b = 2"
+        rewrite_declarations("let a=1; var b = 2; a + b"),
+        rewritten("    a=1;     b = 2; a + b", "let a;var b;", false)
     );
     // Every name has an initializer; the commas in brackets are not the declaration's.
     assert_eq!(
         rewrite_declarations("let a = f(1, 2), b = { c: 3, d }, e = (g, h) => g"),
-        "    a = f(1, 2), b = { c: 3, d }, e = (g, h) => g"
+        rewritten(
+            "    a = f(1, 2), b = { c: 3, d }, e = (g, h) => g",
+            "let a, b, e;",
+            true
+        )
     );
     // A declaration ends at its `;`.
     assert_eq!(
-        rewrite_declarations("let a = 1, b; const c = 2, d = 3"),
-        "let a = 1, b;       c = 2, d = 3"
+        rewrite_declarations("let a = 1, b; const c = 2, d = 3;"),
+        rewritten("let a = 1, b;       c = 2, d = 3;", "let c, d;", true)
+    );
+    assert_eq!(
+        rewrite_declarations("const \u{e9}t\u{e9} = await f()\n\nx"),
+        rewritten(
+            "      \u{e9}t\u{e9} = await f()\n\nx",
+            "let \u{e9}t\u{e9};",
+            true
+        )
     );
 }
 
@@ -147,7 +167,11 @@ fn keeps_other_declarations() {
         "let x == y",
         "const f => 1",
     ] {
-        assert_eq!(rewrite_declarations(source), source, "{source:?}");
+        assert_eq!(
+            rewrite_declarations(source),
+            rewritten(source, "", false),
+            "{source:?}"
+        );
     }
 }
 
@@ -161,19 +185,37 @@ fn candidates_wrap_inputs_that_await() {
             parenthesized: false,
         }]
     );
-    let wrapped = candidates("const x = await f() // done");
+    let wrapped = candidates("const x = await f(); x // done");
     assert_eq!(wrapped.len(), 3);
     assert!(!wrapped[0].awaited);
     assert_eq!(
         wrapped[1].source,
-        "(async () => {return (      x = await f() // done\n)})()"
+        "let x;(async () => {      x = await f();return ( x // done\n)})()"
     );
     assert!(wrapped[1].awaited);
     assert_eq!(
         wrapped[2].source,
-        "(async () => {      x = await f() // done\n})()"
+        "let x;(async () => {      x = await f(); x // done\n})()"
     );
     assert!(wrapped[2].awaited);
+}
+
+#[test]
+fn candidates_of_an_input_that_ends_with_a_declaration_return_nothing() {
+    let wrapped = candidates("x = 1; var y = await f()\n");
+    assert_eq!(
+        wrapped
+            .into_iter()
+            .map(|c| (c.source, c.awaited))
+            .collect::<Vec<_>>(),
+        [
+            ("x = 1; var y = await f()\n".to_owned(), false),
+            (
+                "var y;(async () => {x = 1;     y = await f()\n\n})()".to_owned(),
+                true
+            ),
+        ]
+    );
 }
 
 #[test]

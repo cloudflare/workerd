@@ -65,7 +65,8 @@ class ReplEnvironment final: public ReplHost {
   struct Candidate {
     kj::String source;
     // The completion value is a promise the REPL awaits, rendering what it settles to: the input
-    // was wrapped in an async function so that it could `await`.
+    // was wrapped in an async function so that it could `await`, after any declarations made
+    // ahead of it.
     bool awaited;
     // The input was put in parentheses, so that a `{` that starts it starts an object literal. A
     // syntax error compiling it is the parentheses', not the input's own.

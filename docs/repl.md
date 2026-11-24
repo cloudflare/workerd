@@ -146,10 +146,15 @@ while the REPL waits, so timers, `fetch()` and the loaded servers all make progr
 
 A declaration inside an async function would be local to it. So in an input that awaits at top
 level, a `const`, `let` or `var` declaration at the input's top level (not in a block) that gives
-each of its names a value, such as `const x = await f()`, becomes an assignment to a global, which
-later inputs can see. Other declarations stay local to the input: one with a destructuring pattern
-(assign instead, as in `({ a } = await f())`), one with a name it gives no value, such as
-`let x;`, one in a block, and a function or class declaration.
+each of its names a value, such as `const x = await f()`, declares its names at the top level,
+ahead of the function, and the function assigns them, as in Node's REPL. Later inputs see them,
+and declaring one again is the error it would be without `await`. Two things differ from the
+declaration as written: a `const` is declared with `let`, so it can be reassigned, and the names
+are declared before the input runs, so those of an input that fails stay declared, as
+`undefined`. Such a declaration prints `undefined` when it ends the input, as a declaration does.
+Other declarations stay local to the input: one with a destructuring pattern (assign instead, as
+in `({ a } = await f())`), one with a name it gives no value, such as `let x;`, one in a block,
+and a function or class declaration.
 
 An input that doesn't await at top level runs as a script. A promise it produces prints as a
 promise; `await` it to see what it settles to.

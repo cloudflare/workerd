@@ -63,9 +63,10 @@ The `workerd` global loads configs and reaches their services:
   await s.close()
 
 In an input that awaits at top level, a `const`, `let` or `var` declaration that gives each of
-its names a value, such as `const a = await f(), b = 2`, assigns globals instead, so that later
-inputs see them. Other declarations stay local to the input: one that destructures (assign
-instead, as in `({ a } = await f())`), one that leaves a name without a value, one in a block.
+its names a value, such as `const a = await f(), b = 2`, declares them at the top level ahead of
+the input, so that later inputs see them; a `const` is declared with `let`. Other declarations
+stay local to the input: one that destructures (assign instead, as in `({ a } = await f())`),
+one that leaves a name without a value, one in a block.
 
 `_` is the last result and `_error` the last exception, until you assign to them.
 

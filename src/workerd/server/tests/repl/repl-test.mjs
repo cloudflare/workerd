@@ -83,6 +83,45 @@ test('a config that does not load leaves the REPL running', async () => {
   assert.deepStrictEqual(results.slice(-2), ["'undefined'", '2'], stdout);
 });
 
+test('an input that awaits declares its names as one that does not would', async () => {
+  const { results, stdout } = await repl(
+    [],
+    [
+      'const x = 1',
+      'const x = await 2',
+      'let y = 1',
+      'let y = await 2',
+      'class K {}',
+      'const K = await 1',
+      'const fetch = await 1',
+      '[typeof globalThis.fetch, fetch]',
+      'var v = await 3',
+      'globalThis.v',
+      // A declaration prints `undefined`, and a `const` declared so can be reassigned.
+      'const z = await 4',
+      'z = 5',
+    ]
+  );
+  assert.deepStrictEqual(
+    results,
+    [
+      'undefined',
+      "Uncaught SyntaxError: Identifier 'x' has already been declared",
+      'undefined',
+      "Uncaught SyntaxError: Identifier 'y' has already been declared",
+      'undefined',
+      "Uncaught SyntaxError: Identifier 'K' has already been declared",
+      'undefined',
+      "[ 'function', 1 ]",
+      'undefined',
+      '3',
+      'undefined',
+      '5',
+    ],
+    stdout
+  );
+});
+
 test('the exit status says whether an input failed', async () => {
   for (const [lines, failed] of [
     [['1 + 1', '_error'], false],
@@ -373,7 +412,7 @@ test('an environment evaluates input as the console does', async () => {
   assert.strictEqual(code, 0, stderr);
   assert.deepStrictEqual(
     results.slice(-4),
-    [`"'undefined'"`, "'1'", "'2'", "'undefined'"],
+    [`"'undefined'"`, "'undefined'", "'2'", "'undefined'"],
     results.join('\n')
   );
 });

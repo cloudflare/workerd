@@ -14,6 +14,8 @@
 //! after a block but not after an object literal; after a `)` it takes `/` to divide, which it
 //! does after an expression but not after the condition of an `if` or a loop.
 
+use std::ops::Range;
+
 use super::bridge::ffi::ReplCandidate;
 
 /// The keywords after which an expression starts, so that a `/` starts a regular expression.
@@ -321,9 +323,10 @@ fn is_word_byte(byte: u8) -> bool {
 /// The ways the REPL may compile `input`, in the order to try them: as it is, then, if it may
 /// await at top level, wrapped in an async function, first returning the value of its last
 /// statement ([`returning_last_statement`]) and then as statements whose result is `undefined`.
-/// See [`rewrite_declarations`] for what the wrappings do to declarations. The session passes over
-/// the input as it is when it uses `await` as a name, as `await (x)` does in a script
-/// (`ReplEnvironment::compile`).
+/// See [`rewrite_declarations`] for what the wrappings do to declarations; an input whose last
+/// statement is one of those declarations has only the second wrapping, so that it prints
+/// `undefined`, as a declaration does. The session passes over the input as it is when it uses
+/// `await` as a name, as `await (x)` does in a script (`ReplEnvironment::compile`).
 ///
 /// An input that starts with `{` and doesn't end with `;` is first tried in parentheses, so that
 /// `{ a: 1 }` is an object literal rather than a block, as in Node's REPL. Without them it is a
@@ -354,15 +357,21 @@ pub fn candidates(input: &str) -> Vec<ReplCandidate> {
         parenthesized: false,
     });
     if awaits {
-        let rewritten = rewrite_declarations(input);
-        candidates.push(ReplCandidate {
-            source: returning_last_statement(&rewritten),
-            awaited: true,
-            parenthesized: false,
-        });
+        let Rewritten {
+            source: rewritten,
+            declarations,
+            ends_with_declaration,
+        } = rewrite_declarations(input);
+        if !ends_with_declaration {
+            candidates.push(ReplCandidate {
+                source: format!("{declarations}{}", returning_last_statement(&rewritten)),
+                awaited: true,
+                parenthesized: false,
+            });
+        }
         // The line break keeps a line comment that ends the input from swallowing the wrapping.
         candidates.push(ReplCandidate {
-            source: format!("(async () => {{{rewritten}\n}})()"),
+            source: format!("{declarations}(async () => {{{rewritten}\n}})()"),
             awaited: true,
             parenthesized: false,
         });
@@ -370,11 +379,9 @@ pub fn candidates(input: &str) -> Vec<ReplCandidate> {
     candidates
 }
 
-/// `source` as an async function that returns the value of its last statement, the code after its
-/// last top-level `;` (not counting those that end it): `a = await f(); a.b` becomes
-/// `(async () => {a = await f();return ( a.b\n)})()`. Lines and the columns past the first line
-/// stay where they were. If the last statement is not an expression, this does not compile.
-fn returning_last_statement(source: &str) -> String {
+/// Where the last statement of `source` is: the code after its last top-level `;`, not counting
+/// those that end it, up to them.
+fn last_statement(source: &str) -> Range<usize> {
     let mut semicolons = Vec::new();
     Scanner::default().scan_tokens(source.as_bytes(), |token| {
         if let Token::Semicolon(at) = token {
@@ -388,47 +395,98 @@ fn returning_last_statement(source: &str) -> String {
         end = last;
         semicolons.pop();
     }
+    semicolons.last().map_or(0, |&split| split + 1)..end
+}
+
+/// `source` as an async function that returns the value of its last statement, the code after its
+/// last top-level `;` (not counting those that end it): `a = await f(); a.b` becomes
+/// `(async () => {a = await f();return ( a.b\n)})()`. Lines and the columns past the first line
+/// stay where they were. If the last statement is not an expression, this does not compile.
+fn returning_last_statement(source: &str) -> String {
+    let last = last_statement(source);
     // The line break keeps a line comment that ends the input from swallowing the parenthesis.
-    match semicolons.last() {
-        Some(&split) => format!(
+    if last.start == 0 {
+        format!("(async () => {{return ({}\n)}})()", &source[..last.end])
+    } else {
+        format!(
             "(async () => {{{};return ({}\n)}})()",
-            &source[..split],
-            &source[split + 1..end]
-        ),
-        None => format!("(async () => {{return ({}\n)}})()", &source[..end]),
+            &source[..last.start - 1],
+            &source[last]
+        )
     }
+}
+
+/// What [`rewrite_declarations`] makes of an input.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Rewritten {
+    /// The input, with the keywords of the declarations it turns into assignments blanked.
+    pub source: String,
+    /// The declarations of their names, to make ahead of the async function, on the first line:
+    /// `let a, b;var c;`, or nothing.
+    pub declarations: String,
+    /// Whether the input's last statement is one of those declarations.
+    pub ends_with_declaration: bool,
 }
 
 /// Turns the top-level `const`, `let` and `var` declarations in `source` that give each of their
 /// names an initializer into assignments, by blanking the keyword: `const x = await f()` becomes
 /// `      x = await f()`. A declaration in the async function that lets an input await would end
-/// with the function; the assignment makes a global that later inputs see, as Node's REPL does.
-/// Declarations with a destructuring pattern or a name without an initializer (in `let a = 1, b`,
-/// the assignment would leave `b` an undefined name) are kept, as are declarations inside
-/// brackets. A declaration is taken to end at the next top-level `;`, so one that a line break
-/// ends is kept if a top-level `,` after it is not followed by a name and `=`.
-pub fn rewrite_declarations(source: &str) -> String {
+/// with the function. So the names are declared ahead of it instead, at the top level of the
+/// script, `const` ones with `let`, as Node's REPL does: later inputs see them, and redeclaring
+/// one is the error it would be without `await`. Declarations with a destructuring pattern or a
+/// name without an initializer (in `let a = 1, b`, the assignment would leave `b` an undefined
+/// name) are kept, as are declarations inside brackets. A declaration is taken to end at the next
+/// top-level `;`, so one that a line break ends is kept if a top-level `,` after it is not
+/// followed by a name and `=`.
+pub fn rewrite_declarations(source: &str) -> Rewritten {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     Scanner::default().scan_tokens(bytes, |token| tokens.push(token));
     let mut blanked = Vec::new();
+    let mut lexical = Vec::new();
+    let mut vars = Vec::new();
     for (i, token) in tokens.iter().enumerate() {
-        if let Token::Word {
+        let Token::Word {
             start,
             end,
             top_level: true,
         } = *token
-            && matches!(&bytes[start..end], b"const" | b"let" | b"var")
-            && starts_initialized_name(&bytes[end..])
-            && tokens[i + 1..]
-                .iter()
-                .take_while(|token| !matches!(token, Token::Semicolon(_)))
-                .all(|token| match *token {
-                    Token::Comma(at) => starts_initialized_name(&bytes[at + 1..]),
-                    _ => true,
-                })
-        {
+        else {
+            continue;
+        };
+        let keyword = &source[start..end];
+        if !matches!(keyword, "const" | "let" | "var") {
+            continue;
+        }
+        let names: Option<Vec<&str>> = std::iter::once(end)
+            .chain(
+                tokens[i + 1..]
+                    .iter()
+                    .take_while(|token| !matches!(token, Token::Semicolon(_)))
+                    .filter_map(|token| match *token {
+                        Token::Comma(at) => Some(at + 1),
+                        _ => None,
+                    }),
+            )
+            .map(|at| initialized_name(source, at))
+            .collect();
+        if let Some(names) = names {
             blanked.push(start..end);
+            if keyword == "var" {
+                &mut vars
+            } else {
+                &mut lexical
+            }
+            .extend(names);
+        }
+    }
+    let ends_with_declaration = blanked
+        .last()
+        .is_some_and(|keyword| keyword.start >= last_statement(source).start);
+    let mut declarations = String::new();
+    for (keyword, names) in [("let", &lexical), ("var", &vars)] {
+        if !names.is_empty() {
+            declarations += &format!("{keyword} {};", names.join(", "));
         }
     }
     let mut rewritten = source.to_owned();
@@ -436,27 +494,27 @@ pub fn rewrite_declarations(source: &str) -> String {
         // The keywords are ASCII, so blanking them keeps the string valid and every column put.
         rewritten.replace_range(range.clone(), &" ".repeat(range.len()));
     }
-    rewritten
-}
-
-/// Whether `rest`, what follows a declaration keyword or the `,` before a declaration's next name,
-/// starts with a name and then `=` (and not `==` or `=>`).
-fn starts_initialized_name(rest: &[u8]) -> bool {
-    let rest = trim_start(rest);
-    let name_length = rest.iter().take_while(|&&b| is_word_byte(b)).count();
-    if name_length == 0 || rest[0].is_ascii_digit() {
-        return false;
+    Rewritten {
+        source: rewritten,
+        declarations,
+        ends_with_declaration,
     }
-    let rest = trim_start(&rest[name_length..]);
-    rest.first() == Some(&b'=') && !matches!(rest.get(1), Some(b'=' | b'>'))
 }
 
-fn trim_start(bytes: &[u8]) -> &[u8] {
-    let start = bytes
+/// The name that `source` starts with at `at`, what follows a declaration keyword or the `,`
+/// before a declaration's next name, if `=` (and not `==` or `=>`) follows it.
+fn initialized_name(source: &str, at: usize) -> Option<&str> {
+    let start = at + source[at..].len() - source[at..].trim_start().len();
+    let name_length = source.as_bytes()[start..]
         .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(bytes.len());
-    &bytes[start..]
+        .take_while(|&&b| is_word_byte(b))
+        .count();
+    let name = &source[start..start + name_length];
+    if name.is_empty() || name.as_bytes()[0].is_ascii_digit() {
+        return None;
+    }
+    let rest = source[start + name_length..].trim_start().as_bytes();
+    (rest.first() == Some(&b'=') && !matches!(rest.get(1), Some(b'=' | b'>'))).then_some(name)
 }
 
 /// What tab completion completes in a line: the name being typed before the cursor, and the
