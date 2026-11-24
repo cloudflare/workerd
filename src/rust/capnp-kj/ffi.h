@@ -107,9 +107,9 @@ class ContextMessage final: public CxxMessage {
 // any other server's a C++ message it builds in the context. Each side reads the other's message
 // in place. A message is copied only to forward the call through a context the bridge doesn't
 // know, for a tail call's response, which Rust can't read in place, and when C++ asks for a Rust
-// server's results, as KJ's pipelining does when the results can contain capabilities. Messages
+// server's results, as KJ's pipelining does when the results can contain capabilities. Results
 // are never moved out of the context once set, so readers on both sides can take them in any
-// order.
+// order; a Rust server takes a Rust caller's params only if C++ hasn't read them.
 class BridgeContext final: public capnp::CallContextHook,
                            public capnp::ResponseHook,
                            public capnp::RequestHook,

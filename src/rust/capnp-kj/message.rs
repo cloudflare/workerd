@@ -294,8 +294,8 @@ impl message::ReaderSegments for CxxSegments {
             reason = "reads a segment of the C++ message that `self` owns"
         )]
         // Safety: the segments belong to `self.message`, which lives as long as `self`, on the
-        // heap. It is a copy, or the results of a completed call, and nothing writes to either
-        // once Rust has it.
+        // heap. It is a copy, the results of a completed call, or the params of a sent call,
+        // which C++ built before sending it, and nothing writes to any of them once Rust has it.
         Some(unsafe { &*segment })
     }
 
