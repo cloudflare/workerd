@@ -726,6 +726,21 @@ void BaseTracer::setInvocationSpanAttribute(
     KJ_CASE_ONEOF(i, int64_t) {
       invocationSpan.setTag(key.clone(), i, IsCustomTag::YES);
     }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      auto clone = spanTagClone(value);
+      invocationSpan.setTag(
+          key.clone(), kj::mv(clone.get<tracing::AttributeStringArray>()), IsCustomTag::YES);
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      auto clone = spanTagClone(value);
+      invocationSpan.setTag(
+          key.clone(), kj::mv(clone.get<tracing::AttributeBoolArray>()), IsCustomTag::YES);
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      auto clone = spanTagClone(value);
+      invocationSpan.setTag(
+          key.clone(), kj::mv(clone.get<tracing::AttributeDoubleArray>()), IsCustomTag::YES);
+    }
   }
 }
 
