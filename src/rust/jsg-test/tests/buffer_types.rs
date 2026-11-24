@@ -315,6 +315,63 @@ fn shared_array_buffer_to_vec_copies_its_bytes() {
 }
 
 #[test]
+fn array_buffer_view_over_shared_array_buffer_to_vec_copies_its_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        // A view at an offset, a DataView, and a length-tracking view over a growable buffer
+        // each copy exactly the bytes they cover.
+        let val = ctx
+            .eval_raw(
+                lock,
+                "globalThis.sab = new SharedArrayBuffer(4, { maxByteLength: 8 }); \
+                 new Uint8Array(sab).set([1, 2, 3, 4]); new Uint8Array(sab, 1, 2)",
+            )
+            .unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
+        assert_eq!(view.to_vec(), vec![2u8, 3]);
+
+        let val = ctx.eval_raw(lock, "new DataView(sab, 2)").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
+        assert_eq!(view.to_vec(), vec![3u8, 4]);
+
+        let val = ctx
+            .eval_raw(
+                lock,
+                "globalThis.tracking = new Uint8Array(sab); sab.grow(6); tracking",
+            )
+            .unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
+        assert_eq!(view.to_vec(), vec![1u8, 2, 3, 4, 0, 0]);
+
+        let val = ctx.eval_raw(lock, "new Uint8Array(sab, 6)").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
+        assert!(view.to_vec().is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn shared_buffer_of_a_view_to_vec_copies_its_bytes() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        // V8 hands out a view's `SharedArrayBuffer` as an `ArrayBuffer`; its `to_vec()` copies
+        // every byte of the buffer, not just the view's.
+        let val = ctx
+            .eval_raw(
+                lock,
+                "const sab = new SharedArrayBuffer(4); new Uint8Array(sab).set([1, 2, 3, 4]); \
+                 new Uint8Array(sab, 1, 2)",
+            )
+            .unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
+        let buffer = view.buffer(lock);
+        assert!(buffer.is_shared());
+        assert_eq!(buffer.to_vec(), vec![1u8, 2, 3, 4]);
+        Ok(())
+    });
+}
+
+#[test]
 fn array_buffer_into_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {

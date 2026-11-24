@@ -385,6 +385,8 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_contents(buffer: &Local, byte_length: &mut usize)
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
+        #[nothrow]
+        pub unsafe fn local_array_buffer_copy_to(buffer: &Local, out: &mut [u8]) -> usize;
 
         // Local<SharedArrayBuffer>
         #[nothrow]
@@ -409,6 +411,8 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_buffer_data(view: &Local) -> *mut u8;
         pub unsafe fn local_array_buffer_view_data(view: &Local, byte_length: &mut usize) -> usize;
+        #[nothrow]
+        pub unsafe fn local_array_buffer_view_copy_to(view: &Local, out: &mut [u8]) -> usize;
         pub unsafe fn local_array_buffer_view_get_buffer(
             isolate: *mut Isolate,
             view: &Local,
@@ -3068,6 +3072,10 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// resize or write to the buffer) needs `&mut Lock`, so none of it can happen while
     /// the slice is live.
     ///
+    /// The buffer may be a `SharedArrayBuffer`, as the one an `ArrayBufferView`'s `buffer()`
+    /// returns may be ([`is_shared`](Self::is_shared) tells), and another agent may write its
+    /// bytes while the slice is live; [`to_vec`](Self::to_vec) copies them without borrowing.
+    ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
@@ -3105,10 +3113,18 @@ impl<'s> Local<'s, ArrayBuffer> {
     }
 
     /// Copies the `ArrayBuffer` contents into a new `Vec<u8>`.
+    ///
+    /// The buffer may be a `SharedArrayBuffer` (see [`is_shared`](Self::is_shared)), which another
+    /// agent may write to at any time, so C++ copies the bytes and Rust never borrows them.
     pub fn to_vec(&self) -> Vec<u8> {
-        // SAFETY: the FFI returns this region's bytes, and no JavaScript runs
-        // before the copy completes.
-        unsafe { &*self.as_raw_slice() }.to_vec()
+        let mut bytes = vec![0; self.byte_length()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_array_buffer_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the buffer can't have
+        // shrunk. Another agent may grow a `SharedArrayBuffer` in the meantime, but the copy stops
+        // at `bytes.len()`.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
     }
 
     /// A raw pointer to the buffer's bytes, read from V8 in one call. It is dangling, with no
@@ -3288,6 +3304,10 @@ impl<'s> Local<'s, ArrayBufferView> {
     }
 
     /// Returns the backing `ArrayBuffer` of this view.
+    ///
+    /// As in V8, the buffer may be a `SharedArrayBuffer` even though the handle is a
+    /// `Local<ArrayBuffer>`. Its `is_shared()` tells, and its `to_vec()`, unlike its
+    /// `as_slice()`, reads a shared buffer without borrowing it.
     pub fn buffer(self, lock: &mut Lock<'s>) -> Local<'s, ArrayBuffer> {
         // SAFETY: lock guarantees the isolate is locked; the new handle is created in the
         // lock's scope.
@@ -3304,6 +3324,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// Zero-copy: points directly into V8-managed memory. The slice borrows `lock`, so
     /// no JavaScript (which could detach, resize or write to the buffer) can run while
     /// it is live.
+    ///
+    /// For a view over a `SharedArrayBuffer`, another agent may write the bytes while the slice
+    /// is live; [`to_vec`](Self::to_vec) copies them without borrowing.
     ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
@@ -3342,9 +3365,18 @@ impl<'s> Local<'s, ArrayBufferView> {
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
+    ///
+    /// The view's buffer may be a `SharedArrayBuffer`, which another agent may write to at any
+    /// time, so C++ copies the bytes and Rust never borrows them.
     pub fn to_vec(&self) -> Vec<u8> {
-        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
-        unsafe { &*self.as_raw_slice() }.to_vec()
+        let mut bytes = vec![0; self.as_raw_slice().len()];
+        // SAFETY: handle is valid within the current HandleScope.
+        let copied = unsafe { ffi::local_array_buffer_view_copy_to(self.raw(), &mut bytes) };
+        // No JavaScript runs between reading the length and copying, so the view can't have
+        // shrunk. Another agent may grow a `SharedArrayBuffer` under a length-tracking view in
+        // the meantime, but the copy stops at `bytes.len()`.
+        debug_assert_eq!(copied, bytes.len());
+        bytes
     }
 
     /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with
@@ -3511,6 +3543,11 @@ macro_rules! impl_typed_array {
             /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
             /// The slice borrows `lock`, so no JavaScript (which could detach, resize
             /// or write to the buffer) can run while it is live.
+            ///
+            /// For a typed array over a `SharedArrayBuffer`, another agent may write the
+            /// elements while the slice is live; converting it into a
+            /// `Local<ArrayBufferView>` and calling `to_vec()` copies its bytes without
+            /// borrowing.
             ///
             /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
             /// integrate this method with that somehow.

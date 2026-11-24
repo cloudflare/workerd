@@ -953,6 +953,15 @@ size_t local_array_buffer_get_backing_store(const Local& buffer) {
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
+size_t local_array_buffer_copy_to(const Local& buffer, ::rust::Slice<uint8_t> out) {
+  auto buf = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  auto size = kj::min(buf->ByteLength(), out.size());
+  if (size > 0) {
+    memcpy(out.data(), buf->Data(), size);
+  }
+  return size;
+}
+
 // Local<SharedArrayBuffer>
 size_t local_shared_array_buffer_byte_length(const Local& buffer) {
   return local_as_ref_from_ffi<v8::SharedArrayBuffer>(buffer)->ByteLength();
@@ -1000,6 +1009,15 @@ uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length) {
   auto bytes = viewBytes(local_as_ref_from_ffi<v8::ArrayBufferView>(view));
   byte_length = bytes.size();
   return reinterpret_cast<uintptr_t>(bytes.begin());
+}
+
+size_t local_array_buffer_view_copy_to(const Local& view, ::rust::Slice<uint8_t> out) {
+  auto bytes = viewBytes(local_as_ref_from_ffi<v8::ArrayBufferView>(view));
+  auto size = kj::min(bytes.size(), out.size());
+  if (size > 0) {
+    memcpy(out.data(), bytes.begin(), size);
+  }
+  return size;
 }
 
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
