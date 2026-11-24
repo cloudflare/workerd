@@ -112,10 +112,21 @@ export function syncBuiltinESMExports(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.syncBuiltinESMExports');
 }
 
-export function wrap(): void {
-  // TODO(soon): Implement this feature.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('module.wrap');
+// Module.wrap and Module.wrapper are accessors, as in Node.js, so that a
+// Worker can replace either one. wrap() reads Module.wrapper on every call.
+let currentWrapper: unknown = [
+  '(function (exports, require, module, __filename, __dirname) { ',
+  '\n});',
+];
+
+export function wrap(script: unknown): string {
+  const w = currentWrapper as [string, string];
+  // Use + rather than a template literal: it converts objects with the
+  // default hint, as Node.js does, so valueOf() is preferred over toString().
+  return w[0] + (script as string) + w[1];
 }
+
+let currentWrap: unknown = wrap;
 
 export const globalPaths: string[] = [];
 
@@ -331,9 +342,20 @@ Object.defineProperties(Module, {
     enumerable: true,
   },
   wrap: {
-    value: wrap,
-    writable: true,
-    enumerable: true,
+    get(): unknown {
+      return currentWrap;
+    },
+    set(value: unknown) {
+      currentWrap = value;
+    },
+  },
+  wrapper: {
+    get(): unknown {
+      return currentWrapper;
+    },
+    set(value: unknown) {
+      currentWrapper = value;
+    },
   },
   _cache: {
     value: _cache,
