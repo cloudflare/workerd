@@ -93,6 +93,7 @@ import {
   createHmac,
   generateKeyPairSync,
   randomBytes,
+  randomUUID,
 } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { env } from 'node:process';
@@ -445,14 +446,44 @@ const SEVERAL_THREADS = {
     'several threads are not supported on Windows',
 };
 
-// How many requests a test sends for one thread before it gives up.
+// How many requests a test sends before it gives up on what it waits for.
 const THREAD_TRIES = 200;
+
+// What the `attempts` of a round resolved to, once each has settled. An attempt that failed
+// after another was answered is of no interest (the server may have stopped meanwhile); if none
+// was answered, the first failure is the round's.
+async function settled(attempts) {
+  const results = await Promise.allSettled(attempts);
+  const answers = results.flatMap((r) =>
+    r.status === 'fulfilled' ? [r.value] : []
+  );
+  const failure = results.find((r) => r.status === 'rejected');
+  if (
+    failure !== undefined &&
+    answers.every((a) => a.status === 409 && a.body.refused === true)
+  ) {
+    throw failure.reason;
+  }
+  return answers;
+}
+
+// How many rounds `NodeThread.fetchJson` sends before it gives up.
+const THREAD_ROUNDS = 8;
 
 // One of the loop threads a node serves on (`--threads`), by the identity of
 // its isolate (`thread`). Each request goes to whichever thread takes it, so a
 // request names the isolate it is for (`x-thread`), the node's worker refuses
-// it on any other thread (409, before doing anything with it), and it is sent
-// again until this thread serves it.
+// it on any other thread (409 and `refused`, before doing anything with it),
+// and it is sent again until this thread serves it.
+//
+// The node wakes the sleeping thread with the fewest requests in flight for
+// each request, and among equals the one that slept last, so one request at a
+// time would keep going to the same warm thread. A round therefore sends
+// several attempts a few milliseconds apart, and a worker holds its refusal for
+// a while, so that it has a request in flight and the next attempt goes to
+// another thread; each round sends twice as many, so that a thread with
+// requests of its own in flight is reached too. The attempts share an
+// `x-attempt`, so this thread acts on one of them only.
 class NodeThread {
   #port;
 
@@ -463,16 +494,27 @@ class NodeThread {
 
   // As `fetchJson`, served by this thread.
   async fetchJson(path, { timeoutMs = 30_000 } = {}) {
-    for (let tries = 0; tries < THREAD_TRIES; tries++) {
-      const answer = await this.#send(path, timeoutMs);
-      if (answer.status !== 409 || answer.body.thread === this.thread) {
-        return answer;
+    const attempt = randomUUID();
+    for (let round = 1; round <= THREAD_ROUNDS; round++) {
+      const attempts = [];
+      for (let i = 0; i < THREADS * 2 ** (round - 1); i++) {
+        const sent = this.#send(path, timeoutMs, attempt);
+        // A failure is the round's only if no attempt was answered (`settled`).
+        sent.catch(() => {});
+        attempts.push(sent);
+        await sleep(2);
       }
+      const answers = (await settled(attempts)).filter(
+        (answer) => answer.status !== 409 || answer.body.refused !== true
+      );
+      if (answers.length > 0) return answers[0];
     }
-    assert.fail(`thread ${this.thread} served none of ${THREAD_TRIES} ${path}`);
+    assert.fail(
+      `thread ${this.thread} served none of ${THREAD_ROUNDS} ${path}`
+    );
   }
 
-  #send(path, timeoutMs) {
+  #send(path, timeoutMs, attempt) {
     return new Promise((resolve, reject) => {
       const req = http.request(
         {
@@ -480,7 +522,7 @@ class NodeThread {
           host: '127.0.0.1',
           port: this.#port,
           path,
-          headers: { 'x-thread': this.thread },
+          headers: { 'x-thread': this.thread, 'x-attempt': attempt },
         },
         (res) => {
           let text = '';
@@ -508,14 +550,22 @@ class NodeThread {
 }
 
 // Each of the loop threads `node` serves on. The node's worker answers
-// `/thread` with its isolate's identity, which every thread has its own of,
-// and the node wakes its idle threads in turn, so a few requests find them all.
+// `/thread` with its isolate's identity, which every thread has its own of. A
+// round sends a request per thread at once, each answered after a while: a
+// thread with one in flight is passed over for one with none, so a round
+// usually finds every thread.
 async function nodeThreads(node, threads = THREADS) {
   const found = new Set();
-  for (let tries = 0; tries < THREAD_TRIES && found.size < threads; tries++) {
-    const { status, body } = await fetchJson(node.httpPort, '/thread');
-    assert.strictEqual(status, 200, JSON.stringify(body));
-    found.add(body.thread);
+  for (let round = 0; round < THREAD_ROUNDS && found.size < threads; round++) {
+    const answers = [];
+    for (let i = 0; i < threads; i++) {
+      answers.push(fetchJson(node.httpPort, '/thread?ms=250'));
+      await sleep(2);
+    }
+    for (const { status, body } of await Promise.all(answers)) {
+      assert.strictEqual(status, 200, JSON.stringify(body));
+      found.add(body.thread);
+    }
   }
   assert.strictEqual(
     found.size,

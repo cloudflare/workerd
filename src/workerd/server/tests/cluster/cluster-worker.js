@@ -110,17 +110,33 @@ import {
 // thread.
 let thread;
 
-// Answers `/thread` with this isolate's identity, and a request whose
-// `x-thread` header names another isolate with 409 and this one's identity,
-// before anything else is done with it, for the client to send it again until
-// that isolate serves it; nothing for any other request.
-function threadRequest(request, url) {
+// The `x-attempt` of every request this isolate acted on.
+const attempts = new Set();
+
+// Answers `/thread` with this isolate's identity (after `ms` milliseconds, if
+// given, so that requests sent together are in flight together, each on a
+// thread of its own), and refuses a request whose `x-thread` header names
+// another isolate with 409, `refused` and this one's identity, before anything
+// else is done with it, for the client to send it again until that isolate
+// serves it; nothing for any other request. The refusal is held for a while:
+// the node gives the next request to a sleeping thread with the fewest requests
+// in flight, so the client's other attempts at once go to other threads. The
+// attempts of one request carry one `x-attempt`, and the isolate named acts on
+// the first it gets only: it refuses the others too.
+async function threadRequest(request, url) {
   thread ??= crypto.randomUUID();
   const wanted = request.headers.get('x-thread');
-  if (wanted !== null && wanted !== thread) {
-    return Response.json({ thread }, { status: 409 });
+  const attempt = request.headers.get('x-attempt');
+  if (
+    wanted !== null &&
+    (wanted !== thread || (attempt !== null && attempts.has(attempt)))
+  ) {
+    await scheduler.wait(100);
+    return Response.json({ thread, refused: true }, { status: 409 });
   }
+  if (attempt !== null) attempts.add(attempt);
   if (url.pathname !== '/thread') return undefined;
+  await scheduler.wait(Number(url.searchParams.get('ms') ?? 0));
   return Response.json({ thread });
 }
 
@@ -133,7 +149,7 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
-    const answer = threadRequest(request, url);
+    const answer = await threadRequest(request, url);
     if (answer !== undefined) return answer;
     if (url.pathname === '/cron-clock') {
       return env.CRON.fetch(`http://cron/clock${url.search}`, {

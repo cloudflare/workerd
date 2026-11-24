@@ -44,6 +44,13 @@
 //! they check up front. The file watcher is runtime-independent (notify delivers from its own
 //! thread; `tokio::sync::Notify` stores wakeups without a runtime) and checks nothing.
 //!
+//! A Rust caller may also serve its own sockets on a tokio runtime that is no loop's, such as
+//! one with several threads: [`ListenerSockets::listen`], [`TokioListener::accept`] and
+//! [`when_write_disconnected`] accept the runtime entered on a thread that has no
+//! `TokioEventPort` (`current_runtime_id`), and a listener made there belongs to that runtime
+//! as one made on a loop thread belongs to its loop. Everything C++ reaches takes a loop
+//! thread.
+//!
 //! # Scope: workerd's provider
 //!
 //! This crate implements KJ's I/O interfaces for **workerd**, which is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for

@@ -8,11 +8,10 @@
 // Whichever thread takes a request serves it, whatever connection it came on, so the tests learn
 // the threads by the identities of their isolates and have the thread they choose serve what they
 // test: a request names the isolate it is for (`x-thread`), any other isolate refuses it before
-// doing anything with it (409), and the test sends it again until the one it names serves it.
-// The server wakes its idle threads in turn, so that takes about as many tries as there are
-// threads.
+// doing anything with it (409), and the test sends it again until the one it names serves it
+// (`steer`).
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
@@ -67,7 +66,7 @@ async function serve(threads) {
     ],
     { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }
   );
-  const server = { child, log: '', port: undefined };
+  const server = { child, threads, log: '', port: undefined };
   for (const stream of [child.stdout, child.stderr]) {
     stream.setEncoding('utf8');
     stream.on('data', (data) => {
@@ -126,19 +125,61 @@ async function withServer(threads, body) {
   assert.deepStrictEqual(await server.stop(), SIGTERM_EXIT);
 }
 
-// How many requests a test sends for one isolate before it gives up.
+// How many times a test asks before it gives up on what it waits for.
 const TRIES = 200;
 
-// Sends a request until the isolate of `front` whose identity is `thread` serves it, or any
-// isolate if `thread` is undefined. `attempt(headers)` sends the request once with `headers`
-// and resolves with what it got, or with undefined if another isolate refused it.
-async function steer(thread, attempt) {
-  const headers = thread === undefined ? {} : { 'x-thread': thread };
-  for (let tries = 0; tries < TRIES; tries++) {
-    const answer = await attempt(headers);
-    if (answer !== undefined) return answer;
+// What the `attempts` of a round resolved to, once each has settled. An attempt that failed
+// after another was answered is of no interest (the server may have stopped meanwhile); if none
+// was answered, the first failure is the round's.
+async function settled(attempts) {
+  const results = await Promise.allSettled(attempts);
+  const answers = results.flatMap((r) =>
+    r.status === 'fulfilled' ? [r.value] : []
+  );
+  const failure = results.find((r) => r.status === 'rejected');
+  if (failure !== undefined && answers.every((a) => a === undefined)) {
+    throw failure.reason;
   }
-  assert.fail(`isolate ${thread} served none of ${TRIES} requests`);
+  return answers;
+}
+
+// How many rounds `steer` sends before it gives up.
+const ROUNDS = 8;
+
+// Sends a request until the isolate of `front` whose identity is `thread` serves it, or once to
+// any isolate if `thread` is undefined, on a server of `threads` threads. `attempt(headers)`
+// sends the request once with `headers` and resolves with what it got, or with undefined if
+// another isolate refused it.
+//
+// The front wakes the sleeping thread with the fewest requests in flight for each request, and
+// among equals the one that slept last, so one request at a time would keep going to the same warm
+// thread. Steering fans out instead: a round sends several attempts a few milliseconds apart, and
+// an isolate that is not the one named holds its refusal for a while, so that it has a request in
+// flight and the next attempt goes to another thread. Each round sends twice as many, so that a
+// thread with requests of its own in flight is reached too. The attempts share an `x-attempt`, so
+// the isolate named acts on one of them only.
+async function steer(thread, attempt, threads = THREADS) {
+  if (thread === undefined) {
+    const answer = await attempt({});
+    assert.notStrictEqual(answer, undefined, 'a request was refused');
+    return answer;
+  }
+  const headers = { 'x-thread': thread, 'x-attempt': randomUUID() };
+  for (let round = 1; round <= ROUNDS; round++) {
+    const attempts = [];
+    for (let i = 0; i < threads * 2 ** (round - 1); i++) {
+      const sent = attempt(headers);
+      // A failure is the round's only if no attempt was answered (`settled`).
+      sent.catch(() => {});
+      attempts.push(sent);
+      await scheduler.wait(2);
+    }
+    const answers = (await settled(attempts)).filter(
+      (answer) => answer !== undefined
+    );
+    if (answers.length > 0) return answers[0];
+  }
+  assert.fail(`isolate ${thread} served none of ${ROUNDS} rounds of requests`);
 }
 
 // The options of a request for `path` on a connection of its own.
@@ -180,7 +221,8 @@ function get(server, path, thread) {
         });
         req.on('error', reject);
         req.end();
-      })
+      }),
+    server.threads
   );
 }
 
@@ -203,22 +245,31 @@ function open(server, path, thread, more) {
           }
         });
         req.flushHeaders();
-      })
+      }),
+    server.threads
   );
 }
 
 // The isolates of `front`, one per thread, by identity: `first` is the first thread's, whose
 // copy of the Worker runs the objects, so it is also `object`, the identity the objects report;
-// `replicas` are the others'. Requests go to the threads in turn, so a few find them all.
+// `replicas` are the others'. A round sends a request per thread at once, each answered after a
+// while: a thread with one in flight is passed over for one with none, so a round usually finds
+// every thread.
 async function threadsOf(server, threads = THREADS) {
   const fronts = new Set();
   let object;
-  for (let tries = 0; tries < TRIES && fronts.size < threads; tries++) {
-    const where = await get(server, '/where?name=probe');
-    assert.match(where.front, UUID);
-    assert.strictEqual(object ?? where.isolate, where.isolate);
-    object = where.isolate;
-    fronts.add(where.front);
+  for (let round = 0; round < ROUNDS && fronts.size < threads; round++) {
+    const answers = [];
+    for (let i = 0; i < threads; i++) {
+      answers.push(get(server, '/where?name=probe&ms=250'));
+      await scheduler.wait(2);
+    }
+    for (const where of await Promise.all(answers)) {
+      assert.match(where.front, UUID);
+      assert.strictEqual(object ?? where.isolate, where.isolate);
+      object = where.isolate;
+      fronts.add(where.front);
+    }
   }
   assert.strictEqual(fronts.size, threads, 'isolates that served requests');
   assert(fronts.has(object), 'the first thread served no request');
@@ -328,7 +379,8 @@ function webSocket(server, path, thread) {
           });
         });
         req.end();
-      })
+      }),
+    server.threads
   );
 }
 

@@ -5,6 +5,7 @@
 // Stateless Workers under `workerd serve --threads`: every thread serves its own copy of each
 // Worker, and each request goes to whichever thread takes it, whatever connection it came on.
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import { env } from 'node:process';
@@ -53,29 +54,97 @@ async function serve(extraArgs) {
   return { workerd, port: await workerd.getListenPort('http') };
 }
 
-// How many requests a test sends for one isolate before it gives up.
+// How many requests a test sends before it gives up on what it waits for.
 const TRIES = 200;
 
-// Sends a request until the isolate of `front` whose identity is `thread` serves it, or any
-// isolate if `thread` is undefined: a request names the isolate it is for (`x-thread`), and any
-// other refuses it before reading its body. `attempt(headers)` sends the request once with
-// `headers` and resolves with what it got, or with undefined if another isolate refused it.
-async function steer(thread, attempt) {
-  const headers = thread === undefined ? {} : { 'x-thread': thread };
-  for (let tries = 0; tries < TRIES; tries++) {
-    const answer = await attempt(headers);
-    if (answer !== undefined) return answer;
+// What the `attempts` of a round resolved to, once each has settled. An attempt that failed
+// after another was answered is of no interest (the server may have stopped meanwhile); if none
+// was answered, the first failure is the round's.
+async function settled(attempts) {
+  const results = await Promise.allSettled(attempts);
+  const answers = results.flatMap((r) =>
+    r.status === 'fulfilled' ? [r.value] : []
+  );
+  const failure = results.find((r) => r.status === 'rejected');
+  if (failure !== undefined && answers.every((a) => a === undefined)) {
+    throw failure.reason;
   }
-  assert.fail(`isolate ${thread} served none of ${TRIES} requests`);
+  return answers;
 }
 
-// A request on a connection of its own, served by the isolate `thread` (any if undefined). The
-// server answers once the request body ends: `response` is the promise for the parsed response,
-// `finish()` ends the body. A request another isolate refused is sent again, its body open.
-function request(port, path = '/', thread) {
-  let current;
-  let finished = false;
-  const response = steer(
+// How many rounds `steer` sends before it gives up.
+const ROUNDS = 8;
+
+// Sends a request until the isolate of `front` whose identity is `thread` serves it.
+// `attempt(headers)` sends the request once with `headers` and resolves with what it got, or
+// with undefined if another isolate refused it.
+//
+// The front wakes the sleeping thread with the fewest requests in flight for each request, and
+// among equals the one that slept last, so one request at a time would keep going to the same warm
+// thread. Steering fans out instead: a round sends several attempts a few milliseconds apart, and
+// an isolate that is not the one named holds its refusal for a while, so that it has a request in
+// flight and the next attempt goes to another thread. Each round sends twice as many, so that a
+// thread with requests of its own in flight is reached too. The attempts share an `x-attempt`, so
+// the isolate named acts on one of them only.
+async function steer(thread, attempt) {
+  const headers = { 'x-thread': thread, 'x-attempt': randomUUID() };
+  for (let round = 1; round <= ROUNDS; round++) {
+    const attempts = [];
+    for (let i = 0; i < THREADS * 2 ** (round - 1); i++) {
+      const sent = attempt(headers);
+      // A failure is the round's only if no attempt was answered (`settled`).
+      sent.catch(() => {});
+      attempts.push(sent);
+      await scheduler.wait(2);
+    }
+    const answers = (await settled(attempts)).filter(
+      (answer) => answer !== undefined
+    );
+    if (answers.length > 0) return answers[0];
+  }
+  assert.fail(`isolate ${thread} served none of ${ROUNDS} rounds of requests`);
+}
+
+// A request on a connection of its own, served by whichever isolate takes it. The server answers
+// once the request body ends (`/open` sends the head before): `response` is the promise for the
+// parsed response, `head` for the `x-front` of its head, `finish()` ends the body.
+function request(port, path = '/') {
+  const req = http.request({
+    agent: false,
+    host: '127.0.0.1',
+    port,
+    path,
+    method: 'POST',
+  });
+  let headArrived;
+  const head = new Promise((resolve) => (headArrived = resolve));
+  const response = new Promise((resolve, reject) => {
+    req.on('error', reject);
+    req.on('response', (res) => {
+      headArrived(res.headers['x-front']);
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => (body += chunk));
+      res.on('error', reject);
+      res.on('end', () => {
+        try {
+          assert.strictEqual(res.statusCode, 200, body);
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  });
+  // Sends the head now, so that the server has the request while its body is open.
+  req.flushHeaders();
+  return { response, head, finish: () => req.end() };
+}
+
+// A request that the isolate `thread` holds in flight, once its head is here: `release()` ends it
+// by resetting its connection (a client that only half-closes is not gone).
+function hold(port, thread) {
+  return steer(
     thread,
     (headers) =>
       new Promise((resolve, reject) => {
@@ -83,53 +152,23 @@ function request(port, path = '/', thread) {
           agent: false,
           host: '127.0.0.1',
           port,
-          path,
-          method: 'POST',
+          path: '/hold?ms=20000',
           headers,
         });
-        current = req;
         req.on('error', reject);
         req.on('response', (res) => {
-          let body = '';
-          res.setEncoding('utf8');
-          res.on('data', (chunk) => (body += chunk));
-          res.on('error', reject);
-          res.on('end', () => {
-            try {
-              if (res.statusCode === 409 && thread !== undefined) {
-                req.destroy();
-                resolve(undefined);
-                return;
-              }
-              assert.strictEqual(res.statusCode, 200, body);
-              const ids = JSON.parse(body);
-              if (thread !== undefined) assert.strictEqual(ids.front, thread);
-              resolve(ids);
-            } catch (error) {
-              reject(error);
-            }
-          });
+          if (res.statusCode === 409) {
+            res.resume();
+            res.on('end', () => resolve(undefined));
+            return;
+          }
+          res.on('error', () => {});
+          req.on('error', () => {});
+          resolve({ release: () => res.socket.resetAndDestroy() });
         });
-        // Sends the head now, so that the server has the request while its body is open.
-        req.flushHeaders();
-        if (finished) req.end();
+        req.end();
       })
   );
-  return {
-    response,
-    finish: () => {
-      finished = true;
-      if (!current.destroyed) current.end();
-    },
-  };
-}
-
-// The parsed response to a request for `path` that ends at once, served by the isolate
-// `thread` (any if undefined).
-function get(port, path, thread) {
-  const { response, finish } = request(port, path, thread);
-  finish();
-  return response;
 }
 
 // Opens `count` requests at once and holds them all open, so that no thread can have served
@@ -161,13 +200,16 @@ async function requestDuringSpin(port) {
 }
 
 // Sends requests one after another over one keep-alive connection until `threads` isolates of
-// `front` have served them; their responses, in order. Nothing ties a connection to a thread:
-// each request goes to whichever thread takes it, and an idle server wakes its threads in turn.
+// `front` have served them; their responses, in order. Nothing ties a connection to a thread,
+// but the front gives a request to the thread that served the last if it sleeps with nothing in
+// flight, so the thread that served one is then held busy with a request of another connection
+// (`hold`) that stays in flight: the next request goes to a thread that has none.
 async function oneConnection(port, threads = THREADS) {
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
   const sockets = new Set();
   const responses = [];
   const fronts = new Set();
+  const holds = [];
   try {
     for (let tries = 0; tries < TRIES && fronts.size < threads; tries++) {
       const ids = await new Promise((resolve, reject) => {
@@ -193,10 +235,13 @@ async function oneConnection(port, threads = THREADS) {
         req.end();
       });
       responses.push(ids);
+      if (fronts.has(ids.front)) continue;
       fronts.add(ids.front);
+      if (fronts.size < threads) holds.push(await hold(port, ids.front));
     }
   } finally {
     agent.destroy();
+    for (const { release } of holds) release();
   }
   assert.strictEqual(sockets.size, 1, 'connections the requests went over');
   assert.strictEqual(
@@ -289,20 +334,13 @@ test(
       const fronts = [
         ...new Set((await oneConnection(port)).map((r) => r.front)),
       ];
-      // Each thread has requests that wait for their bodies.
-      const PER_THREAD = 16;
-      const wanted = fronts.flatMap((front) =>
-        Array.from({ length: PER_THREAD }, () => front)
+      // Requests in flight whose responses wait for their bodies: the front gives each to a
+      // sleeping thread with the fewest in flight, so every thread gets some.
+      const requests = Array.from({ length: fronts.length * 16 }, () =>
+        request(port, '/open')
       );
-      const requests = wanted.map((front) => request(port, '/', front));
-      for (const front of fronts) {
-        for (let tries = 0; ; tries++) {
-          const { waiting } = await get(port, '/waiting', front);
-          if (waiting === PER_THREAD) break;
-          assert(tries < TRIES, `${waiting} requests wait on a thread`);
-          await scheduler.wait(10);
-        }
-      }
+      const heads = await Promise.all(requests.map(({ head }) => head));
+      assert.deepStrictEqual(new Set(heads), new Set(fronts));
       workerd.kill('SIGTERM');
       // A draining server accepts no connection, and still serves the ones it has.
       await scheduler.wait(500);
@@ -312,7 +350,7 @@ test(
       );
       assert.deepStrictEqual(
         responses.map((ids) => ids.front),
-        wanted
+        heads
       );
       assert.deepStrictEqual(
         await exited(workerd.closed(), () => workerd.kill('SIGKILL')),

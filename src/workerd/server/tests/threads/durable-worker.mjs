@@ -19,6 +19,9 @@ function isolateId() {
   return isolate;
 }
 
+// The `x-attempt` of every request this isolate acted on.
+const attempts = new Set();
+
 function upperCase() {
   return new TransformStream({
     transform(chunk, controller) {
@@ -345,14 +348,25 @@ export default {
     const front = isolateId();
     // A request for another isolate is refused before anything else is done with it (its body
     // is not read, an upgrade not accepted), so that the client can send it again until the
-    // isolate it names serves it.
+    // isolate it names serves it. The refusal is held for a while: the front gives the next
+    // request to a sleeping thread with the fewest requests in flight, so the client's other
+    // attempts at once go to other threads.
+    //
+    // The attempts of one request carry one `x-attempt`, and the isolate named acts on the
+    // first it gets only: it refuses the others too.
     const wanted = request.headers.get('x-thread');
-    if (wanted !== null && wanted !== front) {
+    const attempt = request.headers.get('x-attempt');
+    if (
+      wanted !== null &&
+      (wanted !== front || (attempt !== null && attempts.has(attempt)))
+    ) {
+      await scheduler.wait(100);
       return Response.json(
         { front },
         { status: 409, headers: { 'x-front': front } }
       );
     }
+    if (attempt !== null) attempts.add(attempt);
     const url = new URL(request.url);
     const name = url.searchParams.get('name') ?? 'default';
     const counter = env.COUNTER.getByName(name);
@@ -375,6 +389,9 @@ export default {
       case '/slow-calls':
         return Response.json({ front, calls: await counter.slowCalls() });
       case '/where':
+        // Answers after `ms` milliseconds, if given, so that requests sent together are in
+        // flight together, each on a thread of its own.
+        await scheduler.wait(Number(url.searchParams.get('ms') ?? 0));
         return Response.json({ front, ...(await counter.where()) });
       case '/features':
         return Response.json({ front, ...(await features(env, ctx, name)) });

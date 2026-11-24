@@ -222,24 +222,27 @@ impl TestLoop {
 }
 
 #[test]
-fn equally_loaded_sleeping_loops_are_woken_in_turn() {
+fn of_equally_loaded_sleeping_loops_the_last_to_sleep_is_woken() {
     let queue = Queue::new();
     let loops: Vec<_> = (0..3).map(|_| TestLoop::new(&queue)).collect();
-    let mut woken = Vec::new();
-    for item in 0..6 {
-        for worker in &loops {
-            worker.parking.before_park();
-        }
-        let before: Vec<_> = loops.iter().map(TestLoop::wakes).collect();
-        let _ticket = queue.push(item);
-        let index = (0..3)
-            .find(|&i| loops[i].wakes() > before[i])
-            .expect("a sleeping loop is woken");
-        woken.push(index);
-        // The item is done before the next arrives: every loop has nothing in flight again.
-        assert_eq!(loops[index].take().0, item);
+    for worker in &loops {
+        worker.parking.before_park();
     }
-    assert_eq!(woken, [0, 1, 2, 0, 1, 2]);
+    // The loop that serves an item sleeps last again, so one item at a time stays on it.
+    for item in 0..4 {
+        let _ticket = queue.push(item);
+        assert_eq!(loops[2].wakes(), item as usize + 1);
+        assert_eq!(loops[2].take().0, item);
+        loops[2].sleep();
+    }
+    assert_eq!((loops[0].wakes(), loops[1].wakes()), (0, 0));
+    // An item that arrives while that loop is busy goes to the one that slept last before it.
+    let _ticket = queue.push(10);
+    let held = loops[2].take();
+    let _ticket = queue.push(11);
+    assert_eq!((loops[0].wakes(), loops[1].wakes()), (0, 1));
+    assert_eq!(loops[1].take().0, 11);
+    drop(held);
 }
 
 #[test]

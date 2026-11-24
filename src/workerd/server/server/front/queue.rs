@@ -17,7 +17,9 @@
 //!
 //! A loop that is asleep cannot notice new work, so [`Queue::push`] wakes one: of the loops that
 //! sleep, the one with the fewest items in flight, which keeps a loop that has many requests
-//! suspended from collecting more while others have none; among equals the turn goes around.
+//! suspended from collecting more while others have none; among equals it is the loop that
+//! went to sleep last, so a server with little to do keeps serving on a thread that is warm
+//! and leaves the others asleep.
 //! It wakes at most that one loop per
 //! item, and none if every loop is awake: each of those looks at the queue before it sleeps.
 //! Either the push sees the loop asleep or the loop sees the item queued; both read after they
@@ -33,6 +35,7 @@
 //! client that went away leaves. Or the last loop is gone, and the queue drops what it holds and
 //! is given.
 
+use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -68,6 +71,8 @@ struct Shared<T> {
     taken_through: AtomicU64,
     /// The queue is closed and empty: the loops are done with it.
     ended: AtomicBool,
+    /// Counts the times a loop went to sleep, to tell which did last.
+    sleeps: AtomicU64,
 }
 
 struct State<T> {
@@ -79,8 +84,6 @@ struct State<T> {
     /// There were loops, and the last is gone: nothing will be taken.
     deserted: bool,
     loops: Vec<Arc<LoopState>>,
-    /// Where the search for a sleeping loop starts.
-    next_sleeper: usize,
 }
 
 /// What the queue knows of one loop.
@@ -88,6 +91,8 @@ struct State<T> {
 struct LoopState {
     /// The loop's thread sleeps, or is about to, and has not been woken for an item.
     asleep: AtomicBool,
+    /// When the loop last went to sleep, as a count of all loops' sleeps.
+    slept: AtomicU64,
     /// The loop may take one item.
     granted: AtomicBool,
     /// Items the loop took whose [`InFlight`] it still holds.
@@ -125,21 +130,21 @@ impl<T> Shared<T> {
 
 impl<T> State<T> {
     /// Of the loops that sleep, the one with the fewest items in flight, no longer counted
-    /// asleep: the caller wakes it. Among loops with equally few, the turn goes around, so that
-    /// a server with little to do does not serve everything on one loop.
-    fn claim_sleeper(&mut self) -> Option<Arc<LoopState>> {
-        let count = self.loops.len();
+    /// asleep: the caller wakes it. Among loops with equally few it is the one that went to
+    /// sleep last, whose thread and isolates are the likeliest to still be warm.
+    fn claim_sleeper(&self) -> Option<Arc<LoopState>> {
         loop {
-            let (index, sleeper) = (0..count)
-                .map(|offset| (self.next_sleeper + offset) % count)
-                .map(|index| (index, &self.loops[index]))
-                .filter(|(_, worker)| worker.asleep.load(SeqCst))
-                .min_by_key(|(_, worker)| worker.in_flight.load(SeqCst))?;
+            let sleeper = self
+                .loops
+                .iter()
+                .filter(|worker| worker.asleep.load(SeqCst))
+                .min_by_key(|worker| {
+                    let in_flight = worker.in_flight.load(SeqCst);
+                    (in_flight, Reverse(worker.slept.load(SeqCst)))
+                })?;
             // The loop may have woken by itself meanwhile; then another is chosen.
             if sleeper.asleep.swap(false, SeqCst) {
-                let sleeper = Arc::clone(sleeper);
-                self.next_sleeper = (index + 1) % count;
-                return Some(sleeper);
+                return Some(Arc::clone(sleeper));
             }
         }
     }
@@ -156,11 +161,11 @@ impl<T> Queue<T> {
                     closed: false,
                     deserted: false,
                     loops: Vec::new(),
-                    next_sleeper: 0,
                 }),
                 queued: AtomicUsize::new(0),
                 taken_through: AtomicU64::new(0),
                 ended: AtomicBool::new(false),
+                sleeps: AtomicU64::new(0),
             }),
         }
     }
@@ -363,6 +368,8 @@ impl<T> Parking<T> {
         if me.gone.load(SeqCst) {
             return;
         }
+        me.slept
+            .store(self.shared.sleeps.fetch_add(1, SeqCst), SeqCst);
         me.asleep.store(true, SeqCst);
         // A push that has not seen this loop asleep has queued its item by now.
         if self.shared.queued.load(SeqCst) > 0 && me.asleep.swap(false, SeqCst) {

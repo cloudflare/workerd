@@ -222,8 +222,8 @@ pub struct ServeArgs {
 
     /// Serve on <N> event-loop threads; more than one requires --experimental.
     ///
-    /// The threads take requests from one queue, each when it has nothing else to run, so the
-    /// requests of one connection are served by different threads; a separate front
+    /// The threads take requests from one queue, each when it has nothing else to run, so a
+    /// request is served by a thread that is free, whichever connection it came on; a separate front
     /// (--front-threads) accepts the connections of the config's HTTP, HTTPS and TCP sockets and
     /// speaks TLS and HTTP for them. Every thread runs its own copy of every
     /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
