@@ -111,6 +111,10 @@ pub enum Error {
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),
+    /// This node's clock may be off from the bucket's by more than a lease
+    /// allows (`lease::Skew`).
+    #[error("{0}")]
+    Clock(String),
     /// The store refused a conditional write's guard, but an earlier attempt
     /// of the same request, or a copy sent beside it, may have been applied,
     /// and the refusal may be of that one's own write: whether the write

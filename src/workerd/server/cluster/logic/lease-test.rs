@@ -23,6 +23,7 @@ fn divided_times_keep_their_proportions() {
     let t = Timing::DEFAULT;
     for (d, divided) in DIVISORS.into_iter().zip(timings()) {
         assert_eq!(divided.times().map(|ms| ms * d), t.times(), "{divided:?}");
+        assert_eq!(divided.max_skew_ms, t.max_skew_ms, "{divided:?}");
         // A round renews before the lease needs to fence.
         let round = divided.interval_ms + divided.renew_timeout_ms;
         assert!(round + divided.safety_ms < divided.lease_ms, "{divided:?}");
@@ -114,6 +115,25 @@ fn a_clock_not_known_within_the_max_skew_fences_at_once() {
         assert!(matches!(skewed(Some(most + 1)), Step::Fence(_)));
         assert!(matches!(skewed(None), Step::Fence(_)));
     }
+}
+
+#[test]
+fn a_clock_that_fails_is_read_again_while_the_lease_holds_past_it() {
+    let t = Timing::DEFAULT;
+    let mut lease = Lease::new(t);
+    lease.renewed(0, Ok(t.lease_ms));
+    let skewed = |now_ms, ms| {
+        lease.before_renew(&Observed {
+            now_ms,
+            skew_ms: Some(ms),
+        })
+    };
+    // A clock behind by the far end still fences a round before peers may
+    // take over.
+    let last = t.lease_ms - t.safety_ms - t.round_ms() - t.max_skew_ms;
+    assert_eq!(skewed(last - 1, t.max_skew_ms), Step::Measure);
+    assert!(matches!(skewed(last, t.max_skew_ms), Step::Fence(_)));
+    assert!(matches!(skewed(0, t.lease_ms), Step::Fence(_)));
 }
 
 #[test]

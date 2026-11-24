@@ -67,8 +67,9 @@ pub struct Timing {
     /// bucket's, so twice that. A test's nodes share one clock.
     pub safety_ms: u64,
     /// A node whose clock may be off from the bucket's by more than this
-    /// (`Skew`) does not join, or exits. Clocks run at their own pace in
-    /// tests too: `divided` keeps it.
+    /// (`Skew`) does not join, or reads the bucket's dates again and exits
+    /// if they do not narrow it (`Step::Measure`). Clocks run at their own
+    /// pace in tests too: `divided` keeps it.
     pub max_skew_ms: u64,
     /// A node whose event loop makes no progress for this long fences
     /// (`watchdog`). The lease is kept on a thread of its own, so a turn of
@@ -252,6 +253,9 @@ pub enum Step {
     Fence(String),
     /// Try again after `retry_ms`; the lease still holds.
     Retry(String),
+    /// Read the bucket until its dates narrow the clock's window enough,
+    /// for up to a tenth of a lease, then ask again; fence if they do not.
+    Measure,
 }
 
 #[derive(Default)]
@@ -286,7 +290,17 @@ impl Lease {
 
     pub fn before_renew(&self, o: &Observed) -> Step {
         if let Err(e) = self.clock(o.skew_ms) {
-            return Step::Fence(e);
+            // A window that started over is one answer's, a second wide
+            // (`Skew`): a clock well within the bound may fail until reads at
+            // other points of the bucket's second narrow it. Read them while
+            // the lease holds a round past the far end, so that a clock
+            // behind by that much still fences before peers take over.
+            let past = |ms| self.holds(o.now_ms + self.timing.round_ms() + ms);
+            return if o.skew_ms.is_some_and(past) {
+                Step::Measure
+            } else {
+                Step::Fence(e)
+            };
         }
         // A node stalled past its lease (a paused process, a lease thread
         // that got no time) may have been taken over: it must not renew

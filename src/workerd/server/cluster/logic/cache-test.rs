@@ -313,7 +313,9 @@ impl Sim {
             node.next_renew = now + RENEW;
             // `Lease::before_renew`: a clock not known well enough, or a
             // lease about to lapse, ends the process, which restarts as
-            // another node. The record it leaves expires in its time.
+            // another node. The record it leaves expires in its time. No
+            // window here starts over, so none reads again first
+            // (`Step::Measure`).
             let lapsing = |u| now + L.renew_timeout_ms + self.safety >= u;
             if node.until.is_some_and(lapsing) || !known {
                 self.restart(i);
