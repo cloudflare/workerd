@@ -1,0 +1,29 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "capnp-kj",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [
+        ":ffi",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//capnp",
+        "@crates_vendor//futures",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)

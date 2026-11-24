@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "6b7b26d7a718abecad1a310b3254c7e9c33f7ce5e7827334361aaa1a0b8caf7e",
+  "checksum": "4a81c107a43a90f06ff0f5f9c6f59fca3c995a9aebafca4f9527c0d51678c6a0",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -1180,6 +1180,13 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
+          "patch_args": [
+            "-p1"
+          ],
+          "patches": [
+            "@@//:patches/rust/crates/capnp/inline-first-segment.patch",
+            "@@//:patches/rust/crates/capnp/retype-response-without-boxing.patch"
+          ],
           "sha256": "98216f4102645406ce4dbb0d2b3511cae502537885bae5662812ccc1fe6b04e7",
           "url": "https://static.crates.io/crates/capnp/0.27.3/download"
         }
