@@ -270,7 +270,7 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
 fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
 `src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
-`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`readApiObject`, `readHostObjectWithoutJs`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
@@ -1243,9 +1243,11 @@ Instances of the runtime's classes implemented in JavaScript, such as `QuotaExce
 written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
 that the class's `clone` function returns follows the value. Reading one makes the copy from the
 class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
-with the class's `deserialize` function once the whole value is read. That function is the only
-JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
-such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+with the class's `deserialize` function once the whole value is read. That function, and the work
+that a workerd API object's deserializer leaves until then, are the only JavaScript
+deserialization runs, and where C++ code has disallowed JavaScript execution, reading such an
+instance or API object throws `DataCloneError`. A reader that tries to run JavaScript while the
+value is read fails the read with `DataCloneError`, as in C++ JSG. A `SharedArrayBuffer` is written as a reference to a
 buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
 given only the bytes can resolve, so data containing one can't be read back.
 

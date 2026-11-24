@@ -68,6 +68,21 @@ test('UDP connect() handler reports protocol "udp"', async () => {
   }
 });
 
+test('UDP socket.opened reports the original peer address and port', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    const reply = await sendAndReceive(
+      client,
+      port,
+      Buffer.from('remoteAddress')
+    );
+    assert.strictEqual(reply.toString(), `127.0.0.1:${client.address().port}`);
+  } finally {
+    client.close();
+  }
+});
+
 /// macOS limits the size of UDP packets to 9,216 bytes maximum, so this test chooses a value below this.
 test('UDP connect() round-trips a large datagram', async () => {
   const port = await workerd.getListenPort('udp');

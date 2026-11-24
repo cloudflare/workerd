@@ -57,6 +57,12 @@
 //      over `ClusterNode::peer_service`): a write is seen at once on the
 //      other node, named caches are apart, a large value crosses, and a
 //      killed node's entries miss at once.
+//  17. Nodes can take the cluster key and bucket from the environment, a
+//      binary from `workerd compile` too, and compiling embeds neither.
+//  18. Nodes serving a wrangler project, which has no cluster section, join a
+//      cluster with --cluster-addr and the key and bucket from the
+//      environment, and forward Durable Object requests to each other. A
+//      binary from `workerd compile` without a cluster section cannot join.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -68,8 +74,17 @@
 //   - a dead owner's alarms adopted with its node record gone: only the
 //     orphan scan finds them. alarms-test.rs.
 
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import {
@@ -78,7 +93,7 @@ import {
   generateKeyPairSync,
   randomBytes,
 } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { env } from 'node:process';
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
@@ -147,9 +162,12 @@ class ClusterNode {
   #disk;
   #configName;
   #env;
+  #compiled;
 
-  // `localPath` is the directory of the config's disk service `disk`. `env`
-  // adds to the process's environment, or with `undefined` removes from it.
+  // `localPath` is the directory of the config's disk service `disk`, or with
+  // a `disk` of null its `--data-dir`, as for a wrangler config. `env`
+  // adds to the process's environment, or with `undefined` removes from it. A
+  // `configName` of null names no constant, as for a wrangler config.
   constructor({
     binary,
     config,
@@ -160,9 +178,11 @@ class ClusterNode {
     nodeId,
     extraArgs = [],
     env = {},
+    compiled = false,
   }) {
-    this.#env = env;
     this.#extraArgs = extraArgs;
+    this.#env = env;
+    this.#compiled = compiled;
     this.#disk = disk;
     this.#configName = configName;
     this.#binary = binary;
@@ -223,17 +243,25 @@ class ClusterNode {
   async start() {
     assert.strictEqual(this.#child, null);
 
-    const args = [
+    // A binary from `workerd compile` takes no command and no config.
+    const config = [
       'serve',
       this.#config,
-      ...(this.#configName === undefined ? [] : [this.#configName]),
+      ...(this.#configName == null ? [] : [this.#configName]),
+    ];
+    const args = [
+      ...(this.#compiled ? [] : config),
       '--experimental',
       '--verbose',
       `--control-fd=${CONTROL_FD}`,
       `--socket-addr=http=127.0.0.1:0`,
     ];
     if (this.#localPath !== undefined) {
-      args.push(`--directory-path=${this.#disk}=${this.#localPath}`);
+      args.push(
+        this.#disk === null
+          ? `--data-dir=${this.#localPath}`
+          : `--directory-path=${this.#disk}=${this.#localPath}`
+      );
     }
     args.push(...this.#extraArgs);
 
@@ -337,6 +365,12 @@ class ClusterNode {
     this.#httpPort = null;
     this.#clusterPort = null;
     return result;
+  }
+
+  // Sends the node `signal` without waiting for it to exit.
+  signal(signal) {
+    assert(this.#child !== null, 'node not started');
+    this.#child.kill(signal);
   }
 
   async stop({ signal = 'SIGTERM', timeoutMs = 10_000 } = {}) {
@@ -553,20 +587,24 @@ class FakeS3 {
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
 // The nodes run the config constant `configName` of `config`, whose disk
-// service `disk` is a directory of each node's own, once `before` has prepared
-// the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
-// what a node adds to its environment.
+// service `disk` (with null, the --data-dir) is a directory of each node's
+// own, once `before` has prepared the bucket, of `dialect` ("s3" or "gcs",
+// FakeS3.fresh). Node `i` gets the
+// extra environment variables `nodeEnv(i, root, bucket)`, where `root` is the
+// test's temporary directory, and runs the binary that `nodeBinary(i, root)`
+// names (`compiled` when `workerd compile` built it).
 async function withCluster(
   numNodes,
   fn,
   {
     extraArgs = () => [],
+    nodeEnv = async () => ({}),
+    nodeBinary = async () => ({ binary: env.WORKERD_BINARY, compiled: false }),
     config = env.WD_TEST_CONFIG,
     configName = 'config',
     disk = 'local',
     before = async () => {},
     dialect = 's3',
-    nodeEnv = () => ({}),
   } = {}
 ) {
   // Each test run gets its own bucket and disks, so state doesn't leak
@@ -582,7 +620,7 @@ async function withCluster(
       await mkdir(localPath);
       nodes.push(
         new ClusterNode({
-          binary: env.WORKERD_BINARY,
+          ...(await nodeBinary(i, root)),
           config,
           configName,
           localPath,
@@ -590,7 +628,7 @@ async function withCluster(
           s3Port: bucket.port,
           nodeId: `node${i}`,
           extraArgs: await extraArgs(i),
-          env: nodeEnv(bucket),
+          env: await nodeEnv(i, root, bucket),
         })
       );
     }
@@ -1526,6 +1564,105 @@ test('cluster: the nodes share one Cache API cache', async () => {
   );
 });
 
+test('cluster: the key and bucket can come from the environment', async () => {
+  // Node 0 reads the key from WORKERD_CLUSTER_KEY, node 1 from a file named by
+  // WORKERD_CLUSTER_KEY_FILE, ending in a newline as secret files often do.
+  const key = 'test-cluster-shared-secret-of-32-bytes';
+  const nodeEnv = async (i, root) => {
+    const env = { WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster' };
+    if (i === 0) return { ...env, WORKERD_CLUSTER_KEY: key };
+    const file = join(root, 'cluster-key');
+    await writeFile(file, `${key}\n`);
+    return { ...env, WORKERD_CLUSTER_KEY_FILE: file };
+  };
+  await withCluster(
+    2,
+    async ({ nodes, nodeKeys }) => {
+      // Node 1 forwards to node 0, so both hold the same key.
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=env');
+      const second = await fetchJson(nodes[1].httpPort, '/increment?name=env');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.count, 2);
+      assert.strictEqual(second.body.nodeId, first.body.nodeId);
+      // And that key is the one given.
+      const port = nodes[1].clusterPort;
+      const node = nodeKeys.get(nodes[1].nodeId);
+      const auth = clusterAuth(node, `127.0.0.1:${port}`);
+      assert.match(await clusterConnect(port, auth), / 200 /);
+    },
+    { configName: 'fromEnvironment', nodeEnv }
+  );
+});
+
+// LD_LIBRARY_PATH for a copy of `binary` elsewhere: on Linux, some builds
+// (TSan) link shared libraries found relative to the binary's own directory,
+// which a copy does not have. Empty where `ldd` does not apply.
+function sharedLibraryPath(binary) {
+  if (process.platform !== 'linux') return {};
+  const libraries = execFileSync('ldd', [binary], { encoding: 'utf8' });
+  const dirs = [...libraries.matchAll(/=> (\/\S+)/g)].map((m) => dirname(m[1]));
+  return { LD_LIBRARY_PATH: [...new Set(dirs)].join(':') };
+}
+
+test('cluster: a binary from workerd compile takes the key and bucket from the environment', async () => {
+  const key = 'test-cluster-shared-secret-of-32-bytes';
+  // `workerd compile`, run with the variables set, writes the config as it is.
+  const compile = async (args, file) => {
+    const out = await open(file, 'w', 0o755);
+    try {
+      const child = spawn(
+        env.WORKERD_BINARY,
+        ['compile', ...args, env.WD_TEST_CONFIG, 'fromEnvironment'],
+        {
+          stdio: ['ignore', out.fd, 'inherit'],
+          env: {
+            ...env,
+            WORKERD_CLUSTER_KEY: key,
+            WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+          },
+        }
+      );
+      const code = await new Promise((resolve, reject) => {
+        child.once('error', reject).once('exit', resolve);
+      });
+      assert.strictEqual(code, 0, `workerd compile ${args.join(' ')} failed`);
+    } finally {
+      await out.close();
+    }
+  };
+  const nodeBinary = async (i, root) => {
+    if (i === 0) return { binary: env.WORKERD_BINARY, compiled: false };
+    const configOnly = join(root, 'config.bin');
+    await compile(['--config-only'], configOnly);
+    const bytes = await readFile(configOnly);
+    assert(!bytes.includes(key), 'the compiled config holds the key');
+    assert(!bytes.includes('s3://wdtest/cluster'), 'it holds the bucket');
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    const binary = join(root, `compiled-workerd${exe}`);
+    await compile([], binary);
+    return { binary, compiled: true };
+  };
+  const nodeEnv = async (i) => ({
+    WORKERD_CLUSTER_KEY: key,
+    WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+    ...(i === 1 ? sharedLibraryPath(env.WORKERD_BINARY) : {}),
+  });
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      // The compiled node forwards to the other, so it joined with the key.
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=bin');
+      const second = await fetchJson(nodes[1].httpPort, '/increment?name=bin');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.count, 2);
+      assert.strictEqual(second.body.nodeId, first.body.nodeId);
+    },
+    { configName: 'fromEnvironment', nodeEnv, nodeBinary }
+  );
+});
+
 test('cluster: a public cluster address is refused', async () => {
   const local = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
   // The unreachable bucket proves that address validation runs before
@@ -1747,7 +1884,11 @@ for (const dialect of ['s3', 'gcs']) {
     // As `GCS`, with tokens from the fake metadata server.
     const options =
       dialect === 'gcs'
-        ? { configName: 'gcs', dialect, nodeEnv: (bucket) => bucket.gcsEnv }
+        ? {
+            configName: 'gcs',
+            dialect,
+            nodeEnv: (_i, _root, bucket) => bucket.gcsEnv,
+          }
         : {};
     await withCluster(
       1,
@@ -2982,6 +3123,202 @@ test(
   }
 );
 
+// The status of `GET /ready` on a cluster port, or undefined once nothing
+// answers within a second.
+async function readiness(port) {
+  const signal = AbortSignal.timeout(1000);
+  return (
+    await fetch(`http://127.0.0.1:${port}/ready`, { signal }).catch(() => null)
+  )?.status;
+}
+
+// The first status other than 200 that `GET /ready` on a cluster port
+// answers, within `ms`.
+async function untilNotReady(port, ms = 5000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const status = await readiness(port);
+    if (status !== 200) return status;
+    assert(Date.now() < deadline, `port ${port} still ready after ${ms} ms`);
+    await sleep(20);
+  }
+}
+
+// The shutdown delay, in seconds, of the nodes in the tests below, which
+// WORKERD_SHUTDOWN_DELAY_MS sets.
+const SHUTDOWN_DELAY_S = 6;
+
+test(
+  'cluster: a node serves its DOs through its shutdown delay, then hands them off',
+  SIGTERM_DRAINS,
+  async () => {
+    // Only the first node is sent SIGTERM; the peer is killed at the end.
+    const nodeEnv = () => ({
+      WORKERD_SHUTDOWN_DELAY_MS: `${SHUTDOWN_DELAY_S * 1000}`,
+    });
+    await withCluster(
+      2,
+      async ({ nodes: [stopping, peer], bucket, nodeKeys }) => {
+        const key = nodeKeys.get(stopping.nodeId);
+        const first = await fetchJson(
+          stopping.httpPort,
+          '/increment?name=delayed'
+        );
+        assert.strictEqual(first.body.nodeId, stopping.nodeId);
+        assert.strictEqual(await readiness(stopping.clusterPort), 200);
+
+        const stoppedAt = Date.now();
+        const exit = stopping.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        // Not ready from the signal on, so what routes by readiness stops
+        // sending requests here.
+        assert.strictEqual(await untilNotReady(stopping.clusterPort), 503);
+
+        // Until the delay ends, the node serves what it still gets, and its
+        // DO, which it still owns, runs here whichever node it is asked on.
+        // The node stays a member of the cluster. The requests stop 2 s
+        // before the delay does, so that none lands in the handoff; what
+        // slow CI answers only after the delay may have met the handoff, so
+        // only what is answered within it shows where the DO runs.
+        const delayEnd = stoppedAt + SHUTDOWN_DELAY_S * 1000;
+        let count = first.body.count;
+        let served = 0;
+        while (Date.now() < delayEnd - 2000) {
+          for (const node of [stopping, peer]) {
+            const response = await fetchJson(
+              node.httpPort,
+              '/increment?name=delayed',
+              { timeoutMs: 10_000 }
+            );
+            assert.strictEqual(
+              response.status,
+              200,
+              JSON.stringify(response.body)
+            );
+            assert.strictEqual(response.body.count, ++count);
+            const owner = await bucket.owner(response.body.id);
+            if (Date.now() < delayEnd) {
+              assert.strictEqual(response.body.nodeId, stopping.nodeId);
+              assert.strictEqual(owner, key);
+              served++;
+            }
+          }
+          const members = await bucket.nodes();
+          if (Date.now() < delayEnd) assert(members.includes(key));
+          await sleep(200);
+        }
+        assert(served > 0, 'no request was answered within the delay');
+        assert.notStrictEqual(await readiness(stopping.clusterPort), 200);
+
+        // Then it drains as it would at once without the delay: it hands
+        // the DO off and leaves.
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        assert(stopMs >= SHUTDOWN_DELAY_S * 1000, `stopped in ${stopMs} ms`);
+        assert(!(await bucket.nodes()).includes(key));
+        const moved = await fetchJson(peer.httpPort, '/increment?name=delayed');
+        assert.strictEqual(moved.status, 200, JSON.stringify(moved.body));
+        assert.strictEqual(moved.body.nodeId, peer.nodeId);
+        assert.strictEqual(moved.body.count, count + 1);
+      },
+      { nodeEnv }
+    );
+  }
+);
+
+test(
+  'cluster: a second SIGTERM cuts the shutdown delay short',
+  SIGTERM_DRAINS,
+  async () => {
+    const nodeEnv = () => ({ WORKERD_SHUTDOWN_DELAY_MS: '600000' });
+    await withCluster(
+      1,
+      async ({ nodes: [node], bucket, nodeKeys }) => {
+        await fetchJson(node.httpPort, '/increment?name=cut-short');
+        node.signal('SIGTERM');
+        assert.strictEqual(await untilNotReady(node.clusterPort), 503);
+        // In the delay, not draining: the node is still a member well after
+        // a drain would have handed its one DO off and left.
+        await sleep(2000);
+        assert((await bucket.nodes()).includes(nodeKeys.get(node.nodeId)));
+        const response = await fetchJson(
+          node.httpPort,
+          '/increment?name=cut-short'
+        );
+        assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+
+        const stoppedAt = Date.now();
+        const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        // Within the stop timeout of 10 s, with time to exit.
+        assert(stopMs < 11_500, `stopped in ${stopMs} ms`);
+      },
+      { nodeEnv }
+    );
+  }
+);
+
+test(
+  'serve: a SIGTERM while the server starts drains it without the shutdown delay',
+  SIGTERM_DRAINS,
+  async () => {
+    // A worker whose evaluation keeps the server starting, synchronously,
+    // for seconds after it logs.
+    const dir = await mkdtemp(join(tmpdir(), 'workerd-starting-'));
+    try {
+      await writeFile(
+        join(dir, 'worker.js'),
+        `console.log('evaluating');
+let x = 0;
+for (let j = 0; j < 8; j++) for (let i = 0; i < 1e8; i++) x = (x + i) | 0;
+export default { fetch: () => new Response(String(x)) };
+`
+      );
+      const config = join(dir, 'config.capnp');
+      await writeFile(
+        config,
+        `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [(name = "main", worker = (
+    compatibilityDate = "2024-01-01",
+    modules = [(name = "worker.js", esModule = embed "worker.js")],
+  ))],
+  sockets = [(name = "http", address = "127.0.0.1:0", http = (), service = "main")],
+);
+`
+      );
+      const child = spawn(env.WORKERD_BINARY, ['serve', config], {
+        stdio: ['ignore', 'pipe', 'inherit'],
+        env: { ...env, WORKERD_SHUTDOWN_DELAY_MS: '600000' },
+      });
+      const closed = new Promise((resolve) =>
+        child.once('close', (code, signal) => resolve({ code, signal }))
+      );
+      const killTimer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+      try {
+        // The signal handler is installed before the server starts.
+        let stdout = '';
+        await new Promise((resolve, reject) => {
+          child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+            if (stdout.includes('evaluating')) resolve();
+          });
+          closed.then(() => reject(new Error(`exited early: ${stdout}`)));
+        });
+        child.kill('SIGTERM');
+        // The server was never ready, so it drains as soon as it is up,
+        // rather than serve for the delay.
+        assert.deepStrictEqual(await closed, { code: 0, signal: null });
+      } finally {
+        clearTimeout(killTimer);
+        child.kill('SIGKILL');
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
 test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO after it breaks', async () => {
   await withCluster(2, async ({ nodes }) => {
     const first = await fetchJson(nodes[0].httpPort, '/increment?name=root');
@@ -3504,7 +3841,10 @@ async function until(check, ms, message) {
 }
 
 test('cluster: an owner record write answered 503 after it landed counts as written', async () => {
-  for (const options of [{}, { ...GCS, nodeEnv: (bucket) => bucket.gcsEnv }]) {
+  for (const options of [
+    {},
+    { ...GCS, nodeEnv: (_i, _root, bucket) => bucket.gcsEnv },
+  ]) {
     await withCluster(
       1,
       async ({ nodes, bucket, nodeKeys }) => {
@@ -3605,7 +3945,7 @@ test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata s
     {
       ...GCS,
       before: (bucket) => bucket.gcs({ expiresIn: 8 }),
-      nodeEnv: (bucket) => bucket.gcsEnv,
+      nodeEnv: (_i, _root, bucket) => bucket.gcsEnv,
     }
   );
 });
@@ -3641,7 +3981,7 @@ test('cluster: a gs:// bucket takes a service account key', async () => {
           };
           await writeFile(keyFile, JSON.stringify(key));
         },
-        nodeEnv: (bucket) => ({
+        nodeEnv: (_i, _root, bucket) => ({
           ...bucket.gcsEnv,
           GCE_METADATA_HOST: undefined,
           GOOGLE_APPLICATION_CREDENTIALS: keyFile,
@@ -3747,4 +4087,169 @@ test('cluster: a cron occurrence does not run again on an owner whose clock lags
     );
     assert.strictEqual(runs.length, 1);
   });
+});
+
+test('cluster: nodes serving a wrangler project join a cluster with --cluster-addr', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  try {
+    await writeWranglerProject(project, { name: 'counter' });
+    await withCluster(
+      2,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const counts = [];
+        let id;
+        for (const node of nodes) {
+          const { status, body } = await fetchJson(node.httpPort, '/increment');
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.count);
+          id = body.id;
+        }
+        // One object, so one node forwarded its request to the other.
+        assert.deepStrictEqual(counts, [1, 2]);
+        const record = await bucket.get(
+          `${objectPrefix(id, 'counter-Counter')}/own.json`
+        );
+        assert.notStrictEqual(record, null);
+        const owner = nodes.find(
+          (node) => nodeKeys.get(node.nodeId) === JSON.parse(record).node
+        );
+        assert(owner !== undefined, record);
+        // The object is stored in `do/` where --data-dir points, and nothing
+        // is stored in the project.
+        assert(
+          (await readdir(join(owner.localPath, 'do'))).includes(
+            'counter-Counter'
+          )
+        );
+        assert.deepStrictEqual((await readdir(project)).sort(), [
+          'index.js',
+          'wrangler.jsonc',
+        ]);
+      },
+      {
+        config: join(project, 'wrangler.jsonc'),
+        configName: null,
+        disk: null,
+        extraArgs: () => ['--cluster-addr=127.0.0.1:0'],
+        nodeEnv: async () => ({
+          WORKERD_CLUSTER_KEY: 'test-cluster-shared-secret-of-32-bytes',
+          WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+          AWS_ACCESS_KEY_ID: 'wdtest',
+          AWS_SECRET_ACCESS_KEY: 'wdtest-secret',
+        }),
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('cluster: --cluster-addr and --data-dir are refused where they cannot apply', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  // Spawns `binary` with `args`, and resolves to its exit code and stderr. A
+  // process still running after 30 s is killed, so its code is null.
+  const run = async (binary, args, stdout, extraEnv = {}) => {
+    const child = spawn(binary, args, {
+      stdio: ['ignore', stdout, 'pipe'],
+      env: { ...env, ...extraEnv },
+      timeout: 30_000,
+    });
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d));
+    const code = await new Promise((resolve, reject) => {
+      child.once('error', reject).once('exit', resolve);
+    });
+    return { code, stderr };
+  };
+  try {
+    await writeWranglerProject(project, { name: 'counter' });
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    const binary = join(project, `compiled-workerd${exe}`);
+    const out = await open(binary, 'w', 0o755);
+    try {
+      const compile = await run(
+        env.WORKERD_BINARY,
+        ['compile', join(project, 'wrangler.jsonc')],
+        out.fd
+      );
+      assert.strictEqual(compile.code, 0, compile.stderr);
+    } finally {
+      await out.close();
+    }
+    const { code, stderr } = await run(
+      binary,
+      [
+        '--experimental',
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      'ignore',
+      {
+        ...sharedLibraryPath(env.WORKERD_BINARY),
+        WORKERD_CLUSTER_KEY: 'test-cluster-shared-secret-of-32-bytes',
+        WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+        AWS_ENDPOINT_URL: 'http://127.0.0.1:1',
+      }
+    );
+    assert.notStrictEqual(code, 0);
+    assert.match(
+      stderr.replace(/\s+/g, ' '),
+      /the config compiled into this executable has no cluster, so it cannot join one/
+    );
+
+    // A refusal ends the process with an error that says why.
+    const refused = async (binary, args, message) => {
+      const { code, stderr } = await run(binary, args, 'ignore', {
+        ...sharedLibraryPath(env.WORKERD_BINARY),
+      });
+      assert(code !== 0 && code !== null, `${args.join(' ')}: ${code}`);
+      assert.match(stderr.replace(/\s+/g, ' '), message);
+    };
+    const data = join(project, 'data');
+    // The compiled binary's paths were fixed when it was compiled.
+    await refused(
+      binary,
+      ['--experimental', `--data-dir=${data}`],
+      /--data-dir: the config compiled into this executable fixed its directories/
+    );
+    // A Cap'n Proto config names its own directories.
+    await refused(
+      env.WORKERD_BINARY,
+      ['serve', env.WD_TEST_CONFIG, 'config', `--data-dir=${data}`],
+      /--data-dir: only a wrangler config keeps its state there/
+    );
+    // A config without the disk service `do-storage`, here the wrangler
+    // config translated for a server that joins no cluster, cannot join one:
+    // the cluster's deployments keep their Durable Objects on it.
+    const configOnly = join(project, 'config.bin');
+    await writeFile(
+      configOnly,
+      await compileConfig(join(project, 'wrangler.jsonc'))
+    );
+    await refused(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        '--experimental',
+        '--binary',
+        configOnly,
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      /--cluster-addr: the config has no writable disk service named `do-storage`/
+    );
+    // Joining a cluster needs --experimental, as a config's cluster does.
+    await refused(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        join(project, 'wrangler.jsonc'),
+        '--socket-addr=http=127.0.0.1:0',
+        '--cluster-addr=127.0.0.1:0',
+      ],
+      /Cluster mode is experimental; it requires --experimental/
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
 });

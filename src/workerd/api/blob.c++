@@ -9,6 +9,8 @@
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>
 
+#include <cmath>
+
 namespace workerd::api {
 
 namespace {
@@ -182,7 +184,7 @@ kj::String normalizeType(kj::String type) {
   // type contains non-printable-ASCII characters we should discard it, and otherwise we should
   // lower-case it.
   for (char& c: type) {
-    if (static_cast<signed char>(c) < 0x20) {
+    if (auto u = static_cast<kj::byte>(c); u < 0x20 || u > 0x7e) {
       // Throw it away.
       return nullptr;
     } else if ('A' <= c && c <= 'Z') {
@@ -191,6 +193,18 @@ kj::String normalizeType(kj::String type) {
   }
 
   return kj::mv(type);
+}
+
+// Converts a slice() start or end argument to an offset into a Blob of the given size, per
+// https://w3c.github.io/FileAPI/#slice-blob. The argument is a WebIDL [Clamp] long long,
+// so it is rounded to the nearest integer with ties to even, and NaN becomes 0. A negative
+// value counts back from the end. Clamping to [0, size] covers the long long range, which
+// a Blob can never exceed.
+size_t relativeOffset(double value, double size) {
+  if (std::isnan(value)) return 0;
+  value = std::nearbyint(value);
+  if (value < 0) value += size;
+  return static_cast<size_t>(kj::max(0.0, kj::min(value, size)));
 }
 
 }  // namespace
@@ -251,8 +265,8 @@ kj::ArrayPtr<const byte> Blob::getData(jsg::Lock& js) const {
 }
 
 jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
-    jsg::Optional<int> maybeStart,
-    jsg::Optional<int> maybeEnd,
+    jsg::Optional<double> maybeStart,
+    jsg::Optional<double> maybeEnd,
     jsg::Optional<kj::String> type) {
 
   auto normalizedType = normalizeType(kj::mv(type).orDefault(nullptr));
@@ -262,21 +276,9 @@ jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
     return js.alloc<Blob>(kj::mv(normalizedType));
   }
 
-  int start = maybeStart.orDefault(0);
-  int end = maybeEnd.orDefault(bytes.size());
-
-  if (start < 0) {
-    // Negative value interpreted as offset from end.
-    start += bytes.size();
-  }
-  if (end < 0) {
-    // Negative value interpreted as offset from end.
-    end += bytes.size();
-  }
-
-  // Clamp start and end to range.
-  start = kj::max(0, kj::min(start, static_cast<int>(bytes.size())));
-  end = kj::max(start, kj::min(end, static_cast<int>(bytes.size())));
+  double size = bytes.size();
+  size_t start = relativeOffset(maybeStart.orDefault(0), size);
+  size_t end = kj::max(start, relativeOffset(maybeEnd.orDefault(size), size));
 
   // We run with KJ_IREQUIRE checks enabled in production, which will catch
   // out of bounds start/end ... but since we're clamping them above, this

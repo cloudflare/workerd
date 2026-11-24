@@ -591,7 +591,7 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // because we explicitly want external memory to be allowed to live beyond the isolate
     // in some cases. The Impl variant bypasses the destructor check that
     // ExternalMemoryAccounter enforces (requiring adjustment to return to zero).
-    // See patches/v8/0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch
+    // See patches/v8/2025-01-15-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-public-API.patch
     target->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   } else {
     // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time

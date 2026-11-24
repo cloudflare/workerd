@@ -17,7 +17,6 @@ use jsg_macros::jsg_traced;
 use memory_cache::CacheError;
 use memory_cache::FallbackPermit;
 
-use crate::NoData;
 use crate::cache_error;
 use crate::now_ms;
 use crate::trace;
@@ -164,6 +163,10 @@ struct Fill {
     fallback_span: IoOwnedSpan,
     _read_span: IoOwnedSpan,
 }
+
+/// The data of a reaction that needs none.
+#[jsg_traced]
+struct NoData;
 
 /// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
 /// its callback and spans. It holds no JavaScript values, so sharing it is sound.

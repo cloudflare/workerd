@@ -37,7 +37,7 @@ import {
   validateBoolean,
 } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
-import { isIP } from 'node-internal:internal_net';
+import { isIP } from 'node-internal:internal_net_ip';
 import inner from 'cloudflare-internal:sockets';
 import type dns from 'node:dns';
 

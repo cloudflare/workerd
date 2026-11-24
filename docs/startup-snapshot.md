@@ -129,7 +129,8 @@ all of these hold:
    7. The default-context handle is reset. A heap that still holds a suspended generator, such
       as an async function the top level left awaiting a promise, fails the zygote:
       `CreateBlob(kClear)` discards the bytecode a generator resumes in, which is also why V8's
-      bytecode flushing never discards it. V8 patch 0054 adds
+      bytecode flushing never discards it. The V8 patch
+      `Add-SnapshotCreator-HasSuspendedGenerators` adds
       `SnapshotCreator::HasSuspendedGenerators()`, which looks for one among the objects
       `CreateBlob()` would serialize. Then `SnapshotCreator::CreateBlob()` runs. V8 calls
       `serializeInternalFields()` for each wrapper's tag field and `serializeApiWrapperCallback()`
@@ -255,8 +256,9 @@ on the context, enters it and calls `IsolateBase::notifySnapshotContextReady()`.
 
 A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
 registry's `import.meta.resolve`, for example) transfers if its functor provides
-`Impl clone() const`; V8 patch 0052 keeps functions created by `v8::Function::New()` in the
-context snapshot so that their wrapper goes through the same path.
+`Impl clone() const`; the V8 patch
+`snapshot-Keep-functions-created-by-v8-Function-New-in-the-context-snapshot` keeps functions
+created by `v8::Function::New()` in the context snapshot so that their wrapper goes through the same path.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -340,8 +342,8 @@ once.
   it too.
 - Without multiple pointer-compression cages every isolate shares one read-only heap, built from
   the read-only snapshot of the isolate the group starts with. A zygote's read-only snapshot
-  differs from the built-in one only in the SharedFunctionInfo id it records; V8 patch 0053 leaves
-  that id out of the debug build's read-only-heap checksum and has a restored isolate continue
+  differs from the built-in one only in the SharedFunctionInfo id it records; the V8 patch
+  `Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum` leaves that id out of the debug build's read-only-heap checksum and has a restored isolate continue
   past it, so that isolates of both kinds can share the heap.
 
 ## Tests

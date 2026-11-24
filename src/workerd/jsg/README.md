@@ -505,6 +505,13 @@ A raw read past the end of the data throws DataCloneError.
 - Tag enum values MUST NOT change once data has been serialized
 - First tag = current version; subsequent tags = accepted old versions
 - `deserialize()` receives the tag for version dispatch
+- `deserialize()` MUST NOT run JavaScript, since V8 is reading the value. It may read, check
+  types, create objects, define properties and unwrap a `JSG_STRUCT`. It must not get an
+  inherited property, assign one, convert to a primitive or JSON, call a function, or serialize.
+  Nor may it call C++ that does, such as `exceptionToKj()` on a value it read. Put that work in a
+  `deserializer.afterRead()` callback, which runs once the whole value has been read and its
+  instances of classes implemented in JavaScript are initialized. An attempt to run JavaScript
+  fails the read with `DataCloneError`. `docs/jsg.md` has the details
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
   runtime call-site label (defaults to `"unknown"`).
@@ -522,7 +529,8 @@ constructor and initializes it once the whole value has been read, with JavaScri
 - A `deserializeInfo` MUST NOT change once data has been serialized
 - A value a `JSG_SERIALIZABLE` type's `deserialize()` reads with `readValue()` may contain such
   instances before they are initialized: keep it as a `JsRef` rather than unwrapping it or reading
-  its properties, unless the type's own state, which can't contain one, produced it
+  its properties, unless the type's own state, which can't contain one, produced it. An
+  `afterRead()` callback finds them initialized
 - A Serializer or Deserializer that writes to or reads for another delegate (`writeApiObject()`,
   `readApiObject()`, as the Rust serializer uses) rejects such instances with DataCloneError
 

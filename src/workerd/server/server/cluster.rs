@@ -10,7 +10,7 @@
 //! whose `getActor` gives a `WorkerdBootstrap` for one Durable Object, so HTTP, WebSockets and
 //! JS RPC to the object cross unchanged. A request for an object this instance
 //! does not own routes on through its own channel to the owner. `GET /ready` answers whether
-//! the instance takes traffic: it serves, holds its lease, and is not stopping.
+//! the instance takes traffic: it serves, holds its lease, and was not told to stop.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -99,14 +99,15 @@ pub struct ClusterNode {
     /// Set once this instance stops its peers' sessions (`stop_peer_sessions`): from then on it
     /// starts none of their requests, and accepts no session.
     refusing_peers: Rc<Signal>,
-    /// Whether the application's listeners are being served (`Serving`).
-    serving: Cell<bool>,
+    /// Whether the application's listeners are served and the instance was not told to stop
+    /// (`Ready`).
+    ready: Cell<bool>,
     /// How long a stop waits from its drain's start to leave: the leases a service granted
     /// here (the cache's), else 0.
     pub leave_wait_ms: Cell<u64>,
     /// The `cache` services a peer's session reaches here (`ServerHandle::resolve_peer_cache`).
     pub caches: RefCell<HashSet<String>>,
-    /// Whether the lease thread watches this thread's event loop (`serving`).
+    /// Whether the lease thread watches this thread's event loop (`ready`).
     watched: Cell<bool>,
     /// How often the event loop counts its progress while it sleeps: once a lease round.
     beat: Duration,
@@ -134,12 +135,13 @@ pub struct Count {
     none: Notify,
 }
 
-/// The application's listeners are being served, until this is dropped.
-pub struct Serving(Rc<ClusterNode>);
+/// The instance takes traffic as far as its listeners go, until this is dropped: they are served,
+/// and it was not told to stop.
+pub struct Ready(Rc<ClusterNode>);
 
-impl Drop for Serving {
+impl Drop for Ready {
     fn drop(&mut self) {
-        self.0.serving.set(false);
+        self.0.ready.set(false);
     }
 }
 
@@ -557,7 +559,7 @@ impl ClusterNode {
             peer_requests: Rc::default(),
             peer_sessions: Rc::default(),
             refusing_peers: Rc::default(),
-            serving: Cell::new(false),
+            ready: Cell::new(false),
             leave_wait_ms: Cell::new(0),
             caches: RefCell::default(),
             watched: Cell::new(false),
@@ -565,11 +567,12 @@ impl ClusterNode {
         }))
     }
 
-    /// Marks the application's listeners as served until the guard is dropped.
+    /// Marks the instance as taking traffic, as far as its listeners go, until the guard is
+    /// dropped.
     ///
     /// The first time, the lease thread starts watching this thread's event loop
     /// (`Cluster::watch`). Not before: linking runs in turns as long as itself.
-    pub fn serving(self: &Rc<Self>) -> Serving {
+    pub fn ready(self: &Rc<Self>) -> Ready {
         if !self.watched.replace(true) {
             // The loop beats once a round while it sleeps. A loop that cannot be watched serves
             // on, and says that it does; what stops it from being watched lasts, so it is not
@@ -582,8 +585,8 @@ impl ClusterNode {
                 ),
             }
         }
-        self.serving.set(true);
-        Serving(Rc::clone(self))
+        self.ready.set(true);
+        Ready(Rc::clone(self))
     }
 
     /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
@@ -990,9 +993,10 @@ impl Handler for PeerConnection {
         if method != Method::GET || url != b"/ready" {
             return send_error(response, 404, "Not Found", &headers).await;
         }
-        // Ready to take traffic: serving, a member of the cluster, not stopping.
+        // Ready to take traffic: serving and not told to stop, a member of the cluster, not
+        // draining.
         let cluster = &self.node.cluster;
-        if self.node.serving.get() && cluster.lease_holds() && !cluster.is_draining() {
+        if self.node.ready.get() && cluster.lease_holds() && !cluster.is_draining() {
             send_error(response, 200, "OK", &headers).await
         } else {
             send_error(response, 503, "Service Unavailable", &headers).await
