@@ -734,6 +734,11 @@ common:bazelflare --remote_cache_compression --remote_timeout=600
 # bazelflare sends nothing while an action runs, so only pings notice a connection that died
 # without closing; Bazel then retries on a new one instead of waiting forever.
 common:bazelflare --grpc_keepalive_time=30s --grpc_keepalive_timeout=20s
+# A remote call that still fails UNAVAILABLE after its retries aborts the whole build, even with
+# --keep_going. Bazel's default 5 retries, from 100 ms doubling, give up after about 3 s, less than a
+# busy bazelflare shard can take to recover. 10 retries of up to 10 s each ride out about 40 s; only
+# UNAVAILABLE and similar transient errors are retried, so other failures still surface at once.
+common:bazelflare --remote_retries=10 --remote_retry_max_delay=10s
 common:bazelflare --jobs=200
 # Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
 # streams onto each connection, each served by one bazelflare Worker invocation.
