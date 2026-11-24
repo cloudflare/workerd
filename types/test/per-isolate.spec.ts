@@ -133,6 +133,31 @@ test('collectPerIsolateDeclarations: rejects references through an import that d
   );
 });
 
+test('collectPerIsolateDeclarations: rejects an import type', () => {
+  // TypeScript writes these for an inferred type that the module does not
+  // name, such as a getter's without a return type.
+  for (const type of [
+    'import("./state").State',
+    'typeof import("./state")',
+  ]) {
+    assert.throws(
+      () =>
+        collect({
+          'public-types.d.ts': `export type { Thing } from './thing';\n`,
+          'state.d.ts': `export type State = 'open' | 'closed';\n`,
+          'thing.d.ts': `declare class Thing {
+    get state(): ${type};
+}
+export type { Thing };
+`,
+        }),
+      {
+        message: `Thing refers to \`${type}\`, which the Workers types cannot resolve; annotate the type with a global or a published declaration`,
+      }
+    );
+  }
+});
+
 test('collectPerIsolateDeclarations: rejects a manifest that does more than re-export types', () => {
   assert.throws(
     () =>

@@ -211,7 +211,9 @@ function publishedDeclarationsOf(
 // declarations by their published names: the bootstrap's other declarations
 // do not reach the output, and a reference prints as it is spelled. The
 // program has no libraries, so a reference resolves only to one of the
-// bootstrap's declaration files.
+// bootstrap's declaration files. An `import("./module")` type, which
+// TypeScript writes for an inferred type that the module does not name,
+// cannot resolve in the output either.
 function checkReferences(
   checker: ts.TypeChecker,
   manifestPath: string,
@@ -220,6 +222,11 @@ function checkReferences(
   publishedSymbols: Set<ts.Symbol>
 ): void {
   const visit = (node: ts.Node): void => {
+    if (ts.isImportTypeNode(node)) {
+      throw new Error(
+        `${name} refers to \`${node.getText()}\`, which the Workers types cannot resolve; annotate the type with a global or a published declaration`
+      );
+    }
     let entity: ts.Node | undefined;
     if (ts.isTypeReferenceNode(node)) entity = node.typeName;
     else if (ts.isExpressionWithTypeArguments(node)) entity = node.expression;
