@@ -908,7 +908,7 @@ pub mod ffi {
         ) -> Result<i32>;
 
         /// The server run inside another program's event loop (in_process.rs), on a factory
-        /// that program built: a test, or `workerd repl`. With `mock_internet`, connections to
+        /// that program built: a test, or `workerd repl`. After `mock_internet`, connections to
         /// public addresses go to loopback names instead. `run` is `workerd serve` until `drain`,
         /// with `--debug-port` if `debug_port` is not empty; `start` is `workerd serve` in the
         /// background, until the server is closed, and resolves once it listens; `test` is
@@ -921,10 +921,8 @@ pub mod ffi {
         /// socket, which `revoke` (or closing the server) revokes along with every request
         /// started on them.
         type InProcessServer;
-        fn new_in_process_server(
-            factory: KjOwn<WorkerFactory>,
-            mock_internet: bool,
-        ) -> Box<InProcessServer>;
+        fn new_in_process_server(factory: KjOwn<WorkerFactory>) -> Box<InProcessServer>;
+        fn mock_internet(self: &InProcessServer);
         async unsafe fn run<'a>(self: &'a InProcessServer, debug_port: &'a str) -> Result<()>;
         async unsafe fn start<'a>(self: &'a InProcessServer) -> Result<()>;
         async unsafe fn test<'a>(

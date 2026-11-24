@@ -17,6 +17,7 @@ use tokio::sync::oneshot;
 use workerd_server::run::RunOptions;
 
 use super::bridge;
+use super::bridge::ffi::Features;
 use super::bridge::ffi::ReplSession;
 use super::editor::Completion;
 use super::input;
@@ -160,9 +161,9 @@ async fn complete(session: Pin<&mut ReplSession>, line: &str, cursor: usize) -> 
 pub fn repl_load_config(
     path: &str,
     const_name: &str,
-    experimental: bool,
+    features: Features,
 ) -> Result<Vec<u64>, cxx::KjError> {
-    load_config(path, const_name, experimental, None)
+    load_config(path, const_name, features, None)
 }
 
 /// See the bridge's declaration.
@@ -183,9 +184,9 @@ impl ReplWatch {
         &self,
         path: &str,
         const_name: &str,
-        experimental: bool,
+        features: Features,
     ) -> Result<Vec<u64>, cxx::KjError> {
-        load_config(path, const_name, experimental, Some(self.watcher.clone()))
+        load_config(path, const_name, features, Some(self.watcher.clone()))
     }
 
     /// See the bridge's declaration.
@@ -198,7 +199,7 @@ impl ReplWatch {
 fn load_config(
     path: &str,
     const_name: &str,
-    experimental: bool,
+    features: Features,
     watcher: Option<Watcher>,
 ) -> Result<Vec<u64>, cxx::KjError> {
     let failed = |message: String| cxx::KjError::new(cxx::KjExceptionType::Failed, message);
@@ -212,6 +213,7 @@ fn load_config(
                 "{path}: A wrangler config has no named constants."
             )));
         }
+        let experimental = features == Features::Experimental;
         return wrangler::load(path, &process, &RunOptions::default(), None, experimental)
             .map(Config::into_words)
             .map_err(|error| failed(format!("{path}: {error}")));

@@ -57,7 +57,6 @@ class ReplConfigLoader {
   // the config does not load; `watch` still watches the files read until then.
   virtual kj::Array<capnp::word> load(kj::StringPtr path,
       kj::Maybe<kj::StringPtr> constName,
-      bool experimental,
       kj::Maybe<ReplConfigWatch&> watch) = 0;
 
   // A watch of no files yet.

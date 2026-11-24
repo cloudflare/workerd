@@ -210,7 +210,6 @@ struct Fixture final: public ReplConfigLoader {
 
   kj::Array<capnp::word> load(kj::StringPtr path,
       kj::Maybe<kj::StringPtr> constName,
-      bool experimental,
       kj::Maybe<ReplConfigWatch&> watch) override {
     auto& text = JSG_REQUIRE_NONNULL(configs.find(path), Error, path, ": No such file.");
     capnp::MallocMessageBuilder message;
@@ -433,7 +432,7 @@ KJ_TEST("REPL rejects invalid compatibility settings") {
   };
   struct: public ReplConfigLoader {
     kj::Array<capnp::word> load(
-        kj::StringPtr, kj::Maybe<kj::StringPtr>, bool, kj::Maybe<ReplConfigWatch&>) override {
+        kj::StringPtr, kj::Maybe<kj::StringPtr>, kj::Maybe<ReplConfigWatch&>) override {
       KJ_UNREACHABLE;
     }
     kj::Own<ReplConfigWatch> newWatch() override {

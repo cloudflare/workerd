@@ -64,8 +64,7 @@ kj::Promise<Started> start(const ReplServerContext& context,
     const ReplConfigSource& source,
     kj::Maybe<ReplConfigWatch&> watch) {
   auto config = context.loader.load(source.path,
-      source.constName.map([](const kj::String& name) { return name.asPtr(); }),
-      context.experimental, watch);
+      source.constName.map([](const kj::String& name) { return name.asPtr(); }), watch);
   auto options = kj::heap<WorkerFactory::Options>();
   options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
   options->experimental = context.experimental;
@@ -78,7 +77,7 @@ kj::Promise<Started> start(const ReplServerContext& context,
           kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), config.size())
               .as<kj_rs::RustCopy>());
   // The server owns the factory for as long as it runs.
-  auto server = new_in_process_server(kj::mv(factory), /*mock_internet=*/false);
+  auto server = new_in_process_server(kj::mv(factory));
 
   auto reports = co_await serve(*server);
   if (reports.errors.size() > 0) {

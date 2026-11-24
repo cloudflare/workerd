@@ -72,18 +72,12 @@ pub struct InProcessServer {
     revoker: Revoker,
 }
 
-/// A server over `factory`. With `mock_internet`, the server's connections to public addresses
-/// are made to loopback names instead, for a test to accept.
-pub fn new_in_process_server(
-    factory: KjOwn<ffi::WorkerFactory>,
-    mock_internet: bool,
-) -> Box<InProcessServer> {
+/// A server over `factory`. Its connections to public addresses reach the network, unless
+/// [`InProcessServer::mock_internet`] is called first.
+pub fn new_in_process_server(factory: KjOwn<ffi::WorkerFactory>) -> Box<InProcessServer> {
     crate::log::install();
     let factory = Rc::new(Factory::new(factory));
     factory.loopback().enable();
-    if mock_internet {
-        factory.loopback().mock_internet();
-    }
     let (reports, reported) = mpsc::unbounded_channel();
     Box::new(InProcessServer {
         factory,
@@ -136,6 +130,12 @@ impl InProcessServer {
             Box::new(report(true)),
             Box::new(report(false)),
         )
+    }
+
+    /// Makes the server's connections to public addresses to loopback names instead, for a test to
+    /// accept. Called before the server runs.
+    pub fn mock_internet(&self) {
+        self.factory.loopback().mock_internet();
     }
 
     /// Marks `service` in the config as defined by `deployment`.

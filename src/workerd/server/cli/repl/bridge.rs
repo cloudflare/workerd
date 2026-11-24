@@ -50,6 +50,12 @@ pub mod ffi {
         parenthesized: bool,
     }
 
+    /// Whether a loaded config may use experimental features: `--experimental`.
+    enum Features {
+        Stable,
+        Experimental,
+    }
+
     /// What became of an input.
     struct ReplEvaluation {
         /// The text to print: the rendered result, or `Uncaught ...`.
@@ -104,7 +110,7 @@ pub mod ffi {
         /// Loads the config at `path`, a Cap'n Proto config (with the constant `const_name`, if
         /// not empty) or a `wrangler.json(c)`, as an encoded `Config` message. The error lists
         /// every problem.
-        fn repl_load_config(path: &str, const_name: &str, experimental: bool) -> Result<Vec<u64>>;
+        fn repl_load_config(path: &str, const_name: &str, features: Features) -> Result<Vec<u64>>;
 
         /// Files configs were loaded from, watched for changes (cli/watch.rs).
         type ReplWatch;
@@ -117,7 +123,7 @@ pub mod ffi {
             self: &ReplWatch,
             path: &str,
             const_name: &str,
-            experimental: bool,
+            features: Features,
         ) -> Result<Vec<u64>>;
 
         /// Resolves once a watched file has changed and changes have settled.

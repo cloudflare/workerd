@@ -107,12 +107,13 @@ class CandidateSource final: public ReplEnvironment::CandidateSource {
   }
 };
 
-// Loads configs as `workerd serve` does (cli/repl/session.rs).
+// Loads configs as `workerd serve` does (cli/repl/session.rs), with the session's `features`.
 class ConfigLoader final: public ReplConfigLoader {
  public:
+  explicit ConfigLoader(Features features): features(features) {}
+
   kj::Array<capnp::word> load(kj::StringPtr path,
       kj::Maybe<kj::StringPtr> constName,
-      bool experimental,
       kj::Maybe<ReplConfigWatch&> watch) override {
     auto rustPath = path.as<kj_rs::RustUncheckedUtf8>();
     auto rustConstName = constName.orDefault(""_kj).as<kj_rs::RustUncheckedUtf8>();
@@ -120,10 +121,10 @@ class ConfigLoader final: public ReplConfigLoader {
     KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
       KJ_IF_SOME(w, watch) {
         // Every watch this loader is given came from its newWatch().
-        words = kj::downcast<ConfigWatch>(w).getRust().load_config(
-            rustPath, rustConstName, experimental);
+        words =
+            kj::downcast<ConfigWatch>(w).getRust().load_config(rustPath, rustConstName, features);
       } else {
-        words = repl_load_config(rustPath, rustConstName, experimental);
+        words = repl_load_config(rustPath, rustConstName, features);
       }
     })) {
       JSG_FAIL_REQUIRE(Error, e.getDescription());
@@ -136,6 +137,9 @@ class ConfigLoader final: public ReplConfigLoader {
   kj::Own<ReplConfigWatch> newWatch() override {
     return kj::heap<ConfigWatch>(repl_watch_new());
   }
+
+ private:
+  Features features;
 };
 
 }  // namespace
@@ -153,6 +157,7 @@ class ReplSession::Impl {
         v8Platform(*platform),
         v8System(v8Platform,
             KJ_MAP(flag, v8Flags) -> kj::StringPtr { return flag; }, platform.get()),
+        configLoader(options.experimental ? Features::Experimental : Features::Stable),
         environment(
             ReplServerResources{
               .v8System = v8System,
