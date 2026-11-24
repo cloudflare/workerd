@@ -96,3 +96,19 @@ export const protocolAndExtensionsAfterOpen = {
     ws.close();
   },
 };
+
+export const repeatedProtocolsDifferentCase = {
+  test(ctrl, env) {
+    const protocols = ['echo', 'Echo'];
+    if (env.standard) {
+      throws(() => new WebSocket('wss://example.com/', protocols), {
+        name: 'SyntaxError',
+      });
+    } else {
+      new WebSocket('wss://example.com/', protocols).close();
+    }
+    throws(() => new WebSocket('wss://example.com/', ['echo', 'echo']), {
+      name: 'SyntaxError',
+    });
+  },
+};

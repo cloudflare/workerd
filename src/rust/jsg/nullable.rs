@@ -15,6 +15,9 @@ use crate::Result;
 /// passing `undefined` produces `Nullable::Null`, but omitting the argument
 /// is a `TypeError`.
 ///
+/// Also like `kj::Maybe<T>`, a value that `T` does not take is `Nullable::Null` for a
+/// worker without the `dont_substitute_null_on_type_error` compatibility flag.
+///
 /// Use [`NullOrUndefined<T>`](crate::NullOrUndefined) for an optional nullable
 /// that keeps `undefined` distinct from `null`:
 ///

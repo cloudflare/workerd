@@ -2,15 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// close() and disposal. Divergences (see AGENTS.md):
-// - #10: once a listener closes the TypeScript EventSource, the rest of the
-//   messages read with that one are dropped; C++ dispatches them.
-// - #11: closing an EventSource.from() source cancels its stream in the
-//   TypeScript implementation; C++ goes on reading it.
+// close() and disposal. Once a listener closes the EventSource, the rest of
+// the messages read with that one are dropped, and closing an
+// EventSource.from() source cancels its stream.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { connect, nextEvent, record, streamOf } from 'helpers';
-import { usingTsImpl } from 'which-impl';
 
 export const closeIsIdempotentAndSilent = {
   async test(ctrl, env) {
@@ -52,7 +49,6 @@ export const disposeIgnoresAPatchedClose = {
   },
 };
 
-// #10.
 export const closeFromAListener = {
   async test() {
     const source = EventSource.from(streamOf(['data: a\n\ndata: b\n\n']));
@@ -62,11 +58,10 @@ export const closeFromAListener = {
       source.close();
     };
     await scheduler.wait(20);
-    deepStrictEqual(data, usingTsImpl ? ['a'] : ['a', 'b']);
+    deepStrictEqual(data, ['a']);
   },
 };
 
-// #11.
 export const closeCancelsAFromStream = {
   async test() {
     let pulls = 0;
@@ -93,9 +88,6 @@ export const closeCancelsAFromStream = {
     await scheduler.wait(10);
     const before = pulls;
     await scheduler.wait(30);
-    deepStrictEqual(
-      [cancelled, pulls > before],
-      usingTsImpl ? [true, false] : [false, true]
-    );
+    deepStrictEqual([cancelled, pulls > before], [true, false]);
   },
 };

@@ -129,13 +129,7 @@ export default {
     disabledTests: true,
   },
   'Create-protocol-with-space.any.js': {},
-  'Create-protocols-repeated-case-insensitive.any.js': {
-    comment:
-      'workerd does not throw for case-insensitive duplicate protocols (allows "Echo" and "echo")',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and an array of protocol strings with repeated values but different case - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-protocols-repeated-case-insensitive.any.js': {},
   'Create-protocols-repeated.any.js': {},
   'Create-url-with-space.any.js': {},
   'Create-valid-url-array-protocols.any.js': {
@@ -160,9 +154,7 @@ export default {
     replace: removeUseCapture,
   },
   'Send-0byte-data.any.js': {
-    comment:
-      'workerd returns 0 instead of undefined for empty message data; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Send-65K-data.any.js': {
     replace: removeUseCapture,
@@ -335,10 +327,7 @@ export default {
     comment: 'importScripts is not available in Workers',
     omittedTests: true,
   },
-  'referrer.any.js': {
-    comment: 'Referrer behavior is different in workers',
-    disabledTests: true,
-  },
+  'referrer.any.js': {},
   'remove-own-iframe-during-onerror.window.js': {
     comment: 'iframe tests are browser-specific',
     omittedTests: true,

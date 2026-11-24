@@ -15,11 +15,7 @@ export default {
   'abort/general.any.js': {
     comment: 'See individual tests',
     disabledTests: [
-      // Flaky since 2025-06-09. To be investigated.
-      'Stream errors once aborted, after reading. Underlying connection closed.',
-      // Flaky since 2025-07-25. To be investigated.
-      'Stream errors once aborted. Underlying connection closed.',
-      // Flaky since 2026-08-07. To be investigated.
+      // Flaky on macOS since 2026-08-07. To be investigated.
       'Underlying connection is closed when aborting after receiving response',
     ],
     expectedFailures: [
@@ -205,11 +201,7 @@ export default {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
   },
-  'basic/response-null-body.any.js': {
-    comment:
-      'Response begins with hello-worldHTTP/1.1 which will lead to invalid protocol errors coming up on other tests later on',
-    disabledTests: true,
-  },
+  'basic/response-null-body.any.js': {},
   'basic/response-url.sub.any.js': {},
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {
@@ -229,6 +221,7 @@ export default {
     ],
   },
   'basic/scheme-others.sub.any.js': {},
+  'basic/split-byte-order-mark.any.js': {},
   'basic/status.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
@@ -313,6 +306,10 @@ export default {
     omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
+  'cors/cors-preflight-safelist-value-size.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
@@ -525,7 +522,11 @@ export default {
       'Fix our handling of empty Location header. Even when fixed, tests will still fail due to CORS stuff',
     expectedFailures: [
       'redirect response with empty Location, manual mode',
-      'redirect response with empty Location, follow mode',
+      '301 redirect response with empty Location, follow mode',
+      '302 redirect response with empty Location, follow mode',
+      '303 redirect response with empty Location, follow mode',
+      '307 redirect response with empty Location, follow mode',
+      '308 redirect response with empty Location, follow mode',
     ],
   },
   'redirect/redirect-keepalive.any.js': {
@@ -739,11 +740,7 @@ export default {
     ],
   },
   'request/request-cache.js': {},
-  'request/request-clone-readable-stream-body.any.js': {
-    comment:
-      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
-    expectedFailures: true,
-  },
+  'request/request-clone-readable-stream-body.any.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:
@@ -751,12 +748,7 @@ export default {
     expectedFailures: ['Consume empty FormData request body as text'],
   },
   'request/request-consume.any.js': {},
-  'request/request-disturbed.any.js': {
-    comment: "They're literally passing URL, the constructor, as the URL!?!",
-    expectedFailures: [
-      'Request construction failure should not set "bodyUsed"',
-    ],
-  },
+  'request/request-disturbed.any.js': {},
   'request/request-error.any.js': {
     comment:
       'These tests would require us to throw errors for some invalid situations that we just ignore',
@@ -854,13 +846,7 @@ export default {
     expectedFailures: ['Consume empty FormData response body as text'],
   },
   'response/response-consume-stream.any.js': {},
-  'response/response-error-from-stream.any.js': {
-    comment: 'We have TypeError, they want pull Error',
-    expectedFailures: [
-      'ReadableStream start() Error propagates to Response.formData() Promise',
-      'ReadableStream pull() Error propagates to Response.formData() Promise',
-    ],
-  },
+  'response/response-error-from-stream.any.js': {},
   'response/response-error.any.js': {},
   'response/response-from-stream.any.js': {},
   'response/response-headers-guard.any.js': {},

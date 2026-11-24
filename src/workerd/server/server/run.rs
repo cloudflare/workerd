@@ -8,10 +8,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use futures::future::Either;
 use futures::future::FusedFuture;
@@ -34,6 +36,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::cluster::Ready;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -231,7 +234,7 @@ async fn start(
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        start_cluster(&factory, node, listener, &mut control).await?;
+        start_cluster(&factory, node, listener, &mut control)?;
     }
     for (name, port, url) in ports {
         control.listen(&name, port, url);
@@ -254,29 +257,19 @@ async fn start(
     }))
 }
 
-/// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for
-/// the life of the process; a lease the instance cannot keep ends it. The lease is renewed first,
-/// so that the first maintenance round finds it held however long startup took since `join`.
-async fn start_cluster(
+/// Runs this instance's part in the cluster: the peer port, the peer listing, and compaction. They
+/// run for the life of the process, as does the lease, which the lease thread keeps from `join` on;
+/// a lease the instance cannot keep ends it (`ClusterNode::new`).
+fn start_cluster(
     factory: &Rc<Factory>,
     node: &Rc<ClusterNode>,
     listener: tokio::net::TcpListener,
     control: &mut Control,
 ) -> Result<()> {
-    node.cluster
-        .renew_to_serve()
-        .await
-        .map_err(|e| kj::failed!("renewing the cluster lease to serve: {e}"))?;
     control.listen_cluster(&listener)?;
     factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
     let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move {
-        let reason = cluster.maintain().await;
-        // Peers may take this instance's objects over once its lease lapses: it must stop
-        // serving first.
-        tracing::error!("leaving the cluster: {reason}");
-        std::process::exit(1);
-    });
+    factory.spawn_detached(async move { cluster.list_loop().await });
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move { cluster.tier_loop().await });
     let node = Rc::clone(node);
@@ -397,7 +390,9 @@ fn report_unmatched_overrides(
         }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
-            Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
+            Ok(service::Which::Disk(_) | service::Which::Cache(_)) => {
+                directories.retain(|n| *n != name);
+            }
             _ => {}
         }
     }
@@ -432,19 +427,24 @@ async fn serve_listeners(
     Ok(())
 }
 
-/// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
-/// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
-/// error returned.
+/// `workerd serve`: serves until told to drain, then stops accepting connections, lets the open
+/// ones finish, and stops the actors' containers. A listener failing is fatal and is the error
+/// returned.
+///
+/// Each item of `drain`, which never ends, is a drain signal. After the first, the server serves
+/// on for the config's `shutdownDelayMs`, or until the next signal, then drains (`drain_due`).
 ///
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
-/// `stopTimeoutMs` bounds all of it.
+/// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
+#[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
     report: Reporter,
-    drain: impl Future<Output = ()>,
+    drain: impl Stream<Item = ()>,
 ) -> Result<()> {
+    let delay = shutdown_delay(&factory)?;
     let Some(Running {
         server,
         mut listeners,
@@ -454,9 +454,16 @@ pub async fn run(
         return Ok(());
     };
 
-    // Whatever way this returns, the cluster port answers that this instance is not ready.
-    let _serving = server.cluster().map(ClusterNode::serving);
-    let drain = std::pin::pin!(drain);
+    // A SIGTERM that arrived while the server started reaches `drain` only once the runtime has
+    // polled its drivers, which a start that never had to wait may not have let it do. tokio wakes
+    // a task that yields only after it has polled them, so the check below sees such a signal.
+    tokio::task::yield_now().await;
+    let mut drain = std::pin::pin!(drain);
+    let pending = drain.next().now_or_never().is_some();
+    // From here on the lease thread watches the event loop. The cluster port answers ready
+    // until the instance is told to drain or this returns.
+    let ready = server.cluster().map(ClusterNode::ready);
+    let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
@@ -467,7 +474,8 @@ pub async fn run(
             // `preventEviction` or not, while it serves on: a request for one waits for it and
             // then goes where it runs next. Then it leaves the cluster, so peers take over what
             // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
+            // balancers may still send some, and lets its connections finish, its peers' sessions
+            // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
@@ -486,14 +494,18 @@ pub async fn run(
                     }
                     Either::Right((stopped, _)) => stopped,
                 };
-                // Released before the lease goes, so nothing is served after it. Until the
-                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again. With
-                // objects still running, which stopping very many can leave, it stays a member:
-                // peers take over every object it did not hand off once its lease expires, after
-                // this process exited.
+                // Released before the lease goes, so nothing is served after it, and gone no
+                // sooner than `leave`, so no cache copy outlives it either. Until the
+                // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
+                // a peer that reads this node's record still finds it live and routes here again.
+                // With objects still running, which stopping very many can leave, it stays a
+                // member: peers take over every object it did not hand off once its lease
+                // expires, after this process exited.
                 if stopped {
-                    let deregister = node.cluster.deregister();
+                    let deregister = async {
+                        tokio::time::sleep_until(deadlines.leave).await;
+                        node.cluster.deregister().await
+                    };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
@@ -520,7 +532,7 @@ pub async fn run(
                     if !serving.is_terminated() {
                         serving.as_mut().await?;
                     }
-                    node.peer_requests_done().await;
+                    node.stop_peer_sessions().await;
                     Ok::<_, crate::Error>(())
                 };
                 let finished = tokio::time::timeout_at(deadlines.connections, finished);
@@ -556,6 +568,44 @@ pub async fn run(
     }
     tracing::warn!("leaving containers behind at the stop deadline");
     Ok(())
+}
+
+/// The config's `shutdownDelayMs`.
+fn shutdown_delay(factory: &Factory) -> Result<Duration> {
+    let message = factory.config()?;
+    let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
+    Ok(Duration::from_millis(config.get_shutdown_delay_ms().into()))
+}
+
+/// Resolves when `run` is to drain. That is at once if a signal was `pending` as the server
+/// started: it was never ready, so nothing sends it traffic to serve through the delay. Otherwise
+/// it is `delay` (`Config.shutdownDelayMs`) after the next item of `drain`, or on the item after
+/// it, whichever comes first. Load balancers go on sending connections for a while, which are
+/// served as before meanwhile, and a cluster node keeps its Durable Objects and its place in the
+/// cluster. Its readiness probe fails from the signal on (`ready` is dropped), so that what routes
+/// by it sends no more.
+async fn drain_due(
+    factory: &Factory,
+    delay: Duration,
+    pending: bool,
+    ready: Option<Ready>,
+    mut drain: Pin<&mut impl Stream<Item = ()>>,
+) {
+    if pending {
+        return;
+    }
+    drain.next().await;
+    drop(ready);
+    if delay.is_zero() {
+        return;
+    }
+    let seconds = delay.as_secs_f64();
+    tracing::warn!(
+        "drain signal received: serving for {seconds:.1} s more (shutdownDelayMs), then \
+         draining; a second signal drains at once"
+    );
+    let delay = std::pin::pin!(factory.sleep(delay));
+    futures::future::select(delay, drain.next()).await;
 }
 
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.

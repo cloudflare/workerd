@@ -17,6 +17,7 @@ use std::ops::Deref;
 
 pub use bridge::TokioAsyncIoContext;
 pub use bridge::new_tokio_async_io_context;
+pub use bridge::start_progress_probe;
 use tokio::runtime::EnterGuard;
 use tokio::runtime::Runtime;
 
@@ -157,6 +158,9 @@ mod bridge {
         /// `TimerImpl::SleepHooks` (a sooner timer was armed while sleeping). Unblocks a
         /// concurrent `wait_*` without setting the wake latch; a no-op outside `wait_*`.
         fn notify_kj_service(&self);
+
+        /// Loop thread only: the port's progress probe fired (`crate::Progress`).
+        fn count_progress(&self);
     }
 
     extern "Rust" {
@@ -180,5 +184,10 @@ mod bridge {
         /// caught comes out of it.
         #[cxx_name = "blockOn"]
         fn block_on(self: Pin<&mut TokioAsyncIoContext>, task: Box<BlockOnTask>) -> Result<()>;
+
+        /// Loop thread only: starts this thread's port's progress probe (`crate::Progress`), and
+        /// arms it. Fails if no `TokioEventPort` drives this thread.
+        #[cxx_name = "startProgressProbe"]
+        fn start_progress_probe() -> Result<()>;
     }
 }

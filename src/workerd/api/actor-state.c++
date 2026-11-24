@@ -1338,7 +1338,7 @@ kj::Array<jsg::Ref<api::WebSocket>> DurableObjectState::getWebSockets(
     jsg::Lock& js, jsg::Optional<kj::String> tag) {
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
   KJ_IF_SOME(manager, a.getHibernationManager()) {
-    return manager->getWebSockets(js, tag.map([](kj::StringPtr t) { return t; })).releaseAsArray();
+    return manager->getWebSockets(js, tag).releaseAsArray();
   }
   return kj::Array<jsg::Ref<api::WebSocket>>();
 }

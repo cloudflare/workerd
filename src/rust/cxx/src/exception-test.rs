@@ -367,3 +367,26 @@ fn test_kj_exception_raw_round_trip() {
     assert_eq!(exception.what(), "raw");
     assert_eq!(exception.r#type(), repr::KjExceptionType::Overloaded);
 }
+
+fn detailed_exception() -> KjException {
+    let details = vec![(7u64, b"detail".to_vec())];
+    KjException::new(
+        repr::KjExceptionType::Overloaded,
+        "kept",
+        "kept.rs",
+        11,
+        Some(&details),
+    )
+}
+
+#[test]
+fn test_kj_exception_clone() {
+    let exception = detailed_exception();
+    let copy = exception.clone();
+    assert_ne!(copy.err, exception.err);
+    assert_eq!(copy.what(), "kept");
+    assert_eq!(copy.r#type(), repr::KjExceptionType::Overloaded);
+    assert_eq!(copy.file(), c"kept.rs");
+    assert_eq!(copy.line(), 11);
+    assert_eq!(copy.details(), exception.details());
+}

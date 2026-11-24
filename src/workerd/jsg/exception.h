@@ -186,6 +186,14 @@ inline bool isRetryable(const kj::Exception& exception) {
       exception.getDetail(EXCEPTION_IS_TRANSIENT) != kj::none;
 }
 
+// Set by kj-hyper (src/rust/cxx/kj-hyper/client.rs) on a request's failure when the response head
+// didn't parse. The payload is the reason, as UTF-8.
+constexpr kj::Exception::DetailTypeId INVALID_RESPONSE_DETAIL_ID = 0xb1fc133636df86e3ull;
+
+// Set by kj-hyper on a request's failure when the connection for it couldn't be made, for example
+// because its host didn't resolve or its TLS handshake failed. The payload is the cause, as UTF-8.
+constexpr kj::Exception::DetailTypeId CONNECT_FAILED_DETAIL_ID = 0x4356f6737342b412ull;
+
 // Set when a Durable Object execution was terminated by a call to state.abort().
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166d61b404a7ull;
 

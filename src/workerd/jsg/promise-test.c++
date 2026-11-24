@@ -104,6 +104,16 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     js.resolvedPromise(js.num(1));
   }
 
+  // Resolves promises with C++ values, which V8 sees as opaque wrappers: through a resolver, as
+  // an already resolved promise, and as the result of a C++ continuation.
+  void resolveWithCppValues(jsg::Lock& js) {
+    auto [promise, resolver] = js.newPromiseAndResolver<kj::String>();
+    resolver.resolve(js, kj::str("resolver"));
+    promise.then(js, [](jsg::Lock&, kj::String value) { return kj::mv(value); });
+    js.resolvedPromise(kj::str("resolved"));
+    js.runMicrotasks();
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -118,6 +128,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     JSG_METHOD(thenable);
     JSG_METHOD(prototypePolution);
+    JSG_METHOD(resolveWithCppValues);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -213,6 +224,26 @@ KJ_TEST("prototype polution") {
     });
     prototypePolution();
     m;
+  )A",
+      "boolean", "false");
+}
+
+KJ_TEST("a then on Object.prototype isn't called for a promise resolved with a C++ value") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  // Resolving a promise with an object looks up its `then`, so the opaque wrapper that carries a
+  // C++ value must not inherit Object.prototype's.
+  e.expectEval(R"A(
+    let called = false;
+    Object.defineProperty(Object.prototype, 'then', {
+      configurable: true,
+      get() {
+        called = true;
+        return undefined;
+      },
+    });
+    resolveWithCppValues();
+    called;
   )A",
       "boolean", "false");
 }

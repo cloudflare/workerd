@@ -633,6 +633,10 @@ struct JsValue {
       capability @0 :Capability;
     }
 
+    struct EmailFwdr {
+      capability @0 :Capability;
+    }
+
     enum SecureTransport {
       # Security transport mode for a transferred Socket. Mirrors api::SecureTransportKind.
       off @0;
@@ -741,6 +745,10 @@ struct JsValue {
 
       durableObjectSnapshot @22 :DurableObjectSnapshot;
       # Opaque capability for a Durable Object storage snapshot.
+
+      emailFwdr @25 :EmailFwdr;
+      # The capability an inbound email event carries for forward() and reply(). Defined in
+      # edgeworker, so the capability is opaque here.
 
       # TODO(soon): WebSocket, Request, Response
     }

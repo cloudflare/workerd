@@ -1,0 +1,24 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# BenchController, the first argument of a Worker's `bench()` handler, and the runner that times
+# the cases it registers. C++ dispatches the bench event to it through bench_run() (ffi.rs).
+wd_rust_crate(
+    name = "bench-api",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/util:thread-scopes",
+    ],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/api/bench-core",
+        "//src/workerd/io:bench_capnp_rust",
+        "//src/workerd/io/io-context",
+        "@crates_vendor//capnp",
+    ],
+)

@@ -231,7 +231,7 @@ jobs:
           if [ "$BAZELFLARE" = true ]; then
             bazel build --config=bazelflare --config=ci --config=ci-bazelflare --config=ci-download-types //types
           else
-            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux-without-pgo --config=x64-release //types
           fi
       - name: Check snapshot diff
         run: |

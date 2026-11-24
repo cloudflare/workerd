@@ -36,7 +36,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
   `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
-  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes)
+  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes);
+  `kj_rs_tokio::watch_progress()` counts the loop's progress for a watchdog on another thread,
+  busy or asleep, except through three kinds of busy stretch that `progress.rs` names
 - `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
   client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
   transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,

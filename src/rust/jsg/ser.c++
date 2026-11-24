@@ -548,15 +548,24 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     v8::Local<v8::Value> value;
     if (!deser.ReadValue(isolate->GetCurrentContext()).ToLocal(&value)) return {};
     if (!pendingJsSerializables.empty() && !finishJsSerializables()) return {};
+    // After the instances, as jsg::Deserializer calls them.
+    auto callbacks = kj::mv(afterReadCallbacks);
+    for (auto& callback: callbacks) {
+      if (!callback(isolate)) return {};
+    }
     return value;
   }
 
   v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate*) override {
     uint32_t tag;
     if (!deser.ReadUint32(&tag)) return throwMalformed();
-    if (tag == SERIALIZATION_TAG_NATIVE_ERROR) return readError();
-    if (tag == SERIALIZATION_TAG_JS_SERIALIZABLE) return readJsSerializable();
-    return ::workerd::jsg::readApiObject(isolate, deser, tag);
+    if (tag == SERIALIZATION_TAG_NATIVE_ERROR || tag == SERIALIZATION_TAG_JS_SERIALIZABLE) {
+      // readApiObject() reads the other host objects under the same scope.
+      return ::workerd::jsg::readHostObjectWithoutJs(isolate, tag, [&]() {
+        return tag == SERIALIZATION_TAG_NATIVE_ERROR ? readError() : readJsSerializable();
+      });
+    }
+    return ::workerd::jsg::readApiObject(isolate, deser, tag, afterReadCallbacks);
   }
 
   // V8's GetSharedArrayBufferFromId() throws for a SharedArrayBuffer, which the data only refers
@@ -571,10 +580,13 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     uint32_t tag;
     if (!deser.ReadUint32(&tag)) return throwMalformed();
     v8::Local<v8::Value> name;
-    if (tag == ERROR_TAG_UNKNOWN && !deser.ReadValue(context).ToLocal(&name)) return {};
+    if (tag == ERROR_TAG_UNKNOWN &&
+        !::workerd::jsg::readValueInHostObject(isolate, deser).ToLocal(&name)) {
+      return {};
+    }
 
     v8::Local<v8::Value> message;
-    if (!deser.ReadValue(context).ToLocal(&message)) return {};
+    if (!::workerd::jsg::readValueInHostObject(isolate, deser).ToLocal(&message)) return {};
     if (!message->IsString()) {
       throwDataCloneError(
           isolate, newString(isolate, "Deserialization failed: error message is not a string"_kj));
@@ -589,7 +601,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     }
 
     v8::Local<v8::Value> properties;
-    if (!deser.ReadValue(context).ToLocal(&properties)) return {};
+    if (!::workerd::jsg::readValueInHostObject(isolate, deser).ToLocal(&properties)) return {};
     if (properties->IsObject()) {
       auto object = properties.As<v8::Object>();
       v8::Local<v8::Array> keys;
@@ -664,7 +676,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // DataCloneError), leaving the exception pending.
   bool readErrorField(kj::StringPtr field, v8::Local<v8::String>& string) {
     v8::Local<v8::Value> value;
-    if (!deser.ReadValue(isolate->GetCurrentContext()).ToLocal(&value)) return false;
+    if (!::workerd::jsg::readValueInHostObject(isolate, deser).ToLocal(&value)) return false;
     if (!value->IsString()) {
       throwDataCloneError(isolate,
           kj::str("Deserialization failed: ", field,
@@ -891,6 +903,9 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // were read, which read() initializes once it has read the value. Globals, since V8 hands the
   // delegate values in handle scopes of its own, which end before deserialization does.
   kj::Vector<PendingJsSerializable> pendingJsSerializables;
+  // What the deserializers of the workerd API objects that the value contains leave until it is
+  // read, which read() calls once it has initialized the instances.
+  ::workerd::jsg::AfterReadCallbacks afterReadCallbacks;
   v8::ValueDeserializer deser;
 };
 

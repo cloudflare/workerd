@@ -2,9 +2,7 @@
 
 #include <kj/common.h>
 #include <kj/debug.h>
-#include <kj/exception.h>
 
-#include <concepts>
 #include <list>
 
 namespace workerd::util {

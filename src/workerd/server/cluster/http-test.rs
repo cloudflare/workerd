@@ -33,7 +33,8 @@ fn a_body_held_in_memory_is_capped() {
         let url = format!("http://127.0.0.1:{port}/");
         let payload = Payload::Bytes(bytes::Bytes::new());
         let sent = http.send("GET".into(), url, vec![], payload, None, (wait, wait));
-        assert_eq!(sent.await.err().as_deref(), Some("response body too large"));
+        let message = sent.await.err().map(|e| e.message);
+        assert_eq!(message.as_deref(), Some("response body too large"));
     });
 }
 
@@ -50,12 +51,7 @@ async fn serving(answer: impl Fn(usize) -> Answer + Send + Sync + 'static) -> Se
     Server::serving(move |_, n| answer(n)).await
 }
 
-/// `answer`, `ms` late.
-fn after(ms: u64, answer: Answer) -> Answer {
-    Answer::After(Duration::from_millis(ms), Box::new(answer))
-}
-
-fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse, String>> {
+fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse, HttpError>> {
     let wait = Duration::from_secs(30);
     let url = format!("http://{}/k", server.host);
     let payload = Payload::Bytes(bytes::Bytes::new());
@@ -66,6 +62,55 @@ fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse
 async fn abandoned(server: &Server, n: usize) {
     let abandoned = tokio::time::timeout(Duration::from_secs(30), server.abandoned(n));
     abandoned.await.unwrap();
+}
+
+#[test]
+fn a_failed_request_says_whether_it_may_have_reached_the_server() {
+    runtime().block_on(async {
+        let http = Http::new().unwrap();
+        let wait = Duration::from_secs(30);
+        let send = |url: String, head: Duration| {
+            http.send("GET".into(), url, vec![], EMPTY, None, (head, wait))
+        };
+        // The server reads the request, then closes the connection.
+        let server = serving(|n| {
+            if n == 1 {
+                Answer::Close
+            } else {
+                reply(200, "ok")
+            }
+        })
+        .await;
+        let error = get(&http, &server).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Lost, "{}", error.message);
+        assert_eq!(
+            error.message,
+            "client error (SendRequest): connection closed before message completed"
+        );
+        // A new connection closed before the request went out on it.
+        server.hang_up(1);
+        let error = get(&http, &server).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Unsent, "{}", error.message);
+        assert_eq!(server.requests(), 1);
+        assert_eq!(get(&http, &server).await.unwrap().body, b"ok");
+        // No connection at all: nothing listens on port 0.
+        let error = send("http://127.0.0.1:0/k".into(), wait)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.failure, Failure::Other, "{}", error.message);
+        assert!(
+            error.message.starts_with("client error (Connect): "),
+            "{}",
+            error.message
+        );
+        // No answer in time.
+        let stalled = serving(|_| Answer::Stall).await;
+        let url = format!("http://{}/k", stalled.host);
+        let error = send(url, Duration::from_millis(50)).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Other, "{}", error.message);
+        assert_eq!(error.message, "timed out");
+    });
 }
 
 const EMPTY: Payload = Payload::Bytes(bytes::Bytes::new());
@@ -79,6 +124,7 @@ fn get_call(empty: &Payload) -> Call<'_> {
         guarded: false,
         body: empty,
         to: None,
+        stream: false,
     }
 }
 
@@ -131,8 +177,10 @@ fn a_request_that_answers_in_time_goes_once() {
         let http = Http::new().unwrap();
         let empty = EMPTY;
         let call = get_call(&empty);
+        // Longer than a stall of a busy machine, which a request answered
+        // at once never waits out.
         let answer = prompt(
-            Duration::from_millis(500),
+            Duration::from_millis(600),
             ANY,
             attempt(&call, what, not_refused, || get(&http, &server)),
         );
@@ -146,9 +194,10 @@ fn a_request_that_answers_in_time_goes_once() {
 #[test]
 fn a_request_that_answers_late_is_not_abandoned() {
     runtime().block_on(async {
+        // The first answers once the copy sent again has arrived.
         let server = serving(|n| {
             if n == 1 {
-                after(300, reply(201, ""))
+                Answer::WithNext(Box::new(reply(201, "")))
             } else {
                 Answer::Stall
             }
@@ -158,7 +207,7 @@ fn a_request_that_answers_late_is_not_abandoned() {
         let empty = EMPTY;
         let call = get_call(&empty);
         let answer = prompt(
-            Duration::from_millis(100),
+            Duration::from_millis(50),
             ANY,
             attempt(&call, what, settles, || get(&http, &server)),
         );
@@ -174,10 +223,11 @@ fn a_request_that_answers_late_is_not_abandoned() {
 #[test]
 fn an_answer_that_does_not_settle_waits_for_the_other_copy() {
     runtime().block_on(async {
-        // Sent again at 0.5 s and refused at once; the first answers at
-        // 0.75 s.
+        // Sent again at the bound and refused at once; the first answers
+        // once the refusal has gone out, well within the bound more the
+        // refusal waits, which is longer than a stall of a busy machine.
         let server = serving(|n| match n {
-            1 => after(750, reply(201, "")),
+            1 => Answer::AfterNextAnswered(Box::new(reply(201, ""))),
             _ => reply(412, ""),
         })
         .await;
@@ -185,7 +235,7 @@ fn an_answer_that_does_not_settle_waits_for_the_other_copy() {
         let empty = EMPTY;
         let call = get_call(&empty);
         let answer = prompt(
-            Duration::from_millis(500),
+            Duration::from_millis(600),
             ANY,
             attempt(&call, what, not_refused, || get(&http, &server)),
         );
@@ -232,10 +282,13 @@ fn a_request_is_sent_again_only_once() {
             ANY,
             attempt(&call, what, settles, || get(&http, &server)),
         );
-        // The caller's deadline ends it, as it ends a request sent once.
-        let deadline = tokio::time::timeout(Duration::from_secs(2), answer);
-        assert!(deadline.await.is_err());
-        assert_eq!(server.requests(), 2);
+        // No third copy follows within three bounds of the second's
+        // arrival; the caller's deadline ends it, as it ends a request sent
+        // once.
+        let window = Duration::from_millis(150);
+        let (sent, answer) = server.requests_during(2, window, answer).await;
+        assert!(answer.is_none());
+        assert_eq!(sent, 2);
     });
 }
 
@@ -253,12 +306,11 @@ fn a_request_outside_prompt_waits_for_its_answer() {
         let http = Http::new().unwrap();
         let empty = EMPTY;
         let call = get_call(&empty);
-        let answer = tokio::time::timeout(
-            Duration::from_millis(500),
-            attempt(&call, what, settles, || get(&http, &server)),
-        );
-        assert!(answer.await.is_err());
-        assert_eq!(server.requests(), 1);
+        let answer = attempt(&call, what, settles, || get(&http, &server));
+        let window = Duration::from_millis(150);
+        let (sent, answer) = server.requests_during(1, window, answer).await;
+        assert!(answer.is_none());
+        assert_eq!(sent, 1);
     });
 }
 
@@ -274,9 +326,12 @@ fn only_a_request_safe_to_send_twice_is_sent_again() {
         guarded,
         body,
         to,
+        stream: false,
     };
     let cases = [
         (call("GET", false, &empty, None), Some(Repeat::Read)),
+        (call("HEAD", false, &empty, None), Some(Repeat::Read)),
+        (call("POST", false, &small, None), None),
         (call("DELETE", false, &empty, None), Some(Repeat::Delete)),
         (call("PUT", true, &small, None), Some(Repeat::GuardedWrite)),
         // A download into a file.
@@ -310,9 +365,11 @@ fn only_a_request_safe_to_send_twice_is_sent_again() {
                 repeat,
                 attempt(call, what, settles, || get(&http, &server)),
             );
-            let deadline = tokio::time::timeout(Duration::from_millis(500), answer);
-            assert!(deadline.await.is_err());
-            assert_eq!(server.requests(), 1, "{}", call.method);
+            // No copy within three bounds of the request's arrival.
+            let window = Duration::from_millis(150);
+            let (sent, answer) = server.requests_during(1, window, answer).await;
+            assert!(answer.is_none(), "{}", call.method);
+            assert_eq!(sent, 1, "{}", call.method);
         });
     }
 }

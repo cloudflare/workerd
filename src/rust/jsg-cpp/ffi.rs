@@ -82,6 +82,9 @@ pub use bridge::CppRef;
 /// }
 /// ```
 ///
+/// `src/workerd/api/channel-interop` declares `api::Fetcher` and `api::DurableObjectClass` this
+/// way.
+///
 /// # Safety
 ///
 /// `try_unwrap` only returns references made for the C++ class `Self` stands for, and `wrap`
@@ -266,10 +269,6 @@ impl<T: CppResource> jsg::MemoryInfo for Ref<T> {
 impl<T: CppResource> jsg::Type for Ref<T> {
     fn class_name() -> &'static str {
         T::class_name()
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_object()
     }
 }
 

@@ -6,8 +6,6 @@
 
 #include <workerd/rust/worker/ffi.rs.h>
 
-#include <kj-rs/kj-rs.h>
-
 namespace workerd::rust::worker {
 
 inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::EventOutcome outcome) {
@@ -154,6 +152,9 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
   kj::Promise<bool> test() override {
     return impl->test();
   }
+
+  kj::Promise<void> bench(workerd::bench::BenchParams::Reader params,
+      workerd::bench::BenchReport::Group::Builder report) override;
 
  private:
   ::rust::Box<Impl> impl;

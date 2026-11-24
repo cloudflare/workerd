@@ -5,7 +5,7 @@
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
-import { inspect } from 'node:util';
+import { inspect, promisify } from 'node:util';
 import { isIPv4, isIPv6 } from 'node:net';
 
 // Taken from Node.js
@@ -443,6 +443,23 @@ export const lookupDefaultFamilyResolvesIPv4 = {
       resolve();
     });
     await promise;
+  },
+};
+
+export const promisifiedLookup = {
+  async test() {
+    const result = await promisify(dns.lookup)(addresses.INET4_HOST, 4);
+    deepStrictEqual(Object.keys(result), ['address', 'family']);
+    ok(
+      isIPv4(result.address),
+      `expected an IPv4 address, got ${result.address}`
+    );
+    strictEqual(result.family, 4);
+
+    const all = await promisify(dns.lookup)(addresses.INET4_HOST, {
+      all: true,
+    });
+    ok(Array.isArray(all), 'all: true resolves with the array of addresses');
   },
 };
 

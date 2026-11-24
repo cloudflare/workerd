@@ -20,6 +20,26 @@ pub fn completed_task_count() -> u64 {
     COMPLETED_TASKS.load(Ordering::SeqCst)
 }
 
+/// What `start_progress` last started watching, for `progress_count` to read on any thread.
+static PROGRESS: std::sync::Mutex<Option<kj_rs_tokio::Progress>> = std::sync::Mutex::new(None);
+
+pub fn start_progress(beat_ms: u64) -> bool {
+    let progress = kj_rs_tokio::watch_progress(Duration::from_millis(beat_ms));
+    let started = progress.is_ok();
+    *PROGRESS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = progress.ok();
+    started
+}
+
+pub fn progress_count() -> u64 {
+    PROGRESS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .map_or(0, kj_rs_tokio::Progress::count)
+}
+
 pub fn has_loop_runtime_handle() -> bool {
     kj_rs_tokio::current_handle().is_some()
 }
