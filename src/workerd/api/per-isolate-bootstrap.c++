@@ -1043,10 +1043,11 @@ jsg::JsRef<jsg::JsFunction> newRequireFunction(jsg::Lock& js, v8::FunctionCallba
 }
 
 // Build a JS object with { flagName: true } entries for enabled compat flags.
-// Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
-// which yields false for unset flags.
+// Disabled flags are omitted. The object has no prototype, so a disabled flag reads as undefined
+// whatever user code has added to Object.prototype: a script that loads on first use, or a
+// function called later, reads its flags after user code has run.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
   auto dynamicFlags = capnp::toDynamic(flags);
 
   for (auto& entry: getCompatFlagFields()) {
@@ -1059,9 +1060,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 }
 
 // Build a JS object with { gateName: true } entries for enabled autogates.
-// Disabled autogates are omitted.
+// Disabled autogates are omitted. As for the compat flags, the object has no prototype.
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
 
   for (util::AutogateKey key: util::getAutogateKeys()) {
     if (util::Autogate::isEnabled(key)) {

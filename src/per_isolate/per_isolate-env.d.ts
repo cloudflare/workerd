@@ -29,7 +29,8 @@ declare const exports: any;
 
 /**
  * Compatibility flags for the current worker configuration.
- * Scripts use these to conditionally install globals.
+ * Scripts use these to conditionally install globals. A flag that is off is
+ * absent, and the object has no prototype, so it reads as undefined.
  */
 declare const compatFlags: {
   readonly [key: string]: boolean;
@@ -39,6 +40,8 @@ declare const compatFlags: {
  * Autogate flags for the current process. Unlike compatFlags (per-worker),
  * autogates are process-wide and used for gradual rollout of risky changes.
  * Gate names use kebab-case (e.g., "v8-fast-api", "rust-backed-node-dns").
+ * As for compatFlags, a gate that is off is absent and the object has no
+ * prototype.
  */
 declare const autogates: {
   readonly [key: string]: boolean;
