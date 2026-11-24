@@ -367,6 +367,12 @@ class ClusterNode {
     return result;
   }
 
+  // Sends the node `signal` without waiting for it to exit.
+  signal(signal) {
+    assert(this.#child !== null, 'node not started');
+    this.#child.kill(signal);
+  }
+
   async stop({ signal = 'SIGTERM', timeoutMs = 10_000 } = {}) {
     if (this.#child === null) return null;
     const child = this.#child;
@@ -3114,6 +3120,202 @@ test(
       }
       await assertLoadServed(await finish(), nodes);
     });
+  }
+);
+
+// The status of `GET /ready` on a cluster port, or undefined once nothing
+// answers within a second.
+async function readiness(port) {
+  const signal = AbortSignal.timeout(1000);
+  return (
+    await fetch(`http://127.0.0.1:${port}/ready`, { signal }).catch(() => null)
+  )?.status;
+}
+
+// The first status other than 200 that `GET /ready` on a cluster port
+// answers, within `ms`.
+async function untilNotReady(port, ms = 5000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const status = await readiness(port);
+    if (status !== 200) return status;
+    assert(Date.now() < deadline, `port ${port} still ready after ${ms} ms`);
+    await sleep(20);
+  }
+}
+
+// The shutdown delay, in seconds, of the nodes in the tests below, which
+// WORKERD_SHUTDOWN_DELAY_MS sets.
+const SHUTDOWN_DELAY_S = 6;
+
+test(
+  'cluster: a node serves its DOs through its shutdown delay, then hands them off',
+  SIGTERM_DRAINS,
+  async () => {
+    // Only the first node is sent SIGTERM; the peer is killed at the end.
+    const nodeEnv = () => ({
+      WORKERD_SHUTDOWN_DELAY_MS: `${SHUTDOWN_DELAY_S * 1000}`,
+    });
+    await withCluster(
+      2,
+      async ({ nodes: [stopping, peer], bucket, nodeKeys }) => {
+        const key = nodeKeys.get(stopping.nodeId);
+        const first = await fetchJson(
+          stopping.httpPort,
+          '/increment?name=delayed'
+        );
+        assert.strictEqual(first.body.nodeId, stopping.nodeId);
+        assert.strictEqual(await readiness(stopping.clusterPort), 200);
+
+        const stoppedAt = Date.now();
+        const exit = stopping.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        // Not ready from the signal on, so what routes by readiness stops
+        // sending requests here.
+        assert.strictEqual(await untilNotReady(stopping.clusterPort), 503);
+
+        // Until the delay ends, the node serves what it still gets, and its
+        // DO, which it still owns, runs here whichever node it is asked on.
+        // The node stays a member of the cluster. The requests stop 2 s
+        // before the delay does, so that none lands in the handoff; what
+        // slow CI answers only after the delay may have met the handoff, so
+        // only what is answered within it shows where the DO runs.
+        const delayEnd = stoppedAt + SHUTDOWN_DELAY_S * 1000;
+        let count = first.body.count;
+        let served = 0;
+        while (Date.now() < delayEnd - 2000) {
+          for (const node of [stopping, peer]) {
+            const response = await fetchJson(
+              node.httpPort,
+              '/increment?name=delayed',
+              { timeoutMs: 10_000 }
+            );
+            assert.strictEqual(
+              response.status,
+              200,
+              JSON.stringify(response.body)
+            );
+            assert.strictEqual(response.body.count, ++count);
+            const owner = await bucket.owner(response.body.id);
+            if (Date.now() < delayEnd) {
+              assert.strictEqual(response.body.nodeId, stopping.nodeId);
+              assert.strictEqual(owner, key);
+              served++;
+            }
+          }
+          const members = await bucket.nodes();
+          if (Date.now() < delayEnd) assert(members.includes(key));
+          await sleep(200);
+        }
+        assert(served > 0, 'no request was answered within the delay');
+        assert.notStrictEqual(await readiness(stopping.clusterPort), 200);
+
+        // Then it drains as it would at once without the delay: it hands
+        // the DO off and leaves.
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        assert(stopMs >= SHUTDOWN_DELAY_S * 1000, `stopped in ${stopMs} ms`);
+        assert(!(await bucket.nodes()).includes(key));
+        const moved = await fetchJson(peer.httpPort, '/increment?name=delayed');
+        assert.strictEqual(moved.status, 200, JSON.stringify(moved.body));
+        assert.strictEqual(moved.body.nodeId, peer.nodeId);
+        assert.strictEqual(moved.body.count, count + 1);
+      },
+      { nodeEnv }
+    );
+  }
+);
+
+test(
+  'cluster: a second SIGTERM cuts the shutdown delay short',
+  SIGTERM_DRAINS,
+  async () => {
+    const nodeEnv = () => ({ WORKERD_SHUTDOWN_DELAY_MS: '600000' });
+    await withCluster(
+      1,
+      async ({ nodes: [node], bucket, nodeKeys }) => {
+        await fetchJson(node.httpPort, '/increment?name=cut-short');
+        node.signal('SIGTERM');
+        assert.strictEqual(await untilNotReady(node.clusterPort), 503);
+        // In the delay, not draining: the node is still a member well after
+        // a drain would have handed its one DO off and left.
+        await sleep(2000);
+        assert((await bucket.nodes()).includes(nodeKeys.get(node.nodeId)));
+        const response = await fetchJson(
+          node.httpPort,
+          '/increment?name=cut-short'
+        );
+        assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+
+        const stoppedAt = Date.now();
+        const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        // Within the stop timeout of 10 s, with time to exit.
+        assert(stopMs < 11_500, `stopped in ${stopMs} ms`);
+      },
+      { nodeEnv }
+    );
+  }
+);
+
+test(
+  'serve: a SIGTERM while the server starts drains it without the shutdown delay',
+  SIGTERM_DRAINS,
+  async () => {
+    // A worker whose evaluation keeps the server starting, synchronously,
+    // for seconds after it logs.
+    const dir = await mkdtemp(join(tmpdir(), 'workerd-starting-'));
+    try {
+      await writeFile(
+        join(dir, 'worker.js'),
+        `console.log('evaluating');
+let x = 0;
+for (let j = 0; j < 8; j++) for (let i = 0; i < 1e8; i++) x = (x + i) | 0;
+export default { fetch: () => new Response(String(x)) };
+`
+      );
+      const config = join(dir, 'config.capnp');
+      await writeFile(
+        config,
+        `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [(name = "main", worker = (
+    compatibilityDate = "2024-01-01",
+    modules = [(name = "worker.js", esModule = embed "worker.js")],
+  ))],
+  sockets = [(name = "http", address = "127.0.0.1:0", http = (), service = "main")],
+);
+`
+      );
+      const child = spawn(env.WORKERD_BINARY, ['serve', config], {
+        stdio: ['ignore', 'pipe', 'inherit'],
+        env: { ...env, WORKERD_SHUTDOWN_DELAY_MS: '600000' },
+      });
+      const closed = new Promise((resolve) =>
+        child.once('close', (code, signal) => resolve({ code, signal }))
+      );
+      const killTimer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+      try {
+        // The signal handler is installed before the server starts.
+        let stdout = '';
+        await new Promise((resolve, reject) => {
+          child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+            if (stdout.includes('evaluating')) resolve();
+          });
+          closed.then(() => reject(new Error(`exited early: ${stdout}`)));
+        });
+        child.kill('SIGTERM');
+        // The server was never ready, so it drains as soon as it is up,
+        // rather than serve for the delay.
+        assert.deepStrictEqual(await closed, { code: 0, signal: null });
+      } finally {
+        clearTimeout(killTimer);
+        child.kill('SIGKILL');
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 );
 

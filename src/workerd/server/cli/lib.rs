@@ -108,6 +108,7 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
+    let config = with_environment(config);
     let (config, options) =
         with_cluster::<T>(config, &args.serve_or_test, options, &process, false);
     entry::serve(
@@ -143,6 +144,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 serve_or_test.data_dir.as_deref(),
                 serve_or_test.experimental,
             );
+            let config = with_environment(config);
             let (config, options) =
                 with_cluster::<T>(config, &serve_or_test, options, &process, true);
             entry::serve(
@@ -510,10 +512,38 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
+/// Overrides settings in `config` with those the environment sets, for `serve` and a compiled
+/// binary only, so that `compile` never embeds the environment, and checks them. An
+/// unusable variable or setting ends the process, even under `--watch`, because the cause can lie
+/// outside the config files.
+fn with_environment(config: Config) -> Config {
+    config
+        .with_shutdown_delay_environment(|name: &str| std::env::var_os(name))
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        })
+}
+
+/// The value of the environment variable `name` for [`Config::with_cluster`]: `None` when it is
+/// unset or empty. One that is not UTF-8 ends the process, as an unusable
+/// `WORKERD_SHUTDOWN_DELAY_MS` does, rather than count as unset.
+fn cluster_var(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) => Some(value).filter(|value| !value.is_empty()),
+        Err(std::env::VarError::NotPresent) => None,
+        // The value is not shown: it may be the cluster key.
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("{name}: not UTF-8 text.");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Joins `config` to a cluster with `--cluster-addr` if it has none, `can_join` (not for a
-/// compiled config) and a writable disk service `do-storage`, fills its cluster key and bucket
-/// from the environment ([`Config::with_cluster`]), then adds cluster deployments to `config` and
-/// records their service sources in `options`.
+/// compiled config) and a writable disk service `do-storage`, takes its cluster key, bucket and
+/// stop timeout from the environment where it sets them ([`Config::with_cluster`]), then adds
+/// cluster deployments to `config` and records their service sources in `options`.
 ///
 /// Only joining happens without `--experimental`, so that the server refuses the cluster as it
 /// refuses one in the config. A public cluster address or an error in `config` found during
@@ -533,8 +563,9 @@ fn with_cluster<T: CommandFactory>(
         advertise: options.cluster_advertise.as_deref(),
         can_join,
     };
-    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    let environment = serve_or_test.experimental.then_some(&var as Env<'_>);
+    let environment = serve_or_test
+        .experimental
+        .then_some(&cluster_var as Env<'_>);
     let config = match config.with_cluster(&flags, environment) {
         Ok(config) => config,
         Err(ClusterError::Usage(error)) => usage_error::<T>(error),
