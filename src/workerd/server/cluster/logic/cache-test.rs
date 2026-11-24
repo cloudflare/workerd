@@ -298,7 +298,9 @@ impl Sim {
         // drift to spare before the node joins.
         let local = now.cast_signed();
         let ahead = if node.until.is_none() { LEASE / 100 } else { 0 };
-        let skew_ms = node.estimate.map(|s| s.most_ms(local, local) + ahead);
+        let skew_ms = node
+            .estimate
+            .map(|s| s.most_ms(local, local, local) + ahead);
         let known = lease::Lease::new(L).clock(skew_ms).is_ok();
         // `know_clock` gives up after a lease: the process exits, and comes
         // back, as another node, once its clock is fixed. Until the node

@@ -179,11 +179,16 @@ pub struct Observed {
 /// bucket's answers.
 ///
 /// Each answer bounds it to a window over a second wide. The windows are
-/// kept on the monotonic clock, which is never stepped, so a step of this
-/// clock moves them at once; each is widened by how far the clocks may have
-/// drifted apart since, so answers at different points of the bucket's
-/// second narrow it. An answer that fits none of them, as from a bucket
-/// whose clock was stepped, starts over.
+/// kept on a monotonic clock that NTP neither steps nor slews, so a step or
+/// slew of the wall clock shows at once; each is widened by how far the
+/// clocks may have drifted apart since, so answers at different points of
+/// the bucket's second narrow it. An answer that fits none of them starts
+/// over.
+///
+/// The windows assume one steady bucket clock. A step of the bucket's that
+/// leaves its answers overlapping the window, or front ends whose clocks
+/// differ by more than its width, can leave the far end short by up to
+/// that width, about a second, until an answer falls outside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Skew {
     /// The monotonic clock less the bucket's.
@@ -216,21 +221,18 @@ impl Skew {
         }
     }
 
-    /// How far the clock may be off when it reads `wall`, at `at` by the
-    /// monotonic clock.
+    /// How far the clock may be off when it reads `wall`, between `before`
+    /// and `after` by the monotonic clock.
     #[must_use]
-    pub fn most_ms(self, at: i64, wall: i64) -> u64 {
-        let k = self.widened(at);
-        let step = wall - at;
-        (k.lo + step)
+    pub fn most_ms(self, before: i64, after: i64, wall: i64) -> u64 {
+        let k = self.widened(after);
+        (k.lo + wall - after)
             .unsigned_abs()
-            .max((k.hi + step).unsigned_abs())
+            .max((k.hi + wall - before).unsigned_abs())
     }
 
-    /// A clock gains or loses at most 1% of its own time on the bucket's,
-    /// 10 ms a second; NTP slews it by at most 0.05%. chrony slews faster,
-    /// but toward the bucket's time: that narrows the skew, which the far
-    /// end still bounds.
+    /// The monotonic clock, unslewed, gains or loses on the bucket's at its
+    /// oscillator's rate, within 1% of its own time, 10 ms a second.
     fn widened(self, at: i64) -> Self {
         // In whole ms, rounded up.
         let drift = (at - self.at + 99).max(0) / 100;

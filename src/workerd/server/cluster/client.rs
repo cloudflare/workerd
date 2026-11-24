@@ -14,9 +14,7 @@
 use std::cell::Cell;
 use std::fmt::Write;
 use std::path::Path;
-use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -95,7 +93,8 @@ pub struct Client<D> {
     /// `<scheme>://<host>[:<port>]`.
     endpoint: String,
     bucket: String,
-    /// This node's wall clock less the bucket's, from the responses so far.
+    /// This node's monotonic clock less the bucket's, from the responses so
+    /// far (`mono_ms`).
     skew: Cell<Option<Skew>>,
     /// The first pause of the 429/503 backoff (`BACKOFF`).
     backoff: Duration,
@@ -190,8 +189,13 @@ impl<D: Dialect> Store for Client<D> {
     /// How far this node's wall clock may be off from the bucket's, from the
     /// responses' `Date` headers.
     fn clock_skew_ms(&self) -> Option<u64> {
+        // A pause between the reads widens the window by its length.
+        let before = mono_ms();
         let wall = unix_ms(SystemTime::now());
-        self.skew.get().map(|skew| skew.most_ms(mono_ms(), wall))
+        let after = mono_ms();
+        self.skew
+            .get()
+            .map(|skew| skew.most_ms(before, after, wall))
     }
 
     // R2's calls. A read is a `Repeat::Read`: `http::prompt` may send it
@@ -791,10 +795,28 @@ fn listing_page(
     }
 }
 
-/// Milliseconds by the monotonic clock, from the first call.
+/// Milliseconds by a monotonic clock that NTP neither steps nor slews:
+/// chrony slews `Instant`'s on Linux, `CLOCK_MONOTONIC`, by up to 8.3%, past
+/// the drift `Skew` allows.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "clock_gettime is a C call")]
 fn mono_ms() -> i64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    i64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(i64::MAX)
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `t` is a timespec to write to.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_RAW, &raw mut t) };
+    assert_eq!(r, 0, "CLOCK_MONOTONIC_RAW");
+    t.tv_sec * 1000 + t.tv_nsec / 1_000_000
+}
+
+/// Windows' `Instant` is not slewed.
+#[cfg(not(unix))]
+fn mono_ms() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
 /// The text of each `<name>…</name>` element, in order. S3's listing XML has

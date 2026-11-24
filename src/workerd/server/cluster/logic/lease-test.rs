@@ -145,15 +145,15 @@ fn stamped(known: Option<Skew>, local: i64) -> Skew {
 
 #[test]
 fn a_skew_is_the_far_end_of_what_the_dates_allow() {
-    // 1.9 to 2.9 s ahead: the end nearest 0, which `max_skew_ms` once
-    // judged, passes; the clock may be at the other.
+    // 1.9 to 2.9 s ahead: the end nearest 0 is within `max_skew_ms`, but the
+    // clock may be at the other.
     let ahead = stamped(None, 1_002_900);
-    assert_eq!(ahead.most_ms(1_002_900, 1_002_900), 2_900);
+    assert_eq!(ahead.most_ms(1_002_900, 1_002_900, 1_002_900), 2_900);
     assert!(Lease::new(Timing::DEFAULT).clock(Some(2_900)).is_err());
     // Kept 10 s, the window widens by the drift.
     let synced = stamped(None, 1_000_100);
-    assert_eq!(synced.most_ms(1_000_100, 1_000_100), 900);
-    assert_eq!(synced.most_ms(1_010_100, 1_010_100), 1_000);
+    assert_eq!(synced.most_ms(1_000_100, 1_000_100, 1_000_100), 900);
+    assert_eq!(synced.most_ms(1_010_100, 1_010_100, 1_010_100), 1_000);
 }
 
 /// `n` answers 370 ms apart by this clock, each 30 ms, to a clock `skew(i)`
@@ -178,7 +178,7 @@ fn answers_across_the_bucket_second_narrow_the_skew() {
         let s = answers(20, |_| skew);
         // From 1,030 ms; the drift each answer allows keeps it at 146.
         assert!(s.hi - s.lo <= 150, "{skew}: {s:?}");
-        let most = s.most_ms(s.at, s.at);
+        let most = s.most_ms(s.at, s.at, s.at);
         assert!(most <= skew.unsigned_abs() + 150, "{skew}: {s:?}");
     }
 }
@@ -198,11 +198,24 @@ fn a_stepped_clock_moves_its_window_at_once() {
         hi: 1_850,
         at: 1_000_000,
     };
-    assert_eq!(known.most_ms(1_000_000, 1_000_600), 2_450);
+    assert_eq!(known.most_ms(1_000_000, 1_000_000, 1_000_600), 2_450);
     // An answer after the step, 200 ms into the bucket's second.
     let after = Skew::answered(Some(known), 1_001_000, 1_001_000, 999_000);
-    assert_eq!(after.most_ms(1_001_000, 1_001_600), 2_460);
+    assert_eq!(after.most_ms(1_001_000, 1_001_000, 1_001_600), 2_460);
     // An answer that fits none of the window starts over.
     let over = Skew::answered(Some(known), 1_000_000, 1_000_000, 995_000);
-    assert_eq!(over.most_ms(1_000_000, 1_000_000), 5_000);
+    assert_eq!(over.most_ms(1_000_000, 1_000_000, 1_000_000), 5_000);
+}
+
+#[test]
+fn a_pause_after_the_wall_clock_is_read_hides_no_skew() {
+    // 1.75 to 1.85 s ahead; the wall clock read, then a 50 ms pause before
+    // the monotonic clock is, which alone would take 50 ms off.
+    let known = Skew {
+        lo: 1_750,
+        hi: 1_850,
+        at: 1_000_000,
+    };
+    assert_eq!(known.most_ms(1_000_050, 1_000_050, 1_000_000), 1_801);
+    assert_eq!(known.most_ms(1_000_000, 1_000_050, 1_000_000), 1_851);
 }
