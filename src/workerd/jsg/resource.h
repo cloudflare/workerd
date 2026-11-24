@@ -2084,7 +2084,9 @@ class ResourceWrapper {
 
     instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
 
-    auto classname = v8StrIntern(isolate, typeName(typeid(T)));
+    // Cache the demangled class name once per type across all isolates.
+    static const kj::String* const cachedClassName = new kj::String(typeName(typeid(T)));
+    auto classname = v8StrIntern(isolate, *cachedClassName);
 
     if (getShouldSetToStringTag(isolate)) {
       prototype->Set(
