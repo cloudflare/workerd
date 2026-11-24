@@ -89,10 +89,24 @@ wd_rust_crate(
     name = "workerd-cli",
     srcs = glob(["cli/**/*.rs"]),
     crate_root = "cli/lib.rs",
-    cxx_bridge_deps = ["//src/workerd/server/factory:bootstrap-hdrs"],
+    cxx_bridge_deps = {
+        "cli/bridge.rs": ["//src/workerd/server/factory:bootstrap-hdrs"],
+        "cli/repl/bridge.rs": [
+            "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+            "//src/workerd/server/repl:repl-hdrs",
+        ],
+    },
     cxx_bridge_hdrs = ["config-compiler.h"],
-    cxx_bridge_src = "cli/bridge.rs",
-    link_deps = [":config-compiler"],
+    cxx_bridge_srcs = [
+        "cli/bridge.rs",
+        "cli/repl/bridge.rs",
+    ],
+    # The REPL's C++ (//src/workerd/server/repl) includes its bridge's header.
+    cxx_bridge_visibility = ["//src/workerd/server/repl:__pkg__"],
+    link_deps = [
+        ":config-compiler",
+        "//src/workerd/server/repl",
+    ],
     test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
     # Its tests run one at a time (RUST_TEST_THREADS=1); on Windows CI they took over the 15 s of
     # "medium".
@@ -100,6 +114,7 @@ wd_rust_crate(
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-tokio",
         "//src/workerd/server/cluster",
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//capnp",
@@ -271,6 +286,7 @@ wd_cc_library(
         "//src/workerd/server/queues:queues-js",
         "//src/workerd/server/r2:r2-js",
         "//src/workerd/server/ratelimit:ratelimit-js",
+        "//src/workerd/server/repl:repl-api",
         "//src/workerd/server/secrets-store:secrets-store-js",
         "//src/workerd/server/workflows:workflows-js",
         "//src/workerd/util:perfetto",

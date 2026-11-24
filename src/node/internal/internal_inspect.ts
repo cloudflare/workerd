@@ -3055,7 +3055,8 @@ function isRpcWildcardType(value: unknown) {
   return (
     value instanceof internalWorkers.RpcStub ||
     value instanceof internalWorkers.RpcPromise ||
-    value instanceof internalWorkers.RpcProperty
+    value instanceof internalWorkers.RpcProperty ||
+    value instanceof internalWorkers.ServiceStub
   );
 }
 
