@@ -183,8 +183,8 @@ void requireModernKeyFormat(jsg::Lock& js, kj::StringPtr format) {
 // =======================================================================================
 // Helper functions
 
-// Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
-// or if it doesn't support the given usage.
+// Throws NotSupportedError if the requested algorithm name is not a registered algorithm, and
+// InvalidAccessError if the key is incompatible with it or doesn't support the given usage.
 void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, CryptoKeyUsageSet usage) {
   // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
   //   Web IDL says that's deprecated.
@@ -192,6 +192,8 @@ void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, Crypto
   // TODO(cleanup): Make this function go away. Maybe this can be rolled into the default
   //   implementations of the CryptoKey::Impl::<crypto operation>() functions.
 
+  JSG_REQUIRE(lookupAlgorithm(requestedName) != kj::none, DOMNotSupportedError,
+      "Unrecognized or unimplemented algorithm \"", requestedName, "\" requested.");
   JSG_REQUIRE(strcasecmp(requestedName.cStr(), key.getAlgorithmName().cStr()) == 0,
       DOMInvalidAccessError, "Requested algorithm \"", requestedName,
       "\" does not match this CryptoKey's algorithm \"", key.getAlgorithmName(), "\".");
@@ -696,8 +698,7 @@ bool CryptoKey::verifyX509Private(const X509* cert) const {
 
 void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(algorithmProperty, usagesProperty);
-  if (impl.get() == nullptr) return;
-  impl->visitForGc(visitor);
+  visitor.visit(impl);
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js,
@@ -847,17 +848,14 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::deriveBits(jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
-    jsg::Optional<kj::Maybe<int>> lengthParam) {
+    jsg::Optional<kj::Maybe<uint32_t>> lengthParam) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   kj::Maybe<uint32_t> length = kj::none;
   KJ_IF_SOME(maybeLength, lengthParam) {
-    KJ_IF_SOME(l, maybeLength) {
-      JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-      length = static_cast<uint32_t>(l);
-    }
+    length = maybeLength;
   }
 
   return js.evalNow([&] {
@@ -886,8 +884,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
       size_t minimumLength;
     };
 
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     auto exportedKey = key.impl->exportKey(js, kj::mv(format));
 
@@ -1028,10 +1025,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
 
   return js.evalNow([&] {
     requireModernKeyFormat(js, format);
-    // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
-    //   but Web IDL says that's deprecated.
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     return key.impl->exportKey(js, format);
   });
@@ -1540,6 +1534,8 @@ kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
   // seen here as the single code point it is.
   size_t prefix = pendingLead == kj::none ? 0 : 1;
   auto utf16 = kj::heapArray<char16_t>(prefix + str.length(js));
+  // Zeroed because V8 may not fill it; see JsString::writeInto().
+  utf16.asPtr().fill(0);
   auto dest =
       kj::arrayPtr(reinterpret_cast<uint16_t*>(utf16.begin() + prefix), utf16.size() - prefix);
   // Only the prefix that writeInto() reports as written is initialized; see
@@ -1739,32 +1735,37 @@ jsg::Ref<DigestStream> DigestStream::constructor(
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise),
       readDigestEncoding(options));
 
+  // Each sink promotes a WeakRef to the stream and holds the strong Ref until it returns, so a GC
+  // that starts inside the call (resolving the digest allocates) can't destroy the stream under
+  // it. A Ref captured for the sinks' lifetime would keep the stream alive through the controller
+  // it owns. If the stream is already gone, nothing can observe the operation.
   // clang-format off
   stream->getController().setup(js, UnderlyingSink{
-    .write = [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+    .write = [weak = stream.getWeakRef(js)](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) {
+      auto stream = KJ_UNWRAP_OR_RETURN(weak.tryAddRef(js), js.resolvedPromise());
       return js.tryCatch([&] {
         // Make sure what we got can be interpreted as bytes...
         if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
           jsg::JsBufferSource source(chunk);
           if (source.size() == 0) return js.resolvedPromise();
 
-          KJ_IF_SOME(error, stream.write(js, source.asArrayPtr())) {
+          KJ_IF_SOME(error, stream->write(js, source.asArrayPtr())) {
             return js.rejectedPromise<void>(kj::mv(error));
           } else {
           }  // Here to silence a compiler warning
-          stream.bytesWritten += source.size();
+          stream->bytesWritten += source.size();
           return js.resolvedPromise();
         } else if (chunk->IsString()) {
           // Lone surrogates become WTF-8, or U+FFFD when the stream was constructed
           // with toWellFormed. Shared with the TypeScript implementation so both
           // hash a given string identically. Empty under toWellFormed when the
           // chunk ended mid-surrogate-pair, whose lead is held for the next one.
-          auto str = stream.encoder.encode(js, jsg::JsString(chunk.As<v8::String>()));
+          auto str = stream->encoder.encode(js, jsg::JsString(chunk.As<v8::String>()));
           if (str.size() == 0) return js.resolvedPromise();
-          KJ_IF_SOME(error, stream.write(js, str.asBytes())) {
+          KJ_IF_SOME(error, stream->write(js, str.asBytes())) {
             return js.rejectedPromise<void>(kj::mv(error));
           }
-          stream.bytesWritten += str.size();
+          stream->bytesWritten += str.size();
           return js.resolvedPromise();
         }
         return js.rejectedPromise<void>(
@@ -1772,17 +1773,19 @@ jsg::Ref<DigestStream> DigestStream::constructor(
                         "non-ArrayBuffer/ArrayBufferView/string type on its writable side."));
       }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
     },
-    .abort = [&stream = *stream](jsg::Lock& js, auto reason) mutable {
+    .abort = [weak = stream.getWeakRef(js)](jsg::Lock& js, auto reason) {
+      auto stream = KJ_UNWRAP_OR_RETURN(weak.tryAddRef(js), js.resolvedPromise());
       return js.tryCatch([&] {
-        stream.abort(js, jsg::JsValue(reason));
+        stream->abort(js, jsg::JsValue(reason));
         return js.resolvedPromise();
       }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
     },
-    .close = [&stream = *stream](jsg::Lock& js) mutable {
+    .close = [weak = stream.getWeakRef(js)](jsg::Lock& js) {
+      auto stream = KJ_UNWRAP_OR_RETURN(weak.tryAddRef(js), js.resolvedPromise());
       return js.tryCatch([&] {
         // If sink.close returns a non kj::none value, that means the sink was errored
         // and we return a rejected promise here. Otherwise, we return resolved.
-        KJ_IF_SOME(error, stream.close(js)) {
+        KJ_IF_SOME(error, stream->close(js)) {
           return js.rejectedPromise<void>(kj::mv(error));
         } else {
         }  // Here to silence a compiler warning

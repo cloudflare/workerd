@@ -135,3 +135,12 @@ export {
 export { internalDictionariesIgnorePollution } from 'pollution';
 
 export { structuredCloneCompressionStreams } from 'transfer';
+
+export {
+  brotliDecodesKnownVector,
+  brotliLargeRoundTrip,
+  brotliCorruptInputRejectsWrite,
+  brotliTrailingDataRejectsWrite,
+  brotliCloseWithoutDataRejects,
+  brotliTruncatedStreamRejectsClose,
+} from 'brotli';

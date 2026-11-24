@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "r2-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "r2-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        bindings = [
+          ( name = "BUCKET",
+            r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"test\"}" ) ) ),
+          ( name = "SAME",
+            r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"test\"}" ) ) ),
+          ( name = "OTHER",
+            r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"other\"}" ) ) ),
+          ( name = "R2_WORKER",
+            service = ( name = "r2", props = ( json = "{\"bucket\": \"test\"}" ) ) ),
+        ],
+      )
+    ),
+    # Its objects in a local store in TEST_TMPDIR/r2/.
+    ( name = "r2",
+      worker = (
+        modules = [ ( name = "r2.js", bundled = "/workerd/r2.js" ) ],
+        compatibilityFlags = ["rpc"],
+        bindings = [
+          ( name = "BLOBS", service = "r2-blobs" ),
+        ],
+      )
+    ),
+    ( name = "r2-blobs",
+      bucket = ( path = "r2", localDisk = "TEST_TMPDIR" ) ),
+  ],
+);

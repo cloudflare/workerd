@@ -17,6 +17,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "empty-stream", esModule = embed "empty-stream.js"),
   (name = "corrupt-input", esModule = embed "corrupt-input.js"),
   (name = "strict-checks", esModule = embed "strict-checks.js"),
+  (name = "brotli", esModule = embed "brotli.js"),
   (name = "byob", esModule = embed "byob.js"),
   (name = "backpressure", esModule = embed "backpressure.js"),
   (name = "propagation", esModule = embed "propagation.js"),

@@ -42,9 +42,11 @@ The new module registry was designed to address several limitations of the legac
    worker bundle ESM modules at startup.
 
 4. **Cross-isolate compile cache.** ESM modules cache their V8 compiled bytecode
-   in a `kj::MutexGuarded` field on the `Module` object itself. When a second
-   isolate imports the same module, the cached bytecode is consumed, skipping
-   recompilation. If the embedder gives isolates a code cache store
+   in a `kj::MutexGuarded` field on the `Module` object itself. The second
+   isolate to compile a module generates the bytecode, and later isolates
+   consume it, skipping recompilation. The first isolate does not serialize, so
+   a module compiled by only one isolate never pays for it. If the embedder
+   gives isolates a code cache store
    (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle, builtin and fallback
    modules use the store when a cache key is available. Both registries share
    the store. Embedded builtin bytecode takes precedence. Otherwise, compilation
@@ -214,9 +216,10 @@ consumption through `CompilationObserver::onCompileHintsConsumed`.
 Embedded bytecode takes precedence. For bundle modules with a `codeCacheKey`, an
 installed isolate code cache takes precedence on both misses and hits. Modules
 without an applicable store use the definition-local shared slot: existing bytecode
-takes precedence, while an empty slot compiles with hints and can cache the result
-for subsequent isolates. Hint production bypasses caches and supplied hints. Missing
-hints preserve ordinary source compilation, and builtins do not consume bundle hints.
+takes precedence, while an empty slot compiles with hints and, from the second
+compile on, caches the result for subsequent isolates. Hint production bypasses
+caches and supplied hints. Missing hints preserve ordinary source compilation, and
+builtins do not consume bundle hints.
 
 #### Source Encoding (`EncodedSource`)
 
@@ -247,10 +250,16 @@ and the shared compile cache stays consistent.
 First isolate compiles module:
   1. lockShared(sharedCompileCache) -> empty -> no cached data
   2. CompileModule(source, supplied hints if present) -> v8::Module
-  3. lockExclusive(sharedCompileCache) -> still empty?
-     -> CreateCodeCache(module) -> store Own<CachedData>
+  3. lockExclusive(sharedCompileCache) -> still empty, not yet compiled?
+     -> mark compiled, no serialization
 
 Second isolate compiles same module:
+  1. lockShared(sharedCompileCache) -> empty -> no cached data
+  2. CompileModule(source, supplied hints if present) -> v8::Module
+  3. lockExclusive(sharedCompileCache) -> still empty, already compiled?
+     -> CreateCodeCache(module) -> store Own<CachedData>
+
+Later isolates compile same module:
   1. lockShared(sharedCompileCache) -> has data -> borrow bytes under lock
      -> kConsumeCodeCache -> CompileModule(source, cache)
   2. No exclusive lock needed (cache already populated)
@@ -258,8 +267,8 @@ Second isolate compiles same module:
 
 Rejected bytecode is cleared under the exclusive lock only if the slot's
 generation has not changed, preserving replacements made by another replica.
-Snapshot preparation can consume existing bytecode but never generates or
-regenerates an entry.
+Snapshot preparation can consume existing bytecode but never marks, generates
+or regenerates an entry.
 
 #### Code cache store
 
@@ -471,12 +480,30 @@ User code: const mod = await import('./bar.js')
       bundle module.
    b. Build ResolveContext { type from referrer's module, source=DYNAMIC_IMPORT, ... }
    c. findResolved or resolveWithCaching (same as static)
-   d. Call module.evaluate(js, v8Module, observer, maybeEvaluate) -> Promise
-   e. Chain: .then(namespace -> resolve Promise with module namespace)
+   d. Reject an already-errored target with its stored exception.
+   e. When nested in module evaluation, try linking an uninstantiated target.
+      If linking fails, defer linking and evaluation to a microtask instead.
+      Graphs that link successfully still evaluate inline.
+   f. If the target is kEvaluating, resolve to its namespace without evaluating
+      it again, matching the legacy registry.
+   g. Otherwise, call module.evaluate(js, v8Module, observer, maybeEvaluate) -> Promise
+   h. Chain: .then(namespace -> resolve Promise with module namespace)
 
 6. Return Promise to V8
 
-Note: a dynamically imported module whose top-level await never settles leaves
+Nested evaluation does not drain microtasks, so deferred links run after the
+current synchronous evaluation stack unwinds. This lets a new graph link when
+it statically imports an evaluating module. Deferred work captures a persistent
+module handle, not a borrowed registry entry, and retries only once: permanent
+link errors and evaluation failures reject the import. Synchronous `require()`
+cannot wait and continues to reject such ESM cycles.
+
+An import that resolves directly to an already-evaluating target's namespace
+does not wait for its evaluation promise or reject if that evaluation later
+fails. Its continuations run after the synchronous stack unwinds, but may run
+before the target's top-level await finishes.
+
+Otherwise, a dynamically imported module whose top-level await never settles leaves
 the import() promise pending indefinitely (standard ESM semantics, subject to
 normal request hang detection). The legacy registry instead throws an eager
 "Top-level await in module is unsettled." error, a deviation tied to its
@@ -800,8 +827,8 @@ if (isolate.isUsingNewModuleRegistry()) {
 The isolate-level bit is set at isolate construction from
 `isNewModuleRegistryEnabled(flags)` (`io/features.h`), which returns false for
 Python workers regardless of the `new_module_registry` flag. All other
-flag-check sites (`worker-factory.c++` registry creation, `worker.c++` compile paths and
-the nodejs_compat_v2 process/buffer warm-up, and the api-level require paths)
+flag-check sites (`worker-factory.c++` registry creation, `worker.c++` compile paths,
+the lazy `process` and `Buffer` getters in `global-scope.c++`, and the api-level require paths)
 route through the same function, so a worker can never be split across the two
 registries. Note that `Cloudflare.compatibilityFlags.new_module_registry` as
 observed by user code still reflects the configured flag value; the function
@@ -893,7 +920,7 @@ returning a rejected promise with the cached exception.
    O(n) reverse scan is eliminated.
 
 4. **Cross-isolate caching.** ESM compile cache and Wasm compiled modules are
-   shared across isolate replicas, reducing startup time for subsequent replicas.
+   shared across isolate replicas, reducing startup time for later replicas.
    With a code cache store, bundle, builtin and fallback module caches are shared
    across registries. Builtin bundles consume embedded build-time caches first.
    Runtime cache production is deferred until startup evaluation completes;

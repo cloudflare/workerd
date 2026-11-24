@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The rate-limiting module, its clock under test control, and Miniflare's
+# rate-limiting tests (packages/miniflare/test/plugins/ratelimit) against it.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ratelimit-test", worker = .testWorker ),
+    ( name = "ratelimit",
+      worker = (
+        modules = [ ( name = "ratelimit.js", bundled = "/workerd/ratelimit.js" ) ],
+        bindings = [ ( name = "TEST_CLOCK", json = "true" ) ],
+      )
+    ),
+  ],
+);
+
+const testWorker :Workerd.Worker = (
+  modules = [ ( name = "worker", esModule = embed "ratelimit-test.js" ) ],
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+  bindings = [
+    ( name = "BASIC", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"basic\", \"limit\": 2, \"period\": 60}" ) ) ),
+    ( name = "VALIDATE", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"validate\", \"limit\": 100, \"period\": 60}" ) ) ),
+    ( name = "WEIGHTED", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"weighted\", \"limit\": 5, \"period\": 60}" ) ) ),
+    ( name = "RATE_A", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"shared\", \"limit\": 2, \"period\": 60}" ) ) ),
+    ( name = "RATE_B", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"shared\", \"limit\": 2, \"period\": 60}" ) ) ),
+    ( name = "RATE_C", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"other\", \"limit\": 2, \"period\": 60}" ) ) ),
+    ( name = "RATE_SLOW", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"periods\", \"limit\": 1, \"period\": 60}" ) ) ),
+    ( name = "RATE_FAST", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"periods\", \"limit\": 1, \"period\": 10}" ) ) ),
+    ( name = "WINDOW", service = ( name = "ratelimit", entrypoint = "RateLimit",
+        props = ( json = "{\"namespace\": \"window\", \"limit\": 1, \"period\": 10}" ) ) ),
+    ( name = "CLOCK", service = "ratelimit" ),
+  ],
+);

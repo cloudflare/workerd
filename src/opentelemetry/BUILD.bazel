@@ -1,0 +1,24 @@
+# The OpenTelemetry protocol (OTLP) schemas for the signals workerd exports. src/rust/otlp writes
+# them through its own prost structs; the generated classes here are for tests that decode them.
+
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+proto_library(
+    name = "otlp_proto",
+    srcs = [
+        "proto/collector/logs/v1/logs_service.proto",
+        "proto/collector/trace/v1/trace_service.proto",
+        "proto/common/v1/common.proto",
+        "proto/logs/v1/logs.proto",
+        "proto/resource/v1/resource.proto",
+        "proto/trace/v1/trace.proto",
+    ],
+    strip_import_prefix = "/src",
+)
+
+cc_proto_library(
+    name = "otlp_cc_proto",
+    visibility = ["//visibility:public"],
+    deps = [":otlp_proto"],
+)

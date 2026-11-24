@@ -33,7 +33,6 @@ const {
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
   Date,
-  Error,
   NumberIsFinite,
   NumberIsNaN,
   ObjectCreate,
@@ -43,7 +42,10 @@ const {
   PromiseResolve,
   RangeError,
   RegExpPrototypeExec,
+  StringPrototypeCharCodeAt,
+  StringPrototypeIndexOf,
   StringPrototypeIsWellFormed,
+  StringPrototypeSlice,
   StringPrototypeToLowerCase,
   TextDecoder,
   TextDecoderDecode,
@@ -123,9 +125,8 @@ function getDecoder(): TextDecoder {
   } as TextDecoderOptions));
 }
 
-// Any code unit outside printable ASCII (DEL counts as printable here, as in
-// the C++).
-const kNonPrintableAscii = /[^\x20-\x7f]/;
+// Any code unit outside printable ASCII.
+const kNonPrintableAscii = /[^\x20-\x7e]/;
 
 // An instance's state, under the private properties above.
 type Slots = Record<symbol, unknown>;
@@ -169,18 +170,20 @@ function toString(value: unknown): string {
   return `${value as string}`;
 }
 
-// JSG's int: an int32 as it is, anything else through ToNumber, non-finite
-// numbers as 0, and the rest truncated, if within the int32 range.
-function toInt(value: unknown): number {
-  if (typeof value === 'number' && (value | 0) === value) return value;
-  const number = +(value as number);
-  if (!NumberIsFinite(number)) return 0;
-  if (number >= 2147483648 || number <= -2147483649) {
-    throw new TypeError(
-      'Value out of range. Must be between -2147483648 and 2147483647 (inclusive).'
-    );
-  }
-  return number | 0;
+// A slice() start or end, already a number, as an offset into a Blob of
+// `size` bytes, as the C++ converts a WebIDL [Clamp] long long: NaN as 0,
+// rounded to the nearest integer with ties to even, a negative value counted
+// back from the end, and clamped to the Blob.
+function relativeOffset(value: number, size: number): number {
+  if (NumberIsNaN(value)) return 0;
+  if (!NumberIsFinite(value)) return value < 0 ? 0 : size;
+  const truncated = value - (value % 1);
+  const floor = truncated > value ? truncated - 1 : truncated;
+  const fraction = value - floor;
+  let offset =
+    fraction < 0.5 || (fraction === 0.5 && floor % 2 === 0) ? floor : floor + 1;
+  if (offset < 0) offset += size;
+  return offset < 0 ? 0 : offset > size ? size : offset;
 }
 
 // The type as the C++ normalizes it: discarded if any code unit is outside
@@ -267,20 +270,46 @@ function convertType(options: object | undefined): string {
   return type === undefined ? '' : normalizeType(toString(type));
 }
 
-function checkEndings(options: object | undefined): void {
-  if (
-    options !== undefined &&
-    (options as { endings?: unknown }).endings !== undefined
-  ) {
-    throw new Error("The 'endings' field on 'Options' is not implemented.");
+// The `endings` option, read and converted to a string as JSG reads the
+// field; requireNativeEndings() checks it once every field is read.
+function convertEndings(options: object | undefined): string | undefined {
+  if (options === undefined) return undefined;
+  const endings: unknown = (options as { endings?: unknown }).endings;
+  return endings === undefined ? undefined : toString(endings);
+}
+
+// Whether `endings` asks for string parts' line endings to be converted to
+// the native one.
+function requireNativeEndings(endings: string | undefined): boolean {
+  if (endings === undefined || endings === 'transparent') return false;
+  if (endings === 'native') return true;
+  throw new TypeError(
+    `The provided value '${fromWtf8(endings)}' is not a valid enum value of ` +
+      'type EndingType.'
+  );
+}
+
+// `string` with every CRLF and lone CR as LF, which is the native line
+// ending on every platform, as in the C++.
+function convertLineEndings(string: string): string {
+  let cr = StringPrototypeIndexOf(string, '\r') as number;
+  if (cr === -1) return string;
+  let result = '';
+  let start = 0;
+  while (cr !== -1) {
+    result += `${StringPrototypeSlice(string, start, cr)}\n`;
+    start =
+      StringPrototypeCharCodeAt(string, cr + 1) === 0x0a ? cr + 2 : cr + 1;
+    cr = StringPrototypeIndexOf(string, '\r', start) as number;
   }
+  return result + StringPrototypeSlice(string, start);
 }
 
 // The parts' bytes, concatenated: a single Blob's shared rather than copied.
 // Each part is checked in turn, as C++ checks them: a resizable buffer
 // (under no_resizable_array_buffer_in_blob), then the running size against
 // the limit.
-function combine(parts: Part[]): Uint8Array {
+function combine(parts: Part[], nativeEndings: boolean): Uint8Array {
   if (parts.length === 1) {
     const only = bytesOf(parts[0]);
     if (only !== undefined) return only;
@@ -292,7 +321,7 @@ function combine(parts: Part[]): Uint8Array {
     const part = parts[i] as Part;
     let bytes: Uint8Array;
     if (typeof part === 'string') {
-      bytes = encodeString(part);
+      bytes = encodeString(nativeEndings ? convertLineEndings(part) : part);
     } else if (isArrayBuffer(part) || isArrayBufferView(part)) {
       if (kRejectResizable && isResizableBufferSource(part)) {
         throw new TypeError(
@@ -444,8 +473,8 @@ function Blob(this: object, blobParts?: unknown, options?: unknown): void {
   const parts = convertParts(blobParts, kConstructBlob);
   const bag = requireOptions(options, kConstructBlob, 2);
   const type = convertType(bag);
-  checkEndings(bag);
-  initInstance(this, combine(parts), type);
+  const nativeEndings = requireNativeEndings(convertEndings(bag));
+  initInstance(this, combine(parts, nativeEndings), type);
 }
 
 function File(
@@ -477,8 +506,8 @@ function File(
     lastModified = +(lastModifiedArg as number);
     if (NumberIsNaN(lastModified)) lastModified = 0;
   }
-  checkEndings(bag);
-  initInstance(this, combine(parts), type, name, lastModified);
+  const nativeEndings = requireNativeEndings(convertEndings(bag));
+  initInstance(this, combine(parts, nativeEndings), type, name, lastModified);
 }
 
 // The prototypes' members, in JSG's order. Methods and accessors defined in
@@ -496,17 +525,15 @@ const kBlobMembers = {
 
   slice(start?: unknown, end?: unknown, contentType?: unknown): object {
     const bytes = requireBytes(this);
-    const startArg = start === undefined ? undefined : toInt(start);
-    const endArg = end === undefined ? undefined : toInt(end);
+    // ToNumber, which throws for a Symbol or a BigInt.
+    const startArg = start === undefined ? undefined : +(start as number);
+    const endArg = end === undefined ? undefined : +(end as number);
     const type =
       contentType === undefined ? '' : normalizeType(toString(contentType));
     const size = TypedArrayPrototypeGetByteLength(bytes) as number;
-    let from = startArg ?? 0;
-    let to = endArg ?? size;
-    if (from < 0) from += size;
-    if (to < 0) to += size;
-    from = from < 0 ? 0 : from > size ? size : from;
-    to = to < from ? from : to > size ? size : to;
+    const from = startArg === undefined ? 0 : relativeOffset(startArg, size);
+    let to = endArg === undefined ? size : relativeOffset(endArg, size);
+    if (to < from) to = from;
     const blob = ObjectCreate(kBlobPrototype) as object;
     initInstance(blob, subrange(bytes, from, to), type);
     return blob;

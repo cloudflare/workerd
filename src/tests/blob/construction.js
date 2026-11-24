@@ -159,11 +159,84 @@ export const options = {
           "Failed to construct 'Blob': constructor parameter 2 is not of type 'Options'.",
       });
     }
-    throws(() => new Blob([], { endings: 'native' }), {
-      name: 'Error',
-      message: "The 'endings' field on 'Options' is not implemented.",
-    });
     strictEqual(new Blob([], { endings: undefined }).size, 0);
+  },
+};
+
+export const endings = {
+  async test() {
+    const text = 'a\r\nb\rc\nd\r\r\n\n\r';
+    const converted = 'a\nb\nc\nd\n\n\n\n';
+    strictEqual(await new Blob([text]).text(), text);
+    strictEqual(
+      await new Blob([text], { endings: 'transparent' }).text(),
+      text
+    );
+    strictEqual(
+      await new Blob([text], { endings: 'native' }).text(),
+      converted
+    );
+    strictEqual(
+      await new File([text], 'f', { endings: 'native' }).text(),
+      converted
+    );
+    // Each string part alone: a CR that ends one and an LF that starts the
+    // next are two line endings.
+    strictEqual(
+      await new Blob(['a\r', '\nb'], { endings: 'native' }).text(),
+      'a\n\nb'
+    );
+    // Only string parts are converted.
+    const bytes = new TextEncoder().encode('x\r\ny');
+    strictEqual(
+      await new Blob([bytes, new Blob(['z\r'])], { endings: 'native' }).text(),
+      'x\r\nyz\r'
+    );
+    strictEqual(
+      await new Blob(
+        [
+          {
+            toString() {
+              return 'p\rq';
+            },
+          },
+        ],
+        { endings: 'native' }
+      ).text(),
+      'p\nq'
+    );
+    // Converted to a string, then checked once every option is read.
+    for (const value of ['Native', '', null, 1, {}]) {
+      for (const make of [
+        () => new Blob([], { endings: value }),
+        () => new File([], 'f', { endings: value }),
+      ]) {
+        throws(make, {
+          name: 'TypeError',
+          message: `The provided value '${value}' is not a valid enum value of type EndingType.`,
+        });
+      }
+    }
+    const log = [];
+    throws(
+      () =>
+        new File([], 'f', {
+          get type() {
+            log.push('type');
+            return '';
+          },
+          get lastModified() {
+            log.push('lastModified');
+            return 0;
+          },
+          get endings() {
+            log.push('endings');
+            return 'bad';
+          },
+        }),
+      TypeError
+    );
+    deepStrictEqual(log, ['type', 'lastModified', 'endings']);
   },
 };
 
@@ -174,8 +247,8 @@ export const typeNormalization = {
     strictEqual(type('téxt'), '');
     strictEqual(type('a\u001fb'), '');
     strictEqual(type('a\ud800'), '');
-    // DEL is kept.
-    strictEqual(type('a\u007fb'), 'a\u007fb');
+    strictEqual(type('a\u007fb'), '');
+    strictEqual(type('a~b'), 'a~b');
     strictEqual(
       type({
         toString() {

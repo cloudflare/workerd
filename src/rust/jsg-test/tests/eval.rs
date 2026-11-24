@@ -244,10 +244,10 @@ fn eval_function_string() {
 }
 
 // =============================================================================
-// Lenient<T> tests
+// LenientOption<T> tests
 // =============================================================================
 
-/// A minimal resource for testing `Lenient<Rc<R>>`.
+/// A minimal resource for testing `LenientOption<Rc<R>>`.
 #[jsg_resource]
 struct NumberBox {
     value: f64,
@@ -261,63 +261,110 @@ impl NumberBox {
     }
 
     #[jsg_method]
-    fn take_lenient(&self, lock: &mut jsg::Lock, num: jsg::Lenient<jsg::Rc<NumberBox>>) -> f64 {
-        match num {
-            jsg::Lenient::Some(b) => b.get(lock).value,
-            jsg::Lenient::Unconvertable(_) => 321.0,
-            jsg::Lenient::Null => 42.97,
-            jsg::Lenient::Undefined => -12.6,
-        }
+    fn take_lenient(
+        &self,
+        lock: &mut jsg::Lock,
+        num: jsg::LenientOption<jsg::Rc<NumberBox>>,
+    ) -> String {
+        num.as_ref()
+            .map_or_else(|| "absent".to_owned(), |b| b.get(lock).value.to_string())
+    }
+
+    #[jsg_method]
+    fn echo_lenient(&self, value: jsg::LenientOption<String>) -> jsg::LenientOption<String> {
+        value
     }
 }
 
+fn eval_lenient_string(
+    lock: &mut jsg::Lock,
+    ctx: &crate::EvalContext<'_>,
+    code: &str,
+) -> Option<String> {
+    ctx.eval::<jsg::LenientOption<String>>(lock, code)
+        .unwrap()
+        .0
+}
+
 #[test]
-fn lenient_string_some() {
+fn lenient_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<String> = ctx.eval(lock, "'hello'").unwrap();
-        assert!(matches!(result, jsg::Lenient::Some(ref s) if s == "hello"));
+        assert_eq!(
+            eval_lenient_string(lock, ctx, "'hello'").as_deref(),
+            Some("hello")
+        );
+        assert_eq!(eval_lenient_string(lock, ctx, "undefined"), None);
+        // As for C++ `LenientOptional<kj::String>`, null goes through the string conversion.
+        assert_eq!(
+            eval_lenient_string(lock, ctx, "null").as_deref(),
+            Some("null")
+        );
+        assert_eq!(eval_lenient_string(lock, ctx, "42").as_deref(), Some("42"));
         Ok(())
     });
 }
 
 #[test]
-fn lenient_string_undefined() {
+fn lenient_non_coercible_mismatch_is_absent() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<String> = ctx.eval(lock, "undefined").unwrap();
-        assert!(matches!(result, jsg::Lenient::Undefined));
+        type Lenient = jsg::LenientOption<jsg::NonCoercible<String>>;
+        assert!(ctx.eval::<Lenient>(lock, "1").unwrap().is_none());
+        assert!(ctx.eval::<Lenient>(lock, "null").unwrap().is_none());
+        let value = ctx.eval::<Lenient>(lock, "'x'").unwrap().0;
+        assert_eq!(
+            value.map(jsg::NonCoercible::into_inner).as_deref(),
+            Some("x")
+        );
         Ok(())
     });
 }
 
+// As for C++ `LenientOptional<uint32_t>`, a coercing `T` takes any value, and a value it
+// can't coerce is an error rather than absent.
 #[test]
-fn lenient_string_null() {
+fn lenient_coercing_integer_errors_are_not_absent() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<String> = ctx.eval(lock, "null").unwrap();
-        assert!(matches!(result, jsg::Lenient::Null));
+        type Lenient = jsg::LenientOption<u32>;
+        assert_eq!(
+            ctx.eval::<Lenient>(lock, "null").unwrap().into_inner(),
+            Some(0)
+        );
+        assert_eq!(
+            ctx.eval::<Lenient>(lock, "'7'").unwrap().into_inner(),
+            Some(7)
+        );
+        assert!(ctx.eval::<Lenient>(lock, "undefined").unwrap().is_none());
+        for code in ["'abc'", "-1"] {
+            let Err(EvalError::UncoercibleResult { message, .. }) = ctx.eval::<Lenient>(lock, code)
+            else {
+                panic!("{code} should not convert");
+            };
+            assert!(message.starts_with("TypeError"), "{code}: {message}");
+        }
         Ok(())
     });
 }
 
+/// `LenientOption<T>` derefs to its `Option<T>`, as C++ `LenientOptional<T>` is a `kj::Maybe<T>`.
 #[test]
-fn lenient_string_number() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<String> = ctx.eval(lock, "42").unwrap();
-        let result: Option<jsg::Nullable<String>> = result.into();
-        assert_eq!(result, Some(jsg::Nullable::Some("42".to_owned())));
-        Ok(())
-    });
+fn lenient_option_derefs_to_option() {
+    let mut value = jsg::LenientOption(Some(3_u32));
+    assert_eq!(value.as_ref(), Some(&3));
+    assert_eq!(value.take(), Some(3));
+    assert!(value.is_none());
+    value.replace(4);
+    assert_eq!(value.into_inner(), Some(4));
 }
 
 #[test]
-fn lenient_array_top_level_mismatch_is_unconvertable() {
+fn lenient_array_top_level_mismatch_is_absent() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<Vec<u32>> = ctx.eval(lock, "42").unwrap();
-        assert!(matches!(result, jsg::Lenient::Unconvertable(_)));
+        let result: jsg::LenientOption<Vec<u32>> = ctx.eval(lock, "42").unwrap();
+        assert!(result.is_none());
         Ok(())
     });
 }
@@ -326,69 +373,44 @@ fn lenient_array_top_level_mismatch_is_unconvertable() {
 fn lenient_array_nested_conversion_error_propagates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result = ctx.eval::<jsg::Lenient<Vec<u32>>>(lock, "[Symbol()]");
+        let result = ctx.eval::<jsg::LenientOption<Vec<u32>>>(lock, "[Symbol()]");
         assert!(result.is_err());
         Ok(())
     });
 }
 
 #[test]
-fn lenient_resource_some() {
+fn lenient_resource() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: f64 = ctx.eval(lock, "box.takeLenient(box)").unwrap();
-        assert!((result - 42.0).abs() < f64::EPSILON);
+        let take = |lock: &mut jsg::Lock, code: &str| -> String { ctx.eval(lock, code).unwrap() };
+        assert_eq!(take(lock, "box.takeLenient(box)"), "42");
+        assert_eq!(take(lock, "box.takeLenient()"), "absent");
+        assert_eq!(take(lock, "box.takeLenient(undefined)"), "absent");
+        // As for C++ `LenientOptional<Ref<T>>` (value-test.c++), null is absent for a resource.
+        assert_eq!(take(lock, "box.takeLenient(null)"), "absent");
+        // Passing a function instead of a NumberBox is absent too.
+        assert_eq!(take(lock, "box.takeLenient(() => {})"), "absent");
         Ok(())
     });
 }
 
 #[test]
-fn lenient_resource_undefined() {
+fn lenient_to_js() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 0.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: f64 = ctx.eval(lock, "box.takeLenient()").unwrap();
-        assert!((result - -12.6).abs() < f64::EPSILON);
-        Ok(())
-    });
-}
-
-#[test]
-fn lenient_resource_undefined_explicit() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
-        ctx.set_global(lock, "box", boxed);
-        let result: f64 = ctx.eval(lock, "box.takeLenient(undefined)").unwrap();
-        assert!((result - -12.6).abs() < f64::EPSILON);
-        Ok(())
-    });
-}
-
-#[test]
-fn lenient_resource_null() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
-        ctx.set_global(lock, "box", boxed);
-        let result: f64 = ctx.eval(lock, "box.takeLenient(null)").unwrap();
-        assert!((result - 42.97).abs() < f64::EPSILON);
-        Ok(())
-    });
-}
-
-#[test]
-fn lenient_resource_wrong_type() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
-        ctx.set_global(lock, "box", boxed);
-        // Passing a function instead of a NumberBox — should be silently treated as absent.
-        let result: f64 = ctx.eval(lock, "box.takeLenient(() => {})").unwrap();
-        assert!((result - 321.0).abs() < f64::EPSILON);
+        let result: String = ctx
+            .eval(
+                lock,
+                "[box.echoLenient('a'), box.echoLenient(), box.echoLenient(null)]
+                     .map((v) => `${typeof v}:${v}`).join()",
+            )
+            .unwrap();
+        assert_eq!(result, "string:a,undefined:undefined,string:null");
         Ok(())
     });
 }

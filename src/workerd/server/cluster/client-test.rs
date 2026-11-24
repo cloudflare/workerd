@@ -40,6 +40,12 @@ fn listing_xml() {
         .map(|c| unescape(elements(c, "Key").next().unwrap()))
         .collect();
     assert_eq!(keys, ["a&b"]);
+    for (xml, text) in [
+        ("&amp;lt;&#13;&#x1F600;", "&lt;\r\u{1F600}"),
+        ("a & b &bogus; &#xD800;", "a & b &bogus; &#xD800;"),
+    ] {
+        assert_eq!(unescape(xml), text, "{xml}");
+    }
     let prefixes: Vec<_> = elements(xml, "CommonPrefixes")
         .map(|c| elements(c, "Prefix").next().unwrap())
         .collect();
@@ -99,20 +105,18 @@ fn error_codes_are_capped() {
     let long = format!("<Error><Code>{}</Code></Error>", "x".repeat(1000));
     let response = HttpResponse {
         status: 500,
-        etag: String::new(),
-        generation: String::new(),
-        date: String::new(),
-        metadata_flavor: String::new(),
         body: long.into_bytes(),
+        ..HttpResponse::default()
     };
     let sent = Sent {
         response,
         maybe_applied: false,
     };
-    let Err(Error::Http(message)) = written("k", &sent, false) else {
+    let Err(error @ Error::Refused { .. }) = written("k", &sent, false) else {
         panic!("a 500 was accepted");
     };
-    assert_eq!(message, format!("PUT k: 500 {}", "x".repeat(100)));
+    let message = format!("bucket: PUT k: 500 {}", "x".repeat(100));
+    assert_eq!(error.to_string(), message);
 }
 
 // The real client against a fake bucket.
@@ -151,30 +155,38 @@ async fn call(bucket: &Bucket, call: Call) -> std::result::Result<String, String
     };
     outcome.map_err(|e| match e {
         Error::Http(message) => message,
+        Error::Refused { what, status, code } => format!("{what}: {status} {code}"),
         Error::OutcomeUnknown(message) => format!("unknown: {message}"),
         other => other.to_string(),
     })
 }
 
+/// In `retried`, the request's connection closes unanswered.
+const CLOSE: u16 = 0;
+
 /// Drives `bucket` as `end_to_end` does, through calls the bucket answers
-/// only after refusing them once or more.
+/// only after refusing them, or closing their connections, once or more.
 async fn retried(
     bucket: &Bucket,
     server: &Server,
     queue: &Mutex<VecDeque<Answer>>,
     version: (&'static str, &str),
 ) {
-    let answer = |status| Answer::Reply {
-        status,
-        headers: if status == 200 {
-            vec![(version.0, version.1.to_owned())]
-        } else {
-            Vec::new()
+    let answer = |status| match status {
+        CLOSE => Answer::Close,
+        _ => Answer::Reply {
+            status,
+            headers: if status == 200 {
+                vec![(version.0, version.1.to_owned())]
+            } else {
+                Vec::new()
+            },
+            body: String::new(),
         },
-        body: String::new(),
     };
     let unknown = |status| Err(format!("unknown: PUT k: {status} to a retry"));
     let written = Ok(format!("Some({:?})", version.1));
+    let closed = "client error (SendRequest): connection closed before message completed";
     for (call_, statuses, expected) in [
         // A 429 or 503 may follow a write the bucket applied, and a guard
         // that fails after it may fail against that write.
@@ -183,11 +195,22 @@ async fn retried(
         (Call::PutIfAbsent, &[429, 412], unknown(412)),
         (Call::PutIfAbsent, &[503, 429, 412], unknown(412)),
         (Call::PutIfAbsent, &[503, 200], written.clone()),
-        (Call::PutIfAbsent, &[429, 200], written),
+        (Call::PutIfAbsent, &[429, 200], written.clone()),
         (Call::PutIfAbsent, &[412], Ok("None".into())),
         // A write without a guard fails no guard.
         (Call::Put, &[503, 200], Ok("written".into())),
         (Call::Put, &[503, 412], Err("PUT k: 412 ".into())),
+        // So may a connection that failed with the request on it, which
+        // the bucket may have received whole.
+        (Call::PutIfAbsent, &[CLOSE, 412], unknown(412)),
+        (Call::PutIfAbsent, &[CLOSE, 503, 200], written.clone()),
+        (Call::Put, &[CLOSE, 200], Ok("written".into())),
+        (
+            Call::Get,
+            &[CLOSE, CLOSE, 200],
+            Ok(format!("Some({:?})", version.1)),
+        ),
+        (Call::Put, &[CLOSE; 5], Err(format!("PUT k: {closed}"))),
     ] {
         queue
             .lock()
@@ -197,6 +220,48 @@ async fn retried(
         assert_eq!(outcome, expected, "{call_:?} answered {statuses:?}");
         assert_eq!(server.take().len(), statuses.len(), "{statuses:?}");
     }
+
+    // A new connection that closed before the request went out on it: the
+    // request is sent again, and a guard that fails then fails against no
+    // copy of this write. Each answer closes its connection, so that the
+    // next request opens one.
+    let closing = |status| Answer::Reply {
+        status,
+        headers: vec![
+            ("connection", "close".to_owned()),
+            (version.0, version.1.to_owned()),
+        ],
+        body: String::new(),
+    };
+    for (call_, hang_ups, statuses, expected) in [
+        (Call::PutIfAbsent, 1, &[412][..], Ok("None".into())),
+        (Call::PutIfAbsent, 2, &[200], written.clone()),
+        (Call::Get, 1, &[200], written.clone()),
+    ] {
+        server.hang_up(hang_ups);
+        queue
+            .lock()
+            .unwrap()
+            .extend(statuses.iter().map(|status| closing(*status)));
+        let outcome = call(bucket, call_).await;
+        assert_eq!(outcome, expected, "{call_:?} after {hang_ups} hang-ups");
+        assert_eq!(server.take().len(), statuses.len(), "{call_:?}");
+        // The request went out on new connections, not a pooled one.
+        assert_eq!(server.hang_ups(), 0, "{call_:?}");
+    }
+    server.hang_up(5);
+    let outcome = call(bucket, Call::Put).await;
+    let message = outcome.expect_err("five hang-ups");
+    assert!(message.starts_with("PUT k: client error ("), "{message}");
+    assert_eq!(server.take().len(), 0);
+    assert_eq!(server.hang_ups(), 0);
+
+    // Any other failure is the answer: a body cut short after the head.
+    let head = vec![(version.0, version.1.to_owned())];
+    queue.lock().unwrap().push_back(Answer::Cut(head));
+    let outcome = call(bucket, Call::Get).await;
+    assert!(outcome.is_err(), "{outcome:?}");
+    assert_eq!(server.take().len(), 1);
 }
 
 /// Drives `bucket`, the client of the fake bucket `b` at `server`, which
@@ -291,6 +356,10 @@ async fn end_to_end<D: Dialect>(
     }
 }
 
+/// The first pause of the 429/503 backoff in the end-to-end tests, which
+/// check what the retries answer and not when.
+const BACKOFF: Duration = Duration::from_millis(5);
+
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -311,7 +380,7 @@ fn an_s3_bucket_end_to_end() {
         ]
         .map(|(name, value)| (name.to_owned(), value));
         let (s3, prefix) = S3::new("s3://b", &options).unwrap();
-        let bucket = Bucket::new(s3, &prefix);
+        let bucket = Bucket::new(s3.backoff(BACKOFF), &prefix);
         let wire = (("etag", "\"e\""), "x-amz-meta-", true);
         retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<SigV4>(bucket, &server, &queue, wire).await;
@@ -325,12 +394,21 @@ fn an_anonymous_cloud_storage_emulator_end_to_end() {
         let host = server.host.clone();
         let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
         let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
-        let bucket = Bucket::new(gcs, &prefix);
+        let bucket = Bucket::new(gcs.backoff(BACKOFF), &prefix);
         let wire = (("x-goog-generation", "17"), "x-goog-meta-", false);
         retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<Google>(bucket, &server, &queue, wire).await;
     });
 }
+
+/// The bound (`http::prompt`) on a request the fake answers at once:
+/// longer than a stall of a busy machine, so that it is not sent again.
+/// Only a test of a stalled request waits it out.
+const ATTEMPT: Duration = Duration::from_millis(600);
+
+/// The bound in a call whose only requests under it are a stalled one and
+/// its copy, which is not sent again however late it answers.
+const STALLED_ATTEMPT: Duration = Duration::from_millis(50);
 
 /// Where a client whose metadata server is the fake asks for tokens.
 const TOKEN: &str = "/computeMetadata/v1/instance/service-accounts/default/token";
@@ -393,7 +471,7 @@ fn a_stalled_cloud_storage_request_is_sent_again() {
         })
         .await;
         let bucket = cloud_storage(&server);
-        let bound = Duration::from_millis(100);
+        let bound = STALLED_ATTEMPT;
         let repeat = &[Repeat::Read, Repeat::GuardedWrite];
         let bearer = || "Bearer t1".to_owned();
 
@@ -413,10 +491,12 @@ fn a_stalled_cloud_storage_request_is_sent_again() {
         let guarded = (bearer(), Some("17".to_owned()));
         assert_eq!(object_requests(&server), [guarded.clone(), guarded]);
 
-        // An unguarded write goes once.
+        // An unguarded write goes once: no copy follows it within three
+        // bounds of its arrival.
         let put = prompt(bound, repeat, bucket.put("k", Vec::new(), &[]));
-        let waited = tokio::time::timeout(Duration::from_secs(1), put).await;
-        assert!(waited.is_err(), "an unguarded write answered");
+        let (sent, answer) = server.requests_during(1, 3 * bound, put).await;
+        assert!(answer.is_none(), "an unguarded write answered");
+        assert_eq!(sent, 1);
         assert_eq!(object_requests(&server), [(bearer(), None)]);
     });
 }
@@ -445,7 +525,9 @@ fn a_copy_refused_its_token_is_sent_again_with_another() {
         })
         .await;
         let bucket = cloud_storage(&server);
-        let get = prompt(Duration::from_millis(100), &[Repeat::Read], bucket.get("k"));
+        // The request sent again with the next token answers at once, so
+        // the bound is one it needs.
+        let get = prompt(ATTEMPT, &[Repeat::Read], bucket.get("k"));
         let got = tokio::time::timeout(Duration::from_secs(10), get).await;
         assert_eq!(got.unwrap().unwrap().map(|(_, v)| v.0), Some("17".into()));
         // The refusal ends the attempt, the stalled copy with it: the
@@ -485,14 +567,14 @@ fn a_guarded_write_refused_beside_another_copy_is_of_unknown_outcome() {
         .await;
         let bucket = cloud_storage(&server);
         let guard = || Guard::Match(Version("17".into()));
-        let put = |key| {
+        let put = |key, bound| {
             let put = bucket.put_if(key, Vec::new(), guard());
-            prompt(Duration::from_millis(100), &[Repeat::GuardedWrite], put)
+            prompt(bound, &[Repeat::GuardedWrite], put)
         };
         // The stalled copy may land yet, or have landed before the refusal,
         // which may then be of its own write.
         for key in ["stalls", "reauthorized"] {
-            let outcome = tokio::time::timeout(Duration::from_secs(10), put(key));
+            let outcome = tokio::time::timeout(Duration::from_secs(10), put(key, STALLED_ATTEMPT));
             let outcome = outcome.await.unwrap();
             assert!(
                 matches!(outcome, Err(Error::OutcomeUnknown(_))),
@@ -500,6 +582,201 @@ fn a_guarded_write_refused_beside_another_copy_is_of_unknown_outcome() {
             );
         }
         // A write that went once failed its guard.
-        assert_eq!(put("refused").await.unwrap(), None);
+        assert_eq!(put("refused", ATTEMPT).await.unwrap(), None);
+    });
+}
+
+/// The answer `status` with `headers` and `body`.
+fn answer(status: u16, headers: &[(&'static str, &str)], body: &str) -> Answer {
+    let headers = headers
+        .iter()
+        .map(|(name, value)| (*name, (*value).to_owned()));
+    Answer::Reply {
+        status,
+        headers: headers.collect(),
+        body: body.to_owned(),
+    }
+}
+
+/// An error answer with S3's `Code`.
+fn error(status: u16, code: &str) -> Answer {
+    answer(status, &[], &format!("<Error><Code>{code}</Code></Error>"))
+}
+
+/// A refusal's status and code.
+fn refusal<T>(result: Result<T>) -> (u16, String) {
+    match result {
+        Err(Error::Refused { status, code, .. }) => (status, code),
+        other => panic!("not refused: {:?}", other.err()),
+    }
+}
+
+/// The body of a read, read.
+async fn body(body: crate::bucket::Body) -> Result<String> {
+    let chunks: Vec<_> = body.collect().await;
+    let chunks = chunks.into_iter().collect::<Result<Vec<_>>>()?;
+    Ok(String::from_utf8(chunks.concat()).unwrap())
+}
+
+/// What the cluster test's fakes can't show of the calls R2 makes through
+/// `bucket`, whose versions are the header `version`: error answers, a body
+/// that stalls or is cut short, a completion sent again. Reads carry
+/// `accept-encoding: gzip` if `gzip`; every request is signed if
+/// `authorized`.
+async fn r2_calls(
+    bucket: &Bucket,
+    server: &Server,
+    queue: &Mutex<VecDeque<Answer>>,
+    version: (&'static str, &str),
+    (gzip, authorized): (bool, bool),
+) {
+    let push = |answers: Vec<Answer>| queue.lock().unwrap().extend(answers);
+    let mut sent = Vec::new();
+    // A HEAD's answer has no body, so no `Code`.
+    push(vec![
+        answer(404, &[], ""),
+        error(403, "AccessDenied"),
+        error(416, "InvalidRange"),
+    ]);
+    assert!(bucket.head("k").await.unwrap().is_none());
+    assert_eq!(refusal(bucket.head("k").await), (403, String::new()));
+    let past = Some(crate::bucket::Range::Suffix(0));
+    let past = refusal(bucket.read("k", past).await);
+    assert_eq!(past, (416, "InvalidRange".into()));
+    let reads = server.take();
+    assert_eq!(reads[2].header("range"), Some("bytes=-0"));
+    for request in &reads {
+        assert_eq!(request.header("accept-encoding").is_some(), gzip);
+    }
+    sent.extend(reads);
+
+    // The body streams: its first bytes arrive long before its end.
+    let versioned = || vec![(version.0, version.1.to_owned())];
+    push(vec![Answer::Dribble(versioned())]);
+    let (object, mut got) = bucket.read("k", None).await.unwrap().unwrap();
+    assert_eq!(object.size, 100_000);
+    let first = tokio::time::timeout(Duration::from_secs(5), got.next()).await;
+    let first = first.unwrap().unwrap().unwrap();
+    assert!(
+        first.len() < 1000 && first.iter().all(|&b| b == b' '),
+        "{first:?}"
+    );
+    drop(got);
+    // A body cut short is an error at its end.
+    push(vec![Answer::Cut(versioned())]);
+    let (_, got) = bucket.read("k", None).await.unwrap().unwrap();
+    let Err(Error::Http(message)) = body(got).await else {
+        panic!("a short body was read");
+    };
+    assert!(message.starts_with("GET k: "), "{message}");
+    sent.extend(server.take());
+
+    // A completion that failed after its head went out; one sent again
+    // after a refusal that may have followed its success, and found the
+    // upload gone; an abort likewise, which is done.
+    push(vec![
+        answer(200, &[], "<Error><Code>InternalError</Code></Error>"),
+        error(503, "SlowDown"),
+        error(404, "NoSuchUpload"),
+        error(400, "InvalidPart"),
+        error(503, "SlowDown"),
+        error(404, "NoSuchUpload"),
+        error(404, "NoSuchUpload"),
+    ]);
+    let parts = [(1, "p1".to_owned())];
+    let complete = || bucket.complete("k", "u", &parts);
+    assert_eq!(refusal(complete().await), (200, "InternalError".into()));
+    let unknown = complete().await;
+    assert!(
+        matches!(unknown, Err(Error::OutcomeUnknown(_))),
+        "{unknown:?}"
+    );
+    assert_eq!(refusal(complete().await), (400, "InvalidPart".into()));
+    bucket.abort("k", "u").await.unwrap();
+    let gone = (404, "NoSuchUpload".to_owned());
+    assert_eq!(refusal(bucket.abort("k", "u").await), gone);
+    let completions = server.take();
+    assert_eq!(completions.len(), 7);
+    sent.extend(completions);
+    for request in sent {
+        let header = request.header("authorization");
+        assert_eq!(header.is_some(), authorized, "{} {header:?}", request.path);
+    }
+}
+
+#[test]
+fn an_s3_bucket_answers_r2s_calls() {
+    runtime().block_on(async {
+        let (server, queue) = fake().await;
+        let options = [
+            ("aws_endpoint", format!("http://{}", server.host)),
+            ("aws_access_key_id", "k".into()),
+            ("aws_secret_access_key", "s".into()),
+        ]
+        .map(|(name, value)| (name.to_owned(), value));
+        let (s3, prefix) = S3::new("s3://b", &options).unwrap();
+        let bucket = Bucket::new(s3, &prefix);
+        let version = ("etag", "\"e\"");
+        r2_calls(&bucket, &server, &queue, version, (false, true)).await;
+    });
+}
+
+#[test]
+fn a_cloud_storage_emulator_answers_r2s_calls() {
+    runtime().block_on(async {
+        let (server, queue) = fake().await;
+        let host = server.host.clone();
+        let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
+        let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
+        let bucket = Bucket::new(gcs, &prefix);
+        let version = ("x-goog-generation", "17");
+        r2_calls(&bucket, &server, &queue, version, (true, false)).await;
+    });
+}
+
+#[test]
+fn a_stalled_read_is_sent_again_but_multipart_calls_are_not() {
+    use crate::http::Repeat;
+    use crate::http::prompt;
+    runtime().block_on(async {
+        // The first copy of a read stalls, the second answers; any other
+        // request stalls.
+        let server = Server::serving(move |request, n| {
+            if n % 2 == 1 || !matches!(&request.method[..], "GET" | "HEAD") {
+                return Answer::Stall;
+            }
+            // A HEAD's answer goes without the body.
+            answer(200, &[("etag", "\"e\""), ("content-length", "5")], "hello")
+        })
+        .await;
+        let options = [
+            ("aws_endpoint", format!("http://{}", server.host)),
+            ("aws_access_key_id", "k".into()),
+            ("aws_secret_access_key", "s".into()),
+        ]
+        .map(|(name, value)| (name.to_owned(), value));
+        let bucket = Bucket::new(S3::new("s3://b", &options).unwrap().0, "");
+        let bound = Duration::from_millis(100);
+        let any = &[Repeat::Read, Repeat::Delete, Repeat::GuardedWrite];
+
+        let head = prompt(bound, any, bucket.head("k")).await.unwrap();
+        assert_eq!(head.unwrap().size, 5);
+        let (_, got) = prompt(bound, any, bucket.read("k", None))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body(got).await.unwrap(), "hello");
+        assert_eq!(server.take().len(), 4);
+
+        let patience = Duration::from_secs(1);
+        let none = crate::bucket::Headers::default();
+        let begin = prompt(bound, any, bucket.begin("k", &none, &[]));
+        assert!(tokio::time::timeout(patience, begin).await.is_err());
+        let part = prompt(bound, any, bucket.part("k", "u", 1, "x".into()));
+        let part = tokio::time::timeout(patience, part).await;
+        assert!(part.is_err(), "{part:?}");
+        let complete = prompt(bound, any, bucket.complete("k", "u", &[]));
+        assert!(tokio::time::timeout(patience, complete).await.is_err());
+        assert_eq!(server.take().len(), 3);
     });
 }

@@ -8,15 +8,15 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iterator>
-#include <new>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 #ifdef _WIN32
 #include <basetsd.h>
 #else
+// For ssize_t. include-cleaner attributes it to whichever libc header defines it first.
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <sys/types.h>
 #endif
 
@@ -107,6 +107,23 @@ struct Result final {
     }
   }
 };
+
+// A `KjException` bridge argument or return value crosses the boundary as a `kj::Exception*`
+// allocated with `new`, which the receiving side owns (`cxx::KjException` on the Rust side).
+
+// Takes over an exception that Rust handed to C++, as the `kj::Exception` the C++ function
+// receives by value. Frees the heap copy at once, so the exception is destroyed with that value
+// whether or not the callee consumes it.
+inline kj::Exception takeException(kj::Exception *exception) noexcept {
+  kj::Exception result = kj::mv(*exception);
+  delete exception;
+  return result;
+}
+
+// Hands an exception to Rust, which takes over the returned pointer.
+inline kj::Exception *releaseException(kj::Exception &&exception) {
+  return new kj::Exception(kj::mv(exception));
+}
 
 }  // namespace repr
 

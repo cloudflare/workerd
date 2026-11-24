@@ -108,6 +108,11 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
 // by their full prefixed specifier.
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
 
+// Returns the exports of the named bootstrap module of workerd's, first loading it, as the
+// bootstrap's require() does, if nothing has required it yet. For a module that the bootstrap
+// loads only on first use. Loading runs the module's script, which can throw.
+jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
+
 // Returns the function property `name` of the named bootstrap module export, which
 // must be a frozen object, or kj::none if the module was not required or the property
 // is not a function. The function is cached per context, so later lookups of the same

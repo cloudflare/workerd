@@ -17,14 +17,15 @@ mod date_bigint;
 mod dict;
 mod dispose;
 mod dom_exception;
-mod drop_moved_rc;
 mod eval;
 mod exception_to_kj;
+mod external_memory;
 mod fast_api;
 mod function;
 mod function_new;
 mod gc;
 mod global;
+mod handle_scope;
 mod harness;
 mod integer;
 mod internal_error;
@@ -58,7 +59,11 @@ mod resource_template;
 mod resource_this;
 mod rest_arguments;
 mod serialization;
+mod set_prototype;
+mod signature_callback;
+mod startup_snapshot;
 mod string;
+mod struct_field_errors;
 mod symbol;
 mod termination;
 mod to_js_creator;
@@ -68,4 +73,15 @@ mod traced_global_lifetime;
 mod tunneled_exception;
 mod typed_promise;
 mod unwrap;
+mod wasm_module_object;
+mod weak_condemned;
 mod wildcard_property;
+
+/// The message of a panic caught with `std::panic::catch_unwind`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("<non-string panic payload>")
+}

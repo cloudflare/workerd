@@ -63,6 +63,25 @@ struct TracingSpanContext {
   JSG_STRUCT(traceId, spanId, traceFlags);
 };
 
+// The input form of a link's TracingSpanContext. Its fields are optional during conversion so
+// malformed links can be ignored individually. The public type requires them; toSpanLink()
+// validates them.
+struct TracingSpanLinkContext {
+  jsg::Optional<jsg::Value> traceId;
+  jsg::Optional<jsg::Value> spanId;
+  jsg::Optional<jsg::Value> traceFlags;
+
+  JSG_STRUCT(traceId, spanId, traceFlags);
+};
+
+struct TracingSpanLink {
+  jsg::Optional<jsg::Value> context;
+  jsg::Optional<jsg::Value> attributes;
+
+  // droppedAttributesCount is computed from sanitization, not read from the input.
+  JSG_STRUCT(context, attributes);
+};
+
 // Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
 // no-op spans, while sharing JS-side attribute byte-limit enforcement.
 class SpanState: public kj::Refcounted {
@@ -95,9 +114,12 @@ class SpanState: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack);
 
+  void addLinks(tracing::SpanLinks links);
+
  protected:
   SpanState() = default;
   virtual bool canRecordAttributes() = 0;
+  virtual void recordLinks(tracing::SpanLinks links) = 0;
   virtual void recordAttribute(kj::String key, TagValue value) = 0;
   virtual void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
@@ -140,6 +162,17 @@ class Span: public jsg::Object {
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
+  jsg::Ref<Span> addLink(jsg::Lock& js,
+      jsg::Value link,
+      const jsg::TypeHandler<TracingSpanLink>& linkHandler,
+      const jsg::TypeHandler<TracingSpanLinkContext>& contextHandler,
+      const jsg::TypeHandler<TagValue>& attributeHandler);
+  jsg::Ref<Span> addLinks(jsg::Lock& js,
+      jsg::Value links,
+      const jsg::TypeHandler<TracingSpanLink>& linkHandler,
+      const jsg::TypeHandler<TracingSpanLinkContext>& contextHandler,
+      const jsg::TypeHandler<TagValue>& attributeHandler);
+
   // Changes the span name. Calls after the span has ended are ignored.
   jsg::Ref<Span> updateName(jsg::Lock& js, kj::String operationName);
 
@@ -149,6 +182,11 @@ class Span: public jsg::Object {
 
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
+
+  // A span created outside an IoContext (at the top level, say) records nothing: its state is a
+  // no-op one the Span owns, and the clone gets a fresh no-op state. A span of a request holds its
+  // state through an IoOwn and stays unclonable.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
@@ -161,7 +199,18 @@ class Span: public jsg::Object {
     JSG_METHOD(setStatus);
     JSG_METHOD(end);
 
+    JSG_METHOD(addLink);
+    JSG_METHOD(addLinks);
+    JSG_TS_DEFINE(
+      interface TracingSpanLink {
+        context: TracingSpanContext;
+        attributes?: Record<string, boolean | number | string | undefined>;
+        droppedAttributesCount?: number;
+      }
+    );
     JSG_TS_OVERRIDE({
+      addLink(link: TracingSpanLink): this;
+      addLinks(links: readonly TracingSpanLink[]): this;
       setAttribute(key: string, value: boolean | number | string): this;
       setAttributes(
         attributes: Record<string, boolean | number | string | undefined>
@@ -314,4 +363,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
   api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData,                         \
-      api::user_tracing::TracingSpanStatus, api::user_tracing::TracingSpanContext
+      api::user_tracing::TracingSpanStatus, api::user_tracing::TracingSpanContext,                 \
+      api::user_tracing::TracingSpanLinkContext, api::user_tracing::TracingSpanLink

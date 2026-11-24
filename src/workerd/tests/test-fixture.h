@@ -68,7 +68,7 @@ struct TestFixture {
     // If set, supplied to the actor's constructor, as whatever holds a manager across generations
     // does in production. What an actor does with a manager it is handed differs from what
     // setHibernationManager() does with one it adopts.
-    kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> hibernationManager;
+    kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> hibernationManager;
     // If set, supplied to the actor's constructor as its holder token. Actors of one holder share a
     // token; sibling facets do not.
     kj::Maybe<uint64_t> holderToken;
@@ -288,6 +288,11 @@ struct TestFixture {
   void setLimitsExceeded(EventOutcome outcome) {
     limitsExceeded = outcome;
   }
+  // Like setLimitsExceeded(), but the limit enforcer records `outcome` only when the next scope of
+  // its enterJs() ends, as an enforcer that measures CPU time over that scope does.
+  void setLimitsExceededOnLeavingJs(EventOutcome outcome) {
+    limitsExceededOnLeavingJs = outcome;
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -325,7 +330,7 @@ struct TestFixture {
   kj::Maybe<kj::Own<Worker::Actor::Loopback>> savedActorLoopback;
   // Saved for the same reason as savedActorLoopback: resetActor() hands a fresh ref to each actor
   // it constructs.
-  kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
+  kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
   kj::Maybe<kj::String> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
@@ -353,6 +358,7 @@ struct TestFixture {
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
   kj::Maybe<EventOutcome> limitsExceeded;
+  kj::Maybe<EventOutcome> limitsExceededOnLeavingJs;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

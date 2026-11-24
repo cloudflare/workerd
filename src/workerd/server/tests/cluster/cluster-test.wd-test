@@ -29,6 +29,14 @@ const gcs :Workerd.Config = (
   ),
 );
 
+# As `config`, its log JSON on stdout.
+const structuredLogging :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = .cluster,
+  structuredLogging = true,
+);
+
 # As `config`, with a stop timeout short enough for a test to wait out.
 const shortStop :Workerd.Config = (
   services = .services,
@@ -39,6 +47,53 @@ const shortStop :Workerd.Config = (
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
     stopTimeoutMs = 4000,
+    unsafeTimeDivisor = 4,
+  ),
+);
+
+# As `config`, with a Worker whose Cache API is `cache`, whose entries the nodes share
+# (services/cache-cluster.rs), each spooling them to a directory of its own.
+const cache :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-cache-worker.js", esModule = embed "cluster-cache-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        cacheApiOutbound = "cache",
+      )
+    ),
+    ( name = "cache", cache = () ),
+  ],
+  sockets = .sockets,
+  cluster = .cluster,
+);
+
+# As `config`, with a tenth of the default lease rather than a quarter: a node whose event loop
+# makes no progress fences within seconds.
+const shortLease :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 10000,
+    unsafeTimeDivisor = 10,
+  ),
+);
+
+# As `config`, with the key and bucket left to WORKERD_CLUSTER_KEY (or WORKERD_CLUSTER_KEY_FILE) and
+# WORKERD_CLUSTER_BUCKET.
+const fromEnvironment :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    stopTimeoutMs = 10000,
     unsafeTimeDivisor = 4,
   ),
 );
@@ -68,6 +123,8 @@ const services :List(Workerd.Service) = [
         ( name = "KV_WORKER",
           service = (
             name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ( name = "R2",
+          r2Bucket = ( name = "r2", props = ( json = "{\"bucket\": \"cluster-r2\"}" ) ) ),
       ],
       durableObjectNamespaces = [
         ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -96,6 +153,18 @@ const services :List(Workerd.Service) = [
     )
   ),
   ( name = "kv-blobs", bucket = ( path = "kv" ) ),
+
+  # R2, each object an object in the bucket at `services/r2/<bucket>/<key>`.
+  ( name = "r2",
+    worker = (
+      modules = [ ( name = "r2.js", bundled = "/workerd/r2.js" ) ],
+      compatibilityDate = "2026-01-01",
+      bindings = [
+        ( name = "BLOBS", service = "r2-blobs" ),
+      ],
+    )
+  ),
+  ( name = "r2-blobs", bucket = ( path = "r2" ) ),
 
   ( name = "on-hibernate",
     worker = (

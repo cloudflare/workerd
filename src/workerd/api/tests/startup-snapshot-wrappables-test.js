@@ -4,15 +4,20 @@
 
 // Live API objects across a startup snapshot. A case Worker's top level creates objects whose
 // native side has to travel through the snapshot (Headers, URL, TextEncoder, crypto, navigator,
-// the text/data/JSON bindings; node:fs in startup-snapshot-wrappables-fs-test.js) and at request
-// time reports whether they still hold their state and still work. Negative cases leave an object
-// the snapshot cannot carry reachable, or do not qualify for the pipeline, and must start as plain
-// Workers. The runner asserts the reports. Under the startup-snapshot autogate every service here
-// goes through the zygote; without it they are plain Workers and the same assertions hold with
-// snapshotUsed false.
+// the text/data/JSON bindings; node:fs in startup-snapshot-wrappables-fs-test.js, file system
+// handles in startup-snapshot-wrappables-webfs-test.js) and at request time reports whether they
+// still hold their state and still work. Negative cases leave an object the snapshot cannot carry
+// reachable, or do not qualify for the pipeline, and must start as plain Workers. The runner
+// asserts the reports. Under the startup-snapshot autogate every service here goes through the
+// zygote; without it they are plain Workers and the same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
-import { DurableObject, WorkerEntrypoint, env } from 'cloudflare:workers';
+import {
+  DurableObject,
+  WorkerEntrypoint,
+  env,
+  tracing,
+} from 'cloudflare:workers';
 // Whether a Worker was started from a startup snapshot is asked at request time: at module scope
 // the answer would be the zygote's and be baked into the snapshot.
 import unsafe from 'workerd:unsafe';
@@ -43,14 +48,26 @@ let params = null;
 let kept = null;
 let blob = null;
 let file = null;
+// The C++ streams cases: a promise the top level leaves pending, and the stream parked on it.
+let gate = null;
+let resolveGate = null;
+let stream = null;
+let pending = null;
+// The performance cases.
+let performanceAtTopLevel = null;
+let nowAtTopLevel = 0;
+// The span case.
+let span = null;
+let endedSpan = null;
 // The finalization case's registry and what its cleanup callback did. The handler reads this
 // object, which keeps the registry reachable: an unreachable registry never runs its callback.
 const finalization = { registry: null, cleaned: [], headers: null };
 
 switch (MODE) {
   case 'unclonable':
-    // Neither stateless nor clonable: the zygote rejects the snapshot.
-    controller = new AbortController();
+    // Neither stateless nor clonable: a signal that has aborted holds its reason, a JavaScript
+    // value, so the zygote rejects the snapshot.
+    controller = AbortSignal.abort('unclonable');
     break;
   case 'midstream-decoder':
     // A decoder with the first byte of a two-byte character pending.
@@ -69,6 +86,54 @@ switch (MODE) {
     // created lazily, but a reference the top level keeps makes it reachable. The TypeScript one
     // (the TS_URL autogate) is a JavaScript object over its URL's LegacyUrlHandle, and travels.
     params = url.searchParams;
+    break;
+  case 'cpp-streams-pending-pull':
+    // A C++ stream whose pull() returns a promise the top level leaves pending: the controller
+    // chains a C++ continuation onto it, whose opaque data no snapshot can carry. Not an async
+    // pull(): a suspended async function fails the zygote earlier and for its own reason.
+    gate = new Promise((resolve) => (resolveGate = resolve));
+    stream = new ReadableStream({
+      pull(c) {
+        return gate.then((chunk) => {
+          c.enqueue(chunk);
+          c.close();
+        });
+      },
+    });
+    break;
+  case 'cpp-streams-pending-cancel':
+    // cancel() returns a promise the top level leaves pending: as with pull(), the C++ side chains
+    // a continuation onto it.
+    gate = new Promise((resolve) => (resolveGate = resolve));
+    stream = new ReadableStream({
+      cancel() {
+        return gate;
+      },
+    });
+    pending = stream.cancel();
+    break;
+  case 'performance':
+    // Touching the global creates the Performance object, which the snapshot clones.
+    performanceAtTopLevel = performance;
+    nowAtTopLevel = performance.now();
+    break;
+  case 'performance-entries':
+    // A recorded entry is a jsg::Ref the clone cannot carry.
+    performance.mark('top-level');
+    break;
+  case 'span':
+    // Outside a request tracing.startSpan() returns a span that records nothing, which the
+    // snapshot clones. Nothing the top level does to such a span leaves state behind.
+    span = tracing.startSpan('top-level');
+    span.setAttribute('key', 'value');
+    endedSpan = tracing.startSpan('ended');
+    endedSpan.end();
+    break;
+  case 'abort':
+    // An AbortController and its signal, both wrapped at the top level: the restored controller
+    // must still own the restored signal.
+    controller = new AbortController();
+    kept = controller.signal;
     break;
   case 'gc':
     // Wrappers created and dropped before the snapshot: their collection in the zygote must not
@@ -156,7 +221,7 @@ async function checks() {
   };
   switch (MODE) {
     case 'unclonable':
-      result.controller = !controller.signal.aborted;
+      result.controller = controller.aborted;
       break;
     case 'searchparams':
       result.params = params.get('query') === 'string';
@@ -202,6 +267,12 @@ async function checks() {
     case 'midstream-decoder':
       result.midStreamDecoder = kept.decode(new Uint8Array([0xa9])) === 'é';
       break;
+    case 'abort':
+      result.abortSignalIdentity = controller.signal === kept;
+      result.abortNotYet = !kept.aborted;
+      controller.abort('now');
+      result.abortWorks = kept.aborted && kept.reason === 'now';
+      break;
     case 'gc':
       collect();
       result.keptAfterGc = kept.get('kept') === 'yes';
@@ -223,6 +294,57 @@ async function checks() {
       result.headersFromCleanup =
         finalization.headers !== null &&
         finalization.headers.get('x-held') === 'b';
+      break;
+    }
+    case 'cpp-streams-pending-pull':
+      resolveGate(new TextEncoder().encode('ok'));
+      result.pendingPullRead = (await new Response(stream).text()) === 'ok';
+      break;
+    case 'cpp-streams-pending-cancel':
+      resolveGate();
+      await pending;
+      result.pendingCancelSettled = true;
+      break;
+    case 'performance':
+      result.performanceIdentity = performanceAtTopLevel === performance;
+      result.performanceNow = performance.now() >= nowAtTopLevel;
+      result.performanceMark =
+        performance.mark('request').name === 'request' &&
+        performance.getEntriesByName('request').length === 1;
+      break;
+    case 'performance-entries':
+      result.performanceEntries =
+        performance.getEntriesByName('top-level').length === 1;
+      break;
+    case 'span': {
+      const context = span.spanContext();
+      const requestSpan = tracing.startSpan('request');
+      result.spanType =
+        span instanceof tracing.Span && endedSpan instanceof tracing.Span;
+      result.spanDistinct = span !== endedSpan;
+      result.spanNotTraced = !span.isTraced && !endedSpan.isTraced;
+      result.spanContext =
+        context.traceId === '0'.repeat(32) &&
+        context.spanId === '0'.repeat(16) &&
+        context.traceFlags === 0;
+      // Every mutator returns the span it was called on.
+      result.spanChaining =
+        span.setAttribute('key', 'value') === span &&
+        span.setAttributes({ a: 1, b: true }) === span &&
+        span.updateName('renamed') === span &&
+        span.setStatus({ code: 'error', message: 'failed' }) === span;
+      span.recordException(new Error('boom'));
+      span.end();
+      endedSpan.end();
+      result.spanEnded = !span.isTraced && !endedSpan.isTraced;
+      // The runtime takes the span as an argument and hands the same object back.
+      result.spanActive =
+        tracing.withActiveSpan(span, () => tracing.getActiveSpan()) === span;
+      // A span of this request is another object of the same type.
+      result.spanOfRequest =
+        requestSpan !== span &&
+        Object.getPrototypeOf(requestSpan) === Object.getPrototypeOf(span);
+      requestSpan.end();
       break;
     }
     case 'bindings':
@@ -282,22 +404,36 @@ async function test(ctrl, env) {
     'control',
     'state',
     'state-url-standard',
+    'abort',
     'gc',
     'finalization',
     'bindings',
+    // C++ streams: the pipeline takes a Worker without typescript_implemented_streams all the
+    // same; only a C++ stream with a parked pull() would fail its zygote, and this module scope
+    // has none.
+    'cpp-streams',
+    'performance',
+    'span',
+    // File system handles: see startup-snapshot-wrappables-webfs-test.js.
+    'webfs-tmp',
+    'webfs-bundle',
+    // node:fs and node:url: the module scope reaches UrlUtil, a Rust JSG resource
+    // (src/rust/api/url.rs) marked snapshot_stateless.
+    'fs',
     ...(tsUrl ? ['searchparams'] : []),
     ...(tsBlob ? ['blob'] : []),
   ];
-  // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
-  // module scope of node:fs reaches UrlUtil, a Rust JSG resource (src/rust/api/url.rs); Rust
-  // resource types have no snapshot transfer, so the fs case falls back until they do.
+  // Cases that fail the zygote: always plain Workers.
   const fallback = [
-    'fs',
     'unclonable',
     ...(tsUrl ? [] : ['searchparams']),
     ...(tsBlob ? [] : ['blob']),
     'midstream-decoder',
-    'no-ts-streams',
+    // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
+    'cpp-streams-pending-pull',
+    'cpp-streams-pending-cancel',
+    // A recorded performance entry is JavaScript state the clone cannot carry.
+    'performance-entries',
   ];
 
   const run = async (name, expectedSnapshotUsed) => {

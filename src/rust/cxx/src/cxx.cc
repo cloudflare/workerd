@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 extern "C" {
 void cxxbridge1$cxx_string$init(std::string *s, const std::uint8_t *ptr,
@@ -53,6 +54,19 @@ std::size_t cxxbridge1$latin1$utf8_length(const char *ptr,
 std::size_t cxxbridge1$latin1$convert_to_utf8(const char *ptr, std::size_t len,
                                               char *out) noexcept {
   return simdutf::convert_latin1_to_utf8(ptr, len, out);
+}
+
+// UTF-16 to UTF-8, for cxxbridge1$string$from_utf16_lossy in rust_string.rs.
+// Unpaired surrogates become U+FFFD, as in String::from_utf16_lossy.
+std::size_t cxxbridge1$utf16$utf8_length_lossy(const char16_t *ptr,
+                                                std::size_t len) noexcept {
+  return simdutf::utf8_length_from_utf16_with_replacement(ptr, len).count;
+}
+
+std::size_t cxxbridge1$utf16$convert_to_utf8_lossy(const char16_t *ptr,
+                                                   std::size_t len,
+                                                   char *out) noexcept {
+  return simdutf::convert_utf16_to_utf8_with_replacement(ptr, len, out);
 }
 
 // rust::String
@@ -569,6 +583,11 @@ void cxxbridge1$kjException$getDetails(kj::Exception *err,
     output[i].data_len = detail.value.size();
     output[i].data_ptr = detail.value.begin();
   }
+}
+
+// copy a kj::Exception into a new one allocated by new.
+kj::Exception *cxxbridge1$kjException$clone(const kj::Exception *err) noexcept {
+  return new kj::Exception(err->clone());
 }
 
 // delete kj::Exception allocated by new.

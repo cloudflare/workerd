@@ -120,17 +120,17 @@ void HibernatableWebSocketCustomEvent::ensureHibernationManagerForEvent(
     Worker::Actor& actor, kj::StringPtr websocketId) {
   // Resolved before any JS runs, so an event that cannot be routed fails here rather than from
   // inside a handler that has already observed it.
-  auto& manager = KJ_REQUIRE_NONNULL(LegacyHibernationManagerImpl::findManagerForEvent(websocketId),
+  auto manager = KJ_REQUIRE_NONNULL(LegacyHibernationManagerImpl::findManagerForEvent(websocketId),
       "hibernatable WebSocket event manager was not found for this event ID");
 
   // The adopt branch below has no manager of its own to compare against, so these checks are what
   // stop an actor adopting a manager another actor is still using. Both are needed, for the reasons
   // given on LegacyHibernationManagerImpl::takeWebSocketForEvent().
-  KJ_IF_SOME(ownerId, manager.getOwningActorId()) {
+  KJ_IF_SOME(ownerId, manager->getOwningActorId()) {
     KJ_REQUIRE(Worker::Actor::idsEqual(ownerId, actor.getId()),
         "hibernatable WebSocket event names a hibernation manager owned by a different actor");
   }
-  KJ_IF_SOME(owner, manager.getOwningActor()) {
+  KJ_IF_SOME(owner, manager->getOwningActor()) {
     KJ_REQUIRE(&owner == &actor,
         "hibernatable WebSocket event names a hibernation manager owned by a different live actor");
   }
@@ -139,7 +139,7 @@ void HibernatableWebSocketCustomEvent::ensureHibernationManagerForEvent(
     // The event ID is resolved in a registry shared by every manager on the event loop, so it can
     // name a manager this actor does not use. That means the event was misrouted, and delivering it
     // would strand the socket in a manager this actor's own getWebSockets() cannot see.
-    KJ_REQUIRE(&existing == &manager,
+    KJ_REQUIRE(existing.get() == manager.get(),
         "hibernatable WebSocket event ID names a different hibernation manager than the receiving "
         "actor's");
   } else {
@@ -150,9 +150,9 @@ void HibernatableWebSocketCustomEvent::ensureHibernationManagerForEvent(
     // say that this actor is a later generation of the holder the sockets belong to rather than a
     // sibling facet. Adopting stamps the manager with this actor, erasing who it belonged to, so
     // this is the last point at which the distinction can be made.
-    KJ_REQUIRE(actor.ownsHibernatedSockets(manager),
+    KJ_REQUIRE(actor.ownsHibernatedSockets(*manager),
         "hibernatable WebSocket event names a hibernation manager owned by a different holder");
-    actor.setHibernationManager(manager.addRef());
+    actor.setHibernationManager(kj::mv(manager));
   }
 }
 

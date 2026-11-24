@@ -12,13 +12,7 @@ use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("<non-string panic payload>")
-}
+use super::panic_message;
 
 #[test]
 fn lock_derefs_to_its_isolate() {

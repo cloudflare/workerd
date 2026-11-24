@@ -37,7 +37,7 @@ kj::Maybe<const jsg::CompiledWasmModuleHolder&> PyodideBundleManager::getPyodide
 }
 
 void PyodideBundleManager::setPyodideBundleData(
-    kj::String version, kj::Array<unsigned char> data) const {
+    kj::String version, kj::Array<const kj::byte> data) const {
   auto wordArray = kj::arrayPtr(
       reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
   // We're going to reuse this in the ModuleRegistry for every Python isolate, so set the traversal
@@ -108,43 +108,6 @@ void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
   });
 }
 
-kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
-  auto builder = kj::Vector<kj::String>(names.size());
-  for (auto i: kj::zeroTo(names.size())) {
-    if (names[i].endsWith(".py")) {
-      builder.add(kj::str(contents[i].asChars()));
-    }
-  }
-  return builder.releaseAsArray();
-}
-
-kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
-  auto result = kj::HashSet<kj::String>();
-  const auto vendor = "python_modules/"_kj;
-  const auto dotPy = ".py"_kj;
-  const auto dotSo = ".so"_kj;
-  for (auto& item: names) {
-    kj::StringPtr name = item;
-    if (name.startsWith(vendor)) {
-      name = name.slice(vendor.size());
-    }
-    auto firstSlash = name.findFirst('/');
-    KJ_IF_SOME(idx, firstSlash) {
-      result.upsert(kj::str(name.slice(0, idx)), [](auto&&, auto&&) {});
-      continue;
-    }
-    if (name.endsWith(dotPy)) {
-      result.upsert(kj::str(name.slice(0, name.size() - dotPy.size())), [](auto&&, auto&&) {});
-      continue;
-    }
-    if (name.endsWith(dotSo)) {
-      result.upsert(kj::str(name.slice(0, name.size() - dotSo.size())), [](auto&&, auto&&) {});
-      continue;
-    }
-  }
-  return result;
-}
-
 kj::Array<uint32_t> PyodideMetadataReader::getSizes(jsg::Lock& js) {
   auto builder = kj::heapArrayBuilder<uint32_t>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
@@ -162,11 +125,35 @@ uint32_t PyodideMetadataReader::read(
   return readToTarget(data, offset, buf);
 }
 
-uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
-  if (state->memorySnapshot == kj::none) {
-    return 0;
+namespace {
+
+class BytesMemorySnapshotSource final: public MemorySnapshotSource {
+ public:
+  explicit BytesMemorySnapshotSource(kj::Array<kj::byte> bytes): bytes(kj::mv(bytes)) {}
+
+  size_t size() override {
+    return bytes.size();
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
+
+  size_t read(size_t offset, kj::ArrayPtr<kj::byte> buf) override {
+    return readToTarget(bytes, offset, buf);
+  }
+
+ private:
+  kj::Array<kj::byte> bytes;
+};
+
+}  // namespace
+
+kj::Own<MemorySnapshotSource> MemorySnapshotSource::fromBytes(kj::Array<kj::byte> bytes) {
+  return kj::heap<BytesMemorySnapshotSource>(kj::mv(bytes));
+}
+
+uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
+  KJ_IF_SOME(snapshot, state->memorySnapshot) {
+    return static_cast<uint32_t>(snapshot->read(offset, buf));
+  }
+  return 0;
 }
 
 uint32_t ArtifactBundler::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
@@ -224,19 +211,17 @@ jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
   return obj;
 }
 
-PyodideMetadataReader::State::State(const State& other)
-    : mainModule(kj::str(other.mainModule)),
-      moduleInfo(other.moduleInfo.clone()),
-      pyodideVersion(kj::str(other.pyodideVersion)),
-      isWorkerdFlag(other.isWorkerdFlag),
-      isTracingFlag(other.isTracingFlag),
-      snapshotToDisk(other.snapshotToDisk),
-      createBaselineSnapshot(other.createBaselineSnapshot),
-      memorySnapshot(other.memorySnapshot.map(
-          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
-
 kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
-  return kj::heap<PyodideMetadataReader::State>(*this);
+  auto snapshotCopy = memorySnapshot.map([](kj::Own<MemorySnapshotSource>& snapshot) {
+    auto bytes = kj::heapArray<kj::byte>(snapshot->size());
+    KJ_ASSERT(snapshot->read(0, bytes) == bytes.size());
+    return MemorySnapshotSource::fromBytes(kj::mv(bytes));
+  });
+  auto moduleInfoCopy = moduleInfo.clone();
+  return kj::heap<PyodideMetadataReader::State>(kj::str(mainModule), kj::mv(moduleInfoCopy.names),
+      kj::mv(moduleInfoCopy.contents), kj::str(pyodideVersion), IsWorkerd(isWorkerdFlag),
+      IsTracing(isTracingFlag), SnapshotToDisk(snapshotToDisk),
+      CreateBaselineSnapshot(createBaselineSnapshot), kj::mv(snapshotCopy));
 }
 
 void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
@@ -264,37 +249,7 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
   }
 }
 
-const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
-
-jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key) {
-  KJ_IF_SOME(root, cacheRoot) {
-    kj::Path path(key);
-    auto file = root->tryOpenFile(path);
-
-    KJ_IF_SOME(f, file) {
-      return f->readAllBytes();
-    } else {
-      return kj::none;
-    }
-  } else {
-    return kj::none;
-  }
-}
-
-void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
-  KJ_IF_SOME(root, cacheRoot) {
-    kj::Path path(key);
-    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-
-    KJ_IF_SOME(f, file) {
-      f->writeAll(data);
-    } else {
-      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
-    }
-  } else {
-    return;
-  }
-}
+const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_SNAPSHOT_ROOT = kj::none;
 
 void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, snapshotRoot) {

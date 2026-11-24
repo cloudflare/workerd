@@ -9,7 +9,6 @@
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/util.h>
-#include <workerd/util/http-util.h>
 // This is imported for the error type and that's shared between internal and public beta.
 
 #include <capnp/compat/json.h>

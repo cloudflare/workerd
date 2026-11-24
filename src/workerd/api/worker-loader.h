@@ -5,7 +5,6 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/worker.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

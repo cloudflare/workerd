@@ -7,6 +7,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace A {
 struct AShared;
@@ -120,6 +121,11 @@ struct ThrowingCopy {
   uint64_t value;
   ThrowingCopy(const ThrowingCopy &other);
   ThrowingCopy(ThrowingCopy &&) = default;
+};
+
+// Aligned more strictly than `operator new(std::size_t)` guarantees.
+struct alignas(64) OverAligned {
+  uint64_t value;
 };
 
 struct E {
@@ -287,6 +293,15 @@ size_t c_fail_kj_exception_with_empty_detail_return_primitive();
 size_t c_cancel_return_primitive();
 size_t c_cancel_via_rust_return_primitive();
 size_t c_cancel_roundtrip_return_primitive();
+
+rust::String c_describe_kj_exception(kj::Exception exception);
+kj::Exception c_return_kj_exception();
+kj::Exception c_try_return_kj_exception();
+kj::Exception c_roundtrip_kj_exception(kj::Exception exception);
+void c_drop_kj_exception(kj::Exception exception);
+void c_throw_before_consuming_kj_exception(kj::Exception exception);
+kj::Exception c_return_tracked_kj_exception();
+size_t c_tracked_kj_exception_disposals();
 
 // Functions which throw even though their bridge signature is infallible. Their
 // exceptions must turn into Rust panics rather than terminating the process.

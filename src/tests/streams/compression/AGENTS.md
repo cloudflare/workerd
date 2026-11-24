@@ -7,7 +7,7 @@ C++ implementation (`src/workerd/api/streams/compression.{h,c++}`, built on
 internal streams over the shared `api/compression.h` CodecStage) and the
 TypeScript implementation (`src/per_isolate/webstreams/compression.ts`,
 behind `typescript_implemented_streams`) are covered. The two wrap the SAME
-C++ zlib codec (the TS pair drives `utils.newCompressionCodec` handles), so
+C++ codec (the TS pair drives `utils.newCompressionCodec` handles), so
 codec output is parity by construction; divergences live in the stream
 wrappers.
 
@@ -22,7 +22,7 @@ flag axis, and real-HTTP body integration via the SELF loopback binding.
 ```webidl
 [Exposed=Worker]
 interface CompressionStream {
-  constructor(DOMString format);  // 'deflate' | 'gzip' | 'deflate-raw'
+  constructor(DOMString format);  // 'deflate' | 'gzip' | 'deflate-raw' | 'brotli'
   readonly attribute ReadableStream readable;
   readonly attribute WritableStream writable;
 };
@@ -38,9 +38,9 @@ interface DecompressionStream {
   TypeScript is standalone. `readable`/`writable` placement and
   `constructor.length` (0 vs 1) follow (#5, #6).
 - The format is ToString-coerced exactly once (an object's `toString` runs
-  once, both impls); a coerced string outside the three formats throws
+  once, both impls); a coerced string outside the four formats throws
   `TypeError` "The compression format must be either 'deflate',
-  'deflate-raw' or 'gzip'." — but non-string arguments diverge (#7):
+  'deflate-raw', 'gzip' or 'brotli'." — but non-string arguments diverge (#7):
   TypeScript coerces `undefined` into that same validation failure, while
   the C++ jsg layer rejects it at the type boundary ("constructor parameter
   1 is not of type 'string'."). `null` coerces to `"null"` in both.
@@ -97,6 +97,8 @@ interface DecompressionStream {
   before the member completes rejects ("Called close() on a decompression
   stream with incomplete data") — including close with no data at all.
   Closing a CompressionStream with no writes emits a valid empty member.
+  `brotli` always gets these checks, with or without the flag (brotli.js
+  runs in the legacy cell too).
 - **Backpressure accounting (#8):** the C++ writer's `desiredSize` is inert
   (always 1); TypeScript counts the in-flight chunk against the default
   HWM 1 and recovers. `writer.ready` is settled in both (no sustained

@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 8 Jun 2025 16:39:03 -0400
+Subject: Port concurrent mksnapshot support
+
+Change-Id: I57c8158ff5d624e5379e6b072f27ac7a40419522
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index d554427c01de432a0e8d66184fd2c5028409d0e6..1ef24b49b7e116e3acac66e6bb8ad9e7dbf2c23e 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -122,6 +122,11 @@ v8_flag(name = "v8_enable_hugepage")
+ 
+ v8_flag(name = "v8_enable_fast_mksnapshot")
+ 
++v8_flag(
++    name = "v8_enable_concurrent_mksnapshot",
++    default = True,
++)
++
+ v8_flag(name = "v8_enable_future")
+ 
+ # NOTE: Transitions are not recommended in library targets:
+@@ -4861,6 +4866,13 @@ v8_mksnapshot(
+             "--no-turbo-verify-allocation",
+         ],
+         "//conditions:default": [],
++    }) + select({
++        ":is_v8_enable_concurrent_mksnapshot": [
++            "--concurrent-builtin-generation",
++            # Use all the cores for concurrent builtin generation.
++            "--concurrent-turbofan-max-threads=0",
++        ],
++        "//conditions:default": [],
+     }) + select({
+         ":is_v8_enable_snapshot_code_comments": ["--code-comments"],
+         "//conditions:default": [],

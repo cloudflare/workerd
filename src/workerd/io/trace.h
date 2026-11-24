@@ -17,7 +17,6 @@
 #include <kj/time.h>
 #include <kj/vector.h>
 
-#include <concepts>
 #include <initializer_list>
 
 namespace kj {
@@ -210,8 +209,8 @@ constexpr SpanId SpanId::nullId = nullptr;
 // Fixed spanId value to be used for tests
 constexpr uint64_t staticSpanId = 0x2a2a2a2a2a2a2a2aULL;
 
-// W3C trace flags propagated from an upstream traceparent. Wrapped in kj::Maybe
-// at usage sites: kj::none means no upstream decision was made.
+// W3C trace flags propagated from upstream or selected locally. Wrapped in kj::Maybe
+// at usage sites: kj::none means no sampling decision was made.
 class TraceFlags final {
  public:
   explicit constexpr TraceFlags(uint8_t flags): flags(flags) {}
@@ -289,10 +288,15 @@ class InvocationSpanContext final {
     return kj::none;
   }
 
-  // W3C trace flags propagated from an upstream traceparent. kj::none when
-  // no upstream sampling decision exists.
+  // W3C trace flags propagated from upstream or selected locally. kj::none when
+  // no sampling decision exists.
   inline kj::Maybe<TraceFlags> getTraceFlags() const {
     return traceFlags;
+  }
+
+  // Supply a local sampling decision without overriding one propagated from upstream.
+  void setDefaultTraceFlags(TraceFlags flags) {
+    if (traceFlags == kj::none) traceFlags = flags;
   }
 
   // Creates a new child span. If the current context does not have an entropy
@@ -310,8 +314,7 @@ class InvocationSpanContext final {
 
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
   // traceId is used as the traceId for the newly created context. Otherwise a new
-  // traceId is generated. The invocationId is always generated new and the spanId
-  // will be 0 with no parent span.
+  // traceId is generated. The invocationId and spanId are always generated new.
   static InvocationSpanContext newForInvocation(
       kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
       kj::Maybe<kj::EntropySource&> entropySource = kj::none);
@@ -337,8 +340,8 @@ class InvocationSpanContext final {
   // testing is enabled). The isTrigger() should also return true.
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 
-  // W3C trace flags from an upstream traceparent, propagated through the
-  // invocation chain. kj::none when no upstream sampling decision was made.
+  // W3C trace flags propagated through the invocation chain. kj::none when no
+  // upstream or local sampling decision was made.
   kj::Maybe<TraceFlags> traceFlags;
 };
 
@@ -814,6 +817,41 @@ struct Attribute final {
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 
+struct SpanLink final {
+  SpanContext context;
+  CustomInfo attributes;
+  uint32_t droppedAttributesCount;
+
+  SpanLink(SpanContext context, CustomInfo attributes, uint32_t droppedAttributesCount = 0);
+  explicit SpanLink(rpc::Trace::SpanLink::Reader reader);
+  SpanLink(SpanLink&&) noexcept = default;
+  SpanLink& operator=(SpanLink&&) = default;
+  KJ_DISALLOW_COPY(SpanLink);
+
+  // Link identities may have zero IDs when attributes carry the relationship.
+  // Hexadecimal IDs are accepted in either case.
+  static kj::Maybe<SpanContext> parseContext(
+      kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags);
+  void copyTo(rpc::Trace::SpanLink::Builder builder) const;
+  SpanLink clone() const;
+  size_t size() const;
+};
+
+struct SpanLinks final {
+  kj::Array<SpanLink> links;
+
+  explicit SpanLinks(kj::Array<SpanLink> links): links(kj::mv(links)) {}
+  explicit SpanLinks(rpc::Trace::SpanLinks::Reader reader);
+  SpanLinks(SpanLinks&&) noexcept = default;
+  SpanLinks& operator=(SpanLinks&&) = default;
+  KJ_DISALLOW_COPY(SpanLinks);
+
+  void copyTo(rpc::Trace::SpanLinks::Builder builder) const;
+  SpanLinks clone() const;
+  size_t size() const;
+  kj::String toString() const;
+};
+
 struct SpanOpenData {
   // Represents the data needed for a SpanOpen event
   tracing::SpanId spanId;
@@ -1006,6 +1044,7 @@ struct TailEvent final {
       SpanOpen,
       SpanClose,
       SpanUpdate,
+      SpanLinks,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1337,6 +1376,8 @@ class SpanBuilder {
 
   void setStatus(tracing::SpanStatus status);
 
+  void addLinks(tracing::SpanLinks links);
+
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1383,6 +1424,11 @@ class SpanBuilder {
 // ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
+  // Returns a new kj::Rc reference to this observer.
+  [[nodiscard]] kj::Rc<SpanObserver> addRef() {
+    return addRefToThis();
+  }
+
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
@@ -1424,6 +1470,8 @@ class SpanObserver: public kj::Refcounted {
   virtual void onUpdateName(kj::ConstString operationName) {}
 
   virtual void onUpdateStatus(tracing::SpanStatus&& status) {}
+
+  virtual void onLinks(tracing::SpanLinks links) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
@@ -1533,10 +1581,15 @@ class TraceContextParent {
   // this thread (AsyncTracker::inTurn()). Prefer the overload taking the tracker when the owning
   // context is known.
   [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+  // Like newChild(), but opens only the internal span: the user span parent passes through, so
+  // work done under the result nests directly under the current user span.
+  [[nodiscard]] TraceContext newChildWithoutUserSpan(kj::ConstString operationName);
 
   // Like newChild(operationName), but the operation is recorded by `asyncTracker`, the tracker of
   // the context that owns the spans (none if that context is not traced).
   [[nodiscard]] TraceContext newChild(
+      kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker);
+  [[nodiscard]] TraceContext newChildWithoutUserSpan(
       kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker);
 
  private:
@@ -1564,12 +1617,21 @@ class TraceContext {
       : span(kj::mv(span)),
         userSpan(kj::mv(userSpan)),
         asyncTraceResource(kj::mv(asyncTraceResource)) {}
+  TraceContext(kj::Badge<TraceContextParent>,
+      SpanBuilder span,
+      SpanParent userSpanParent,
+      AsyncResource asyncTraceResource)
+      : span(kj::mv(span)),
+        userSpan(nullptr),
+        userSpanParent(kj::mv(userSpanParent)),
+        asyncTraceResource(kj::mv(asyncTraceResource)) {}
   TraceContext(TraceContext&& other) = default;
   TraceContext& operator=(TraceContext&& other) {
     if (this != &other) {
       asyncTraceResource.settle(AsyncOutcome::OK);
       span = kj::mv(other.span);
       userSpan = kj::mv(other.userSpan);
+      userSpanParent = kj::mv(other.userSpanParent);
       asyncTraceResource = kj::mv(other.asyncTraceResource);
     }
     return *this;
@@ -1590,18 +1652,22 @@ class TraceContext {
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
   bool isObserved() {
-    return span.isObserved() || userSpan.isObserved();
+    return span.isObserved() || userSpan.isObserved() ||
+        userSpanParent.map([](SpanParent& p) { return p.isObserved(); }).orDefault(false);
   }
   SpanParent getInternalSpanParent() {
     return SpanParent(span);
   }
 
   SpanParent getUserSpanParent() {
+    KJ_IF_SOME(parent, userSpanParent) {
+      return parent.addRef();
+    }
     return SpanParent(userSpan);
   }
 
   TraceContextParent getSpanParents() {
-    return TraceContextParent(SpanParent(span), SpanParent(userSpan), asyncTraceResource.getId());
+    return TraceContextParent(SpanParent(span), getUserSpanParent(), asyncTraceResource.getId());
   }
 
   // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
@@ -1616,6 +1682,8 @@ class TraceContext {
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
+  // Set instead of `userSpan` by TraceContextParent::newChildWithoutUserSpan().
+  kj::Maybe<SpanParent> userSpanParent;
   AsyncResource asyncTraceResource;
 };
 
@@ -1635,6 +1703,20 @@ inline TraceContext TraceContextParent::newChild(
   auto userChild = userSpan.newChild(kj::mv(operationName));
   return TraceContext(kj::Badge<TraceContextParent>(), kj::mv(internalChild), kj::mv(userChild),
       kj::mv(asyncTraceResource));
+}
+
+inline TraceContext TraceContextParent::newChildWithoutUserSpan(kj::ConstString operationName) {
+  return newChildWithoutUserSpan(kj::mv(operationName), AsyncTracker::inTurn());
+}
+
+inline TraceContext TraceContextParent::newChildWithoutUserSpan(
+    kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker) {
+  AsyncResource asyncTraceResource;
+  KJ_IF_SOME(tracker, asyncTracker) {
+    asyncTraceResource = tracker.createChild(AsyncKind::OPERATION, operationName, asyncTraceParent);
+  }
+  return TraceContext(kj::Badge<TraceContextParent>(), internalSpan.newChild(kj::mv(operationName)),
+      userSpan.addRef(), kj::mv(asyncTraceResource));
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

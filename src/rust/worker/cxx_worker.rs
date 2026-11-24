@@ -22,6 +22,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::ServiceResult;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjDate;
@@ -57,7 +58,7 @@ impl Service for CxxWorkerInterface {
         headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         // SAFETY: the returned future borrows self.inner and the arguments for its duration.
         unsafe {
             bridge::worker_request(
@@ -80,7 +81,7 @@ impl Service for CxxWorkerInterface {
         connection: Pin<&'a mut AsyncIoStream>,
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
-    ) -> Result<()> {
+    ) -> ServiceResult {
         // SAFETY: the returned future borrows self.inner and the arguments for its duration.
         unsafe {
             bridge::worker_connect(
@@ -146,6 +147,11 @@ impl Interface for CxxWorkerInterface {
     async fn test(&mut self) -> Result<bool> {
         // SAFETY: the returned future borrows self.inner for its duration.
         Ok(unsafe { bridge::worker_test(self.inner.as_mut()) }.await?)
+    }
+
+    async fn bench(&mut self, params: &[u64]) -> Result<Vec<u64>> {
+        // SAFETY: the returned future borrows self.inner and params for its duration.
+        Ok(unsafe { bridge::worker_bench(self.inner.as_mut(), params) }.await?)
     }
 }
 

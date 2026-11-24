@@ -142,6 +142,19 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The three Performance members below exist only under the
+  // ts-performance-now autogate; only performance/now uses them.
+  //
+  // performance.now() on `this`: the Spectre-safe clock plus the native
+  // perf-event accounting. It and requirePerformance() take the Performance as
+  // a signature-checked `this`; call them through uncurryThis. See "THE C++
+  // CONTRACT" in performance/AGENTS.md.
+  performanceNow(this: unknown): number;
+  // The receiver check alone: does nothing for a Performance `this`.
+  requirePerformance(this: unknown): void;
+  // Performance.prototype, without creating the lazy `performance` singleton,
+  // whatever the compat flags.
+  getPerformancePrototype(): object;
   // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
   // these only through events/event-target-internals, which documents them.
   setListenerCountHook(
@@ -178,6 +191,16 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // Defines key on target as a writable, configurable data property,
+  // enumerable if enumerable is true, whose value is the key export of the
+  // bootstrap module specifier, required when the property is first read (V8's
+  // lazy data property). A read that throws leaves it lazy.
+  defineLazyDataProperty(
+    target: object,
+    key: string | symbol,
+    specifier: string,
+    enumerable: boolean
+  ): void;
   // The request-bound I/O handle (api/request-io.h), bound to the current
   // request, or undefined outside of one.
   createRequestIo(): RequestIo | undefined;
@@ -256,6 +279,12 @@ declare const utils: {
   // A string's bytes as JSG makes a kj::String of it: WTF-8, a lone
   // surrogate as its own three bytes.
   encodeWtf8(value: string): Uint8Array;
+  // The structured clone of `value` (jsg::structuredClone), transferring the
+  // objects in `transfer`, a dense array the caller built. The native
+  // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
+  // any other object throws a TypeError, and an uncloneable value a
+  // DataCloneError. Consumed by structured-clone.
+  structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

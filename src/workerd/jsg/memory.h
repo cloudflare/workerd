@@ -13,10 +13,9 @@
 #include <v8-profiler.h>
 
 #include <kj/common.h>
-#include <kj/debug.h>
 #include <kj/exception.h>
-#include <kj/hash.h>
 #include <kj/map.h>
+#include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/table.h>
@@ -119,11 +118,15 @@ namespace workerd::jsg {
 
 class MemoryTracker;
 class MemoryRetainerNode;
+class ContextGlobal;
+class Wrappable;
 
 template <typename T>
 class V8Ref;
 template <typename T>
 class Ref;
+template <typename T>
+class TracedOwn;
 
 enum class MemoryInfoDetachedState {
   UNKNOWN,
@@ -160,6 +163,10 @@ template <typename T>
 concept V8Value = requires(T a) { std::is_assignable_v<v8::Value, T>; };
 
 // sometimes jsgGetMemoryName is virtual sometimes it is not, so ¯\_(ツ)_/¯
+//
+// Not for jsg::Object subclasses: JSG_RESOURCE_TYPE reports a resource through
+// visitForMemoryInfo(), and its jsgGetMemoryInfo() skips any base class that has no
+// JSG_RESOURCE_TYPE of its own, so JSG_MEMORY_INFO on such a base would never run.
 #define JSG_MEMORY_INFO(Name)                                                                      \
   _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wsuggest-override\"")          \
       kj::StringPtr                                                                                \
@@ -167,6 +174,8 @@ concept V8Value = requires(T a) { std::is_assignable_v<v8::Value, T>; };
     return #Name##_kjc;                                                                            \
   }                                                                                                \
   size_t jsgGetMemorySelfSize() const {                                                            \
+    static_assert(!std::is_base_of_v<::workerd::jsg::Wrappable, Name>,                             \
+        "use visitForMemoryInfo() instead of JSG_MEMORY_INFO in a jsg::Object subclass");          \
     return sizeof(Name);                                                                           \
   }                                                                                                \
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const _Pragma("GCC diagnostic pop")
@@ -189,6 +198,11 @@ class MemoryTracker final {
   template <MemoryRetainer T>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Arc<T>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  template <MemoryRetainer T>
+  inline void trackField(kj::StringPtr edgeName,
+      const TracedOwn<T>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <MemoryRetainer T, typename D>
@@ -230,6 +244,12 @@ class MemoryTracker final {
   template <typename T>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Maybe<T&>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  // Tracks whichever alternative the OneOf holds.
+  template <typename... T>
+  inline void trackField(kj::StringPtr edgeName,
+      const kj::OneOf<T...>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   inline void trackField(kj::StringPtr edgeName,
@@ -442,6 +462,14 @@ void MemoryTracker::trackField(
   }
 }
 
+template <MemoryRetainer T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const TracedOwn<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  if (value.get() != nullptr) {
+    trackField(edgeName, value.get(), nodeName);
+  }
+}
+
 template <MemoryRetainer T, typename D>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const std::unique_ptr<T, D>& value, kj::Maybe<kj::StringPtr> nodeName) {
@@ -464,6 +492,13 @@ void MemoryTracker::trackField(
   KJ_IF_SOME(v, value) {
     trackField(edgeName, v, nodeName);
   }
+}
+
+template <typename... T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const kj::OneOf<T...>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  ((value.template is<T>() ? trackField(edgeName, value.template get<T>(), nodeName) : void()),
+      ...);
 }
 
 template <typename T>
@@ -609,7 +644,7 @@ template <V8Value T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const v8::Local<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
   if (!value.IsEmpty()) {
-    addEdge(graph_->V8Node(value.template As<v8::Value>()), edgeName);
+    addEdge(graph_->V8Node(v8::Local<v8::Data>(value)), edgeName);
   }
 }
 
@@ -659,6 +694,11 @@ template <typename T>
 inline void visitSubclassForMemoryInfo(const T* obj, MemoryTracker& tracker) {
   if constexpr (&T::visitForMemoryInfo != &T::jsgSuper::visitForMemoryInfo) {
     obj->visitForMemoryInfo(tracker);
+  }
+  // Only the type that first inherits ContextGlobal reports it, so it's reported once.
+  if constexpr (std::is_base_of_v<ContextGlobal, T> &&
+      !std::is_base_of_v<ContextGlobal, typename T::jsgSuper>) {
+    obj->jsgGetContextGlobalMemoryInfo(tracker);
   }
 }
 

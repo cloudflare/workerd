@@ -54,8 +54,6 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   kj::Maybe<uint64_t> getOwningHolderToken() override;
   void forgetOwningHolder() override;
 
-  kj::Own<HibernationManager> addRef() override;
-
   friend class api::HibernatableWebSocketEvent;
   friend class api::HibernatableWebSocketCustomEvent;
   friend struct LegacyHibernationManagerTestAccess;
@@ -70,10 +68,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // Returns the manager that registered `websocketId`, or kj::none if no manager on this event loop
   // registered that ID.
   //
-  // The result is a bare reference on purpose: an owning one would keep the manager alive until the
-  // event settles, and since the manager owns the task delivering the event, an event that never
-  // settles would keep both alive forever.
-  static kj::Maybe<Worker::Actor::HibernationManager&> findManagerForEvent(
+  // Don't keep the result for the duration of the event: the manager owns the task delivering the
+  // event, so an event that never settles would keep both alive forever.
+  static kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> findManagerForEvent(
       kj::StringPtr websocketId);
 
  private:

@@ -5,13 +5,20 @@ We use a combination of micro and macro benchmarks for performance testing worke
 Benchmarks should be built using `--config=benchmark` configuration, which builds a release
 binary with additional debug info.
 
+On Linux, add `--config=cross-lto`, as the `just` recipes do: Rust then takes part in ThinLTO, so
+calls between crates and between Rust and C++ can be inlined. Without it only C++ is optimized at
+link time, which puts Rust at a disadvantage in a comparison with C++. A `wd_cc_benchmark` links
+with link-time optimization turned off unless it sets `tool = True`, so a benchmark that compares
+Rust with C++ should set it.
+
 To obtain most consistent results it is recommended to disable CPU frequency scaling
 (use "performance" governor https://wiki.debian.org/CpuFrequencyScaling)
 
 # Micro benchmarks
 
 Micro benchmarks are defined using `wd_cc_benchmark` bazel macro. Use `bazel run --config=benchmark`
-on a defined target to obtain benchmarking results.
+on a defined target to obtain benchmarking results. `bazel test` runs each benchmark once
+(`--benchmark_dry_run`), to check that it works, and measures nothing.
 
 See example in [bench-json.c++](../src/workerd/tests/bench-json.c++)
 
@@ -178,5 +185,6 @@ See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js).
 [src/bench/streams/](../src/bench/streams/AGENTS.md) runs the same benchmarks against the C++ and
 TypeScript streams implementations, to compare them.
 [src/bench/serialization/](../src/bench/serialization/structured-clone.js) measures
-`structuredClone()` of object graphs, class instances, arrays and strings.
+`structuredClone()` of object graphs, class instances, arrays and strings, and its options,
+against the C++ and TypeScript implementations, including the first calls in a new isolate.
 

@@ -81,6 +81,13 @@ if (autogates['ts-dom-exception']) {
   }
 }
 
+// performance.now() and performance.timeOrigin. Gated by an autogate rather
+// than a compat flag because the swap preserves the observable shape (see
+// performance/AGENTS.md).
+if (autogates['ts-performance-now']) {
+  require('performance/now').install(utils.getPerformancePrototype());
+}
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,
@@ -327,84 +334,53 @@ if (compatFlags['typescript_implemented_streams']) {
   }
 }
 
-// The TypeScript MessageChannel and MessagePort replace the C++ ones. They are
-// loaded whether or not they become globals: cloudflare-internal:messagechannel
-// (used by node:worker_threads) reads them from this module's exports
-// (MessageChannelModule in api/messagechannel.h).
-if (autogates['ts-message-channel']) {
-  const {
-    MessageChannel,
-    MessagePort,
-  } = require('messagechannel/messagechannel');
-  if (compatFlags['expose_global_message_channel']) {
-    // Installed where JSG_NESTED_TYPE installs the C++ classes, with the same
-    // attributes: always on the global scope's prototype, with all three true,
-    // and under spec_compliant_property_attributes also as own properties of
-    // the global, non-enumerable per Web IDL.
-    ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-      MessageChannel: {
-        __proto__: null,
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: MessageChannel,
-      },
-      MessagePort: {
-        __proto__: null,
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: MessagePort,
-      },
-    });
-    if (compatFlags['spec_compliant_property_attributes']) {
-      ObjectDefineProperties(globalThis, {
-        MessageChannel: {
-          __proto__: null,
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: MessageChannel,
-        },
-        MessagePort: {
-          __proto__: null,
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: MessagePort,
-        },
-      });
-    }
+// MessageChannel and MessagePort are loaded on first use, since few Workers
+// use them: through the globals defined here, or through
+// cloudflare-internal:messagechannel (MessageChannelModule in
+// api/messagechannel.h), which node:worker_threads uses. Whichever comes first
+// loads the module; the other finds it in the require() cache.
+if (compatFlags['expose_global_message_channel']) {
+  const { defineLazyDataProperty } = utils;
+  const specifier = 'messagechannel/messagechannel';
+  // Defined as JSG_NESTED_TYPE defines a global class: always on the global
+  // scope's prototype, with all three attributes true, and under
+  // spec_compliant_property_attributes also as own properties of the global,
+  // non-enumerable per Web IDL. Each is a lazy data property, an ordinary data
+  // property once read.
+  const globalPrototype = ObjectGetPrototypeOf(globalThis) as object;
+  defineLazyDataProperty(globalPrototype, 'MessageChannel', specifier, true);
+  defineLazyDataProperty(globalPrototype, 'MessagePort', specifier, true);
+  if (compatFlags['spec_compliant_property_attributes']) {
+    defineLazyDataProperty(globalThis, 'MessageChannel', specifier, false);
+    defineLazyDataProperty(globalThis, 'MessagePort', specifier, false);
   }
 }
 
-// The TypeScript EventSource replaces the C++ one, which global-scope.h then
-// leaves out. Loaded after the streams globals above, whose reader it
-// captures.
-if (autogates['ts-event-source']) {
-  const { EventSource } = require('eventsource/eventsource');
-  // Installed as the MessageChannel classes above are, matching
-  // JSG_NESTED_TYPE.
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+// EventSource is always a global. Loaded after the streams globals above,
+// whose reader it captures, and installed as JSG_NESTED_TYPE installs a
+// global class: on the global scope's prototype, with all three attributes
+// true, and under spec_compliant_property_attributes also as an own property
+// of the global, non-enumerable per Web IDL.
+const { EventSource } = require('eventsource/eventsource');
+ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+  EventSource: {
+    __proto__: null,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: EventSource,
+  },
+});
+if (compatFlags['spec_compliant_property_attributes']) {
+  ObjectDefineProperties(globalThis, {
     EventSource: {
       __proto__: null,
       configurable: true,
-      enumerable: true,
+      enumerable: false,
       writable: true,
       value: EventSource,
     },
   });
-  if (compatFlags['spec_compliant_property_attributes']) {
-    ObjectDefineProperties(globalThis, {
-      EventSource: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: EventSource,
-      },
-    });
-  }
 }
 
 // The TypeScript Blob and File replace the C++ ones, which global-scope.h
@@ -486,6 +462,24 @@ if (autogates['ts-url-pattern']) {
       enumerable: false,
       writable: true,
       value: URLPattern,
+    },
+  });
+}
+
+// The TypeScript structuredClone() replaces the C++ method, which
+// global-scope.h then leaves out. Installed where JSG_METHOD installs it, on
+// ServiceWorkerGlobalScope.prototype, with the same attributes (all three
+// true).
+if (autogates['ts-structured-clone']) {
+  const { structuredClone } = require('structured-clone');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    __proto__: null,
+    structuredClone: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: structuredClone,
     },
   });
 }

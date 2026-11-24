@@ -282,8 +282,6 @@ constexpr int MAX_SIZE_FOR_STACK_ALLOC = 4096;
 
 }  // namespace
 
-const kj::Array<const kj::byte> TextDecoder::EMPTY =
-    kj::Array<const kj::byte>(&DUMMY, 0, kj::NullArrayDisposer::instance);
 const TextDecoder::DecodeOptions TextDecoder::DEFAULT_OPTIONS = TextDecoder::DecodeOptions();
 
 kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ignoreBom) {
@@ -493,11 +491,23 @@ kj::StringPtr TextDecoder::getEncoding() {
   return getEncodingId(getImpl().getEncoding());
 }
 
-jsg::JsString TextDecoder::decode(jsg::Lock& js,
-    jsg::Optional<kj::Array<const kj::byte>> maybeInput,
-    jsg::Optional<DecodeOptions> maybeOptions) {
+jsg::JsString TextDecoder::decode(
+    jsg::Lock& js, jsg::Optional<Input> maybeInput, jsg::Optional<DecodeOptions> maybeOptions) {
   auto options = maybeOptions.orDefault(DEFAULT_OPTIONS);
-  auto& input = maybeInput.orDefault(EMPTY);
+  kj::ArrayPtr<const kj::byte> input;
+  KJ_IF_SOME(in, maybeInput) {
+    KJ_SWITCH_ONEOF(in) {
+      KJ_CASE_ONEOF(buffer, jsg::JsBufferSource) {
+        input = kj::implicitCast<const jsg::JsBufferSource&>(buffer).asArrayPtr();
+      }
+      KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
+        input = bytes;
+      }
+    }
+  }
+  // A decoder may not take a null pointer, even for empty input.
+  static constexpr kj::byte DUMMY = 0;
+  if (input.size() == 0) input = kj::arrayPtr(&DUMMY, static_cast<size_t>(0));
   midStream = options.stream;
   return JSG_REQUIRE_NONNULL(
       getImpl().decode(js, input, !options.stream), TypeError, "Failed to decode input.");
@@ -574,6 +584,8 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
     kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
+    // Zeroed because V8 may not fill it; see JsString::writeInto().
+    latin1Buffer.asPtr().fill(0);
     auto latin1 = latin1Buffer.first(str.writeInto(js, latin1Buffer.asPtr()).written).asChars();
 
     utf8_length = simdutf::utf8_length_from_latin1(latin1.begin(), latin1.size());
@@ -593,6 +605,7 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
   // and potentially triggering GC. Stack allocation for small strings, heap for large.
   kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
+  utf16Buffer.asPtr().fill(0);
   size_t utf16Length = str.writeInto(js, utf16Buffer.asPtr()).written;
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());

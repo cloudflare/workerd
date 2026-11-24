@@ -248,12 +248,28 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Generator<T>`         | Sync generator                   |
 | `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
+| `jsg::TracedOwn<T>`         | Owned heap object with handles   |
+
+Hold a heap object whose handles you visit in a `jsg::TracedOwn<T>`, not a `kj::Own<T>`.
+Moving a `kj::Own<T>` moves only the pointer, so an object moved out of the owner that
+visited it keeps traced handles that nothing visits, and the GC can free their targets
+while the object still uses them. A `TracedOwn<T>` makes them strong again when it moves.
+This is behind the `gc-complete-tracing` autogate; with it disabled, a `TracedOwn<T>` behaves
+like a `kj::Own<T>`.
+The `jsg-traced-own` clang-tidy check flags a `visitForGc()`, or a helper handed the
+visitor, that visits through a `kj::Own`, and moving or swapping a container whose
+elements hold a `TracedOwn`, or a struct that holds such a container. Moving a
+non-reference local isn't flagged, since the function that moves it filled it.
 
 **Not GC-visitable** (compile error if visited):
 `jsg::WeakRef<T>`.
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
+
+**Iterator State.** The `State` of `JSG_ITERATOR` and `JSG_ASYNC_ITERATOR` must have a
+public `visitForGc()`, or declare `JSG_HOLDS_NO_GC_HANDLES` if it holds none; otherwise it
+fails to compile. For a type you can't add a member to, specialize `jsg::holdsNoGcHandles<T>`.
 
 **Visit only what this object owns alone.** An object behind a `kj::Rc`, `kj::Arc`, or a
 `kj::Own` of a refcounted type can have other owners that visit it too, and a handle visited
@@ -489,6 +505,13 @@ A raw read past the end of the data throws DataCloneError.
 - Tag enum values MUST NOT change once data has been serialized
 - First tag = current version; subsequent tags = accepted old versions
 - `deserialize()` receives the tag for version dispatch
+- `deserialize()` MUST NOT run JavaScript, since V8 is reading the value. It may read, check
+  types, create objects, define properties and unwrap a `JSG_STRUCT`. It must not get an
+  inherited property, assign one, convert to a primitive or JSON, call a function, or serialize.
+  Nor may it call C++ that does, such as `exceptionToKj()` on a value it read. Put that work in a
+  `deserializer.afterRead()` callback, which runs once the whole value has been read and its
+  instances of classes implemented in JavaScript are initialized. An attempt to run JavaScript
+  fails the read with `DataCloneError`. `docs/jsg.md` has the details
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
   runtime call-site label (defaults to `"unknown"`).
@@ -506,7 +529,8 @@ constructor and initializes it once the whole value has been read, with JavaScri
 - A `deserializeInfo` MUST NOT change once data has been serialized
 - A value a `JSG_SERIALIZABLE` type's `deserialize()` reads with `readValue()` may contain such
   instances before they are initialized: keep it as a `JsRef` rather than unwrapping it or reading
-  its properties, unless the type's own state, which can't contain one, produced it
+  its properties, unless the type's own state, which can't contain one, produced it. An
+  `afterRead()` callback finds them initialized
 - A Serializer or Deserializer that writes to or reads for another delegate (`writeApiObject()`,
   `readApiObject()`, as the Rust serializer uses) rejects such instances with DataCloneError
 

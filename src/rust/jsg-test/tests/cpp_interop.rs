@@ -12,6 +12,7 @@ use jsg::v8;
 use crate::Harness;
 use crate::cpp_interop::HOST_DROPS;
 use crate::cpp_interop::Host;
+use crate::cpp_interop::HostDropCounter;
 use crate::cpp_interop::ffi;
 
 /// Sets the simulated request for the duration of a test.
@@ -36,12 +37,13 @@ fn new_host(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Host> {
         Host {
             label: "test".to_owned(),
             held: jsg::RefCell::new(None),
+            drops: HostDropCounter,
         },
     )
 }
 
 /// Runs a C++ constructor and returns the wrapper it made.
-fn new_cpp<'s>(
+pub(super) fn new_cpp<'s>(
     lock: &jsg::Lock<'s>,
     constructor: impl FnOnce(*mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal,
 ) -> v8::Local<'s, v8::Value> {

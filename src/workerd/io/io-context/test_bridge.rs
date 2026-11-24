@@ -16,20 +16,28 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
+use channel_interop::Fetcher;
+use channel_interop::SubrequestChannel;
 use execution_context::new_gate;
 use execution_context::new_rust_execution_context;
 use execution_context::open_gate;
+use futures::FutureExt;
 use futures::channel::oneshot;
+use io_context::AwaitJs;
 use io_context::IoContext;
 use io_context::IoOwned;
 use io_context::IoOwnedSpan;
+use io_context::ReentryCallback;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
+use kj_rs::KjRc;
 
 /// C++ receives an error as an exception whose description is the `jsg::Error`'s name and
 /// message.
@@ -57,6 +65,7 @@ mod ffi {
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
         type Isolate = jsg::v8::ffi::Isolate;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type Local = jsg::v8::ffi::Local;
     }
 
     /// How the last `await_released()` ends once its future has a value.
@@ -109,16 +118,84 @@ mod ffi {
         Terminate,
     }
 
+    /// How `await_js_start()` starts its wait.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AwaitJsStart {
+        /// Keeps the promise's resolver, for `settle_awaited_js()`.
+        KeepResolver,
+        /// Keeps nothing, so that the promise and its reactions are unreachable.
+        DropResolver,
+        /// Keeps the resolver, and races the wait with `cancel_awaited_js()`.
+        Cancellable,
+        /// Keeps the resolver, with a conversion that calls a function that throws a
+        /// `RangeError`.
+        MapThrows,
+        /// Keeps the resolver, with a conversion that returns a `RangeError`.
+        MapFails,
+        /// Keeps the resolver, with a conversion that returns an internal error.
+        MapFailsInternally,
+        /// Keeps the resolver, and holds the wait outside the request, for
+        /// `poll_held_awaited_js()`, so that it can outlive the `IoContext`.
+        Held,
+    }
+
+    /// What `register_reaction()` registers with.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ReactionKind {
+        /// `IoContext::then()`.
+        Then,
+        /// `IoContext::catch()`.
+        Catch,
+        /// `IoContext::then_or_catch()`.
+        ThenOrCatch,
+    }
+
+    /// The `UncaughtExceptionSource` that `log_uncaught_exception()` logs from.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum LogSource {
+        Internal,
+        InternalAsync,
+    }
+
+    /// What the function of a `make_reentry_callback()` callback does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ReentryBehavior {
+        /// Calls the JavaScript function, and waits for its promise with `await_js()`, whose
+        /// conversion takes a string.
+        CallJs,
+        /// Returns a future that is ready with "ready", without JavaScript.
+        Ready,
+        /// Returns a `RangeError`.
+        Fail,
+        /// Calls the JavaScript function, terminates execution, then calls it again.
+        Terminate,
+        /// Calls the JavaScript function, aborts the IoContext with a `RangeError`, which
+        /// terminates execution, then calls the function again.
+        Abort,
+        /// Calls the JavaScript function, then panics.
+        Panic,
+    }
+
+    #[namespace = "workerd::api::channel_interop"]
+    unsafe extern "C++" {
+        include!("workerd/api/channel-interop/ffi.h");
+        type SubrequestChannel = channel_interop::SubrequestChannel;
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
         fn record_async_context(isolate: usize);
         fn record_await_context();
+        fn record_drop_context();
+        fn keep_channel(channel: KjRc<SubrequestChannel>);
     }
 
     extern "Rust" {
         unsafe fn await_and_record_async_context(isolate: usize) -> Result<()>;
         fn register_probe_module(registry: Pin<&mut ModuleRegistry>);
+        fn register_failing_module(registry: Pin<&mut ModuleRegistry>);
+        fn register_terminating_module(registry: Pin<&mut ModuleRegistry>);
         fn take_probe_observation() -> ProbeObservation;
         unsafe fn await_released(isolate: usize, ending: AwaitEnding) -> Result<()>;
         fn release_await(value: i32);
@@ -136,6 +213,12 @@ mod ffi {
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
         unsafe fn use_owned_value(isolate: usize) -> Result<i32>;
+        unsafe fn register_reaction(
+            isolate: usize,
+            kind: ReactionKind,
+            promise: Local,
+            held: Local,
+        ) -> Result<usize>;
         unsafe fn add_owned_span(isolate: usize) -> Result<()>;
         unsafe fn tag_owned_span(isolate: usize) -> Result<bool>;
         fn drop_owned_span_handle();
@@ -150,10 +233,58 @@ mod ffi {
         fn open_gate() -> bool;
         unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()>;
 
+        unsafe fn await_js_start(isolate: usize, start: AwaitJsStart) -> Result<()>;
+        unsafe fn settle_awaited_js(isolate: usize, fulfill: bool) -> Result<()>;
+        unsafe fn reject_awaited_js(isolate: usize, reason: Local) -> Result<()>;
+        unsafe fn abort_request(isolate: usize, reason: Local) -> Result<()>;
+        fn forget_awaited_js_resolver();
+        fn cancel_awaited_js() -> bool;
+        fn awaited_js_outcome() -> String;
+        fn awaited_js_map_runs() -> u32;
+        fn awaited_js_detail_ids() -> Vec<u64>;
+        fn take_awaited_js_error() -> Result<()>;
+        fn poll_held_awaited_js() -> bool;
+        unsafe fn log_uncaught_exception(
+            isolate: usize,
+            source: LogSource,
+            exception: Local,
+        ) -> Result<()>;
+
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
+
+        /// A `ReentryCallback`, as a crate that hands one to C++ wraps it.
+        type HeldReentryCallback;
+        unsafe fn make_reentry_callback(
+            isolate: usize,
+            behavior: ReentryBehavior,
+            function: Local,
+        ) -> Result<Box<HeldReentryCallback>>;
+        async unsafe fn call_reentry_callback<'a>(
+            callback: &'a HeldReentryCallback,
+        ) -> Result<String>;
+        async unsafe fn call_and_drop_reentry_callback(
+            callback: Box<HeldReentryCallback>,
+        ) -> Result<String>;
+        fn reentry_function_runs() -> u32;
+        fn reentry_function_dropped() -> bool;
+        fn reentry_function_dropped_with_callback() -> bool;
+
+        /// A `ReentryCallback` whose output, a channel, is not `Send`.
+        type HeldChannelReentryCallback;
+        unsafe fn make_channel_reentry_callback(
+            isolate: usize,
+            function: Local,
+        ) -> Result<Box<HeldChannelReentryCallback>>;
+        async unsafe fn call_channel_reentry_callback<'a>(
+            callback: &'a HeldChannelReentryCallback,
+        ) -> Result<()>;
+        fn channel_conversion_runs() -> u32;
+        /// The id of the `IoContext` the conversion last got, or 0.
+        fn channel_conversion_context() -> u64;
+
     }
 }
 
@@ -261,6 +392,29 @@ fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
             PROBE_OBSERVATION.with(|cell| cell.set(observation));
             Ok(jsg::Rc::new(lock, probe::Probe))
         },
+        jsg::modules::ModuleType::Internal,
+    );
+}
+
+/// Registers the internal module `test:io-context-failing`, whose callback returns an error.
+fn register_failing_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "test:io-context-failing",
+        |_lock| -> jsg::Result<jsg::Rc<probe::Probe>> {
+            Err(jsg::Error::new_type_error("the module failed"))
+        },
+        jsg::modules::ModuleType::Internal,
+    );
+}
+
+/// Registers the internal module `test:io-context-terminating`, whose callback terminates
+/// execution.
+fn register_terminating_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "test:io-context-terminating",
+        |lock| -> jsg::Result<jsg::Rc<probe::Probe>> { Err(lock.terminate_execution_now()) },
         jsg::modules::ModuleType::Internal,
     );
 }
@@ -583,11 +737,10 @@ thread_local! {
 static OWNED_DROPPED: AtomicBool = AtomicBool::new(false);
 
 /// Sets `OWNED_DROPPED` when dropped, and counts its uses.
+#[jsg_macros::jsg_traced]
 struct DropFlag {
     uses: i32,
 }
-
-jsg::jsg_traced!(DropFlag);
 
 impl Drop for DropFlag {
     fn drop(&mut self) {
@@ -649,6 +802,79 @@ unsafe fn use_owned_value(isolate: usize) -> Result<i32> {
             .map_err(|err| to_io(&err))?;
         Ok(uses.unwrap_or(-1))
     })
+}
+
+/// The data of the reactions `register_reaction()` registers: a value they return, which only
+/// they hold, so the garbage collector keeps it only by tracing them. Dropping it records the
+/// `IoContext` that is current then.
+struct HeldValue(v8::TracedGlobal<v8::Value>);
+
+impl Drop for HeldValue {
+    fn drop(&mut self) {
+        ffi::record_drop_context();
+    }
+}
+
+impl jsg::Traced for HeldValue {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+/// In a request, registers reactions on `promise`, a promise in the caller's `HandleScope`, with
+/// `IoContext::then()`, `catch()` or `then_or_catch()` as `kind` says, and returns the promise
+/// they return, in that scope. Their data holds `held`, a value in that scope. Each reaction
+/// records the `IoContext` it runs in, as C++ sees it, and checks that the one it gets can be
+/// used. The fulfillment reaction returns `held`; the rejection reaction returns "caught".
+unsafe fn register_reaction(
+    isolate: usize,
+    kind: ffi::ReactionKind,
+    promise: v8::ffi::Local,
+    held: v8::ffi::Local,
+) -> Result<usize> {
+    fn on_fulfilled<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        held: &HeldValue,
+        _value: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        Ok(held.0.as_local(lock))
+    }
+    fn on_rejected<'a>(
+        lock: &mut jsg::Lock<'a>,
+        context: &IoContext<'a>,
+        _held: &HeldValue,
+        _exception: v8::Local<'a, v8::Value>,
+    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+        ffi::record_await_context();
+        context.now()?;
+        "caught".to_owned().to_js(lock)
+    }
+
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a promise handle and a value handle of the scope `lock` stands for.
+    let (promise, held) = unsafe {
+        (
+            v8::Local::<v8::Promise>::from_ffi(promise),
+            v8::Local::<v8::Value>::from_ffi(held),
+        )
+    };
+    let held = HeldValue(held.to_traced_global(lock));
+    let returned = IoContext::current(lock)
+        .and_then(|context| match kind {
+            ffi::ReactionKind::Then => context.then(lock, promise, held, on_fulfilled),
+            ffi::ReactionKind::Catch => context.catch(lock, promise, held, on_rejected),
+            ffi::ReactionKind::ThenOrCatch => {
+                context.then_or_catch(lock, promise, held, on_fulfilled, on_rejected)
+            }
+            _ => unreachable!(),
+        })
+        .map_err(|err| to_io(&err))?;
+    // SAFETY: the handle is the caller's to use in its `HandleScope`, which outlives this call.
+    Ok(unsafe { returned.into_ffi() }.ptr)
 }
 
 /// In a request, starts the span `owned_span` and gives it to the request, keeping the handle
@@ -780,6 +1006,465 @@ unsafe fn await_and_record_async_context(isolate: usize) -> Result<()> {
         .map_err(|err| to_io(&err))
 }
 
+thread_local! {
+    /// The resolver of the promise the last `await_js_start()` waits for, if it kept it.
+    static AWAITED_JS_RESOLVER: RefCell<Option<v8::Global<v8::PromiseResolver>>> =
+        const { RefCell::new(None) };
+}
+
+/// How the wait of the last `await_js_start()` ended: "pending" until it does.
+static AWAITED_JS_OUTCOME: Mutex<String> = Mutex::new(String::new());
+/// How many times the conversion of the last `await_js_start()` ran.
+static AWAITED_JS_MAP_RUNS: AtomicU32 = AtomicU32::new(0);
+/// The exception the wait of the last `await_js_start()` failed with, if it failed.
+static AWAITED_JS_ERROR: Mutex<Option<cxx::KjException>> = Mutex::new(None);
+/// What cancels the wait of the last `await_js_start(Cancellable)`.
+static AWAITED_JS_CANCEL: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
+/// The wait of the last `await_js_start(Held)`, until `poll_held_awaited_js()` finds it ended.
+static AWAITED_JS_HELD: Mutex<Option<AwaitJs<f64>>> = Mutex::new(None);
+
+fn set_awaited_js_outcome(outcome: String) {
+    *AWAITED_JS_OUTCOME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = outcome;
+}
+
+/// Records the exception the wait failed with, if it did, and returns how the wait ended.
+fn record_awaited_js(result: std::result::Result<f64, cxx::KjException>) -> String {
+    match result {
+        Ok(value) => format!("fulfilled: {value}"),
+        Err(err) => {
+            let outcome = format!("rejected: {}", err.what());
+            *AWAITED_JS_ERROR
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(err);
+            outcome
+        }
+    }
+}
+
+/// The conversion of `await_js_start()`'s wait, which counts its runs.
+fn count_and_convert<'a>(
+    lock: &mut jsg::Lock<'a>,
+    value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    f64::from_js(lock, value)
+}
+
+/// The conversion of `await_js_start(MapThrows)`'s wait: calls a function that throws.
+fn count_and_throw<'a>(
+    lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    let thrower = v8::Function::new(lock, (), |_lock, (), _args| {
+        Err(jsg::Error::new_range_error("thrown by JavaScript"))
+    })?;
+    thrower.call(lock, None, &[])?;
+    unreachable!("the function throws")
+}
+
+/// The conversion of `await_js_start(MapFails)`'s wait.
+fn count_and_fail<'a>(
+    _lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    Err(jsg::Error::new_range_error("the conversion failed"))
+}
+
+/// The conversion of `await_js_start(MapFailsInternally)`'s wait.
+fn count_and_fail_internally<'a>(
+    _lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    Err(jsg::Error::new_internal_error(
+        "the conversion failed internally",
+    ))
+}
+
+/// In a request, `IoContext::await_js()`s a new promise as `start` says, and records how the
+/// wait ends from the future that an `await_io_and_run()` waits for, so that it is recorded even
+/// once the request is aborted, when the callback no longer runs.
+unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()> {
+    set_awaited_js_outcome("pending".to_owned());
+    AWAITED_JS_MAP_RUNS.store(0, Ordering::SeqCst);
+    AWAITED_JS_ERROR
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    AWAITED_JS_HELD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
+    let (cancel, cancelled) = oneshot::channel::<()>();
+    // Without `Cancellable`, the future holds the sender, so that the wait is never cancelled.
+    let held_cancel = if start == ffi::AwaitJsStart::Cancellable {
+        *AWAITED_JS_CANCEL
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(cancel);
+        None
+    } else {
+        Some(cancel)
+    };
+
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    let resolver = v8::PromiseResolver::new(lock).map_err(|err| to_io(&err))?;
+    let promise = resolver.promise();
+    let wait = match start {
+        ffi::AwaitJsStart::MapThrows => context.await_js(lock, promise, count_and_throw),
+        ffi::AwaitJsStart::MapFails => context.await_js(lock, promise, count_and_fail),
+        ffi::AwaitJsStart::MapFailsInternally => {
+            context.await_js(lock, promise, count_and_fail_internally)
+        }
+        _ => context.await_js(lock, promise, count_and_convert),
+    }
+    .map_err(|err| to_io(&err))?;
+    if start != ffi::AwaitJsStart::DropResolver {
+        let resolver = resolver.to_global(lock);
+        AWAITED_JS_RESOLVER.with(|cell| *cell.borrow_mut() = Some(resolver));
+    }
+    if start == ffi::AwaitJsStart::Held {
+        *AWAITED_JS_HELD
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(wait);
+        return Ok(());
+    }
+    let future = async move {
+        let _held_cancel = held_cancel;
+        let outcome = match futures::future::select(wait, cancelled).await {
+            futures::future::Either::Left((result, _)) => record_awaited_js(result),
+            futures::future::Either::Right(_) => "cancelled".to_owned(),
+        };
+        set_awaited_js_outcome(outcome);
+    };
+    context
+        .await_io_and_run(future, |_lock, ()| Ok(()))
+        .map_err(|err| to_io(&err))
+}
+
+/// In a request, aborts it as `ctx.abort(reason)` does, through `IoContext::abort()`, with
+/// `reason`, a handle in the caller's scope, and fails unless that leaves the termination pending,
+/// for C++ to cancel.
+unsafe fn abort_request(isolate: usize, reason: v8::ffi::Local) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let reason = unsafe { v8::Local::<v8::Value>::from_ffi(reason) };
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    let termination = context.abort(lock, Some(reason));
+    if termination.is_pending() {
+        Ok(())
+    } else {
+        Err(to_io(&termination))
+    }
+}
+
+/// Fulfills the promise of the last `await_js_start()` with 42, or rejects it with a
+/// `TypeError`, from the request this is called in.
+unsafe fn settle_awaited_js(isolate: usize, fulfill: bool) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let resolver = AWAITED_JS_RESOLVER
+        .with(|cell| cell.borrow_mut().take())
+        .ok_or_else(|| std::io::Error::other("await_js_start() kept no resolver"))?
+        .as_local(lock);
+    if fulfill {
+        let value = 42.0_f64.to_js(lock).map_err(|err| to_io(&err))?;
+        resolver.resolve(lock, value)
+    } else {
+        let reason = lock
+            .exception(&jsg::Error::new_type_error("boom"))
+            .map_err(|err| to_io(&err))?;
+        resolver.reject(lock, reason)
+    }
+    .map_err(|err| to_io(&err))
+}
+
+/// Rejects the promise of the last `await_js_start()` with `reason`, a handle in the caller's
+/// scope.
+unsafe fn reject_awaited_js(isolate: usize, reason: v8::ffi::Local) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let reason = unsafe { v8::Local::<v8::Value>::from_ffi(reason) };
+    AWAITED_JS_RESOLVER
+        .with(|cell| cell.borrow_mut().take())
+        .ok_or_else(|| std::io::Error::other("await_js_start() kept no resolver"))?
+        .as_local(lock)
+        .reject(lock, reason)
+        .map_err(|err| to_io(&err))
+}
+
+/// Drops the resolver the last `await_js_start()` kept.
+fn forget_awaited_js_resolver() {
+    AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
+}
+
+/// Cancels the wait of the last `await_js_start(Cancellable)`; false if there was none.
+fn cancel_awaited_js() -> bool {
+    AWAITED_JS_CANCEL
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .is_some_and(|cancel| cancel.send(()).is_ok())
+}
+
+fn awaited_js_outcome() -> String {
+    AWAITED_JS_OUTCOME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+fn awaited_js_map_runs() -> u32 {
+    AWAITED_JS_MAP_RUNS.load(Ordering::SeqCst)
+}
+
+fn awaited_js_detail_ids() -> Vec<u64> {
+    AWAITED_JS_ERROR
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(cxx::KjException::details)
+        .map(|details| details.iter().map(|(id, _)| *id).collect())
+        .unwrap_or_default()
+}
+
+/// Takes the exception the wait of the last `await_js_start()` failed with and fails with it,
+/// which C++ receives as that exception, or succeeds if it has not failed.
+fn take_awaited_js_error() -> std::result::Result<(), cxx::KjException> {
+    AWAITED_JS_ERROR
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .map_or(Ok(()), Err)
+}
+
+/// Polls the wait of the last `await_js_start(Held)` once, and, if it has ended, records how, as
+/// for the other waits, and returns true.
+fn poll_held_awaited_js() -> bool {
+    let mut held = AWAITED_JS_HELD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let Some(result) = held.as_mut().and_then(FutureExt::now_or_never) else {
+        return false;
+    };
+    held.take();
+    drop(held);
+    set_awaited_js_outcome(record_awaited_js(result));
+    true
+}
+
+/// In a request, `IoContext::log_uncaught_exception()`s `exception`, a handle in the caller's
+/// scope, as from `source`.
+unsafe fn log_uncaught_exception(
+    isolate: usize,
+    source: ffi::LogSource,
+    exception: v8::ffi::Local,
+) -> Result<()> {
+    let source = if source == ffi::LogSource::Internal {
+        io_context::UncaughtExceptionSource::Internal
+    } else {
+        io_context::UncaughtExceptionSource::InternalAsync
+    };
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let exception = unsafe { v8::Local::<v8::Value>::from_ffi(exception) };
+    IoContext::current(lock)
+        .and_then(|context| context.log_uncaught_exception(lock, source, exception))
+        .map_err(|err| to_io(&err))
+}
+
+/// A `ReentryCallback`, held in a type of this bridge, as a crate that hands one to C++ holds it:
+/// C++ calls it through `call_reentry_callback()`.
+struct HeldReentryCallback(ReentryCallback<String>);
+
+/// How many times the function of a `make_reentry_callback()` callback has run.
+static REENTRY_FUNCTION_RUNS: AtomicU32 = AtomicU32::new(0);
+/// Whether the function of the last `make_reentry_callback()` callback has been dropped.
+static REENTRY_FUNCTION_DROPPED: AtomicBool = AtomicBool::new(false);
+
+/// Sets `REENTRY_FUNCTION_DROPPED` when the function that holds it is dropped.
+struct ReentryDropFlag;
+
+impl Drop for ReentryDropFlag {
+    fn drop(&mut self) {
+        REENTRY_FUNCTION_DROPPED.store(true, Ordering::SeqCst);
+    }
+}
+
+type ReentryOutputFuture =
+    Pin<Box<dyn Future<Output = std::result::Result<String, cxx::KjException>> + Send>>;
+
+/// In a request, makes a reentry callback whose function records the `IoContext` it runs in,
+/// then does as `behavior` says, with `function`, a JavaScript function in the caller's scope.
+unsafe fn make_reentry_callback(
+    isolate: usize,
+    behavior: ffi::ReentryBehavior,
+    function: v8::ffi::Local,
+) -> Result<Box<HeldReentryCallback>> {
+    REENTRY_FUNCTION_RUNS.store(0, Ordering::SeqCst);
+    REENTRY_FUNCTION_DROPPED.store(false, Ordering::SeqCst);
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a function handle of the scope `lock` stands for.
+    let function = unsafe { v8::Local::<v8::Function>::from_ffi(function) }.to_global(lock);
+    let drop_flag = ReentryDropFlag;
+    let callback = IoContext::current(lock)
+        .and_then(|context| {
+            context.make_reentry_callback_weak(move |lock, context| {
+                let _ = &drop_flag;
+                ffi::record_await_context();
+                REENTRY_FUNCTION_RUNS.fetch_add(1, Ordering::SeqCst);
+                let future: ReentryOutputFuture = match behavior {
+                    ffi::ReentryBehavior::CallJs => {
+                        let result = function.as_local(lock).call(lock, None, &[])?;
+                        let promise = v8::Promise::resolved(lock, result)?;
+                        Box::pin(context.await_js(lock, promise, |lock, value| {
+                            // The conversion runs in the IoContext too.
+                            ffi::record_await_context();
+                            String::from_js(lock, value)
+                        })?)
+                    }
+                    ffi::ReentryBehavior::Ready => {
+                        Box::pin(std::future::ready(Ok("ready".to_owned())))
+                    }
+                    ffi::ReentryBehavior::Fail => {
+                        return Err(jsg::Error::new_range_error("the function failed"));
+                    }
+                    ffi::ReentryBehavior::Terminate => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        lock.terminate_execution();
+                        function.as_local(lock).call(lock, None, &[])?;
+                        unreachable!("execution is terminating")
+                    }
+                    ffi::ReentryBehavior::Abort => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        let reason = jsg::Error::new_range_error("the abort reason");
+                        let reason = lock.exception(&reason)?;
+                        let termination = context.abort(lock, Some(reason));
+                        assert!(termination.is_pending());
+                        function.as_local(lock).call(lock, None, &[])?;
+                        unreachable!("execution is terminating")
+                    }
+                    ffi::ReentryBehavior::Panic => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        panic!("the reentry function panicked")
+                    }
+                    _ => unreachable!(),
+                };
+                Ok(future)
+            })
+        })
+        .map_err(|err| to_io(&err))?;
+    Ok(Box::new(HeldReentryCallback(callback)))
+}
+
+/// Calls `callback`, as the `kj::Function` that C++ wraps it in does, and returns its output, or
+/// the exception it failed with as it is.
+async unsafe fn call_reentry_callback(
+    callback: &HeldReentryCallback,
+) -> std::result::Result<String, cxx::KjException> {
+    callback.0.call().await
+}
+
+/// Whether the function of the callback that `call_and_drop_reentry_callback()` dropped had been
+/// dropped by the time the callback was.
+static REENTRY_FUNCTION_DROPPED_WITH_CALLBACK: AtomicBool = AtomicBool::new(false);
+
+/// Calls `callback`, then drops it while the call is in flight, then waits for the call.
+async unsafe fn call_and_drop_reentry_callback(
+    callback: Box<HeldReentryCallback>,
+) -> std::result::Result<String, cxx::KjException> {
+    let call = callback.0.call();
+    drop(callback);
+    REENTRY_FUNCTION_DROPPED_WITH_CALLBACK.store(
+        REENTRY_FUNCTION_DROPPED.load(Ordering::SeqCst),
+        Ordering::SeqCst,
+    );
+    call.await
+}
+
+fn reentry_function_dropped_with_callback() -> bool {
+    REENTRY_FUNCTION_DROPPED_WITH_CALLBACK.load(Ordering::SeqCst)
+}
+
+fn reentry_function_runs() -> u32 {
+    REENTRY_FUNCTION_RUNS.load(Ordering::SeqCst)
+}
+
+fn reentry_function_dropped() -> bool {
+    REENTRY_FUNCTION_DROPPED.load(Ordering::SeqCst)
+}
+
+/// A `ReentryCallback` whose output is the channel of the `Fetcher` its function resolves, as
+/// `WorkerLoader.get()`'s takes a dynamic Worker's outbound channels from the code it resolves,
+/// held as `HeldReentryCallback` holds its callback.
+struct HeldChannelReentryCallback(ReentryCallback<KjRc<SubrequestChannel>>);
+
+/// How many times the conversion of a `make_channel_reentry_callback()` callback has run.
+static CHANNEL_CONVERSION_RUNS: AtomicU32 = AtomicU32::new(0);
+/// The id of the `IoContext` the conversion of a `make_channel_reentry_callback()` callback last got,
+/// or 0.
+static CHANNEL_CONVERSION_CONTEXT: AtomicU64 = AtomicU64::new(0);
+
+/// In a request, makes a reentry callback whose function calls `function`, a JavaScript function
+/// in the caller's scope, and converts the value of the promise it returns with
+/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, taken to keep past the
+/// request, recording the `IoContext` the conversion runs in.
+unsafe fn make_channel_reentry_callback(
+    isolate: usize,
+    function: v8::ffi::Local,
+) -> Result<Box<HeldChannelReentryCallback>> {
+    CHANNEL_CONVERSION_RUNS.store(0, Ordering::SeqCst);
+    CHANNEL_CONVERSION_CONTEXT.store(0, Ordering::SeqCst);
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a function handle of the scope `lock` stands for.
+    let function = unsafe { v8::Local::<v8::Function>::from_ffi(function) }.to_global(lock);
+    let callback = IoContext::current(lock)
+        .and_then(|context| {
+            context.make_reentry_callback_weak(move |lock, context| {
+                let result = function.as_local(lock).call(lock, None, &[])?;
+                let promise = v8::Promise::resolved(lock, result)?;
+                context.await_js_local(lock, promise, |lock, context, value| {
+                    ffi::record_await_context();
+                    CHANNEL_CONVERSION_CONTEXT.store(context.as_ffi(), Ordering::SeqCst);
+                    CHANNEL_CONVERSION_RUNS.fetch_add(1, Ordering::SeqCst);
+                    let fetcher = jsg_cpp::Ref::<Fetcher>::from_js(lock, value)?;
+                    let channel = fetcher.get(lock).subrequest_channel(lock, context)?;
+                    // Kept past the request, as Worker Loader keeps a dynamic Worker's outbound.
+                    channel.require_allows_transfer(lock)
+                })
+            })
+        })
+        .map_err(|err| to_io(&err))?;
+    Ok(Box::new(HeldChannelReentryCallback(callback)))
+}
+
+/// Calls `callback`, and hands the channel it produces to C++, through `keep_channel()`.
+async unsafe fn call_channel_reentry_callback(
+    callback: &HeldChannelReentryCallback,
+) -> std::result::Result<(), cxx::KjException> {
+    ffi::keep_channel(callback.0.call().await?);
+    Ok(())
+}
+
+fn channel_conversion_runs() -> u32 {
+    CHANNEL_CONVERSION_RUNS.load(Ordering::SeqCst)
+}
+
+fn channel_conversion_context() -> u64 {
+    CHANNEL_CONVERSION_CONTEXT.load(Ordering::SeqCst)
+}
+
 /// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the
 /// resource macros expect the prelude's `Result`.
 mod execution_context {
@@ -806,6 +1491,25 @@ mod execution_context {
             promise: v8::VoidPromise<'s>,
         ) -> jsg::Result<()> {
             IoContext::current(lock)?.add_wait_until(lock, promise)
+        }
+
+        /// Has the request wait for `promise` through `IoContext::await_js()`, ignoring how the
+        /// wait ends. `ctx.waitUntil()`, which waits through C++ `IoContext::awaitJs()`, is its
+        /// counterpart in the C++ `ExecutionContext`.
+        #[jsg_method]
+        fn await_js<'s>(
+            &self,
+            lock: &mut jsg::Lock<'s>,
+            promise: v8::VoidPromise<'s>,
+        ) -> jsg::Result<()> {
+            let context = IoContext::current(lock)?;
+            let wait = context.await_js(lock, promise, |_lock, _value| Ok(()))?;
+            context.await_io_and_run(
+                async move {
+                    let _ = wait.await;
+                },
+                |_lock, ()| Ok(()),
+            )
         }
 
         #[jsg_method]

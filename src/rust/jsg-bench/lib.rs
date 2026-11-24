@@ -231,6 +231,33 @@ impl Target {
     }
 
     #[jsg_method]
+    fn bytes_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::Uint8Array>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
+    fn buffer_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::ArrayBuffer>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
+    fn view_slice_len<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::ArrayBufferView>,
+    ) -> u32 {
+        a.as_slice(lock).len() as u32
+    }
+
+    #[jsg_method]
     fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
         let a = a.as_slice(lock).to_vec();
         black_box(&a);
@@ -275,6 +302,54 @@ impl Target {
     #[jsg_method]
     fn fail(&self) -> Result<(), jsg::Error> {
         Err(jsg::Error::new_type_error("benchmark error"))
+    }
+
+    #[jsg_method]
+    fn resolved<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: f64,
+    ) -> Result<jsg::Promise<'s, f64>, jsg::Error> {
+        jsg::Promise::resolved(lock, a + 1.0)
+    }
+
+    #[jsg_method]
+    fn resolved_void<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> Result<jsg::Promise<'s, ()>, jsg::Error> {
+        jsg::Promise::resolved(lock, ())
+    }
+
+    #[jsg_method]
+    fn untyped_void<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
+        let undefined = lock.undefined();
+        v8::Promise::resolved(lock, undefined)
+    }
+
+    #[jsg_method]
+    fn then_add<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: jsg::Promise<'s, f64>,
+    ) -> Result<jsg::Promise<'s, f64>, jsg::Error> {
+        a.then(lock, (), |_lock, (), n| Ok(n + 1.0))
+    }
+
+    #[jsg_method]
+    fn call_async<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        a: v8::Local<'s, v8::Value>,
+    ) -> Result<jsg::Promise<'s, ()>, jsg::Error> {
+        let a: v8::Local<'s, v8::Function> = a
+            .try_into()
+            .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
+        a.call(lock, None, &[])?;
+        jsg::Promise::resolved(lock, ())
     }
 }
 

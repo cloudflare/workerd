@@ -20,7 +20,8 @@ Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitut
 | `internal/workers-api/`                       | Python SDK package (frozen)                                            |
 | `scripts/`                                    | Standalone dev/CI scripts (not used by bazel): `make_snapshots.py`, `upload_bundles.py`, `create_vendor_zip.py` |
 | `internal/metadata.ts`                        | Config flags: `IS_WORKERD`, `MAIN_MODULE_NAME`, etc.                                                  |
-| `pyodide_extra.capnp`                         | Cap'n Proto schema for Pyodide bundle metadata                                                        |
+| `pyodide_extra.capnp` + `pyodide_extra.bzl`   | Table of Python releases compiled into the binary, generated from `BUNDLE_VERSION_INFO` in `build/python_metadata.bzl` |
+| `pyodide_static.bzl`                          | Builds `pyodide_static`: `python-entrypoint-helper.ts`, `internal/`, `types/`                         |
 
 ## Python SDK
 
@@ -80,10 +81,10 @@ so a change to such a module doesn't reach Workers that restore an older snapsho
 
 ## TESTING
 
-Tests live in `src/workerd/server/tests/python/`. `py_wd_test.bzl` macro: expands `%PYTHON_FEATURE_FLAGS` template, handles multiple Pyodide versions, snapshot generation/loading, per-version compat flag isolation. Tests are `size="enormous"` by default. Each test generates variants per supported Pyodide version (`0.26.0a2`, newer).
+Tests live in `src/pyodide/tests/`. `py_wd_test.bzl` macro: expands `%PYTHON_FEATURE_FLAGS` template, handles multiple Pyodide versions, snapshot generation/loading, per-version compat flag isolation. Tests are `size="enormous"` by default. Each test generates variants per supported Pyodide version (`0.26.0a2`, newer).
 
 When Python changes require new snapshots, run tests locally without creating or loading snapshots:
 
 ```sh
-bazel test --config=regenerate-snapshots //src/workerd/server/tests/python:<target>
+bazel test --config=regenerate-snapshots //src/pyodide/tests:<target>
 ```

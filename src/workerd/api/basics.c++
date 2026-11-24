@@ -35,12 +35,12 @@ constexpr bool isSpecialEventType(kj::StringPtr type) {
 }  // namespace
 
 const jsg::HashableV8Ref<v8::Object>& EventTarget::EventHandlerHashCallbacks::keyForRow(
-    const kj::Own<EventHandler>& row) const {
+    const jsg::TracedOwn<EventHandler>& row) const {
   return row->identity;
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
+    const jsg::TracedOwn<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
   return a->identity == b;
 }
 
@@ -99,6 +99,13 @@ size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
 
 kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
+}
+
+bool EventTarget::hasEventListeners() const {
+  for (auto& entry: typeMap) {
+    if (getHandlerCount(entry.key) > 0) return true;
+  }
+  return false;
 }
 
 void EventTarget::forEachSnapshotListener(
@@ -688,6 +695,17 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     : flag(flag),
       maybeAbortException(kj::mv(exception)),
       reason(kj::mv(maybeReason)) {}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
+  if (aborting || maybeAbortException != kj::none || reason != kj::none || hasEventListeners() ||
+      !nativeRegistrations.empty() || !abortAlgorithms.empty() || dependent ||
+      !dependentSignals.empty() || !sourceSignals.empty() || !rpcRegistrations.empty() ||
+      rpcReceiverContext != kj::none || rpcSubscriptionRequested || rpcAbortPromise != kj::none ||
+      pendingReason != kj::none) {
+    return kj::none;
+  }
+  return ownAsWrappable(kj::refcounted<AbortSignal>(kj::none, kj::none, flag));
+}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return getEventHandlerAttribute(js, kAbortEvent);
@@ -1293,7 +1311,14 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   if (isCanceled) {
     // The signal is already aborted and cannot be triggered again. We don't need to set up RPC.
-    return abort(js, reason);
+    // Its exception is derived from the reason, which can run JavaScript, so that waits until the
+    // value has been read; until then it is the exception of a signal aborted without a reason.
+    auto signal = js.alloc<AbortSignal>(abortException(js, kj::none), reason.addRef(js));
+    deserializer.afterRead(
+        [signal = signal.addRef(), reason = reason.addRef(js)](jsg::Lock& js) mutable {
+      signal->maybeAbortException = abortException(js, reason.getHandle(js));
+    });
+    return signal;
   }
 
   if (flag == Flag::NEVER_ABORTS) {
@@ -1439,9 +1464,7 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& entry: typeMap) {
-    for (auto& handler: entry.value.handlers) {
-      visitor.visit(*handler);
-    }
+    visitor.visitAll(entry.value.handlers);
   }
   for (auto& entry: eventHandlerAttributes) {
     KJ_IF_SOME(handler, entry.value.handler) {

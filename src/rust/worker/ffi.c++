@@ -10,6 +10,8 @@
 
 #include <kj-rs/date.h>
 
+#include <capnp/serialize.h>
+
 // Out-of-line reverse-direction shims. These return the cxx shared result structs, which are only
 // complete in the generated bridge header (ffi.rs.h) -- and that header includes ffi.h, so ffi.h
 // itself cannot include it. See kj/ffi.c++ for the same pattern with HttpConnectSettings.
@@ -49,6 +51,52 @@ kj::Promise<CustomEventResult> worker_custom_event(
   };
 }
 
+namespace {
+
+kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> words) {
+  return kj::arrayPtr(reinterpret_cast<const capnp::word*>(words.begin()), words.size());
+}
+
+kj::ArrayPtr<const uint64_t> asU64s(kj::ArrayPtr<const capnp::word> words) {
+  return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size());
+}
+
+// A report holds every sample of every case, so it can exceed the default traversal limit.
+constexpr capnp::ReaderOptions BENCH_GROUP_READER_OPTIONS = {.traversalLimitInWords = kj::maxValue};
+
+}  // namespace
+
+kj::Promise<::rust::Vec<uint64_t>> worker_bench(
+    WorkerInterface& worker, ::rust::Slice<const uint64_t> params) {
+  capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<kj_rs::Rust>(params)));
+  capnp::MallocMessageBuilder groupMessage;
+  co_await worker.bench(paramsMessage.getRoot<bench::BenchParams>(),
+      groupMessage.initRoot<bench::BenchReport::Group>());
+  auto words = capnp::messageToFlatArray(groupMessage);
+  co_return asU64s(words).as<kj_rs::RustCopy>();
+}
+
+kj::Promise<void> RustWorkerInterface::bench(
+    bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) {
+  capnp::MallocMessageBuilder paramsMessage;
+  paramsMessage.setRoot(params);
+  auto paramsWords = capnp::messageToFlatArray(paramsMessage);
+  auto groupWords = co_await impl->bench(asU64s(paramsWords).as<kj_rs::Rust>());
+  capnp::FlatArrayMessageReader groupMessage(
+      asWords(kj::from<kj_rs::Rust>(groupWords)), BENCH_GROUP_READER_OPTIONS);
+  // The group's name and startup flag belong to the caller.
+  auto group = groupMessage.getRoot<bench::BenchReport::Group>();
+  if (group.hasError()) {
+    report.setError(group.getError());
+  }
+  if (group.hasOverhead()) {
+    report.setOverhead(group.getOverhead());
+  }
+  if (group.hasCases()) {
+    report.setCases(group.getCases());
+  }
+}
+
 kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> event) {
   // `event` is a coroutine parameter, so it stays alive until the returned promise settles.
   auto result = co_await event->notSupported();
@@ -57,10 +105,8 @@ kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> e
   };
 }
 
-void custom_event_failed(kj::Own<CustomEvent> event, ::rust::Box<Error> error) {
-  // error->raise() throws through the bridge's KjError -> kj::Exception conversion, so the
-  // exception passed to the event keeps the error's type, description, location and details.
-  event->failed(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { error->raise(); })));
+void custom_event_failed(kj::Own<CustomEvent> event, kj::Exception exception) {
+  event->failed(exception);
 }
 
 kj::Own<WorkerInterface> wrapper_into_kj(::rust::Box<Wrapper> wrapper) {

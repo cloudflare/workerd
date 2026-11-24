@@ -113,8 +113,7 @@ jsg::JsValue UrlBootstrap::parse(
   auto inputStr = toUsvString(js, input, "input"_kj);
   auto baseStr = toOptionalUsvString(js, base, "base"_kj);
   auto components = toComponentsArray(out);
-  auto maybeUrl = jsg::Url::tryParse(
-      inputStr.asPtr(), baseStr.map([](jsg::USVString& b) { return b.asPtr(); }));
+  auto maybeUrl = jsg::Url::tryParse(inputStr.asPtr(), baseStr);
   KJ_IF_SOME(url, maybeUrl) {
     writeComponents(url, components);
     return js.str(url.getHref());
@@ -125,8 +124,7 @@ jsg::JsValue UrlBootstrap::parse(
 bool UrlBootstrap::canParse(jsg::Lock& js, jsg::JsValue input, jsg::JsValue base) {
   auto inputStr = toUsvString(js, input, "input"_kj);
   auto baseStr = toOptionalUsvString(js, base, "base"_kj);
-  return jsg::Url::canParse(
-      inputStr.asPtr(), baseStr.map([](jsg::USVString& b) { return b.asPtr(); }));
+  return jsg::Url::canParse(inputStr.asPtr(), baseStr);
 }
 
 jsg::JsValue UrlBootstrap::update(jsg::Lock& js,

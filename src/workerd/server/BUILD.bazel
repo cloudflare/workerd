@@ -89,6 +89,9 @@ wd_rust_crate(
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
     test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
+    # Its tests run one at a time (RUST_TEST_THREADS=1); on Windows CI they took over the 15 s of
+    # "medium".
+    test_size = "large",
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
@@ -214,6 +217,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         "//src/rust/jsg:ffi",
+        "//src/rust/jsg-cpp:ffi",
         "//src/workerd/api:analytics-engine",
         "//src/workerd/api:capnp",
         "//src/workerd/api:kv",
@@ -221,6 +225,9 @@ wd_cc_library(
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
+        "//src/workerd/api:wrapped-binding",
+        "//src/workerd/api/bench-api",
+        "//src/workerd/api/bench-api:ffi.rs@cxx",
         "//src/workerd/api/memory-cache-api",
         "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:promise-wrapper",
@@ -254,8 +261,12 @@ wd_cc_library(
         "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
         "//src/workerd/server/cron:cron-js",
+        "//src/workerd/server/d1:d1-js",
         "//src/workerd/server/kv:kv-js",
         "//src/workerd/server/queues:queues-js",
+        "//src/workerd/server/r2:r2-js",
+        "//src/workerd/server/ratelimit:ratelimit-js",
+        "//src/workerd/server/secrets-store:secrets-store-js",
         "//src/workerd/server/workflows:workflows-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
@@ -309,6 +320,9 @@ wd_cc_library(
     name = "container-client",
     srcs = ["container-client.c++"],
     hdrs = ["container-client.h"],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":channel-token",
@@ -399,6 +413,7 @@ kj_test(
         "//conditions:default": [],
     }),
     deps = [
+        ":workerd_capnp",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/workerd/server/factory:worker-factory",
         "//src/workerd/server/server:workerd-server",

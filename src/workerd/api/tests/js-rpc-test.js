@@ -320,6 +320,17 @@ export class MyService extends WorkerEntrypoint {
   getRpcPromise(callback) {
     return callback();
   }
+  async callTwice(callback) {
+    await callback();
+    // Bounded so that a second call that can't enter the caller's critical section fails the
+    // test instead of hanging it.
+    return await Promise.race([
+      callback(),
+      scheduler.wait(1000).then(() => {
+        throw new Error('second callback call did not complete');
+      }),
+    ]);
+  }
   getNestedRpcPromise(callback) {
     return { value: callback() };
   }
@@ -642,6 +653,14 @@ export class MyActor extends DurableObject {
         return 12345;
       };
       return await this.env.MyService.getRpcPromise(func);
+    });
+  }
+
+  async doCallbackTwiceBlockingConcurrency() {
+    // Like doCallbackBlockingConcurrency(), but the callback is invoked more than once, and every
+    // call must run in the critical section.
+    return this.ctx.blockConcurrencyWhile(async () => {
+      return await this.env.MyService.callTwice(() => 12345);
     });
   }
 
@@ -1019,6 +1038,7 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(8), 15);
 
     assert.strictEqual(await stub.doCallbackBlockingConcurrency(), 12345);
+    assert.strictEqual(await stub.doCallbackTwiceBlockingConcurrency(), 12345);
   },
 };
 
@@ -1936,6 +1956,38 @@ export let serializeHttpTypes = {
 
       assert.strictEqual(await req.text(), 'Response body!');
     }
+  },
+};
+
+// A received Request or Response clones its `cf` with JSON.stringify(), which calls a `toJSON()`
+// that `cf` inherits. It does that once the whole value has been read: while V8 reads a value, no
+// JavaScript can run.
+export let serializeRequestAndResponseCfWithToJson = {
+  async test(controller, env, ctx) {
+    // Made first, so that only the readers call toJSON().
+    const request = new Request('http://foo', { cf: { abc: 123 } });
+    const response = new Response('body', { cf: { foo: 'bar' } });
+    let calls = 0;
+    Object.defineProperty(Object.prototype, 'toJSON', {
+      value() {
+        calls++;
+        return this;
+      },
+      writable: true,
+      configurable: true,
+    });
+    let req;
+    let res;
+    try {
+      req = await env.MyService.roundTrip(request);
+      res = await env.MyService.roundTrip(response);
+    } finally {
+      delete Object.prototype.toJSON;
+    }
+    assert.deepEqual(req.cf, { abc: 123 });
+    assert.deepEqual(res.cf, { foo: 'bar' });
+    assert.strictEqual(await res.text(), 'body');
+    assert.ok(calls > 0);
   },
 };
 

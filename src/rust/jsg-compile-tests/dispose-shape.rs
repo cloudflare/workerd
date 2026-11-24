@@ -74,7 +74,7 @@ impl Mutable {
     //~^ ERROR a resource method takes `&self`
 }
 
-// A disposer's callback trusts the type's `v8::Signature`, so a disposer is not also a member
+// A disposer's callback expects the type's `v8::Signature`, so a disposer is not also a member
 // registered without it, whichever attribute comes first.
 #[jsg_resource]
 pub struct InspectFirst;

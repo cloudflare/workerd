@@ -93,14 +93,6 @@ namespace workerd::util {
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
   V(TS_STDIO)                                                                                      \
-  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
-     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
-     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
-     cloudflare-internal:messagechannel. */                                                        \
-  V(TS_MESSAGE_CHANNEL)                                                                            \
-  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
-     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
-  V(TS_EVENT_SOURCE)                                                                               \
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
@@ -108,10 +100,24 @@ namespace workerd::util {
      (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
      api/urlpattern-standard.h. */                                                                 \
   V(TS_URL_PATTERN)                                                                                \
+  /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
+     be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
+     covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
+     settles can be collected, and the Cursor held by a SQL cursor's iterators. When disabled,     \
+     they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
+     down, and jsg::TracedOwn behaves like kj::Own. */                                             \
+  V(GC_COMPLETE_TRACING)                                                                           \
   /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
      class in jsg/dom-exception.h. */                                                              \
   V(TS_DOM_EXCEPTION)                                                                              \
+  /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
+     bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
+     serializer, rather than the C++ method in api/global-scope.h. */                              \
+  V(TS_STRUCTURED_CLONE)                                                                           \
+  /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
+     performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
+  V(TS_PERFORMANCE_NOW)                                                                            \
   /* Blob and File are the TypeScript implementations from the per-isolate bootstrap               \
      (src/per_isolate/blob/) rather than the C++ classes in api/blob.h. C++ takes and makes        \
      them through api/blob-bridge.h, and both serialize alike. */                                  \
@@ -128,7 +134,21 @@ namespace workerd::util {
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
-  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
+  /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
+     so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
+     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
+     group's memory pools. */                                                                      \
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* An actor's outgoing calls use the I/O channels of its newest request that is still running,   \
+     rather than its newest request, which may have returned and be waiting only for background    \
+     work. See IoContext::getIncomingRequestForIoChannels(). */                                    \
+  V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
+  /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
+     instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
+  V(RUST_FAILURE_WORKER_INTERFACE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

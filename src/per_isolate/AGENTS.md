@@ -33,6 +33,23 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_BLOB` autogate, `main.ts` installs the TypeScript `Blob`
   and `File` (`blob/`), which replace the C++ ones (`api/blob.h`); see
   `blob/AGENTS.md`.
+- Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
+  TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
+  the native `utils.structuredClone()`), which replaces the C++ method; its
+  parity suite and divergence ledger are in `src/tests/structured-clone/`, and
+  its types in `types/defines/structured-clone.d.ts`.
+- `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
+  under `expose_global_message_channel`, as lazy data properties
+  (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads
+  on first use, through them or through `cloudflare-internal:messagechannel`
+  (`requireBootstrapExport()` in `per-isolate-bootstrap.h`), which
+  `node:worker_threads` uses. Use the same for any other global few Workers
+  need. A module loaded on first use runs after user code, so its top level
+  must not read what user code can change, such as a constructor's
+  `prototype`, which `extends` reads; see `EventTargetHeritage` in
+  `messagechannel/messagechannel.ts`.
+- Under the `TS_PERFORMANCE_NOW` autogate, `main.ts` installs the
+  TypeScript `performance.now()`/`timeOrigin`; see `performance/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Shared type checks (`isObject()`) come from `type-checks`, a leaf.

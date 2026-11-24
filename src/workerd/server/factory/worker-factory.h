@@ -16,22 +16,17 @@
 // fallible in the bridge, where a C++ exception becomes a `Result` error on the Rust side; the rest
 // do not throw.
 
-#include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/io/otlp-span-submitter.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
-#include <workerd/rust/worker/bridge.h>
+#include <workerd/rust/worker/ffi.rs.h>
 #include <workerd/server/channel-token.h>
-#include <workerd/server/workerd.capnp.h>
 
-#include <kj-rs/kj-rs.h>
-
-#include <capnp/compat/byte-stream.h>
-#include <capnp/compat/http-over-capnp.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
@@ -57,7 +52,7 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
-struct AbortReason;
+struct PeerSession;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -97,10 +92,11 @@ struct WorkerSpec;
 struct WorkerInfo;
 struct ContainerRef;
 struct FacetStartInfo;
+struct HttpAnswer;
+struct WorkerStartupTiming;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
-enum class AlarmElsewhere : uint8_t;
 
 // How the config message is read: configs can legitimately be very large and are not malicious.
 constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {.traversalLimitInWords = kj::maxValue};
@@ -191,14 +187,34 @@ kj::Promise<void> factory_settle_tasks(const WorkerFactory& factory);
 uint64_t factory_timer_now(const WorkerFactory& factory);
 kj::Promise<void> factory_sleep(const WorkerFactory& factory, uint64_t nanos);
 
+// The server's owner of the shared span exporter. Destroying this handle unlinks the collector
+// even when spans still hold exporter references.
+class OtlpExporter final {
+ public:
+  class Impl;
+  explicit OtlpExporter(kj::Rc<Impl> impl);
+  ~OtlpExporter() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(OtlpExporter);
+
+  Impl& getImpl() const;
+
+  kj::Rc<OtlpSpanExporter> addRef() const;
+
+ private:
+  mutable kj::Rc<Impl> impl;
+};
+
+kj::Own<OtlpExporter> factory_new_otlp_exporter(
+    const WorkerFactory& factory, ::rust::Box<SubrequestChannel> collector);
+kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
+void otlp_exporter_unlink(const OtlpExporter& exporter);
+
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
-kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
-    const WorkerSpec& spec,
-    uint32_t configService,
-    ::rust::Slice<const uint64_t> params);
+kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 
 // =======================================================================================
 
@@ -216,8 +232,12 @@ class CompiledWorker final {
   mutable kj::Own<Impl> impl;
 };
 
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& factory, uint32_t configService);
 WorkerInfo worker_info(const CompiledWorker& worker);
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals);
+void worker_set_otlp_exporter(
+    const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter);
 void worker_unlink(const CompiledWorker& worker);
 kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     kj::Maybe<::rust::Str> entrypoint,
@@ -273,7 +293,8 @@ class ActorHandle final {
 
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
-void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+void actor_abort(const ActorHandle& actor, kj::Exception reason);
+void actor_stop(const ActorHandle& actor);
 bool actor_has_on_hibernate_handler(const ActorHandle& actor);
 bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
@@ -309,7 +330,6 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Box<ActorNamespaceHandle> actors);
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
-kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.
@@ -352,7 +372,7 @@ void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     bool persistent);
 
 void exception_throw(const kj::Exception& exception);
-::rust::String exception_text(const AbortReason& error);
+::rust::String exception_text(kj::Exception error);
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json);
 kj::Own<Frankenvalue> frankenvalue_clone(const Frankenvalue& value);
@@ -406,6 +426,10 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> target);
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Promise<void> factory_accept_cluster_peer(const WorkerFactory& factory,
+    kj::Own<kj::AsyncIoStream> stream,
+    ::rust::Box<PeerSession> session,
+    ::rust::Box<ResultTask> closing);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {
@@ -426,12 +450,26 @@ void actor_close_storage(const ActorHandle& actor);
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 kj::Own<RpcClient> rpc_client_debug_actor(
     const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+struct HttpCall {
+  kj::Own<kj::HttpClient> client;
+  kj::HttpClient::Request request;
+};
+kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
+    kj::HttpMethod method,
+    ::rust::Str url,
+    const kj::HttpHeaders& headers,
+    uint64_t length);
+inline kj::AsyncOutputStream& http_call_body(HttpCall& call) {
+  return *call.request.body;
+}
+kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str header);
 kj::Own<WorkerInterface> worker_interface_watch_moved(
     kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 kj::Own<WorkerInterface> worker_interface_watch_peer(
@@ -454,6 +492,8 @@ kj::Own<kj::HttpHeaders> edit_headers(const kj::HttpHeaderTable& table,
 kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Response& inner,
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits);
+kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
+kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(

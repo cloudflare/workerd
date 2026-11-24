@@ -525,9 +525,14 @@ fn expand_cxx_function_decl(efn: &ExternFn, types: &Types) -> TokenStream {
         }
     });
     let all_args = receiver.chain(args);
-    // C++ functions always return a Result: an exception must never escape through the
-    // extern "C" boundary, so the C++ shim catches it and reports it here instead.
-    let ret = quote!(-> ::cxx::private::Result);
+    // A C++ function returns a Result: an exception must never escape through the extern "C"
+    // boundary, so the C++ shim catches it and reports it here instead. A #[nothrow] function's
+    // shim catches nothing; it is declared extern "C-unwind" instead.
+    let ret = if efn.nothrow {
+        quote!()
+    } else {
+        quote!(-> ::cxx::private::Result)
+    };
     let outparam = if indirect_return(efn)
         && let Some(ret) = &efn.ret
     {
@@ -639,6 +644,9 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
                 true => quote_spanned!(span=> ::cxx::private::RustSlice::from_mut(#var)),
             },
             Type::KjDate(_) => quote_spanned!(span=> #var.into()),
+            Type::KjException(_) => {
+                quote_spanned!(span=> ::cxx::private::kj_exception_into_raw(#var))
+            }
             ty if types.needs_indirect_abi(ty) => quote_spanned!(span=> #var.as_mut_ptr()),
             _ => quote!(#var),
         }
@@ -681,6 +689,10 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
             quote_spanned! {span=>
                 #local_name(#(#vars,)* __return.as_mut_ptr()).into_result()?;
             }
+        } else if efn.nothrow {
+            quote_spanned! {span=>
+                #local_name(#(#vars,)* __return.as_mut_ptr());
+            }
         } else {
             // An infallible signature cannot report the exception to its caller, so
             // turn it into a panic rather than letting the process abort.
@@ -692,6 +704,10 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
     } else if efn.throws {
         quote_spanned! {span=>
             #local_name(#(#vars),*).into_result()
+        }
+    } else if efn.nothrow {
+        quote_spanned! {span=>
+            #local_name(#(#vars),*)
         }
     } else {
         quote_spanned! {span=>
@@ -778,6 +794,9 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
                     quote_spanned!(span=> ::kj_rs::new_callbacks_promise_future(&#call))
                 }
                 Type::KjDate(_) => quote_spanned!(span=> #call.into()),
+                Type::KjException(_) => {
+                    quote_spanned!(span=> ::cxx::private::kj_exception_from_raw(#call))
+                }
                 _ => call,
             },
         };
@@ -796,8 +815,16 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
         _ => quote!(),
     };
     let arg_list = quote_spanned!(efn.sig.paren_token.span=> (#(#all_args,)*));
+    // An exception that escapes a #[nothrow] function unwinds into Rust, which aborts the
+    // process at the next frame that can't unwind or at `catch_unwind`, as Rust can't catch a
+    // foreign exception.
+    let abi = if efn.nothrow {
+        quote!("C-unwind")
+    } else {
+        quote!("C")
+    };
     let fn_body = quote_spanned!(span=> {
-        #UnsafeExtern extern "C" {
+        #UnsafeExtern extern #abi {
             #decl
         }
         #trampolines
@@ -1112,6 +1139,10 @@ fn expand_rust_function_shim_impl(
                 }
             }
             Type::KjDate(_) => quote!(#var.into()),
+            Type::KjException(_) => {
+                requires_unsafe = true;
+                quote_spanned!(span=> ::cxx::private::kj_exception_from_raw(#var))
+            }
             ty if types.needs_indirect_abi(ty) => {
                 requires_unsafe = true;
                 quote_spanned!(span=> ::cxx::core::ptr::read(#var))
@@ -1156,6 +1187,7 @@ fn expand_rust_function_shim_impl(
             }
         }
         Type::UniquePtr(_) => Some(quote_spanned!(span=> ::cxx::UniquePtr::into_raw)),
+        Type::KjException(_) => Some(quote_spanned!(span=> ::cxx::private::kj_exception_into_raw)),
         Type::Ref(ty) => match &ty.inner {
             Type::Ident(ident) if ident.rust == RustString => match ty.mutable {
                 false => Some(quote_spanned!(span=> ::cxx::private::RustString::from_ref)),
@@ -2169,6 +2201,9 @@ fn expand_extern_type(ty: &Type, types: &Types, style: ExternTypeStyle) -> Token
         }
         Type::KjDate(span) => {
             quote_spanned!(*span=> i64)
+        }
+        Type::KjException(span) => {
+            quote_spanned!(*span=> *mut ::cxx::private::KjExceptionRepr)
         }
         _ => quote!(#ty),
     }

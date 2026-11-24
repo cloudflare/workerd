@@ -215,7 +215,7 @@ kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
       }
       KJ_UNREACHABLE;
     });
-    auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
+    kj::Maybe<kj::StringPtr> actorIdPtr = actorId;
     AsyncTraceSinks sinks;
     isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
     if (isAsyncTracePerfettoEnabled()) {
@@ -302,8 +302,10 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
-    : context(kj::mv(contextParam)),
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::String> clientAddress)
+    : clientAddress(kj::mv(clientAddress)),
+      context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
@@ -320,9 +322,7 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   }
 
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource());
+      maybeTriggerInvocationSpan, context->getEntropySource());
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
@@ -696,9 +696,8 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
       auto userSpan = request.getRootUserTraceSpan();
       auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
 
-      auto errorInfo =
-          tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
-              error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+      auto errorInfo = tracing::ErrorInfo::fromErrorProperties(
+          kj::str(error.name), kj::str(error.message), error.stack);
       t.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
           kj::mv(errorInfo.stack));
     }
@@ -775,6 +774,16 @@ void IoContext::abort(kj::Exception&& e) {
 kj::Exception IoContext::abortWithoutReasonException() {
   return JSG_KJ_EXCEPTION(
       FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
+}
+
+kj::Exception IoContext::neverSettledException() {
+  return JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete.");
+}
+
+kj::Exception IoContext::memoryLimitException() {
+  auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, MEMORY_LIMIT_MESSAGE);
+  e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return e;
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -1633,6 +1642,19 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   return js.v8Ref(contextHandle);
 }
 
+IoContext::IncomingRequest& IoContext::getIncomingRequestForIoChannels() {
+  auto& current = getCurrentIncomingRequest();
+  if (!util::Autogate::isEnabled(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)) {
+    return current;
+  }
+  for (auto& request: incomingRequests) {
+    if (!request.waitedForWaitUntil) {
+      return request;
+    }
+  }
+  return current;
+}
+
 SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_SOME(lock, currentLock) {
@@ -1699,6 +1721,11 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
+}
+
+TraceContext IoContext::makeTraceSpanWithoutUserSpan(kj::ConstString operationName) {
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChildWithoutUserSpan(kj::mv(operationName), tryGetAsyncTracker());
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

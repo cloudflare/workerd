@@ -11,6 +11,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/performance-bootstrap.h>
 #include <workerd/api/request-io.h>
 #include <workerd/api/url-bootstrap.h>
 #include <workerd/api/urlpattern-bootstrap.h>
@@ -536,6 +537,47 @@ static void QueueReaction(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The getter of a property defined by DefineLazyDataProperty(): requires the bootstrap module
+// named by the callback's data and returns its export of the property's name. V8 then replaces
+// the property with a data property holding the result, so a read that returns runs this once.
+static void LazyDataPropertyGetter(
+    v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto specifier = jsg::JsString(info.DataV2().As<v8::Value>().As<v8::String>()).toString(js);
+    auto exports =
+        KJ_ASSERT_NONNULL(requireBootstrapExport(js, specifier).tryCast<jsg::JsObject>());
+    return exports.get(js, jsg::JsValue(name));
+  });
+}
+
+// Defines the property `key` (a string or symbol) of `target` as a writable, configurable data
+// property, enumerable if `enumerable` is true, whose value is the `key` export of the bootstrap
+// module `specifier`, which is required when the property is first read; reading its descriptor
+// counts. Until then nothing is loaded, and nothing but the timing of the load distinguishes it
+// from an ordinary data property: it is V8's lazy data property, as JSG_LAZY_INSTANCE_PROPERTY
+// defines. A read that throws leaves the property lazy, so the next read tries again.
+static void DefineLazyDataProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto target = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>(), TypeError,
+        "defineLazyDataProperty() expects an object");
+    JSG_REQUIRE(args[1]->IsName(), TypeError, "defineLazyDataProperty() expects a property key");
+    JSG_REQUIRE(
+        args[2]->IsString(), TypeError, "defineLazyDataProperty() expects a module specifier");
+    auto attributes = args[3]->IsTrue() ? v8::PropertyAttribute::None : v8::DontEnum;
+    // A property still lazy when a zygote takes its snapshot keeps this getter, and its data, in
+    // the heap. V8 serializes an accessor's data into the isolate snapshot, which is shared by
+    // every context restored from it and so cannot hold a function of this one: the data is the
+    // specifier, and the getter requires the module in the context it is read in.
+    jsg::isolateRegisterExternalReference(
+        js.v8Isolate, reinterpret_cast<intptr_t>(&LazyDataPropertyGetter));
+    KJ_ASSERT(jsg::check(v8::Local<v8::Object>(target)->SetLazyDataProperty(
+        js.v8Context(), args[1].As<v8::Name>(), &LazyDataPropertyGetter, args[2], attributes)));
+    return js.v8Undefined();
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -578,19 +620,94 @@ static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The structured clone of a value, backing the TypeScript structuredClone(). The
+// caller has already converted the options, so the second argument is undefined
+// or a dense array it built itself, whose elements are objects to transfer;
+// reading them cannot run user code. Serialization can run user code (getters)
+// and throws a DataCloneError for an uncloneable value. Plain method: it
+// allocates and can throw.
+static void StructuredClone(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    kj::Maybe<kj::Array<jsg::JsValue>> transfer;
+    KJ_IF_SOME(list, jsg::JsValue(args[1]).tryCast<jsg::JsArray>()) {
+      auto builder = kj::heapArrayBuilder<jsg::JsValue>(list.size());
+      for (auto i: kj::zeroTo(list.size())) {
+        builder.add(list.get(js, i));
+      }
+      transfer = builder.finish();
+    }
+    return jsg::JsValue(args[0]).structuredClone(js, kj::mv(transfer));
+  });
+}
+
+// performance.now() on the receiver, and the receiver check alone for the
+// timeOrigin getter. V8 checks the receiver against a signature for
+// Performance's template before either runs (see "THE C++ CONTRACT" in
+// src/per_isolate/performance/AGENTS.md), so neither checks it again.
+//
+// PerformanceNow's function data is Performance's wrappable tag range, packed
+// by packTagRange(), so that unwrapping the receiver costs no type lookup.
+static v8::Local<v8::Value> packTagRange(jsg::Lock& js, v8::CppHeapPointerTagRange range) {
+  static_assert(static_cast<uint32_t>(v8::CppHeapPointerTag::kLastTag) <= 0xffff);
+  auto first = static_cast<uint32_t>(range.first);
+  auto last = static_cast<uint32_t>(range.last);
+  return v8::Integer::NewFromUnsigned(js.v8Isolate, first << 16 | last);
+}
+
+static v8::CppHeapPointerTagRange unpackTagRange(v8::Local<v8::Data> data) {
+  uint32_t packed = data.As<v8::Value>().As<v8::Uint32>()->Value();
+  return v8::CppHeapPointerTagRange(static_cast<v8::CppHeapPointerTag>(packed >> 16),
+      static_cast<v8::CppHeapPointerTag>(packed & 0xffff));
+}
+
+static void PerformanceNow(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.num(api::performanceNowForBootstrap(js, args.This(), unpackTagRange(args.DataV2())));
+  });
+}
+
+static double PerformanceNowFastApi(
+    v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {
+  auto isolate = options.isolate;
+  v8::HandleScope handleScope(isolate);
+  auto& js = jsg::Lock::from(isolate);
+  auto tagRange = unpackTagRange(options.DataV2());
+  return jsg::liftKj<double>(
+      isolate, [&] { return api::performanceNowForBootstrap(js, receiver, tagRange); });
+}
+
+static void RequirePerformance(const v8::FunctionCallbackInfo<v8::Value>&) {}
+
+static void RequirePerformanceFastApi(v8::Local<v8::Object>, v8::FastApiCallbackOptions&) {}
+
+static const v8::CFunction fast_performance_now_ = v8::CFunction::Make(PerformanceNowFastApi);
+static const v8::CFunction fast_require_performance_ =
+    v8::CFunction::Make(RequirePerformanceFastApi);
+
+static void GetPerformancePrototype(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return api::getPerformancePrototypeForBootstrap(js);
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
 v8::Local<v8::Value> makeMethod(jsg::Lock& js,
     v8::FunctionCallback callback,
     v8::SideEffectType sideEffect,
-    const v8::CFunction* c_function = nullptr) {
+    const v8::CFunction* c_function = nullptr,
+    v8::Local<v8::Signature> signature = {},
+    v8::Local<v8::Value> data = {}) {
   jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
   if (c_function != nullptr) {
     jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(c_function));
   }
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow, sideEffect, c_function)
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, data, signature, 0,
+      v8::ConstructorBehavior::kThrow, sideEffect, c_function)
                         ->GetFunction(js.v8Context()));
 }
 
@@ -602,6 +719,17 @@ v8::Local<v8::Value> getFastMethodNoSideEffect(
 v8::Local<v8::Value> getFastMethod(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
   return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function);
+}
+
+// A fast method that V8 calls only with a `this` built from `receiverTemplate`
+// (or a subclass of it), throwing "Illegal invocation" for any other receiver.
+v8::Local<v8::Value> getFastReceiverMethod(jsg::Lock& js,
+    v8::FunctionCallback callback,
+    const v8::CFunction* c_function,
+    v8::Local<v8::FunctionTemplate> receiverTemplate,
+    v8::Local<v8::Value> data = {}) {
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function,
+      v8::Signature::New(js.v8Isolate, receiverTemplate), data);
 }
 
 v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
@@ -639,6 +767,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createTrustedEvent",
     "cloneMessageData",
     "queueReaction",
+    "defineLazyDataProperty",
     "createTrustedOpenEvent",
     "createTrustedErrorEvent",
     "createRequestIo",
@@ -663,8 +792,28 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "isResizableBufferSource",
     "encodeWtf8",
     "DOMExceptionBase",
+    "structuredClone",
+    "performanceNow",
+    "requirePerformance",
+    "getPerformancePrototype",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+
+  // The Performance natives exist only for the TypeScript performance.now(),
+  // and building them requires the isolate's TypeWrapper to know Performance.
+  // Without the autogate their properties are left off (empty values).
+  v8::MaybeLocal<v8::Value> performanceNow;
+  v8::MaybeLocal<v8::Value> requirePerformance;
+  v8::MaybeLocal<v8::Value> getPerformancePrototype;
+  if (util::Autogate::isEnabled(util::AutogateKey::TS_PERFORMANCE_NOW)) {
+    auto performanceTemplate = api::getPerformanceTemplateForBootstrap(js);
+    performanceNow = getFastReceiverMethod(js, PerformanceNow, &fast_performance_now_,
+        performanceTemplate, packTagRange(js, api::getPerformanceTagRangeForBootstrap(js)));
+    requirePerformance = getFastReceiverMethod(
+        js, RequirePerformance, &fast_require_performance_, performanceTemplate);
+    getPerformancePrototype = getMethod(js, GetPerformancePrototype);
+  }
+
   v8::MaybeLocal<v8::Value> values[] = {
 #define V(Name) getFastMethodNoSideEffect(js, Is##Name, &fast_is_##Name##_),
     VALUE_METHOD_MAP(V)
@@ -687,6 +836,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
     getMethod(js, QueueReaction),
+    getMethod(js, DefineLazyDataProperty),
     getMethod(js, CreateTrustedOpenEvent),
     getMethod(js, CreateTrustedErrorEvent),
     getMethod(js, CreateRequestIo),
@@ -711,6 +861,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, IsResizableBufferSource),
     getMethod(js, EncodeWtf8),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
+    getMethod(js, StructuredClone),
+    performanceNow,
+    requirePerformance,
+    getPerformancePrototype,
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -1216,6 +1370,14 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
 
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
   return getBootstrapState(js).tryGetLoadedExports(js, specifier);
+}
+
+jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
+  auto& state = getBootstrapState(js);
+  KJ_IF_SOME(exports, state.tryGetLoadedExports(js, specifier)) {
+    return exports;
+  }
+  return state.requireFn.getHandle(js).call(js, js.undefined(), js.strIntern(specifier));
 }
 
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(

@@ -88,6 +88,8 @@ The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
   `FastApiNoScopeMethod` (fast-api.h) — its `data` pointer dies at the next GC, and unwrapping
   any other argument can trigger one (#4625). `FastApiArgType` enforces this; don't bypass it
 - **NEVER** unwrap `Ref<Object>` — use `V8Ref<v8::Object>` instead
+- **NEVER** use `JSG_MEMORY_INFO` in a `jsg::Object` subclass (a `static_assert` rejects it);
+  report a resource's memory from `visitForMemoryInfo()`, which `JSG_RESOURCE_TYPE` calls
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs
 - Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`. The Rust `Realm` sets `IsolateBase::setDeferredActionHook()`, which `applyDeferredActions()` calls whenever an `IsolateBase::Lock` is taken, to release the handles of Rust `Global`s dropped without the lock, and, when it is dropped, `setDisposeHook()`, which `~IsolateBase()` calls after `Dispose()` to free the handle slots of Rust `Global`s dropped after the Realm, which V8 may write into until then
@@ -179,6 +181,14 @@ These rules MUST be followed when writing or modifying JSG code:
     to run JavaScript. Mark a `jsg::Lock&`-taking primitive that never runs JavaScript with
     `JSG_NO_JS`, and a function that runs JavaScript without taking the lock with
     `JSG_MAY_RUN_JS` (both in `util.h`); see `README.md` §Calls That Run JavaScript.
+
+18. **Hold a heap object whose handles are visited in `jsg::TracedOwn<T>`**, not
+    `kj::Own<T>`, and move its elements out of a container one at a time. Moving a
+    `kj::Own` or a whole container leaves the handles traced with nothing visiting
+    them, so the GC can free their targets while they are in use. The
+    `jsg-traced-own` clang-tidy check flags both, including moving or swapping a
+    struct that holds such a container. Objects shared through `kj::Rc` fall under
+    invariant 14.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

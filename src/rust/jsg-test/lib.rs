@@ -4,6 +4,7 @@
 
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
@@ -24,6 +25,7 @@ mod ffi {
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
+        type CompiledWasmModule = jsg::v8::ffi::CompiledWasmModule;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -56,6 +58,15 @@ mod ffi {
             flags: &[u8],
             fast_api: FastApi,
         ) -> Result<KjOwn<TestHarness>>;
+
+        /// See [`crate::snapshot_round_trip`].
+        pub unsafe fn snapshot_round_trip(
+            flags: &[u8],
+            top_level_data: usize,
+            top_level: unsafe fn(usize, *mut Isolate, Pin<&mut EvalContext>),
+            restored_data: usize,
+            restored: unsafe fn(usize, *mut Isolate, Pin<&mut EvalContext>),
+        ) -> String;
         pub unsafe fn run_in_context(
             self: &TestHarness,
             data: usize, /* callback */
@@ -70,6 +81,11 @@ mod ffi {
             data: usize, /* callback */
             callback: unsafe fn(usize /* callback */),
         );
+
+        /// Takes the realm's cached templates and resets them, as the snapshot pipeline does.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn take_realm_templates(self: &TestHarness);
 
         pub unsafe fn eval(
             self: &EvalContext,
@@ -119,11 +135,29 @@ mod ffi {
             callback: unsafe fn(usize /* callback */),
         );
 
+        /// Calls `callback` with KJ logging at every severity and returns what it logged, each
+        /// as `"<severity>: <text>"`. See `capture_kj_logs` in `ffi.h`.
+        pub unsafe fn capture_kj_logs(
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        ) -> Vec<String>;
+
+        /// Fails with a `FAILED` KJ exception with `description`.
+        pub fn fail_with_kj_exception(description: &str) -> Result<()>;
+
         /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
         /// global and traced handle nodes in use.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
+
+        /// `v8::HandleScope::NumberOfHandles()`: the local handles alive in the isolate's
+        /// handle scopes.
+        pub unsafe fn number_of_handles(isolate: *mut Isolate) -> i32;
+
+        /// The external memory that embedders have attributed to the isolate; see
+        /// `external_memory` in `ffi.h`.
+        pub unsafe fn external_memory(isolate: *mut Isolate) -> i64;
 
         /// Takes a heap snapshot of the isolate, which includes what `jsg::MemoryTracker`
         /// reports, and returns it serialized as JSON.
@@ -199,6 +233,20 @@ mod ffi {
             disallowed: bool,
         ) -> Result<()>;
 
+        /// Allows or disallows dynamic code evaluation, WebAssembly compilation included.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_allow_eval(isolate: *mut Isolate, allow: bool);
+
+        /// Makes a `WebAssembly.Module` from `module` without recompiling it, as C++ code
+        /// that the module is handed to does. Fails if V8 creates none.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn wasm_module_object_from_compiled_module(
+            isolate: *mut Isolate,
+            module: KjOwn<CompiledWasmModule>,
+        ) -> Result<Local>;
+
         /// Gives `object` `name` and `message` as an error implemented in the per-isolate
         /// bootstrap holds them. Fails if it is not an object.
         #[expect(clippy::allow_attributes)]
@@ -262,6 +310,108 @@ mod ffi {
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+/// A canonical `CompatibilityFlags` message that `set_flags` filled in.
+fn flags_words(set_flags: impl FnOnce(compatibility_flags::Builder<'_>)) -> Vec<capnp::Word> {
+    let mut message = capnp::message::Builder::new_default();
+    set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
+    message
+        .into_reader()
+        .canonicalize()
+        .expect("canonicalizing a freshly built message cannot fail")
+}
+
+/// A callback that a harness runs in a context, and the panic it raised.
+struct ContextCall<F> {
+    callback: Option<F>,
+    panic: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl<F> ContextCall<F>
+where
+    F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+{
+    fn new(callback: F) -> Self {
+        Self {
+            callback: Some(callback),
+            panic: None,
+        }
+    }
+
+    /// Runs the callback for C++, which passes the address of a `ContextCall<F>` as `data`.
+    #[expect(clippy::needless_pass_by_value)]
+    fn trampoline(
+        data: usize,
+        isolate: *mut v8::ffi::Isolate,
+        context: Pin<&mut ffi::EvalContext>,
+    ) {
+        // SAFETY: C++ passes back the address of the `ContextCall<F>` it was given.
+        let call = unsafe { &mut *(data as *mut Self) };
+        let Some(callback) = call.callback.take() else {
+            return;
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut eval_context = EvalContext { inner: &context };
+            // SAFETY: C++ calls this with the isolate locked, a context entered and a
+            // HandleScope open for the duration of the call.
+            jsg::callback_scope!(unsafe let lock, isolate);
+            if let Err(e) = callback(lock, &mut eval_context) {
+                panic!("Test failed: {}: {}", e.name, e.message);
+            }
+        }));
+        if let Err(payload) = result {
+            call.panic = Some(payload);
+        }
+    }
+
+    fn resume_panic(&mut self) {
+        if let Some(payload) = self.panic.take() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
+/// Builds a startup snapshot with `top_level`, and runs `restored` in an isolate started from it.
+///
+/// The zygote runs `top_level` in its context, as a Worker's does. The isolate started from the
+/// snapshot runs `restored` in its context, which the snapshot carried over with the objects
+/// `top_level` left reachable. Both isolates have all compatibility flags off. Returns why the
+/// zygote failed, in which case `restored` does not run.
+///
+/// # Errors
+///
+/// The description of the KJ exception that failed the zygote.
+///
+/// # Panics
+///
+/// Panics if either callback panics or fails.
+pub fn snapshot_round_trip<T, R>(top_level: T, restored: R) -> Result<(), String>
+where
+    T: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+    R: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
+{
+    let words = flags_words(|_| {});
+    let mut top_level = ContextCall::new(top_level);
+    let mut restored = ContextCall::new(restored);
+    // SAFETY: both calls are valid for the duration of snapshot_round_trip, and each trampoline
+    // is given the address of its own.
+    let failure = unsafe {
+        ffi::snapshot_round_trip(
+            capnp::Word::words_to_bytes(&words),
+            &raw mut top_level as usize,
+            ContextCall::<T>::trampoline,
+            &raw mut restored as usize,
+            ContextCall::<R>::trampoline,
+        )
+    };
+    top_level.resume_panic();
+    restored.resume_panic();
+    if failure.is_empty() {
+        Ok(())
+    } else {
+        Err(failure)
+    }
+}
 
 /// The process's autogate configuration that [`set_autogates`] made.
 ///
@@ -485,12 +635,7 @@ impl Harness {
         set_flags: impl FnOnce(compatibility_flags::Builder<'_>),
         fast_api: ffi::FastApi,
     ) -> Self {
-        let mut message = capnp::message::Builder::new_default();
-        set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
-        let words = message
-            .into_reader()
-            .canonicalize()
-            .expect("canonicalizing a freshly built message cannot fail");
+        let words = flags_words(set_flags);
         let bytes = capnp::Word::words_to_bytes(&words);
         // SAFETY: create_test_harness initializes the V8 platform and returns a valid harness.
         Self(
@@ -515,50 +660,14 @@ impl Harness {
     where
         F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
     {
-        struct Call<F> {
-            callback: Option<F>,
-            panic: Option<Box<dyn std::any::Any + Send>>,
-        }
-
-        #[expect(clippy::needless_pass_by_value)]
-        fn trampoline<F>(
-            data: usize,
-            isolate: *mut v8::ffi::Isolate,
-            context: Pin<&mut ffi::EvalContext>,
-        ) where
-            F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> Result<(), jsg::Error>,
-        {
-            // SAFETY: data was cast from &raw mut Call<F> in run_in_context below.
-            let call = unsafe { &mut *(data as *mut Call<F>) };
-            let Some(callback) = call.callback.take() else {
-                return;
-            };
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut eval_context = EvalContext { inner: &context };
-                // SAFETY: the C++ harness calls this with the isolate locked, a context
-                // entered and a HandleScope open for the duration of the call.
-                jsg::callback_scope!(unsafe let lock, isolate);
-                if let Err(e) = callback(lock, &mut eval_context) {
-                    panic!("Test failed: {}: {}", e.name, e.message);
-                }
-            }));
-            if let Err(payload) = result {
-                call.panic = Some(payload);
-            }
-        }
-
-        let mut call = Call {
-            callback: Some(callback),
-            panic: None,
-        };
-        // SAFETY: `call` is valid for the duration of run_in_context.
+        let mut call = ContextCall::new(callback);
+        // SAFETY: `call` is valid for the duration of run_in_context, and the trampoline is
+        // given its address.
         unsafe {
             self.0
-                .run_in_context(&raw mut call as usize, trampoline::<F>);
+                .run_in_context(&raw mut call as usize, ContextCall::<F>::trampoline);
         }
-        if let Some(payload) = call.panic {
-            std::panic::resume_unwind(payload);
-        }
+        call.resume_panic();
     }
 
     /// Drops the realm, as the isolate's teardown does before it disposes the isolate, then runs
@@ -598,6 +707,13 @@ impl Harness {
         if let Some(payload) = call.panic {
             std::panic::resume_unwind(payload);
         }
+    }
+
+    /// Takes the realm's cached templates and resets their handles, under the isolate lock, as
+    /// the startup snapshot pipeline does before it creates the snapshot.
+    pub fn take_realm_templates(&self) {
+        // SAFETY: the harness is valid, and no Rust `Lock` is in use outside a callback.
+        unsafe { self.0.take_realm_templates() };
     }
 
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
@@ -686,6 +802,23 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
+    /// counts taken earlier.
+    #[must_use]
+    pub fn number_of_handles(lock: &mut jsg::Lock<'_>) -> i32 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::number_of_handles(lock.isolate().as_ffi()) }
+    }
+
+    /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have
+    /// attributed to the isolate and that has reached V8. Tests compare it with amounts taken
+    /// earlier.
+    #[must_use]
+    pub fn external_memory(lock: &mut jsg::Lock<'_>) -> i64 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::external_memory(lock.isolate().as_ffi()) }
+    }
+
     /// Takes a heap snapshot, as the inspector's `HeapProfiler.takeHeapSnapshot` does, and
     /// returns it in V8's JSON format.
     ///
@@ -745,6 +878,39 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked.
         unsafe { ffi::set_javascript_execution_disallowed(lock.isolate().as_ffi(), disallowed) }
             .expect("JavaScript execution should have been disallowed");
+    }
+
+    /// Allows or disallows dynamic code evaluation (`eval()`, `new Function()` and WebAssembly
+    /// compilation), as C++ JSG's `jsg::Lock::setAllowEval()` does. The harness disallows it.
+    pub fn set_allow_eval(lock: &mut jsg::Lock<'_>, allow: bool) {
+        // SAFETY: `lock` proves the isolate is locked.
+        unsafe { ffi::set_allow_eval(lock.isolate().as_ffi(), allow) }
+    }
+
+    /// Makes a `WebAssembly.Module` from `module` in C++, without recompiling it, as C++ code
+    /// that Rust hands a [`v8::CompiledWasmModule`] to does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 creates no module object.
+    pub fn wasm_module_object_from_compiled_module<'s>(
+        lock: &mut jsg::Lock<'s>,
+        module: v8::CompiledWasmModule,
+    ) -> v8::Local<'s, v8::WasmModuleObject> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which the result belongs to.
+        let local = unsafe {
+            v8::Local::<v8::Value>::from_ffi(
+                ffi::wasm_module_object_from_compiled_module(
+                    lock.isolate().as_ffi(),
+                    module.into_ffi(),
+                )
+                .expect("V8 should create the module object"),
+            )
+        };
+        local
+            .try_into()
+            .expect("the result should be a WebAssembly.Module")
     }
 
     /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,
@@ -999,11 +1165,68 @@ impl Harness {
     }
 }
 
+/// A field that adds one to its counter when it is dropped, for a test resource that counts its
+/// drops. A resource that holds GC references can't implement `Drop` itself.
+#[jsg_macros::jsg_traced]
+pub struct DropCounter(pub &'static AtomicUsize);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// Whether `a` and `b` belong to the same `v8::IsolateGroup`.
 pub fn isolates_share_group(a: &jsg::Isolate, b: &jsg::Isolate) -> bool {
     // SAFETY: both references keep their isolates alive; reading an isolate's group needs no
     // lock.
     unsafe { ffi::isolates_share_group(a.as_ffi(), b.as_ffi()) }
+}
+
+/// Runs `f` and returns what it returns, with what KJ logged on this thread while it ran.
+///
+/// Every severity from `info` up is captured, each message as `"<severity>: <text>"`, as C++
+/// tests observe logging with `KJ_EXPECT_LOG`. What is captured is not written to stderr.
+///
+/// # Panics
+///
+/// Panics if `f` panics, once logging is restored.
+pub fn capture_kj_logs<F: FnOnce() -> R, R>(f: F) -> (R, Vec<String>) {
+    struct Call<F, R> {
+        f: Option<F>,
+        result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+    }
+
+    fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+        // SAFETY: data was cast from &raw mut Call<F, R> in capture_kj_logs below.
+        let call = unsafe { &mut *(data as *mut Call<F, R>) };
+        let Some(f) = call.f.take() else {
+            return;
+        };
+        // A panic must not unwind into C++.
+        call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)));
+    }
+
+    let mut call = Call::<F, R> {
+        f: Some(f),
+        result: None,
+    };
+    // SAFETY: `call` is valid for the duration of capture_kj_logs.
+    let logs = unsafe { ffi::capture_kj_logs(&raw mut call as usize, trampoline::<F, R>) };
+    match call.result.expect("the callback ran") {
+        Ok(result) => (result, logs),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Fails with a `FAILED` KJ exception with `description`, as a C++ function that a cxx bridge
+/// calls fails.
+///
+/// # Errors
+///
+/// Always.
+pub fn fail_with_kj_exception(description: &str) -> Result<(), cxx::KjException> {
+    ffi::fail_with_kj_exception(description)
 }
 
 impl Default for Harness {

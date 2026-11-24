@@ -112,9 +112,24 @@ For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
 config. `main` is bundled with esbuild, as Wrangler does. The supported fields
 are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `durable_objects`, `exports`, `migrations`, `no_bundle`, `$schema` and, with
-`--experimental`, `kv_namespaces`, `triggers.crons`, `queues` and `workflows`;
-any other field is an error. Each KV namespace is one Durable Object, so its
-throughput is that of one object.
+`--experimental`, `kv_namespaces`, `r2_buckets`, `triggers.crons`, `queues`,
+`workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits` and
+`assets`; any other field is an error. With `assets`, `main` may be left out to
+serve files only, and then fields that need a Worker are an error. Each KV
+namespace and each D1 database is one Durable Object, so its throughput is that
+of one object; each R2 object is an object in the store. A cluster's bucket
+should have a lifecycle rule that aborts incomplete multipart uploads, or the
+parts of R2 uploads that never finish stay forever. A Secrets Store secret's
+value is the environment variable `WORKERD_SECRET_` plus its `secret_name`,
+upper-cased, with other characters than letters and digits as `_` (`api-key` is
+`WORKERD_SECRET_API_KEY`), read when the server starts and never written to
+disk, so a name has one value in every store. A Worker can only `get()` it, as
+on Cloudflare; wrangler's local `secrets-store secret` commands write
+Miniflare's state and do not set it. Secrets Store secrets and rate limits are
+called over JS RPC, so the Worker needs a compatibility date of 2024-04-03 or
+later, or the `rpc` flag, and for secrets before 2024-03-26 also
+`fetcher_no_get_put_delete`. Rate limits count in the server's memory, and a
+restart forgets the counts.
 
 A simple "Hello World!" config file might look like:
 

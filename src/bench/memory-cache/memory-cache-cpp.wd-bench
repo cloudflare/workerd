@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# memory-cache-rust.wd-bench runs these services against the Rust MemoryCache.
+const unitTests :Workerd.Config = (services = .services);
+
+const limits :Workerd.Worker.Binding.MemoryCacheLimits = (
+  maxKeys = 10000,
+  maxValueSize = 1024,
+  maxTotalValueSize = 10485760,
+);
+
+const services :List(Workerd.Service) = [
+  ( name = "memory-cache",
+    worker = (
+      modules = [(name = "worker", esModule = embed "memory-cache.js")],
+      compatibilityFlags = ["memory_cache_delete"],
+      bindings = [
+        (name = "CACHE", memoryCache = (limits = .limits)),
+        (name = "MISS_CACHE", memoryCache = (limits = .limits)),
+        (name = "DELETE_CACHE", memoryCache = (limits = .limits)),
+      ],
+    ),
+  ),
+];

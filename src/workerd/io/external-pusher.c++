@@ -269,6 +269,12 @@ class ExternalPusherImpl::DelayedChannelTokenImpl final
  public:
   DelayedChannelTokenImpl(kj::Array<byte> token): token(kj::mv(token)) {}
 
+  kj::Promise<void> getToken(GetTokenContext context) override {
+    context.getResults(capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0})
+        .setToken(token);
+    return kj::READY_NOW;
+  }
+
   kj::Array<byte> token;
 };
 
@@ -282,9 +288,26 @@ kj::Promise<void> ExternalPusherImpl::pushDelayedChannelToken(
 
 kj::Promise<kj::Array<byte>> ExternalPusherImpl::unwrapDelayedChannelToken(
     rpc::JsValue::ExternalPusher::DelayedChannelToken::Client cap) {
-  auto& unwrapped = KJ_REQUIRE_NONNULL(co_await delayedChannelTokenSet.getLocalServer(cap),
-      "pushed external is not a DelayedChannelToken");
-  co_return kj::mv(kj::downcast<DelayedChannelTokenImpl>(unwrapped).token);
+  KJ_IF_SOME(unwrapped, co_await delayedChannelTokenSet.getLocalServer(cap)) {
+    // Copy rather than move, since getToken() may still be asked for the token.
+    co_return kj::heapArray(kj::downcast<DelayedChannelTokenImpl>(unwrapped).token.asPtr());
+  }
+
+  // The capability settled on something other than one of our own DelayedChannelTokenImpls: it
+  // was pushed to a different ExternalPusher, or reached us through a proxy or membrane that
+  // did not unwrap. Ask it for the token instead.
+  auto response = co_await cap.getTokenRequest(capnp::MessageSize{4, 0}).send();
+  co_return kj::heapArray(response.getToken());
+}
+
+rpc::JsValue::ExternalPusher::DelayedChannelToken::Client sendDelayedChannelToken(
+    rpc::JsValue::ExternalPusher::Client pusher, kj::Promise<kj::Array<byte>> token) {
+  return token.then([pusher = kj::mv(pusher)](kj::Array<byte> token) mutable {
+    auto req = pusher.pushDelayedChannelTokenRequest(
+        capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
+    req.setToken(token);
+    return req.send().getCap();
+  });
 }
 
 }  // namespace workerd

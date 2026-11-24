@@ -16,6 +16,7 @@ use crate::Error;
 use crate::Guard;
 use crate::Registry;
 use crate::Result;
+use crate::Version;
 use crate::registry::NodeRecord;
 
 /// One Durable Object's record in `do/<namespace>/<actor>/own.json`, the only
@@ -257,8 +258,7 @@ impl Ownership {
             let written = if fresh {
                 Some(Guard::Absent)
             } else {
-                let body = serde_json::to_vec(&record)?;
-                let version = self.bucket.put_if_settled(&key, body, guard).await?;
+                let version = self.write_record(&key, &record, guard).await?;
                 version.map(Guard::Match)
             };
             // Draining may have started during the write: the object it
@@ -344,10 +344,8 @@ impl Ownership {
             node: String::new(),
             ..record
         };
-        let body = serde_json::to_vec(&released)?;
         let written = self
-            .bucket
-            .put_if_settled(&key, body, Guard::Match(version))
+            .write_record(&key, &released, Guard::Match(version))
             .await?;
         Ok(written.is_some())
     }
@@ -404,12 +402,7 @@ impl Ownership {
             return Ok(false);
         }
         record.from = epoch;
-        let body = serde_json::to_vec(&record)?;
-        Ok(self
-            .bucket
-            .put_if_settled(&key, body, guard)
-            .await?
-            .is_some())
+        Ok(self.write_record(&key, &record, guard).await?.is_some())
     }
 
     /// Move this instance's open epoch to the next, which recovers the one
@@ -428,10 +421,8 @@ impl Ownership {
             return Ok(None);
         }
         let record = previous.successor(&previous.node);
-        let body = serde_json::to_vec(&record)?;
         let Some(version) = self
-            .bucket
-            .put_if_settled(&key, body, Guard::Match(version))
+            .write_record(&key, &record, Guard::Match(version))
             .await?
         else {
             return Ok(None);
@@ -440,6 +431,26 @@ impl Ownership {
             .borrow_mut()
             .insert(key, (record.clone(), Guard::Match(version)));
         Ok(Some(record.owned()))
+    }
+
+    /// Write `record` at `key` under `guard` (`Bucket::put_if_settled`). A
+    /// write that `put_if_settled` leaves unsettled answers as refused, as
+    /// one refused outright does: every caller answers a refusal by
+    /// reading the record again, or leaves that to the next claim, which
+    /// finds the write if a copy of it landed since. A copy lands only
+    /// under `guard`, so before any other write of the record.
+    async fn write_record(
+        &self,
+        key: &str,
+        record: &OwnerRecord,
+        guard: Guard,
+    ) -> Result<Option<Version>> {
+        let body = serde_json::to_vec(record)?;
+        let pause = self.registry.pause_when_contended();
+        match self.bucket.put_if_settled(key, body, guard, pause).await {
+            Err(Error::OutcomeUnknown(_)) => Ok(None),
+            written => written,
+        }
     }
 
     /// The epoch own.json names now: the re-read after a bucket upload that

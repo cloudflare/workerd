@@ -305,6 +305,17 @@ pub mod ffi {
         fn c_cancel_via_rust_return_primitive() -> Result<usize>;
         fn c_cancel_roundtrip_return_primitive() -> Result<usize>;
 
+        // A kj::Exception passed by value, which C++ receives and returns as `kj::Exception`.
+        fn c_describe_kj_exception(exception: KjException) -> String;
+        fn c_return_kj_exception() -> KjException;
+        fn c_try_return_kj_exception() -> Result<KjException>;
+        fn c_roundtrip_kj_exception(exception: KjException) -> KjException;
+        fn c_drop_kj_exception(exception: KjException);
+        fn c_throw_before_consuming_kj_exception(exception: KjException) -> Result<()>;
+        // An exception whose detail counts, per thread, how often it was destroyed.
+        fn c_return_tracked_kj_exception() -> KjException;
+        fn c_tracked_kj_exception_disposals() -> usize;
+
         // These signatures are infallible, but the C++ implementations throw.
         // The exception has to become a panic; it must not abort the process.
         fn c_infallible_fail_void();
@@ -340,6 +351,38 @@ pub mod ffi {
         fn c_set_array(self: &mut Array, value: i32);
 
         fn c_get_use_count(weak: &WeakPtr<C>) -> usize;
+
+        // #[nothrow] declarations of functions declared above, one per way a value returns.
+        #[nothrow]
+        #[rust_name = "c_return_primitive_nothrow"]
+        fn c_return_primitive() -> usize;
+        #[nothrow]
+        #[rust_name = "c_return_shared_nothrow"]
+        fn c_return_shared() -> Shared;
+        #[nothrow]
+        #[rust_name = "c_return_mut_ptr_nothrow"]
+        fn c_return_mut_ptr(n: usize) -> *mut C;
+        #[nothrow]
+        #[rust_name = "c_return_ref_nothrow"]
+        unsafe fn c_return_ref<'a>(shared: &'a Shared) -> &'a usize;
+        #[nothrow]
+        #[rust_name = "c_return_str_nothrow"]
+        unsafe fn c_return_str<'a>(shared: &'a Shared) -> &'a str;
+        #[nothrow]
+        #[rust_name = "c_return_box_nothrow"]
+        fn c_return_box() -> Box<R>;
+        #[nothrow]
+        #[rust_name = "c_return_rust_string_nothrow"]
+        fn c_return_rust_string() -> String;
+        #[nothrow]
+        #[rust_name = "c_take_primitive_nothrow"]
+        fn c_take_primitive(n: usize);
+        #[nothrow]
+        #[rust_name = "get_nothrow"]
+        fn get(self: &C) -> usize;
+        #[nothrow]
+        #[rust_name = "set_nothrow"]
+        fn set(self: Pin<&mut C>, n: usize) -> usize;
 
         #[rust_name = "i32_overloaded_method"]
         fn cOverloadedMethod(&self, x: i32) -> String;
@@ -464,6 +507,13 @@ pub mod ffi {
         fn r_cancel_via_cpp_return_primitive() -> Result<usize>;
         fn r_cancel_roundtrip_return_primitive() -> Result<usize>;
 
+        fn r_describe_kj_exception(exception: KjException) -> String;
+        fn r_return_kj_exception() -> KjException;
+        fn r_try_return_kj_exception() -> Result<KjException>;
+        fn r_roundtrip_kj_exception(exception: KjException) -> KjException;
+        fn r_drop_kj_exception(exception: KjException);
+        fn r_fail_with_kj_exception(exception: KjException) -> Result<()>;
+
         unsafe fn r_try_return_sliceu8<'a>(s: &'a [u8]) -> Result<&'a [u8]>;
         unsafe fn r_try_return_mutsliceu8<'a>(s: &'a mut [u8]) -> Result<&'a mut [u8]>;
 
@@ -476,6 +526,7 @@ pub mod ffi {
         fn r_aliased_function(x: i32) -> String;
 
         fn r_panic(s: &str);
+        fn r_panic_literal();
     }
 
     struct Dag0 {
@@ -513,6 +564,11 @@ mod other {
     #[repr(C)]
     pub struct D {
         pub d: u64,
+    }
+
+    #[repr(C, align(64))]
+    pub struct OverAligned {
+        pub value: u64,
     }
 
     #[repr(C)]
@@ -565,6 +621,12 @@ mod other {
     // Safety: the test fixture provides valid bridge pointers and matching layouts.
     unsafe impl ExternType for ThrowingCopy {
         type Id = type_id!("tests::ThrowingCopy");
+        type Kind = Trivial;
+    }
+
+    // Safety: the test fixture provides valid bridge pointers and matching layouts.
+    unsafe impl ExternType for OverAligned {
+        type Id = type_id!("tests::OverAligned");
         type Kind = Trivial;
     }
 
@@ -865,6 +927,69 @@ fn r_result_kj_exception_with_details_return_primitive() -> Result<usize, KjErro
     .with_details(details))
 }
 
+/// Describes `exception` as `c_describe_kj_exception()` does in C++:
+/// `<type>|<description>|<file>:<line>|<id>=<bytes>;...`.
+pub fn describe_kj_exception(exception: &cxx::KjException) -> String {
+    let r#type = match exception.r#type() {
+        KjExceptionType::Failed => "failed",
+        KjExceptionType::Overloaded => "overloaded",
+        KjExceptionType::Disconnected => "disconnected",
+        KjExceptionType::Unimplemented => "unimplemented",
+    };
+    let details = exception
+        .details()
+        .unwrap_or_default()
+        .iter()
+        .map(|(id, bytes)| format!("{id}={}", String::from_utf8_lossy(bytes)))
+        .collect::<Vec<_>>()
+        .join(";");
+    format!(
+        "{type}|{}|{}:{}|{details}",
+        exception.what(),
+        exception.file().to_string_lossy(),
+        exception.line(),
+    )
+}
+
+/// The exception that `r_return_kj_exception()` returns.
+pub fn rust_kj_exception() -> cxx::KjException {
+    KjError::new(
+        KjExceptionType::Overloaded,
+        "rust exception by value".to_owned(),
+    )
+    .with_location(String::from("rust/cxx/tests/ffi/lib.rs"), 1234)
+    .with_details(vec![
+        (11, b"first".to_vec()),
+        (22, Vec::new()),
+        (33, b"third".to_vec()),
+    ])
+    .into()
+}
+
+fn r_describe_kj_exception(exception: cxx::KjException) -> String {
+    describe_kj_exception(&exception)
+}
+
+fn r_return_kj_exception() -> cxx::KjException {
+    rust_kj_exception()
+}
+
+fn r_try_return_kj_exception() -> Result<cxx::KjException, Error> {
+    Ok(rust_kj_exception())
+}
+
+fn r_roundtrip_kj_exception(exception: cxx::KjException) -> cxx::KjException {
+    exception
+}
+
+fn r_drop_kj_exception(exception: cxx::KjException) {
+    drop(exception);
+}
+
+fn r_fail_with_kj_exception(exception: cxx::KjException) -> Result<(), cxx::KjException> {
+    Err(exception)
+}
+
 // Panic with CanceledException to simulate cancellation
 fn r_cancel_panic_test() {
     cxx::CanceledException::panic()
@@ -915,4 +1040,9 @@ fn r_aliased_function(x: i32) -> String {
 
 fn r_panic(s: &str) {
     panic!("{s}");
+}
+
+// A panic with no format arguments carries a &'static str payload.
+fn r_panic_literal() {
+    panic!("literal panic");
 }

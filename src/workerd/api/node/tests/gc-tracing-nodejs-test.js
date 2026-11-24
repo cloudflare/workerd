@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { ok } from 'node:assert';
+import { ok, strictEqual } from 'node:assert';
+import { createHash, createHmac } from 'node:crypto';
 import {
   inflateSync,
   deflateSync,
@@ -96,4 +97,25 @@ export const createInflateAbandonedCollects = {
     const refs = collectRefs(() => ({ engine: createInflate() }));
     await expectAllCollected(refs, 'createInflate-abandoned');
   },
+};
+
+// Ending a Hash or Hmac as a stream computes the digest, and the handle keeps it so that a later
+// digest() can return it. The handle visits it, so a GC treats it as traced and must keep it
+// alive. An unvisited reference stays strong and also survives, so these cases only catch a
+// visit that lets the cache be collected, not a missing visit.
+async function checkCachedDigestSurvivesGc(make) {
+  const expected = make().update('abc').digest('hex');
+  const hasher = make();
+  hasher.end('abc');
+  strictEqual(hasher.read().toString('hex'), expected);
+  await awaitGc();
+  strictEqual(hasher.digest('hex'), expected);
+}
+
+export const hashCachedDigestSurvivesGc = {
+  test: () => checkCachedDigestSurvivesGc(() => createHash('sha256')),
+};
+
+export const hmacCachedDigestSurvivesGc = {
+  test: () => checkCachedDigestSurvivesGc(() => createHmac('sha256', 'key')),
 };

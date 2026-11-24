@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -55,9 +56,13 @@ use crate::channels::SubrequestChannel;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
+use crate::cluster::PeerSession;
+use crate::cluster::SessionService;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
+use crate::services::assets::Assets;
+use crate::services::bucket::Home;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -102,6 +107,14 @@ impl Factory {
     #[must_use]
     pub fn experimental(&self) -> bool {
         ffi::factory_experimental(&self.inner)
+    }
+
+    /// The navigation flag of the assets service `services[service]`.
+    pub fn assets_navigation_prefers_asset_serving(&self, service: u32) -> Result<bool> {
+        Ok(ffi::factory_assets_navigation_prefers_asset_serving(
+            &self.inner,
+            service,
+        )?)
     }
 
     /// Whether requests get tail workers: not under `workerd bench`, unless given `--trace`.
@@ -403,7 +416,7 @@ impl Reporter {
 /// The CLI's substitutions for config values, by service or socket name.
 #[derive(Default)]
 pub struct Overrides {
-    /// `--directory-path`: a disk service's path.
+    /// `--directory-path`: a disk or cache service's path.
     pub directories: HashMap<String, String>,
     /// `--external-addr`: an external service's address.
     pub externals: HashMap<String, String>,
@@ -417,6 +430,7 @@ pub enum Service {
     /// the rest of the config can be checked.
     Leaf(Rc<dyn Channel>),
     Disk(Rc<DiskDirectoryService>),
+    Assets(Rc<Assets>),
 }
 
 impl Service {
@@ -427,6 +441,7 @@ impl Service {
             Self::Worker(worker) => worker.default_entrypoint(),
             Self::Leaf(channel) => Rc::clone(channel),
             Self::Disk(disk) => Rc::clone(disk) as Rc<dyn Channel>,
+            Self::Assets(assets) => assets.channel(false),
         }
     }
 
@@ -538,6 +553,7 @@ impl Drop for Services {
 /// The server: the service graph of one run.
 pub struct Server {
     report: Reporter,
+    otlp: Option<OtlpTracing>,
     services: Services,
     /// Durable namespaces by `uniqueKey`, for actor tokens.
     namespaces_by_unique_key: HashMap<String, Rc<ActorNamespace>>,
@@ -548,7 +564,54 @@ pub struct Server {
     factory: Rc<Factory>,
 }
 
+struct OtlpTracing {
+    collector: String,
+    exporter: KjOwn<ffi::OtlpExporter>,
+}
+
+impl OtlpTracing {
+    fn from_config(
+        factory: &Factory,
+        config: config::Reader<'_>,
+        services: &Services,
+        report: &Reporter,
+    ) -> Result<Option<Self>> {
+        let tracing = config.get_tracing().map_err(capnp_error)?;
+        if !tracing.has_otlp() {
+            return Ok(None);
+        }
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            tracing.get_otlp().map_err(capnp_error)?,
+            "tracing.otlp".to_owned(),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            report.error(error);
+        }
+        let collector = lookup_service(&services.0, report, None, &designator);
+        Ok(Some(Self {
+            collector: designator.service,
+            exporter: ffi::factory_new_otlp_exporter(
+                factory.raw(),
+                SubrequestChannel::new(collector),
+            )?,
+        }))
+    }
+}
+
 impl Server {
+    /// The collector's own worker is excluded across all of its entrypoints. Dynamic workers
+    /// have no configured service name and are eligible too.
+    pub fn otlp_exporter(&self, service: Option<&str>) -> Option<&ffi::OtlpExporter> {
+        let otlp = self.otlp.as_ref()?;
+        if service == Some(otlp.collector.as_str()) {
+            return None;
+        }
+        Some(&otlp.exporter)
+    }
+
     #[must_use]
     pub fn factory(&self) -> &Rc<Factory> {
         &self.factory
@@ -611,6 +674,9 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        if let Some(otlp) = &self.otlp {
+            ffi::otlp_exporter_unlink(&otlp.exporter);
+        }
         // Actors may have background work, which aborting them cancels. The run's background
         // tasks (tasks.rs) go too: one may hold an actor, and so its class's worker.
         self.abort_all_actors(Some(&kj::disconnected!("Server shutting down.")));
@@ -1260,6 +1326,11 @@ pub fn lookup_service(
     };
     let props = configured_props(props_json.as_deref());
 
+    if let Service::Assets(assets) = service
+        && entrypoint.as_deref().is_none_or(|e| e == "AssetWorker")
+    {
+        return assets.channel(entrypoint.is_some());
+    }
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
             report.reference_error(
@@ -1394,6 +1465,7 @@ impl Server {
     ///
     /// `inbound_listeners` are the sockets bound ahead of the services, by the service they
     /// serve, for `Worker::Api::getInboundListeners()`.
+    #[expect(clippy::too_many_lines, reason = "the config's passes, in order")]
     pub async fn start(
         factory: Rc<Factory>,
         overrides: &Overrides,
@@ -1460,7 +1532,9 @@ impl Server {
             _ => None,
         };
         if let Some(cluster) = &cluster {
-            // Actor databases open only under a lease.
+            // Actor databases open only under a lease, which the lease thread keeps from here on,
+            // however long linking takes: it watches the event loop only once the node serves
+            // (`ClusterNode::ready`).
             cluster
                 .cluster
                 .join()
@@ -1482,10 +1556,14 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
-        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
+        let node = cluster.as_ref();
+        cluster_services(config, &mut services, node, overrides, &factory, &report)?;
+
+        let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
 
         let server = Rc::new(Self {
             report,
+            otlp,
             services,
             namespaces_by_unique_key,
             worker_loaders: RefCell::new(WorkerLoaders::default()),
@@ -1498,6 +1576,11 @@ impl Server {
         // Third pass: the links.
         for (name, worker) in server.workers() {
             tolerate_deployment(&server.report, name, server.link_worker(name, worker))?;
+        }
+        for (name, service) in &server.services.0 {
+            if let Service::Assets(assets) = service {
+                assets.link(|d| lookup_service(&server.services.0, &server.report, Some(name), d));
+            }
         }
 
         // A deployment's service with errors fails every request.
@@ -1796,8 +1879,27 @@ async fn make_service(
                     .map(Service::Disk),
             ))
         }
-        // Made once the cluster is joined (`make_bucket_services`).
-        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
+        Ok(service::Which::Assets(assets)) => {
+            if !factory.experimental() {
+                report.error_in(
+                    name,
+                    "Assets services are an experimental feature which may change or go away in \
+                     the future. You must run workerd with `--experimental` to use this feature.",
+                );
+                return Ok(Service::Leaf(Rc::new(InvalidConfigChannel)));
+            }
+            let assets = assets.map_err(capnp_error)?;
+            Ok(invalid_on_error(
+                name,
+                report,
+                crate::services::assets::make_assets_service(name, index, assets, factory, report)
+                    .map(Service::Assets),
+            ))
+        }
+        // Made once the cluster, if any, is joined (`cluster_services`).
+        Ok(service::Which::Bucket(_) | service::Which::Cache(_)) => {
+            Ok(Service::Leaf(Rc::new(InvalidConfigChannel)))
+        }
         Err(capnp::NotInSchema(_)) => {
             report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -1926,9 +2028,55 @@ impl ServerHandle {
             )
         })?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
+            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?, None),
             None => namespace.channel_by_name(actor_id, false),
         }))
+    }
+}
+
+impl ServerHandle {
+    pub(crate) fn resolve_peer_actor(
+        &self,
+        session: &PeerSession,
+        service_name: &str,
+        class_name: &str,
+        actor_id: &str,
+    ) -> Result<Box<SubrequestChannel>> {
+        let server = self.server()?;
+        let namespace = server
+            .debug_service(service_name)?
+            .as_worker()
+            .and_then(|worker| worker.namespace(class_name))
+            .filter(|namespace| namespace.cluster().is_some())
+            .ok_or_else(|| {
+                kj::failed!(
+                    "jsg.Error: no clustered Durable Object class \"{class_name}\" in \
+                     \"{service_name}\""
+                )
+            })?;
+        let id = ffi::actor_id_from_hex(actor_id)?;
+        let session = Rc::clone(&session.requests);
+        Ok(SubrequestChannel::new(
+            namespace.peer_channel(id, Some(session)),
+        ))
+    }
+
+    /// A cluster peer's `getEntrypoint`: a clustered `cache` service, for its messages.
+    pub(crate) fn resolve_peer_cache(
+        &self,
+        session: &PeerSession,
+        service_name: &str,
+    ) -> Result<Box<SubrequestChannel>> {
+        let server = self.server()?;
+        let node = server
+            .cluster()
+            .filter(|node| node.caches.borrow().contains(service_name))
+            .ok_or_else(|| kj::failed!("jsg.Error: no clustered cache \"{service_name}\""))?;
+        Ok(SubrequestChannel::new(Rc::new(SessionService {
+            node: Rc::clone(node),
+            session: Rc::clone(&session.requests),
+            service: server.debug_service(service_name)?.channel(),
+        })))
     }
 }
 
@@ -1956,26 +2104,60 @@ impl Server {
 #[path = "config-test.rs"]
 mod tests;
 
-/// Replaces each `bucket` service's stand-in with the directory of the
-/// cluster's bucket it names.
-fn make_bucket_services(
+/// Replaces the stand-ins of the services made once the cluster, if any, is joined: each `bucket`
+/// with the directory it names, of the cluster's bucket or without a cluster of its `localDisk`,
+/// and each `cache` with one whose entries the cluster's nodes share, else in its directory.
+fn cluster_services(
     config: config::Reader<'_>,
     services: &mut Services,
     cluster: Option<&Rc<ClusterNode>>,
+    overrides: &Overrides,
     factory: &Rc<Factory>,
     report: &Reporter,
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
-        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
-            continue;
-        };
         let name = text(conf.get_name())?;
-        let Some(node) = cluster else {
-            report.service_error(&name, "A bucket service requires Config.cluster.");
-            continue;
+        let bucket = match conf.which() {
+            Ok(service::Which::Bucket(bucket)) => bucket,
+            Ok(service::Which::Cache(cache)) => {
+                let cache = cache.map_err(capnp_error)?;
+                let path = overrides
+                    .directories
+                    .get(&name)
+                    .filter(|_| !report.from_deployment(&name))
+                    .map(String::as_str);
+                let made = crate::services::cache::make_cache_service(
+                    &name, cache, path, factory, cluster,
+                );
+                let service = invalid_on_error(&name, report, made.map(Service::Leaf));
+                services.0.insert(name, service);
+                continue;
+            }
+            _ => continue,
         };
         let bucket = bucket.map_err(capnp_error)?;
-        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let disk = text(bucket.get_local_disk())?;
+        let disk = match services.0.get(&disk) {
+            Some(Service::Disk(disk)) => disk.writable_path().map(PathBuf::from),
+            _ => None,
+        };
+        let home = match (cluster, &disk) {
+            (Some(node), _) => Home::Cluster(node),
+            (None, Some(_)) if !factory.experimental() => {
+                report.service_error(&name, "A bucket service requires --experimental.");
+                continue;
+            }
+            (None, Some(disk)) => Home::Disk(disk),
+            (None, None) => {
+                report.service_error(
+                    &name,
+                    "A bucket service requires Config.cluster, or localDisk naming a writable \
+                     disk service.",
+                );
+                continue;
+            }
+        };
+        let made = crate::services::bucket::make_bucket_service(bucket, home, factory);
         let channel: Rc<dyn Channel> = match made {
             Ok(service) => Rc::new(service),
             Err(error) => {
@@ -2002,7 +2184,11 @@ fn make_cluster(
     let conf = config.get_cluster().map_err(capnp_error)?;
     // The MAC's other inputs cross the wire, so a short key falls to an offline search.
     if text(conf.get_key())?.len() < 32 {
-        report.error("cluster.key must be at least 32 bytes.".to_owned());
+        report.error(
+            "cluster.key must be at least 32 bytes. Fix it in the config, or set \
+             WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE, which override it."
+                .to_owned(),
+        );
         return Ok(None);
     }
     Ok(Some(ClusterNode::new(Rc::clone(factory), conf, address)?))

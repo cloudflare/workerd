@@ -5,12 +5,10 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/util/strong-bool.h>
 
 #include <pyodide/bundle/python_packages.capnp.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide_static.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -32,7 +30,9 @@ WD_STRONG_BOOL(SnapshotToDisk);
 
 class PyodideBundleManager {
  public:
-  void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
+  // `data` is read in place for the manager's lifetime, including by V8, through external strings
+  // over the bundle's module sources.
+  void setPyodideBundleData(kj::String version, kj::Array<const kj::byte> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
   // Returns the holder for the compiled pyodide.asm.wasm of bundle `version`, or kj::none if that
@@ -57,7 +57,6 @@ class PyodideBundleManager {
 };
 
 struct PythonConfig {
-  kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
   bool createSnapshot;
@@ -150,9 +149,22 @@ class PythonModuleInfo {
     auto clonedNames = KJ_MAP(name, this->names) { return kj::str(name); };
     return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
   }
+};
 
-  kj::HashSet<kj::String> getWorkerModuleSet();
-  kj::Array<kj::String> getPythonFileContents();
+// The uncompressed bytes of a Python memory snapshot.
+class MemorySnapshotSource {
+ public:
+  virtual ~MemorySnapshotSource() noexcept(false) = default;
+
+  // Wraps bytes that are already uncompressed.
+  static kj::Own<MemorySnapshotSource> fromBytes(kj::Array<kj::byte> bytes);
+
+  // The size of the whole snapshot. This must be known before any of the snapshot is read.
+  virtual size_t size() = 0;
+
+  // Copies the bytes starting at `offset` into `buf`, waiting until they are available, and returns
+  // how many it copied.
+  virtual size_t read(size_t offset, kj::ArrayPtr<kj::byte> buf) = 0;
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -171,7 +183,7 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
-    kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
+    kj::Maybe<kj::Own<MemorySnapshotSource>> memorySnapshot;
 
     State(kj::String mainModule,
         kj::Array<kj::String> names,
@@ -181,7 +193,7 @@ class PyodideMetadataReader: public jsg::Object {
         IsTracing isTracing,
         SnapshotToDisk snapshotToDisk,
         CreateBaselineSnapshot createBaselineSnapshot,
-        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
+        kj::Maybe<kj::Own<MemorySnapshotSource>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           pyodideVersion(kj::mv(pyodideVersion)),
@@ -193,10 +205,9 @@ class PyodideMetadataReader: public jsg::Object {
       verifyNoMainModuleInVendor();
     }
 
-    State(const State& other);
-
     void verifyNoMainModuleInVendor();
 
+    // Copies the state, reading the whole memory snapshot if there is one.
     kj::Own<State> clone();
   };
 
@@ -237,7 +248,7 @@ class PyodideMetadataReader: public jsg::Object {
     if (state->memorySnapshot == kj::none) {
       return 0;
     }
-    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot)->size();
     KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
     return size;
   }
@@ -418,28 +429,22 @@ class DisabledInternalJaeger: public jsg::Object {
   JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
 
-// This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
+// Writes memory snapshots that workerd creates (--python-save-snapshot,
+// --python-save-baseline-snapshot) to the --python-snapshot-dir directory.
 class DiskCache: public jsg::Object {
  private:
-  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
+  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_SNAPSHOT_ROOT;  // always kj::none
 
-  const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
   const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
-      const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
-      : cacheRoot(cacheRoot),
-        snapshotRoot(snapshotRoot) {};
+  DiskCache(): snapshotRoot(NULL_SNAPSHOT_ROOT) {};  // Disabled disk cache
+  explicit DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
+      : snapshotRoot(snapshotRoot) {};
 
-  jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
-  void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
   void putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
 
   JSG_RESOURCE_TYPE(DiskCache) {
-    JSG_METHOD(get);
-    JSG_METHOD(put);
     JSG_METHOD(putSnapshot);
   }
 };

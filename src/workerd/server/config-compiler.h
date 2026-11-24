@@ -10,7 +10,6 @@
 //
 // Do not include workerd/server/cli/bridge.rs.h here: it includes this header.
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 
 namespace workerd::server::cli {

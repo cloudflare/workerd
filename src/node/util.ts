@@ -44,8 +44,17 @@ import {
   stripVTControlCharacters,
 } from 'node-internal:internal_inspect';
 
-import { callbackify, parseEnv } from 'node-internal:internal_utils';
+import {
+  callbackify,
+  kCustomPromisifiedSymbol,
+  kCustomPromisifyArgsSymbol,
+  kNullProtoObject,
+  parseEnv,
+} from 'node-internal:internal_utils';
 import { diff } from 'node-internal:internal_util_diff';
+// Sets promisify.custom on the node:timers functions, which
+// enable_nodejs_global_timers also installs on globalThis.
+import 'node-internal:internal_timers_promises';
 import {
   isReadableStream,
   isWritableStream,
@@ -116,11 +125,6 @@ export const types = internalTypes;
 
 export { MIMEParams, MIMEType };
 
-const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
-const kCustomPromisifyArgsSymbol = Symbol.for(
-  'nodejs.util.promisify.custom.args'
-);
-
 // TODO(later): Proper type signature for promisify.
 /* eslint-disable */
 export function promisify(original: Function): Function {
@@ -132,6 +136,8 @@ export function promisify(original: Function): Function {
     validateFunction(fn, 'util.promisify.custom');
 
     return Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+      // @ts-expect-error TS2353 Required for __proto__
+      __proto__: kNullProtoObject,
       value: fn,
       enumerable: false,
       writable: false,
@@ -165,6 +171,8 @@ export function promisify(original: Function): Function {
   Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
 
   Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     value: fn,
     enumerable: false,
     writable: false,
@@ -201,6 +209,8 @@ export function inherits(
     );
   }
   Object.defineProperty(ctor, 'super_', {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     value: superCtor,
     writable: true,
     configurable: true,

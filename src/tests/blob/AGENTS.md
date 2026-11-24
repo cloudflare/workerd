@@ -26,11 +26,14 @@ what reading them creates, and what `JsBlob` and `JsFile`
   real Array (not any iterable), each element read in turn: a Blob or a
   BufferSource is kept, anything else (a SharedArrayBuffer included) is
   converted to a string. Then `options` (undefined, null or an object):
-  `type`, then `endings`, which must be undefined. A proxy, even over an
+  `type`, then `endings`, converted to a string. A proxy, even over an
   array, is not an Array. `new File(parts, name,
   options)` converts `name` between them, and reads `lastModified` (NaN as
   0, absent as now) between `type` and `endings`.
-- **Type:** discarded if any code unit is outside 0x20 to 0x7F, otherwise
+- **Endings:** checked once every option is read: `"transparent"`, or
+  `"native"`, which makes every CRLF and lone CR of each string part an LF;
+  anything else throws `TypeError`.
+- **Type:** discarded if any code unit is outside 0x20 to 0x7E, otherwise
   lower-cased.
 - **Checks:** once every part is converted, each in turn is checked: under
   `no_resizable_array_buffer_in_blob`, a BufferSource over a resizable
@@ -43,8 +46,9 @@ what reading them creates, and what `JsBlob` and `JsFile`
   `name` reads those bytes decoded, each such surrogate as three U+FFFDs. A
   type or name C++ gives as bytes that are not UTF-8 is kept as those bytes
   for C++ to read back (`api/blob-bootstrap-test.c++`).
-- **`slice(start, end, type)`:** each converted as JSG converts an `int`
-  (non-finite as 0, truncated, a `TypeError` outside int32), negative values
+- **`slice(start, end, type)`:** `start` and `end` each converted to a
+  number and clamped as a WebIDL `[Clamp] long long` (NaN as 0, rounded to
+  the nearest integer with ties to even, clamped to the Blob), negative values
   counted from the end; always a new Blob, never a File.
 - **Reading:** `arrayBuffer()` and `bytes()` copy; `text()` decodes UTF-8,
   replacing invalid sequences and keeping a byte order mark; `stream()`

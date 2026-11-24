@@ -9,7 +9,15 @@ const text = (b) => b.text();
 
 export const sliceRanges = {
   async test() {
-    strictEqual(await text(blob.slice(1.7)), 'bcdef');
+    // Rounded to the nearest integer, ties to even.
+    strictEqual(await text(blob.slice(1.7)), 'cdef');
+    strictEqual(await text(blob.slice(1.2)), 'bcdef');
+    strictEqual(await text(blob.slice(0.5)), 'abcdef');
+    strictEqual(await text(blob.slice(1.5)), 'cdef');
+    strictEqual(await text(blob.slice(2.5)), 'cdef');
+    strictEqual(await text(blob.slice(-1.5)), 'ef');
+    strictEqual(await text(blob.slice(-2.5)), 'ef');
+    strictEqual(await text(blob.slice(0, 2.5)), 'ab');
     strictEqual(await text(blob.slice(-2)), 'ef');
     strictEqual(await text(blob.slice('2', '4')), 'cd');
     strictEqual(
@@ -24,21 +32,23 @@ export const sliceRanges = {
     );
     strictEqual(await text(blob.slice(4, 2)), '');
     strictEqual(await text(blob.slice(-100, 100)), 'abcdef');
-    // Non-finite values and null convert to 0.
+    // NaN and null convert to 0.
     strictEqual(blob.slice(NaN, NaN).size, 0);
     strictEqual(blob.slice(null, null).size, 0);
-    strictEqual(blob.slice(1, Infinity).size, 0);
-    // An int, as JSG converts one.
-    for (const value of [2 ** 40, -(2 ** 40)]) {
-      throws(() => blob.slice(value), {
-        name: 'TypeError',
-        message:
-          'Value out of range. Must be between -2147483648 and 2147483647 (inclusive).',
-      });
-    }
+    // Anything beyond the Blob is clamped to it.
+    strictEqual(await text(blob.slice(1, Infinity)), 'bcdef');
+    strictEqual(await text(blob.slice(-Infinity, 2)), 'ab');
+    strictEqual(blob.slice(Infinity).size, 0);
+    strictEqual(blob.slice(2 ** 40).size, 0);
+    strictEqual(await text(blob.slice(-(2 ** 40))), 'abcdef');
+    strictEqual(await text(blob.slice(1, 2 ** 70)), 'bcdef');
     throws(() => blob.slice(Symbol()), {
       name: 'TypeError',
       message: 'Cannot convert a Symbol value to a number',
+    });
+    throws(() => blob.slice(0, 1n), {
+      name: 'TypeError',
+      message: 'Cannot convert a BigInt value to a number',
     });
   },
 };

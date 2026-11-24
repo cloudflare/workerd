@@ -385,6 +385,28 @@ fn test_c_try_return() {
 }
 
 #[test]
+fn test_c_nothrow() {
+    let shared = ffi::Shared { z: 2020 };
+    assert_eq!(2020, ffi::c_return_primitive_nothrow());
+    assert_eq!(2020, ffi::c_return_shared_nothrow().z);
+    assert_eq!(2020, ffi::c_return_box_nothrow().0);
+    assert_eq!("2020", ffi::c_return_rust_string_nothrow());
+    // SAFETY: The returned borrows are bounded by their live input values.
+    unsafe {
+        assert_eq!(2020, *ffi::c_return_ref_nothrow(&shared));
+        assert_eq!("2020", ffi::c_return_str_nothrow(&shared));
+    }
+    check!(ffi::c_take_primitive_nothrow(2020));
+
+    let ptr = ffi::c_return_mut_ptr_nothrow(2023);
+    // SAFETY: `c_return_mut_ptr` returns a new, owned `C`, which `UniquePtr` then deletes.
+    let mut unique_ptr = unsafe { cxx::UniquePtr::from_raw(ptr) };
+    assert_eq!(2023, unique_ptr.get_nothrow());
+    assert_eq!(2024, unique_ptr.pin_mut().set_nothrow(2024));
+    assert_eq!(2024, unique_ptr.get());
+}
+
+#[test]
 fn test_c_take() {
     let unique_ptr = ffi::c_return_unique_ptr();
     let unique_ptr_ns = ffi2::c_return_ns_unique_ptr();
@@ -663,6 +685,24 @@ fn test_rust_vec_copy_assign_failure() {
 }
 
 #[test]
+fn test_smart_ptr_new_over_aligned() {
+    let is_aligned =
+        |ptr: *const ffi2::OverAligned| ptr.addr().is_multiple_of(align_of::<ffi2::OverAligned>());
+
+    let unique: Vec<_> = (0..16)
+        .map(|value| UniquePtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(unique.iter().all(|ptr| is_aligned(ptr.as_ptr())));
+    assert!(unique.iter().map(|ptr| ptr.value).eq(0..16));
+
+    let shared: Vec<_> = (0..16)
+        .map(|value| SharedPtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(shared.iter().all(|ptr| is_aligned(&raw const **ptr)));
+    assert!(shared.iter().map(|ptr| ptr.value).eq(0..16));
+}
+
+#[test]
 fn test_extern_opaque() {
     let mut e = ffi2::c_return_opaque_ptr();
     check!(ffi2::c_take_opaque_ref(e.as_ref().unwrap()));
@@ -869,4 +909,79 @@ fn test_rust_to_cpp_to_rust_cancellation() {
             "Expected panic payload to be CanceledException"
         );
     }
+}
+
+const CPP_KJ_EXCEPTION: &str =
+    "disconnected|c++ exception by value|tests/ffi/tests.cc:4321|44=fourth;55=fifth";
+const RUST_KJ_EXCEPTION: &str =
+    "overloaded|rust exception by value|rust/cxx/tests/ffi/lib.rs:1234|11=first;22=;33=third";
+
+#[test]
+fn test_kj_exception_by_value() {
+    use cxx_test_suite::describe_kj_exception;
+    use cxx_test_suite::rust_kj_exception;
+
+    assert_eq!(
+        RUST_KJ_EXCEPTION,
+        ffi::c_describe_kj_exception(rust_kj_exception())
+    );
+    assert_eq!(
+        CPP_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_return_kj_exception())
+    );
+    assert_eq!(
+        CPP_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_try_return_kj_exception().unwrap())
+    );
+    assert_eq!(
+        RUST_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_roundtrip_kj_exception(rust_kj_exception()))
+    );
+}
+
+#[test]
+fn test_kj_exception_by_value_from_kj_error_without_location() {
+    let error = cxx::KjError::new(cxx::KjExceptionType::Failed, "no location".to_owned());
+    let line = line!() + 1;
+    let exception = cxx::KjException::from(error);
+    // kj::Exception drops everything up to the last `src/` directory from the file name, which
+    // need not be the first component: workerd may be built as an external repository.
+    let file = file!();
+    let file = file.rsplit_once("src/").map_or(file, |(_, rest)| rest);
+    assert_eq!(
+        format!("failed|no location|{file}:{line}|"),
+        ffi::c_describe_kj_exception(exception)
+    );
+}
+
+#[test]
+fn test_kj_exception_by_value_is_destroyed_once() {
+    let disposals = ffi::c_tracked_kj_exception_disposals();
+
+    // Rust drops it.
+    drop(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 1, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ drops it without consuming it.
+    ffi::c_drop_kj_exception(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 2, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ throws before consuming it.
+    let error = ffi::c_throw_before_consuming_kj_exception(ffi::c_return_tracked_kj_exception())
+        .unwrap_err();
+    assert!(
+        error
+            .what()
+            .contains("thrown before consuming the exception"),
+        "{}",
+        error.what()
+    );
+    assert_eq!(disposals + 3, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ hands it back, and Rust owns it again.
+    let exception = ffi::c_roundtrip_kj_exception(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 3, ffi::c_tracked_kj_exception_disposals());
+    assert_eq!(Some(vec![(66, b"tracked".to_vec())]), exception.details());
+    drop(exception);
+    assert_eq!(disposals + 4, ffi::c_tracked_kj_exception_disposals());
 }

@@ -25,6 +25,7 @@ export {
   detachedSources,
   conversionOrder,
   options,
+  endings,
   typeNormalization,
   loneSurrogates,
   fileConstructorIgnoresItsPrototype,

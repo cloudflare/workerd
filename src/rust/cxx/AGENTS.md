@@ -36,7 +36,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
   `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
-  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes)
+  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes);
+  `kj_rs_tokio::watch_progress()` counts the loop's progress for a watchdog on another thread,
+  busy or asleep, except through three kinds of busy stretch that `progress.rs` names
 - `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
   client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
   transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
@@ -62,6 +64,14 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `KjOwn<T>` requires `T: kj_rs::OwnTarget`, generated per bridge for every declared type held in
   a `KjOwn` (see `kj-rs/README.md`). A type that is only aliased into a bridge gets no
   implementation there; add `impl KjOwn<T> {}` to the bridge that declares `T`.
+- `KjException` is a built-in bridge type: `cxx::KjException` in Rust, `kj::Exception` by value
+  in C++, crossing as an owned `kj::Exception*` (`rust::repr::takeException` /
+  `releaseException` in `include/cxx.h`, `cxx::private::kj_exception_{into,from}_raw`). Use it
+  to hand an exception to the other side without throwing; it is only allowed as a top-level
+  argument or return value (`syntax/check.rs`).
+- An `extern "C++"` function is called through a shim that catches every exception, unless it is
+  `#[nothrow]` (README.md, "`#[nothrow]` C++ functions"); keep a `#[nothrow]` shim free of
+  exception handling so that LTO can still inline it into Rust.
 - Run formatting and the full component tests after changing generated ABI behavior.
 
 ## kj-rs-io ownership and reactor rules

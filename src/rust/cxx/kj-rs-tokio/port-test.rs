@@ -255,6 +255,23 @@ fn poll_never_sleeps() {
     assert!(start.elapsed() < Duration::from_millis(100));
 }
 
+/// A zero timeout means a KJ timer is already due. Tokio would sleep until the end of its next
+/// 1 ms tick however short the timeout, so `wait_timeout_ns(0)` polls instead of parking. A task
+/// spawned before the call runs during it either way, and records whether the port was parked.
+#[test]
+fn zero_timeout_does_not_park() {
+    use std::cell::Cell;
+    let port = TokioPort::new();
+    let parked = Rc::new(Cell::new(None));
+    let task_parked = Rc::clone(&parked);
+    let state = Arc::clone(&port.state);
+    let _jh = spawn(async move {
+        task_parked.set(Some(state.in_wait.load(Ordering::Relaxed)));
+    });
+    let _ = port.wait_timeout_ns(0);
+    assert_eq!(parked.get(), Some(false));
+}
+
 /// `spawn` accepts `!Send` futures because it is backed by `LocalSet::spawn_local`. This
 /// future holds an `Rc` — which is `!Send` — across an await point, exercising that path,
 /// and proves such a task actually runs to completion on the loop thread.

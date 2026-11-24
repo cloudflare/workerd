@@ -2,11 +2,13 @@
 
 #include <workerd/api/commonjs.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/util/strong-bool.h>
 
+#include <pyodide/pyodide_static.capnp.h>
 #include <pyodide/python-entrypoint.embed.h>
 
 #include <capnp/blob.h>
@@ -478,7 +480,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
     api::pyodide::SnapshotToDisk snapshotToDisk,
     api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
     PythonSnapshotRelease::Reader pythonRelease,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> maybeSnapshot,
     CompatibilityFlags::Reader featureFlags);
 
 jsg::Bundle::Reader retrievePyodideBundle(
@@ -494,13 +496,16 @@ jsg::Bundle::Reader retrievePyodideBundle(
 // `pyodideWasmModuleHolder`, if given, must outlive the registry. Pyodide's pyodide.asm.wasm is
 // then instantiated from it: once a Python isolate has stored a compilation there, later Python
 // isolates with the same Wasm compile setting reuse it instead of compiling again.
+//
+// `moduleSource`, if given, provides the storage V8 reads the compiled-in PYODIDE_BUNDLE sources
+// from; see jsg/module-source.h. The `pyodideBundle` sources are read where they are.
 template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
     CompatibilityFlags::Reader featureFlags,
     jsg::Bundle::Reader pyodideBundle,
     const workerd::WorkerSource::ModulesSource& source,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> maybeSnapshot,
     api::pyodide::IsWorkerd isWorkerd,
     api::pyodide::IsTracing isTracing,
     api::pyodide::SnapshotToDisk snapshotToDisk,
@@ -509,12 +514,13 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
     kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
-    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none,
+    const jsg::ModuleSource* moduleSource = nullptr) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  modules.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+  modules.addBuiltinBundle(PYODIDE_BUNDLE, kj::none, moduleSource);
 
   using namespace workerd::api::pyodide;
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
@@ -613,7 +619,7 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(pythonConfig.createBaselineSnapshot);
   api::pyodide::SnapshotToDisk snapshotToDisk(
       pythonConfig.createSnapshot || createBaselineSnapshot);
-  kj::Maybe<kj::Array<kj::byte>> snapshot = kj::none;
+  kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> snapshot = kj::none;
   KJ_IF_SOME(snapshotName, pythonConfig.loadSnapshotFromDisk) {
     auto& root = KJ_REQUIRE_NONNULL(pythonConfig.snapshotDirectory);
     kj::Path path(snapshotName);
@@ -621,12 +627,12 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
     if (maybeFile == kj::none) {
       KJ_FAIL_REQUIRE("Expected to find", snapshotName, "in the package cache directory");
     }
-    snapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
+    snapshot = api::pyodide::MemorySnapshotSource::fromBytes(
+        KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes());
   }
 
   // Create disk cache module
-  auto diskCache = lockParam.alloc<api::pyodide::DiskCache>(
-      pythonConfig.packageDiskCacheRoot, pythonConfig.snapshotDirectory);
+  auto diskCache = lockParam.alloc<api::pyodide::DiskCache>(pythonConfig.snapshotDirectory);
 
   modules::python::registerPythonCommonModules<api::pyodide::DisabledInternalJaeger>(lockParam,
       modules, featureFlags, bundle, source, kj::mv(snapshot), api::pyodide::IsWorkerd::YES,

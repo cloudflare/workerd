@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Opts out of python_dedicated_snapshot_keep_import_caches, which later compatibility dates imply,
+# so that the test covers invalidating the import caches a dedicated snapshot restores.
+# subdirectory-keep-import-caches.wd-test covers keeping them.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          (name = "a.py", pythonModule = embed "./a.py"),
+          (name = "subdir/__init__.py", pythonModule = embed "./subdir/__init__.py"),
+          (name = "subdir/a.py", pythonModule = embed "./subdir/a.py"),
+          (name = "subdir/b.py", pythonModule = embed "./subdir/b.py"),
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "no_python_dedicated_snapshot_keep_import_caches"],
+      )
+    ),
+  ],
+);
+

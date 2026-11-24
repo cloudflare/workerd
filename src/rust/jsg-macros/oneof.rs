@@ -208,10 +208,6 @@ impl<'a> Union<'a> {
                 fn class_name() -> &'static str {
                     stringify!(#name)
                 }
-
-                fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                    #(<#inner_types as jsg::UnionVariant>::is_exact(value))||*
-                }
             }
         }
     }

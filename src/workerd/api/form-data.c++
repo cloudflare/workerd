@@ -235,7 +235,7 @@ void FormData::parseFormDataImpl(
       message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
-    callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
+    callback(name, filename, type, message.asBytes());
   }
 }
 

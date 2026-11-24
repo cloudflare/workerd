@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/io/invocation-span.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
@@ -176,6 +177,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     }
   }
 
+  exportInvocationLog(context, timestamp, logLevel, message, errorInfo);
+
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
@@ -276,10 +279,27 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  updateInvocationSpan(update);
   if (maybeTailStreamWriter == kj::none) {
     return;
   }
   addSpanUpdateInternal(spanId, kj::mv(update), getTime());
+}
+
+void WorkerTracer::addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {
+  if (maybeTailStreamWriter == kj::none) return;
+  addSpanLinksInternal(spanId, kj::mv(links), getTime());
+}
+
+void WorkerTracer::addSpanLinksInternal(
+    tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE || links.links.size() == 0) return;
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto size = links.size();
+  writer->report(context, kj::mv(links), timestamp, size);
 }
 
 void WorkerTracer::addSpanUpdateInternal(
@@ -301,6 +321,12 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     kj::String name,
     kj::String message,
     kj::Maybe<kj::String> stack) {
+  kj::Maybe<kj::StringPtr> stackPtr;
+  KJ_IF_SOME(s, stack) {
+    stackPtr = s;
+  }
+  recordInvocationLevelException(context, name, message, stackPtr);
+  exportInvocationException(context.getSpanId(), timestamp, name, message, stackPtr);
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -313,10 +339,6 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    kj::Maybe<kj::StringPtr> stackPtr;
-    KJ_IF_SOME(s, stack) {
-      stackPtr = s;
-    }
     reportExceptionToTailStream(*writer, context, timestamp, kj::none, name, message, stackPtr);
   }
 
@@ -341,6 +363,12 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
     kj::String name,
     kj::String message,
     kj::Maybe<kj::String> stack) {
+  kj::Maybe<kj::StringPtr> stackPtr;
+  KJ_IF_SOME(s, stack) {
+    stackPtr = s;
+  }
+  recordInvocationSpanException(code, name, message, stackPtr);
+  exportInvocationException(spanId, timestamp, name, message, stackPtr);
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -350,10 +378,6 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
   auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
       topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
 
-  kj::Maybe<kj::StringPtr> stackPtr;
-  KJ_IF_SOME(s, stack) {
-    stackPtr = s;
-  }
   reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
 
@@ -397,6 +421,7 @@ void WorkerTracer::setEventInfo(
   // IoContext is available at this time, capture weakRef.
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
+  startInvocationSpan(incomingRequest, info);
   auto& context = incomingRequest.getInvocationSpanContext();
   setEventInfoInternal(context,
       context.getParent().map(
@@ -486,6 +511,7 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
 }
 
 void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) {
+  endInvocationSpan(outcome, cpuTime, wallTime);
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
@@ -589,6 +615,9 @@ void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> 
 
 void WorkerTracer::setReturn(
     kj::Maybe<kj::Date> timestamp, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo) {
+  KJ_IF_SOME(info, fetchResponseInfo) {
+    setInvocationResponseStatus(invocationSpan, info.statusCode);
+  }
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments in setEventInfo()
   // that are related to this check will probably also affect this function.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
@@ -626,6 +655,7 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
 void WorkerTracer::addSpanAttribute(const tracing::InvocationSpanContext& context,
     kj::ConstString key,
     tracing::Attribute::Value value) {
+  setInvocationSpanAttribute(key, value);
   if (pipelineLogLevel == PipelineLogLevel::NONE || maybeTailStreamWriter == kj::none) {
     return;
   }
@@ -658,8 +688,113 @@ void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext
   tailStreamWriter->report(context, kj::mv(attributes), timestamp, size);
 }
 
+void BaseTracer::setStartInvocationSpanFunc(StartInvocationSpanFunc func) {
+  KJ_ASSERT(
+      startInvocationSpanFunc == kj::none, "setStartInvocationSpanFunc can only be called once");
+  startInvocationSpanFunc = kj::mv(func);
+}
+
+void BaseTracer::startInvocationSpan(
+    IoContext::IncomingRequest& incomingRequest, const tracing::EventInfo& info) {
+  KJ_IF_SOME(func, startInvocationSpanFunc) {
+    auto started = func(incomingRequest.getInvocationSpanContext());
+    invocationSpan = kj::mv(started.span);
+    invocationLogs = kj::mv(started.logs);
+    invocationExportsSpans = started.exportSpans;
+    describeInvocationSpan(invocationSpan, info);
+  }
+}
+
+void BaseTracer::updateInvocationSpan(const tracing::SpanUpdate& update) {
+  KJ_SWITCH_ONEOF(update.info) {
+    KJ_CASE_ONEOF(name, kj::ConstString) {
+      invocationSpan.setOperationName(name.clone());
+    }
+    KJ_CASE_ONEOF(status, tracing::SpanStatus) {
+      invocationSpan.setStatus(status.clone());
+    }
+  }
+}
+
+void BaseTracer::setInvocationSpanAttribute(
+    const kj::ConstString& key, const tracing::Attribute::Value& value) {
+  // As user code's attributes on its own spans are (see api/tracing.c++).
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(s, kj::ConstString) {
+      invocationSpan.setTag(key.clone(), s.clone(), IsCustomTag::YES);
+    }
+    KJ_CASE_ONEOF(b, bool) {
+      invocationSpan.setTag(key.clone(), b, IsCustomTag::YES);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      invocationSpan.setTag(key.clone(), d, IsCustomTag::YES);
+    }
+    KJ_CASE_ONEOF(i, int64_t) {
+      invocationSpan.setTag(key.clone(), i, IsCustomTag::YES);
+    }
+  }
+}
+
+void BaseTracer::recordInvocationSpanException(const kj::Maybe<tracing::Exception::Code>& code,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  if (!invocationSpan.isObserved()) return;
+  kj::Maybe<tracing::Exception::Code> codeCopy;
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(s, kj::String) {
+        codeCopy = tracing::Exception::Code(kj::str(s));
+      }
+      KJ_CASE_ONEOF(d, double) {
+        codeCopy = tracing::Exception::Code(d);
+      }
+    }
+  }
+  invocationSpan.recordException(kj::mv(codeCopy), kj::str(name), kj::str(message),
+      stack.map([](kj::StringPtr s) { return kj::str(s); }));
+}
+
+void BaseTracer::recordInvocationLevelException(const tracing::InvocationSpanContext& context,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  if (context.getSpanId() != SpanParent(invocationSpan).getSpanId()) return;
+  recordInvocationSpanException(kj::none, name, message, stack);
+}
+
+void BaseTracer::exportInvocationLog(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    LogLevel level,
+    kj::StringPtr message,
+    const tracing::LogErrorInfo& errorInfo) {
+  KJ_IF_SOME(logs, invocationLogs) {
+    auto truncated =
+        message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
+    logs->submitLog(context.getSpanId(), timestamp, level,
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated, errorInfo);
+  }
+}
+
+void BaseTracer::exportInvocationException(tracing::SpanId spanId,
+    kj::Date timestamp,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  KJ_IF_SOME(logs, invocationLogs) {
+    logs->submitException(spanId, timestamp, name, message, stack);
+  }
+}
+
+void BaseTracer::endInvocationSpan(
+    EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) {
+  setInvocationOutcome(invocationSpan, outcome, cpuTime, wallTime);
+  invocationSpan.end();
+}
+
 SpanParent BaseTracer::makeUserRequestSpan(
     tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+  if (invocationSpan.isObserved() && invocationExportsSpans) return SpanParent(invocationSpan);
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
     return func(kj::mv(traceId), traceFlags);
   } else {
@@ -670,6 +805,7 @@ SpanParent BaseTracer::makeUserRequestSpan(
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     const kj::ConstString& methodName) {
+  setInvocationRpcMethod(invocationSpan, methodName);
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -692,6 +828,10 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
 
 void WorkerTracer::markUnused() {
   markedUnused = true;
+}
+
+kj::Date SpanSubmitter::getTime() {
+  return IoContext::current().now();
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
@@ -731,6 +871,10 @@ void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
   }
 }
 
+void UserSpanObserver::onLinks(tracing::SpanLinks links) {
+  if (wasAccepted) submitter->submitSpanLinks(spanId, kj::mv(links));
+}
+
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
   this->startTime = startTime;
   if (fromUserCode) {
@@ -752,9 +896,8 @@ void UserSpanObserver::onException(kj::Date timestamp,
   }
 }
 
-// Provide I/O time to the tracing system for user spans.
 kj::Date UserSpanObserver::getTime() {
-  return IoContext::current().now();
+  return submitter->getTime();
 }
 
 tracing::SpanId UserSpanObserver::getSpanId() {
