@@ -41,6 +41,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
+use cluster_logic::lease::Timing;
 use futures::StreamExt;
 use ring::rand::SecureRandom;
 use ring::rand::SystemRandom;
@@ -429,7 +430,8 @@ async fn check_conditional_writes(bucket: &Bucket) -> Result<()> {
     SecureRandom::fill(&SystemRandom::new(), &mut nonce)
         .map_err(|_| Error::Deploy("could not generate random numbers".into()))?;
     let probe = format!("deploy/{}.probe", hex(&nonce));
-    crate::cluster::check_conditional_writes(bucket, &probe).await
+    let pause = std::time::Duration::from_millis(Timing::DEFAULT.contended_pause_ms);
+    crate::cluster::check_conditional_writes(bucket, &probe, pause).await
 }
 
 /// Resolves a catalog write that failed with `error` but may have succeeded.

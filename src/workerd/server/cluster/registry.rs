@@ -106,6 +106,12 @@ impl Registry {
         self
     }
 
+    /// How long a write waits to go again when its guard failed on a
+    /// version that is still current (`Timing::contended_pause_ms`).
+    pub const fn pause_when_contended(&self) -> Duration {
+        self.contended_pause
+    }
+
     /// The next `NodeRecord::write`.
     fn next_write(&self) -> u64 {
         self.writes.set(self.writes.get() + 1);
