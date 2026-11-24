@@ -1852,6 +1852,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # rules rather than by the KJ URL parser alone, which follows neither those nor RFC 3986. Relative
   # URLs still throw a SyntaxError, because a Worker has no base URL. Once the connection is open,
   # `protocol` and `extensions` are the empty string when the server selected none, not null.
+  # Protocols passed to the constructor are compared case-insensitively, so `["echo", "Echo"]`
+  # throws a SyntaxError as repeated values.
 
   fetchInvalidResponseTypeError @208 :Bool
       $compatEnableFlag("fetch_invalid_response_type_error")
