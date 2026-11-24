@@ -3548,7 +3548,7 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/send)
    */
-  send(message: (ArrayBuffer | ArrayBufferView) | string): void;
+  send(message: (ArrayBuffer | ArrayBufferView) | Blob | string): void;
   /**
    * The **`WebSocket.close()`** method closes the WebSocket connection or connection attempt, if any. If the connection is already CLOSED, this method does nothing.
    *
