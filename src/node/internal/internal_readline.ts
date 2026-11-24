@@ -24,6 +24,8 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { EventEmitter } from 'node-internal:events';
+import { AbortError } from 'node-internal:internal_errors';
+import { setCustomPromisified } from 'node-internal:internal_utils';
 import type { Abortable } from 'node:events';
 import type Readline from 'node:readline';
 
@@ -106,3 +108,23 @@ export class Interface extends EventEmitter implements Readline.Interface {
     yield '';
   }
 }
+
+setCustomPromisified(
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  Interface.prototype.question,
+  function question(
+    this: Interface,
+    query: string,
+    options?: Abortable | null
+  ): Promise<string> {
+    const opts = options !== null && typeof options === 'object' ? options : {};
+    if (opts.signal?.aborted) {
+      return Promise.reject(
+        new AbortError(undefined, { cause: opts.signal.reason })
+      );
+    }
+    return new Promise((resolve) => {
+      this.question(query, opts, resolve);
+    });
+  }
+);

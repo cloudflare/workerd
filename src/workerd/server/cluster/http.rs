@@ -21,6 +21,7 @@ use std::time::Duration;
 use http::Uri;
 use http_body::Body as _;
 use http_body::Frame;
+use hyper::body::Incoming;
 use hyper_util::client::legacy;
 use hyper_util::client::legacy::connect::Connected;
 use hyper_util::client::legacy::connect::Connection;
@@ -36,7 +37,9 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-/// A bucket response: only the parts the bucket clients read.
+/// A bucket response: the parts the bucket clients read, and every header
+/// for the calls that read more.
+#[derive(Default)]
 pub struct HttpResponse {
     pub status: u16,
     pub etag: String,
@@ -47,9 +50,58 @@ pub struct HttpResponse {
     /// The `Metadata-Flavor` header, which Google's metadata server sets to
     /// `Google`.
     pub metadata_flavor: String,
-    /// Empty when a 2xx body went to a file.
+    pub headers: http::HeaderMap,
+    /// Empty when a 2xx body went to a file or is left to read (`stream`).
     pub body: Vec<u8>,
+    /// The 2xx body `Http::open` left to read.
+    pub stream: Option<Chunks>,
 }
+
+/// Why a request has no response.
+#[derive(Debug)]
+pub struct HttpError {
+    pub message: String,
+    pub failure: Failure,
+}
+
+/// How a request without a response failed, as sending it again goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// Its connection failed before the request was handed to it: a new
+    /// connection that closed before it was ready, or one that hyper found
+    /// closed and handed the request back from unwritten. hyper-util sends
+    /// such a request again by itself only on a pooled connection. None of
+    /// it left this process.
+    Unsent,
+    /// Its connection failed after hyper's dispatcher took the request,
+    /// before the answer's head came: writing it, reading the answer, or
+    /// parsing it. hyper cannot tell how much of the request reached the
+    /// server, which may have read none of it, or all of it and applied it.
+    /// A server closing an idle pooled connection as a request goes out on
+    /// it fails the request this way, before reading any of it.
+    Lost,
+    /// Anything else: no connection to the server, a timeout, a body this
+    /// end could not read or write, an answer's body cut short.
+    Other,
+}
+
+impl From<String> for HttpError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            failure: Failure::Other,
+        }
+    }
+}
+
+impl std::fmt::Display for HttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// A body read chunk by chunk as the caller asks for them.
+pub type Chunks = Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>;
 
 /// What a request sends: bytes, or a file read in chunks on the blocking
 /// pool.
@@ -92,7 +144,42 @@ impl Http {
         payload: Payload,
         to: Option<&Path>,
         (head, idle): (Duration, Duration),
-    ) -> Result<HttpResponse, String> {
+    ) -> Result<HttpResponse, HttpError> {
+        let response = self.request(method, url, headers, payload, head).await?;
+        collect(response, to, idle).await
+    }
+
+    /// As `send`, but a 2xx body is left to read (`HttpResponse::stream`),
+    /// however large; `idle` bounds each wait for its next chunk. Any other
+    /// body is read as `send` reads it.
+    pub async fn open(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        payload: Payload,
+        (head, idle): (Duration, Duration),
+    ) -> Result<HttpResponse, HttpError> {
+        let response = self.request(method, url, headers, payload, head).await?;
+        if !response.status().is_success() {
+            return collect(response, None, idle).await;
+        }
+        let (parts, incoming) = response.into_parts();
+        Ok(HttpResponse {
+            stream: Some(chunks(incoming, idle)),
+            ..head_of(parts.status.as_u16(), parts.headers)
+        })
+    }
+
+    /// Sends the request and waits up to `head` for the response's head.
+    async fn request(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        payload: Payload,
+        head: Duration,
+    ) -> Result<http::Response<Incoming>, HttpError> {
         let mut request = http::Request::builder().method(method.as_str()).uri(url);
         for pair in headers.chunks(2) {
             request = request.header(&pair[0], &pair[1]);
@@ -104,66 +191,140 @@ impl Http {
         let request = request.body(body).map_err(|e| e.to_string())?;
         let response = tokio::time::timeout(head, self.client.request(request))
             .await
-            .map_err(|_| "timed out".to_owned())?
-            .map_err(|e| e.to_string())?;
-        let header = |name| {
-            let value = response.headers().get(name);
-            value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
-        };
-        let (status, etag, date) = (response.status().as_u16(), header("etag"), header("date"));
-        let generation = header("x-goog-generation");
-        let metadata_flavor = header("metadata-flavor");
-        let mut incoming = response.into_body();
-        let to = to
-            .filter(|_| (200..300).contains(&status))
-            .map(Path::to_owned);
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
-        let writer = to.map(|path| {
-            tokio::task::spawn_blocking(move || -> io::Result<()> {
-                let mut file = io::BufWriter::new(std::fs::File::create(path)?);
-                while let Some(chunk) = rx.blocking_recv() {
-                    file.write_all(&chunk)?;
-                }
-                file.flush()
-            })
-        });
-        let mut body = Vec::new();
-        loop {
-            let frame = poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx));
-            let frame = tokio::time::timeout(idle, frame)
-                .await
-                .map_err(|_| "timed out reading the body".to_owned())?;
-            let Some(frame) = frame else { break };
-            let chunk = frame
-                .map_err(|e| e.to_string())?
-                .into_data()
-                .unwrap_or_default();
-            if writer.is_none() {
-                // Records, listings, deployments and errors: an endpoint sending more is broken.
-                if body.len() + chunk.len() > MAX_BODY {
-                    return Err(TOO_LARGE.to_owned());
-                }
-                body.extend(chunk);
-            } else if tx.send(chunk).await.is_err() {
-                break;
-            }
-        }
-        drop(tx);
-        if let Some(writer) = writer {
-            writer
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(HttpResponse {
-            status,
-            etag,
-            generation,
-            date,
-            metadata_flavor,
-            body,
+            .map_err(|_| "timed out".to_owned())?;
+        response.map_err(|e| HttpError {
+            message: describe(&e),
+            failure: failure(&e),
         })
     }
+}
+
+/// How `error` failed its request (`Failure`). A connection's failure has
+/// hyper's own error as its source: of the connection's I/O, of an answer
+/// cut short or one that does not parse. A `Connect` error's source is the
+/// connector's, and a failure of the request's own body is hyper's user
+/// error. Once a pooled connection took the request, the error carries the
+/// connection's info, which one of a new connection that never got ready
+/// does not; hyper's error is a cancellation when it handed the request
+/// back unwritten.
+fn failure(error: &legacy::Error) -> Failure {
+    let source = std::error::Error::source(error);
+    let hyper = source.and_then(|source| source.downcast_ref::<hyper::Error>());
+    match hyper {
+        Some(hyper) if !error.is_connect() && !hyper.is_user() => {
+            if error.connect_info().is_none() || hyper.is_canceled() {
+                Failure::Unsent
+            } else {
+                Failure::Lost
+            }
+        }
+        _ => Failure::Other,
+    }
+}
+
+/// `error` and each of its sources: hyper-util's own text names only the
+/// error's kind.
+fn describe(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(error) = source {
+        text = format!("{text}: {error}");
+        source = error.source();
+    }
+    text
+}
+
+/// A response without its body.
+fn head_of(status: u16, headers: http::HeaderMap) -> HttpResponse {
+    let header = |name| {
+        let value = headers.get(name);
+        value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
+    };
+    HttpResponse {
+        status,
+        etag: header("etag"),
+        generation: header("x-goog-generation"),
+        date: header("date"),
+        metadata_flavor: header("metadata-flavor"),
+        headers,
+        body: Vec::new(),
+        stream: None,
+    }
+}
+
+/// `response` with its body read, to the file `to` if 2xx and given.
+async fn collect(
+    response: http::Response<Incoming>,
+    to: Option<&Path>,
+    idle: Duration,
+) -> Result<HttpResponse, HttpError> {
+    let (parts, mut incoming) = response.into_parts();
+    let mut response = head_of(parts.status.as_u16(), parts.headers);
+    let to = to
+        .filter(|_| (200..300).contains(&response.status))
+        .map(Path::to_owned);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
+    let writer = to.map(|path| {
+        tokio::task::spawn_blocking(move || -> io::Result<()> {
+            let mut file = io::BufWriter::new(std::fs::File::create(path)?);
+            while let Some(chunk) = rx.blocking_recv() {
+                file.write_all(&chunk)?;
+            }
+            file.flush()
+        })
+    });
+    let body = &mut response.body;
+    loop {
+        let frame = poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx));
+        let frame = tokio::time::timeout(idle, frame)
+            .await
+            .map_err(|_| "timed out reading the body".to_owned())?;
+        let Some(frame) = frame else { break };
+        let chunk = frame
+            .map_err(|e| e.to_string())?
+            .into_data()
+            .unwrap_or_default();
+        if writer.is_none() {
+            // Records, listings, deployments and errors: an endpoint sending more is broken.
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err(TOO_LARGE.to_owned().into());
+            }
+            body.extend(chunk);
+        } else if tx.send(chunk).await.is_err() {
+            break;
+        }
+    }
+    drop(tx);
+    if let Some(writer) = writer {
+        writer
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(response)
+}
+
+/// `incoming`'s data as `Chunks`, each wait for the next bounded by `idle`.
+/// The stream ends after an error.
+fn chunks(incoming: Incoming, idle: Duration) -> Chunks {
+    let chunks = futures::stream::unfold(Some(incoming), move |incoming| async move {
+        let mut incoming = incoming?;
+        loop {
+            let frame = poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx));
+            let error = match tokio::time::timeout(idle, frame).await {
+                Err(_) => "timed out reading the body".to_owned(),
+                Ok(None) => return None,
+                Ok(Some(Err(e))) => e.to_string(),
+                Ok(Some(Ok(frame))) => match frame.into_data() {
+                    Ok(data) => return Some((Ok(data), Some(incoming))),
+                    // Trailers, which carry no data.
+                    Err(_) => continue,
+                },
+            };
+            return Some((Err(error), None));
+        }
+    });
+    Box::pin(chunks)
 }
 
 tokio::task_local! {
@@ -177,7 +338,7 @@ tokio::task_local! {
 /// what the caller does with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Repeat {
-    /// A GET: a read or a listing, which changes nothing.
+    /// A GET or a HEAD: a read or a listing, which changes nothing.
     Read,
     /// A DELETE, safe only where no key the calls delete is written again:
     /// a late copy then deletes nothing written since.
@@ -186,8 +347,10 @@ pub enum Repeat {
     /// bucket client reports a refusal of one sent twice as of unknown
     /// outcome (`Attempt::sent_twice`, `Error::OutcomeUnknown`). Safe only
     /// where the caller's answer to that holds when the other copy lands
-    /// later still, as a renewal's reread does: a read back, as
-    /// `Bucket::put_if_settled` makes, may come before it lands.
+    /// later still, as a renewal's reread does. `Bucket::put_if_settled`
+    /// writes again while the read back finds the guarded version, which
+    /// settles most such writes, but can still answer unknown with a copy
+    /// yet to land; its caller's answer to that must hold the same way.
     GuardedWrite,
 }
 
@@ -219,6 +382,10 @@ pub struct Call<'a> {
     pub body: &'a Payload,
     /// Where the answer's body goes instead of memory.
     pub to: Option<&'a Path>,
+    /// Whether a 2xx answer's body is left to read (`Http::open`). Only the
+    /// wait for the head is bounded and sent again: a copy that answers
+    /// streams the body alone.
+    pub stream: bool,
 }
 
 /// The largest body a request sent again may have: a larger one's own bound
@@ -235,7 +402,7 @@ impl Call<'_> {
             return None;
         }
         match self.method {
-            "GET" => Some(Repeat::Read),
+            "GET" | "HEAD" => Some(Repeat::Read),
             "DELETE" => Some(Repeat::Delete),
             "PUT" if self.guarded => Some(Repeat::GuardedWrite),
             _ => None,
@@ -384,6 +551,10 @@ impl tower_service::Service<Uri> for Connector {
             let host = uri.host().ok_or_else(invalid)?.to_owned();
             let https = uri.scheme_str() == Some("https");
             let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
+            #[cfg(test)]
+            if let Some(stream) = crate::fake_http::connect(&format!("{host}:{port}")) {
+                return Ok(TokioIo::new(Stream::Memory(stream)));
+            }
             let tcp = TcpStream::connect((host.as_str(), port)).await?;
             tcp.set_nodelay(true)?;
             if !https {
@@ -399,6 +570,9 @@ impl tower_service::Service<Uri> for Connector {
 enum Stream {
     Tcp(TcpStream),
     Tls(Box<TlsStream<TcpStream>>),
+    /// To a test's `fake_http::Server`.
+    #[cfg(test)]
+    Memory(tokio::io::DuplexStream),
 }
 
 impl Connection for Stream {
@@ -416,6 +590,8 @@ impl AsyncRead for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
@@ -429,6 +605,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
@@ -436,6 +614,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_flush(cx),
             Self::Tls(s) => Pin::new(s).poll_flush(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
@@ -443,6 +623,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
             Self::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }

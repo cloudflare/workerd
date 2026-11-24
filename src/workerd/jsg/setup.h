@@ -638,9 +638,8 @@ class IsolateBase {
   }
 
   // Isolate-level counterpart: pins `data` into the isolate's own snapshot data rather than a
-  // context's, so the restored isolate can read it back with
-  // v8::Isolate::GetDataFromSnapshotOnce() before any context exists.
-  // Same preconditions as above.
+  // context's, so the restored isolate can read it back with extractOnceFromIsolateSnapshot()
+  // before any context exists. Same preconditions as above.
   size_t pinIntoIsolateSnapshot(v8::Local<v8::Data> data) {
     return getSnapshotCreator()->AddData(data);
   }
@@ -664,6 +663,18 @@ class IsolateBase {
     return value;
   }
 
+  // Isolate-level counterpart: returns the value pinned into the isolate's own snapshot data
+  // under `index` by pinIntoIsolateSnapshot(), as a `T`. Same once-only semantics and
+  // preconditions as above, except that no context is needed, so it may be called before any
+  // context exists.
+  template <typename T>
+  v8::Local<T> extractOnceFromIsolateSnapshot(size_t index) {
+    v8::Local<T> value;
+    KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<T>(index).ToLocal(&value),
+        "nothing pinned into the isolate snapshot under this index", index);
+    return value;
+  }
+
   // Zygote, right after `context` is created and before any JavaScript runs in it: captures the
   // holders and installs the properties. `hasTemporal` is the context's
   // NewContextOptions::enableTemporal.
@@ -681,6 +692,11 @@ class IsolateBase {
   // Restored context, right after v8::Context::New() has re-added the defaults and before any
   // JavaScript runs in it: re-applies the state the zygote recorded.
   void replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context);
+
+  // Restored context, once the embedder has populated its embedder-data slots and before any
+  // JavaScript runs in it: calls Wrappable::snapshotContextReady() on every object with a live
+  // wrapper. The caller has entered the context.
+  void notifySnapshotContextReady(Lock& js);
 
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
@@ -735,15 +751,6 @@ class IsolateBase {
       const uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata,
       kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
-
-  // Start from snapshot, before Context::New(): builds the instance each serialized wrapper slot
-  // is restored to (a stateless type's recreate function or a stored clone's snapshotClone()) and
-  // pre-allocates its CppgcShim; see WrappableDeserializeMetadata. Throws only if one of those
-  // does, which their contracts forbid: nothing on this path catches it and the Worker fails to
-  // start.
-  void prepareWrappableDeserializeMetadata(Lock& js, WrappableDeserializeMetadata& metadata);
-  // After Context::New(): WrappableDeserializeMetadata::releaseSlotsWithChecks().
-  void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -1136,13 +1143,6 @@ class IsolateBase {
   static v8::Local<v8::FunctionTemplate> getOpaqueTemplate(v8::Isolate* isolate);
 };
 
-// Free-function form of IsolateBase::registerExternalReference() for call sites that only have a
-// v8::Isolate* and cannot include setup.h (e.g. ResourceTypeBuilder in resource.h, which
-// forward-declares this function).
-inline void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
-  IsolateBase::from(isolate).registerExternalReference(addr);
-}
-
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace
 // through it. The trace is built inside `scratch` without performing any allocation. This is
 // intended to be invoked from a signal handler.
@@ -1399,8 +1399,7 @@ class Isolate: public IsolateBase {
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
       return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
         KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
-          return newBootstrapDomException(*this, prototype, name, message,
-              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
+          return newBootstrapDomException(*this, prototype, name, message, maybeStack);
         }
 
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
@@ -1522,7 +1521,9 @@ class Isolate: public IsolateBase {
       WrappableDeserializeMetadata metadata;
       kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
-        jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
+        metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer,
+            jsgIsolate.finalizedSnapshotArtifact(),
+            [this](v8::CppHeapPointerTag tag) { return jsgIsolate.snapshotRecreateFnFor(tag); });
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
@@ -1539,7 +1540,12 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
-        jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+        {
+          // snapshotRelink() runs with the new context entered.
+          v8::Context::Scope contextScope(context.getHandle(v8Isolate));
+          metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        }
+        metadata.releaseSlotsWithChecks();
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and
       // adds them to a context restored from the snapshot, see

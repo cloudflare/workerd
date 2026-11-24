@@ -251,7 +251,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ): number;
   clearInterval(timeoutId: number | null): void;
   queueMicrotask(task: Function): void;
-  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
   reportError(error: any): void;
   fetch(
     input: RequestInfo | URL,
@@ -283,9 +282,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
-  EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
   ReadableByteStreamController: typeof ReadableByteStreamController;
@@ -337,6 +333,9 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   PerformanceResourceTiming: typeof PerformanceResourceTiming;
   PerformanceObserver: typeof PerformanceObserver;
   PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
+  EventSource: typeof EventSource;
 }
 export declare function addEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
@@ -392,11 +391,6 @@ export declare function setInterval<Args extends any[]>(
 export declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 export declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-export declare function structuredClone<T>(
-  value: T,
-  options?: StructuredSerializeOptions,
-): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 export declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
@@ -518,9 +512,6 @@ export interface ExportedHandler<
   test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env, Props>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-}
-export interface StructuredSerializeOptions {
-  transfer?: any[];
 }
 export declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
@@ -3478,12 +3469,16 @@ export interface SqlStorage {
 }
 export declare abstract class SqlStorageStatement {}
 export type SqlStorageValue = ArrayBuffer | string | number | null;
+export interface SqlStorageCursor<
+  T extends Record<string, SqlStorageValue>,
+> extends Disposable {}
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
   next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
+  close(): void;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
   columnNames: string[];
   get rowsRead(): number;
@@ -3515,58 +3510,6 @@ export interface TlsOptions {
 export interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
-}
-/**
- * The **`EventSource`** interface is web content's interface to server-sent events.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
- */
-export declare class EventSource extends EventTarget {
-  constructor(url: string, init?: EventSourceEventSourceInit);
-  /**
-   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
-   */
-  close(): void;
-  /**
-   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
-   */
-  get url(): string;
-  /**
-   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
-   */
-  get withCredentials(): boolean;
-  /**
-   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
-   */
-  get readyState(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  get onopen(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  set onopen(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  get onmessage(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  set onmessage(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  get onerror(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  set onerror(value: any | null);
-  static readonly CONNECTING: number;
-  static readonly OPEN: number;
-  static readonly CLOSED: number;
-  static from(stream: ReadableStream): EventSource;
-}
-export interface EventSourceEventSourceInit {
-  withCredentials?: boolean;
-  fetcher?: Fetcher;
 }
 export interface ExecOutput {
   readonly stdout: ArrayBuffer;
@@ -3674,59 +3617,6 @@ export interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
   diskMb: number;
-}
-/**
- * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
- */
-export declare abstract class MessagePort extends EventTarget {
-  /**
-   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
-   */
-  postMessage(
-    data?: any,
-    options?: any[] | MessagePortPostMessageOptions,
-  ): void;
-  /**
-   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
-   */
-  close(): void;
-  /**
-   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
-   */
-  start(): void;
-  get onmessage(): any | null;
-  set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-export declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
-}
-export interface MessagePortPostMessageOptions {
-  transfer?: any[];
 }
 export type LoopbackForExport<
   T extends
@@ -12779,16 +12669,49 @@ export type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   excludeExternalLinks?: boolean;
 };
 export type BrowserRunSnapshotFormat =
-  "content" | "screenshot" | "markdown" | "accessibilityTree";
-export type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
-  /** Which representations of the page to return. At least two distinct formats
-   * are required; request a single format from its dedicated action instead.
-   * @default ["content","screenshot"]
-   */
-  formats?: BrowserRunSnapshotFormat[];
-  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
-  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
-};
+  | "content"
+  | "screenshot"
+  | "markdown"
+  | "accessibilityTree"
+  | "pdf"
+  | "links"
+  | "scrape"
+  | "json";
+export type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions & {
+    /** Which representations of the page to return. At least two distinct formats
+     * are required; request a single format from its dedicated action instead.
+     * @default ["content","screenshot"]
+     */
+    formats?: BrowserRunSnapshotFormat[];
+    /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+    screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+    /** CSS selectors to scrape. Required when `formats` includes `scrape`. */
+    elements?: BrowserRunScrapeOptions["elements"];
+    /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+    pdfOptions?: BrowserRunPDFOptions["pdfOptions"];
+    /** When true, only return links that are visible on the page. @default false */
+    visibleLinksOnly?: BrowserRunLinksOptions["visibleLinksOnly"];
+    /** When true, exclude links pointing to external domains. @default false */
+    excludeExternalLinks?: BrowserRunLinksOptions["excludeExternalLinks"];
+    /** When true, prune accessibility nodes that carry no semantic meaning.
+     * @default true
+     */
+    interestingOnly?: BrowserRunAccessibilityTreeOptions["interestingOnly"];
+    /** CSS selector limiting the accessibility tree to the matching element's
+     * subtree.
+     */
+    root?: BrowserRunAccessibilityTreeOptions["root"];
+    /** Natural-language prompt describing what data to extract. Required when
+     * `formats` includes `json`, unless `response_format` is set.
+     */
+    prompt?: string;
+    /** Structured output schema for the AI model. Required when `formats`
+     * includes `json`, unless `prompt` is set.
+     * @see https://developers.cloudflare.com/workers-ai/json-mode/
+     */
+    response_format?: AiTextGenerationResponseFormat;
+  };
 /** Options for the `accessibilityTree` quick action. */
 export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
   /** When true, prune nodes that carry no semantic meaning, such as generic
@@ -12966,6 +12889,14 @@ export type BrowserRunSnapshotSuccessResponse = {
     markdown?: string;
     /** Root of the page's accessibility tree. */
     accessibilityTree?: BrowserRunSerializedAXNode;
+    /** Base64-encoded PDF. */
+    pdf?: string;
+    /** Links found on the page. */
+    links?: string[];
+    /** Elements matched by the requested selectors. */
+    scrape?: BrowserRunScrapeSuccessResponse["result"];
+    /** JSON data extracted from the page using an AI model. */
+    json?: Record<string, unknown> | unknown[] | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -13205,21 +13136,31 @@ export type BrowserRunScriptOptions = {
   lab?: boolean;
   /** Record the browser session. @default false */
   recording?: boolean;
+  /** Run the script on an alternate browser backend. Only the raw CDP client is
+   * supported, and no session is kept open afterwards. Setting `library`,
+   * `keepAlive`, `lab` or `recording` with it returns an HTTP 400 error
+   * response.
+   */
+  browser?: "kitesurf";
 };
-/** Options for `scriptInSession()`. */
+/** Options for `script()` in an existing browser session. */
 export type BrowserRunScriptSessionOptions = {
+  /** Session to run in, such as the `cf-browser-session-id` header returned by
+   * `script()`. The session keeps the launch options it was acquired with.
+   */
+  sessionId: string;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
   /** Library whose objects are passed to the script. Omit it for raw CDP. */
   library?: BrowserRunScriptLibrary;
   /** Maximum run time of the script in milliseconds. Between 1 and 120000.
    * @default 60000
    */
   timeout?: number;
-  /** Page target the script attaches to, such as the `cf-browser-target-id`
-   * header returned by `script()`. Defaults to the session's first page.
-   */
-  targetId?: string;
 };
-/** JSON success body of `script()` and `scriptInSession()`. */
+/** JSON success body of `script()`. */
 export type BrowserRunScriptSuccessResponse = {
   success: true;
   /** The script's return value, or `null` when it returned nothing. */
@@ -13332,8 +13273,9 @@ export declare abstract class BrowserRun {
   /**
    * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including the `formats` to return and
-   * screenshot settings (encoding is always base64).
+   * @param options - Snapshot options: the `formats` to return, plus the
+   * per-format options for screenshots, PDFs, scraped elements, links, the
+   * accessibility tree, and JSON extraction.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13444,7 +13386,7 @@ export declare abstract class BrowserRun {
    * @param code - Source of an async function. It receives the selected
    * library's objects (Playwright `{ page, context, browser }`, Puppeteer
    * `{ page, browser }`) or, without `library`, a CDP client.
-   * @param options - Library, timeout and session launch options.
+   * @param options - Library, timeout, session launch and backend options.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13454,26 +13396,28 @@ export declare abstract class BrowserRun {
    * non-JSON output
    *
    * **Error:**
-   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 502, 503)
    * - HTTP 408 when the script exceeds `timeout`
    * - HTTP 422 when the script fails to compile or throws
+   * - HTTP 502 when the script fails on the `browser: 'kitesurf'` backend
    * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
    * throw before any request is made.
    *
-   * **Headers:**
-   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * **Headers** (not returned with `browser: 'kitesurf'`):
+   * - `cf-browser-session-id`: Session kept open for a later `script()` call
+   * with `sessionId`
    * - `cf-browser-target-id`: Page target the script ran on
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
   script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
   /**
    * Run a script against an existing browser session, such as one kept open by
-   * `script()`.
-   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
-   * header returned by `script()`.
-   * @param code - Source of an async function, as for `script()`.
-   * @param options - Library, timeout and page target options.
-   * @returns A `Response` with the same success bodies as `script()`.
+   * an earlier `script()` call.
+   * @param code - Source of an async function, as for a new session.
+   * @param options - The session to run in, plus page target, library and
+   * timeout options. Launch options such as `keepAlive` cannot be set, because
+   * the session keeps the ones it was acquired with.
+   * @returns A `Response` with the same success bodies as a new-session run.
    *
    * **Error:**
    * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
@@ -13485,10 +13429,9 @@ export declare abstract class BrowserRun {
    * **Headers:**
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
-  scriptInSession(
-    sessionId: string,
+  script(
     code: string,
-    options?: BrowserRunScriptSessionOptions,
+    options: BrowserRunScriptSessionOptions,
   ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
@@ -14888,15 +14831,15 @@ export interface EmailMessage {
    * Envelope To attribute of the email message.
    */
   readonly to: string;
+  /**
+   * Stream of the email message content.
+   */
+  readonly raw: ReadableStream<Uint8Array>;
 }
 /**
  * An email message that is sent to a consumer Worker and can be rejected/forwarded.
  */
 export interface ForwardableEmailMessage extends EmailMessage {
-  /**
-   * Stream of the email message content.
-   */
-  readonly raw: ReadableStream<Uint8Array>;
   /**
    * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    */
@@ -15010,6 +14953,59 @@ export declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
   env: Env,
   ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
+// EventSource, a global at every compatibility date.
+/**
+ * The **`EventSource`** interface is web content's interface to server-sent events.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
+ */
+export declare class EventSource extends EventTarget {
+  constructor(url: string, init?: EventSourceEventSourceInit);
+  /**
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
+   */
+  close(): void;
+  /**
+   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
+   */
+  get url(): string;
+  /**
+   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
+   */
+  get withCredentials(): boolean;
+  /**
+   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
+   */
+  get readyState(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  get onopen(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  set onopen(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  get onmessage(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  set onmessage(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  get onerror(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  set onerror(value: any | null);
+  static readonly CONNECTING: number;
+  static readonly OPEN: number;
+  static readonly CLOSED: number;
+  static from(stream: ReadableStream): EventSource;
+}
+export interface EventSourceEventSourceInit {
+  withCredentials?: boolean;
+  fetcher?: Fetcher;
+}
 /**
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
@@ -15792,6 +15788,75 @@ export interface MediaError extends Error {
   readonly message: string;
   readonly stack?: string;
 }
+// MessageChannel and MessagePort, declared at every compatibility date. They
+// are globals under the expose_global_message_channel compatibility flag (the
+// default from 2025-08-15); node:worker_threads exports them at any date.
+/**
+ * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+export declare abstract class MessagePort extends EventTarget {
+  /**
+   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+export declare class MessageChannel {
+  constructor();
+  /**
+   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+export interface MessagePortPostMessageOptions {
+  transfer?: any[];
+}
+/**
+ * An `oidc_token` binding: issues OpenID Connect tokens for the Worker's own
+ * identity, to exchange for cloud credentials or send to an API as a bearer
+ * token. Each binding has one audience, set in its config.
+ */
+export interface OidcTokenBinding {
+  /**
+   * Returns a newly signed JWT for the configured audience, valid for 5
+   * minutes. Each call gets a new `jti`. Call it when you need a token; don't
+   * store the token across requests.
+   */
+  getToken(): Promise<string>;
+}
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
@@ -15888,6 +15953,381 @@ export interface RateLimit {
    * @returns A promise that resolves with the outcome of the rate limit.
    */
   limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
+}
+/** Main interface for creating meetings in the app configured for your binding. */
+export interface RealtimeKitBinding {
+  /**
+   * Creates a meeting and returns its details along with a method for adding
+   * participants.
+   */
+  createMeeting(
+    options?: RealtimeKitCreateMeetingOptions,
+  ): Promise<RealtimeKitMeeting>;
+}
+/** Settings for creating a meeting. */
+export interface RealtimeKitCreateMeetingOptions {
+  /** Human-readable meeting title. */
+  title?: string | null;
+  /**
+   * Start recording when a participant joins.
+   * @default false
+   */
+  record_on_start?: boolean | null;
+  /**
+   * Start livestreaming when the meeting starts.
+   * @default false
+   */
+  live_stream_on_start?: boolean | null;
+  /** Meeting recording settings, which take precedence over app settings. */
+  recording_config?: RealtimeKitRecordingConfig;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /**
+   * Retain meeting chat for a week.
+   * @default false
+   */
+  persist_chat?: boolean;
+  /**
+   * Generate a meeting summary; requires transcription.
+   * @default false
+   */
+  summarize_on_end?: boolean;
+  /**
+   * Generate a transcript when the meeting ends.
+   * @default false
+   */
+  transcribe_on_end?: boolean;
+  /**
+   * Seconds a session stays active after its last participant leaves.
+   * Between 60 and 600.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+}
+/** Details of the participant to add to a meeting. */
+export interface RealtimeKitAddParticipantOptions {
+  /** Your unique identifier for the participant, such as a user ID or email. */
+  custom_participant_id: string;
+  /** Name of an existing preset to apply, such as group_call_host. */
+  preset_name: string;
+  /** Participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** Validity window for the participant authentication token. */
+  token?: RealtimeKitParticipantTokenValidity;
+}
+/**
+ * Controls when a participant's join token can be used.
+ * The token is valid from not_before up to, but not including, expires_on.
+ * The validity period cannot exceed 100 days and defaults to 100 days from now.
+ */
+export interface RealtimeKitParticipantTokenValidity {
+  /** RFC 3339 timestamp with a timezone; defaults to now and may be in the past. */
+  not_before?: string;
+  /**
+   * RFC 3339 timestamp with a timezone; must be in the future when issued.
+   * Defaults to not_before plus 100 days.
+   */
+  expires_on?: string;
+}
+/** Participant details and the authentication token needed to join the meeting. */
+export interface RealtimeKitParticipant {
+  /** Participant UUID. */
+  id: string;
+  /** The unique participant identifier you provided when adding the participant. */
+  custom_participant_id: string;
+  /** Preset applied to the participant. */
+  preset_name: string;
+  /** Supplied participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** When the participant was created, as an ISO date-time string. */
+  created_at: string;
+  /** When the participant was last updated, as an ISO date-time string. */
+  updated_at: string;
+  /** Sensitive authentication token used to join the meeting. Do not log it. */
+  token: string;
+  /** Time from which the token is valid, as a UTC date-time string. */
+  not_before?: string;
+  /** Time at which the token expires, as a UTC date-time string. */
+  expires_on?: string;
+}
+/**
+ * Meeting details captured when the meeting was created.
+ * Use addParticipant() to add participants to this meeting.
+ * Use `using` to release the meeting handle when finished.
+ */
+export interface RealtimeKitMeeting extends Disposable {
+  /** Unique identifier of the meeting. */
+  readonly id: string;
+  /** Human-readable meeting title. */
+  title?: string;
+  /** When the meeting was created, as an ISO date-time string. */
+  readonly created_at: string;
+  /** When the meeting was last updated, as an ISO date-time string. */
+  readonly updated_at: string;
+  /** Whether recording starts when a participant joins. */
+  record_on_start?: boolean;
+  /** Whether livestreaming starts when the meeting starts. */
+  live_stream_on_start?: boolean;
+  /** Whether meeting chat persists for a week. */
+  persist_chat?: boolean;
+  /** Whether a meeting summary is generated using transcripts. */
+  summarize_on_end?: boolean;
+  /** Whether a transcript is generated when the meeting ends. */
+  transcribe_on_end?: boolean;
+  /** Recording settings for the meeting. Storage credentials are not included. */
+  recording_config?: RealtimeKitRecordingConfigResponse;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /** Participants cannot join an INACTIVE meeting. */
+  status?: "ACTIVE" | "INACTIVE";
+  /**
+   * Session keep-alive duration, 60 to 600 seconds.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+  /**
+   * Adds a participant to this meeting and returns their details and join token.
+   */
+  addParticipant(
+    options: RealtimeKitAddParticipantOptions,
+  ): Promise<RealtimeKitParticipant>;
+}
+/** Meeting-level recording settings, overriding the app's recording settings. */
+export interface RealtimeKitRecordingConfig {
+  /** Maximum recording duration in seconds, between 60 and 86400. */
+  max_seconds?: number;
+  /** Prefix added to the recording file name. */
+  file_name_prefix?: string;
+  /** Recorded video encoding, dimensions, and watermark settings. */
+  video_config?: RealtimeKitVideoConfig;
+  /** Recorded audio encoding and channel settings. */
+  audio_config?: RealtimeKitAudioConfig;
+  /** Storage destination and credentials for uploading recordings. */
+  storage_config?: RealtimeKitStorageConfig;
+  /** Whether recordings are uploaded to RealtimeKit's bucket. */
+  realtimekit_bucket_config?: RealtimeKitBucketConfig;
+  /** Destination for live-streaming the recording. */
+  live_streaming_config?: RealtimeKitLivestreamingConfig;
+}
+/** Recording settings for a meeting, with storage credentials omitted. */
+export interface RealtimeKitRecordingConfigResponse extends Omit<
+  RealtimeKitRecordingConfig,
+  "storage_config"
+> {
+  /** Destination storage with access keys, secrets, passwords, and keys omitted. */
+  storage_config?: RealtimeKitStorageConfigResponse;
+}
+/** Video settings for meeting recordings. */
+export interface RealtimeKitVideoConfig {
+  /**
+   * Video codec.
+   * @default 'H264'
+   */
+  codec?: "H264" | "VP8" | "VP9";
+  /**
+   * Video width in pixels, between 1 and 1920.
+   * @default 1280
+   */
+  width?: number;
+  /**
+   * Video height in pixels, between 1 and 1920.
+   * @default 720
+   */
+  height?: number;
+  /** Watermark image, dimensions, and placement. */
+  watermark?: {
+    /** URL of the watermark image. */
+    url?: string;
+    /** Watermark dimensions in pixels. */
+    size?: {
+      /** Watermark width; minimum 1 pixel. */
+      width?: number;
+      /** Watermark height; minimum 1 pixel. */
+      height?: number;
+    };
+    /**
+     * Watermark placement.
+     * @default 'left top'
+     */
+    position?: "left top" | "right top" | "left bottom" | "right bottom";
+  };
+  /**
+   * Export a separate video file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Audio settings for meeting recordings. */
+export interface RealtimeKitAudioConfig {
+  /**
+   * Audio codec. VP8/VP9 video automatically uses Vorbis audio, and the audio
+   * codec cannot be changed.
+   * @default 'AAC'
+   */
+  codec?: "MP3" | "AAC";
+  /**
+   * Audio channel layout.
+   * @default 'stereo'
+   */
+  channel?: "mono" | "stereo";
+  /**
+   * Export a separate audio file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Destination and authentication settings for external recording storage. */
+export interface RealtimeKitStorageConfigBase {
+  /** Destination bucket name. */
+  bucket: string;
+  /**
+   * Storage access key; required and nonempty except for Google Cloud Storage.
+   * Not included in returned storage details.
+   */
+  access_key?: string;
+  /** Secret key for the storage provider. Not included in returned details. */
+  secret?: string;
+  /** Storage region; required and nonempty except for Google Cloud Storage. */
+  region?: string;
+  /** Recording path relative to the bucket root. */
+  path?: string;
+  /** Authentication method for SFTP storage. */
+  auth_method?: "KEY" | "PASSWORD";
+  /** Destination SSH username for SFTP. */
+  username?: string;
+  /**
+   * SFTP login password, or SSH private-key passphrase when using KEY.
+   * Not included in returned storage details.
+   */
+  password?: string;
+  /** Destination SSH hostname for SFTP. */
+  host?: string;
+  /** Destination SSH port for SFTP. */
+  port?: number;
+  /** SSH private key for SFTP key authentication. Not included in returned details. */
+  private_key?: string;
+}
+/** Recording destination in Google Cloud Storage, AWS, Azure, DigitalOcean, or SFTP. */
+export type RealtimeKitStorageConfig =
+  | (RealtimeKitStorageConfigBase &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            access_key: string;
+            region: string;
+          }
+        | ({
+            type: "sftp";
+            access_key: string;
+            region: string;
+            username: string;
+            host: string;
+            port: number;
+          } & (
+            | {
+                auth_method: "KEY";
+                private_key: string;
+              }
+            | {
+                auth_method: "PASSWORD";
+                password: string;
+              }
+          ))
+      ))
+  | null;
+/** Recording destination details, without access keys, secrets, passwords, or private keys. */
+export type RealtimeKitStorageConfigResponse =
+  | (Omit<
+      RealtimeKitStorageConfigBase,
+      "access_key" | "secret" | "password" | "private_key"
+    > &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            region: string;
+          }
+        | {
+            type: "sftp";
+            region: string;
+            auth_method: "KEY" | "PASSWORD";
+            username: string;
+            host: string;
+            port: number;
+          }
+      ))
+  | null;
+/** Controls uploading recordings to RealtimeKit's managed bucket. */
+export interface RealtimeKitBucketConfig {
+  /**
+   * Enable managed-bucket uploads. If false, recording download URLs and
+   * their expiry are not generated.
+   */
+  enabled: boolean;
+}
+/** Live-streaming destination for a recording. */
+export interface RealtimeKitLivestreamingConfig {
+  /** RTMP destination URL. */
+  rtmp_url?: string;
+}
+/** Transcription and summary customization for a meeting. */
+export interface RealtimeKitAIConfig {
+  /** Transcription options. */
+  transcription?: RealtimeKitTranscriptionConfig;
+  /** Summary options. */
+  summarization?: RealtimeKitSummarizationConfig;
+}
+/** Meeting transcription settings. */
+export interface RealtimeKitTranscriptionConfig {
+  /** Terms to recognize more accurately during transcription. */
+  keywords?: string[];
+  /**
+   * Language used for transcription. If omitted, post-meeting transcription
+   * detects the language automatically.
+   */
+  language?:
+    "en-US" | "en-IN" | "de" | "hi" | "sv" | "ru" | "pl" | "el" | "fr" | "nl";
+  /**
+   * Filter offensive language in transcripts.
+   * @default false
+   */
+  profanity_filter?: boolean;
+}
+/** Meeting summarization settings. */
+export interface RealtimeKitSummarizationConfig {
+  /**
+   * Maximum words in the summary, between 150 and 1000.
+   * @default 500
+   */
+  word_limit?: number;
+  /**
+   * Summary text format.
+   * @default 'markdown'
+   */
+  text_format?: "plain_text" | "markdown";
+  /**
+   * Summary style.
+   * @default 'general'
+   */
+  summary_type?:
+    | "general"
+    | "team_meeting"
+    | "sales_call"
+    | "client_check_in"
+    | "interview"
+    | "daily_standup"
+    | "one_on_one_meeting"
+    | "lecture"
+    | "code_review";
 }
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
@@ -16387,6 +16827,7 @@ export interface SecretsStoreSecret {
  * - Binding-level operations:
  *   `await env.STREAM.videos.upload`
  *   `await env.STREAM.videos.createDirectUpload`
+ *   `await env.STREAM.clip`
  *   `await env.STREAM.videos.*`
  *   `await env.STREAM.watermarks.*`
  * - Per-video operations:
@@ -16433,6 +16874,19 @@ export interface StreamBinding {
   createDirectUpload(
     params: StreamDirectUploadCreateParams,
   ): Promise<StreamDirectUpload>;
+  /**
+   * Creates a new video by clipping a time range from an existing video.
+   * @param videoId The unique identifier of the source video to clip from.
+   * @param params The time range to clip from the source video.
+   * @returns The details of the newly created clip.
+   * @throws {NotFoundError} if the source video is not found
+   * @throws {BadRequestError} if the time range is invalid or extends past the end of the source video
+   * @throws {BadRequestError} if the source video is a live stream recording
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {RateLimitedError} if the account has too many videos processing at once
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  clip(videoId: string, params: StreamClipParams): Promise<StreamVideo>;
   videos: StreamVideos;
   watermarks: StreamWatermarks;
 }
@@ -16469,10 +16923,13 @@ export interface StreamVideoHandle {
   delete(): Promise<void>;
   /**
    * Creates a signed URL token for a video.
+   * @param options Optional settings for the token.
    * @returns The signed token that was created.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the options are invalid, e.g. `expiresAt` is in the past or more than 24 hours away, `notBefore` is not before `expiresAt`, or the signing key is not found or does not belong to the account
    * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
    */
-  generateToken(): Promise<string>;
+  generateToken(options?: StreamSignedTokenOptions): Promise<string>;
   downloads: StreamScopedDownloads;
   captions: StreamScopedCaptions;
 }
@@ -16582,6 +17039,13 @@ export interface StreamVideo {
    * Public details associated with the video.
    */
   publicDetails: StreamPublicDetails | null;
+  /**
+   * The unique customer code associated with the video.
+   *
+   * Use this to construct URLs that require a customer code, such as player URLs using signed tokens.
+   * `https://customer-{customerCode}.cloudflarestream.com/{token}/iframe`
+   */
+  customerCode: string;
 }
 export type StreamVideoStatus = {
   /**
@@ -16740,6 +17204,98 @@ export type StreamUrlUploadParams = {
    */
   watermarkId?: string;
 };
+export type StreamClipParams = {
+  /**
+   * The point in the source video, in whole seconds, where the clip starts.
+   */
+  startTimeSeconds: number;
+  /**
+   * The point in the source video, in whole seconds, where the clip ends.
+   * Must be greater than `startTimeSeconds` and no later than the end of the
+   * source video.
+   */
+  endTimeSeconds: number;
+};
+export type StreamSignedTokenOptions = {
+  /**
+   * The signing key to sign the token with. When omitted, the token is signed
+   * with a key Stream manages for the account.
+   */
+  signingKey?: StreamSigningKey;
+  /**
+   * When the token stops being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be in the future and no more than 24 hours from now.
+   * Defaults to one hour from now.
+   */
+  expiresAt?: Date | number;
+  /**
+   * When the token starts being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be earlier than `expiresAt`. Defaults to one hour ago.
+   */
+  notBefore?: Date | number;
+  /**
+   * Whether the token can also be used to access the video's MP4 downloads.
+   * @default false
+   */
+  downloadable?: boolean;
+  /**
+   * Rules that allow or block viewers by IP address or country. Rules are
+   * evaluated in order, and the first rule that matches is applied.
+   */
+  accessRules?: StreamAccessRule[];
+  /**
+   * Additional flags for the token.
+   */
+  flags?: StreamSignedTokenFlags;
+};
+export type StreamSigningKey = {
+  /**
+   * The ID of a Stream signing key.
+   */
+  id: string;
+  /**
+   * The base64-encoded private key, in PEM format, for the signing key.
+   */
+  pem: string;
+};
+export type StreamSignedTokenFlags = {
+  /**
+   * Whether the token serves the original video without transformations.
+   * @default false
+   */
+  original?: boolean;
+};
+export type StreamAccessRuleAction = "allow" | "block";
+export type StreamAccessRule =
+  | {
+      /**
+       * Matches every request. Use as the last rule to set a default action.
+       */
+      type: "any";
+      action: StreamAccessRuleAction;
+    }
+  | {
+      /**
+       * Matches requests from the listed IP addresses or CIDR ranges.
+       */
+      type: "ip.src";
+      action: StreamAccessRuleAction;
+      /**
+       * IPv4 or IPv6 addresses or CIDR ranges.
+       */
+      ip: string[];
+    }
+  | {
+      /**
+       * Matches requests from the listed countries.
+       */
+      type: "ip.geoip.country";
+      action: StreamAccessRuleAction;
+      /**
+       * Two-letter ISO 3166-1 alpha-2 country codes.
+       */
+      country: string[];
+    };
 export interface StreamScopedCaptions {
   /**
    * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
@@ -16774,6 +17330,15 @@ export interface StreamScopedCaptions {
    * @throws {InternalError} if an unexpected error occurs
    */
   list(language?: string): Promise<StreamCaption[]>;
+  /**
+   * Gets the WebVTT file for a caption or subtitle track.
+   * @param language The BCP 47 language tag of the track.
+   * @returns The track's WebVTT file as a stream.
+   * @throws {NotFoundError} if the video is not found, it has no caption for this language, or a generated caption has not finished
+   * @throws {BadRequestError} if the language is not a valid BCP 47 tag
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  get(language: string): Promise<ReadableStream>;
   /**
    * Removes the captions or subtitles from a video.
    * @param language The BCP 47 language tag to remove.
@@ -17123,6 +17688,17 @@ export interface AlreadyUploadedError extends StreamError {
 export interface TooManyWatermarksError extends StreamError {
   name: "TooManyWatermarksError";
 }
+export interface StructuredSerializeOptions {
+  transfer?: any[];
+}
+export interface ServiceWorkerGlobalScope {
+  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+export declare function structuredClone<T>(
+  value: T,
+  options?: StructuredSerializeOptions,
+): T;
 export type MarkdownDocument = {
   name: string;
   blob: Blob;

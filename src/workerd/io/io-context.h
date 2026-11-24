@@ -290,8 +290,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
 
   kj::UnwindDetector unwindDetector;
 
-  // Used for debugging, tracks whether we properly called drain() or some other mechanism to
-  // wait for waitUntil tasks.
+  // Tracks whether we called drain() or some other mechanism to wait for waitUntil tasks, which
+  // happens once the request has returned, or is canceled for hibernation. Used for debugging, and
+  // by IoContext::getIncomingRequestForIoChannels() to tell whether the request is still running.
   bool waitedForWaitUntil = false;
 
   // If drain() was already called, this is non-null and fulfilling it will cancel the drain.
@@ -369,6 +370,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // instrumentation site checks this first, so keep it cheap.
   kj::Maybe<const AsyncTracker&> tryGetAsyncTracker() const {
     return asyncTracker.get();
+  }
+
+  // The async trace resource of an awaitJs() wait, which the wait settles when the JavaScript
+  // promise settles. Inert if the context is not traced. The Rust io-context crate's await_js()
+  // creates its resource with this too.
+  AsyncResource makeAwaitJsResource() const {
+    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
+    }
+    return {};
   }
 
   // Gets the actor, throwing if there isn't one.
@@ -601,6 +612,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       "values are not allowed within global scope. To fix this error, perform this "
       "operation within a handler. "
       "https://developers.cloudflare.com/workers/runtime-apis/handlers/"_kj;
+
+  // The exception with which awaitJs() fails if JavaScript never settles the promise: a FAILED
+  // Error whose message is "Promise will never complete.".
+  static kj::Exception neverSettledException();
+
+  // The message of memoryLimitException().
+  static constexpr kj::StringPtr MEMORY_LIMIT_MESSAGE = "Worker has exceeded memory limit."_kj;
+
+  // The exception with which awaitJs() fails, rather than with neverSettledException(), if
+  // JavaScript never settles the promise while the isolate has excessively exceeded its heap
+  // limit: an OVERLOADED Error with MEMORY_LIMIT_MESSAGE, carrying MEMORY_LIMIT_DETAIL_ID, which
+  // marks it as an out-of-memory outcome.
+  static kj::Exception memoryLimitException();
 
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
@@ -981,6 +1005,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The original functor may optionally accept `IoContext&` immediately after `jsg::Lock&`. The
   // wrapper injects the current context after the `IoOwn` has verified that it is the context that
   // owns the functor. Callers therefore do not need to capture an IoContext reference themselves.
+  //
+  // Rust code registers such continuations with `IoContext::then()`, `catch()` and
+  // `then_or_catch()` in the `io-context` crate (`io-context/lib.rs`), which check the context and
+  // pass it in the same way.
   template <typename Func>
   auto addFunctor(Func&& func);
 
@@ -1340,6 +1368,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns both an internal and a user tracing span, this ensures that all user spans are
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
+  // Like makeUserTraceSpan(), but opens only the internal span; the current user span is the
+  // user span parent of whatever runs under it.
+  [[nodiscard]] TraceContext makeTraceSpanWithoutUserSpan(kj::ConstString operationName);
 
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on
@@ -1353,13 +1384,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
-  // The IoChannelFactory must be accessed through the
-  // currentIncomingRequest because it has some tracing context built in.
+  // The IoChannelFactory must be accessed through an IncomingRequest because it has some tracing
+  // context built in, and the embedder may stamp outgoing calls with the request's metadata, such
+  // as a loop-detection TTL. getIncomingRequestForIoChannels() says which request that is.
   //
   // TODO(later): this is made public for Python Workers. It should be possible to make this private
   // again later.
   IoChannelFactory& getIoChannelFactory() {
-    return *getCurrentIncomingRequest().ioChannelFactory;
+    return *getIncomingRequestForIoChannels().ioChannelFactory;
   }
 
   void pumpMessageLoop();
@@ -1422,6 +1454,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
+  // NOTE: This must also live below `abortException` and `abortFlag`: the half of a Rust
+  //   await_js() wait that settles it reads `abortException` when it is destroyed, and destroys a
+  //   branch of `abortFlag`.
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
@@ -1566,8 +1601,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void resumeAfterIo(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
-  // Async trace resources for the awaitIo() and awaitJs() bridges. Inert if the context is not
-  // traced.
+  // The async trace resource for the awaitIo() bridge. Inert if the context is not traced.
+  // awaitJs()'s is makeAwaitJsResource().
   AsyncResource makeAwaitIoResource() const {
     KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
       KJ_IF_SOME(name, awaitIoOperationName) {
@@ -1583,12 +1618,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Set by AwaitIoOperation.
   mutable kj::Maybe<kj::StringPtr> awaitIoOperationName;
-  AsyncResource makeAwaitJsResource() const {
-    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
-      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
-    }
-    return {};
-  }
 
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.
@@ -1601,14 +1630,22 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // usage on the part of the actor, including outgoing subrequests, is attributed to the current
   // request for logging and tracing. This is a hack, we don't actually know which request
   // "caused" any particular resource usage, so this is merely our best guess.
-  //
-  // The IoChannelFactory must also be accessed through the currentIncomingRequest because it has
-  // some tracing context built in.
   IncomingRequest& getCurrentIncomingRequest() {
     KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest",
         lastDeliveredLocation);
     return incomingRequests.front();
   }
+
+  // The request whose IoChannelFactory getIoChannelFactory() returns. Without the
+  // IO_CHANNELS_FROM_RUNNING_REQUEST autogate, this is the current request. With it, it is the
+  // newest request that is still running, or the current request if every request has returned.
+  //
+  // An actor's newest request stays current after it returns, while it waits for background work.
+  // So without the autogate, a request that returned long ago can keep governing the calls that
+  // other, still-running requests make, such as calls through a long-lived JS RPC session. With it,
+  // work that a request leaves running after it returns makes its calls through the newest running
+  // request too, since we don't know which request started that work.
+  IncomingRequest& getIncomingRequestForIoChannels();
 
   // Run the given callback within the scope of this IoContext. This encapsulates the
   // setup of a number of scopes that must be entered prior to running within the
@@ -2113,13 +2150,11 @@ class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
       return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
     }).orDefault(false);
     if (hasExcessivelyExceededHeapLimit) {
-      auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
-      e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      fulfiller->reject(kj::mv(e));
+      fulfiller->reject(memoryLimitException());
     } else {
       // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
       // this promise.
-      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+      fulfiller->reject(neverSettledException());
     }
   }
 };

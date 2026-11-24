@@ -598,17 +598,25 @@ impl WorkerService {
         self.named_entrypoints.keys().map(String::as_str)
     }
 
-    /// Times starting this worker in new isolates, for `workerd bench`, as
-    /// `ffi::factory_bench_startup` does: `params` is an encoded `BenchParams` message, and the
-    /// result an encoded startup `BenchReport.Group`. Only for a config worker under
-    /// `workerd bench`, which keeps the spec to start copies from.
+    /// Times starting this worker in new isolates, for `workerd bench`: starts throwaway copies
+    /// of it as `params` (an encoded `BenchParams` message) ask, and returns the encoded startup
+    /// `BenchReport.Group`, without its name; see `bench_core::startup::time_startup`. Only
+    /// for a config worker under `workerd bench`, which keeps the spec to start copies from.
     pub async fn bench_startup(&self, params: &[u64]) -> Result<Vec<u64>> {
         let Some((service_index, spec)) = &self.config_spec else {
             return Err(kj::failed!(
                 "startup is timed only for config workers under `workerd bench`"
             ));
         };
-        Ok(ffi::factory_bench_startup(self.factory.raw(), spec, *service_index, params).await?)
+        let (factory, service_index) = (self.factory.raw(), *service_index);
+        bench_core::startup::time_startup(params, || async move {
+            ffi::factory_start_throwaway_worker(factory, spec, service_index)
+                .await
+                .map(startup_timing)
+                .map_err(|error| error.what().to_owned())
+        })
+        .await
+        .map_err(|error| kj::failed!("{error}"))
     }
 
     /// The namespace of `class_name`, if the config gives the class storage.
@@ -735,6 +743,11 @@ impl WorkerService {
         if self.channels.borrow().is_some() {
             return Err(kj::failed!("already called link()"));
         }
+        let server = channels.server.upgrade();
+        let exporter = server
+            .as_ref()
+            .and_then(|server| server.otlp_exporter(self.service_name.as_deref()));
+        ffi::worker_set_otlp_exporter(&self.worker, exporter.into());
         *self.channels.borrow_mut() = Some(Rc::new(channels));
         for namespace in self.namespaces.borrow().values() {
             if !namespace.is_linked() {
@@ -1173,5 +1186,28 @@ impl ChannelFactory {
 
     pub(crate) fn has_debug_port(&self) -> bool {
         self.0.has_debug_port
+    }
+}
+
+/// See `bench_clock_now` in bridge.rs.
+pub fn bench_clock_now() -> ffi::StartupPhaseTiming {
+    let now = bench_core::clock::now();
+    ffi::StartupPhaseTiming {
+        wall_ns: now.wall_ns,
+        cpu_ns: now.cpu_ns,
+    }
+}
+
+/// The timing of a start, as the factory measured it.
+fn startup_timing(timing: ffi::WorkerStartupTiming) -> bench_core::startup::StartupTiming {
+    let phase = |phase: ffi::StartupPhaseTiming| bench_core::Timing {
+        wall_ns: phase.wall_ns,
+        cpu_ns: phase.cpu_ns,
+    };
+    bench_core::startup::StartupTiming {
+        isolate: phase(timing.isolate),
+        script: phase(timing.script),
+        worker: phase(timing.worker),
+        total: phase(timing.total),
     }
 }

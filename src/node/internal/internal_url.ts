@@ -8,6 +8,7 @@ import {
   ERR_INVALID_FILE_URL_PATH,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_INVALID_URL,
   ERR_INVALID_URL_SCHEME,
 } from 'node-internal:internal_errors';
 import { default as urlUtil } from 'node-internal:url';
@@ -231,7 +232,15 @@ export function pathToFileURL(
       throw new ERR_INVALID_ARG_VALUE('path', filepath, 'Empty UNC servername');
     }
     const hostname = filepath.slice(prefixLength, hostnameEndIndex);
-    outURL.hostname = urlUtil.domainToASCII(hostname);
+    const asciiHostname = urlUtil.domainToASCII(hostname);
+    // The host ends at the first '/', '?' or '#', as in the hostname setter.
+    // When the server name starts with one of them (like the '?' in \\?\C:\)
+    // the host is empty, which a file URL allows, but domainToASCII still
+    // returns ''.
+    if (asciiHostname === '' && /^[^/?#]/.test(hostname)) {
+      throw new ERR_INVALID_URL(filepath.slice(hostnameEndIndex), hostname);
+    }
+    outURL.hostname = asciiHostname;
     outURL.pathname = encodePathChars(
       filepath.slice(hostnameEndIndex).replace(backslashRegEx, '/'),
       { windows }

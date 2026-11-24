@@ -241,6 +241,7 @@ mod bridge {
         type BodySink;
         async fn write(self: &BodySink, data: &[u8]) -> Result<()>;
         async fn when_write_disconnected(self: &BodySink);
+        fn abort(self: &BodySink);
 
         /// Random bytes for kj's frame masks (its `EntropySource`).
         fn fill_random(buffer: &mut [u8]);

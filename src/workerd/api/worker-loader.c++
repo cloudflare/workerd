@@ -84,13 +84,12 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
       [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
           jsg::Lock& js, IoContext& ioctx) mutable {
     // getCode() is application-provided and may resolve its promise from a different context.
-    // Binding the continuation to this context ensures that it either runs here or throws before
-    // accessing the context.
-    return getCode(js).then(js,
-        ioctx.addFunctor([compatDateValidation](jsg::Lock& js, IoContext& ioctx,
-                             WorkerCode code) -> DynamicWorkerSource {
-      return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
-    }));
+    // awaitJs() runs the conversion only in this context, and in the same continuation that hands
+    // the resulting DynamicWorkerSource, which owns KJ objects, to the returned KJ promise.
+    return ioctx.awaitJs(js, getCode(js),
+        [compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
+      return toDynamicWorkerSource(js, IoContext::current(), compatDateValidation, kj::mv(code));
+    });
   });
 
   auto isolateChannel =

@@ -144,6 +144,7 @@ export const testFileURLToPath = {
 
     // input must be a file URL
     throws(() => fileURLToPath('https://a/b/c'), {
+      name: 'TypeError',
       code: 'ERR_INVALID_URL_SCHEME',
     });
 
@@ -152,9 +153,16 @@ export const testFileURLToPath = {
       const withHost = new URL('file://host/a');
 
       throws(() => fileURLToPath(withHost), {
+        name: 'TypeError',
         code: 'ERR_INVALID_FILE_URL_HOST',
       });
     }
+
+    throws(() => fileURLToPath('file:///x', { windows: true }), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_FILE_URL_PATH',
+    });
+    throws(() => fileURLToPath('https://a/b/c'), TypeError);
 
     const windowsTestCases = [
       // Lowercase ascii alpha
@@ -349,6 +357,30 @@ export const testPathToFileURL = {
         {
           code: 'ERR_INVALID_ARG_TYPE',
         }
+      );
+
+      // A UNC server name that isn't a valid host:
+      for (const host of ['a b', 'xn--i\u00f1valid', 'a%20b', 'a:1', 'a@b']) {
+        throws(() => pathToFileURL(`\\\\${host}\\s\\x`, { windows: true }), {
+          name: 'TypeError',
+          code: 'ERR_INVALID_URL',
+          input: '\\s\\x',
+          base: host,
+        });
+      }
+      strictEqual(
+        pathToFileURL('\\\\localhost\\s\\x', { windows: true }).href,
+        'file:///s/x'
+      );
+      // As in Node, a server name starting with '/', '?' or '#' is an empty
+      // host.
+      strictEqual(
+        pathToFileURL('\\\\#x\\s\\y', { windows: true }).href,
+        'file:///s/y'
+      );
+      strictEqual(
+        pathToFileURL('\\\\[::1]\\s\\x', { windows: true }).href,
+        'file://[::1]/s/x'
       );
 
       // UNC paths on Posix are considered a single path that has backslashes:

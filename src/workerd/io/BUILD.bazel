@@ -28,16 +28,71 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "async-trace-inspector",
+    srcs = [
+        "async-trace-inspector.c++",
+    ],
+    hdrs = [
+        "async-trace-inspector.h",
+    ],
+    implementation_deps = [
+        "@workerd-v8//:v8",
+    ],
+    deps = [
+        ":async-trace",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace-stacks",
+    srcs = [
+        "async-trace-stacks.c++",
+    ],
+    hdrs = [
+        "async-trace-stacks.h",
+    ],
+    implementation_deps = [
+        "@workerd-v8//:v8",
+    ],
+    deps = [
+        ":async-trace",
+    ],
+)
+
+wd_cc_library(
+    name = "access-info",
+    hdrs = ["access-info.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "invocation-span",
+    srcs = ["invocation-span.c++"],
+    hdrs = ["invocation-span.h"],
+    implementation_deps = [
+        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":outcome_capnp",
+        ":trace",
+    ],
+)
+
+wd_cc_library(
     name = "io",
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
     #   depends on `io` but not vice versa. In practice, this appears very difficult due to the
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
+    # Do not add more files here if it is at all possible to avoid.
     # TODO(cleanup): Fix this.
     srcs = [
-        "async-trace-inspector.c++",
         "async-trace-promises.c++",
-        "async-trace-stacks.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -53,10 +108,7 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
-        "access-info.h",
-        "async-trace-inspector.h",
         "async-trace-promises.h",
-        "async-trace-stacks.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -71,17 +123,22 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        ":async-trace-inspector",
         ":async-trace-perfetto",
+        ":async-trace-stacks",
+        ":invocation-span",
         "//src/per_isolate",
-        "//src/rust/histogram",
         "//src/rust/jsg",
         "//src/workerd/api:compression",
         "//src/workerd/api:crypto-crc-impl",
+        "//src/workerd/api:crypto-endianness",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
+        "//src/workerd/util:abortable",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:stream-utils",
         "//src/workerd/util:string-buffer",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
@@ -92,6 +149,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":access-info",
         ":actor",
         ":actor-id",
         ":actor-storage_capnp",
@@ -129,6 +187,7 @@ wd_cc_library(
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:canceler",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:consume",
         "//src/workerd/util:exception",
@@ -378,10 +437,11 @@ wd_cc_library(
     name = "async-trace-perfetto",
     srcs = ["async-trace-perfetto.c++"],
     hdrs = ["async-trace-perfetto.h"],
+    implementation_deps = ["//src/workerd/util:perfetto"],
     visibility = ["//visibility:public"],
     deps = [
-        ":async-trace",
-        "//src/workerd/util:perfetto",
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -471,8 +531,26 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "worker-interface",
-    srcs = ["worker-interface.c++"],
+    name = "otlp-span-submitter",
+    srcs = ["otlp-span-submitter.c++"],
+    hdrs = ["otlp-span-submitter.h"],
+    implementation_deps = [
+        "//src/workerd/util:thread-scopes",
+        "//src/workerd/util:uuid",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/rust/otlp",
+        "//src/workerd/util:strong-bool",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+# The WorkerInterface declarations alone. Header-only: the Rust worker crate depends on it, and
+# :worker-interface depends on the crate, so the two cannot be one target.
+wd_cc_library(
+    name = "worker-interface-hdrs",
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
@@ -480,22 +558,46 @@ wd_cc_library(
         ":frankenvalue_capnp",
         ":trace",
         ":worker-interface_capnp",
-        "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
 )
 
+wd_cc_library(
+    name = "worker-interface",
+    srcs = ["worker-interface.c++"],
+    hdrs = ["worker-interface.h"],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":worker-interface-hdrs",
+        "//src/rust/worker",
+        "//src/rust/worker:bridge",
+        "//src/rust/worker:failure.rs@cxx",
+        "//src/workerd/util:autogate",
+    ],
+)
+
 kj_test(
     src = "worker-interface-test.c++",
-    deps = [":worker-interface"],
+    deps = [
+        ":worker-interface",
+        "//src/workerd/util",
+        "//src/workerd/util:stream-utils",
+    ],
 )
 
 wd_cc_benchmark(
     name = "bench-revocable-worker-interface",
     srcs = ["bench-revocable-worker-interface.c++"],
-    deps = [":worker-interface"],
+    deps = [
+        ":worker-interface",
+        "//src/workerd/util",
+        "//src/workerd/util:stream-utils",
+    ],
 )
 
 wd_cc_library(
@@ -698,10 +800,30 @@ kj_test(
 )
 
 kj_test(
+    src = "invocation-span-test.c++",
+    deps = [
+        ":invocation-span",
+        "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
+        ":io",
         ":trace",
         "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
+    src = "tracer-test.c++",
+    deps = [
+        ":io",
+        ":otlp-span-submitter",
+        ":timer-test-fixture",
+        "//src/opentelemetry:otlp_cc_proto",
+        "//src/workerd/tests:test-fixture",
     ],
 )
 

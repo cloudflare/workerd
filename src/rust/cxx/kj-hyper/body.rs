@@ -121,10 +121,13 @@ impl RustBody {
     }
 }
 
-/// A `kj::AsyncOutputStream` feeding an outgoing hyper body. Dropping it ends the body.
+/// A `kj::AsyncOutputStream` feeding an outgoing hyper body. Dropping it ends the body, unless
+/// [`BodySink::abort`] failed it first.
 pub struct BodySink {
     /// `None` for a body that is discarded (a response to HEAD).
     tx: Option<mpsc::Sender<Bytes>>,
+    /// `None` for a body that is discarded.
+    abort: Option<BodyAbort>,
     /// Bytes still to be written, for a body of declared length. A `Cell`: kj writes through
     /// `&self`, as `whenWriteDisconnected()` may be awaited alongside a write.
     remaining: Cell<Option<u64>>,
@@ -136,7 +139,18 @@ impl BodySink {
     pub fn discarding() -> Self {
         Self {
             tx: None,
+            abort: None,
             remaining: Cell::new(None),
+        }
+    }
+
+    /// Fails the body rather than letting its drop end it: kj's `abortWrite()`, which a pump
+    /// whose source failed calls before it drops the stream. The failure of the call that wrote
+    /// the body would come too late, as hyper may poll the body between the drop and the
+    /// failure.
+    pub fn abort(&self) {
+        if let Some(abort) = &self.abort {
+            abort.abort();
         }
     }
 
@@ -182,12 +196,16 @@ impl BodySink {
 }
 
 /// Ends a [`ChannelBody`] with an error, so hyper drops the connection instead of framing what
-/// was written as a complete message. Dropping it unused has no effect.
-pub struct BodyAbort(oneshot::Sender<()>);
+/// was written as a complete message. Its clones share the one abort, the first to abort wins,
+/// and dropping all of them unused has no effect.
+#[derive(Clone)]
+pub struct BodyAbort(Rc<Cell<Option<oneshot::Sender<()>>>>);
 
 impl BodyAbort {
-    pub fn abort(self) {
-        let _ = self.0.send(());
+    pub fn abort(&self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
@@ -241,12 +259,14 @@ impl ChannelBody {
 pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
     let (tx, rx) = mpsc::channel(1);
     let (abort_tx, abort_rx) = oneshot::channel();
+    let abort = BodyAbort(Rc::new(Cell::new(Some(abort_tx))));
     (
         BodySink {
             tx: Some(tx),
+            abort: Some(abort.clone()),
             remaining: Cell::new(length),
         },
-        BodyAbort(abort_tx),
+        abort,
         ChannelBody {
             rx: Some(rx),
             abort: Some(abort_rx),

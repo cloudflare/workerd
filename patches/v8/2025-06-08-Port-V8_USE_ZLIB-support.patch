@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 8 Jun 2025 16:40:37 -0400
+Subject: Port V8_USE_ZLIB support
+
+Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 8eaf2582fe897c96457c4ea7de41145240af4ef8..d554427c01de432a0e8d66184fd2c5028409d0e6 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -164,6 +164,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+ 
+ v8_flag(name = "v8_enable_test_features")
+ 
++v8_flag(
++    name = "v8_use_zlib",
++    default = True,
++)
++
+ v8_flag(name = "v8_wasm_random_fuzzers")
+ 
+ v8_flag(
+@@ -579,6 +584,7 @@ v8_config(
+         "v8_x64_16byte_stack_alignment": "V8_X64_16BYTE_STACK_ALIGNMENT",
+         "v8_support_la57": "V8_SUPPORT_LA57",
+         "v8_enable_ecma402_icu4x": "V8_ENABLE_ECMA402_ICU4X",
++        "v8_use_zlib": "V8_USE_ZLIB",
+     },
+     defines = [
+         "GOOGLE3",
+@@ -5005,6 +5011,8 @@ v8_library(
+         "@highway//:hwy",
+         "@fast_float",
+         "@simdutf",
++        "@zlib",
++        "@zlib//:compression_utils_portable",
+     ],
+ )
+ 
+diff --git a/src/snapshot/snapshot-utils.cc b/src/snapshot/snapshot-utils.cc
+index ea04fcec0ecebd409d1ed9839dd0db3ac73160a9..e67eb478a0f49fa2a6c4f338e86a7e6a5e6d686f 100644
+--- a/src/snapshot/snapshot-utils.cc
++++ b/src/snapshot/snapshot-utils.cc
+@@ -7,7 +7,7 @@
+ #include "src/base/sanitizer/msan.h"
+ 
+ #ifdef V8_USE_ZLIB
+-#include "third_party/zlib/zlib.h"
++#include <zlib.h>
+ #endif
+ 
+ namespace v8 {

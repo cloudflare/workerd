@@ -8,13 +8,13 @@
 
 #include "worker-factory.h"
 
-#include <workerd/api/bench.h>
-#include <workerd/io/actor-sqlite.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/container-client.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/server/bridge.rs.h>
+#include <workerd/server/workerd.capnp.h>
 
 #include <capnp/rpc-twoparty.h>
 #include <capnp/serialize.h>
@@ -177,6 +177,7 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   const WorkerFactory& factory;
   kj::String name;
   WorkerTimerChannel timerChannel;
+  kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter;
   kj::TaskSet waitUntilTasks;
 
   // The compiled compatibility flags of a config worker; a dynamic worker's live in its source.
@@ -202,8 +203,8 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
 
   WorkerInfo info;
   // How long the phases of compiling the worker took, which `workerd bench` reports for the
-  // throwaway copies `factory_bench_startup()` compiles.
-  api::WorkerStartupTiming startupTiming;
+  // throwaway copies `factory_start_throwaway_worker()` compiles.
+  WorkerStartupTiming startupTiming{};
 
   const Worker& getWorker() const {
     return *KJ_ASSERT_NONNULL(worker);
@@ -254,9 +255,15 @@ class RpcClient::Impl final {
   struct Session: public kj::Refcounted {
     explicit Session(kj::Own<kj::AsyncIoStream> connection)
         : connection(kj::mv(connection)),
-          rpcSystem(*this->connection) {}
+          rpcSystem(*this->connection),
+          bootstrap(rpcSystem.bootstrap()) {}
     kj::Own<kj::AsyncIoStream> connection;
     capnp::TwoPartyClient rpcSystem;
+    // The peer's bootstrap, obtained once. A bootstrap after the connection failed with calls out
+    // starts a new RPC connection over the same TwoPartyVatNetwork, which still counts the failed
+    // one as busy: capnp's check of that throws from the bootstrap call itself, instead of
+    // failing its calls as disconnected.
+    capnp::Capability::Client bootstrap;
   };
 
   Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)

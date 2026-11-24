@@ -183,8 +183,8 @@ void requireModernKeyFormat(jsg::Lock& js, kj::StringPtr format) {
 // =======================================================================================
 // Helper functions
 
-// Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
-// or if it doesn't support the given usage.
+// Throws NotSupportedError if the requested algorithm name is not a registered algorithm, and
+// InvalidAccessError if the key is incompatible with it or doesn't support the given usage.
 void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, CryptoKeyUsageSet usage) {
   // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
   //   Web IDL says that's deprecated.
@@ -192,6 +192,8 @@ void validateOperation(const CryptoKey& key, kj::StringPtr requestedName, Crypto
   // TODO(cleanup): Make this function go away. Maybe this can be rolled into the default
   //   implementations of the CryptoKey::Impl::<crypto operation>() functions.
 
+  JSG_REQUIRE(lookupAlgorithm(requestedName) != kj::none, DOMNotSupportedError,
+      "Unrecognized or unimplemented algorithm \"", requestedName, "\" requested.");
   JSG_REQUIRE(strcasecmp(requestedName.cStr(), key.getAlgorithmName().cStr()) == 0,
       DOMInvalidAccessError, "Requested algorithm \"", requestedName,
       "\" does not match this CryptoKey's algorithm \"", key.getAlgorithmName(), "\".");
@@ -846,17 +848,14 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::deriveBits(jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
-    jsg::Optional<kj::Maybe<int>> lengthParam) {
+    jsg::Optional<kj::Maybe<uint32_t>> lengthParam) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   kj::Maybe<uint32_t> length = kj::none;
   KJ_IF_SOME(maybeLength, lengthParam) {
-    KJ_IF_SOME(l, maybeLength) {
-      JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-      length = static_cast<uint32_t>(l);
-    }
+    length = maybeLength;
   }
 
   return js.evalNow([&] {
@@ -885,8 +884,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
       size_t minimumLength;
     };
 
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     auto exportedKey = key.impl->exportKey(js, kj::mv(format));
 
@@ -1027,10 +1025,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
 
   return js.evalNow([&] {
     requireModernKeyFormat(js, format);
-    // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
-    //   but Web IDL says that's deprecated.
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
-        key.getAlgorithmName(), " key.");
+    key.impl->requireExportable();
 
     return key.impl->exportKey(js, format);
   });

@@ -2,16 +2,11 @@
 
 An informal specification of EventSource as implemented in workerd,
 derived from, and kept in lockstep with, the test suite in this directory.
-**The tests are the normative artifact.** Both the C++ implementation
-(`src/workerd/api/eventsource.{h,c++}`) and the TypeScript implementation
-(`src/per_isolate/eventsource/eventsource.ts`, behind the
-`TS_EVENT_SOURCE` autogate) are covered. The TypeScript class subclasses
+**The tests are the normative artifact.** The implementation is
+`src/per_isolate/eventsource/eventsource.ts`, whose class subclasses the C++
 EventTarget through the seam in
 `src/per_isolate/events/event-target-internals.ts` and does its I/O through
-`RequestIo` (`src/workerd/api/request-io.{h,c++}`), so dispatch, fetch
-and request binding are shared; the divergences are in
-class shape, in event stream parsing, in the Last-Event-ID header, and in
-how reads are driven.
+`RequestIo` (`src/workerd/api/request-io.{h,c++}`).
 
 ## Interface
 
@@ -55,13 +50,17 @@ dictionary EventSourceInit {
   TypeError for any other receiver. Members are enumerable, like every JSG
   member; names, lengths and constants' configurability follow
   `spec_compliant_property_attributes`.
+- Where the class does not look like JSG's: its constructor inherits from
+  EventTarget's, as WebIDL requires; its `prototype` is non-writable
+  whatever `immutable_api_prototypes` says; and calling it without `new`
+  throws the language's TypeError.
 
 ## Core semantics
 
 - **Request:** a GET through the init's `fetcher`, else the global
   fetch(), with `Accept: text/event-stream`, `Cache-Control: no-cache`, and
-  `Last-Event-ID` on a reconnection that has one (whitespace trimmed in
-  the TypeScript implementation, #16).
+  `Last-Event-ID` on a reconnection that has one: the last dispatched
+  event's ID, with HTTP whitespace trimmed, as Headers trims any value.
 - **Response:** a status other than 200, or a content type other than
   `text/event-stream` (parameters allowed), fails the EventSource for good
   with an `AbortError`. A redirect moves `url` and the messages' `origin`.
@@ -70,23 +69,31 @@ dictionary EventSourceInit {
   without reconnecting.
 - **Reconnection:** the end of a connected EventSource's stream fires an
   'error' (`The server disconnected.`) in CONNECTING and reconnects after
-  the reconnection time, 2 seconds unless a `retry` field set it, clamped to
-  1 to 10 seconds. The end of an EventSource.from() stream closes it.
-- **Parsing** follows the HTML standard in the TypeScript implementation;
-  the C++ parser departs from it in the cases of ledger #4 to #9. The
-  stream is decoded as UTF-8 with replacement. A string chunk from a
-  from() stream is read as its UTF-8 bytes, any buffer or view as its
-  bytes; anything else fails the EventSource with the TypeError the
+  the reconnection time, 2 seconds unless a `retry` field of ASCII digits
+  set it, clamped to 1 to 10 seconds (not pinned: observable only through
+  reconnection timing). The end of an EventSource.from() stream closes it.
+- **Parsing** follows the HTML standard, where an empty `event` field
+  dispatches a 'message', a BOM is stripped however the first chunks split
+  it, an `id` containing U+0000 is ignored, a `data` field with an empty
+  value dispatches empty data, and a CRLF split across chunks ends one
+  line. The stream is decoded as UTF-8 with replacement. A string chunk
+  from a from() stream is read as its UTF-8 bytes, any buffer or view as
+  its bytes; anything else fails the EventSource with the TypeError the
   streams implementation's byte reads throw.
 - **Events:** a trusted OpenEvent (whose class is not a global), trusted
   MessageEvents carrying `lastEventId` and the URL's origin (null for a
   from() source), and trusted ErrorEvents whose `error` says why. None
-  bubbles or is cancelable.
+  bubbles or is cancelable. Messages are dispatched from the reaction to
+  the read that produced them, held back by a Durable Object's input gate
+  (not pinned: no cheap observable).
 - **Event handlers:** onopen, onmessage and onerror are HTML event handler
   attributes, positioned at first assignment and kept across reassignment;
   any other `on<type>` property is called as EventTarget calls it.
-- **close()** is idempotent and fires nothing. Callbacks resumed by another
-  request do nothing, and close() from another request throws.
+- **close()** is idempotent and fires nothing. A listener that closes the
+  EventSource drops the rest of the messages read with that one. Closing
+  an EventSource.from() source cancels its stream, as does an error that
+  closes it. Callbacks resumed by another request do nothing, and close()
+  from another request throws.
 - **Listener exceptions** under `spec_compliant_dispatch_exceptions`: a
   throwing 'open' or 'message' listener's exception is reported, the
   remaining listeners run, then the EventSource errors out with it and the
@@ -94,13 +101,11 @@ dictionary EventSourceInit {
   is only reported. Without the flag the first throwing 'message' listener
   ends the dispatch, unreported, and errors the EventSource out.
 - **Lifetime:** a pending read retains its EventSource; once the stream has
-  ended, nothing does.
-- **Prototype pollution:** the TypeScript implementation reaches built-ins
-  only through primordials. The C++ implementation calls no built-in
-  either, except that reading the TypeScript streams, the native pump
-  resolves a promise with another, which looks up
-  `Promise.prototype.then`; `pollution.js` leaves that unpatched for the
-  `cpp-ts-streams` cell.
+  ended, nothing does, nor once a from() source is closed and its read
+  cancelled (not pinned). An event wrapped before dispatch keeps its target
+  alive until the event is swept, so the EventSource can outlive its
+  stream's end by a major GC; `gc.js` allows three.
+- **Prototype pollution:** built-ins are reached only through primordials.
 
 ## Compatibility flags
 
@@ -108,57 +113,32 @@ dictionary EventSourceInit {
 | --- | --- | --- |
 | `set_tostring_tag` (2024-09-26) | `[object EventSource]` branding | `legacyToStringTag` |
 | `spec_compliant_dispatch_exceptions` (2026-09-15) | reporting listener exceptions | `legacyThrowingMessageListener` |
-| `spec_compliant_property_attributes` (dateless) | accessor names; lengths; non-configurable constants; the global as an own property | the main cells (the `-opt-in` cells enable it) |
-| `immutable_api_prototypes` (dateless) | C++ constructor's `prototype` non-writable | the main cells (the `-opt-in` cells enable it) |
-| `typescript_implemented_streams` (experimental) | the streams an EventSource reads | the main cells (the `-ts-streams` cells enable it) |
+| `spec_compliant_property_attributes` (dateless) | accessor names; lengths; non-configurable constants; the global as an own property | the main cells (the `-opt-in` cell enables it) |
+| `immutable_api_prototypes` (dateless) | nothing: the constructor's `prototype` is non-writable regardless | `constructorAttributes` (the `-opt-in` cell enables it) |
+| `typescript_implemented_streams` (experimental) | the streams an EventSource reads | the `eventsource` and `-opt-in` cells (the `-ts-streams` cell enables it) |
 
-The main cells pin the two dated flags on; the legacy cells pin them off
+The main cells pin the two dated flags on; the legacy cell pins them off
 by their disable names, so every cell keeps its `@all-compat-flags`
 variant. The main cells also pin `nodejs_compat` (`node:assert`,
 `node:util`), `enable_weak_ref` and `rpc` (for `gc.js`), and
 `streams_enable_constructors`.
 
-## Divergence ledger (C++ vs TypeScript)
-
-| # | Area | C++ | TypeScript | Pinned in |
-| --- | --- | --- | --- | --- |
-| 1 | Constructor static inheritance | `getPrototypeOf(EventSource) === Function.prototype` | `=== EventTarget` | `prototypeChains` |
-| 2 | Constructor's `prototype` | writable unless `immutable_api_prototypes` | never writable | `constructorAttributes` |
-| 3 | Calling the constructor without `new` | JSG's TypeError | the language's TypeError | `constructorRequiresNew` |
-| 4 | Empty `event` field | an event of type `''` | a 'message' | `emptyEventField` |
-| 5 | BOM split across chunks | not stripped | stripped | `bomSplitAcrossChunks` |
-| 6 | `id` field containing U+0000 | taken | ignored | `idWithNullIsIgnored` |
-| 7 | `data` field with an empty value | dispatches nothing | dispatches empty data | `formatFieldData` |
-| 8 | CRLF split across chunks | ends two lines | ends one | `crlfSplitAcrossChunks` |
-| 9 | Last event ID across a reconnection | the last `id` field parsed | the last dispatched event's | `formatDataBeforeFinalEmptyLine` |
-| 10 | A listener closes the EventSource | the rest of the messages read with that one are dispatched | dropped | `closeFromAListener` |
-| 11 | close() of a from() source | goes on reading the stream | cancels it | `closeCancelsAFromStream` |
-| 12 | `retry` value | anything KJ parses as a `uint32_t`; larger values ignored | ASCII digits only; any length, clamped | not pinned: observable only through reconnection timing |
-| 13 | Message dispatch | from a task per write | from the reaction to each read | not pinned: no cheap observable. Both are held by a Durable Object's input gate: a native body's read resumes through `IoContext::run()`, and a JavaScript stream's chunks are enqueued under the input lock |
-| 14 | A from() source closed while a read is pending | retained until the read settles | collectable (its read is cancelled, #11) | not pinned: the C++ side is a leak |
-| 15 | Collection after the last event | on the next major GC | one major GC later: an event wrapped before dispatch keeps its target alive until it is swept | not pinned: `gc.js` allows three collections |
-| 16 | Last-Event-ID with leading or trailing whitespace | sent as parsed | trimmed, as Headers trims values | `lastEventIdWhitespace` |
-
-The C++ implementation also logs a from() stream's non-byte chunk error
-twice; the TypeScript one, once. Not in the ledger, as only the logs see
-it.
-
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | static and prototype members, attributes, names and lengths; key order; prototype chains (#1); constructor attributes (#2); runtime class marks; toStringTag branding; dispose member; no own instance properties; the global |
+| `api-surface.js` | static and prototype members, attributes, names and lengths; key order; prototype chains; constructor attributes; runtime class marks; toStringTag branding; dispose member; no own instance properties; the global |
 | `inspect.js` | `util.inspect()` of an EventSource and of `EventSource.prototype` |
-| `construction.js` | `new` required (#3); URL conversion and errors; absolute URLs; init, `withCredentials` and `fetcher` checks; conversion order; initial state; module scope refused |
+| `construction.js` | `new` required; URL conversion and errors; absolute URLs; init, `withCredentials` and `fetcher` checks; conversion order; initial state; module scope refused |
 | `illegal-invocation.js` | every member brand-checked against every non-EventSource receiver |
 | `from.js` | argument checks; locked and disturbed streams; no receiver; synchronous open; reading to the end; chunk kinds; string chunks; non-byte chunks |
-| `parser.js` | data joining; ignored lines; leading space; line endings; unterminated events; BOMs; UTF-8; named events; last event ID; #4 to #8; WPT format cases |
+| `parser.js` | data joining; ignored lines; leading space; line endings, split CRLFs included; unterminated events; BOMs, split ones included; UTF-8; named and empty event fields; last event ID, `id` with U+0000 included; empty data; WPT format cases |
 | `request.js` | request headers; a rejected fetch() closes |
 | `response.js` | status; content type; redirects; responses without a body |
-| `reconnection.js` | end of stream reconnects; Last-Event-ID; #16; #9; `retry` |
+| `reconnection.js` | end of stream reconnects; Last-Event-ID, its whitespace, and the last dispatched event's ID; `retry` |
 | `event-shapes.js` | OpenEvent, MessageEvent and ErrorEvent shapes |
 | `handlers.js` | default null; positional ordering; `on<type>` for a named event |
-| `close.js` | idempotent and silent; dispose, which ignores a patched close(); closing from a listener (#10); cancelling a from() stream (#11) |
+| `close.js` | idempotent and silent; dispose, which ignores a patched close(); closing from a listener; cancelling a from() stream |
 | `listener-exceptions.js` | throwing 'message', 'open' and 'error' listeners |
 | `context.js` | cross-request callbacks and close(), with and without `handle_cross_request_promise_resolution`; close during reconnection; same-request delivery |
 | `gc.js` | pending reads retain, ended streams release, for native and JavaScript sources and in a Durable Object |
@@ -167,7 +147,7 @@ it.
 | `legacy-listener-exceptions.js` | the first throwing listener ends the dispatch, unreported |
 | `server.js` | the event streams connected EventSources fetch, through `subrequest` |
 | `context-worker.js` | `context.js`'s fixture services |
-| `which-impl.js` | the cell's implementation and the flags the suite branches on |
+| `flags.js` | the flags the suite branches on |
 | `helpers.js` | descriptor attribute strings; streams; event waiting and recording |
 
 ## Web Platform Tests
@@ -182,8 +162,6 @@ EventSource.from() or `server.js`: `format-bom-2`,
 
 ## Tests that live elsewhere (by design)
 
-- `src/workerd/api/eventsource-test.c++`: a unit test of the C++
-  implementation's native pump, removed with it.
 - `eventSourceLegacyError` in
   `src/workerd/api/tests/legacy-dispatch-exceptions-test.js`, which pins
   the legacy dispatch policy across several APIs at once.

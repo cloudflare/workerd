@@ -25,6 +25,7 @@
 
 import timers from 'node:timers';
 import timersPromises from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { throws, strictEqual, deepStrictEqual, rejects, ok } from 'node:assert';
 
 export const testEnroll = {
@@ -518,5 +519,36 @@ export default {
       });
     }
     return new Response();
+  },
+};
+
+export const promisifiedTimers = {
+  test() {
+    strictEqual(promisify(timers.setTimeout), timersPromises.setTimeout);
+    strictEqual(promisify(timers.setImmediate), timersPromises.setImmediate);
+  },
+};
+
+export const testInvalidCallback = {
+  test() {
+    class Foo {}
+    const cases = [
+      [undefined, 'undefined'],
+      [null, 'null'],
+      [1, 'type number (1)'],
+      ['x', "type string ('x')"],
+      [{}, 'an instance of Object'],
+      [new Foo(), 'an instance of Foo'],
+      [Object.create(null), '[Object: null prototype] {}'],
+    ];
+    for (const fn of [timers.setTimeout, timers.setInterval]) {
+      for (const [value, received] of cases) {
+        throws(() => fn(value, 1), {
+          name: 'TypeError',
+          code: 'ERR_INVALID_ARG_TYPE',
+          message: `The "callback" argument must be of type function. Received ${received}`,
+        });
+      }
+    }
   },
 };

@@ -9,7 +9,6 @@
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #ifdef WORKERD_FUZZILLI
 #include <workerd/api/fuzzilli.h>
 #endif
@@ -39,6 +38,8 @@
 
 #include <v8-microtask-queue.h>
 
+#include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -240,7 +241,34 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
-    response.accept(200, "OK", headers);
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    // A peer that asked for TLS from the start must not see the connection open before it is
+    // secure. The handler can't run that handshake, so it accepts the connection itself once it
+    // has made it secure further along. WorkerEntrypoint::connect() lets such a connection through
+    // only when connect_handler_immediate_tls is enabled.
+    kj::Maybe<kj::Rc<ConnectAcceptance>> acceptance;
+    if (settings.useTls) {
+      KJ_ASSERT(FeatureFlags::get(js).getConnectHandlerImmediateTls());
+      acceptance = kj::rc<ConnectAcceptance>(response, ioContext.getHeaderTable());
+    } else {
+      response.accept(200, "OK", headers);
+    }
+    kj::ConstString unacceptedReason =
+        "The connect() handler finished without accepting a connection that requested "
+        "secureTransport 'on'. Call socket.accept() once the connection is secure."_kjc;
+    // `response` goes away once this request is over, and the handler's socket can outlive it, so
+    // the acceptance must give `response` up however the handler finishes: by returning or
+    // throwing, synchronously or asynchronously, or by being canceled. Set up before anything below
+    // can throw. On a normal return, it moves into the returned promise's attachments.
+    auto abandonAcceptance = kj::defer(
+        [acceptance = acceptance.map([](kj::Rc<ConnectAcceptance>& a) { return a.addRef(); }),
+            reason = unacceptedReason.clone()]() mutable {
+      KJ_IF_SOME(a, acceptance) {
+        a->abandon(reason);
+      }
+    });
 
     // Using neuterable stream to manage lifetime of stream promises. We MUST neuter this when the
     // promise returned to the caller resolves because `connection` is owned by the caller and will
@@ -251,13 +279,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     });
     KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
-    auto& ioContext = IoContext::current();
-    jsg::Lock& js = lock;
-
-    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
+    // A peer that asked for TLS from the start shows up as secureTransport 'on', which tells the
+    // handler to call accept() once it has made the connection secure. Otherwise, support startTls
+    // if the transport that delivered this CONNECT offered a tlsStarter slot.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
-    KJ_IF_SOME(starter, settings.tlsStarter) {
+    if (settings.useTls) {
+      secureTransport = SecureTransportKind::ON;
+    } else KJ_IF_SOME(starter, settings.tlsStarter) {
       if (FeatureFlags::get(lock).getConnectHandlerStartTls()) {
         KJ_IF_SOME(s, starter) {
           // The transport can run a real handshake on this connection -- a TCP listener holding a
@@ -276,6 +305,13 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
       }
     }
 
+    kj::Own<kj::AsyncIoStream> socketConnection = ownConnection.addRef().toOwn();
+    KJ_IF_SOME(a, acceptance) {
+      // Nothing crosses the connection until the handler accepts it. See whenAccepted().
+      socketConnection = kj::newPromisedStream(a->whenAccepted().then(
+          [connection = kj::mv(socketConnection)]() mutable { return kj::mv(connection); }));
+    }
+
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
@@ -285,17 +321,29 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // The handler is also the server side of any TLS upgrade, so there is no peer name to verify:
     // both starters set up above ignore the hostname they are given. `host` is passed as the
     // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
-    jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::str(host),
-            SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
-            SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(socketConnection), kj::mv(clientAddress),
+        kj::str(host), SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
+        SocketProtocol::TCP, kj::str(host) /* domain */, false /* isDefaultFetchPort */, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
-    // connection is already open at this point, exception handling is not required.
+    // connection is already open at this point, exception handling is not required. This holds
+    // even while the connection waits for accept(): the handler needs its socket to make the
+    // connection secure, and the peer's `opened` is what waits.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+    KJ_IF_SOME(a, acceptance) {
+      jsSocket->setAcceptance(ioContext.addObject(a.addRef()));
+    }
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+    auto result = ioContext.awaitJs(js, kj::mv(promise));
+    KJ_IF_SOME(a, acceptance) {
+      // A handler that returns normally without accepting is an error in the handler: throwing
+      // fails the connection and reports it like any other exception the handler throws.
+      result = result.then([a = a.addRef(), reason = kj::mv(unacceptedReason)]() mutable {
+        JSG_REQUIRE(!a->abandon(reason), Error, reason);
+      });
+    }
+    return result.attach(kj::mv(span), kj::mv(abandonAcceptance), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");
@@ -892,30 +940,31 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
-jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
+jsg::Promise<kj::Array<capnp::word>> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     bench::BenchParams::Reader params) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Benchmarks are not currently supported with Service Workers syntax.");
   jsg::Lock& js = lock;
-  auto& typeHandler = lock.getWorker().getIsolate().getApi().getBenchTypeHandler(lock);
-  auto handlers = JSG_REQUIRE_NONNULL(typeHandler.tryUnwrap(js, eh.self.getHandle(js)), Error,
-      "Entrypoint does not export a bench() function.");
-  auto benchHandler = JSG_REQUIRE_NONNULL(
-      kj::mv(handlers.bench), Error, "Entrypoint does not export a bench() function.");
-  auto controller = js.alloc<BenchController>(params);
-  return js
-      .tryCatch(
-          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
-          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
-      .then(js,
-          IoContext::current().addFunctor(
-              [controller = controller.addRef()](
-                  jsg::Lock& js) mutable { return controller->runCases(js); }),
-          [](jsg::Lock& js, jsg::Value exception) {
-    return js.resolvedPromise(BenchGroupResult{
-      .error = describeBenchException(js, exception),
-    });
+  auto& api = lock.getWorker().getIsolate().getApi();
+  v8::Local<v8::Value> ctx = js.v8Undefined();
+  KJ_IF_SOME(c, eh.getCtx()) {
+    ctx = api.wrapExecutionContext(js, kj::mv(c));
+  }
+  capnp::MallocMessageBuilder paramsMessage;
+  paramsMessage.setRoot(params);
+  auto group = api.runBench(js, eh.self.getHandle(js), eh.env.getHandle(js), ctx,
+      capnp::messageToFlatArray(paramsMessage));
+  return js.toPromise(group).then(js, [](jsg::Lock& js, jsg::Value value) {
+    auto handle = value.getHandle(js);
+    KJ_ASSERT(handle->IsArrayBuffer(), "the bench runner resolves with an ArrayBuffer");
+    auto buffer = handle.As<v8::ArrayBuffer>();
+    auto bytes = kj::arrayPtr(static_cast<const kj::byte*>(buffer->Data()), buffer->ByteLength());
+    KJ_ASSERT(bytes.size() % sizeof(capnp::word) == 0);
+    // Copied, so that the message is aligned to words.
+    auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+    words.asBytes().copyFrom(bytes);
+    return words;
   });
 }
 
@@ -1084,7 +1133,7 @@ void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip
 }
 
 kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
-  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+  return dnsOverrides.find(hostname);
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
@@ -1334,6 +1383,14 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
     return p.getHandle(js);
   }
   constexpr auto kSpecifier = "node:buffer"_kj;
+  // This loads the module on first access. With the new module registry, a require() at
+  // evaluation depth 0 drains the microtask queue, so a first access during a request would run
+  // the Worker's pending microtasks inside this getter. node:buffer is a synchronous built-in
+  // that settles without a drain, so it is resolved as if nested in a module evaluation.
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     KJ_IF_SOME(p, bufferValue) {
       // There's a chance that resolving the module caused side-effects
@@ -1402,6 +1459,11 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
     }
   })();
 
+  // Resolved as if nested in a module evaluation, for the reason given in getBuffer().
+  kj::Maybe<jsg::Lock::ModuleEvaluationScope> scope;
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    scope.emplace(js);
+  }
   KJ_IF_SOME(module, js.resolveInternalModule(specifier)) {
     KJ_IF_SOME(p, processValue) {
       // There's a chance that resolving the module caused side-effects

@@ -1841,4 +1841,42 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  websocketStandardUrlAndExtensions @207 :Bool
+      $compatEnableFlag("websocket_standard_url_and_extensions")
+      $compatDisableFlag("websocket_legacy_url_and_extensions");
+  # Makes the WebSocket constructor and attributes follow the WHATWG WebSockets spec. The URL is
+  # parsed with the WHATWG URL parser, `http:` and `https:` URLs are accepted and mapped to `ws:` and
+  # `wss:`, and `url` returns the parsed URL serialized, not the string passed in. The URL the
+  # connection requests is built from that serialization, so its path is normalized by the WHATWG
+  # rules rather than by the KJ URL parser alone, which follows neither those nor RFC 3986. Relative
+  # URLs still throw a SyntaxError, because a Worker has no base URL. Once the connection is open,
+  # `protocol` and `extensions` are the empty string when the server selected none, not null.
+  # Protocols passed to the constructor are compared case-insensitively, so `["echo", "Echo"]`
+  # throws a SyntaxError as repeated values.
+
+  fetchInvalidResponseTypeError @208 :Bool
+      $compatEnableFlag("fetch_invalid_response_type_error")
+      $compatDisableFlag("fetch_invalid_response_legacy_error");
+  # When a server's response head doesn't parse, for example because a header value contains a NUL
+  # byte or the status line is malformed, `fetch()` rejects with a TypeError, as the Fetch spec
+  # requires for a network error. Without the flag it rejects with an Error. The message is
+  # "Server returned invalid HTTP response: " followed by the reason either way.
+  #
+  # The same goes for a connection that couldn't be made because its host didn't resolve or its
+  # TLS handshake failed, where the message is "Network connection failed: " followed by the
+  # cause.
+
+  connectHandlerImmediateTls @209 :Bool
+      $compatEnableFlag("connect_handler_immediate_tls")
+      $experimental;
+  # Lets a connect() handler serve a connection whose peer asked for TLS from the start, as another
+  # Worker does by calling `connect()` on a service binding with `secureTransport: 'on'`. The
+  # handler can't run the handshake itself, so it makes the connection secure further along, for
+  # example by opening its own upstream socket with `secureTransport: 'on'`. It then calls
+  # `socket.accept()`, and only then does the peer's `opened` resolve and its writes start flowing.
+  # The handler's socket reports such a connection as `socket.secureTransport` 'on', even though
+  # it carries plaintext between the peer and the handler. A handler that returns, throws or
+  # closes its socket before calling accept() fails the connection, and the peer's `opened`
+  # rejects. Without the flag, such connections are refused before the handler runs.
 }

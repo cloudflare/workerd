@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/snapshot.h>
@@ -68,8 +67,11 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
-  const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
-      jsg::Lock& lock) const override;
+  v8::Local<v8::Promise> runBench(jsg::Lock& lock,
+      v8::Local<v8::Value> handler,
+      v8::Local<v8::Value> env,
+      v8::Local<v8::Value> ctx,
+      kj::ArrayPtr<const capnp::word> params) const override;
   kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&> tryGetEventListenerCallbackTypeHandler(
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(

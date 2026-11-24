@@ -96,9 +96,13 @@ import type {
 import type { InspectOptions } from 'node:util';
 import type { Writable } from 'node:stream';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
+import { default as urlUtil } from 'node-internal:url';
 
 import { inspect } from 'node-internal:internal_inspect';
+import { isIP, isIPv4, isIPv6 } from 'node-internal:internal_net_ip';
 import type { FixedLengthArray } from 'node-internal:internal_utils';
+
+export { isIP, isIPv4, isIPv6 };
 
 const kInspect = inspect.custom;
 
@@ -172,26 +176,6 @@ function releaseBoundSource(socket: Socket): void {
   }
   socket[kBoundSource] = null;
 }
-
-// IPv4 Segment
-const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
-const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`;
-const IPv4Reg = new RegExp(`^${v4Str}$`);
-
-// IPv6 Segment
-const v6Seg = '(?:[0-9a-fA-F]{1,4})';
-const IPv6Reg = new RegExp(
-  '^(?:' +
-    `(?:${v6Seg}:){7}(?:${v6Seg}|:)|` +
-    `(?:${v6Seg}:){6}(?:${v4Str}|:${v6Seg}|:)|` +
-    `(?:${v6Seg}:){5}(?::${v4Str}|(?::${v6Seg}){1,2}|:)|` +
-    `(?:${v6Seg}:){4}(?:(?::${v6Seg}){0,1}:${v4Str}|(?::${v6Seg}){1,3}|:)|` +
-    `(?:${v6Seg}:){3}(?:(?::${v6Seg}){0,2}:${v4Str}|(?::${v6Seg}){1,4}|:)|` +
-    `(?:${v6Seg}:){2}(?:(?::${v6Seg}){0,3}:${v4Str}|(?::${v6Seg}){1,5}|:)|` +
-    `(?:${v6Seg}:){1}(?:(?::${v6Seg}){0,4}:${v4Str}|(?::${v6Seg}){1,6}|:)|` +
-    `(?::(?:(?::${v6Seg}){0,5}:${v4Str}|(?::${v6Seg}){1,7}|:))` +
-    ')(?:%[0-9a-zA-Z-.:]{1,})?$'
-);
 
 const TIMEOUT_MAX = 2 ** 31 - 1;
 
@@ -331,6 +315,14 @@ export class BoundSocket {
 export type LocalAddressInfo = Omit<AddressInfo, 'family'> & {
   family?: string;
 };
+
+// Node's lookup converts a host name to ASCII (punycode); connect() accepts
+// only ASCII. A name with URL delimiters or '%', which the URL host parser
+// would cut or decode, or one that fails to convert, is left for connect().
+function toASCIIHost(host: string): string {
+  if (!/[\u0080-\uffff]/.test(host) || /[/?#\\:%]/.test(host)) return host;
+  return urlUtil.domainToASCII(host) || host;
+}
 
 function familyOf(address: string): string | undefined {
   switch (isIP(address)) {
@@ -671,7 +663,14 @@ export class Server extends EventEmitter {
       socket.pause();
     }
     this.emit('connection', socket);
-    if (!socket.isPaused() && !socket._handle.reading) {
+    // A 'connection' listener may have destroyed the socket, dropping its
+    // handle.
+    if (
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      socket._handle != null &&
+      !socket.isPaused() &&
+      !socket._handle.reading
+    ) {
       tryReadStart(socket);
     }
 
@@ -735,10 +734,11 @@ export declare class Socket extends _Socket {
     // upgrade) never run two loops - and thus two BYOB reads - against the
     // same reader at once.
     readLoopActive?: boolean;
-    // Set by a TLS upgrade before it releases this handle's reader and
-    // writer and carries the connection over to a new handle: the read
-    // loop's pending read then rejects, which is not a failure.
-    handedOver?: boolean;
+    // Set when the read loop's pending read is about to reject and that is
+    // not a failure: a TLS upgrade releases this handle's reader and carries
+    // the connection over to a new handle, or a JSStreamSocket's Duplex
+    // closes before its end, which errors the handle's readable.
+    readRejectionExpected?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -1354,8 +1354,15 @@ Socket.prototype._destroy = function (
 
   releaseBoundSource(this);
 
-  if (this._handle != null) {
-    this._handle.socket.close().then(
+  const handle = this._handle;
+  if (handle != null) {
+    // The socket has no handle from here on, as in Node: bufferSize reads
+    // undefined and the byte counters read the totals kept below.
+    this[kBytesRead] = handle.bytesRead;
+    this[kBytesWritten] = handle.bytesWritten;
+    this.resetAndClosing = false;
+    this._handle = null;
+    handle.socket.close().then(
       () => {
         cleanupAfterDestroy(this, cb, exception);
       },
@@ -1582,6 +1589,10 @@ Object.defineProperties(Socket.prototype, {
 
       if (!writableBuffer) return undefined;
 
+      if (!data) {
+        return this.writableLength + bytes;
+      }
+
       if (Array.isArray(data)) {
         // Was a writev, iterate over chunks to get total length
         for (let i = 0; i < data.length; i++) {
@@ -1602,19 +1613,23 @@ Object.defineProperties(Socket.prototype, {
             );
           }
         }
-      } else if (data) {
+      } else if (typeof data !== 'string') {
         // Writes are either a string or a Buffer.
-        if (typeof data !== 'string') {
-          bytes += data.length;
-        } else {
-          bytes += Buffer.byteLength(data, encoding);
-        }
+        bytes += data.length;
       } else {
-        const flushed =
-          this._handle != null
-            ? this._handle.bytesWritten
-            : this[kBytesWritten];
-        return this.writableLength + flushed;
+        bytes += Buffer.byteLength(data, encoding);
+      }
+
+      // Writes queued behind the pending one.
+      const queued = writableBuffer as unknown as {
+        chunk: Buffer | string;
+        encoding: NodeJS.BufferEncoding;
+      }[];
+      for (const el of queued) {
+        bytes +=
+          el.chunk instanceof Buffer
+            ? el.chunk.length
+            : Buffer.byteLength(el.chunk, el.encoding);
       }
 
       return bytes;
@@ -1685,11 +1700,6 @@ function cleanupAfterDestroy(
   error?: Error
 ): void {
   const isException = error != null;
-  if (socket._handle != null) {
-    socket[kBytesRead] = socket._handle.bytesRead;
-    socket[kBytesWritten] = socket._handle.bytesWritten;
-    socket.resetAndClosing = false;
-  }
   socket[kLastWriteQueueSize] = 0;
   socket[kSocketInfo] = null;
 
@@ -1866,7 +1876,7 @@ function initializeConnection(
       // would replace the synthetic host address here, from handle.opened.
       socket[kBoundSource] = concreteLocal(socket[kBoundSource]);
 
-      const handle = inner.connect(`${host}:${port}`, {
+      const handle = inner.connect(`${toASCIIHost(`${host}`)}:${port}`, {
         // The Duplex owns the half-open policy: with allowHalfOpen false,
         // Readable's endReadableNT schedules endWritableNT, which calls end()
         // a tick after 'end' and so flushes whatever was queued (the socket's
@@ -1946,6 +1956,25 @@ function initializeConnection(
         }
       );
     } catch (err) {
+      if (
+        isIP(address) === 0 &&
+        err instanceof TypeError &&
+        err.message.startsWith('Specified address')
+      ) {
+        // connect() rejects a host name that is not a valid address before
+        // any lookup, where Node's getaddrinfo fails with ENOTFOUND. Node
+        // never looks up an IP literal, so those keep the platform's error. The
+        // platform's error keeps its message and gains the properties Node
+        // gives a failed lookup, which Node reports through 'lookup' first.
+        const { code, errno, syscall, hostname } = new GetAddrInfoException(
+          'ENOTFOUND',
+          address
+        );
+        Object.assign(err, { code, errno, syscall, hostname });
+        nextTick(() =>
+          socket.emit('lookup', err, undefined, undefined, address)
+        );
+      }
       socket.destroy(err as Error);
     }
   };
@@ -2029,9 +2058,10 @@ export function onConnectionClosed(this: Socket): void {
   // Nobody is reading (the socket is paused or stopped on backpressure), so
   // no read will observe the connection's end: end the readable here.
   // push(null) is a no-op if it already has; read(0) lets 'end' fire on a
-  // socket nobody is reading, as in Node.
+  // socket nobody is reading, as in Node. As in startRead(), it is the
+  // Readable's own read(0): the socket's read() override would start reading.
   this.push(null);
-  this.read(0);
+  Duplex.prototype.read.call(this, 0);
 }
 
 async function startRead(socket: Socket): Promise<void> {
@@ -2142,12 +2172,16 @@ async function startRead(socket: Socket): Promise<void> {
     }
   } catch (err) {
     // A pending read rejects when the socket is destroyed (its stream is
-    // closing) or when a TLS upgrade releases this loop's reader (the
-    // handle is handed over; the parent socket keeps pointing at it):
-    // neither is news. Anything else - a failing generator or buffer
-    // (above), a read the runtime refuses - destroys the socket with the
-    // error rather than leaving it open and silent.
-    if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
+    // closing) or when the handle expects it (a TLS upgrade released this
+    // loop's reader, or a JSStreamSocket's Duplex closed): neither is news.
+    // Anything else - a failing generator or buffer (above), a read the
+    // runtime refuses - destroys the socket with the error rather than
+    // leaving it open and silent.
+    if (
+      socket._handle === handle &&
+      !handle.readRejectionExpected &&
+      !socket.destroyed
+    ) {
       socket.destroy(streamFailureError(handle.socket, 'read', err as Error));
     }
   } finally {
@@ -2362,22 +2396,6 @@ export function setDefaultAutoSelectFamilyAttemptTimeout(val: unknown): void {
   validateInt32(val, 'val', 1);
   if (val < 10) val = 10;
   autoSelectFamilyAttemptTimeout = val as number;
-}
-
-export function isIP(input: unknown): number {
-  if (isIPv4(input)) return 4;
-  if (isIPv6(input)) return 6;
-  return 0;
-}
-
-export function isIPv4(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv4Reg.test(input as string);
-}
-
-export function isIPv6(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv6Reg.test(input as string);
 }
 
 // ======================================================================================

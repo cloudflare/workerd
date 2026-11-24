@@ -1380,13 +1380,29 @@ export const zlibNotStringOrBuffer = {
       [1, 2, 3],
       { foo: 'bar' },
     ]) {
-      assert.throws(
-        () => zlib.deflateSync(input),
-        // TODO(soon): Use same error code as NodeJS
-        {
+      assert.throws(() => zlib.deflateSync(input), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          /^The "buffer" argument must be of type string or an instance of Buffer, TypedArray, DataView, or ArrayBuffer\. Received /,
+      });
+      for (const fn of [
+        zlib.deflate,
+        zlib.gzip,
+        zlib.brotliCompress,
+        zlib.zstdCompress,
+      ]) {
+        assert.throws(() => fn(input, () => {}), {
+          code: 'ERR_INVALID_ARG_TYPE',
           name: 'TypeError',
-        }
-      );
+        });
+      }
+      for (const fn of [zlib.brotliCompressSync, zlib.zstdCompressSync]) {
+        assert.throws(() => fn(input), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+        });
+      }
     }
   },
 };
@@ -1429,18 +1445,20 @@ export const zlibFromGzipWithTrailingGarbage = {
       Buffer.alloc(10),
     ]);
 
-    assert.throws(
-      () => zlib.gunzipSync(data),
-      /^Error: unknown compression method$/
-    );
+    assert.throws(() => zlib.gunzipSync(data), {
+      name: 'Error',
+      code: 'Z_DATA_ERROR',
+      errno: -3,
+      message: 'unknown compression method',
+    });
 
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.gunzip(data, (err, result) => {
-        // TODO(soon): use same error code as NodeJS
-        // TODO(soon): Do our messages have a redundant "Error: " word?
         assert.strictEqual(err.name, 'Error');
-        assert.match(err.message, /unknown compression method/);
+        assert.strictEqual(err.code, 'Z_DATA_ERROR');
+        assert.strictEqual(err.errno, -3);
+        assert.strictEqual(err.message, 'unknown compression method');
         assert.strictEqual(result, undefined);
         resolve();
       });
@@ -1456,18 +1474,20 @@ export const zlibFromGzipWithTrailingGarbage = {
       Buffer.from([0x1f, 0x8b, 0xff, 0xff]),
     ]);
 
-    assert.throws(
-      () => zlib.gunzipSync(data),
-      /^Error: unknown compression method$/
-    );
+    assert.throws(() => zlib.gunzipSync(data), {
+      name: 'Error',
+      code: 'Z_DATA_ERROR',
+      errno: -3,
+      message: 'unknown compression method',
+    });
 
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.gunzip(data, (err, result) => {
-        // TODO(soon): Use same error code as NodeJS
-        // TODO(soon): Do our messages have a redundant "Error: " word?
         assert.strictEqual(err.name, 'Error');
-        assert.match(err.message, /unknown compression method/);
+        assert.strictEqual(err.code, 'Z_DATA_ERROR');
+        assert.strictEqual(err.errno, -3);
+        assert.strictEqual(err.message, 'unknown compression method');
         assert.strictEqual(result, undefined);
         resolve();
       });
@@ -2218,7 +2238,8 @@ export const maxOutputLength = {
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.brotliDecompress(encoded, { maxOutputLength: 64 }, (err) => {
-        // TODO(soon): Make error the same as NodeJS
+        assert.strictEqual(err.name, 'RangeError');
+        assert.strictEqual(err.code, 'ERR_BUFFER_TOO_LARGE');
         assert.match(err.message, /Memory limit exceeded/);
         resolve();
       });
@@ -2226,9 +2247,12 @@ export const maxOutputLength = {
     }
 
     // Sync
-    assert.throws(function () {
-      zlib.brotliDecompressSync(encoded, { maxOutputLength: 64 });
-    }, RangeError);
+    assert.throws(
+      function () {
+        zlib.brotliDecompressSync(encoded, { maxOutputLength: 64 });
+      },
+      { name: 'RangeError', code: 'ERR_BUFFER_TOO_LARGE' }
+    );
 
     // Async
     {
@@ -2432,13 +2456,12 @@ export const brotli = {
 
       {
         // Test options.flush range
-        // TODO(soon): Use the same code and message as NodeJS
         assert.throws(
           () => {
             zlib.brotliCompressSync('', { flush: zlib.constants.Z_FINISH });
           },
           {
-            //code: 'ERR_OUT_OF_RANGE',
+            code: 'ERR_OUT_OF_RANGE',
             name: 'RangeError',
             message:
               'The value of "options.flush" is out of range. It must be >= 0 ' +
@@ -2453,7 +2476,7 @@ export const brotli = {
             });
           },
           {
-            //code: 'ERR_OUT_OF_RANGE',
+            code: 'ERR_OUT_OF_RANGE',
             name: 'RangeError',
             message:
               'The value of "options.finishFlush" is out of range. It must be ' +
@@ -3017,5 +3040,38 @@ export const zlibParamsAfterFailedWriteNoStalePointers = {
         // May throw due to stream state; that's fine — the point is no UAF.
       }
     }
+  },
+};
+
+// One-shot APIs attach Node's error codes on the fast path into C++.
+export const oneShotErrorCodes = {
+  test() {
+    // Inputs accepted by the C++ fast path stay accepted.
+    const raw = zlib.deflateSync('abc');
+    for (const input of [
+      raw,
+      new Uint8Array(raw),
+      new DataView(raw.buffer, raw.byteOffset, raw.byteLength),
+      new Uint8Array(raw).buffer,
+    ]) {
+      assert.strictEqual(zlib.inflateSync(input).toString(), 'abc');
+    }
+
+    for (const [fn, name] of [
+      [zlib.deflateSync, 'flush'],
+      [zlib.deflateSync, 'finishFlush'],
+      [zlib.zstdCompressSync, 'flush'],
+      [zlib.zstdCompressSync, 'finishFlush'],
+    ]) {
+      assert.throws(() => fn('', { [name]: 99 }), {
+        name: 'RangeError',
+        code: 'ERR_OUT_OF_RANGE',
+        message: new RegExp(`^The value of "options.${name}" .* Received 99$`),
+      });
+    }
+    assert.throws(() => zlib.deflateSync('', { chunkSize: 1 }), {
+      name: 'RangeError',
+      code: 'ERR_OUT_OF_RANGE',
+    });
   },
 };

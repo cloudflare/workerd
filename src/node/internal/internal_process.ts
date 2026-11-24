@@ -434,8 +434,10 @@ export function emitWarning(
 
   // Emit the warning event on the process object
   // Use nextTick to ensure the warning is emitted asynchronously
+  // The process object is only set once its module has loaded, which happens on first use. Before
+  // that, nothing can have a 'warning' listener, so there is nothing to emit to.
   queueMicrotask(() => {
-    (_process as typeof publicProcessType).emit('warning', err);
+    (_process as typeof publicProcessType | undefined)?.emit('warning', err);
   });
 }
 
@@ -443,7 +445,8 @@ export function emitWarning(
 // this _process for events usage only. All other internal importers should
 // import 'node:process' directly rather, as _eventsProcess is only guaranteed
 // to be available when that has been imported.
-export let _process: typeof legacyProcessType | typeof publicProcessType;
+export let _process:
+  typeof legacyProcessType | typeof publicProcessType | undefined;
 export function _setEventsProcess(
   process: typeof legacyProcessType | typeof publicProcessType
 ): void {

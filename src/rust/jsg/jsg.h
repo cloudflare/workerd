@@ -11,7 +11,6 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
-#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 
 #include <kj/function.h>
@@ -30,13 +29,9 @@ namespace workerd::rust::jsg {
 // Calls a Rust module callback in a `CallScope`. An empty result means that the callback
 // panicked, returned an error or failed to convert its result, and that the exception is pending.
 template <typename CallScope>
-v8::Local<v8::Value> callModuleCallback(ModuleCallback callback, ::workerd::jsg::Lock& js) {
+v8::MaybeLocal<v8::Value> callModuleCallback(ModuleCallback callback, ::workerd::jsg::Lock& js) {
   CallScope scope;
-  v8::Local<v8::Value> value;
-  if (!maybe_local_from_ffi<v8::Value>(callback(js.v8Isolate)).ToLocal(&value)) {
-    throw ::workerd::jsg::JsExceptionThrown();
-  }
-  return value;
+  return maybe_local_from_ffi<v8::Value>(callback(js.v8Isolate));
 }
 
 // Adapter for registering Rust-implemented modules into the OLD module registry
@@ -75,7 +70,10 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
               ::workerd::jsg::Lock& js, ::workerd::jsg::ModuleRegistry::ResolveMethod,
               kj::Maybe<const kj::Path&>&) mutable
           -> kj::Maybe<::workerd::jsg::ModuleRegistry::ModuleInfo> {
-        v8::Local<v8::Value> value = callModuleCallback<CallScope>(callback, js);
+        v8::Local<v8::Value> value;
+        if (!callModuleCallback<CallScope>(callback, js).ToLocal(&value)) {
+          throw ::workerd::jsg::JsExceptionThrown();
+        }
         KJ_DASSERT(value->IsObject());
 
         using ModuleInfo = ::workerd::jsg::ModuleRegistry::ModuleInfo;
@@ -93,8 +91,8 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
 // Adapter for registering Rust-implemented modules into the NEW module registry
 // (jsg::modules::ModuleBundle::BuiltinBuilder). Translates Rust ModuleCallback
 // into BuiltinBuilder::addSynthetic calls. Each Rust module callback receives a
-// v8::Isolate* and returns the module's default export as a MaybeLocal, which
-// callModuleCallback() unwraps before the synthetic module is registered.
+// v8::Isolate* and returns the module's exports as a MaybeLocal, which become
+// the synthetic module's default export.
 //
 // Usage:
 //   RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
@@ -136,10 +134,14 @@ struct RustBuiltinModuleAdapter: public ::workerd::rust::jsg::ModuleRegistry {
           [callback = kj::mv(moduleCallback)](::workerd::jsg::Lock& js, const ::workerd::jsg::Url&,
               const ::workerd::jsg::modules::Module::ModuleNamespace& ns,
               const ::workerd::jsg::CompilationObserver&) mutable {
-        v8::Local<v8::Value> value = callModuleCallback<CallScope>(callback, js);
+        // A synthetic module's callback reports an error by returning false with the exception
+        // pending, which V8 then throws to the importer.
+        v8::Local<v8::Value> value;
+        if (!callModuleCallback<CallScope>(callback, js).ToLocal(&value)) {
+          return false;
+        }
         KJ_DASSERT(value->IsObject());
-        ns.setDefault(js, ::workerd::jsg::JsValue(value));
-        return true;
+        return ns.setDefault(js, ::workerd::jsg::JsValue(value));
       });
     } else {
       KJ_LOG(WARNING, "Ignoring Rust module with invalid specifier", specifierPtr);
