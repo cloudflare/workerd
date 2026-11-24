@@ -19,6 +19,8 @@ wd_cc_benchmark(
     local_defines = ["JSG_IMPLEMENTATION"],
     # Functional coverage is in smoke-test. CodSpeed also excludes manual benchmarks.
     tags = ["manual"],
+    # Link like workerd, so that --config=cross-lto can inline calls between Rust and C++.
+    tool = True,
     deps = [
         ":jsg-bench-fixture",
         "//src/rust/jsg",
@@ -39,4 +41,15 @@ sh_test(
         "cpu:2",
         "workerd-benchmark",
     ],
+)
+
+# Writes Google Benchmark JSON reports to the test outputs, so a remote executor can measure; see
+# README.md.
+sh_test(
+    name = "bench-report",
+    size = "enormous",
+    srcs = ["bench-report.sh"],
+    args = ["$(rootpath :bench-jsg)"],
+    data = [":bench-jsg"],
+    tags = ["manual"],
 )
