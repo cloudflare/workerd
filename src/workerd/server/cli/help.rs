@@ -411,7 +411,9 @@ Options:
       --verbose                      Log to stderr
   -h, --help                         Print this help
   nodejs_compat is on unless a --compat-flag turns it or
-  nodejs_compat_v2 on or off. Autogates are named in kebab-case, as in
+  nodejs_compat_v2 on or off, and so is
+  unhandled_rejection_after_microtask_checkpoint unless one turns it on
+  or off. Autogates are named in kebab-case, as in
   --autogate=compression-rs. Every config the REPL loads runs with these
   autogates and V8 flags, not its own autogates and v8Flags.
   --input-timeout stops awaiting as Ctrl+C does, and the input fails;

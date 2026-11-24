@@ -68,13 +68,18 @@ fails to load is reported like any failed input, and the REPL carries on with `s
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--experimental`            | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
 | `--compat-date=<date>`      | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
-| `--compat-flag=<flag>`      | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly.                                                      |
+| `--compat-flag=<flag>`      | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly. So is `unhandled_rejection_after_microtask_checkpoint` unless a flag turns it on or off; see below. |
 | `--autogate=<name>`         | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
 | `--v8-flag=<flag>`          | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
 | `--input-timeout=<seconds>` | Stops awaiting an input once it has taken this many seconds, such as `30` or `0.5`; see [Interrupting](#interrupting).                                                                                                     |
 
 The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
 Workers use their own settings from the config.
+
+`unhandled_rejection_after_microtask_checkpoint` is on so that an awaited call that fails at once,
+such as an RPC call through a stub a [reload](#reloading) left behind, is reported once, as the
+input's failure. Without it, the call's promise counts as unhandled until the input's `await`
+handles it a microtask later, and the failure is also printed as `Uncaught (in promise)`.
 
 Autogates and V8 flags are set once for the process, so they apply to the REPL's JavaScript and to
 every config it loads.
@@ -387,7 +392,8 @@ loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 The REPL's JavaScript has the compatibility date and flags given on the command line.
 `await workerd.environment({ compatibilityDate, compatibilityFlags })` starts another environment
 like the REPL's, in an isolate of its own, with the date and flags given instead: today's date
-without one, and `nodejs_compat` unless the flags take a position on it, as for the REPL. Its
+without one, and `nodejs_compat` and `unhandled_rejection_after_microtask_checkpoint` unless the
+flags take a position on them, as for the REPL. Its
 handle's `eval(input)` evaluates `input` there, as the REPL evaluates a line typed at it, and
 resolves to what the REPL would print for it, as a string:
 

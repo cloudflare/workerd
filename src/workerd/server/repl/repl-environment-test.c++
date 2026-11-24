@@ -482,6 +482,35 @@ KJ_TEST("REPL enables nodejs_compat unless the flags take a position on it") {
   }
 }
 
+// How many times the REPL's JavaScript sees the failure of an RPC call through a stale Fetcher,
+// awaited at once, as an unhandled rejection. The REPL prints each as "Uncaught (in promise)",
+// besides the input's failure.
+kj::String unhandledStaleCalls(Fixture& fixture) {
+  fixture.setConfig("reload.capnp", configAnswering("one"));
+  fixture.evalAwait("s = await workerd.loadConfig('reload.capnp')");
+  fixture.eval("unhandled = 0; addEventListener('unhandledrejection', () => ++unhandled), 0");
+  fixture.eval("f = s.service('main'), 0");
+  fixture.evalAwait("await s.reload()");
+  // The call fails at once, and hands back a promise already rejected.
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await f.hello()"),
+      "Uncaught Error: The server for reload.capnp was reloaded.");
+  return fixture.evalAwait("await new Promise((resolve) => setTimeout(resolve, 0)), unhandled");
+}
+
+KJ_TEST("REPL reports an awaited call that fails at once as the input's failure alone") {
+  // A date before unhandled_rejection_after_microtask_checkpoint was the default.
+  {
+    Fixture fixture({.compatibilityDate = kj::str("2025-06-01")});
+    KJ_EXPECT(unhandledStaleCalls(fixture) == "0");
+  }
+  // Unless the flags take a position on it.
+  {
+    Fixture fixture({.compatibilityDate = kj::str("2025-06-01"),
+      .compatibilityFlags = kj::arr(kj::str("no_unhandled_rejection_after_microtask_checkpoint"))});
+    KJ_EXPECT(unhandledStaleCalls(fixture) == "1");
+  }
+}
+
 KJ_TEST("REPL rejects invalid compatibility settings") {
   kj::AsyncIoContext io = kj::setupAsyncIo();
   auto fs = kj::newDiskFilesystem();

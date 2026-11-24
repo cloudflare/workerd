@@ -29,7 +29,8 @@ struct ReplEnvironmentOptions {
   // --compat-date`, any valid date is accepted, such as 2999-12-31 for every flag's behavior.
   kj::Maybe<kj::String> compatibilityDate;
 
-  // Added to the date's flags. `nodejs_compat` is added too unless these take a position on it.
+  // Added to the date's flags. `nodejs_compat` and `unhandled_rejection_after_microtask_checkpoint`
+  // are added too, each unless these take a position on it.
   kj::Array<kj::String> compatibilityFlags;
 
   // `--experimental`: lets the compatibility flags and the loaded configs use experimental

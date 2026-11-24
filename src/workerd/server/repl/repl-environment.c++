@@ -101,26 +101,43 @@ bool usesAwaitAsName(jsg::Lock& js, kj::StringPtr source, kj::StringPtr name) {
   }, [](jsg::Value) -> bool { return true; });
 }
 
-// The compatibility flags of the REPL's JavaScript: the user's, `nodejs_compat` unless they take a
-// position on it, so that `await import('node:assert')` works, and with `--experimental`,
-// `service_binding_extra_handlers`, so that a loaded config's services take `scheduled()` and
-// `queue()` calls. The latter lets JavaScript reach the V8 deserializer through `queue()`'s
-// `serializedBody`, which is why it is experimental; the REPL's user runs any code they like.
+// The compatibility flags of the REPL's JavaScript:
+//
+// - The user's.
+// - `nodejs_compat` unless they take a position on it, so that `await import('node:assert')`
+//   works.
+// - `unhandled_rejection_after_microtask_checkpoint` unless they take a position on it. Without
+//   it, an RPC call that fails at once hands back a promise already rejected, which the input
+//   awaiting it handles only a microtask later, so the failure is reported twice: as the input's,
+//   and as an unhandled rejection.
+// - With `--experimental`, `service_binding_extra_handlers`, so that a loaded config's services
+//   take `scheduled()` and `queue()` calls. That lets JavaScript reach the V8 deserializer through
+//   `queue()`'s `serializedBody`, which is why it is experimental; the REPL's user runs any code
+//   they like.
+//
+// Naming a flag the date already enables is harmless.
 kj::Array<kj::String> replCompatibilityFlags(const ReplEnvironmentOptions& options) {
   auto userFlags = options.compatibilityFlags.asPtr();
-  kj::Vector<kj::String> flags(userFlags.size() + 2);
+  kj::Vector<kj::String> flags(userFlags.size() + 3);
   bool nodejsCompatChosen = false;
+  bool rejectionTimingChosen = false;
   bool extraHandlersChosen = false;
   for (auto& flag: userFlags) {
     nodejsCompatChosen = nodejsCompatChosen || flag == "nodejs_compat"_kj ||
         flag == "no_nodejs_compat"_kj || flag == "nodejs_compat_v2"_kj ||
         flag == "no_nodejs_compat_v2"_kj;
+    rejectionTimingChosen = rejectionTimingChosen ||
+        flag == "unhandled_rejection_after_microtask_checkpoint"_kj ||
+        flag == "no_unhandled_rejection_after_microtask_checkpoint"_kj;
     // Naming a flag twice is an error.
     extraHandlersChosen = extraHandlersChosen || flag == "service_binding_extra_handlers"_kj;
     flags.add(kj::str(flag));
   }
   if (!nodejsCompatChosen) {
     flags.add(kj::str("nodejs_compat"));
+  }
+  if (!rejectionTimingChosen) {
+    flags.add(kj::str("unhandled_rejection_after_microtask_checkpoint"));
   }
   if (options.experimental && !extraHandlersChosen) {
     flags.add(kj::str("service_binding_extra_handlers"));
