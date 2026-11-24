@@ -64,11 +64,30 @@ jsg::Optional<jsg::JsRef<jsg::JsValue>> entryDetail(
   }
   return kj::none;
 }
+
+// The read-only attributes of the PerformanceTiming interface. The User Timing spec resolves these
+// names from navigation timing, which exists only in a Window, so measure() rejects them.
+constexpr kj::StringPtr PERFORMANCE_TIMING_NAMES[] = {"navigationStart"_kj, "unloadEventStart"_kj,
+  "unloadEventEnd"_kj, "redirectStart"_kj, "redirectEnd"_kj, "fetchStart"_kj,
+  "domainLookupStart"_kj, "domainLookupEnd"_kj, "connectStart"_kj, "connectEnd"_kj,
+  "secureConnectionStart"_kj, "requestStart"_kj, "responseStart"_kj, "responseEnd"_kj,
+  "domLoading"_kj, "domInteractive"_kj, "domContentLoadedEventStart"_kj,
+  "domContentLoadedEventEnd"_kj, "domComplete"_kj, "loadEventStart"_kj, "loadEventEnd"_kj};
+
+// Implements the timestamp branch of the spec's "convert a mark to a timestamp". NaN passes.
+double requireTimestamp(double time, kj::StringPtr what) {
+  JSG_REQUIRE(!(time < 0), TypeError, "The ", what, " cannot be negative.");
+  return time;
+}
+
 }  // namespace
 
 jsg::Ref<PerformanceMark> PerformanceMark::constructor(
     jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
+  KJ_IF_SOME(startTime, options.startTime) {
+    requireTimestamp(startTime, "startTime"_kj);
+  }
   return js.alloc<PerformanceMark>(kj::mv(name), entryDetail(js, kj::mv(options.detail)),
       options.startTime.orDefault([]() { return dateNow(); }));
 }
@@ -253,59 +272,91 @@ kj::Maybe<double> Performance::findMarkTime(kj::StringPtr name) {
   return kj::none;
 }
 
+double Performance::convertMarkToTimestamp(kj::StringPtr mark) {
+  for (auto name: PERFORMANCE_TIMING_NAMES) {
+    JSG_REQUIRE(mark != name, TypeError, "Cannot convert \"", mark,
+        "\" to a timestamp: PerformanceTiming attributes exist only in a Window.");
+  }
+  KJ_IF_SOME(time, findMarkTime(mark)) {
+    return time;
+  }
+  JSG_FAIL_REQUIRE(DOMSyntaxError, "The mark \"", mark, "\" does not exist.");
+}
+
 jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark,
     jsg::Optional<kj::String> maybeEndMark) {
   isolateLimitEnforcer.markPerfEvent("performance_measure"_kjc);
-  // Default: measure from timeOrigin (0) to now, per the Web Performance API spec.
-  double startTime = 0;
-  double endTime = dateNow();
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-
-  // A mark that does not exist leaves the default time in place.
-  auto useEndMark = [&]() {
-    KJ_IF_SOME(endMark, maybeEndMark) {
-      KJ_IF_SOME(time, findMarkTime(endMark)) {
-        endTime = time;
-      }
-    }
-  };
-
+  kj::Maybe<PerformanceMeasure::Options&> maybeOptions;
+  kj::Maybe<kj::StringPtr> maybeStartMark;
   KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
     KJ_SWITCH_ONEOF(startOrOptions) {
       KJ_CASE_ONEOF(startMark, kj::String) {
-        KJ_IF_SOME(time, findMarkTime(startMark)) {
-          startTime = time;
-        }
-        useEndMark();
+        maybeStartMark = startMark;
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
-        detail = entryDetail(js, kj::mv(options.detail));
-
-        if (options.start == kj::none && options.end == kj::none && options.duration == kj::none) {
-          useEndMark();
-        }
-
-        KJ_IF_SOME(start, options.start) {
-          startTime = start;
-        }
-
-        KJ_IF_SOME(end, options.end) {
-          endTime = end;
-        } else KJ_IF_SOME(duration, options.duration) {
-          endTime = startTime + duration;
-        }
+        maybeOptions = options;
       }
     }
-  } else {
-    useEndMark();
   }
 
-  double duration = endTime >= startTime ? endTime - startTime : 0;
-  auto measure =
-      js.alloc<PerformanceMeasure>(kj::mv(measureName), kj::mv(detail), startTime, duration);
+  kj::Maybe<double> start;
+  kj::Maybe<double> end;
+  kj::Maybe<double> duration;
+  KJ_IF_SOME(options, maybeOptions) {
+    bool hasStart = options.start != kj::none;
+    bool hasEnd = options.end != kj::none;
+    bool hasDuration = options.duration != kj::none;
+    if (hasStart || hasEnd || hasDuration || options.detail != kj::none) {
+      JSG_REQUIRE(maybeEndMark == kj::none, TypeError,
+          "measure() cannot take both an options object and an end mark.");
+      JSG_REQUIRE(hasStart || hasEnd, TypeError, "The measure options must include start or end.");
+      JSG_REQUIRE(!(hasStart && hasEnd && hasDuration), TypeError,
+          "The measure options cannot include start, end and duration together.");
+    }
+    start = options.start.map([](double t) { return requireTimestamp(t, "start"_kj); });
+    end = options.end.map([](double t) { return requireTimestamp(t, "end"_kj); });
+    duration = options.duration.map([](double t) { return requireTimestamp(t, "duration"_kj); });
+  }
 
+  double endTime = [&]() {
+    KJ_IF_SOME(endMark, maybeEndMark) {
+      return convertMarkToTimestamp(endMark);
+    }
+    KJ_IF_SOME(e, end) {
+      return e;
+    }
+    KJ_IF_SOME(s, start) {
+      KJ_IF_SOME(d, duration) {
+        return s + d;
+      }
+    }
+    return dateNow();
+  }();
+
+  double startTime = [&]() {
+    KJ_IF_SOME(s, start) {
+      return s;
+    }
+    KJ_IF_SOME(d, duration) {
+      KJ_IF_SOME(e, end) {
+        return e - d;
+      }
+    }
+    KJ_IF_SOME(startMark, maybeStartMark) {
+      return convertMarkToTimestamp(startMark);
+    }
+    return 0.0;
+  }();
+
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+  KJ_IF_SOME(options, maybeOptions) {
+    detail = entryDetail(js, kj::mv(options.detail));
+  }
+  double measureDuration = endTime >= startTime ? endTime - startTime : 0;
+  auto measure =
+      js.alloc<PerformanceMeasure>(kj::mv(measureName), kj::mv(detail), startTime, measureDuration);
   entries.add(measure.addRef());
   return measure;
 }

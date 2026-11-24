@@ -634,6 +634,9 @@ class Performance: public EventTarget {
   // Returns the start time of the first mark named `name`.
   kj::Maybe<double> findMarkTime(kj::StringPtr name);
 
+  // The spec's "convert a mark to a timestamp" for a mark name.
+  double convertMarkToTimestamp(kj::StringPtr mark);
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(entries);
   }
