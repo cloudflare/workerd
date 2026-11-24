@@ -5,6 +5,7 @@
 #pragma once
 
 #include "basics.h"
+#include "cache-context-ref.h"
 #include "filesystem.h"
 #include "http.h"
 #include "performance.h"
@@ -376,7 +377,7 @@ class ExecutionContext: public jsg::Object {
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
-  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+  jsg::Optional<CacheContextRef> getCache(jsg::Lock& js);
 
   jsg::JsValue getVersion(jsg::Lock& js) {
     // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the

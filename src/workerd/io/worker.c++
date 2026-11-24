@@ -529,6 +529,15 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+jsg::Optional<api::RustCacheContext> Worker::Api::getCtxCacheRustProperty(jsg::Lock& js) const {
+  return kj::none;
+}
+
+kj::Maybe<bool> Worker::Api::isCtxCacheRustInstance(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) const {
+  return false;
+}
+
 v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
     v8::Local<v8::Value> handler,
     v8::Local<v8::Value> env,

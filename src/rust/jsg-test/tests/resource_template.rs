@@ -166,6 +166,29 @@ fn eval_string(harness: &Harness, code: &str) -> String {
 }
 
 #[test]
+fn resource_prototype_can_link_to_a_parent_in_the_current_realm() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Sample>(lock)?;
+        let prototype = jsg::v8::Local::<jsg::v8::Object>::try_from(
+            jsg::v8::Local::<jsg::v8::Object>::from(constructor).get(lock, "prototype")?,
+        )
+        .unwrap();
+        let parent = lock.new_object();
+        prototype.set_prototype(lock, Some(parent))?;
+        ctx.set_global(lock, "Sample", constructor);
+        ctx.set_global(lock, "ParentProto", parent);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "ParentProto.isPrototypeOf(new Sample('x')) && new Sample('x') instanceof Sample"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn to_string_tag_follows_set_to_string_tag() {
     let code = "Object.prototype.toString.call(new Sample('x'))";
     assert_eq!(eval_string(&Harness::new(), code), "[object Object]");
