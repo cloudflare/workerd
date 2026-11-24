@@ -132,7 +132,8 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
+      kj::Maybe<kj::String> clientAddress = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
 
   kj::Weak<IoContext_IncomingRequest> addWeak() {
@@ -143,6 +144,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   IoContext& getContext() {
     return *context;
   }
+
+  // Dispatching a TCP or UDP connect event consumes this address.
+  kj::Maybe<kj::String> clientAddress;
 
   // Invoked when the request is actually delivered.
   //

@@ -302,8 +302,10 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
-    : context(kj::mv(contextParam)),
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::String> clientAddress)
+    : clientAddress(kj::mv(clientAddress)),
+      context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
