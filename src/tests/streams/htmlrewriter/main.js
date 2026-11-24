@@ -16,4 +16,5 @@ export {
   cancelReachesSourceAfterNextChunk,
   erroringSourceRejectsConsumption,
   largeDocumentThroughHandler,
+  outputBeforeAWaitingHandler,
 } from 'rewrite-streams';
