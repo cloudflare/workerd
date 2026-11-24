@@ -1007,6 +1007,12 @@ wd_test(
 )
 
 wd_test(
+    src = "htmlrewriter-stale-token-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-stale-token-test.js"],
+)
+
+wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],
