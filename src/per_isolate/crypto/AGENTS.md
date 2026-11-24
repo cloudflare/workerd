@@ -1,7 +1,8 @@
 # src/per_isolate/crypto/
 
-TypeScript reimplementations of crypto APIs that must be replaced when the
-`typescript_implemented_streams` compat flag is on. Parent directory
+TypeScript reimplementations of crypto APIs: `DigestStream`, which must be
+replaced when the `typescript_implemented_streams` compat flag is on, and
+`SubtleCrypto` and `Crypto`, under the `TS_WEBCRYPTO` autogate. Parent directory
 conventions (primordials discipline, private-brand dispatch, no `instanceof`)
 apply — see `src/per_isolate/AGENTS.md`.
 
@@ -9,7 +10,7 @@ apply — see `src/per_isolate/AGENTS.md`.
 
 `DigestStream` is one of only two `WritableStream` subclasses in the runtime.
 When the streams flag swaps `globalThis.WritableStream` for the TypeScript
-class, a C++ subclass of the *C++* `WritableStream` no longer passes the
+class, a C++ subclass of the _C++_ `WritableStream` no longer passes the
 brand checks used by `pipeTo`, and `instanceof WritableStream` becomes false.
 Reimplementing the subclass in TypeScript is what restores the hierarchy.
 
@@ -20,9 +21,13 @@ constructor — so that method is replaced on the prototype as well.
 
 ## FILE MAP
 
-| File               | Role                                                          |
-| ------------------ | ------------------------------------------------------------- |
-| `digest-stream.ts` | `DigestStream` — WritableStream subclass over a native digest |
+| File                    | Role                                                          |
+| ----------------------- | ------------------------------------------------------------- |
+| `digest-stream.ts`      | `DigestStream` — WritableStream subclass over a native digest |
+| `subtle.ts`             | `SubtleCrypto` — the interface over the native operations     |
+| `subtle-conversions.ts` | JSG's conversions of SubtleCrypto's dictionaries and members  |
+| `crypto.ts`             | `Crypto` — the `crypto` global's class                        |
+| `cpp_exports.ts`        | The functions the C++ bridge calls                            |
 
 ## THE C++ CONTRACT
 
@@ -56,7 +61,7 @@ Two parts of that contract are easy to break:
   behavior, so the two encodings can disagree on `bytesWritten` across chunks
   (4 bytes for a joined pair vs 3+3 for two lone surrogates).
 - **The option bag is coerced, not type-checked.** JSG unwraps
-  `jsg::Optional<bool>` with ToBoolean, so `{toWellFormed: 'false'}` opts *in*.
+  `jsg::Optional<bool>` with ToBoolean, so `{toWellFormed: 'false'}` opts _in_.
   The TypeScript side reproduces this with `!!`, and
   `toWellFormedIsCoerced`/`toWellFormedDefaultsToFalse` hold the two together.
 - **Chunks are not copied.** The digest consumes bytes synchronously inside
@@ -64,7 +69,86 @@ Two parts of that contract are easy to break:
   `webstreams/identity.ts`, which copies because it enqueues. The consequence
   is that SharedArrayBuffer-backed views are read in place.
 
-## PARITY
+## SUBTLECRYPTO
+
+`subtle.ts` owns the WebCrypto interface: the class, the receiver check,
+argument conversion order and messages, and whether a failure throws or
+rejects. The operations, and `CryptoKey`, stay native: the `cryptoBackend`
+pseudo-global is a C++ `SubtleCrypto` (`src/workerd/api/crypto/crypto.h`)
+whose resource type, under the autogate, exports its backend members in place
+of its methods. They run the same `SubtleCrypto::*Sync()` bodies the methods
+run. The bootstrap creates it with the context
+(`createSubtleCryptoBackend()`, declared crypto-free in
+`src/workerd/api/crypto/subtle-bootstrap.h`); it is `undefined` with the
+autogate off.
+
+- **Each argument is converted as JSG converts it.** `subtle-conversions.ts`
+  holds a table per `JSG_STRUCT`, in the C++ declaration order, and coerces
+  each member as its C++ type is. The backend supplies only the checks JS
+  cannot make (`isCryptoKey`); buffers and arrays are tested with `utils`
+  (`utils.isBufferSource()` for a `BufferSource`). Each
+  result is an object literal with every member, so the backend's second
+  conversion never reads a prototype; a table must list every member of its
+  struct.
+- **A missing argument is not `undefined`.** JSG rejects a required parameter
+  past `arguments.length`, even of a type that accepts `undefined`; hence the
+  rest parameters.
+- **Throw or reject follows `capture_async_api_throws`.** Without it, a failed
+  conversion throws; the operation always rejects; a bad receiver always
+  throws.
+- **An error's stack begins in the bootstrap.** The C++ class's begins at the
+  caller. Re-capturing it from the caller costs a second stack capture on
+  every throw, so the stack is left as V8 records it, as `structuredClone()`
+  under TS_STRUCTURED_CLONE leaves its own; the parity suite does not compare
+  stacks.
+- **`SubtleCrypto` is a function, not a class**, so that calling it without
+  `new` throws `Illegal constructor` as JSG does.
+- `crypto.subtle` is the TypeScript `Crypto`'s (below): `crypto.ts` takes the
+  context's one `SubtleCrypto` from `getSubtleCrypto()`.
+
+`src/tests/crypto/crypto-subtle-parity-test.js` records every observable
+behaviour of the C++ class, at the oldest date and with every flag
+(`crypto-subtle-parity-expected.js`), and runs against both implementations
+(`crypto-subtle-parity-test.wd-test`, `crypto-subtle-parity-ts-test.wd-test`).
+The WPT suite runs against both too (`WebCryptoAPI`, `WebCryptoAPI-ts`).
+
+## CRYPTO
+
+`crypto.ts` owns the `crypto` global's class: the receiver checks,
+getRandomValues()'s checks of its argument, `subtle` and `DigestStream`. The
+randomness is native (`src/workerd/api/crypto/random-bootstrap.h`):
+`utils.fillRandomValues(view)` fills a view from the request's entropy
+source, and `utils.newRandomUUID()` makes a UUID from it. Both throw outside a
+request, as the C++ methods do. The UUID is formatted natively because
+building the string in JavaScript costs about as much as the whole C++ call.
+
+- **The checks run in the C++ order**: the argument is an ArrayBufferView
+  (TypeError), an integer-typed one (`TypeMismatchError`), of at most 64 KiB
+  (`QuotaExceededError`); only then is the entropy source read, so a bad
+  argument at the top level reports the bad argument.
+- **Nothing loads until first use.** The global `SubtleCrypto` and `Crypto`
+  are lazy data properties (`utils.defineLazyDataProperty()` in `main.ts`),
+  as JSG's nested types are, so a Worker that never touches WebCrypto pays
+  nothing at startup. `crypto` stays JSG's lazy global:
+  `ServiceWorkerGlobalScope::getCrypto()` (`src/workerd/api/global-scope.h`)
+  requires `crypto/cpp_exports` through `tryCallCryptoCppExport()` and returns
+  `crypto.ts`'s `getCrypto()`, so the property keeps its place, its
+  attributes, and user code can still replace it before first use.
+- **The global `Crypto` is redefined in place**, over the C++ class's property,
+  so it keeps its place among the global's properties. The C++ class is still
+  registered: `crypto.DigestStream` is the C++ class, which the backend
+  exports as a nested type, or under `typescript_implemented_streams` the
+  TypeScript one.
+- **An error's stack begins in the bootstrap**, as `SubtleCrypto`'s does.
+- **`subtle` follows `workers_api_getters_setters_on_prototype`**: a
+  prototype getter, or a read-only own data property of the instance.
+
+`src/tests/crypto/crypto-global-parity-test.js` records the C++ class's
+behaviour at the oldest date and with every flag, for three flag sets
+(`crypto-global-parity-expected.js`), and runs against both implementations
+(`crypto-global-parity-test.wd-test`, `crypto-global-parity-ts-test.wd-test`).
+
+## DIGESTSTREAM PARITY
 
 Both implementations run `crypto-streams-test.js` unmodified, under
 `crypto-streams-test.wd-test` (C++) and `crypto-streams-ts-test.wd-test`
@@ -84,6 +168,12 @@ does report in that case. This is accepted: consuming `digest` is optional, an
 abort is already surfaced through the writer's `ready`/`closed` promises, and
 marking does not propagate to derived promises — `stream.digest.then(f)` with
 no `catch` still reports.
+
+Assigning to `crypto.subtle` in strict code, with the prototype getter, throws
+a TypeError worded "Cannot set property subtle of #<Crypto> which has only a
+getter", where the C++ class's says "Cannot assign to read only property". V8
+words them by the kind of property, and a JavaScript accessor cannot be the
+read-only kind JSG makes. The error's type is the same.
 
 ## ANTI-PATTERNS
 

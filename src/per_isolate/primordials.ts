@@ -302,9 +302,17 @@ const ErrorCaptureStackTrace = (
   }
 ).captureStackTrace;
 
+// The TypeError message JSG gives a member called on a receiver that is not
+// an instance, so that misuse reads the same in every bootstrap class.
+const kIllegalInvocation =
+  'Illegal invocation: function called with incorrect `this` reference. ' +
+  'See https://developers.cloudflare.com/workers/observability/errors/' +
+  '#illegal-invocation-errors for details.';
+
 // Math / Number (statics - plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
+const MathTrunc = Math.trunc;
 const NumberIsFinite = Number.isFinite;
 const NumberIsNaN = Number.isNaN;
 
@@ -833,9 +841,13 @@ module.exports = ObjectFreeze({
   // Error
   ErrorCaptureStackTrace,
 
+  // Messages
+  kIllegalInvocation,
+
   // Math / Number
   MathMax,
   MathMin,
+  MathTrunc,
   NumberIsFinite,
   NumberIsNaN,
 

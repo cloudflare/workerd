@@ -76,6 +76,7 @@ const {
   TypeError,
   WeakRef,
   WeakRefPrototypeDeref,
+  kIllegalInvocation,
 } = primordials;
 
 const { cloneMessageData, getPrivateSymbol, queueReaction } = utils;
@@ -93,12 +94,8 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
-// JSG's messages, so that misuse reads as it does with the runtime's C++
-// classes.
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+// JSG's message, so that misuse reads as it does with the runtime's C++
+// class.
 const kBadOptions =
   "Failed to execute 'postMessage' on 'MessagePort': parameter 2 is not " +
   "of type 'Array or PostMessageOptions'.";

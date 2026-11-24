@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the crypto global benchmarks against the C++ implementation
+# (api/crypto/crypto.h). No compatibilityDate, so
+# that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "global-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "global.js")],
+      )
+    ),
+  ],
+);

@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the crypto global benchmarks against the TypeScript implementation
+# (src/per_isolate/crypto/crypto.ts). No compatibilityDate, so
+# that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "global-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "global.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

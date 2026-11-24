@@ -866,8 +866,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     return JSG_THIS;
   }
 
-  // Implemented in global-scope.c++ to avoid including crypto.h
-  jsg::Ref<Crypto> getCrypto(jsg::Lock& js);
+  // `crypto`: under the TS_WEBCRYPTO autogate, the context's TypeScript Crypto
+  // (src/per_isolate/crypto/crypto.ts). Implemented in global-scope.c++ to avoid including
+  // crypto.h.
+  kj::OneOf<jsg::Ref<Crypto>, jsg::JsValue> getCrypto(jsg::Lock& js);
 
   jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
     return js.alloc<Scheduler>();
@@ -1107,7 +1109,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FormData);
 
     JSG_NESTED_TYPE(Crypto);
-    JSG_NESTED_TYPE(SubtleCrypto);
+    // Under the TS_WEBCRYPTO autogate, the per-isolate bootstrap installs the TypeScript
+    // SubtleCrypto instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
+      JSG_NESTED_TYPE(SubtleCrypto);
+    }
     JSG_NESTED_TYPE(CryptoKey);
 
     JSG_NESTED_TYPE(CacheStorage);
@@ -1271,6 +1277,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       MessageChannel: typeof MessageChannel;
       MessagePort: typeof MessagePort;
       EventSource: typeof EventSource;
+      crypto: Crypto;
     });
   }
 

@@ -91,6 +91,9 @@ declare const primordials: {
   // result then reads.
   readonly captureJsgGetter: <T>(proto: object, name: string) => T;
 
+  // JSG's illegal-invocation TypeError message.
+  readonly kIllegalInvocation: string;
+
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
     (): Promise<void>;
@@ -102,7 +105,15 @@ declare const primordials: {
   readonly [key: string]: any;
 };
 
+// The context's C++ SubtleCrypto, whose resource type exports the backend
+// members under the ts-webcrypto autogate (see SubtleCryptoBackend), created
+// with the context; undefined when the autogate is off.
+declare const cryptoBackend: SubtleCryptoBackend;
+
 declare const utils: {
+  // V8's IsArray(), as JSG tests a sequence. Not Array.isArray(), which a
+  // proxy for an array passes and JSG rejects.
+  isArray(value: unknown): value is unknown[];
   isArrayBuffer(value: unknown): value is ArrayBuffer;
   isArrayBufferView(value: unknown): value is ArrayBufferView;
   isDataView(value: unknown): value is DataView;
@@ -110,6 +121,8 @@ declare const utils: {
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
+  // An ArrayBuffer or an ArrayBufferView, as jsg::JsBufferSource unwraps.
+  isBufferSource(value: unknown): value is ArrayBuffer | ArrayBufferView;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
   // The key of the V8-private property `name`, which C++ reaches by that
@@ -123,6 +136,11 @@ declare const utils: {
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
   createDigestContext(algorithm: string, toWellFormed: boolean): DigestContext;
+  // Fills an integer-typed view from the request's entropy source, for
+  // crypto/crypto (api/crypto/random-bootstrap.h). Throws outside a request.
+  fillRandomValues(view: ArrayBufferView): void;
+  // A random UUID, for crypto/crypto. Throws outside a request.
+  newRandomUUID(): string;
   // The C++ write-context factory (api/filesystem-bootstrap.h), consumed by
   // webfs/writable-file-stream. Throws the DOMException that createWritable
   // reports for an unopenable file.
@@ -353,6 +371,98 @@ declare interface DigestContext {
   flush(): number;
   // Finalizes the digest. Throws if called more than once.
   digest(): ArrayBuffer;
+}
+
+// The native half of the TypeScript SubtleCrypto: a C++ SubtleCrypto, whose
+// backend members (src/workerd/api/crypto/crypto.h) the ts-webcrypto autogate
+// exports. Reached only as the `cryptoBackend` pseudo-global.
+//
+// The operations take arguments that crypto/subtle-conversions has converted,
+// run synchronously and throw what the C++ methods reject with.
+declare interface SubtleCryptoBackend {
+  // The C++ DigestStream class.
+  readonly DigestStream: unknown;
+  isCryptoKey(value: unknown): boolean;
+
+  encrypt(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;
+  decrypt(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;
+  sign(algorithm: unknown, key: unknown, data: unknown): ArrayBuffer;
+  verify(
+    algorithm: unknown,
+    key: unknown,
+    signature: unknown,
+    data: unknown
+  ): boolean;
+  digest(algorithm: unknown, data: unknown): ArrayBuffer;
+  generateKey(
+    algorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  deriveKey(
+    algorithm: unknown,
+    baseKey: unknown,
+    derivedKeyAlgorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  deriveBits(
+    algorithm: unknown,
+    baseKey: unknown,
+    length: unknown
+  ): ArrayBuffer;
+  importKey(
+    format: unknown,
+    keyData: unknown,
+    algorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  exportKey(format: unknown, key: unknown): unknown;
+  wrapKey(
+    format: unknown,
+    key: unknown,
+    wrappingKey: unknown,
+    algorithm: unknown
+  ): ArrayBuffer;
+  unwrapKey(
+    format: unknown,
+    wrappedKey: unknown,
+    unwrappingKey: unknown,
+    algorithm: unknown,
+    unwrappedKeyAlgorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  encapsulateBits(algorithm: unknown, key: unknown): unknown;
+  encapsulateKey(
+    algorithm: unknown,
+    key: unknown,
+    sharedKeyAlgorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  decapsulateBits(
+    algorithm: unknown,
+    key: unknown,
+    ciphertext: unknown
+  ): ArrayBuffer;
+  decapsulateKey(
+    algorithm: unknown,
+    key: unknown,
+    ciphertext: unknown,
+    sharedKeyAlgorithm: unknown,
+    extractable: unknown,
+    usages: unknown
+  ): unknown;
+  getPublicKey(key: unknown, usages: unknown): unknown;
+  timingSafeEqual(a: unknown, b: unknown): boolean;
+  // SubtleCrypto.supports(), which converts its own arguments.
+  supports(
+    operation: string,
+    algorithm: unknown,
+    lengthOrAdditionalAlgorithm: unknown
+  ): boolean;
 }
 
 // Native transactional write state, backing the TypeScript
