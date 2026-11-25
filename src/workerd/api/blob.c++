@@ -59,6 +59,21 @@ kj::Maybe<kj::String> convertLineEndingsToNative(kj::StringPtr text) {
   return kj::mv(result);
 }
 
+// Replaces each surrogate code point that `text` holds as WTF-8 (ED A0..BF 80..BF) with U+FFFD
+// (EF BF BD), giving the bytes that converting the string as USVString would. Both take 3 bytes,
+// so this works in place. 0xED is only ever a lead byte, so a match can't start mid-sequence.
+void replaceSurrogatesWithReplacementChar(kj::String& text) {
+  auto bytes = kj::arrayPtr(reinterpret_cast<kj::byte*>(text.begin()), text.size());
+  for (size_t i = 0; i + 2 < bytes.size(); ++i) {
+    if (bytes[i] == 0xED && bytes[i + 1] >= 0xA0) {
+      bytes[i] = 0xEF;
+      bytes[i + 1] = 0xBF;
+      bytes[i + 2] = 0xBD;
+      i += 2;
+    }
+  }
+}
+
 // Concatenate an array of segments (parameter to Blob constructor).
 kj::Maybe<jsg::JsBufferSource> concat(
     jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits, LineEndings endings) {
@@ -67,7 +82,9 @@ kj::Maybe<jsg::JsBufferSource> concat(
     return kj::none;
   }
 
-  auto rejectResizable = FeatureFlags::get(js).getNoResizableArrayBufferInBlob();
+  auto flags = FeatureFlags::get(js);
+  auto rejectResizable = flags.getNoResizableArrayBufferInBlob();
+  auto usvStringParts = flags.getBlobStringPartsUsvString();
   auto maxBlobSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
   static constexpr int kMaxInt KJ_UNUSED = kj::maxValue;
   KJ_DASSERT(maxBlobSize <= kMaxInt, "Blob size limit exceeds int range");
@@ -85,6 +102,9 @@ kj::Maybe<jsg::JsBufferSource> concat(
         partSize = bytes.size();
       }
       KJ_CASE_ONEOF(text, kj::String) {
+        if (usvStringParts) {
+          replaceSurrogatesWithReplacementChar(text);
+        }
         if (endings == LineEndings::NATIVE) {
           KJ_IF_SOME(converted, convertLineEndingsToNative(text)) {
             text = kj::mv(converted);

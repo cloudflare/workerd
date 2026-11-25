@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 import { inspect } from 'node:util';
 
 export const test1 = {
@@ -401,5 +401,26 @@ export const sliceClamp = {
     strictEqual(await slice(-(2 ** 53)), 'abcd');
     strictEqual(await slice(2 ** 64), '');
     strictEqual(await slice('1', '3'), 'bc');
+  },
+};
+
+export const unpairedSurrogates = {
+  async test() {
+    const usv = Cloudflare.compatibilityFlags['blob_string_parts_usvstring'];
+    const lone = (wtf8) => (usv ? [0xef, 0xbf, 0xbd] : wtf8);
+    for (const make of [(p) => new Blob(p), (p) => new File(p, 'f')]) {
+      for (const [input, expected] of [
+        ['\ud800', lone([0xed, 0xa0, 0x80])],
+        ['\udfff', lone([0xed, 0xbf, 0xbf])],
+        ['a\ud800b', [0x61, ...lone([0xed, 0xa0, 0x80]), 0x62]],
+        ['\ud83d\ude00', [0xf0, 0x9f, 0x98, 0x80]],
+        ['\ud7ff\ue000', [0xed, 0x9f, 0xbf, 0xee, 0x80, 0x80]],
+      ]) {
+        deepStrictEqual(
+          Array.from(new Uint8Array(await make([input]).arrayBuffer())),
+          expected
+        );
+      }
+    }
   },
 };
