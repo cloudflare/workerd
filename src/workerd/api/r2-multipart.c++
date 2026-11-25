@@ -5,6 +5,7 @@
 #include "r2-multipart.h"
 
 #include "r2-bucket.h"
+#include "r2-json.h"
 #include "r2-rpc.h"
 
 #include <workerd/api/r2-api.capnp.h>
@@ -114,16 +115,12 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("uploadPart", errorType);
 
-      capnp::MallocMessageBuilder responseMessage;
-      capnp::JsonCodec json;
-      json.handleByAnnotation<R2UploadPartResponse>();
-      auto responseBuilder = responseMessage.initRoot<R2UploadPartResponse>();
-
-      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
-      kj::StringPtr etag = responseBuilder.getEtag();
-      traceContext.setTag("cloudflare.r2.response.etag"_kjc, etag);
-      UploadedPart uploadedPart = {partNumber, kj::str(etag)};
-      return uploadedPart;
+      return withR2JsonResponse<R2UploadPartResponse>(KJ_ASSERT_NONNULL(r2Result.metadataPayload),
+          serde::parseR2UploadPartResponse, [&](const auto& response) {
+        auto etag = kj::str(response.getEtag());
+        traceContext.setTag("cloudflare.r2.response.etag"_kjc, etag.asPtr());
+        return UploadedPart{partNumber, kj::mv(etag)};
+      });
     });
   });
 }

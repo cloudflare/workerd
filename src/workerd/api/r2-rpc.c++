@@ -4,15 +4,13 @@
 
 #include "r2-rpc.h"
 
-#include <workerd/api/r2-api.capnp.h>
+#include "r2-json.h"
+
 #include <workerd/api/streams/common.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/util.h>
-// This is imported for the error type and that's shared between internal and public beta.
 
-#include <capnp/compat/json.h>
-#include <capnp/message.h>
 #include <kj/compat/http.h>
 
 namespace workerd::api {
@@ -87,14 +85,12 @@ R2PutValue prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
   KJ_UNREACHABLE;
 }
 
+// Extracts the HTTP error before the response header storage is released.
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
-  capnp::JsonCodec json;
-  json.handleByAnnotation<public_beta::R2ErrorResponse>();
-  capnp::MallocMessageBuilder errorMessageArena;
-  auto errorMessage = errorMessageArena.initRoot<public_beta::R2ErrorResponse>();
-  json.decode(responseBody, errorMessage);
-
-  return kj::refcounted<R2Error>(errorMessage.getV4code(), kj::str(errorMessage.getMessage()));
+  return public_beta::withR2JsonResponse<public_beta::R2ErrorResponse>(
+      responseBody, public_beta::serde::parseR2ErrorResponse, [](const auto& response) {
+    return kj::refcounted<R2Error>(response.getV4code(), kj::str(response.getMessage()));
+  });
 }
 
 jsg::JsValue R2Error::getStack(jsg::Lock& js) {
