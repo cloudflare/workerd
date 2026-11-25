@@ -219,7 +219,66 @@ pub struct ServeArgs {
 
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
+
+    /// Serve on <N> event-loop threads; more than one requires --experimental.
+    ///
+    /// The threads take requests from one queue, each when it has nothing else to run, so a
+    /// request is served by a thread that is free, whichever connection it came on; a separate front
+    /// (--front-threads) accepts the connections of the config's HTTP, HTTPS and TCP sockets and
+    /// speaks TLS and HTTP for them. Every thread runs its own copy of every
+    /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
+    /// a service binding reaches the Worker of the same thread. Each thread loads its own dynamic
+    /// Workers too, so threads can run different code under one name if a Worker Loader's
+    /// getCode callback returns different code for it. Durable Objects are spread over the
+    /// threads: each lives on one of them, with its storage, alarms and WebSockets, and the
+    /// other threads call it there. A cluster instance keeps its lease and its record of what
+    /// it owns on one thread, which the others ask. A Durable Object does not see the
+    /// trace span of a caller on another thread. --inspector-addr and the options that save a Python snapshot are not
+    /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
+    /// served by one thread only.
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = 1,
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub threads: u32,
+
+    /// With --threads above one: run the front that accepts connections for the event-loop
+    /// threads on <N> threads of its own (default: 2).
+    ///
+    /// The front accepts from the config's HTTP, HTTPS and TCP sockets, performs the TLS
+    /// handshakes and reads and writes HTTP; the event-loop threads run the Workers. It needs
+    /// more threads only when it, not the Workers, is what limits throughput.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub front_threads: Option<u32>,
+
+    /// With --threads above one: let <N> requests wait for an event-loop thread before the
+    /// front stops taking more (default: 256).
+    ///
+    /// A request, or a connection of a TCP socket, waits in the front's queue until a thread
+    /// has nothing else to run. When that many wait, the front reads no further requests from
+    /// its connections and accepts no further connections until a thread takes one, so clients
+    /// wait in the listen backlog and behind TCP flow control instead of in the server's
+    /// memory. No request is refused or answered with an error for it.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_FRONT_QUEUE)
+    )]
+    pub front_queue: Option<u32>,
 }
+
+/// The most `--front-queue`: more would not be a limit on anything a process can hold.
+const MAX_FRONT_QUEUE: i64 = 1 << 20;
+
+/// The most `--threads`: every thread compiles its own copy of every Worker, so more than a
+/// machine has cores only costs memory.
+const MAX_THREADS: i64 = 256;
 
 #[derive(Args, Debug)]
 pub struct DeployArgs {
@@ -540,6 +599,39 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
                 .iter()
                 .any(|addr| addr.name == *name)
         })
+}
+
+/// Why `serve` cannot run on the `--threads` asked for with the other options given, if it
+/// cannot. The server reports the inspector as a config error, too
+/// (`workerd_server::threads::obstacles`).
+pub fn threads_refused(serve: &ServeArgs, serve_or_test: &ServeOrTestArgs) -> Option<&'static str> {
+    if serve.threads <= 1 {
+        // One thread accepts its connections itself.
+        if serve.front_threads.is_some() {
+            return Some(
+                "--front-threads: There is a front only with more than one thread (--threads).",
+            );
+        }
+        return serve.front_queue.map(
+            |_| "--front-queue: There is a front only with more than one thread (--threads).",
+        );
+    }
+    if !serve_or_test.experimental {
+        return Some(
+            "--threads: Serving on more than one thread is an experimental feature which may \
+             change or go away in the future. You must run workerd with `--experimental` to use \
+             this feature.",
+        );
+    }
+    if serve_or_test.inspector_addr.is_some() {
+        return Some("--threads: --inspector-addr is not supported with more than one thread.");
+    }
+    if serve_or_test.python_save_snapshot || serve_or_test.python_save_baseline_snapshot {
+        return Some(
+            "--threads: Saving a Python snapshot is not supported with more than one thread.",
+        );
+    }
+    None
 }
 
 impl From<&TestArgs> for server::TestOptions {

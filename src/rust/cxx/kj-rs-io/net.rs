@@ -45,7 +45,11 @@
 //! workerd's Rust server uses the same addresses without the C++ adapter and without a filter:
 //! [`TokioAddress::parse_str`], then `listen` and [`TokioListener::accept`], `connect_first` or
 //! `bind_udp`; [`wrap_listener`] for an inherited socket. It gets tokio's own sockets back
-//! ([`Socket`], `UdpSocket`) and serves them itself.
+//! ([`Socket`], `UdpSocket`) and serves them itself. A listener can change runtimes:
+//! [`TokioListener::into_sockets`] takes its sockets out of the loop that bound them, and
+//! [`ListenerSockets::listen`] makes a listener of them on the runtime of the thread that calls
+//! it, which need not be a loop thread's: a server that accepts on a tokio runtime of its own
+//! (workerd's front runtime) gets its listeners this way.
 //!
 //! # Runtime and ownership
 //!
@@ -808,6 +812,16 @@ impl ListenerInner {
         }
     }
 
+    /// The socket itself, registered with no runtime any more.
+    fn into_socket(self) -> Result<socket2::Socket> {
+        match self {
+            Self::Tcp(listener) => listener.into_std().map(socket2::Socket::from),
+            #[cfg(unix)]
+            Self::Unix(listener) => listener.into_std().map(socket2::Socket::from),
+        }
+        .map_err(op("deregistering a listener"))
+    }
+
     fn local_addr(&self) -> Result<SocketAddress> {
         match self {
             Self::Tcp(listener) => Ok(SocketAddress::from(
@@ -920,7 +934,7 @@ impl ListenerShared {
 
     /// One accepted socket and its peer; KJ's transient errors are retried here.
     async fn accept_socket(&self) -> Result<(Socket, SocketAddress)> {
-        crate::ensure_owner_loop(self.owner)?;
+        crate::ensure_owner_runtime(self.owner)?;
         let ListenerBackend { inners, next } = &self.backend;
         loop {
             let (socket, peer) =
@@ -967,6 +981,69 @@ impl TokioListener {
     /// `kj::ConnectionReceiver::getsockname`: the first socket's.
     fn local_addr(&self) -> Result<SocketAddress> {
         self.shared.backend.inners[0].local_addr()
+    }
+
+    /// The listener's sockets, bound and listening as they are and registered with no runtime,
+    /// for [`ListenerSockets::listen`] to make a listener of elsewhere. Connections that arrive
+    /// meanwhile wait in the sockets' queues.
+    ///
+    /// # Errors
+    ///
+    /// An accept is pending on the listener, or a socket could not be deregistered.
+    pub fn into_sockets(self) -> Result<ListenerSockets> {
+        let shared = Arc::try_unwrap(self.shared)
+            .map_err(|_| KjIoError::other("listener", "an accept is pending on this listener"))?;
+        let sockets = shared
+            .backend
+            .inners
+            .into_iter()
+            .map(ListenerInner::into_socket);
+        Ok(ListenerSockets {
+            sockets: sockets.collect::<Result<_>>()?,
+        })
+    }
+}
+
+/// The sockets of a [`TokioListener`] ([`TokioListener::into_sockets`]), registered with no
+/// runtime, so that they may go to another thread, which makes a listener of them.
+pub struct ListenerSockets {
+    /// Never empty.
+    sockets: Vec<socket2::Socket>,
+}
+
+impl ListenerSockets {
+    /// A listener over these sockets, registered with the calling thread's runtime: its loop's,
+    /// or on a thread that is not a loop thread, the tokio runtime entered on it. A listener of
+    /// a runtime with several threads accepts on any of them.
+    pub fn listen(self) -> Result<Box<TokioListener>> {
+        let owner = crate::current_runtime_id()?;
+        let inners = self.sockets.into_iter().map(|socket| {
+            let local = socket.local_addr().map_err(op("getsockname()"))?;
+            listener_inner(socket, &local, "listen()")
+        });
+        let backend = ListenerBackend::sockets(inners.collect::<Result<_>>()?);
+        Ok(Box::new(TokioListener {
+            shared: Arc::new(ListenerShared { backend, owner }),
+        }))
+    }
+}
+
+/// A listening socket of the family of `local`, its address, registered with the calling
+/// thread's loop. The socket is non-blocking already.
+fn listener_inner(
+    socket: socket2::Socket,
+    local: &socket2::SockAddr,
+    what: &'static str,
+) -> Result<ListenerInner> {
+    match local.domain() {
+        socket2::Domain::IPV4 | socket2::Domain::IPV6 => Ok(ListenerInner::Tcp(
+            TcpListener::from_std(socket.into()).map_err(op(what))?,
+        )),
+        #[cfg(unix)]
+        socket2::Domain::UNIX => Ok(ListenerInner::Unix(
+            UnixListener::from_std(socket.into()).map_err(op(what))?,
+        )),
+        _ => Err(KjIoError::other(what, "unsupported socket family")),
     }
 }
 
@@ -1137,21 +1214,7 @@ pub fn wrap_socket(socket: socket2::Socket) -> Result<Box<TokioStream>> {
 pub fn wrap_listener(socket: socket2::Socket) -> Result<Box<TokioListener>> {
     let local = socket.local_addr().map_err(op("getsockname()"))?;
     ensure_loop_thread()?;
-    let inner = match local.domain() {
-        socket2::Domain::IPV4 | socket2::Domain::IPV6 => ListenerInner::Tcp(
-            TcpListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?,
-        ),
-        #[cfg(unix)]
-        socket2::Domain::UNIX => ListenerInner::Unix(
-            UnixListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?,
-        ),
-        _ => {
-            return Err(KjIoError::other(
-                "wrapListenSocketFd",
-                "unsupported socket family",
-            ));
-        }
-    };
+    let inner = listener_inner(socket, &local, "wrapListenSocketFd")?;
     Ok(Box::new(TokioListener::new(ListenerBackend::sockets(
         vec![inner],
     ))?))

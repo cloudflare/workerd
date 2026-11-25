@@ -134,7 +134,7 @@ kj::HttpHeaders rekey(const kj::HttpHeaderTable& table, const kj::HttpHeaders& h
 }
 
 const kj::HttpHeaderTable& hostHeaderTable(const WorkerFactory& factory) {
-  return KJ_REQUIRE_NONNULL(factory.getImpl().options->hostHeaderTable,
+  return KJ_REQUIRE_NONNULL(factory.getImpl().shared.options->hostHeaderTable,
       "the factory has no host header table to rekey headers into");
 }
 

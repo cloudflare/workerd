@@ -21,7 +21,11 @@ wasm_tools_parse(
     src = "wasm-source-url.wat",
 )
 
-exports_files(["starttls-server.pem"])
+exports_files([
+    "connect-handler-server.key",
+    "connect-handler-server.pem",
+    "starttls-server.pem",
+])
 
 wd_test(
     src = "weakref-test.wd-test",

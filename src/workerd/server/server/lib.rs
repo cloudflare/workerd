@@ -20,14 +20,18 @@ pub mod cluster;
 pub mod config;
 pub mod cron;
 pub mod entry;
+pub mod front;
+pub mod hub;
 pub mod in_process;
 pub mod listen;
 pub mod loader;
 pub mod log;
+pub mod placement;
 pub mod pyodide;
 pub mod run;
 pub mod services;
 pub mod tasks;
+pub mod threads;
 pub mod worker;
 
 pub type Error = cxx::KjError;

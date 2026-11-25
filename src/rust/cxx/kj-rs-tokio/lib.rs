@@ -19,8 +19,12 @@
 // hand-written unsafe.
 
 pub use ffi::TokioAsyncIoContext;
+pub use pace::PortPace;
+pub use pace::PortPaced;
+pub use port::ParkHooks;
 pub use port::TokioPort;
 pub use port::current_handle;
+pub use port::set_park_hooks;
 pub use port::spawn;
 pub use progress::Progress;
 pub use progress::WatchError;
@@ -28,6 +32,7 @@ pub use progress::watch_progress;
 pub use runtime::Runtime;
 
 mod ffi;
+mod pace;
 mod port;
 mod progress;
 mod runtime;

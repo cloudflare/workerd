@@ -4,6 +4,14 @@
 
 //! `workerd serve`, `workerd test` and `workerd bench`: bind the sockets, build the service
 //! graph, listen, and either wait for the drain signal or run the tests or benchmarks.
+//!
+//! `workerd serve --threads=<N>` does this on the process's first loop thread (`run`), which
+//! then starts the others, the replicas (`threads.rs`); each builds the graph again for itself
+//! (`run_replica`). No loop then accepts from a stream socket: the first thread gives the ones it
+//! bound to the front (`front/mod.rs`), and every loop serves the work it takes from the front's
+//! queue (`listen::dispatch`). The Durable Objects are spread over the loops, each of which
+//! reaches those of another over its session with it; a cluster node's part in the cluster, and
+//! with it every one of its Durable Objects, is the first thread's alone.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -23,6 +31,7 @@ use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use worker::CxxWorkerInterface;
 use worker::Interface;
 use workerd_capnp::config;
@@ -39,6 +48,7 @@ use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
 use crate::cluster::Ready;
+use crate::config::ClusterJoin;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -46,15 +56,23 @@ use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
 use crate::config::text;
+use crate::front;
+use crate::front::Front;
 use crate::listen;
 use crate::listen::BoundSocket;
+use crate::listen::FrontSockets;
 use crate::listen::HttpSocket;
 use crate::listen::ListenContext;
 use crate::listen::StreamListener;
 use crate::listen::TcpTls;
+use crate::listen::dispatch;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
+use crate::threads;
+use crate::threads::Phase;
+use crate::threads::Replicas;
+use crate::threads::Signals;
 use crate::worker::WorkerService;
 
 /// Where `serve` prints a line for a person.
@@ -90,6 +108,17 @@ pub struct RunOptions {
     pub started: Option<oneshot::Sender<Weak<Server>>>,
     /// Drain as soon as told to, rather than serving on through `Config.shutdownDelayMs`.
     pub drain_at_once: bool,
+    /// `--threads`, less the thread the server starts on: the loop threads to start besides it.
+    pub replicas: usize,
+    /// `--front-threads`: the threads of the front that several loop threads are served by;
+    /// zero for the default.
+    pub front_threads: usize,
+    /// `--front-queue`: how many requests and TCP connections the front's queue holds; zero
+    /// for the default.
+    pub front_queue: usize,
+    /// On a loop thread other than the first of a cluster instance: what the instance's threads
+    /// share of its membership, which the first thread joined.
+    pub cluster: Option<crate::cluster::Seat>,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -142,41 +171,129 @@ type Listeners = FuturesUnordered<LocalBoxFuture<'static, Result<()>>>;
 /// signal.
 struct Running {
     server: Rc<Server>,
+    /// The listeners; the replicas, if any, are one of them (`threads::Started::watch`).
     listeners: Listeners,
     drain: watch::Sender<bool>,
+    /// The other threads of the run, if it has several loop threads; they end with it.
+    threads: Option<Threads>,
 }
 
-/// Binds the sockets, starts the inspector, builds the service graph, and starts the listeners.
+/// The other threads of a run on several loop threads. Dropping it stops the front, which
+/// drops its connections, then stops and joins the replicas, and only then drops the front:
+/// its runtime, which the transports the loops hold are registered with, outlives the loops.
+struct Threads {
+    /// The loop threads besides the first.
+    replicas: Replicas,
+    /// What accepts for the loop threads.
+    front: Front,
+}
+
+impl Drop for Threads {
+    fn drop(&mut self) {
+        // The fields are then dropped in their order.
+        self.front.stop();
+    }
+}
+
+impl Threads {
+    /// Starts `replicas`, which serve what they take from `queue` for the stream sockets among
+    /// `ports`, waits until each can, and makes the front that accepts from `sockets`. Its
+    /// runtime exists, with the listeners registered, before the process says it listens; it
+    /// accepts once told to serve.
+    async fn start(
+        replicas: Replicas,
+        server: &Server,
+        options: &RunOptions,
+        queue: front::Queue,
+        sockets: Vec<front::FrontSocket>,
+        ports: &Ports,
+    ) -> Result<(Self, threads::Started)> {
+        let deployments = server.report().replica_deployments();
+        let overrides = &options.overrides;
+        let started = replicas
+            .start(
+                &ports.front_sockets(),
+                &queue,
+                overrides,
+                &deployments,
+                server.cluster().map(|node| node.seat()).as_ref(),
+            )
+            .await?;
+        let threads = match options.front_threads {
+            0 => front::DEFAULT_THREADS,
+            threads => threads,
+        };
+        let front = Front::new(threads, queue, sockets).await?;
+        Ok((Self { replicas, front }, started))
+    }
+
+    /// Lets the replicas serve and the front accept.
+    fn serve(&self) {
+        self.replicas.serve();
+        self.front.serve();
+    }
+
+    /// Tells the replicas that the server drains, and the front to stop accepting; the front
+    /// closes its queue once its connections have ended, which is what ends the loops' takers.
+    fn drain(&self) {
+        self.replicas.drain();
+        self.front.drain();
+    }
+
+    /// Tells the replicas to stop their containers, until `stop_by` if that is a time, and end.
+    fn quiesce(&self, stop_by: Option<Instant>) {
+        self.replicas.quiesce(stop_by);
+    }
+
+    /// Whether every replica's thread has ended, once it has or at `until`.
+    async fn ended_by(&self, until: Instant) -> bool {
+        self.replicas.ended_by(until).await
+    }
+}
+
+/// The loop thread a server is started on.
+enum Role {
+    /// The process's first: it binds the sockets and has everything a process has one of.
+    First,
+    /// Another, which serves what it takes from the front's queue: the stream sockets as the
+    /// first thread bound them, and the queue.
+    Replica(FrontSockets, front::Queue),
+}
+
+/// Binds the sockets, starts the inspector, builds the service graph, and starts the listeners;
+/// on the first loop thread of several, also starts the replicas and waits until each is ready.
 /// Config errors go to `report`; there is nothing to run (`None`) if it refuses to serve with
 /// them. `for_test` exempts the `TEST_TMPDIR` directory override from the unmatched-override
 /// check.
+///
+/// A replica (see `threads.rs`) gets no `options` but the overrides, so it has no control
+/// channel, inspector or debug port, it arms no cron trigger, and it does not join the cluster:
+/// what needs one it reaches on the first loop thread (`Factory::link`).
+#[expect(clippy::too_many_lines, reason = "a server's start, in order")]
 async fn start(
     factory: Rc<Factory>,
     mut options: RunOptions,
     report: Reporter,
     for_test: bool,
+    role: Role,
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
     let mut control = Control(options.control.take(), options.announce.take());
 
-    let bound = listen::bind_sockets(
-        config,
-        &mut options.socket_addresses,
-        &mut options.socket_fds,
-        factory.loopback(),
-        &report,
-    )
-    .await?;
-    for name in options
-        .socket_addresses
-        .keys()
-        .chain(options.socket_fds.keys())
-    {
-        report.error(format!(
-            "Config did not define any socket named \"{name}\" to match the override provided \
-             on the command line."
-        ));
+    let (is_replica, queue) = match &role {
+        Role::First => (false, None),
+        Role::Replica(_, queue) => (true, Some(queue.clone())),
+    };
+    let bound = sockets(role, config, &mut options, &factory, &report).await?;
+
+    // What several threads cannot serve is a config error. A reporter that serves despite errors
+    // (`--watch`) then serves on this thread alone, like any config with an error.
+    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory));
+    if replicas.is_some() {
+        for obstacle in threads::obstacles(options.inspector.is_some()) {
+            report.error(obstacle);
+        }
     }
 
     // The inspector starts before any isolate exists, so that every isolate registers with it.
@@ -187,21 +304,27 @@ async fn start(
 
     // The cluster port is bound before the services, like the sockets: its address goes in the
     // lease record.
-    let cluster_port = if config.has_cluster() {
+    let cluster_port = if config.has_cluster() && !is_replica {
         let conf = config.get_cluster().map_err(capnp_error)?;
         let (address, advertise) = (&options.cluster_address, &options.cluster_advertise);
         Some(cluster::bind(conf, address.as_deref(), advertise.as_deref()).await?)
     } else {
         None
     };
-    let server = Server::start(
+    let join = match (&cluster_port, options.cluster.take()) {
+        (Some((_, address)), _) => Some(ClusterJoin::At(address.clone())),
+        (None, Some(seat)) => Some(ClusterJoin::Beside(seat)),
+        (None, None) => None,
+    };
+    // Boxed: the graph's construction is most of what this future would hold.
+    let building = Server::start(
         Rc::clone(&factory),
         &options.overrides,
         report,
         bound.inbound,
-        cluster_port.as_ref().map(|(_, address)| address.clone()),
-    )
-    .await?;
+        join,
+    );
+    let server = Box::pin(building).await?;
     report_unmatched_overrides(&server, &options.overrides, config, for_test)?;
 
     let (drain, draining) = watch::channel(false);
@@ -209,20 +332,70 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let (listening, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
+    let Sockets {
+        mut listeners,
+        ports,
+        fronted,
+    } = Sockets::new(config, bound.sockets, &context, &server)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
     }
+    // The graph is built: what the other loop threads send this one is answered from here on.
+    factory.serve_links(&server);
+    // The replicas build their graphs once this thread accepted the config, and are ready
+    // before the process says it listens. They run with or without a stream socket to serve:
+    // each has the Durable Objects whose home it is.
+    let replicas = replicas.filter(|_| !server.report().had_errors());
+    // How many loop threads there are is settled, and with it where each actor lives: the
+    // first thread takes its seat, and every thread schedules the alarms that are its own.
+    if let Some(replicas) = &replicas {
+        replicas.seat(&factory)?;
+    }
+    server.start_alarms()?;
+    // With several loops the front accepts for all of them, and each serves what it takes from
+    // the queue; otherwise this thread accepts for itself.
+    let queue = queue.or_else(|| {
+        let limit = match options.front_queue {
+            0 => front::DEFAULT_QUEUE_LIMIT,
+            limit => limit,
+        };
+        replicas.is_some().then(|| front::Queue::new(limit))
+    });
+    let front_sockets = fronted.serve(queue.as_ref(), &context, &mut listeners)?;
+    let (mut threads, mut started) = match (replicas, queue) {
+        (Some(replicas), Some(queue)) => {
+            let sockets = front_sockets;
+            let (threads, started) =
+                Threads::start(replicas, &server, &options, queue, sockets, &ports).await?;
+            (Some(threads), Some(started))
+        }
+        _ => (None, None),
+    };
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        if let Some(started) = &mut started {
+            started.check()?;
+        }
         start_cluster(&factory, node, listener, &mut control)?;
     }
-    for socket in listening {
-        control.listen(&socket.name, socket.port, socket.url);
+    if let Some(mut started) = started {
+        started.check()?;
+        listeners.push(started.watch());
     }
-    listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
+    if let Some(threads) = &mut threads {
+        listeners.push(threads.front.watch());
+    }
+    for Port {
+        name, number, url, ..
+    } in &ports.0
+    {
+        control.listen(name, *number, url.clone());
+    }
+    if !is_replica {
+        listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
+    }
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
@@ -245,11 +418,48 @@ async fn start(
         let _ = started.send(Rc::downgrade(&server));
     }
 
+    if let Some(threads) = &threads {
+        threads.serve();
+    }
     Ok(Some(Running {
         server,
         listeners,
         drain,
+        threads,
     }))
+}
+
+/// The config's sockets for the thread of `role`: bound, with the command line's overrides for
+/// them taken out of `options` and those that match no socket reported, or adopted.
+async fn sockets(
+    role: Role,
+    config: config::Reader<'_>,
+    options: &mut RunOptions,
+    factory: &Factory,
+    report: &Reporter,
+) -> Result<listen::BoundSockets> {
+    if let Role::Replica(sockets, _) = role {
+        return listen::adopt_sockets(config, sockets);
+    }
+    let bound = listen::bind_sockets(
+        config,
+        &mut options.socket_addresses,
+        &mut options.socket_fds,
+        factory.loopback(),
+        report,
+    )
+    .await?;
+    for name in options
+        .socket_addresses
+        .keys()
+        .chain(options.socket_fds.keys())
+    {
+        report.error(format!(
+            "Config did not define any socket named \"{name}\" to match the override provided \
+             on the command line."
+        ));
+    }
+    Ok(bound)
 }
 
 /// Runs this instance's part in the cluster: the peer port, the peer listing, and compaction. They
@@ -263,112 +473,282 @@ fn start_cluster(
 ) -> Result<()> {
     control.listen_cluster(&listener)?;
     factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
-    let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move { cluster.list_loop().await });
-    let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move { cluster.tier_loop().await });
+    let first = Rc::clone(node.first()?);
+    factory.spawn_detached(async move { first.list_loop().await });
+    compact(factory, node);
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
     Ok(())
 }
 
-/// A socket that listens, as its `listen` event reports it.
-struct ListeningSocket {
+/// Compacts, for the life of the process, the logs of the objects this loop thread owns in the
+/// cluster's bucket.
+fn compact(factory: &Rc<Factory>, node: &Rc<ClusterNode>) {
+    let cluster = Rc::clone(&node.cluster);
+    factory.spawn_detached(async move { cluster.tier_loop().await });
+}
+
+/// A bound socket's name and port, for the control channel's `listen` event.
+struct Port {
     name: String,
-    port: u16,
+    number: u16,
+    /// What `serve` tells a person the socket's URL is, for an HTTP(S) socket.
     url: Option<String>,
+    /// Of a stream socket: its index in the config, and the address it is bound to.
+    stream: Option<(usize, String)>,
 }
 
-/// Starts the listener of every socket of the config that bound; the sockets, for their `listen`
-/// events, and the listeners. A socket whose service does not resolve is a config error.
-fn socket_listeners(
-    context: &Rc<ListenContext>,
-    config: config::Reader<'_>,
-    bound: Vec<Option<(BoundSocket, String)>>,
-    server: &Server,
-) -> Result<(Vec<ListeningSocket>, Listeners)> {
-    let mut listening = Vec::new();
-    let listeners = Listeners::new();
-    let sockets = config.get_sockets().map_err(capnp_error)?;
-    for (sock, bound) in sockets.iter().zip(bound) {
-        // A socket that failed to bind already reported its error.
-        let Some((bound, address)) = bound else {
-            continue;
+/// The bound sockets, in the config's order.
+struct Ports(Vec<Port>);
+
+impl Ports {
+    /// The stream sockets as a replica is told of them.
+    fn front_sockets(&self) -> FrontSockets {
+        let streams = || {
+            self.0
+                .iter()
+                .filter_map(|port| Some((port, port.stream.as_ref()?)))
         };
-        let name = text(sock.get_name())?;
-        let mut errors = Vec::new();
-        let designator = Designator::from_reader(
-            sock.get_service().map_err(capnp_error)?,
-            format!("Socket \"{name}\""),
-            &mut errors,
-        )
-        .map_err(capnp_error)?;
-        for error in errors {
-            server.report().error(error);
+        let count = streams().map(|(_, (index, _))| index + 1).max();
+        let mut sockets = vec![None; count.unwrap_or(0)];
+        for (port, (index, address)) in streams() {
+            sockets[*index] = Some((address.clone(), port.number));
         }
-        let channel = server.lookup(&designator);
-        let port = listen::bound_port(&bound)?;
-        let url = listen::url(sock, &address, port);
-        listening.push(ListeningSocket { name, port, url });
-        if let Some(listener) =
-            listener(Rc::clone(context), sock, bound, &address, channel, server)?
-        {
-            listeners.push(listener);
-        }
+        sockets
     }
-    Ok((listening, listeners))
 }
 
-/// The listener for one bound socket, or none for a socket whose type is unknown (reported).
-fn listener(
+/// What the bound sockets of the config serve.
+struct Sockets {
+    /// The listeners of the sockets only this thread serves: the datagram sockets.
+    listeners: Listeners,
+    ports: Ports,
+    /// The stream sockets, which this thread accepts from itself or the front accepts from.
+    fronted: StreamSockets,
+}
+
+impl Sockets {
+    /// What each socket of the config that is bound serves, as the config says.
+    fn new(
+        config: config::Reader<'_>,
+        bound: Vec<Option<(BoundSocket, String)>>,
+        context: &Rc<ListenContext>,
+        server: &Server,
+    ) -> Result<Self> {
+        let listeners = FuturesUnordered::new();
+        let mut ports = Vec::new();
+        let mut fronted = StreamSockets(Vec::new());
+        let sockets = config.get_sockets().map_err(capnp_error)?;
+        for (index, (sock, bound)) in sockets.iter().zip(bound).enumerate() {
+            // A socket that failed to bind already reported its error; a replica has no
+            // datagram sockets.
+            let Some((bound, address)) = bound else {
+                continue;
+            };
+            let name = text(sock.get_name())?;
+            let mut errors = Vec::new();
+            let designator = Designator::from_reader(
+                sock.get_service().map_err(capnp_error)?,
+                format!("Socket \"{name}\""),
+                &mut errors,
+            )
+            .map_err(capnp_error)?;
+            for error in errors {
+                server.report().error(error);
+            }
+            let channel = server.lookup(&designator);
+            let port = listen::bound_port(&bound)?;
+            let url = listen::url(sock, &address, port);
+            let stream =
+                (!matches!(bound, BoundSocket::Datagram(_))).then(|| (index, address.clone()));
+            ports.push(Port {
+                name,
+                number: port,
+                url,
+                stream,
+            });
+            match socket_service(Rc::clone(context), sock, bound, &address, channel, server)? {
+                Some(SocketService::Datagram(listener)) => listeners.push(listener),
+                Some(SocketService::Stream(socket, protocol)) => {
+                    fronted.0.push((index, socket, protocol));
+                }
+                None => {}
+            }
+        }
+        Ok(Self {
+            listeners,
+            ports: Ports(ports),
+            fronted,
+        })
+    }
+}
+
+/// What a bound socket serves.
+enum SocketService {
+    /// A datagram socket's listener.
+    Datagram(LocalBoxFuture<'static, Result<()>>),
+    /// A stream socket, and what its connections are served as.
+    Stream(BoundSocket, Serves),
+}
+
+/// What the connections of a stream socket are served as.
+enum Serves {
+    Http(Rc<HttpSocket>),
+    /// `connect()` events on the channel, addressed to the socket as bound, with its TLS.
+    Tcp(Rc<dyn Channel>, Option<TcpTls>, String),
+}
+
+/// The stream sockets of the config that are bound: each one's index in the config, the socket,
+/// and what it serves.
+struct StreamSockets(Vec<(usize, BoundSocket, Serves)>);
+
+impl StreamSockets {
+    /// The listeners of this thread over the sockets, which it bound.
+    fn listen(
+        self,
+        context: &Rc<ListenContext>,
+    ) -> Result<Vec<LocalBoxFuture<'static, Result<()>>>> {
+        let listen = |(_, socket, serves)| {
+            let BoundSocket::Stream(listener) = socket else {
+                return Err(kj::failed!(
+                    "a socket of the front has no front to accept from it"
+                ));
+            };
+            let context = Rc::clone(context);
+            let listener: LocalBoxFuture<'static, Result<()>> = match serves {
+                Serves::Http(socket) => Box::pin(listen::listen_http(context, listener, socket)),
+                Serves::Tcp(channel, tls, authority) => Box::pin(listen::listen_tcp(
+                    context, listener, channel, tls, authority,
+                )),
+            };
+            Ok(listener)
+        };
+        self.0.into_iter().map(listen).collect()
+    }
+
+    /// Has this thread serve the sockets. With a `queue`, the front's, a listener is added to
+    /// `listeners` that serves what the thread takes from it, and the sockets are returned for
+    /// the front to accept from; without one, the thread's own listeners over the sockets are
+    /// added.
+    fn serve(
+        self,
+        queue: Option<&front::Queue>,
+        context: &Rc<ListenContext>,
+        listeners: &mut Listeners,
+    ) -> Result<Vec<front::FrontSocket>> {
+        let Some(queue) = queue else {
+            listeners.extend(self.listen(context)?);
+            return Ok(Vec::new());
+        };
+        let (sockets, services) = self.split()?;
+        let serving = dispatch::serve(Rc::clone(context), queue.worker(), services);
+        listeners.push(Box::pin(serving));
+        Ok(sockets)
+    }
+
+    /// The sockets for the front to accept from, which only the thread that bound them has, and
+    /// what this loop serves of the work the front queues for each, by the socket's index.
+    fn split(self) -> Result<(Vec<front::FrontSocket>, Vec<Option<dispatch::Service>>)> {
+        let mut sockets = Vec::new();
+        let mut services = Vec::new();
+        for (index, socket, serves) in self.0 {
+            let (protocol, service) = match serves {
+                Serves::Http(socket) => (
+                    front::Protocol::Http {
+                        tls: socket.tls.clone(),
+                        peer_cf_blob: !socket.rewriter.has_cf_blob_header(),
+                    },
+                    dispatch::Service::Http(socket),
+                ),
+                Serves::Tcp(channel, tls, authority) => (
+                    front::Protocol::Tcp { tls },
+                    dispatch::Service::Tcp(channel, authority.into()),
+                ),
+            };
+            match socket {
+                BoundSocket::Stream(StreamListener::Socket(listener)) => {
+                    sockets.push(front::FrontSocket {
+                        index,
+                        sockets: listener.into_sockets()?,
+                        protocol,
+                    });
+                }
+                BoundSocket::Stream(StreamListener::Loopback(_)) => {
+                    return Err(kj::failed!(
+                        "a loopback socket is served by one loop thread"
+                    ));
+                }
+                BoundSocket::Front(_) | BoundSocket::Datagram(_) => {}
+            }
+            if services.len() <= index {
+                services.resize_with(index + 1, || None);
+            }
+            services[index] = Some(service);
+        }
+        Ok((sockets, services))
+    }
+}
+
+/// What one bound socket serves, or nothing for a socket whose type is unknown (reported).
+fn socket_service(
     context: Rc<ListenContext>,
     sock: socket::Reader<'_>,
     bound: BoundSocket,
     address: &str,
     channel: Rc<dyn Channel>,
     server: &Server,
-) -> Result<Option<LocalBoxFuture<'static, Result<()>>>> {
+) -> Result<Option<SocketService>> {
     let name = text(sock.get_name())?;
     let tls = |options: workerd_capnp::tls_options::Reader<'_>| {
         kj_hyper::tls::server_config(&tls_options(options)?)
     };
-    let http = |listener: StreamListener,
-                options: workerd_capnp::http_options::Reader<'_>,
+    let http = |options: workerd_capnp::http_options::Reader<'_>,
                 physical_protocol: &'static str,
                 tls: Option<std::sync::Arc<rustls::ServerConfig>>,
-                context: Rc<ListenContext>,
                 channel: Rc<dyn Channel>| {
-        let socket = Rc::new(HttpSocket {
+        Ok::<_, crate::Error>(Serves::Http(Rc::new(HttpSocket {
             channel,
             rewriter: Rc::new(HttpRewriter::new(options)?),
             physical_protocol,
             tls,
-        });
-        let listener: LocalBoxFuture<'static, Result<()>> =
-            Box::pin(listen::listen_http(context, listener, socket));
-        Ok::<_, crate::Error>(listener)
+        })))
     };
-    Ok(Some(match (sock.which(), bound) {
-        (Ok(socket::Which::Http(options)), BoundSocket::Stream(listener)) => http(
-            listener,
-            options.map_err(capnp_error)?,
-            "http",
-            None,
-            context,
-            channel,
-        )?,
-        (Ok(socket::Which::Https(https)), BoundSocket::Stream(listener)) => {
-            let tls = tls(https.get_tls_options().map_err(capnp_error)?)?;
-            http(
-                listener,
-                https.get_options().map_err(capnp_error)?,
-                "https",
-                Some(tls),
-                context,
-                channel,
-            )?
+    let protocol = match (sock.which(), &bound) {
+        (Ok(socket::Which::Udp(udp)), BoundSocket::Datagram(_)) => {
+            let BoundSocket::Datagram(socket) = bound else {
+                unreachable!("matched a datagram socket");
+            };
+            return Ok(Some(SocketService::Datagram(Box::pin(
+                listen::udp::listen_udp(
+                    context,
+                    socket,
+                    channel,
+                    address.to_owned(),
+                    Duration::from_millis(udp.get_idle_timeout_ms().into()),
+                    udp.get_max_pending_bytes() as usize,
+                ),
+            ))));
         }
-        (Ok(socket::Which::Tcp(tcp)), BoundSocket::Stream(listener)) => {
+        (Err(capnp::NotInSchema(_)), _) => {
+            server.report().error(format!(
+                "Encountered unknown socket type in \"{name}\". Was the config compiled with a \
+                 newer version of the schema?"
+            ));
+            return Ok(None);
+        }
+        // bind_sockets binds a datagram socket for UDP and a stream listener otherwise.
+        (Ok(socket::Which::Udp(_)), _) | (_, BoundSocket::Datagram(_)) => {
+            return Err(kj::failed!("socket \"{name}\" was bound as the wrong kind"));
+        }
+        (Ok(socket::Which::Http(options)), _) => {
+            http(options.map_err(capnp_error)?, "http", None, channel)?
+        }
+        (Ok(socket::Which::Https(https)), _) => {
+            let tls = tls(https.get_tls_options().map_err(capnp_error)?)?;
+            let options = https.get_options().map_err(capnp_error)?;
+            http(options, "https", Some(tls), channel)?
+        }
+        (Ok(socket::Which::Tcp(tcp)), _) => {
             let tls = if tcp.has_tls_options() {
                 let config = tls(tcp.get_tls_options().map_err(capnp_error)?)?;
                 Some(match tcp.get_tls_mode() {
@@ -386,31 +766,12 @@ fn listener(
             };
             // The authority handed to the connect() handler is the endpoint as bound, so it is
             // truthful for a configured port of 0.
-            let authority = format!("{}:{}", listen::host_of_address(address), listener.port()?);
-            Box::pin(listen::listen_tcp(
-                context, listener, channel, tls, authority,
-            ))
+            let port = listen::bound_port(&bound)?;
+            let authority = format!("{}:{port}", listen::host_of_address(address));
+            Serves::Tcp(channel, tls, authority)
         }
-        (Ok(socket::Which::Udp(udp)), BoundSocket::Datagram(socket)) => {
-            Box::pin(listen::udp::listen_udp(
-                context,
-                socket,
-                channel,
-                address.to_owned(),
-                Duration::from_millis(udp.get_idle_timeout_ms().into()),
-                udp.get_max_pending_bytes() as usize,
-            ))
-        }
-        (Err(capnp::NotInSchema(_)), _) => {
-            server.report().error(format!(
-                "Encountered unknown socket type in \"{name}\". Was the config compiled with a \
-                 newer version of the schema?"
-            ));
-            return Ok(None);
-        }
-        // bind_sockets binds a datagram socket for UDP and a stream listener otherwise.
-        _ => return Err(kj::failed!("socket \"{name}\" was bound as the wrong kind")),
-    }))
+    };
+    Ok(Some(SocketService::Stream(bound, protocol)))
 }
 
 /// Reports the `--external-addr` and `--directory-path` overrides that name no service of their
@@ -477,6 +838,12 @@ async fn serve_listeners(listeners: &mut Listeners) -> Result<()> {
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
 /// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
+///
+/// The front and the replicas, if any, serve through all of that as this thread's listeners
+/// do: the front stops accepting when this thread would, and this thread waits for what the
+/// front's connections and the replicas still have, with its actors and their sessions up, as it
+/// waits for its own. A request a replica has in an object that is handed off, or sends to one,
+/// is this thread's own to the object (`ActorNamespace::channel`).
 #[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
@@ -489,11 +856,15 @@ pub async fn run(
     } else {
         shutdown_delay(&factory)?
     };
+    // What is bound last is dropped first: this thread's listeners, and with them what it took
+    // from the front, then the other threads (the front stopped, the replicas stopped and
+    // joined, the front's runtime), and only then this thread's server.
     let Some(Running {
         server,
+        threads,
         mut listeners,
         drain: draining,
-    }) = start(factory, options, report, false).await?
+    }) = start(factory, options, report, false, Role::First).await?
     else {
         return Ok(());
     };
@@ -508,7 +879,27 @@ pub async fn run(
     // until the instance is told to drain or this returns.
     let ready = server.cluster().map(ClusterNode::ready);
     let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
-    let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
+    // A session with one of the run's other loop threads ends only with that thread, which
+    // serves until this one quiesces the threads: one that ends while the listeners serve has
+    // failed, and the Durable Object calls between the two threads with it. An embedding
+    // program ends its threads when it likes, so there the thread that has the others' actors
+    // watches nothing; a thread seated beside it cannot serve without it.
+    let watches_links = threads.is_some() || server.factory().thread() != 0;
+    let serving = async {
+        let listening = std::pin::pin!(serve_listeners(&mut listeners));
+        let lost = std::pin::pin!(async {
+            if watches_links {
+                server.factory().link_lost().await
+            } else {
+                std::future::pending().await
+            }
+        });
+        match futures::future::select(listening, lost).await {
+            Either::Left((result, _)) => result,
+            Either::Right((thread, _)) => Err(lost_link(thread)),
+        }
+    };
+    let mut serving = std::pin::pin!(serving.fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
     match futures::future::select(serving.as_mut(), drain).await {
@@ -521,16 +912,17 @@ pub async fn run(
             // balancers may still send some, and lets its connections finish, its peers' sessions
             // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
-                let deadlines = node.start_draining();
-                let workers = server
-                    .services()
-                    .filter_map(|(_, service)| service.as_worker());
-                let namespaces: Vec<_> = workers
-                    .flat_map(|worker| worker.namespaces())
-                    .map(|(_, ns)| ns)
-                    .filter(|ns| ns.cluster().is_some())
-                    .collect();
-                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+                let deadlines = node.start_draining()?;
+                // Every loop thread hands off the objects whose home it is, at the same time;
+                // the instance stays a member unless each stopped all of its own, the others
+                // by what they answer until the release deadline (`hand_off_elsewhere`).
+                let namespaces = server.clustered_namespaces();
+                let elsewhere = server.factory().hand_off_elsewhere(deadlines);
+                let handoff = Box::pin(async {
+                    let here = actor::hand_off_all(&namespaces, deadlines);
+                    let (here, elsewhere) = futures::join!(here, elsewhere);
+                    here && elsewhere
+                });
                 let stopped = match futures::future::select(serving.as_mut(), handoff).await {
                     Either::Left((result, handoff)) => {
                         result?;
@@ -542,13 +934,16 @@ pub async fn run(
                 // sooner than `leave`, so no cache copy outlives it either. Until the
                 // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
                 // a peer that reads this node's record still finds it live and routes here again.
-                // With objects still running, which stopping very many can leave, it stays a
-                // member: peers take over every object it did not hand off once its lease
-                // expires, after this process exited.
+                // With objects still running, which stopping very many can leave, and a thread
+                // whose JavaScript does not return to its loop, it stays a member: peers take
+                // over every object it did not hand off once its lease expires, after this
+                // process exited. An object that stopped but was not released does not keep it
+                // one (`actor::hand_off_all`).
                 if stopped {
                     let deregister = async {
                         tokio::time::sleep_until(deadlines.leave).await;
-                        node.cluster.deregister().await
+                        let first = node.first().map_err(|e| e.description().to_owned())?;
+                        (first.deregister().await).map_err(|e| e.to_string())
                     };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
@@ -571,6 +966,9 @@ pub async fn run(
                 stop = Some((Rc::clone(node), deadlines));
             }
             draining.send_replace(true);
+            if let Some(threads) = &threads {
+                threads.drain();
+            }
             if let Some((node, deadlines)) = &stop {
                 let finished = async {
                     if !serving.is_terminated() {
@@ -594,24 +992,53 @@ pub async fn run(
         }
     }
 
-    // All incoming requests have drained. Stop container-enabled actors so they cannot race
-    // their terminal Docker cleanup, then wait for it while their namespaces remain available.
+    // All incoming requests have drained, on every thread, or are waited for no longer: no
+    // thread needs another from here on. Each stops its container-enabled actors, this one
+    // below and the others at the same time; the run's drop joins them.
+    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
+    if let Some(threads) = &threads {
+        threads.quiesce(until);
+    }
+    let stopped = stop_containers(&server, until).await;
+    // The stop deadline is every thread's. One whose loop does not come round to ending by
+    // then is left running as the process exits, as a container is left behind: the run's drop
+    // would wait for it.
+    if let (Some(threads), Some(until)) = (&threads, until)
+        && !threads.ended_by(until).await
+    {
+        tracing::warn!("a loop thread still runs at the stop deadline: exiting without it");
+        if let Err(e) = &stopped {
+            tracing::error!("stopping containers: {}", e.description());
+        }
+        crate::entry::exit_now(crate::entry::exit_code().max(i32::from(stopped.is_err())));
+    }
+    stopped
+}
+
+/// Stops the container-enabled actors of this thread so they cannot race their terminal Docker
+/// cleanup, then waits for it while their namespaces remain available: until `until`, if that
+/// is a time.
+async fn stop_containers(server: &Server, until: Option<Instant>) -> Result<()> {
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
-    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
         namespace.begin_container_cleanup(until).await;
     }
     let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
-    let Some((_, deadlines)) = stop else {
+    let Some(until) = until else {
         return Ok(cleanup.await?);
     };
-    if let Ok(result) = tokio::time::timeout_at(deadlines.stop, cleanup).await {
+    if let Ok(result) = tokio::time::timeout_at(until, cleanup).await {
         return Ok(result?);
     }
     tracing::warn!("leaving containers behind at the stop deadline");
     Ok(())
+}
+
+/// The failure of a thread whose session with loop thread `thread` ended while both served.
+fn lost_link(thread: usize) -> crate::Error {
+    kj::disconnected!("the session with loop thread {thread} ended")
 }
 
 /// The config's `shutdownDelayMs`.
@@ -652,6 +1079,122 @@ async fn drain_due(
     futures::future::select(delay, drain.next()).await;
 }
 
+/// `workerd serve` on a loop thread other than the first (see `threads.rs`).
+///
+/// Builds the graph of `factory`'s config for this thread and, once the process serves, serves
+/// what it takes from `queue`, the front's, for `sockets`, until the queue has ended and what it
+/// took is done.
+///
+/// The first thread accepted the config, so an error in it here is this thread's failure. The
+/// errors and warnings are the ones the first thread reported, and are not reported again.
+pub async fn run_replica(
+    factory: Rc<Factory>,
+    overrides: Overrides,
+    deployments: Deployments,
+    cluster: Option<crate::cluster::Seat>,
+    sockets: FrontSockets,
+    queue: front::Queue,
+    signals: &Signals,
+) -> Result<()> {
+    let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+    // A deployment's errors leave this thread serving, as they left the first, with the same
+    // services broken.
+    let report = Reporter::new(
+        Box::new({
+            let errors = Rc::clone(&errors);
+            move |error| errors.borrow_mut().push(error)
+        }),
+        Box::new(drop),
+        false,
+    )
+    .with_deployments(deployments, Box::new(drop), Box::new(drop));
+    let options = RunOptions {
+        overrides,
+        cluster,
+        ..RunOptions::default()
+    };
+    let role = Role::Replica(sockets, queue);
+    let Some(Running {
+        server,
+        mut listeners,
+        drain: draining,
+        ..
+    }) = start(Rc::clone(&factory), options, report, false, role).await?
+    else {
+        return Err(kj::failed!(
+            "the config has errors here that it did not have on the first loop thread: {}",
+            errors.borrow().join(" ")
+        ));
+    };
+
+    // In a cluster this thread owns objects: the lease thread watches its loop with the others
+    // once the instance serves, and their logs are compacted from here.
+    if let Some(node) = server.cluster() {
+        node.watch_loop();
+        compact(&factory, node);
+    }
+    // Resolves with the phase that ended the serving: `Quiesced` once the process has no
+    // connection left or waits for them no longer, `Stopping` if it ends without waiting.
+    let serve = async {
+        signals.ready();
+        if signals.reached(Phase::Serving).await == Phase::Stopping {
+            return Ok(Phase::Stopping);
+        }
+        let mut serving = std::pin::pin!(serve_listeners(&mut listeners));
+        let drain = std::pin::pin!(signals.reached(Phase::Draining));
+        match futures::future::select(serving.as_mut(), drain).await {
+            // The listeners end only once they drain: this is a failure, or a thread that
+            // stopped serving, which the first thread takes for one.
+            Either::Left((result, _)) => {
+                result?;
+                // The front closes its queue as the process drains, which this thread may see
+                // before it sees the phase.
+                if signals.phase() < Phase::Draining {
+                    return Err(kj::failed!("stopped serving before the server drained"));
+                }
+                if signals.phase() < Phase::Quiesced {
+                    signals.drained();
+                }
+                return Ok(signals.reached(Phase::Quiesced).await);
+            }
+            Either::Right((phase, _)) if phase >= Phase::Quiesced => return Ok(phase),
+            Either::Right(_) => {}
+        }
+        draining.send_replace(true);
+        let quiesced = std::pin::pin!(signals.reached(Phase::Quiesced));
+        match futures::future::select(serving, quiesced).await {
+            Either::Left((result, _)) => result?,
+            Either::Right((phase, _)) => return Ok(phase),
+        }
+        // This thread has no connection left. Its actors stay, and it serves what the other
+        // threads send them, until none of the threads has one.
+        signals.drained();
+        Ok(signals.reached(Phase::Quiesced).await)
+    };
+    // The other end of a session is a thread that serves until the process quiesces, so a
+    // session that ends before is one that failed, and the Durable Object calls between the two
+    // threads with it. The phase is read as it is now: a thread that has ended saw it before
+    // this one may have.
+    let lost = async {
+        loop {
+            let thread = factory.link_lost().await;
+            if signals.phase() < Phase::Quiesced {
+                return thread;
+            }
+            // Its sessions end one by one from here on, as the threads do.
+            std::future::pending::<()>().await;
+        }
+    };
+    let phase = match futures::future::select(std::pin::pin!(serve), std::pin::pin!(lost)).await {
+        Either::Left((result, _)) => result?,
+        Either::Right((thread, _)) => return Err(lost_link(thread)),
+    };
+    if phase == Phase::Quiesced {
+        stop_containers(&server, signals.stop_by()).await?;
+    }
+    Ok(())
+}
+
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.
 struct Target {
     channel: Rc<dyn Channel>,
@@ -676,7 +1219,7 @@ async fn start_local(
         glob::Pattern::new(pattern).map_err(|e| kj::failed!("{handler} filter \"{pattern}\": {e}"))
     };
     let (services, entrypoints) = (glob(service_pattern)?, glob(entrypoint_pattern)?);
-    let Some(running) = start(factory, options, report, true).await? else {
+    let Some(running) = start(factory, options, report, true, Role::First).await? else {
         return Ok(None);
     };
 

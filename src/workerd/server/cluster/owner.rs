@@ -24,10 +24,10 @@ use futures::stream;
 use crate::Bucket;
 use crate::Epoch;
 use crate::Error;
-use crate::Ownership;
 use crate::Result;
 use crate::Sequence;
 use crate::capture::Capture;
+use crate::control::Open;
 use crate::log::Cursor;
 use crate::log::DB;
 use crate::log::File;
@@ -181,7 +181,7 @@ impl Owners {
     /// databases where `layout` places them, ready for workerd to open.
     pub async fn take_over(
         &self,
-        ownership: &Ownership,
+        ownership: &dyn Open,
         ns: &str,
         actor: &str,
         owned: &Owned,
@@ -283,7 +283,7 @@ impl Owners {
     /// as an empty database.
     pub async fn open_fresh(
         &self,
-        ownership: &Ownership,
+        ownership: &dyn Open,
         ns: &str,
         actor: &str,
         owned: &Owned,
@@ -303,7 +303,7 @@ impl Owners {
     /// bucket holds before the epoch opens.
     async fn open_epoch(
         &self,
-        ownership: &Ownership,
+        ownership: &dyn Open,
         ns: &str,
         actor: &str,
         owned: &Owned,
@@ -354,7 +354,7 @@ impl Owners {
     /// Commits upload as a group. Each captures its own transactions, then
     /// one at a time uploads everything captured so far on behalf of all,
     /// so a hot object pays an upload per group, not per transaction.
-    pub async fn commit(&self, ownership: &Ownership, ns: &str, actor: &str) -> Result<()> {
+    pub async fn commit(&self, ownership: &dyn Open, ns: &str, actor: &str) -> Result<()> {
         let slot = self.slot(ns, actor)?;
         let target = {
             let guard = slot.object.lock().await;
@@ -377,7 +377,7 @@ impl Owners {
 
     /// Upload everything captured, and acknowledge it if own.json still
     /// names the epoch after the upload.
-    async fn push(&self, ownership: &Ownership, slot: &Slot) -> Result<()> {
+    async fn push(&self, ownership: &dyn Open, slot: &Slot) -> Result<()> {
         let (ns, actor, epoch, round, staged, replica) = {
             let guard = slot.object.lock().await;
             let round = slot.capture.borrow().last()?;

@@ -399,14 +399,15 @@ async fn write_closed(dup: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>) -> R
 ///
 /// Resolves when a [`TokioStream`]'s over the socket would. The socket is dup'd now, so the
 /// future outlives the borrow and holds the connection open until it is dropped; the dup is
-/// registered with this thread's I/O driver when the future is first polled.
+/// registered with the I/O driver of the thread that first polls the future: its loop's, or on a
+/// thread that is not a loop thread, the tokio runtime entered on it.
 #[cfg(unix)]
 pub fn when_write_disconnected<S: std::os::fd::AsFd>(
     socket: &S,
 ) -> impl Future<Output = Result<()>> + use<S> {
     let owned = socket.as_fd().try_clone_to_owned().map_err(op("dup()"));
     async move {
-        crate::ensure_loop_thread()?;
+        crate::current_runtime_id()?;
         let async_fd = crate::ffi::register_fd(owned?, Interest::WRITABLE)
             .map_err(op("whenWriteDisconnected"))?;
         write_closed(&async_fd).await

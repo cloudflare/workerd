@@ -77,43 +77,93 @@ uint startInspector(kj::String address, InspectorServiceIsolateRegistrar& regist
 
 // =======================================================================================
 
-class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
+class SharedFactory::Impl final {
  public:
-  Impl(WorkerFactory& factory,
-      jsg::V8System& v8System,
-      kj::Timer& timer,
-      const kj::MonotonicClock& monotonicClock,
-      kj::Network& network,
+  Impl(jsg::V8System& v8System,
       kj::EntropySource& entropySource,
       kj::Filesystem& fs,
       kj::Own<Options> options,
       ::rust::Vec<uint64_t> config);
 
   jsg::V8System& v8System;
+  kj::EntropySource& entropySource;
+  kj::Filesystem& fs;
+  // The Pyodide bundle manager in `pythonConfig` is const too: it guards what it loads.
+  kj::Own<const Options> options;
+
+  // The config message. Each loop's factory reads it through a reader of its own, since a
+  // reader counts what it traverses.
+  ::rust::Vec<uint64_t> configMessage;
+
+  // The one header table of the run, and the IDs in it of the headers each loop's capnp factory
+  // and `ThreadContext` use, so that the loops agree on them. The builder is only used while
+  // constructing.
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory::HeaderIdBundle httpOverCapnpHeaderIds;
+  ThreadContext::HeaderIdBundle threadContextHeaderIds;
+  kj::Own<kj::HttpHeaderTable> headerTable;
+
+  // Isolates take the provider by mutable reference; all it offers is thread-safe.
+  mutable kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+  // Every loop's `ChannelTokenHandler` has a copy, so each decodes the others' tokens.
+  ChannelTokenHandler::Key channelTokenKey;
+  // Set when the primary loop starts the inspector.
+  kj::MutexGuarded<kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>>> inspectorRegistrar;
+};
+
+// Writes a `Frankenvalue` for another loop thread of the process: the capabilities of its cap
+// table cross as channel tokens, which each loop resolves in its own graph.
+class LoopFrankenvalueHandler final: public FrankenvalueHandler {
+ public:
+  explicit LoopFrankenvalueHandler(ChannelTokenHandler& tokens): tokens(tokens) {}
+  void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) override {
+    tokens.frankenvalueToCapnp(value, builder);
+  }
+
+ private:
+  ChannelTokenHandler& tokens;
+};
+
+class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
+ public:
+  Impl(WorkerFactory& factory,
+      kj::Arc<SharedFactory> shared,
+      kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
+      kj::Network& network,
+      PrimaryLoop primary);
+
+  // Declared first, so that everything else here is destroyed before the process-wide state
+  // (V8 among it) this may hold the last reference to.
+  kj::Arc<SharedFactory> sharedRef;
+  const SharedFactory::Impl& shared;
+  PrimaryLoop primary;
+  // The loop this factory is bound to.
+  const kj::Executor& executor;
+
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
   // Expires with this factory, which owns every container cleanup that uses `network`.
   WeakOwner<kj::Network&> weakNetwork;
-  kj::EntropySource& entropySource;
-  kj::Filesystem& fs;
-  kj::Own<Options> options;
 
-  // The reader borrows the message, so the message is declared first.
-  ::rust::Vec<uint64_t> configMessage;
+  // This loop's reader of the shared config message.
   capnp::FlatArrayMessageReader configReader;
   config::Config::Reader config;
 
   capnp::ByteStreamFactory byteStreamFactory;
-  kj::HttpHeaderTable::Builder headerTableBuilder;
   capnp::HttpOverCapnpFactory httpOverCapnpFactory;
   ThreadContext threadContext;
-  kj::Own<kj::HttpHeaderTable> headerTable;
 
-  kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   ChannelTokenHandler channelTokenHandler;
+  // Writes the Frankenvalues this loop sends another loop of the process.
+  LoopFrankenvalueHandler loopFrankenvalueHandler;
   kj::Maybe<::rust::Box<ServerHandle>> server;
-  kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorRegistrar;
+
+  // Resolves once this loop's links with the process's other loop threads may answer
+  // (`factory_serve_links`); what a link serves waits for it.
+  kj::Own<kj::PromiseFulfiller<void>> linksServingFulfiller;
+  kj::ForkedPromise<void> linksServing = nullptr;
 
   // The Docker client of an actor's container. Actors and `setInactivityTimeout()` timers own the
   // client; while one lives, the actor's next incarnation takes the same one.
@@ -137,6 +187,8 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   uint64_t spawnCount = 0;
 
   const ServerHandle& getServer() const;
+  // Throws unless this is the primary loop's factory; `what` names the operation.
+  void requirePrimary(kj::StringPtr what) const;
 
  private:
   void taskFailed(kj::Exception&& exception) override;
@@ -205,7 +257,14 @@ class ActorStorage::Impl final: public kj::Refcounted {
   kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
   kj::String uniqueKey;
-  kj::Own<AlarmScheduler> alarmScheduler;
+  kj::Timer& timer;
+  // This loop thread's scheduler for the namespace, once started (`actor_storage_start_alarms`).
+  kj::Maybe<kj::Own<AlarmScheduler>> alarmScheduler;
+
+  AlarmScheduler& getAlarmScheduler() {
+    return *KJ_REQUIRE_NONNULL(
+        alarmScheduler, "the namespace's alarm scheduler has not been started");
+  }
 
   // The facet index of the root actor `rootKey`, read from disk for one operation; none when it
   // does not exist (so no facet can have storage).
@@ -227,10 +286,19 @@ class RpcClient::Impl final {
  public:
   // A connection and its RPC system, shared by the capabilities obtained over it.
   struct Session: public kj::Refcounted {
-    explicit Session(kj::Own<kj::AsyncIoStream> connection)
+    Session(kj::Own<kj::AsyncIoStream> connection, FrankenvalueHandler& frankenvalueHandler)
         : connection(kj::mv(connection)),
           rpcSystem(*this->connection),
-          bootstrap(rpcSystem.bootstrap()) {}
+          bootstrap(rpcSystem.bootstrap()),
+          frankenvalueHandler(frankenvalueHandler) {}
+    // A two-way session: the peer's bootstrap is `served`.
+    Session(kj::Own<kj::AsyncIoStream> connection,
+        FrankenvalueHandler& frankenvalueHandler,
+        capnp::Capability::Client served)
+        : connection(kj::mv(connection)),
+          rpcSystem(*this->connection, kj::mv(served)),
+          bootstrap(rpcSystem.bootstrap()),
+          frankenvalueHandler(frankenvalueHandler) {}
     kj::Own<kj::AsyncIoStream> connection;
     capnp::TwoPartyClient rpcSystem;
     // The peer's bootstrap, obtained once. A bootstrap after the connection failed with calls out
@@ -238,6 +306,8 @@ class RpcClient::Impl final {
     // one as busy: capnp's check of that throws from the bootstrap call itself, instead of
     // failing its calls as disconnected.
     capnp::Capability::Client bootstrap;
+    // Writes the Frankenvalues sent over the session; it outlives the factory's sessions.
+    FrankenvalueHandler& frankenvalueHandler;
   };
 
   Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)
@@ -252,29 +322,42 @@ class RpcClient::Impl final {
 };
 
 // The `WorkerdBootstrap` a peer sees over capnp: every event it starts goes to `service`.
+//
+// A peer that is another loop thread of this process may also restore a stub whose source is
+// `service`: its `restore()` events carry their parameters' capabilities as channel tokens
+// (`LoopFrankenvalueHandler`), which `restoreTokens` resolves in this loop's graph.
 class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
  public:
   WorkerdBootstrapImpl(kj::Rc<IoChannelFactory::SubrequestChannel> service,
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory);
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Maybe<ChannelTokenHandler&> restoreTokens = kj::none);
   kj::Promise<void> startEvent(StartEventContext context) override;
 
  private:
   kj::Rc<IoChannelFactory::SubrequestChannel> service;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::Maybe<ChannelTokenHandler&> restoreTokens;
   class EventDispatcherImpl;
 };
 
-// The debug port: every service's entrypoints and actors, looked up through the server.
+// The debug port: every service's entrypoints and actors, looked up through the server. It is
+// also what another loop thread of the process sees (`callerThread`, its index), whose requests
+// are those of a caller in this process; that one has `restoreTokens`, so the actors and
+// entrypoints it gets take its `restore()` events.
 class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
-  WorkerdDebugPortImpl(
-      ::rust::Box<ServerHandle> server, capnp::HttpOverCapnpFactory& httpOverCapnpFactory);
+  WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Maybe<uint32_t> callerThread = kj::none,
+      kj::Maybe<ChannelTokenHandler&> restoreTokens = kj::none);
   kj::Promise<void> getEntrypoint(GetEntrypointContext context) override;
   kj::Promise<void> getActor(GetActorContext context) override;
 
  private:
   ::rust::Box<ServerHandle> server;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::Maybe<uint32_t> callerThread;
+  kj::Maybe<ChannelTokenHandler&> restoreTokens;
 };
 
 // Trims the name off a durable id longer than production keeps (1024 bytes).

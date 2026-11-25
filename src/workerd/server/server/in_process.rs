@@ -51,7 +51,10 @@ use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
 use crate::config::text;
+use crate::hub::Hub;
+use crate::hub::Seat;
 use crate::listen::loopback::LoopbackListener;
+use crate::placement::Placement;
 use crate::run::RunOptions;
 use crate::services::make_external_service;
 
@@ -402,6 +405,40 @@ impl InProcessServer {
     /// process starts is.
     pub fn drain(&self) {
         self.drain.notify_one();
+    }
+
+    /// Makes this server, which runs, the first of two loop threads (threads.rs), and returns
+    /// the seat of the other, which reaches this one's actors and hosts none. Once.
+    pub fn add_loop_thread(&self) -> Result<Box<Seat>> {
+        // This server has run alone, so the actors it has stay where they are: every actor's
+        // home is this thread.
+        let placement = Placement {
+            count: 2,
+            spread: false,
+        };
+        let (_, seats) = Hub::new(placement);
+        let mut seats = seats.into_iter();
+        let (Some(first), Some(second)) = (seats.next(), seats.next()) else {
+            return Err(kj::failed!("the hub made no seat for a loop thread"));
+        };
+        self.factory.join(first)?;
+        Ok(Box::new(second))
+    }
+
+    /// Ends this server's part in its sessions with the other loop threads, as a session that
+    /// failed would: for a test of what the thread at the other end does then.
+    pub fn drop_loop_thread_links(&self) {
+        self.factory.close_links();
+    }
+
+    /// Seats this server among the loop threads of the server that made `seat`. Before the
+    /// server runs.
+    #[expect(
+        clippy::boxed_local,
+        reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
+    )]
+    pub fn join_loop_threads(&self, seat: Box<Seat>) -> Result<()> {
+        self.factory.join(*seat)
     }
 
     /// A connection to the loopback name `name`, queued for whoever listens on it.

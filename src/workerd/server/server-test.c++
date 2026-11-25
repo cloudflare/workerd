@@ -22,6 +22,7 @@
 #include <kj/encoding.h>
 #include <kj/test.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <regex>
@@ -526,10 +527,11 @@ class Server: public kj::PtrTarget {
     capnp::MallocMessageBuilder message;
     message.setRoot(config);
     auto words = capnp::messageToFlatArray(message);
-    auto factory = kj::heap<WorkerFactory>(v8System, timer, monotonicClock, network, entropySource,
-        fs, kj::mv(options),
+    auto shared = kj::arc<SharedFactory>(v8System, entropySource, fs, kj::mv(options),
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
+    auto factory =
+        kj::heap<WorkerFactory>(kj::mv(shared), timer, monotonicClock, network, PrimaryLoop::YES);
     auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
     started.mock_internet();
     for (auto& [deployment, service]: deploymentServices) {
@@ -9908,6 +9910,9 @@ KJ_TEST("Server: debug port RPC calls") {
                 `      await this.state.storage.put("count", count);
                 `      return new Response("Count: " + count);
                 `    }
+                `    if (url.pathname === "/name") {
+                `      return new Response("Name: " + (this.state.id.name ?? "none"));
+                `    }
                 `    return new Response("Actor: " + this.state.id.toString());
                 `  }
                 `}
@@ -10094,6 +10099,20 @@ KJ_TEST("Server: debug port RPC calls") {
       kj::String expectedResponse = kj::str("Actor: ", expectedId);
       KJ_EXPECT(bodyText == expectedResponse, bodyText, expectedResponse);
     }
+  }
+
+  // Test 5b: A debug-port client cannot name an actor: the name it sends is not the actor's.
+  {
+    kj::byte actorIdBytes[32] = {};
+    kj::arrayPtr(actorIdBytes).fill(0xab);
+    auto req = debugPort.getActorRequest();
+    req.setService("actor-service");
+    req.setEntrypoint("MyActor");
+    req.setActorId(kj::encodeHex(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes))));
+    req.setActorName("not-the-name-of-this-id");
+    auto resp = req.send().wait(test.ws);
+    auto bodyText = makeHttpRequestFromBootstrap(resp.getActor(), "/name");
+    KJ_EXPECT(bodyText == "Name: none", bodyText);
   }
 
   // Test 6: Call RPC methods using jsRpcSession with V8-serialized arguments
@@ -10916,6 +10935,420 @@ KJ_TEST("Server: a service that fails to start does not leak the services before
   // `~TestServer` fails the case if "first" still holds the factory.
   KJ_EXPECT_THROW_MESSAGE(
       "TODO(beta): parameters", test.server.run(v8System, *test.config).wait(test.ws));
+}
+
+// =======================================================================================
+// Several loop threads
+
+// An entropy source every loop thread may use at once.
+class SharedEntropySource final: public kj::EntropySource {
+ public:
+  void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    buffer.fill(4);
+  }
+};
+
+// One loop thread of a process whose loop threads each run a server of their own over one
+// `SharedFactory`: the thread's tokio-backed loop, its worker factory, and the Rust server on it,
+// which compiles this thread's copy of every worker. Constructed, used and destroyed on its thread.
+//
+// With `seat`, the seat the primary loop's server made for another loop thread
+// (`addLoopThread()`), the server is that thread's: an actor whose home is the primary loop is
+// reached there.
+class LoopThreadServer {
+ public:
+  LoopThreadServer(kj::Arc<SharedFactory> shared,
+      PrimaryLoop primary,
+      kj::Maybe<::rust::Box<Seat>> seat = kj::none) {
+    auto ownFactory = kj::heap<WorkerFactory>(kj::mv(shared), io.getTimer(),
+        kj::systemPreciseMonotonicClock(), provider.getNetwork(), primary);
+    factory = *ownFactory;
+    auto& started = *server.emplace(new_in_process_server(kj::mv(ownFactory)));
+    KJ_IF_SOME(s, seat) started.join_loop_threads(kj::mv(s));
+    reportsTask = collectReports(started).eagerlyEvaluate(nullptr);
+    auto task = started.run(""_kj.as<kj_rs::RustUncheckedUtf8>());
+    KJ_ASSERT(!task.poll(ws), "the server stopped");
+    KJ_ASSERT(reports.empty(), "the config has errors or warnings", reports);
+    runTask = kj::mv(task);
+  }
+
+  ~LoopThreadServer() noexcept(false) {
+    runTask = kj::none;
+    reportsTask = kj::none;
+    factory = kj::none;
+    KJ_IF_SOME(s, server) {
+      auto closing = close_in_process_server(kj::mv(s));
+      server = kj::none;
+      unwindDetector.catchExceptionsIfUnwinding([&]() { closing.wait(ws); });
+    }
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(LoopThreadServer);
+
+  // The thread's worker factory, which the server owns.
+  const WorkerFactory& getFactory() {
+    return KJ_ASSERT_NONNULL(factory);
+  }
+
+  // Makes this thread the first of two loop threads; the seat is the other's, whose server
+  // reaches this one's actors.
+  ::rust::Box<Seat> addLoopThread() {
+    return KJ_ASSERT_NONNULL(server)->add_loop_thread();
+  }
+
+  // Ends this server's part in its sessions with the other loop threads, as a failed session
+  // would.
+  void dropLoopThreadLinks() {
+    KJ_ASSERT_NONNULL(server)->drop_loop_thread_links();
+  }
+
+  // Waits up to `limit` for the server's run to end, and rethrows what ended it.
+  void waitForRun(kj::Duration limit) {
+    auto task = kj::mv(KJ_ASSERT_NONNULL(runTask));
+    runTask = kj::none;
+    within(kj::mv(task), limit, "the server still runs"_kj);
+  }
+
+  // What `promise` resolves to, if it does within `limit`; fails with `late` otherwise.
+  template <typename T>
+  T within(kj::Promise<T> promise, kj::Duration limit, kj::StringPtr late) {
+    return promise
+        .exclusiveJoin(io.getTimer().afterDelay(limit).then([late]() -> kj::Promise<T> {
+      KJ_FAIL_ASSERT(late);
+    })).wait(ws);
+  }
+
+  // The body of the response to a GET of `url` on a new connection to the socket at `addr`.
+  kj::Promise<kj::String> get(kj::StringPtr addr, kj::StringPtr url = "http://foo/"_kj) {
+    auto stream = KJ_ASSERT_NONNULL(server)->connect(addr.as<kj_rs::RustUncheckedUtf8>());
+    auto client = kj::newHttpClient(clientHeaderTable, *stream);
+    co_return co_await get(*client, clientHeaderTable, url);
+  }
+
+  // The body of the response to a GET on the channel a subrequest token names, which this
+  // thread's factory decodes and this thread's server resolves.
+  kj::Promise<kj::String> getByToken(kj::ArrayPtr<const kj::byte> token) {
+    auto channel = factory_decode_subrequest_token(
+        getFactory(), IoChannelFactory::ChannelTokenUsage::RPC, token);
+    auto client = asHttpClient(channel->startRequest({}));
+    co_return co_await get(*client, factory_header_table(getFactory()));
+  }
+
+  // A token for the default entrypoint of `service`, as this thread's factory encodes it.
+  kj::Array<kj::byte> encodeToken(kj::StringPtr service) {
+    auto pending =
+        factory_encode_subrequest_token(getFactory(), service.as<kj_rs::RustUncheckedUtf8>(),
+            kj::none, kj::none, false, IoChannelFactory::ChannelTokenUsage::RPC);
+    return kj::mv(KJ_ASSERT_NONNULL(pending->tryGet<kj::Array<kj::byte>>()));
+  }
+
+  kj_rs_tokio::TokioAsyncIoContext io = kj_rs_tokio::setupTokioAsyncIo();
+  kj::WaitScope& ws = io.getWaitScope();
+
+ private:
+  kj_rs_io::TokioAsyncIoProvider provider{io.getTimer()};
+  kj::HttpHeaderTable clientHeaderTable;
+  kj::Maybe<const WorkerFactory&> factory;
+  kj::Maybe<::rust::Box<InProcessServer>> server;
+  kj::Vector<kj::String> reports;
+  kj::Maybe<kj::Promise<void>> reportsTask;
+  kj::Maybe<kj::Promise<void>> runTask;
+  kj::UnwindDetector unwindDetector;
+
+  kj::Promise<void> collectReports(InProcessServer& server) {
+    for (;;) {
+      auto report = co_await server.next_report();
+      reports.add(kj::str(report.message));
+    }
+  }
+
+  kj::Promise<kj::String> get(kj::HttpClient& client,
+      const kj::HttpHeaderTable& table,
+      kj::StringPtr url = "http://foo/"_kj) {
+    kj::HttpHeaders headers(table);
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo"_kj);
+    auto response = co_await client.request(kj::HttpMethod::GET, url, headers).response;
+    KJ_ASSERT(response.statusCode == 200, response.statusCode, response.statusText);
+    co_return co_await response.body->readAllText();
+  }
+};
+
+KJ_TEST("Server: two loop threads each compile and serve the workers of one shared factory") {
+  // Each request takes its number from a counter of the isolate that serves it, gives the isolate
+  // lock up while a timer of its loop runs, and leaves work behind for its loop's `waitUntil`
+  // tasks.
+  auto config = parseConfig(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let count = 0;
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const n = ++count;
+                `    await scheduler.wait(1);
+                `    ctx.waitUntil(scheduler.wait(1));
+                `    return new Response(String(n));
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [ ( name = "main", address = "loopback:test-addr", service = "hello" ) ]
+  ))"_kj,
+      {});
+  capnp::MallocMessageBuilder message;
+  message.setRoot(*config);
+  auto words = capnp::messageToFlatArray(message);
+
+  SharedEntropySource entropySource;
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::INSPECTOR_ONLY);
+  auto shared = kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
+      kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+          .as<kj_rs::RustCopy>());
+
+  // Both threads serve rounds of concurrent requests until each has seen the other serve
+  // `MIN_ROUNDS` rounds, so for at least that many rounds both loops are serving at once.
+  static constexpr uint MIN_ROUNDS = 25;
+  static constexpr uint MAX_ROUNDS = 20000;
+  static constexpr uint REQUESTS_PER_ROUND = 4;
+  struct Progress {
+    std::atomic<uint> rounds = 0;
+    std::atomic<bool> failed = false;
+  };
+  Progress progress[2];
+
+  // Serves this thread's rounds and returns how many requests that was.
+  auto serve = [&](LoopThreadServer& loop, Progress& mine, Progress& theirs) -> uint {
+    kj::HashSet<uint> seen;
+    uint requests = 0;
+    while (mine.rounds < MIN_ROUNDS || theirs.rounds < MIN_ROUNDS) {
+      KJ_ASSERT(!theirs.failed, "the other loop thread failed");
+      KJ_ASSERT(mine.rounds < MAX_ROUNDS, "the other loop thread never served");
+      auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);
+      for (uint i = 0; i < REQUESTS_PER_ROUND; i++) bodies.add(loop.get("test-addr"_kj));
+      for (auto& body: kj::joinPromisesFailFast(bodies.finish()).wait(loop.ws)) {
+        seen.insert(body.parseAs<uint>());
+        ++requests;
+      }
+      ++mine.rounds;
+    }
+    // This thread's isolate counted this thread's requests and no others: the two threads serve
+    // from two isolates.
+    for (uint n = 1; n <= requests; n++) KJ_ASSERT(seen.contains(n), n, requests);
+    return requests;
+  };
+
+  LoopThreadServer primary(shared.addRef(), PrimaryLoop::YES);
+
+  // The token each thread makes for the worker, which the other decodes.
+  auto primaryToken = primary.encodeToken("hello"_kj);
+  kj::Array<kj::byte> secondaryToken;
+
+  {
+    auto thread = kj::heap<kj::Thread>([&]() {
+      KJ_ON_SCOPE_FAILURE(progress[1].failed = true);
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO);
+      // One header table, so the header IDs of both loops' capnp factories agree.
+      KJ_ASSERT(&factory_header_table(secondary.getFactory()) ==
+          &factory_header_table(primary.getFactory()));
+      KJ_EXPECT_THROW_MESSAGE("only the primary loop's worker factory can do this",
+          factory_start_inspector(
+              secondary.getFactory(), "127.0.0.1:0"_kj.as<kj_rs::RustUncheckedUtf8>()));
+
+      uint requests = serve(secondary, progress[1], progress[0]);
+
+      // The primary loop's token names this thread's copy of the worker here.
+      KJ_ASSERT(secondary.getByToken(primaryToken).wait(secondary.ws) == kj::str(requests + 1));
+      secondaryToken = secondary.encodeToken("hello"_kj);
+    });
+
+    KJ_ON_SCOPE_FAILURE(progress[0].failed = true);
+    uint requests = serve(primary, progress[0], progress[1]);
+    KJ_EXPECT(requests >= MIN_ROUNDS * REQUESTS_PER_ROUND);
+
+    // The thread is joined here, with its server closed and its factory destroyed on it.
+    thread = nullptr;
+    KJ_EXPECT(progress[1].rounds >= MIN_ROUNDS);
+
+    // And the secondary loop's token names the primary's copy.
+    KJ_EXPECT(primary.getByToken(secondaryToken).wait(primary.ws) == kj::str(requests + 1));
+  }
+}
+
+// A shared factory for loop threads whose config has one Durable Object, which numbers the
+// requests it gets. "/wait" does not return; "/waiting" is how many requests wait.
+kj::Arc<SharedFactory> counterLoopThreads(kj::EntropySource& entropySource) {
+  auto config = parseConfig(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env) {
+                `    return await env.ns.get(env.ns.idFromName("a")).fetch(request);
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  count = 0;
+                `  waiting = 0;
+                `  async fetch(request) {
+                `    if (request.url.endsWith("/waiting")) return new Response(String(this.waiting));
+                `    if (request.url.endsWith("/wait")) {
+                `      this.waiting++;
+                `      request.signal.addEventListener("abort", () => this.waiting--);
+                `      await scheduler.wait(600000);
+                `    }
+                `    return new Response(String(++this.count));
+                `  }
+                `}
+            )
+          ],
+          compatibilityFlags = ["enable_request_signal"],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [(className = "Counter", uniqueKey = "counter")],
+          durableObjectStorage = (inMemory = void),
+        )
+      )
+    ],
+    sockets = [ ( name = "main", address = "loopback:test-addr", service = "hello" ) ]
+  ))"_kj,
+      {});
+  capnp::MallocMessageBuilder message;
+  message.setRoot(*config);
+  auto words = capnp::messageToFlatArray(message);
+
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::INSPECTOR_ONLY);
+  return kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
+      kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+          .as<kj_rs::RustCopy>());
+}
+
+KJ_TEST("Server: a loop thread without the actors reaches them on the primary loop's") {
+  SharedEntropySource entropySource;
+  auto shared = counterLoopThreads(entropySource);
+
+  static constexpr uint ROUNDS = 25;
+  static constexpr uint REQUESTS_PER_ROUND = 4;
+
+  LoopThreadServer primary(shared.addRef(), PrimaryLoop::YES);
+  KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == "1");
+
+  // The other thread serves while this one's loop runs, which has the actor.
+  auto seat = primary.addLoopThread();
+  auto done = kj::newPromiseAndCrossThreadFulfiller<void>();
+  {
+    kj::Thread thread([&]() {
+      KJ_DEFER(done.fulfiller->fulfill());
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(seat));
+      // It opens the namespace's storage too, and hosts none of its actors.
+      for (uint round = 0; round < ROUNDS; round++) {
+        auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);
+        for (uint i = 0; i < REQUESTS_PER_ROUND; i++) bodies.add(secondary.get("test-addr"_kj));
+        kj::HashSet<uint> seen;
+        for (auto& body: kj::joinPromisesFailFast(bodies.finish()).wait(secondary.ws)) {
+          seen.insert(body.parseAs<uint>());
+        }
+        // One actor numbered the requests of both threads.
+        for (uint i = 0; i < REQUESTS_PER_ROUND; i++) {
+          KJ_ASSERT(seen.contains(2 + round * REQUESTS_PER_ROUND + i), round, i);
+        }
+      }
+
+      // A request the actor has not answered when this thread and its server go away.
+      auto waiting = secondary.get("test-addr"_kj, "http://foo/wait"_kj);
+      while (secondary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(secondary.ws) != "1") {
+        KJ_ASSERT(!waiting.poll(secondary.ws), "the request ended");
+      }
+    });
+    done.promise.wait(primary.ws);
+    // The thread is joined here, with its server closed and its factory destroyed on it.
+  }
+
+  // The actor lost that request with the thread, and serves on.
+  while (primary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(primary.ws) != "0") {
+    primary.io.getTimer().afterDelay(1 * kj::MILLISECONDS).wait(primary.ws);
+  }
+  KJ_EXPECT(
+      primary.get("test-addr"_kj).wait(primary.ws) == kj::str(2 + ROUNDS * REQUESTS_PER_ROUND));
+}
+
+KJ_TEST("Server: a loop thread whose session with the primary loop's ends fails") {
+  SharedEntropySource entropySource;
+  auto shared = counterLoopThreads(entropySource);
+
+  static constexpr uint REQUESTS = 8;
+
+  LoopThreadServer primary(shared.addRef(), PrimaryLoop::YES);
+  KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == "1");
+
+  auto seat = primary.addLoopThread();
+  // The other thread has reached the actor and has a request waiting on it.
+  auto linked = kj::newPromiseAndCrossThreadFulfiller<void>();
+  // This thread has ended its part in the session: fulfilled here, for the other thread, which
+  // makes the promise it waits on.
+  kj::Maybe<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> dropped;
+  auto done = kj::newPromiseAndCrossThreadFulfiller<void>();
+  {
+    kj::Thread thread([&]() {
+      KJ_DEFER(done.fulfiller->fulfill());
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(seat));
+      for (uint i = 0; i < REQUESTS; i++) {
+        KJ_ASSERT(secondary.get("test-addr"_kj).wait(secondary.ws) == kj::str(2 + i), i);
+      }
+      auto waiting = secondary.get("test-addr"_kj, "http://foo/wait"_kj);
+      while (secondary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(secondary.ws) != "1") {
+        KJ_ASSERT(!waiting.poll(secondary.ws), "the request ended");
+      }
+      auto droppedHere = kj::newPromiseAndCrossThreadFulfiller<void>();
+      dropped = kj::mv(droppedHere.fulfiller);
+      linked.fulfiller->fulfill();
+      droppedHere.promise.wait(secondary.ws);
+
+      // The run of this thread, which cannot reach the actors without the session, fails.
+      auto ended = KJ_ASSERT_NONNULL(
+          kj::runCatchingExceptions([&]() { secondary.waitForRun(10 * kj::SECONDS); }),
+          "the run ended without an error");
+      KJ_EXPECT(ended.getType() == kj::Exception::Type::DISCONNECTED, ended);
+      KJ_EXPECT(ended.getDescription().contains("the session with loop thread 0 ended"), ended);
+      // The call in flight has failed with it.
+      auto lost = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+        secondary.within(kj::mv(waiting), 10 * kj::SECONDS, "the call still waits"_kj);
+      }),
+          "the call in flight was answered");
+      KJ_EXPECT(!lost.getDescription().contains("the call still waits"), lost);
+      // And the socket takes no more requests.
+      KJ_EXPECT_THROW_MESSAGE("the listener has stopped accepting connections",
+          secondary.within(
+              secondary.get("test-addr"_kj), 10 * kj::SECONDS, "the request still waits"_kj));
+    });
+    linked.promise.wait(primary.ws);
+    primary.dropLoopThreadLinks();
+    KJ_ASSERT_NONNULL(dropped)->fulfill();
+    // This thread serves its own requests on.
+    KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == kj::str(2 + REQUESTS));
+    done.promise.wait(primary.ws);
+    // The thread is joined here, with its server closed and its factory destroyed on it.
+  }
+
+  // The actor lost the waiting request, and serves on.
+  for (uint tries = 0; primary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(primary.ws) != "0";
+       tries++) {
+    KJ_ASSERT(tries < 10000, "the actor still has the request");
+    primary.io.getTimer().afterDelay(1 * kj::MILLISECONDS).wait(primary.ws);
+  }
+  KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == kj::str(3 + REQUESTS));
 }
 
 }  // namespace

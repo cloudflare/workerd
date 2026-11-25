@@ -17,6 +17,14 @@
 //! container) holds a `Weak`, so that a container dropped from its map goes away with its actor.
 //! Whatever else holds a container's `Rc` keeps it from the cleanup loop: a stub's channel and a
 //! request in flight (each a [`Client`]), and an eviction in progress.
+//!
+//! With several loop threads (threads.rs) every thread has the namespace, with its storage open,
+//! and an actor has one home thread among them, which the threads' hub names
+//! ([`ActorNamespace::home`]): only the home thread's namespace has the actor's container. On
+//! any other thread the channel the namespace gives a stub ([`ForwardedChannel`]) is a
+//! capability, over the session of the two threads, for the channel the home thread's namespace
+//! gives a stub of its own, so the home thread holds the actor's container for as long as the
+//! other holds the stub, and for each request in flight.
 
 use std::cell::Cell;
 use std::cell::OnceCell;
@@ -76,6 +84,8 @@ use crate::cluster::moved;
 use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
+use crate::hub::Mail;
+use crate::placement::Scope;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -97,6 +107,51 @@ const STOPS_AT_ONCE: usize = 64;
 
 const EVICT_TIMEOUT_MESSAGE: &str =
     "jsg.Error: Timed out waiting to evict Durable Object: it still has active references.";
+
+/// Whose requests one loop thread sends another over their session, for an actor whose home the
+/// other is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caller {
+    /// A stub's on the sending thread.
+    Stub,
+    /// The debug port's, which the first thread received.
+    DebugPort,
+    /// A cluster peer's, which the first thread received and counts on the peer's session.
+    Peer,
+}
+
+impl Caller {
+    /// As `WorkerdDebugPort.getActor`'s `caller` has it.
+    #[must_use]
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Stub => 0,
+            Self::DebugPort => 1,
+            Self::Peer => 2,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Result<Self> {
+        match code {
+            0 => Ok(Self::Stub),
+            1 => Ok(Self::DebugPort),
+            2 => Ok(Self::Peer),
+            _ => Err(kj::failed!("getActor: unknown caller {code}")),
+        }
+    }
+}
+
+/// Whose requests a channel to an actor carries.
+enum Origin {
+    /// A stub's of this process: on this thread, or on the loop thread named, which sent for
+    /// the actor here.
+    Stub(Option<usize>),
+    /// The debug port's, or with a session a cluster peer's, received on this thread.
+    Remote(Option<Rc<Count>>),
+    /// The debug port's, or a peer's, that the first loop thread received and passed on here,
+    /// the actor's home. The first thread counts them.
+    Relayed { peer: bool },
+}
 
 /// The namespace of one Durable Object class: its actors and their shared storage. The runtime's
 /// `ActorNamespace`.
@@ -245,6 +300,13 @@ impl ActorNamespace {
             return Err(invalid_config_error());
         }
         let key = ffi::actor_id_key(&id);
+        // Only its home thread holds an object's ownership, and asks the control plane for it.
+        let (home, here) = (self.home(&key), self.factory.thread());
+        if home != here {
+            return Err(kj::failed!(
+                "loop thread {here} was asked to own a Durable Object whose home is thread {home}"
+            ));
+        }
         if let Some(container) = self.owned_container(&key) {
             return Ok(Resolved::Here(Client(container)));
         }
@@ -303,19 +365,13 @@ impl ActorNamespace {
         }
     }
 
-    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
-    /// have been taken over: running its actors, even to read their databases, could act on stale
-    /// data.
+    /// Fails in a cluster once this instance's lease has lapsed (`Shared::require_lease`), as
+    /// this thread reads it.
     fn require_lease(&self) -> Result<()> {
-        if self
-            .cluster()
-            .is_some_and(|node| !node.cluster.lease_holds())
-        {
-            return Err(kj::failed!(
-                "this instance's cluster lease in the bucket has lapsed"
-            ));
-        }
-        Ok(())
+        let Some(node) = self.cluster() else {
+            return Ok(());
+        };
+        (node.cluster.require_lease()).map_err(|lapsed| kj::failed!("{lapsed}"))
     }
 
     /// Removes `container` from the map, unless a newer container has taken its key: one whose
@@ -429,7 +485,32 @@ impl ActorNamespace {
     /// The channel of the actor with `id`, started on first use. `persistent` is recorded on the
     /// channel: whether stubs to it may be stored.
     pub fn channel(&self, id: KjOwn<ActorIdHandle>, persistent: Persistent) -> Rc<dyn Channel> {
-        self.channel_for(id, persistent, false, None)
+        self.channel_for(id, persistent, Origin::Stub(None))
+    }
+
+    /// The channel of the actor with `id` for loop thread `thread` of the process, which sent
+    /// for it over its session with this thread, the actor's home. `caller` is whose requests
+    /// the other thread sends (`Caller`): a stub's of its own, for which this is the channel a
+    /// stub on this thread gets, or, from the first thread, the debug port's or a cluster
+    /// peer's that it received. Whether a stub is persistent arrives with each of its requests.
+    pub fn channel_from_thread(
+        &self,
+        id: KjOwn<ActorIdHandle>,
+        thread: usize,
+        caller: Caller,
+    ) -> Result<Rc<dyn Channel>> {
+        let origin = match caller {
+            Caller::Stub => Origin::Stub(Some(thread)),
+            // What reaches the process from outside reaches its first thread.
+            Caller::DebugPort | Caller::Peer if thread != 0 => {
+                return Err(kj::failed!(
+                    "loop thread {thread} passed on a call that only the first receives"
+                ));
+            }
+            Caller::DebugPort => Origin::Relayed { peer: false },
+            Caller::Peer => Origin::Relayed { peer: true },
+        };
+        Ok(self.channel_for(id, false, origin))
     }
 
     /// The channel of the actor with `id` for the debug port's request, or with `session` a
@@ -439,23 +520,49 @@ impl ActorNamespace {
         id: KjOwn<ActorIdHandle>,
         session: Option<Rc<Count>>,
     ) -> Rc<dyn Channel> {
-        self.channel_for(id, false, true, session)
+        self.channel_for(id, false, Origin::Remote(session))
     }
 
     fn channel_for(
         &self,
         id: KjOwn<ActorIdHandle>,
         persistent: Persistent,
-        remote: bool,
-        session: Option<Rc<Count>>,
+        origin: Origin,
     ) -> Rc<dyn Channel> {
+        let key = ffi::actor_id_key(&id);
+        let home = self.home(&key);
+        if home != self.factory.thread() {
+            let name: Option<String> = ffi::actor_id_name(&id).into();
+            let actor = self.forward(&key, name.as_deref(), home, &origin);
+            let remote = match origin {
+                Origin::Remote(session) => Some(Outside(session)),
+                Origin::Stub(_) | Origin::Relayed { .. } => None,
+            };
+            return Rc::new(ForwardedChannel {
+                namespace: Weak::clone(&self.this),
+                id,
+                persistent,
+                actor: actor.map(Rc::new),
+                remote,
+            });
+        }
         if self.cluster().is_some() {
+            let (remote, session, peer, relayed) = match origin {
+                Origin::Stub(_) => (false, None, false, false),
+                Origin::Remote(session) => {
+                    let peer = session.is_some();
+                    (true, session, peer, false)
+                }
+                Origin::Relayed { peer } => (true, None, peer, true),
+            };
             return Rc::new(RoutedChannel {
                 namespace: Weak::clone(&self.this),
                 id,
                 persistent,
                 remote,
                 session,
+                peer,
+                relayed,
                 bound: Rc::default(),
             });
         }
@@ -463,6 +570,38 @@ impl ActorNamespace {
             container: Client(self.container_for(id)),
             persistent,
         })
+    }
+
+    /// The actor `key`, whose home is the thread `home` and not this one, as a capability of
+    /// this thread's session with that one, for requests of `origin`.
+    ///
+    /// A thread sends for an actor only to its home, as the hub places it, so a thread that is
+    /// sent for one the hub places elsewhere refuses: it hosts no actor of another thread, and
+    /// it passes no call on.
+    fn forward(
+        &self,
+        key: &str,
+        name: Option<&str>,
+        home: usize,
+        origin: &Origin,
+    ) -> Result<KjOwn<ffi::RpcClient>> {
+        let caller = match origin {
+            Origin::Stub(None) => Caller::Stub,
+            Origin::Remote(None) => Caller::DebugPort,
+            Origin::Remote(Some(_)) => Caller::Peer,
+            Origin::Stub(Some(_)) | Origin::Relayed { .. } => {
+                let here = self.factory.thread();
+                tracing::error!(
+                    "loop thread {here} was sent a call for a Durable Object whose home is \
+                     thread {home}"
+                );
+                return Err(kj::failed!(
+                    "a Durable Object call was sent to a loop thread that is not the object's home"
+                ));
+            }
+        };
+        let link = self.factory.link(home)?;
+        link.actor(&self.service, &self.class_name, key, name, caller)
     }
 
     /// The channel of the ephemeral actor named `name`.
@@ -530,6 +669,9 @@ impl ActorNamespace {
         let actors = self.actors.borrow();
         let handoffs = actors.values().map(|c| {
             *c.handoff.borrow_mut() = Some(watch::channel(false).0);
+            if let (Some(node), Some(object)) = (self.cluster(), c.cause_name()) {
+                node.handing_off(object);
+            }
             let ns = Weak::clone(&self.this);
             let handoff = Rc::clone(c).hand_off(ns, in_flight, Rc::clone(slots));
             (c.heat.get(), handoff.boxed_local())
@@ -537,7 +679,7 @@ impl ActorNamespace {
         handoffs.collect()
     }
 
-    /// Aborts every actor and deletes the namespace's storage and alarms.
+    /// Aborts every actor of this thread and deletes the namespace's storage and alarms here.
     pub fn delete_all(&self, reason: Option<&crate::Error>) -> Result<()> {
         // The databases are reset while their connections are open, before the abort closes
         // them: Windows releases file locks late.
@@ -551,9 +693,9 @@ impl ActorNamespace {
         }
     }
 
-    /// Test hook: shuts down every running actor of the namespace (hibernating or closing its
-    /// WebSockets), keeping its container so that the next request rebuilds it. Nothing for a
-    /// namespace with `preventEviction`.
+    /// Test hook: shuts down every running actor of the namespace on this thread (hibernating
+    /// or closing its WebSockets), keeping its container so that the next request rebuilds it.
+    /// Nothing for a namespace with `preventEviction`.
     pub async fn evict_all_for_test(&self, hibernate: bool) -> Result<()> {
         if !self.is_evictable() {
             return Ok(());
@@ -570,13 +712,41 @@ impl ActorNamespace {
             .collect::<Result<()>>()
     }
 
+    /// Test hook for one actor, for a stub on another loop thread: evicts the root actor `key`,
+    /// whose home is this thread, as its own stub's hook would.
+    pub async fn evict_for_test(&self, key: &str, hibernate: bool) -> Result<()> {
+        let container = self.actors.borrow().get(key).cloned();
+        match container {
+            Some(container) => container.evict_for_test(hibernate).await,
+            None => Err(kj::failed!(
+                "jsg.Error: Cannot evict Durable Object: it is not currently running."
+            )),
+        }
+    }
+
+    /// The worker service and class that name the namespace on every loop thread.
+    pub fn name(&self) -> (String, String) {
+        (self.service.clone(), self.class_name.clone())
+    }
+
     /// Whether `link` has opened the namespace's storage.
     pub fn is_linked(&self) -> bool {
         self.storage.get().is_some()
     }
 
+    /// The loop thread the root actor `key` lives on, with its facets.
+    pub fn home(&self, key: &str) -> usize {
+        let scope = match self.unique_key() {
+            Some(unique_key) => Scope::Durable(unique_key),
+            None => Scope::Ephemeral(&self.service, &self.class_name),
+        };
+        self.factory.home(&scope, key)
+    }
+
     /// Opens the namespace's storage. `storage_path` is the directory of the worker's
-    /// `durableObjectStorage.localDisk` service; none for in-memory storage.
+    /// `durableObjectStorage.localDisk` service; none for in-memory storage. Every loop thread
+    /// opens it, for the actors whose home it is; an actor's files have one thread's
+    /// connections, and each thread has an alarm database of its own (`start_alarms`).
     pub fn link(&self, storage_path: Option<&str>) -> Result<()> {
         if self.is_linked() {
             return Err(kj::failed!("already called link()"));
@@ -608,22 +778,29 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
-        if self.cluster().is_some() {
-            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
-            // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
-        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
+        if self.factory.alarms_started() {
+            self.start_alarms()?;
+        }
         Ok(())
     }
 
-    /// Whether this instance is handing off root actor `key`.
-    pub fn hands_off(&self, key: &str) -> bool {
-        self.actors
-            .borrow()
-            .get(key)
-            .is_some_and(|container| container.is_handed_off())
+    /// Starts the namespace's alarm scheduler: this thread's, for the actors whose home it is.
+    /// The first thread's moves the alarms an earlier process left to the thread each belongs
+    /// to now, so it runs before any other thread's.
+    pub fn start_alarms(&self) -> Result<()> {
+        let storage = self.storage()?;
+        let index = |n: usize| u32::try_from(n).map_err(|_| kj::failed!("too many loop threads"));
+        let thread = index(self.factory.thread())?;
+        let threads = index(self.factory.threads())?;
+        ffi::actor_storage_start_alarms(storage, thread, threads)?;
+        if self.cluster().is_some() {
+            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
+            // its alarms from the bucket.
+            ffi::actor_storage_delete_all(storage)?;
+        }
+        Ok(())
     }
 
     /// The `uniqueKey` of a durable namespace; none for an ephemeral one.
@@ -680,7 +857,7 @@ fn claim_directory(directory: &str) -> Result<()> {
     let databases = std::fs::read_dir(directory).into_iter().flatten().flatten();
     let held = databases.map(|e| e.file_name()).any(|name| {
         let name = name.to_string_lossy();
-        name.ends_with(".sqlite") && name != "metadata.sqlite"
+        name.ends_with(".sqlite") && !is_alarm_database(&name)
     });
     if held {
         return Err(kj::failed!(
@@ -694,6 +871,16 @@ fn claim_directory(directory: &str) -> Result<()> {
         .map_err(|e| kj::failed!("{}: {e}", marker.display()))
 }
 
+/// Whether `name` is a loop thread's alarm database in a namespace's directory:
+/// `metadata.sqlite`, the first thread's, or `metadata-<n>.sqlite`.
+fn is_alarm_database(name: &str) -> bool {
+    name == "metadata.sqlite"
+        || name
+            .strip_prefix("metadata-")
+            .and_then(|rest| rest.strip_suffix(".sqlite"))
+            .is_some_and(|thread| !thread.is_empty() && thread.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl ActorNamespaceHandle {
     pub(crate) fn actor_for_alarm(
         &self,
@@ -703,6 +890,14 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
+        // A thread schedules the alarms of the actors whose home it is, and hosts no other.
+        let home = namespace.home(&ffi::actor_id_key(&id));
+        let here = namespace.factory.thread();
+        if home != here {
+            return Err(kj::failed!(
+                "loop thread {here} has the alarm of a Durable Object whose home is thread {home}"
+            ));
+        }
         let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
         let Some(node) = namespace.cluster().map(Rc::clone) else {
             return namespace.container_for(id).start_request(metadata);
@@ -760,7 +955,7 @@ impl ActorNamespaceHandle {
     /// a cluster.
     fn index_alarm<F: Future<Output = cluster::Result<()>> + 'static>(
         &self,
-        index: impl FnOnce(Rc<cluster::Cluster>, String) -> F + 'static,
+        index: impl FnOnce(Rc<cluster::Member>, String) -> F + 'static,
     ) -> ResultTask {
         let target = self.namespace().and_then(|ns| {
             let unique_key = ns.unique_key()?.to_owned();
@@ -780,6 +975,11 @@ impl ActorNamespaceHandle {
 
     pub(crate) fn replicated(&self) -> bool {
         self.namespace().is_some_and(|ns| ns.cluster().is_some())
+    }
+
+    pub(crate) fn alarm_home(&self, actor: &str) -> u32 {
+        let home = self.namespace().map_or(0, |ns| ns.home(actor));
+        u32::try_from(home).unwrap_or(0)
     }
 
     pub(crate) fn check_open(&self) -> Result<()> {
@@ -838,6 +1038,11 @@ struct RoutedChannel {
     remote: bool,
     /// The peer's session, which counts the requests started on it.
     session: Option<Rc<Count>>,
+    /// Whether its requests come from a peer, not the debug port.
+    peer: bool,
+    /// Whether the first loop thread received its requests and passed them on to this one: it
+    /// counts them, and refuses them once it stops its peers' sessions.
+    relayed: bool,
     bound: Rc<RefCell<Option<Rc<Resolved>>>>,
 }
 
@@ -901,9 +1106,9 @@ impl Channel for RoutedChannel {
             ffi::stamp_current_actor_cause(metadata.as_mut());
         }
         let cause = Cause::of_request(&metadata);
-        let peer = remote && self.session.is_some();
+        let (peer, counts) = (self.peer, remote && !self.relayed);
         let counted = match namespace.cluster() {
-            Some(node) if remote => Some(node.peer_request(self.session.as_ref())?),
+            Some(node) if counts => Some(node.peer_request(self.session.as_ref())?),
             _ => None,
         };
         Ok(PromisedInterface::new(async move {
@@ -1275,11 +1480,6 @@ impl ActorContainer {
             container: Rc::downgrade(self),
             cause,
         }
-    }
-
-    /// Whether the object is being handed off.
-    fn is_handed_off(&self) -> bool {
-        self.handoff.borrow().is_some()
     }
 
     fn require_not_broken(&self) -> Result<()> {
@@ -2388,6 +2588,109 @@ impl Channel for ActorChannel {
     }
 }
 
+/// A stub's channel to an actor whose home is another loop thread (threads.rs).
+///
+/// `actor` is the home thread's channel for a stub of its own (`ActorNamespace::channel`), as a
+/// capability of this thread's session with it. The home thread holds that channel while this
+/// one lives, so a stub here keeps the actor's container as a stub there does and lets it go
+/// when dropped; in a cluster it stays, like a stub there, with the instance its first request
+/// found the object on. A request is an event started on that channel: HTTP with its bodies,
+/// WebSockets and JS RPC cross as capnp, in the order the stub's requests were made. So does the
+/// `restore()` of a stub whose source is the actor, which runs the actor's `[restore]()`.
+struct ForwardedChannel {
+    namespace: Weak<ActorNamespace>,
+    id: KjOwn<ActorIdHandle>,
+    persistent: Persistent,
+    /// Or why the session gave none, which every request then fails with.
+    actor: Result<Rc<KjOwn<ffi::RpcClient>>>,
+    /// Set for requests this thread, the first, received from outside the process and passes
+    /// on.
+    remote: Option<Outside>,
+}
+
+/// Where requests from outside the process come from: the debug port, or with a session a
+/// cluster peer.
+struct Outside(Option<Rc<Count>>);
+
+impl ForwardedChannel {
+    fn namespace(&self) -> Result<Rc<ActorNamespace>> {
+        self.namespace
+            .upgrade()
+            .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))
+    }
+}
+
+impl Channel for ForwardedChannel {
+    fn start_request(
+        &self,
+        mut metadata: KjOwn<RequestMetadata>,
+    ) -> Result<KjOwn<WorkerInterface>> {
+        // The home thread's channel is not persistent; the request says whether this one is.
+        ffi::request_metadata_set_from_persistent_stub(metadata.as_mut(), self.persistent);
+        let actor = self.actor.as_ref().map_err(Clone::clone)?;
+        let Some(Outside(session)) = &self.remote else {
+            // What made the request, if it is the work of an actor of this thread: the home
+            // thread has no way to tell.
+            ffi::stamp_current_actor_cause(metadata.as_mut());
+            let interface = ffi::rpc_client_start_request(actor, metadata);
+            return Ok(attach(interface, Rc::clone(actor)));
+        };
+        // A request from outside the process says itself what made it. In a cluster it is
+        // counted here, where its session is, and refused once this instance stops its peers'
+        // sessions, before anything of it reaches the object's thread.
+        let counted = match self.namespace()?.cluster() {
+            Some(node) => Some(node.peer_request(session.as_ref())?),
+            None => None,
+        };
+        let interface = ffi::rpc_client_start_request(actor, metadata);
+        Ok(attach(attach(interface, Rc::clone(actor)), counted))
+    }
+
+    fn require_allows_transfer(&self) -> Result<()> {
+        if !self.namespace()?.is_durable() {
+            return Err(kj::failed!(
+                "jsg.DOMException(DataCloneError): Stubs pointing to ephemeral objects are not \
+                 serializable."
+            ));
+        }
+        Ok(())
+    }
+
+    /// The token names the namespace and the id, which every loop thread resolves in its own
+    /// graph: here to another channel like this one, on the home thread to the actor's.
+    fn token(&self, usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        let namespace = self.namespace()?;
+        let unique_key = namespace
+            .unique_key()
+            .ok_or_else(|| kj::failed!("only durable actors have channel tokens"))?;
+        Ok(ffi::factory_encode_actor_token(
+            namespace.factory.raw(),
+            unique_key,
+            &self.id,
+            self.persistent,
+            usage,
+        )?)
+    }
+
+    fn evict_for_test(&self, hibernate: bool) -> LocalBoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            let namespace = self.namespace()?;
+            let key = ffi::actor_id_key(&self.id);
+            let (service, class) = namespace.name();
+            let asked = namespace
+                .factory
+                .ask(namespace.home(&key), |done| Mail::Evict {
+                    service,
+                    class,
+                    key,
+                    hibernate,
+                    done,
+                });
+            asked.await
+        })
+    }
+}
+
 /// Hands off the objects of `namespaces` as this instance drains, and answers whether it
 /// stopped them all.
 ///
@@ -2397,6 +2700,15 @@ impl Channel for ActorChannel {
 /// to take over once this instance left the cluster, until the release deadline. Objects still
 /// running then must keep this instance a member: a peer that took one over would run it
 /// alongside them.
+///
+/// The answer is about what runs here, not about the bucket. An object that stopped, whose
+/// release the handoff deadline cut short, still has an owner record that names this
+/// instance; the instance may leave the cluster with it. No acknowledged write is lost: a
+/// commit is acknowledged only once it is uploaded and the owner record still names its
+/// epoch (`Owners::commit`), so the next owner recovers it from the bucket. And the object
+/// runs in one place: its database is closed here, its container is out of the namespace's
+/// map, and whatever asks for it is answered `moved`. A peer takes it over with the next
+/// epoch, as it does a dead owner's.
 pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadlines) -> bool {
     let slots = Rc::new(tokio::sync::Semaphore::new(HANDOFFS_AT_ONCE));
     let mut handoffs: Vec<_> = namespaces

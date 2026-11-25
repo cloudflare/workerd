@@ -9,6 +9,17 @@
 //! Ownership rules: a `KjOwn` moves ownership across the boundary in the direction of the call;
 //! a `Box` of a Rust type handed to C++ is a cheap handle (an `Rc` inside), so C++ may hold it
 //! for as long as the wrapping KJ object lives and clone it through `*_clone`.
+//!
+//! Threads: everything here belongs to the loop thread it was made on (the factory, its compiled
+//! workers, actors, channels and every `Box` handed to C++), with one exception. An
+//! `ffi::SharedFactory` is what the loop threads of a process share: a `KjArc` of it is `Send`
+//! and `Sync` and may be cloned and dropped on any thread, and it lives as long as it has to,
+//! since every factory made from it holds a reference. `bootstrap_loop` makes a thread's own
+//! `WorkerFactory` from one, on that thread's loop; the thread then compiles its own copy of each
+//! worker and drops the factory before its loop. The thread that drops the last reference to a
+//! `SharedFactory` tears down V8 and the rest of the process's state: `workerd serve
+//! --threads` (threads.rs) joins every other loop thread before the first drops its factory, so
+//! that is the main thread.
 
 #![allow(
     unsafe_code,
@@ -33,6 +44,7 @@ pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
 pub use crate::entry::run_pending_command;
+pub use crate::hub::Seat;
 pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
@@ -311,10 +323,31 @@ pub mod ffi {
             command: Box<PendingCommand>,
         ) -> Result<i32>;
 
-        /// Sets up what the process needs around the Rust server -- perfetto, autogates, V8
-        /// (platform and `jsg::V8System`), a tokio-backed `kj::Network` on the loop's timer --
-        /// and returns the worker factory over the config, which owns it all: dropping the
-        /// factory tears the rest down after it, in reverse, flushing the perfetto trace.
+        /// Sets up what the process needs around the Rust server, once -- perfetto, autogates,
+        /// V8 (platform and `jsg::V8System`) -- and returns the shared factory over the config,
+        /// which owns it all: dropping the last reference tears it down, in reverse, flushing
+        /// the perfetto trace. `config`, `test` and `bench` are as for `bootstrap`.
+        fn bootstrap_process(
+            config: Vec<u64>,
+            options: &ServeOrTestOptions,
+            test: KjMaybe<&TestOptions>,
+            bench: KjMaybe<&BenchOptions>,
+        ) -> Result<KjArc<SharedFactory>>;
+
+        /// The worker factory of a loop thread other than the first, on `event_loop`, which is
+        /// the calling thread's: a tokio-backed `kj::Network` on the loop's timer, the capnp
+        /// factories and the task set of that loop, over `shared`. The inspector does not see
+        /// the isolates it compiles, and it cannot open Durable Object storage or start the
+        /// inspector. It dies on its thread, before the thread's Runtime.
+        fn bootstrap_loop(
+            shared: &SharedFactory,
+            event_loop: Pin<&mut TokioAsyncIoContext>,
+        ) -> Result<KjOwn<WorkerFactory>>;
+
+        /// `bootstrap_process`, then the worker factory of the process's first loop thread on
+        /// `event_loop` (a tokio-backed `kj::Network` on the loop's timer), which holds the
+        /// shared factory: when no other thread does, dropping the factory tears the process's
+        /// state down after it.
         /// `config` is an encoded message (segment table, then segments) in 8-byte words.
         /// `test` and `bench` are the options of those commands, at most one of them given. An
         /// error means the process failed to start.
@@ -369,10 +402,18 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/server/factory/worker-factory.h");
 
-        /// Everything shared by the workers of one server: the V8 system, the HTTP header
-        /// table, the capnp factories, the channel token handler, the inspector. Created by the
-        /// C++ bootstrap (bootstrap.c++) for the lifetime of a run.
+        /// What the loop threads of a process share (see the module doc): the config and the
+        /// options, V8, the HTTP header table, the memory caches, the channel token key, the
+        /// inspector's registrar. Thread-safe.
+        type SharedFactory;
+
+        /// Everything shared by the workers of one loop thread: its timer and network, the
+        /// capnp factories, the channel token handler, the background tasks. Created by the
+        /// C++ bootstrap (bootstrap.c++) on the thread's loop, over the `SharedFactory`.
         type WorkerFactory;
+
+        /// The shared factory `factory` is over.
+        fn factory_shared(factory: &WorkerFactory) -> KjArc<SharedFactory>;
 
         /// The config, as the bytes of an encoded `Config` message the factory and the server
         /// both read. Owned by the factory for the run; every reader into it stays valid.
@@ -558,8 +599,11 @@ pub mod ffi {
         /// The key the server files the actor under: the hex id, or the name.
         fn actor_id_key(id: &ActorIdHandle) -> String;
         fn actor_id_from_name(name: &str) -> KjOwn<ActorIdHandle>;
-        /// The id of a durable namespace, from its hex text (a debug-port request).
-        fn actor_id_from_hex(hex: &str) -> Result<KjOwn<ActorIdHandle>>;
+        /// The id of a durable namespace, from its hex text (a debug-port request), carrying
+        /// `name` as an id derived from a name does: dropped if it is longer than 1024 bytes.
+        fn actor_id_from_hex(hex: &str, name: KjMaybe<&str>) -> Result<KjOwn<ActorIdHandle>>;
+        /// The name a durable actor's id was derived from, if it carries one.
+        fn actor_id_name(id: &ActorIdHandle) -> KjMaybe<String>;
         /// The id `idFromName(name)` gives in the durable namespace `unique_key`.
         fn actor_id_from_durable_name(unique_key: &str, name: &str) -> KjOwn<ActorIdHandle>;
         /// The id `idFromString(hex)` gives in the durable namespace `unique_key`: an error if
@@ -580,6 +624,16 @@ pub mod ffi {
             unique_key: &str,
             actors: Box<ActorNamespaceHandle>,
         ) -> Result<KjOwn<ActorStorage>>;
+        /// Starts the namespace's alarm scheduler on loop thread `thread` of the process's
+        /// `threads`, over that thread's alarm database in the namespace's directory. The first
+        /// thread first moves every alarm in the directory to the database of the thread that
+        /// `ActorNamespaceHandle::alarm_home` names, so it starts its scheduler before any
+        /// other thread does. Once; nothing schedules an alarm before.
+        fn actor_storage_start_alarms(
+            storage: &ActorStorage,
+            thread: u32,
+            threads: u32,
+        ) -> Result<()>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
         /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
@@ -726,18 +780,38 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
-        /// An actor on a cluster peer, by `WorkerdDebugPort.getActor` over `session`, a peer
-        /// session from `new_rpc_client`. Pipelined: no round trip until its first event. It
-        /// keeps the session alive.
+        /// This loop thread's end of its session with the loop thread `peer` of the process
+        /// (threads.rs), on this thread's factory: a two-way session, on which this end serves
+        /// the debug port's interface for its own graph, resolving actors as for a caller in
+        /// this process, once `factory_serve_links` was called. Unlike a session with another
+        /// instance, it carries the `restore()` of a stub: the capabilities of the parameters
+        /// cross as channel tokens.
+        fn new_thread_link(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            peer: u32,
+        ) -> KjOwn<RpcClient>;
+        /// Has the factory's thread links answer what their peers send.
+        fn factory_serve_links(factory: &WorkerFactory);
+        /// An actor on a cluster peer or on another loop thread, by
+        /// `WorkerdDebugPort.getActor` over `session`, a session from `new_rpc_client` or
+        /// `new_thread_link`.
+        /// Pipelined: no round trip until its first event. It keeps the session alive, and the
+        /// other side holds the actor's channel for as long as it lives.
+        /// `caller` says whose requests the actor is for (`actor::Caller::code`), which only
+        /// another loop thread of the process heeds.
         fn rpc_client_debug_actor(
             session: &RpcClient,
             service: &str,
             class_name: &str,
             actor_id: &str,
+            actor_name: KjMaybe<&str>,
+            caller: u8,
         ) -> Result<KjOwn<RpcClient>>;
-        /// A service on a cluster peer, by `WorkerdDebugPort.getEntrypoint` over `session`: a
-        /// worker's default entrypoint, or a service that is not a worker. Pipelined, and it
-        /// keeps the session alive, as `rpc_client_debug_actor`.
+        /// The service `service` on the other side of `session` (a cluster peer, or for a
+        /// replica the first loop thread), by `WorkerdDebugPort.getEntrypoint`: a worker's
+        /// default entrypoint, or a service that is not a worker. Pipelined, and it keeps the
+        /// session alive, as `rpc_client_debug_actor`.
         fn rpc_client_debug_entrypoint(
             session: &RpcClient,
             service: &str,
@@ -969,6 +1043,16 @@ pub mod ffi {
         /// Revokes, with `reason` (what failed requests say), every channel `service`, `actor`
         /// and `socket` handed out. The first reason stands.
         fn revoke(self: &InProcessServer, reason: &str);
+        /// A loop thread's seat among a process's loop threads (threads.rs), which may go to the
+        /// thread that takes it. `add_loop_thread` makes a running server the first of two loop
+        /// threads and returns the other's seat, with which `join_loop_threads` makes a server
+        /// of another thread, before it runs, the second.
+        type Seat;
+        fn add_loop_thread(self: &InProcessServer) -> Result<Box<Seat>>;
+        fn join_loop_threads(self: &InProcessServer, seat: Box<Seat>) -> Result<()>;
+        /// Ends the server's part in its sessions with the other loop threads, as if they had
+        /// failed.
+        fn drop_loop_thread_links(self: &InProcessServer);
         /// Drains and awaits the run `start` started, then ends the server's tasks and drops the
         /// factory, logging an error if a service still holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
@@ -1029,12 +1113,19 @@ pub mod ffi {
             props: KjMaybe<KjOwn<Frankenvalue>>,
         ) -> Result<Box<SubrequestChannel>>;
         /// The debug port's `getActor`: an actor of `class_name` in the service, by its id (hex
-        /// for a durable namespace, the name for an ephemeral one).
+        /// for a durable namespace, with the name it was derived from if known; the name for an
+        /// ephemeral one). `caller_thread` is set for the session of another loop thread, that
+        /// one's index, and `caller` is then whose requests that thread sends
+        /// (`actor::Caller::code`): a stub's of its own, routed as this thread's own, or the
+        /// debug port's or a cluster peer's that it received.
         fn resolve_debug_actor(
             self: &ServerHandle,
             service_name: &str,
             class_name: &str,
             actor_id: &str,
+            actor_name: KjMaybe<&str>,
+            caller_thread: KjMaybe<u32>,
+            caller: u8,
         ) -> Result<Box<SubrequestChannel>>;
         /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
         /// requests `session` counts.
@@ -1085,8 +1176,20 @@ pub mod ffi {
         /// The channel of the worker's Cloudflare Access identity binding, whose props come from
         /// the request's access blob, if the worker has one.
         fn access_binding_channel(self: &ChannelFactory) -> KjMaybe<u32>;
+        /// Aborts, or aborts and deletes, every evictable actor of this loop thread.
         fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>);
         fn delete_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
+        /// Whether the process has other loop threads, whose actors the two above leave.
+        fn spans_threads(self: &ChannelFactory) -> bool;
+        /// The same on every other loop thread of the process: done once each has.
+        fn abort_all_actors_elsewhere(
+            self: &ChannelFactory,
+            reason: KjMaybe<&Exception>,
+        ) -> Box<ResultTask>;
+        fn delete_all_actors_elsewhere(
+            self: &ChannelFactory,
+            reason: KjMaybe<&Exception>,
+        ) -> Box<ResultTask>;
         async unsafe fn evict_all_actors_for_test<'a>(
             self: &'a ChannelFactory,
             hibernate: bool,
@@ -1149,6 +1252,9 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerInterface>>;
         /// Whether the cluster replicates the namespace's actors.
         fn replicated(self: &ActorNamespaceHandle) -> bool;
+        /// The loop thread that schedules the alarm of root actor `actor` (its id's hex): its
+        /// home.
+        fn alarm_home(self: &ActorNamespaceHandle, actor: &str) -> u32;
         /// Called as SQLite opens one of the namespace's files: fails once this instance's
         /// cluster lease has lapsed.
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
@@ -1241,6 +1347,13 @@ pub mod ffi {
 // SAFETY: a thread logger is made to be moved to the thread it is for, as `kj::Thread` moves the
 // initializer it wraps to the thread it starts; it is used there alone.
 unsafe impl Send for ffi::ThreadLogger {}
+
+// SAFETY: a `SharedFactory` is what the loop threads share. Its C++ state is immutable once
+// constructed or guards itself (worker-factory.h), its reference count is atomic, and the bridge
+// only gives out shared references to it.
+unsafe impl Send for ffi::SharedFactory {}
+// SAFETY: as for `Send`.
+unsafe impl Sync for ffi::SharedFactory {}
 
 // =====================================================================================
 /// A KJ object that forwards to another, which it borrows for its life; the type carries the

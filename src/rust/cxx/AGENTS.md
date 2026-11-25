@@ -35,20 +35,30 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs/` — KJ promises/futures, exceptions, ownership, refcounting, dates, and `Maybe`
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
-  `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
-  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes);
+  `kj_rs_tokio::spawn()`, `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
+  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes),
+  and `set_park_hooks` (`ParkHooks`: the thread's loop says when it is about to sleep, with
+  nothing ready in KJ or tokio, when it woke, and when it hands the thread back to KJ, which
+  a wait can do before a task woken at the same moment has run); `PortPace` / `PortPaced` hold an operation
+  back until the port has run since the one before, for a stream that a thread of another
+  runtime fills, whose reads would otherwise never have to wait and keep the loop to themselves;
   `kj_rs_tokio::watch_progress()` counts the loop's progress for a watchdog on another thread,
   busy or asleep, except through three kinds of busy stretch that `progress.rs` names
 - `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
   client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
   transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
   `kj::WebSocket`, `kj::AsyncIoStream`) so requests reach a C++ `WorkerInterface` and C++ can
-  make outbound requests; see "kj-hyper" below
+  make outbound requests; `server::serve_connection_remote` serves a connection on one thread
+  and hands each request, as a `Send` `RemoteRequest`, to the thread that has the handler; see
+  "kj-hyper" below
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), the same addresses and
   sockets for a Rust caller (`TokioAddress::parse_str`, then `listen` and `TokioListener::accept`,
   `connect_first` or `bind_udp`; `wrap_listener` for an inherited socket; they hand back tokio's
-  own sockets), and the `--watch` file watcher (Rust over `notify`).
+  own sockets; `TokioListener::into_sockets` takes a listener's sockets out of its loop and
+  `ListenerSockets::listen` makes a listener of them on the calling thread's runtime, which
+  may be a tokio runtime that is no loop's, as may the runtime `when_write_disconnected`
+  registers with), and the `--watch` file watcher (Rust over `notify`).
   C++ there is interface adaptation only; the one policy
   object that stays C++ is `PeerFilter`, a wrapper over KJ's own `kj::_::NetworkFilter`, which
   the C++ adapters apply in their connect and accept loops

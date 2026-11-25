@@ -9,6 +9,8 @@
 
 #include <kj/async.h>
 #include <kj/common.h>
+#include <kj/filesystem.h>
+#include <kj/function.h>
 #include <kj/map.h>
 #include <kj/time.h>
 #include <kj/timer.h>
@@ -75,6 +77,33 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
       kj::Path path,
       GetActorFn getActor);
 
+  // The database file, relative to the namespace's directory, of the scheduler of loop thread
+  // `thread`: `metadata.sqlite` for thread 0 and `metadata-<thread>.sqlite` for any other.
+  static kj::Path databasePath(uint thread);
+
+  // Moves every alarm in `directory` into the database of its actor's home thread, for a run of
+  // `threads` loop threads. `directory` is the directory `vfs` is over. No scheduler may be open
+  // on any of its databases while this runs.
+  //
+  // The databases are `metadata.sqlite` (thread 0) and every `metadata-<n>.sqlite` whose `<n>` is
+  // a decimal number of at least 1 without sign or leading zeros; every other file is left alone.
+  // `home(actorId)`, which must be less than `threads`, names the thread whose database an
+  // actor's alarm belongs in. A row already in its home's database stays. Every other row, with
+  // its actor name, is first written to its home's database, which is created with the
+  // scheduler's schema if it does not exist, and only once every such write is done deleted from
+  // where it was, so that a crash in between leaves a duplicate rather than a loss. Where the
+  // destination already has a row for the actor, the earlier scheduled time wins and the name is
+  // kept from whichever row has one. Finally every database whose thread is `threads` or more,
+  // now without rows, is removed with its `-wal` and `-shm` files; the others are kept, even when
+  // empty.
+  //
+  // With `threads == 1` this collects every alarm into `metadata.sqlite`. When no row needs to
+  // move and no database needs to be removed, nothing is written.
+  static void rehome(const SqliteDatabase::Vfs& vfs,
+      const kj::Directory& directory,
+      uint threads,
+      kj::Function<uint(kj::StringPtr actorId)> home);
+
   kj::Maybe<kj::Date> getAlarm(const ActorKey& actor);
   bool setAlarm(const ActorKey& actor, kj::Date scheduledTime);
   bool deleteAlarm(const ActorKey& actor);
@@ -139,6 +168,8 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   int maxJitterMsForDelay(kj::Duration delay);
 
+  // Gives `db` the scheduler's schema: WAL journaling and the `_cf_ALARM` table, created if
+  // missing and given the `actor_name` column if it predates it.
   static void ensureInitialized(SqliteDatabase& db);
   void loadAlarmsFromDb();
 };

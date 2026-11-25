@@ -124,7 +124,8 @@ Key elements: `modules` (embed JS/TS files), `compatibilityFlags`, `bindings` (s
 
 - **Cap'n Proto source code** available in `external/+http+capnp-cpp/` - it contains KJ C++ base library and
   capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
-  `kj::` and `capnp::` namespaces.
+  `kj::` and `capnp::` namespaces. It is built with workerd's patches (`patches/capnp-cpp/`), so
+  it is not always upstream's code.
 
 The other core runtime dependencies include:
 

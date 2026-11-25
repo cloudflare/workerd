@@ -163,11 +163,13 @@ Prepared prepare(const ReplServerContext& context,
   options->experimental = context.experimental;
   options->hostHeaderTable = context.replHeaderTable;
   auto words = config.asBytes();
-  auto factory =
-      kj::heap<WorkerFactory>(resources.v8System, resources.timer, resources.monotonicClock,
-          resources.network, resources.entropySource, resources.fs, kj::mv(options),
-          kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), config.size())
-              .as<kj_rs::RustCopy>());
+  // The config's own shared factory: each loaded config is a run of one loop thread.
+  auto shared = kj::arc<SharedFactory>(resources.v8System, resources.entropySource, resources.fs,
+      kj::mv(options),
+      kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), config.size())
+          .as<kj_rs::RustCopy>());
+  auto factory = kj::heap<WorkerFactory>(kj::mv(shared), resources.timer, resources.monotonicClock,
+      resources.network, PrimaryLoop::YES);
   // The server owns the factory for as long as it runs.
   return Prepared{.server = new_in_process_server(kj::mv(factory)), .claim = kj::mv(claim)};
 }

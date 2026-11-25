@@ -374,7 +374,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
     FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.restoreServiceRequest();
-  frankenvalueHandler.toCapnp(restoreParams, req.initParams());
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    frankenvalueHandler.toCapnp(restoreParams, req.initParams());
+  })) {
+    // The transport cannot carry the params, so nothing was sent: the event fails as `run()`
+    // fails when `[restore]()` throws, with the reason on the channel.
+    channelFulfiller->reject(kj::mv(exception));
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::EXCEPTION};
+  }
   auto sent = req.send();
 
   channelFulfiller->fulfill(kj::rc<RestoredRpcSubrequestChannel>(
@@ -512,7 +519,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
   });
 
   auto req = dispatcher.restoreRpcStubRequest();
-  frankenvalueHandler.toCapnp(restoreParams, req.initParams());
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    frankenvalueHandler.toCapnp(restoreParams, req.initParams());
+  })) {
+    // The transport cannot carry the params, so nothing was sent: the event fails as `run()`
+    // fails when `[restore]()` throws, with the reason on the stub.
+    capFulfiller->reject(kj::mv(exception));
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::EXCEPTION};
+  }
   auto sent = req.send();
 
   rpc::JsRpcTarget::Client cap = sent.getTarget();

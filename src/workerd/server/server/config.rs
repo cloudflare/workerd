@@ -10,6 +10,7 @@
 //! debug-port requests into it.
 
 use std::cell::Cell;
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -17,14 +18,21 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::rc::Weak;
+use std::sync::Arc;
 use std::time::Duration;
 
 use capnp::message::ReaderOptions;
 use capnp::serialize::BufferSegments;
+use futures::future::Either;
 use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
+use kj_rs::KjArc;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 use workerd_capnp::config;
 use workerd_capnp::service;
 use workerd_capnp::service_designator;
@@ -58,26 +66,270 @@ use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
 use crate::cluster::PeerSession;
 use crate::cluster::SessionService;
+use crate::hub::Done;
+use crate::hub::Hub;
+use crate::hub::Mail;
+use crate::hub::Seat;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
+use crate::placement::Scope;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::bucket::Home;
+use crate::threads::ThreadLink;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
-/// The C++ worker factory: everything the workers of one run share, owned for the run.
+/// The C++ worker factory: everything the workers of one loop thread share, owned for the run.
 pub struct Factory {
+    /// The sessions with the process's other loop threads made so far (threads.rs), by the
+    /// other thread's index. Declared before the factory, which the sessions' clients refer to,
+    /// so that they are dropped first.
+    links: RefCell<HashMap<usize, Rc<ThreadLink>>>,
     inner: KjOwn<ffi::WorkerFactory>,
     loopback: Loopback,
+    /// With several loop threads, which of them this is, and their hub (hub.rs).
+    seat: OnceCell<(usize, Arc<Hub>)>,
+    /// This thread's inbox, from when it has its seat until its task takes it.
+    inbox: RefCell<Option<mpsc::UnboundedReceiver<Mail>>>,
+    /// Whether the sessions with other threads are answered and the inbox is read
+    /// (`serve_links`).
+    serving_links: Cell<bool>,
+    /// The thread at the other end of a session that ended, once one has.
+    lost_link: watch::Sender<Option<usize>>,
+    /// Whether this thread closed its links (`close_links`).
+    links_closed: watch::Sender<bool>,
+    /// This thread's server, from when its graph is built (`serve_links`).
+    server: RefCell<Weak<Server>>,
+    /// Whether the namespaces' alarm schedulers run (`Server::start_alarms`): how many loop
+    /// threads the process has is settled.
+    alarms_started: Cell<bool>,
 }
 
 impl Factory {
     #[must_use]
     pub fn new(inner: KjOwn<ffi::WorkerFactory>) -> Self {
         Self {
+            links: RefCell::default(),
             inner,
             loopback: Loopback::default(),
+            seat: OnceCell::new(),
+            inbox: RefCell::new(None),
+            serving_links: Cell::new(false),
+            lost_link: watch::Sender::new(None),
+            links_closed: watch::Sender::new(false),
+            server: RefCell::new(Weak::new()),
+            alarms_started: Cell::new(false),
+        }
+    }
+
+    /// Seats this factory's loop thread among the process's: from now on an actor whose home
+    /// is another thread is reached over a session with that thread. Once; on a thread other
+    /// than the first, before its server is built.
+    pub fn join(self: &Rc<Self>, seat: Seat) -> Result<()> {
+        let Seat { index, hub, inbox } = seat;
+        if self.seat.set((index, hub)).is_err() {
+            return Err(kj::failed!(
+                "this loop thread already has its seat among the process's"
+            ));
+        }
+        *self.inbox.borrow_mut() = Some(inbox);
+        if self.serving_links.get() {
+            self.take_mail();
+        }
+        Ok(())
+    }
+
+    /// Which of the process's loop threads this is: 0, the first, if it is the only one.
+    #[must_use]
+    pub fn thread(&self) -> usize {
+        self.seat.get().map_or(0, |(index, _)| *index)
+    }
+
+    /// The home thread of the root actor `key` of the namespace `scope` names, as the hub
+    /// places it: this thread, if it is the only one.
+    #[must_use]
+    pub fn home(&self, scope: &Scope<'_>, key: &str) -> usize {
+        self.seat.get().map_or(0, |(_, hub)| hub.home(scope, key))
+    }
+
+    /// The session with loop thread `peer` of the process, made if this thread has none yet:
+    /// over the pipe the hub has for the two, which tells `peer` if this thread is the first to
+    /// ask.
+    pub fn link(self: &Rc<Self>, peer: usize) -> Result<Rc<ThreadLink>> {
+        if let Some(link) = self.links.borrow().get(&peer) {
+            return Ok(Rc::clone(link));
+        }
+        let (index, hub) = self
+            .seat
+            .get()
+            .ok_or_else(|| kj::failed!("this is the process's only loop thread"))?;
+        let end = hub.link(*index, peer).ok_or_else(|| {
+            kj::failed!("the hub has no session for loop threads {index} and {peer}")
+        })?;
+        let link = Rc::new(ThreadLink::connect(&self.inner, peer, end)?);
+        self.links.borrow_mut().insert(peer, Rc::clone(&link));
+        // The first session to end is the one reported: a session ends only with the other
+        // thread's loop, or by failing.
+        // The watch holds the session until then, or until this thread closes its links.
+        let this = Rc::downgrade(self);
+        let watched = Rc::clone(&link);
+        let mut closed = self.links_closed.subscribe();
+        self.spawn_detached(async move {
+            let ended = std::pin::pin!(watched.disconnected());
+            let closed = std::pin::pin!(closed.wait_for(|closed| *closed));
+            if let Either::Right(_) = futures::future::select(ended, closed).await {
+                return;
+            }
+            if let Some(this) = this.upgrade() {
+                this.lost_link.send_if_modified(|lost| {
+                    let first = lost.is_none();
+                    if first {
+                        *lost = Some(peer);
+                    }
+                    first
+                });
+            }
+        });
+        Ok(link)
+    }
+
+    /// How many loop threads the process has.
+    #[must_use]
+    pub fn threads(&self) -> usize {
+        self.seat.get().map_or(1, |(_, hub)| hub.threads())
+    }
+
+    /// Sends every other loop thread the mail `make` makes for it, and resolves once each did
+    /// what it asks; at once for the process's only thread.
+    pub fn broadcast(&self, make: impl Fn(Done) -> Mail) -> LocalBoxFuture<'static, Result<()>> {
+        let sent = self
+            .seat
+            .get()
+            .map(|(index, hub)| hub.broadcast(*index, make));
+        Box::pin(async move {
+            match sent {
+                Some(sent) => sent
+                    .await
+                    .map_err(|description| kj::failed!("{description}")),
+                None => Ok(()),
+            }
+        })
+    }
+
+    /// Sends `mail` to loop thread `thread`: false if the thread is gone, or this is the
+    /// process's only thread.
+    pub fn post(&self, thread: usize, mail: Mail) -> bool {
+        (self.seat.get()).is_some_and(|(_, hub)| hub.post(thread, mail))
+    }
+
+    /// Sends loop thread `thread` the mail `make` makes, and resolves once it did what it asks.
+    pub fn ask(
+        &self,
+        thread: usize,
+        make: impl FnOnce(Done) -> Mail,
+    ) -> LocalBoxFuture<'static, Result<()>> {
+        let (done, answer) = oneshot::channel();
+        let sent = self
+            .seat
+            .get()
+            .is_some_and(|(_, hub)| hub.post(thread, make(done)));
+        Box::pin(async move {
+            if !sent {
+                return Err(kj::disconnected!("loop thread {thread} has ended"));
+            }
+            match answer.await {
+                Ok(result) => result.map_err(|description| kj::failed!("{description}")),
+                Err(_) => Err(kj::disconnected!("loop thread {thread} has ended")),
+            }
+        })
+    }
+
+    /// In a cluster, has every other loop thread hand its objects off by `deadlines`: whether
+    /// each answered, by the release deadline, that it stopped every one (`actor::hand_off_all`).
+    /// Resolves no later than that deadline.
+    ///
+    /// A thread that has ended counts as one with objects left, and so does one that has not
+    /// answered by then, whatever it answers later: its loop is held up, as by JavaScript that
+    /// does not return to it, so nothing has stopped its objects, and nothing says when
+    /// anything will. A thread that stops them right at the deadline may be counted so too,
+    /// which only keeps the instance a member for longer than it had to be.
+    pub fn hand_off_elsewhere(
+        &self,
+        deadlines: crate::cluster::Deadlines,
+    ) -> LocalBoxFuture<'static, bool> {
+        let asked: Vec<_> = (0..self.threads())
+            .filter(|thread| *thread != self.thread())
+            .map(|thread| {
+                let (stopped, answer) = oneshot::channel();
+                self.post(thread, Mail::HandOff { deadlines, stopped });
+                (thread, answer)
+            })
+            .collect();
+        Box::pin(async move {
+            let answers = asked.into_iter().map(|(thread, answer)| async move {
+                if let Ok(stopped) = tokio::time::timeout_at(deadlines.release, answer).await {
+                    return stopped.unwrap_or(false);
+                }
+                tracing::warn!(
+                    "loop thread {thread} has not stopped its Durable Objects at the release \
+                     deadline"
+                );
+                false
+            });
+            let stopped = futures::future::join_all(answers).await;
+            stopped.into_iter().all(|stopped| stopped)
+        })
+    }
+
+    /// This thread's server, once its graph is built.
+    pub fn server(&self) -> Result<Rc<Server>> {
+        self.server
+            .borrow()
+            .upgrade()
+            .ok_or_else(|| kj::disconnected!("this loop thread has no server"))
+    }
+
+    /// Whether the namespaces' alarm schedulers run.
+    #[must_use]
+    pub fn alarms_started(&self) -> bool {
+        self.alarms_started.get()
+    }
+
+    /// Has this thread answer what the other threads send over their sessions with it, and
+    /// take what is in its inbox, from now on: `server` is registered and its graph built.
+    pub fn serve_links(self: &Rc<Self>, server: &Rc<Server>) {
+        *self.server.borrow_mut() = Rc::downgrade(server);
+        if !self.serving_links.replace(true) {
+            ffi::factory_serve_links(&self.inner);
+            self.take_mail();
+        }
+    }
+
+    /// Ends this thread's part in its sessions with the other loop threads: what it serves over
+    /// them is released, and what it still holds of theirs fails as disconnected. A session ends
+    /// once the stubs this thread has over it are gone too.
+    pub fn close_links(&self) {
+        // The watch of each lets go of it.
+        self.links_closed.send_replace(true);
+        let links = std::mem::take(&mut *self.links.borrow_mut());
+        drop(links);
+    }
+
+    /// Starts the task that takes this thread's mail, if it has a seat and no such task yet.
+    fn take_mail(self: &Rc<Self>) {
+        if let Some(inbox) = self.inbox.borrow_mut().take() {
+            self.spawn_detached(crate::threads::take_mail(Rc::clone(self), inbox));
+        }
+    }
+
+    /// Resolves once a session with another loop thread ended, with that thread's index.
+    pub async fn link_lost(&self) -> usize {
+        let mut lost = self.lost_link.subscribe();
+        match lost.wait_for(Option::is_some).await {
+            Ok(peer) => peer.unwrap_or_default(),
+            // The sender is this factory's.
+            Err(_) => std::future::pending().await,
         }
     }
 
@@ -91,6 +343,13 @@ impl Factory {
     #[must_use]
     pub fn raw(&self) -> &ffi::WorkerFactory {
         &self.inner
+    }
+
+    /// What this factory shares with the factories of the process's other loop threads, which
+    /// `ffi::bootstrap_loop` makes from it. Unlike the factory, it may go to another thread.
+    #[must_use]
+    pub fn shared(&self) -> KjArc<ffi::SharedFactory> {
+        ffi::factory_shared(&self.inner)
     }
 
     /// The config message; `get_root::<config::Reader>()` gives the `Config`. Configs can
@@ -186,7 +445,7 @@ pub struct Reporter {
 }
 
 /// Tracks which services came from cluster deployments.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Deployments {
     /// The deployment name for each service appended to the node's config, by service name.
     pub services: HashMap<String, String>,
@@ -203,7 +462,7 @@ pub struct Deployments {
 }
 
 /// One line of [`Deployments::log`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeploymentLog {
     Info(String),
     Error(String),
@@ -244,6 +503,17 @@ impl Reporter {
         }
     }
 
+    /// The deployments this reporter attributes errors to, without the messages from loading
+    /// them: what the reporter of another loop thread, which builds the same config, attributes
+    /// its errors by.
+    #[must_use]
+    pub fn replica_deployments(&self) -> Deployments {
+        Deployments {
+            log: Vec::new(),
+            ..self.deployments.clone()
+        }
+    }
+
     /// Records the services of `config` that the node's own config defines, before the services
     /// are built: the implicit `internet` service and every service that no deployment defined.
     pub fn set_node_services(&self, config: config::Reader<'_>) -> Result<()> {
@@ -261,6 +531,12 @@ impl Reporter {
     pub fn error(&self, message: impl Into<String>) {
         self.had_errors.set(true);
         (self.error)(message.into());
+    }
+
+    /// Whether an error in the node's config was reported.
+    #[must_use]
+    pub fn had_errors(&self) -> bool {
+        self.had_errors.get()
     }
 
     /// Whether an error was reported that the server must not serve with.
@@ -414,7 +690,7 @@ impl Reporter {
 }
 
 /// The CLI's substitutions for config values, by service or socket name.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Overrides {
     /// `--directory-path`: a disk or cache service's path.
     pub directories: HashMap<String, String>,
@@ -659,7 +935,29 @@ impl Server {
         }
     }
 
-    /// Aborts every evictable actor and deletes its storage.
+    /// The namespaces whose objects the cluster owns, on this thread.
+    pub fn clustered_namespaces(&self) -> Vec<Rc<ActorNamespace>> {
+        let namespaces = self.workers().flat_map(|(_, worker)| worker.namespaces());
+        namespaces
+            .map(|(_, namespace)| namespace)
+            .filter(|namespace| namespace.cluster().is_some())
+            .collect()
+    }
+
+    /// Starts the alarm scheduler of every namespace, and of those linked from now on as they
+    /// are linked. Once how many loop threads the process has is settled, since each thread
+    /// schedules the alarms of the actors whose home it is.
+    pub fn start_alarms(&self) -> Result<()> {
+        self.factory.alarms_started.set(true);
+        for (_, worker) in self.workers() {
+            for (_, namespace) in worker.namespaces() {
+                namespace.start_alarms()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Aborts every evictable actor of this thread and deletes its storage.
     pub fn delete_all_actors(&self, reason: Option<&crate::Error>) -> Result<()> {
         for (_, worker) in self.workers() {
             for (_, namespace) in worker.namespaces() {
@@ -681,6 +979,11 @@ impl Drop for Server {
         // tasks (tasks.rs) go too: one may hold an actor, and so its class's worker.
         self.abort_all_actors(Some(&kj::disconnected!("Server shutting down.")));
         ffi::factory_clear_tasks(self.factory.raw());
+        // A session with another loop thread holds what this thread serves over it: the channels
+        // of the actors that thread has stubs to, and with them this server's namespaces. The
+        // other thread lets go of those only when its own isolates do, which is not for this
+        // thread to wait for.
+        self.factory.close_links();
         // The dynamic workers go before `services` unlinks the config's.
         let loaders = std::mem::take(&mut *self.worker_loaders.borrow_mut());
         for loader in loaders.by_id.values().chain(&loaders.anonymous) {
@@ -1471,7 +1774,7 @@ impl Server {
         overrides: &Overrides,
         report: Reporter,
         mut inbound_listeners: HashMap<String, Vec<ffi::InboundListener>>,
-        cluster_address: Option<String>,
+        join: Option<ClusterJoin>,
     ) -> Result<Rc<Self>> {
         let message = factory.config()?;
         let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
@@ -1525,22 +1828,25 @@ impl Server {
                 .insert("internet".to_owned(), Service::Leaf(internet));
         }
 
-        let cluster = match cluster_address {
-            Some(address) if config.has_cluster() => {
-                make_cluster(&factory, config, address, &report)?
+        let cluster = match join {
+            Some(ClusterJoin::At(address)) if config.has_cluster() => {
+                let cluster = make_cluster(&factory, config, address, &report)?;
+                if let Some(cluster) = &cluster {
+                    // Actor databases open only under a lease, which the lease thread keeps from
+                    // here on, however long linking takes: it watches the event loops only once
+                    // the node serves (`ClusterNode::ready`).
+                    (cluster.first()?.join().await)
+                        .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
+                }
+                cluster
+            }
+            // The first loop thread joined; this one takes its part in the instance.
+            Some(ClusterJoin::Beside(seat)) if config.has_cluster() => {
+                let conf = config.get_cluster().map_err(capnp_error)?;
+                Some(ClusterNode::member(Rc::clone(&factory), conf, seat)?)
             }
             _ => None,
         };
-        if let Some(cluster) = &cluster {
-            // Actor databases open only under a lease, which the lease thread keeps from here on,
-            // however long linking takes: it watches the event loop only once the node serves
-            // (`ClusterNode::ready`).
-            cluster
-                .cluster
-                .join()
-                .await
-                .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
-        }
 
         // Every service exists: wire each worker's Workflows to the engine that runs them.
         init_workflows(
@@ -2016,11 +2322,35 @@ impl ServerHandle {
         service_name: &str,
         class_name: &str,
         actor_id: &str,
+        actor_name: KjMaybe<&str>,
+        caller_thread: KjMaybe<u32>,
+        caller: u8,
     ) -> Result<Box<SubrequestChannel>> {
+        let caller_thread: Option<u32> = caller_thread.into();
         let namespace = self.actor_namespace(service_name, class_name)?;
-        Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?, None),
-            None => namespace.channel_by_name(actor_id, false),
+        if namespace.unique_key().is_none() {
+            return Ok(SubrequestChannel::new(
+                namespace.channel_by_name(actor_id, false),
+            ));
+        }
+        // Only another loop thread of this process derived the id from the name it sends; from
+        // anyone else, a name would be the actor's `ctx.id.name` whether or not it hashes to the
+        // id.
+        let actor_name = if caller_thread.is_some() {
+            actor_name
+        } else {
+            KjMaybe::None
+        };
+        let id = ffi::actor_id_from_hex(actor_id, actor_name)?;
+        // Another loop thread's stub is a stub of this process: its channel is the one a stub on
+        // this thread gets, which a draining cluster node routes for as for its own. Whether
+        // the stub is persistent arrives with each of its requests.
+        Ok(SubrequestChannel::new(match caller_thread {
+            Some(thread) => {
+                let caller = crate::actor::Caller::from_code(caller)?;
+                namespace.channel_from_thread(id, thread as usize, caller)?
+            }
+            None => namespace.peer_channel(id, None),
         }))
     }
 
@@ -2052,8 +2382,18 @@ impl ServerHandle {
     }
 
     fn actor_namespace(&self, service_name: &str, class_name: &str) -> Result<Rc<ActorNamespace>> {
-        let server = self.server()?;
-        let service = server.debug_service(service_name)?;
+        self.server()?.actor_namespace(service_name, class_name)
+    }
+}
+
+impl Server {
+    /// The namespace of service `service_name`'s Durable Object class `class_name`.
+    pub(crate) fn actor_namespace(
+        &self,
+        service_name: &str,
+        class_name: &str,
+    ) -> Result<Rc<ActorNamespace>> {
+        let service = self.debug_service(service_name)?;
         let worker = service
             .as_worker()
             .ok_or_else(|| kj::failed!("jsg.Error: Worker does not support Durable Objects"))?;
@@ -2094,7 +2434,7 @@ impl ServerHandle {
                      \"{service_name}\""
                 )
             })?;
-        let id = ffi::actor_id_from_hex(actor_id)?;
+        let id = ffi::actor_id_from_hex(actor_id, KjMaybe::None)?;
         let session = Rc::clone(&session.requests);
         Ok(SubrequestChannel::new(
             namespace.peer_channel(id, Some(session)),
@@ -2157,6 +2497,21 @@ fn cluster_services(
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
+        // A `cache` keeps state a process has once, and so does a `bucket` that is a local
+        // store: on a replica each is the first loop thread's, which checked it. A `bucket` of
+        // the cluster's bucket is every thread's own, over the thread's client of it.
+        let own = matches!(conf.which(), Ok(service::Which::Bucket(_))) && cluster.is_some();
+        if factory.thread() != 0 && !own {
+            if matches!(
+                conf.which(),
+                Ok(service::Which::Bucket(_) | service::Which::Cache(_))
+            ) {
+                let first = factory.link(0)?;
+                let forwarded = crate::services::ForwardedService::new(first.service(&name)?);
+                services.0.insert(name, Service::Leaf(Rc::new(forwarded)));
+            }
+            continue;
+        }
         let bucket = match conf.which() {
             Ok(service::Which::Bucket(bucket)) => bucket,
             Ok(service::Which::Cache(cache)) => {
@@ -2208,6 +2563,14 @@ fn cluster_services(
         services.0.insert(name, Service::Leaf(channel));
     }
     Ok(())
+}
+
+/// How a server takes part in the cluster of `Config.cluster`.
+pub enum ClusterJoin {
+    /// As the instance, which peers reach at this address: the process's first loop thread.
+    At(String),
+    /// As another loop thread of the instance whose first thread made the seat.
+    Beside(crate::cluster::Seat),
 }
 
 /// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.

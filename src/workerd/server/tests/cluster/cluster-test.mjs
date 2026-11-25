@@ -98,7 +98,15 @@ import { env } from 'node:process';
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { FakeS3Server } from './fake-s3.mjs';
+import {
+  ClusterNode,
+  FakeS3,
+  fetchJson,
+  nodeThreads as threadsOf,
+  objectPrefix,
+  until,
+  withCluster,
+} from './cluster-harness.mjs';
 
 assert(
   env.WORKERD_BINARY !== undefined,
@@ -123,8 +131,6 @@ function test(name, ...rest) {
     nodeTest(name, ...rest);
 }
 
-const CONTROL_FD = 3;
-
 // Node's SIGTERM is TerminateProcess on Windows, so a node cannot drain there.
 const SIGTERM_DRAINS = {
   skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
@@ -140,532 +146,28 @@ const RENEW_INTERVAL_MS = 3_000 / TIME_DIVISOR;
 // How long a stopping node accepts requests at least.
 const GRACE_MS = 5_000 / TIME_DIVISOR;
 
-// A minimal harness specialized for the cluster test. Unlike server-harness.mjs
-// it:
-//   - allows overriding bindings via process environment (NODE_ID),
-//   - points each instance at the fake S3 and at a disk of its own,
-//   - supports SIGKILL in addition to SIGTERM for the takeover test.
-class ClusterNode {
-  #binary;
-  #config;
-  #localPath;
-  #s3Port;
-  #nodeId;
-  #child = null;
-  #httpPort = null;
-  #clusterPort = null;
-  #closed = null;
-  #stdoutBuffer = '';
-  #stderrBuffer = '';
-  #stderrWaiters = new Set();
-  #extraArgs;
-  #disk;
-  #configName;
-  #env;
-  #compiled;
+// How many loop threads a node of the tests of `--threads` serves on.
+const THREADS = 3;
+// What makes the nodes of `withCluster` serve on that many.
+const THREADED = { extraArgs: () => [`--threads=${THREADS}`] };
+// How many requests a test sends before it gives up on what it waits for.
+const THREAD_TRIES = 200;
 
-  // `localPath` is the directory of the config's disk service `disk`, or with
-  // a `disk` of null its `--data-dir`, as for a wrangler config. `env`
-  // adds to the process's environment, or with `undefined` removes from it. A
-  // `configName` of null names no constant, as for a wrangler config.
-  constructor({
-    binary,
-    config,
-    configName,
-    localPath,
-    disk = 'local',
-    s3Port,
-    nodeId,
-    extraArgs = [],
-    env = {},
-    compiled = false,
-  }) {
-    this.#extraArgs = extraArgs;
-    this.#env = env;
-    this.#compiled = compiled;
-    this.#disk = disk;
-    this.#configName = configName;
-    this.#binary = binary;
-    this.#config = config;
-    this.#localPath = localPath;
-    this.#s3Port = s3Port;
-    this.#nodeId = nodeId;
-  }
+// Each of the loop threads `node` serves on (`--threads=${THREADS}`).
+const nodeThreads = (node) => threadsOf(node, THREADS);
 
-  get localPath() {
-    return this.#localPath;
-  }
-
-  get nodeId() {
-    return this.#nodeId;
-  }
-
-  get httpPort() {
-    assert(this.#httpPort !== null, 'node not started');
-    return this.#httpPort;
-  }
-
-  // The port the node's cluster peer port is bound to.
-  get clusterPort() {
-    assert(this.#clusterPort !== null, 'node has no cluster port');
-    return this.#clusterPort;
-  }
-
-  // Returns the contents of the node's stdout observed so far: its log under
-  // structured logging.
-  get stdout() {
-    return this.#stdoutBuffer;
-  }
-
-  // Returns the contents of the node's stderr observed so far.
-  get stderr() {
-    return this.#stderrBuffer;
-  }
-
-  // Resolves once the node's stderr matches `re`, checked as it arrives.
-  waitForStderr(re, ms) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#stderrWaiters.delete(check);
-        reject(new Error(`${this.#nodeId}: no ${re} within ${ms} ms`));
-      }, ms).unref();
-      const check = () => {
-        if (!re.test(this.#stderrBuffer)) return;
-        clearTimeout(timer);
-        this.#stderrWaiters.delete(check);
-        resolve();
-      };
-      this.#stderrWaiters.add(check);
-      check();
-    });
-  }
-
-  async start() {
-    assert.strictEqual(this.#child, null);
-
-    // A binary from `workerd compile` takes no command and no config.
-    const config = [
-      'serve',
-      this.#config,
-      ...(this.#configName == null ? [] : [this.#configName]),
-    ];
-    const args = [
-      ...(this.#compiled ? [] : config),
-      '--experimental',
-      '--verbose',
-      `--control-fd=${CONTROL_FD}`,
-      `--socket-addr=http=127.0.0.1:0`,
-    ];
-    if (this.#localPath !== undefined) {
-      args.push(
-        this.#disk === null
-          ? `--data-dir=${this.#localPath}`
-          : `--directory-path=${this.#disk}=${this.#localPath}`
-      );
-    }
-    args.push(...this.#extraArgs);
-
-    const child = spawn(this.#binary, args, {
-      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-      env: {
-        ...env,
-        // Drop the runtime on exit, joining its threads, which TSan reports
-        // as leaked otherwise.
-        KJ_CLEAN_SHUTDOWN: '1',
-        NODE_ID: this.#nodeId,
-        AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
-        ...this.#env,
-      },
-    });
-    this.#child = child;
-
-    child.stdout.on('data', (data) => {
-      const chunk = data.toString('utf8');
-      this.#stdoutBuffer += chunk;
-      process.stdout.write(`[${this.#nodeId}] ${chunk}`);
-    });
-
-    child.stderr.on('data', (data) => {
-      const chunk = data.toString('utf8');
-      this.#stderrBuffer += chunk;
-      for (const check of this.#stderrWaiters) check();
-      // Mirror to our own stderr so test output remains useful.
-      process.stderr.write(`[${this.#nodeId}] ${chunk}`);
-    });
-
-    // Watch the control fd for the assigned ports. The cluster port's event,
-    // if any, comes before the sockets'.
-    const portPromise = new Promise((resolve, reject) => {
-      let buffer = '';
-      const onData = (data) => {
-        buffer += data.toString('utf8');
-        let nl;
-        while ((nl = buffer.indexOf('\n')) !== -1) {
-          const line = buffer.slice(0, nl).trim();
-          buffer = buffer.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.event === 'listen-cluster') {
-              this.#clusterPort = parsed.port;
-            }
-            if (parsed.event === 'listen' && parsed.socket === 'http') {
-              child.stdio[CONTROL_FD].off('data', onData);
-              resolve(parsed.port);
-              return;
-            }
-          } catch (err) {
-            reject(
-              new Error(
-                `Failed to parse control message from node ${this.#nodeId}: ${line}`
-              )
-            );
-            return;
-          }
-        }
-      };
-      child.stdio[CONTROL_FD].on('data', onData);
-      child.once('error', reject);
-      child.once('exit', (code, signal) => {
-        if (this.#httpPort === null) {
-          reject(
-            new Error(
-              `Node ${this.#nodeId} exited before listening (code=${code}, signal=${signal})`
-            )
-          );
-        }
-      });
-    });
-
-    this.#closed = new Promise((resolve) => {
-      child.once('exit', (code, signal) => resolve({ code, signal }));
-    });
-
-    await new Promise((resolve, reject) => {
-      child.once('spawn', resolve).once('error', reject);
-    });
-
-    this.#httpPort = await portPromise;
-  }
-
-  // How the node's process ends by itself, within `timeoutMs`. A node still
-  // running then is killed, and this fails.
-  async exited({ timeoutMs }) {
-    let timer;
-    const late = new Promise((resolve) => {
-      timer = setTimeout(resolve, timeoutMs, null);
-    });
-    const result = await Promise.race([this.#closed, late]);
-    clearTimeout(timer);
-    if (result === null) {
-      await this.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
-      assert.fail(`Node ${this.#nodeId} did not exit in ${timeoutMs} ms`);
-    }
-    this.#child = null;
-    this.#httpPort = null;
-    this.#clusterPort = null;
-    return result;
-  }
-
-  // Sends the node `signal` without waiting for it to exit.
-  signal(signal) {
-    assert(this.#child !== null, 'node not started');
-    this.#child.kill(signal);
-  }
-
-  async stop({ signal = 'SIGTERM', timeoutMs = 10_000 } = {}) {
-    if (this.#child === null) return null;
-    const child = this.#child;
-    this.#child = null;
-    child.kill(signal);
-
-    const killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch (_) {
-        // process may already be gone.
-      }
-    }, timeoutMs);
-
-    const result = await this.#closed;
-    clearTimeout(killTimer);
-    this.#httpPort = null;
-    this.#clusterPort = null;
-    return result;
-  }
-}
-
-// Fetches `path` from the given node and parses the JSON response. When
-// `timeoutMs` is given, a request that does not complete in time fails with a
-// clear error instead of hanging the test (used where a bug would manifest as
-// a request that never completes).
-async function fetchJson(port, path, { timeoutMs } = {}) {
-  const url = `http://127.0.0.1:${port}${path}`;
-  let res;
-  try {
-    res = await fetch(url, {
-      signal:
-        timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
-    });
-  } catch (err) {
-    if (err.name === 'TimeoutError') {
-      throw new Error(
-        `request to ${url} did not complete within ${timeoutMs}ms`
-      );
-    }
-    throw err;
-  }
-  const text = await res.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch (err) {
-    throw new Error(
-      `Non-JSON response from ${url} (status ${res.status}): ${text}`
+// Resolves once DO `name` has had `count` /hold-increment requests, asked
+// through `node`.
+async function holding(node, name, count) {
+  for (let tries = 0; ; tries++) {
+    const { status, body } = await fetchJson(
+      node.httpPort,
+      `/holding?name=${name}`
     );
-  }
-  return { status: res.status, body };
-}
-
-// The fake S3 the cluster's state lives in (fake-s3.mjs), or in its "gcs"
-// dialect the fake Cloud Storage, which the test's own requests reach without
-// a token. The tests share one of each, emptied for each.
-const fakeServers = new Map();
-
-class FakeS3 {
-  #server;
-  #headers;
-
-  // An empty bucket of `dialect`, "s3" or "gcs".
-  static async fresh(dialect = 's3') {
-    let server = fakeServers.get(dialect);
-    if (server === undefined) {
-      server = new FakeS3Server({ dialect });
-      await server.listen();
-      fakeServers.set(dialect, server);
-    }
-    server.reset();
-    return new FakeS3(server, dialect === 'gcs' ? { 'x-fake-admin': '1' } : {});
-  }
-
-  constructor(server, headers) {
-    this.#server = server;
-    this.#headers = headers;
-  }
-
-  // Where a node's bucket client and token requests go, for a fake Cloud
-  // Storage.
-  get gcsEnv() {
-    const host = `127.0.0.1:${this.port}`;
-    return {
-      STORAGE_EMULATOR_HOST: host,
-      GCE_METADATA_HOST: host,
-      GOOGLE_APPLICATION_CREDENTIALS: undefined,
-    };
-  }
-
-  get port() {
-    return this.#server.port;
-  }
-
-  // The keys under `prefix` in the cluster's bucket, whose layout is under
-  // `cluster/v1/`.
-  async list(prefix) {
-    const query = new URLSearchParams({
-      'list-type': '2',
-      prefix: `cluster/v1/${prefix}`,
-    });
-    const res = await fetch(`http://127.0.0.1:${this.port}/wdtest/?${query}`, {
-      headers: this.#headers,
-    });
-    const xml = await res.text();
-    return [...xml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((m) =>
-      m[1].slice('cluster/v1/'.length)
-    );
-  }
-
-  async get(key) {
-    const res = await fetch(
-      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
-      { headers: this.#headers }
-    );
-    return res.status === 404 ? null : await res.text();
-  }
-
-  async delete(key) {
-    await fetch(`http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`, {
-      method: 'DELETE',
-      headers: this.#headers,
-    });
-  }
-
-  async put(key, body, headers = {}) {
-    const res = await fetch(
-      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
-      { method: 'PUT', body, headers: { ...this.#headers, ...headers } }
-    );
-    assert.strictEqual(res.status, 200, `PUT ${key} answered ${res.status}`);
-  }
-
-  // How many writes to `key` failed their precondition.
-  async rejected(key) {
-    const query = new URLSearchParams({ key: `cluster/v1/${key}` });
-    return (
-      await fetch(`http://127.0.0.1:${this.port}/_rejected?${query}`)
-    ).json();
-  }
-
-  // A fake Cloud Storage's tokens: with `account`, sets their lifetime
-  // (`expiresIn`) or the service account (`email`, `jwk`); answers how many
-  // it issued and refused (fake-s3.mjs).
-  async gcs(account) {
-    const res = await fetch(`http://127.0.0.1:${this.port}/_gcs`, {
-      method: account === undefined ? 'GET' : 'POST',
-      body: account === undefined ? undefined : JSON.stringify(account),
-    });
-    return res.json();
-  }
-
-  // The key of the node that owns the Counter with this ID, or null when no
-  // owner record exists.
-  async owner(id) {
-    const record = await this.get(`${objectPrefix(id)}/own.json`);
-    return record === null ? null : JSON.parse(record).node;
-  }
-
-  // Arms `faults` (fake-s3.mjs), each `prefix` a key in the cluster's layout,
-  // replacing those armed before.
-  async setFaults(faults) {
-    const armed = faults.map((f) => ({
-      ...f,
-      prefix: `cluster/v1/${f.prefix}`,
-    }));
-    const res = await fetch(`http://127.0.0.1:${this.port}/_faults`, {
-      method: 'POST',
-      body: JSON.stringify(armed),
-    });
-    await res.arrayBuffer();
-  }
-
-  // How many requests each armed fault has matched.
-  async faultHits() {
-    const res = await fetch(`http://127.0.0.1:${this.port}/_faults`);
-    return (await res.json()).map((f) => f.hits);
-  }
-
-  // How many GET, PUT and DELETE requests the bucket served for `key`, a key
-  // in the cluster's layout. The fake counts a key without its first
-  // segment, the bucket's `cluster/`.
-  async requests(key) {
-    const query = new URLSearchParams({ key: `v1/${key}` });
-    return (
-      await fetch(`http://127.0.0.1:${this.port}/_requests?${query}`)
-    ).json();
-  }
-
-  // How many body bytes GETs of `key`, a key in the cluster's layout, were
-  // served.
-  async served(key) {
-    const query = new URLSearchParams({ key: `v1/${key}` });
-    return (
-      await fetch(`http://127.0.0.1:${this.port}/_served?${query}`)
-    ).json();
-  }
-
-  // The keys of the nodes with a lease record.
-  async nodes() {
-    // Not the `.probe` a starting node writes and deletes.
-    return (await this.list('nodes/'))
-      .filter((key) => key.endsWith('.json'))
-      .map((key) => key.slice('nodes/'.length, -'.json'.length));
-  }
-}
-
-// Starts a fake S3 and `numNodes` workerd instances and runs `fn` with:
-//   nodes      the ClusterNode instances, in start order
-//   bucket     the FakeS3
-//   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
-//              what owner records name
-// The nodes run the config constant `configName` of `config`, whose disk
-// service `disk` (with null, the --data-dir) is a directory of each node's
-// own, once `before` has prepared the bucket, of `dialect` ("s3" or "gcs",
-// FakeS3.fresh). Node `i` gets the
-// extra environment variables `nodeEnv(i, root, bucket)`, where `root` is the
-// test's temporary directory, and runs the binary that `nodeBinary(i, root)`
-// names (`compiled` when `workerd compile` built it).
-async function withCluster(
-  numNodes,
-  fn,
-  {
-    extraArgs = () => [],
-    nodeEnv = async () => ({}),
-    nodeBinary = async () => ({ binary: env.WORKERD_BINARY, compiled: false }),
-    config = env.WD_TEST_CONFIG,
-    configName = 'config',
-    disk = 'local',
-    before = async () => {},
-    dialect = 's3',
-  } = {}
-) {
-  // Each test run gets its own bucket and disks, so state doesn't leak
-  // between tests.
-  const root = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
-  const bucket = await FakeS3.fresh(dialect);
-  const nodes = [];
-  const nodeKeys = new Map();
-  try {
-    await before(bucket);
-    for (let i = 0; i < numNodes; i++) {
-      const localPath = join(root, `node${i}`);
-      await mkdir(localPath);
-      nodes.push(
-        new ClusterNode({
-          ...(await nodeBinary(i, root)),
-          config,
-          configName,
-          localPath,
-          disk,
-          s3Port: bucket.port,
-          nodeId: `node${i}`,
-          extraArgs: await extraArgs(i),
-          env: await nodeEnv(i, root, bucket),
-        })
-      );
-    }
-    await Promise.all(nodes.map((node) => node.start()));
-
-    // A node writes its lease record, with the address peers reach it at, as it
-    // joins the cluster, before it listens.
-    const deadline = Date.now() + 10_000;
-    let keys = [];
-    while (Date.now() < deadline) {
-      keys = await bucket.nodes();
-      if (keys.length >= numNodes) break;
-      await sleep(50);
-    }
-    assert.strictEqual(
-      keys.length,
-      numNodes,
-      `expected one lease record per node, got: [${keys.join(', ')}]`
-    );
-    for (const key of keys) {
-      const { address } = JSON.parse(await bucket.get(`nodes/${key}.json`));
-      const node = nodes.find((n) => address.endsWith(`:${n.clusterPort}`));
-      assert(node !== undefined, `no node advertises ${address}`);
-      assert(!nodeKeys.has(node.nodeId), `${node.nodeId} has two records`);
-      nodeKeys.set(node.nodeId, key);
-    }
-    await fn({ nodes, bucket, nodeKeys });
-  } finally {
-    // Kill all nodes, some of which the test may have stopped already: a
-    // drain, which keeps accepting requests for seconds, is for the tests
-    // that check it to wait out.
-    await Promise.all(
-      nodes.map((node) =>
-        node.stop({ signal: 'SIGKILL', timeoutMs: 5000 }).catch(() => {})
-      )
-    );
-    await rm(root, { recursive: true, force: true });
+    assert.strictEqual(status, 200, JSON.stringify(body));
+    if (body.holding === count) return;
+    assert(tries < THREAD_TRIES, `${body.holding} of ${count} requests held`);
+    await sleep(10);
   }
 }
 
@@ -1359,18 +861,6 @@ test('cluster: a KV namespace survives its owner', async () => {
     assert.deepStrictEqual(await bucket.list('services/kv/'), []);
   });
 });
-
-// Where a Durable Object's records are in the bucket: a hash of its
-// namespace's uniqueKey, then its ID.
-function objectPrefix(id, uniqueKey = 'counter-test-namespace') {
-  const hash = createHash('sha256');
-  for (const part of ['workerd cluster namespace v1', '', uniqueKey]) {
-    const length = Buffer.alloc(8);
-    length.writeBigUInt64BE(BigInt(Buffer.byteLength(part)));
-    hash.update(length).update(part);
-  }
-  return `do/${hash.digest().subarray(0, 16).toString('base64url')}/${id}`;
-}
 
 test('cluster: an instance bound to a wildcard advertises --cluster-advertise', async () => {
   // Port 0 for both: the advertised address takes the port the kernel chose.
@@ -3365,6 +2855,223 @@ test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO a
   });
 });
 
+// ---------------------------------------------------------------------------
+// Several loop threads (`--threads`): a node's Durable Objects, and its part in
+// the cluster, are its first thread's, and a request another thread serves
+// reaches them through it.
+
+test('cluster: on several threads, the requests of every thread of every node reach one DO', async () => {
+  await withCluster(
+    2,
+    async ({ nodes, bucket, nodeKeys }) => {
+      // The threads of the DO's owner, and those of the other node, whose
+      // requests go through its own first thread to the owner's.
+      const threads = (
+        await Promise.all(nodes.map((node) => nodeThreads(node)))
+      ).flat();
+      const ROUNDS = 4;
+      const observed = [];
+      const owners = new Set();
+      let id;
+      for (let round = 0; round < ROUNDS; round++) {
+        const answers = await Promise.all(
+          threads.map((t) => t.fetchJson('/increment?name=threads'))
+        );
+        for (const { status, body } of answers) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          observed.push(body.count);
+          owners.add(body.nodeId);
+          id = body.id;
+        }
+      }
+      observed.sort((a, b) => a - b);
+      assert.deepStrictEqual(
+        observed,
+        observed.map((_, i) => i + 1),
+        'each /increment must be a unique strictly-increasing count'
+      );
+      assert.strictEqual(observed.length, ROUNDS * nodes.length * THREADS);
+      assert.strictEqual(owners.size, 1, [...owners].join(', '));
+      const [owner] = owners;
+      assert.strictEqual(await bucket.owner(id), nodeKeys.get(owner));
+
+      // JS RPC from every thread, too.
+      for (const thread of threads) {
+        const { status, body } = await thread.fetchJson(
+          '/rpc-identity?name=threads'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        assert.strictEqual(body.nodeId, owner);
+      }
+
+      // Only a node's first thread is a member of the cluster.
+      assert.strictEqual((await bucket.nodes()).length, nodes.length);
+    },
+    THREADED
+  );
+});
+
+test('cluster: on several threads, KV keeps a large value in the bucket from any thread', async () => {
+  await withCluster(
+    2,
+    async ({ nodes, bucket }) => {
+      const threads = (
+        await Promise.all(nodes.map((node) => nodeThreads(node)))
+      ).flat();
+      const q = (params) => new URLSearchParams(params);
+      // Each thread writes a value large enough to go in the bucket, through
+      // its node's `bucket` service, which is the first thread's.
+      const size = 2 * 1024 * 1024;
+      for (const [i, thread] of threads.entries()) {
+        const put = await thread.fetchJson(
+          `/kv/put?${q({ key: `large-${i}`, size })}`
+        );
+        assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+      }
+      const blobs = await bucket.list('services/kv/');
+      assert(blobs.length >= threads.length, blobs.join(', '));
+      // And every thread reads the value another wrote.
+      for (const [i, thread] of threads.entries()) {
+        const key = `large-${(i + 1) % threads.length}`;
+        const got = await thread.fetchJson(`/kv/get?${q({ key })}`);
+        assert.strictEqual(got.status, 200, JSON.stringify(got.body));
+        assert.strictEqual(got.body.value.length, size);
+      }
+    },
+    THREADED
+  );
+});
+
+test(
+  "cluster: on several threads, requests on every thread follow a draining owner's DO",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes }) => {
+        const name = 'handoff-threads';
+        const initial = await fetchJson(
+          nodes[0].httpPort,
+          `/increment?name=${name}`
+        );
+        assert.strictEqual(initial.status, 200);
+        const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
+        const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
+        const holders = await nodeThreads(owner);
+        const followers = [...holders, ...(await nodeThreads(peer))];
+
+        // Each of the owner's threads has a request in the DO as the owner
+        // starts to drain, which the handoff lets finish.
+        const held = holders.map((t) =>
+          t.fetchJson(`/hold-increment?name=${name}&ms=1000`)
+        );
+        await holding(owner, name, holders.length);
+        const exit = owner.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+        await sleep(100);
+        // Requests that arrive meanwhile, on any thread of either node, wait
+        // for the handoff and run where the DO went.
+        const following = followers.map((t) =>
+          t.fetchJson(`/increment?name=${name}`, { timeoutMs: 15_000 })
+        );
+
+        const counts = [initial.body.count];
+        for (const { status, body } of await Promise.all(held)) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          assert.strictEqual(body.nodeId, owner.nodeId);
+          counts.push(body.count);
+        }
+        for (const { status, body } of await Promise.all(following)) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          assert.strictEqual(body.nodeId, peer.nodeId);
+          counts.push(body.count);
+        }
+        // None was lost and none ran twice.
+        counts.sort((a, b) => a - b);
+        assert.deepStrictEqual(
+          counts,
+          counts.map((_, i) => i + 1)
+        );
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      },
+      THREADED
+    );
+  }
+);
+
+test(
+  'cluster: on several threads, a restarted node serves its DOs again',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      1,
+      async ({ nodes: [node] }) => {
+        const increment = async (threads) => {
+          const answers = await Promise.all(
+            threads.map((t) => t.fetchJson('/increment?name=restart'))
+          );
+          for (const { status, body } of answers) {
+            assert.strictEqual(status, 200, JSON.stringify(body));
+          }
+          return answers.map((a) => a.body.count).sort((a, b) => a - b);
+        };
+        const before = await increment(await nodeThreads(node));
+        assert.deepStrictEqual(before, [1, 2, 3]);
+
+        const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        await node.start();
+
+        // The new instance claims what the old one handed off.
+        const after = await increment(await nodeThreads(node));
+        assert.deepStrictEqual(after, [4, 5, 6]);
+      },
+      THREADED
+    );
+  }
+);
+
+test('cluster: on several threads, a node whose lease lapses exits at once', async () => {
+  await withCluster(
+    1,
+    async ({ nodes: [node], bucket, nodeKeys }) => {
+      const key = nodeKeys.get(node.nodeId);
+      // Every thread has a request in a DO, which outlasts the lease.
+      const threads = await nodeThreads(node);
+      const held = threads.map((t) =>
+        t
+          .fetchJson(`/hold-increment?name=lapse&ms=${4 * LEASE_MS}`)
+          .catch((error) => ({ error }))
+      );
+      await holding(node, 'lapse', threads.length);
+      // The node cannot renew its lease from here on.
+      await bucket.setFaults([
+        {
+          method: 'PUT',
+          prefix: `nodes/${key}.json`,
+          status: 500,
+          times: 1e6,
+        },
+      ]);
+      const lapsing = Date.now();
+      const exit = await Promise.race([
+        node.closed(),
+        sleep(3 * LEASE_MS).then(() => 'still running'),
+      ]);
+      assert.deepStrictEqual(exit, { code: 1, signal: null });
+      assert(
+        Date.now() - lapsing < 2 * LEASE_MS,
+        'the node outlived its lease'
+      );
+      assert.match(node.stderr, /leaving the cluster/);
+      // The requests ended with the process.
+      for (const answer of await Promise.all(held)) {
+        assert(answer.error !== undefined, JSON.stringify(answer));
+      }
+    },
+    THREADED
+  );
+});
+
 // The config of a node that serves the deployments in its bucket, and its disk,
 // on which a deployment's Durable Objects are stored (`workerd deploy --help`).
 const DEPLOYMENT_NODE = { config: env.NODE_CONFIG, disk: 'do-storage' };
@@ -3570,6 +3277,62 @@ test('cluster: a node serves beside deployments it cannot serve', async () => {
           JSON.stringify(manifest)
         );
       },
+    }
+  );
+});
+
+test('cluster: on several threads, every thread serves beside deployments it cannot serve', async () => {
+  const deployments = {
+    app: await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment'),
+    // Its service is broken because its worker throws while loading.
+    throws: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'throws'),
+    // It is skipped because it defines "router", as the node does.
+    clash: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'clash'),
+    // Its service is broken, and so is its Durable Object namespace.
+    'broken-do': await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'brokenDo'),
+  };
+  await withCluster(
+    1,
+    async ({ nodes: [node] }) => {
+      // The deployments' errors are no thread's failure: each serves what the
+      // first does.
+      const threads = await nodeThreads(node);
+      const counts = [];
+      for (const thread of threads) {
+        let { status, body } = await thread.fetchJson('/own');
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        ({ status, body } = await thread.fetchJson(
+          '/MAIN/increment?name=beside-threads'
+        ));
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        counts.push(body.count);
+        for (const path of [
+          '/THROWS/',
+          '/SKIPPED/',
+          '/UNKNOWN/',
+          '/BROKEN_DO/x',
+        ]) {
+          ({ status, body } = await thread.fetchJson(path));
+          assert.strictEqual(status, 500, path);
+          assert.match(
+            body.error,
+            /Service cannot handle requests because its config is invalid/,
+            path
+          );
+        }
+      }
+      assert.deepStrictEqual(counts, [1, 2, 3]);
+      // The errors are reported once, by the first thread.
+      const reported = node.stderr.match(
+        /deployment "throws": service "throws" cannot handle requests/g
+      );
+      assert.strictEqual(reported.length, 1, node.stderr);
+    },
+    {
+      ...THREADED,
+      config: env.BROKEN_NODE_CONFIG,
+      disk: DEPLOYMENT_NODE.disk,
+      before: (bucket) => deploy(bucket, deployments),
     }
   );
 });
@@ -3829,16 +3592,6 @@ const GCS = {
   configName: 'gcs',
   dialect: 'gcs',
 };
-
-// Polls `check` until it answers true, for at most `ms`.
-async function until(check, ms, message) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    if (await check()) return;
-    await sleep(200);
-  }
-  assert.fail(message);
-}
 
 test('cluster: an owner record write answered 503 after it landed counts as written', async () => {
   for (const options of [

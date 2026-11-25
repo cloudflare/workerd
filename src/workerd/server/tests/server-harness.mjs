@@ -193,6 +193,18 @@ export class WorkerdServerHarness {
     return await this.#listenPorts.get(name);
   }
 
+  // Send `signal` to workerd without waiting for it to finish.
+  kill(signal = 'SIGTERM') {
+    assert.notEqual(this.#child, null);
+    this.#child.kill(signal);
+  }
+
+  // Return a promise for workerd's exit: its exit code and the signal that ended it.
+  async closed() {
+    assert.notEqual(this.#closed, null);
+    return await this.#closed;
+  }
+
   // Send SIGTERM to workerd and wait for it to completely finish.
   async stop() {
     assert.notEqual(this.#child, null);

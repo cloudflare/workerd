@@ -215,6 +215,17 @@ fn bad_values_are_usage_errors() {
         &["serve", "c.capnp", "--socket-addr=noequals"][..],
         &["serve", "c.capnp", "--socket-fd=http=abc"],
         &["serve", "c.capnp", "--control-fd=-1"],
+        &["serve", "c.capnp", "--threads=0"],
+        &["serve", "c.capnp", "--threads=257"],
+        &["serve", "c.capnp", "--threads=two"],
+        &["serve", "c.capnp", "--threads"],
+        &["serve", "c.capnp", "--front-threads=0"],
+        &["serve", "c.capnp", "--front-threads=257"],
+        &["serve", "c.capnp", "--front-queue=0"],
+        &["serve", "c.capnp", "--front-queue=1048577"],
+        // Only `serve` has threads.
+        &["test", "c.capnp", "--threads=2"],
+        &["bench", "c.capnp", "--threads=2"],
         &["serve"],
         &["test", "c.capnp", "a", "b"],
         &["unknown"],
@@ -503,4 +514,127 @@ fn repl_process_wide_settings() {
     assert_eq!(repl.autogates, ["compression-rs", "ts-url"]);
     assert_eq!(repl.v8_flags, ["--expose-gc", "--jitless"]);
     assert_eq!(repl.config_file.as_deref(), Some("config.capnp"));
+}
+/// The `serve` arguments of `workerd serve c.capnp <args>`.
+fn serve_args(args: &[&str]) -> (ServeArgs, ServeOrTestArgs) {
+    let Command::Serve {
+        serve,
+        serve_or_test,
+        ..
+    } = parse(&[&["serve", "c.capnp"], args].concat()).command
+    else {
+        panic!("expected serve")
+    };
+    (serve, serve_or_test)
+}
+
+#[test]
+fn threads_default_to_one() {
+    let (serve, serve_or_test) = serve_args(&[]);
+    assert_eq!(serve.threads, 1);
+    assert_eq!(threads_refused(&serve, &serve_or_test), None);
+    let (serve, _) = serve_args(&["--threads=4"]);
+    assert_eq!(serve.threads, 4);
+    let main = CompiledMain::try_parse_from(["workerd", "--threads=3"]).unwrap();
+    assert_eq!(main.serve.threads, 3);
+}
+
+#[test]
+fn the_front_has_threads_only_with_several_loop_threads() {
+    let (serve, _) = serve_args(&["--threads=4", "--front-threads=3"]);
+    assert_eq!(serve.front_threads, Some(3));
+    let (serve, _) = serve_args(&["--threads=4"]);
+    assert_eq!(serve.front_threads, None);
+    // One thread has no front.
+    for args in [
+        &["--front-threads=2"][..],
+        &["--threads=1", "--front-threads=2"],
+    ] {
+        let (serve, serve_or_test) = serve_args(args);
+        let message = threads_refused(&serve, &serve_or_test).unwrap();
+        assert!(message.starts_with("--front-threads: "), "{message}");
+    }
+    // It is part of serving on several threads, which is experimental.
+    let (serve, serve_or_test) = serve_args(&["--threads=2", "--front-threads=2"]);
+    let message = threads_refused(&serve, &serve_or_test).unwrap();
+    assert!(message.contains("`--experimental`"), "{message}");
+}
+
+#[test]
+fn the_front_has_a_queue_only_with_several_loop_threads() {
+    let (serve, _) = serve_args(&["--threads=4", "--front-queue=64"]);
+    assert_eq!(serve.front_queue, Some(64));
+    let (serve, _) = serve_args(&["--threads=4"]);
+    assert_eq!(serve.front_queue, None);
+    for args in [
+        &["--front-queue=64"][..],
+        &["--threads=1", "--front-queue=64"],
+    ] {
+        let (serve, serve_or_test) = serve_args(args);
+        let message = threads_refused(&serve, &serve_or_test).unwrap();
+        assert!(message.starts_with("--front-queue: "), "{message}");
+    }
+    let (serve, serve_or_test) = serve_args(&["--threads=2", "--front-queue=64"]);
+    let message = threads_refused(&serve, &serve_or_test).unwrap();
+    assert!(message.contains("`--experimental`"), "{message}");
+}
+
+#[test]
+fn one_thread_is_refused_nothing() {
+    // One thread is the server as it is without the flag, whatever else is given.
+    for args in [
+        &["--threads=1"][..],
+        &["--threads=1", "--inspector-addr=127.0.0.1:0"],
+        &["--threads=1", "--experimental", "--python-save-snapshot"],
+        &["--inspector-addr=127.0.0.1:0", "--python-save-snapshot"],
+    ] {
+        let (serve, serve_or_test) = serve_args(args);
+        let refused = threads_refused(&serve, &serve_or_test);
+        assert_eq!(refused, None, "{args:?}");
+    }
+}
+
+#[test]
+fn several_threads_refuse_what_they_do_not_support() {
+    let refused = |args: &[&str]| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test)
+    };
+    let experimental = refused(&["--threads=2"]).unwrap();
+    assert!(experimental.contains("`--experimental`"), "{experimental}");
+    // Without --experimental that is the error, whatever else is given.
+    assert_eq!(
+        refused(&["--threads=2", "--inspector-addr=127.0.0.1:0"]),
+        Some(experimental)
+    );
+
+    for (option, named) in [
+        ("--inspector-addr=127.0.0.1:0", "--inspector-addr"),
+        ("-i127.0.0.1:0", "--inspector-addr"),
+        ("--python-save-snapshot", "Python snapshot"),
+        ("--python-save-baseline-snapshot", "Python snapshot"),
+    ] {
+        let message = refused(&["--threads=2", "--experimental", option]).unwrap();
+        assert!(message.starts_with("--threads: "), "{message}");
+        assert!(message.contains(named), "{option}: {message}");
+    }
+
+    // What several threads serve, or one of them does.
+    for args in [
+        &["--threads=2", "--experimental"][..],
+        &["--threads=256", "--experimental"],
+        &["--threads=2", "--experimental", "--watch"],
+        &["--threads=2", "--experimental", "--control-fd=3"],
+        &["--threads=2", "--experimental", "-Shttp=4"],
+        &["--threads=2", "--experimental", "-shttp=*:8080"],
+        &["--threads=2", "--experimental", "--debug-port=127.0.0.1:0"],
+        &["--threads=2", "--experimental", "--python-load-snapshot=x"],
+        &["--threads=2", "--experimental", "--async-trace=trace"],
+        &["--threads=2", "--experimental", "--front-threads=1"],
+        &["--threads=2", "--experimental", "--front-threads=256"],
+        &["--threads=2", "--experimental", "--front-queue=1"],
+        &["--threads=2", "--experimental", "--front-queue=1048576"],
+    ] {
+        assert_eq!(refused(args), None, "{args:?}");
+    }
 }

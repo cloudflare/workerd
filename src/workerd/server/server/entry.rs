@@ -14,6 +14,12 @@
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
+//! This thread is the process's first loop thread. `workerd serve --threads=<N>` has it start
+//! the others once its own server is built (`threads.rs`), each inside this thread's logger
+//! (`log::within_thread`) with a loop and a factory of its own; they have ended, their loops and
+//! factories gone, by the time `run::run` returns, so this thread's factory is the last and V8 is
+//! torn down here.
+//!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
 //! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
 //! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
@@ -174,6 +180,25 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     };
     let command = Box::new(PendingCommand(Box::new(command)));
     Ok(ffi::with_process_context(verbose, config, command)?)
+}
+
+/// The exit status of a run that ends now without a failure of its own: 1 if an error was
+/// reported.
+#[must_use]
+pub fn exit_code() -> i32 {
+    i32::from(HAD_ERRORS.load(Ordering::Relaxed))
+}
+
+/// Ends the process with `code` at once, from any thread.
+///
+/// Other loop threads may still be running: this runs none of the atexit handlers and static
+/// destructors that `std::process::exit` runs on this thread under the others' feet. What Rust
+/// buffered for stdout is written first, as `std::process::exit` would; stderr and the log lines
+/// (`kj_log`) are not buffered.
+pub fn exit_now(code: i32) -> ! {
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    ffi::cli_exit(code);
+    unreachable!("cli_exit returned")
 }
 
 /// Reports an error -- a config error, failed tests, the run's failure -- and makes the exit

@@ -12,7 +12,14 @@
 //! connection it accepted, so that `run()` can wait for the connections to finish once draining
 //! has stopped the accept loop. A failure of the accept loop itself is the listener's failure,
 //! and fatal to the server; a failure of one connection is logged and ends that connection only.
+//!
+//! With several loop threads (`threads.rs`) no loop accepts from a stream socket: the first loop
+//! thread binds them and gives them to the front (`front/mod.rs`), which accepts on its own
+//! runtime and queues what arrives, and every loop serves what it takes from that queue
+//! (`listen::dispatch`). A loop then knows a stream socket only by its port
+//! ([`BoundSocket::Front`]); the datagram sockets stay with the first loop thread.
 
+pub mod dispatch;
 pub mod loopback;
 pub mod udp;
 
@@ -155,6 +162,8 @@ impl StreamListener {
 /// A socket of the config, bound.
 pub enum BoundSocket {
     Stream(StreamListener),
+    /// A stream socket that the front accepts from, bound to this port.
+    Front(u16),
     Datagram(UdpSocket),
 }
 
@@ -185,6 +194,12 @@ fn wrap_inherited(socket: socket2::Socket) -> Result<StreamListener> {
         .map_err(|e| kj::failed!("--socket-fd: {e}"))?;
     Ok(StreamListener::Socket(kj_rs_io::wrap_listener(socket)?))
 }
+
+/// The stream sockets of the config as a loop thread that did not bind them knows them.
+///
+/// For each socket of the config, in order, the address it was bound to and its port; `None`
+/// for a socket the front does not serve: a datagram socket, or one that failed to bind.
+pub type FrontSockets = Vec<Option<(String, u16)>>;
 
 // =====================================================================================
 // Binding
@@ -269,34 +284,68 @@ pub async fn bind_sockets(
             }
         };
 
+        bound.push_stream(sock, BoundSocket::Stream(listener), address)?;
+    }
+    Ok(bound)
+}
+
+/// The config's sockets on a loop thread other than the one that bound them: `sockets`, which
+/// the front accepts from.
+pub fn adopt_sockets(config: config::Reader<'_>, sockets: FrontSockets) -> Result<BoundSockets> {
+    let mut bound = BoundSockets {
+        sockets: Vec::new(),
+        inbound: HashMap::new(),
+    };
+    for (sock, socket) in config
+        .get_sockets()
+        .map_err(capnp_error)?
+        .iter()
+        .zip(sockets)
+    {
+        match socket {
+            Some((address, port)) => {
+                bound.push_stream(sock, BoundSocket::Front(port), address)?;
+            }
+            None => bound.sockets.push(None),
+        }
+    }
+    Ok(bound)
+}
+
+impl BoundSockets {
+    /// Adds the stream socket `sock`, bound to `address` as `socket`.
+    fn push_stream(
+        &mut self,
+        sock: socket::Reader<'_>,
+        socket: BoundSocket,
+        address: String,
+    ) -> Result<()> {
         // A loopback socket is not a listener another process could reach.
         let designator = sock.get_service().map_err(capnp_error)?;
         if matches!(sock.which(), Ok(socket::Which::Tcp(_)))
-            && !matches!(listener, StreamListener::Loopback(_))
+            && !matches!(socket, BoundSocket::Stream(StreamListener::Loopback(_)))
             && designator.has_name()
         {
             let service = text(designator.get_name())?;
-            bound
-                .inbound
+            self.inbound
                 .entry(service)
                 .or_default()
                 .push(ffi::InboundListener {
                     protocol: "tcp".to_owned(),
                     address: host_of_address(&address),
-                    port: listener.port()?,
+                    port: bound_port(&socket)?,
                 });
         }
-        bound
-            .sockets
-            .push(Some((BoundSocket::Stream(listener), address)));
+        self.sockets.push(Some((socket, address)));
+        Ok(())
     }
-    Ok(bound)
 }
 
 /// A bound socket's port, for the control channel's `listen` event.
 pub fn bound_port(socket: &BoundSocket) -> Result<u16> {
     match socket {
         BoundSocket::Stream(listener) => listener.port(),
+        BoundSocket::Front(port) => Ok(*port),
         BoundSocket::Datagram(socket) => socket
             .local_addr()
             .map(|addr| addr.port())
@@ -308,16 +357,16 @@ pub fn bound_port(socket: &BoundSocket) -> Result<u16> {
 // Connections
 
 /// Any tokio byte stream hyper can serve.
-trait Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+pub trait Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + ?Sized> Io for T {}
 
 /// A connection's transport once TLS (if any) is done: the tokio stream the listener accepted,
 /// or the TLS stream over it.
-type Transport = Pin<Box<dyn Io>>;
+pub type Transport = Pin<Box<dyn Io>>;
 
 /// The cf blob describing a peer that sent none itself: its address for a network peer, its
 /// process credentials for a local one. A loopback peer has no identity to describe.
-fn peer_cf_blob(accepted: &Accepted) -> Option<String> {
+pub fn peer_cf_blob(accepted: &Accepted) -> Option<String> {
     match accepted {
         Accepted::Socket(_, Some(peer)) => {
             Some(serde_json::json!({ "clientIp": peer.to_string() }).to_string())
@@ -337,12 +386,13 @@ fn peer_cf_blob(accepted: &Accepted) -> Option<String> {
     }
 }
 
-/// Wraps the connection in TLS when the socket has it, and boxes the transport. Draining drops
-/// a connection that is still shaking hands, as it drops one not yet accepted.
-async fn transport(
+/// Wraps the connection in TLS when the socket has it, and boxes the transport. Draining (when
+/// `drained` resolves) drops a connection that is still shaking hands, as it drops one not yet
+/// accepted.
+pub async fn transport(
     accepted: Accepted,
     tls: Option<&Arc<rustls::ServerConfig>>,
-    context: &ListenContext,
+    drained: impl Future<Output = ()>,
 ) -> Result<Transport> {
     let io: Transport = match accepted {
         Accepted::Socket(Socket::Tcp(stream), _) => Box::pin(stream),
@@ -354,17 +404,19 @@ async fn transport(
         return Ok(io);
     };
     let handshake = std::pin::pin!(kj_hyper::tls::accept(io, Arc::clone(config)));
-    match futures::future::select(handshake, std::pin::pin!(context.drained())).await {
+    match futures::future::select(handshake, std::pin::pin!(drained)).await {
         Either::Left((stream, _)) => Ok(Box::pin(stream?)),
         Either::Right(_) => Err(kj::disconnected!("the server is draining")),
     }
 }
 
-/// Resolves once the peer of `accepted` is gone, as `whenWriteDisconnected()` of kj's own stream
-/// over it would: a socket hung up or failed (not a peer that shut down its side), a loopback
-/// connection's other end dropped. A socket's costs a descriptor for as long as the
-/// connection is served (kj-rs-io/stream.rs, "whenWriteDisconnected costs a descriptor").
-fn hangup(accepted: &Accepted) -> Hangup {
+/// Resolves once the peer of `accepted` is gone.
+///
+/// That is when `whenWriteDisconnected()` of kj's own stream over it would: a socket hung up or
+/// failed (not a peer that shut down its side), a loopback connection's other end dropped. A
+/// socket's costs a descriptor for as long as the connection is served (kj-rs-io/stream.rs,
+/// "whenWriteDisconnected costs a descriptor").
+pub fn hangup(accepted: &Accepted) -> Hangup {
     match accepted {
         Accepted::Socket(Socket::Tcp(stream), _) => {
             kj_rs_io::when_write_disconnected(stream).err_into().boxed()
@@ -379,7 +431,7 @@ fn hangup(accepted: &Accepted) -> Hangup {
 
 /// Logs a connection's failure the way workerd's `handleApplicationError` does: a peer that went
 /// away is not news.
-fn log_connection_error(what: &str, error: &crate::Error) {
+pub fn log_connection_error(what: &str, error: &crate::Error) {
     if error.exception_type() != KjExceptionType::Disconnected {
         tracing::error!("{what}: {}", error.description());
     }
@@ -456,18 +508,22 @@ pub struct HttpSocket {
     pub tls: Option<Arc<rustls::ServerConfig>>,
 }
 
+/// The settings of the HTTP sockets: the application negotiates WebSocket compression itself.
+fn http_settings() -> ServerSettings {
+    ServerSettings {
+        websocket_errors: Some(ffi::new_jsgify_websocket_errors()),
+        websocket_compression: kj_hyper::WebSocketCompression::MANUAL,
+        ..ServerSettings::default()
+    }
+}
+
 /// Serves HTTP on `listener` until the server drains.
 pub async fn listen_http(
     context: Rc<ListenContext>,
     listener: StreamListener,
     socket: Rc<HttpSocket>,
 ) -> Result<()> {
-    // The application negotiates WebSocket compression itself.
-    let settings = Rc::new(ServerSettings {
-        websocket_errors: Some(ffi::new_jsgify_websocket_errors()),
-        websocket_compression: kj_hyper::WebSocketCompression::MANUAL,
-        ..ServerSettings::default()
-    });
+    let settings = Rc::new(http_settings());
     let shutdown = Rc::new(Shutdown::new());
     let serve = |accepted: Accepted| {
         let context = Rc::clone(&context);
@@ -479,7 +535,7 @@ pub async fn listen_http(
                 .then(|| peer_cf_blob(&accepted))
                 .flatten();
             let hangup = hangup(&accepted);
-            let io = transport(accepted, socket.tls.as_ref(), &context).await?;
+            let io = transport(accepted, socket.tls.as_ref(), context.drained()).await?;
             let handler: Rc<dyn Handler> = Rc::new(HttpConnection {
                 context: Rc::clone(&context),
                 socket,
@@ -621,6 +677,66 @@ pub enum TcpTls {
     StartTls(Arc<rustls::ServerConfig>),
 }
 
+/// One connection of a TCP socket.
+struct TcpConnection {
+    /// The connection, past the handshake of a socket with implicit TLS.
+    io: Transport,
+    hangup: Hangup,
+    /// The socket's TLS configuration if its `connect()` handler may upgrade the connection.
+    starttls: Option<Arc<rustls::ServerConfig>>,
+    /// The connection is registered with the front's runtime, whose thread has its bytes ready
+    /// whenever it is ahead: its reads are paced to this thread's port
+    /// (`kj_rs_tokio::PortPace`).
+    of_front: bool,
+}
+
+/// Starts the `connect()` event of a TCP connection from `peer` on `channel`.
+fn start_tcp(channel: &dyn Channel, peer: Option<SocketAddr>) -> Result<CxxWorkerInterface> {
+    let peer = peer.map(|peer| peer.to_string());
+    let metadata = ffi::new_request_metadata(KjMaybe::None, peer.as_deref().into());
+    Ok(CxxWorkerInterface::new(channel.start_request(metadata)?))
+}
+
+/// Serves `connection` as the `connect()` event `worker`, addressed to `authority`.
+async fn tcp_connection(
+    context: &ListenContext,
+    mut worker: CxxWorkerInterface,
+    authority: &str,
+    connection: TcpConnection,
+) -> Result<()> {
+    let hangup = Some(connection.hangup.shared());
+    let io: kj_hyper::BoxIo = if connection.of_front {
+        Box::new(kj_rs_tokio::PortPaced::new(connection.io))
+    } else {
+        Box::new(connection.io)
+    };
+    // Without a STARTTLS config the settings carry no starter slot at all: an empty slot would
+    // tell the service that its peer is waiting to be told about an upgrade, which a raw TCP
+    // client is not.
+    let (mut stream, mut starter) = match connection.starttls {
+        Some(config) => {
+            let (io, starter) = kj_hyper::StartTlsIo::server(io, config);
+            (kj_hyper::into_kj_stream_with(io, hangup), Some(starter))
+        }
+        None => (kj_hyper::into_kj_stream_with(io, hangup), None),
+    };
+    let mut response = ffi::new_null_connect_response();
+    let headers = Headers::new(header_table(&context.factory));
+    worker
+        .connect(
+            authority.as_bytes(),
+            HeadersRef::from(&headers),
+            stream.as_mut(),
+            ConnectResponse::from(response.as_mut()),
+            ConnectSettings {
+                use_tls: false,
+                tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
 /// Serves raw TCP on `listener`: each connection is a `connect()` event on the socket's service,
 /// addressed to `authority` (the socket as bound), until the server drains.
 pub async fn listen_tcp(
@@ -638,42 +754,24 @@ pub async fn listen_tcp(
         let authority = Rc::clone(&authority);
         async move {
             let peer = match &accepted {
-                Accepted::Socket(_, peer) => peer.map(|peer| peer.to_string()),
+                Accepted::Socket(_, peer) => *peer,
                 Accepted::Loopback(_) => None,
             };
-            let metadata = ffi::new_request_metadata(KjMaybe::None, peer.as_deref().into());
-            let mut worker = CxxWorkerInterface::new(channel.start_request(metadata)?);
-            let hangup = Some(hangup(&accepted).shared());
-            let implicit = match &tls {
-                Some(TcpTls::Implicit(config)) => Some(config),
-                _ => None,
+            let worker = start_tcp(&*channel, peer)?;
+            let hangup = hangup(&accepted);
+            let (implicit, starttls) = match &tls {
+                Some(TcpTls::Implicit(config)) => (Some(config), None),
+                Some(TcpTls::StartTls(config)) => (None, Some(Arc::clone(config))),
+                None => (None, None),
             };
-            let io = transport(accepted, implicit, &context).await?;
-            // Without a STARTTLS config the settings carry no starter slot at all: an empty slot
-            // would tell the service that its peer is waiting to be told about an upgrade, which
-            // a raw TCP client is not.
-            let (mut stream, mut starter) = match &tls {
-                Some(TcpTls::StartTls(config)) => {
-                    let (io, starter) = kj_hyper::StartTlsIo::server(io, Arc::clone(config));
-                    (kj_hyper::into_kj_stream_with(io, hangup), Some(starter))
-                }
-                _ => (kj_hyper::into_kj_stream_with(io, hangup), None),
+            let io = transport(accepted, implicit, context.drained()).await?;
+            let connection = TcpConnection {
+                io,
+                hangup,
+                starttls,
+                of_front: false,
             };
-            let mut response = ffi::new_null_connect_response();
-            let headers = Headers::new(header_table(&context.factory));
-            worker
-                .connect(
-                    authority.as_bytes(),
-                    HeadersRef::from(&headers),
-                    stream.as_mut(),
-                    ConnectResponse::from(response.as_mut()),
-                    ConnectSettings {
-                        use_tls: false,
-                        tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
-                    },
-                )
-                .await?;
-            Ok(())
+            tcp_connection(&context, worker, &authority, connection).await
         }
     };
     accept_loop(
@@ -694,7 +792,8 @@ pub async fn listen_debug_port(context: Rc<ListenContext>, listener: StreamListe
     let serve = |accepted: Accepted| {
         let context = Rc::clone(&context);
         async move {
-            let stream = kj_hyper::into_kj_stream(transport(accepted, None, &context).await?);
+            let io = transport(accepted, None, context.drained()).await?;
+            let stream = kj_hyper::into_kj_stream(io);
             Ok(ffi::factory_accept_debug_port(context.factory.raw(), stream).await?)
         }
     };

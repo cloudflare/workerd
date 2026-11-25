@@ -44,6 +44,13 @@
 //! they check up front. The file watcher is runtime-independent (notify delivers from its own
 //! thread; `tokio::sync::Notify` stores wakeups without a runtime) and checks nothing.
 //!
+//! A Rust caller may also serve its own sockets on a tokio runtime that is no loop's, such as
+//! one with several threads: [`ListenerSockets::listen`], [`TokioListener::accept`] and
+//! [`when_write_disconnected`] accept the runtime entered on a thread that has no
+//! `TokioEventPort` (`current_runtime_id`), and a listener made there belongs to that runtime
+//! as one made on a loop thread belongs to its loop. Everything C++ reaches takes a loop
+//! thread.
+//!
 //! # Scope: workerd's provider
 //!
 //! This crate implements KJ's I/O interfaces for **workerd**, which is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for
@@ -111,6 +118,7 @@
 compile_error!("kj-rs-io supports Unix and Windows targets only");
 
 pub use error::exception_type;
+pub use net::ListenerSockets;
 pub use net::TokioAddress;
 pub use net::TokioListener;
 pub use net::wrap_listener;
@@ -146,6 +154,39 @@ pub(crate) fn current_loop_runtime_id() -> error::Result<tokio::runtime::Id> {
     }
 }
 
+/// The runtime a Rust caller's own socket registers with on this thread: the loop's
+/// ([`current_loop_runtime_id`]) or, on a thread that has no `TokioEventPort`, the tokio runtime
+/// entered on it. A server may accept and serve connections on a runtime that is no loop's, with
+/// [`ListenerSockets::listen`], [`TokioListener::accept`] and [`when_write_disconnected`], which
+/// check this; everything C++ reaches takes a loop thread.
+pub(crate) fn current_runtime_id() -> error::Result<tokio::runtime::Id> {
+    if kj_rs_tokio::current_handle().is_some() {
+        return current_loop_runtime_id();
+    }
+    tokio::runtime::Handle::try_current()
+        .map(|entered| entered.id())
+        .map_err(|_| {
+            error::KjIoError::other(
+                "kj_rs_io",
+                "no TokioEventPort on this thread and no tokio runtime entered",
+            )
+        })
+}
+
+/// [`ensure_owner_loop`] for an object a Rust caller may keep on a runtime that is no loop's:
+/// the runtime of this thread ([`current_runtime_id`]) is the one the object is registered with.
+pub(crate) fn ensure_owner_runtime(owner: tokio::runtime::Id) -> error::Result<()> {
+    if current_runtime_id()? == owner {
+        Ok(())
+    } else {
+        Err(error::KjIoError::other(
+            "kj_rs_io",
+            "this I/O object belongs to a different TokioEventPort (it was created on another \
+             loop thread) or to a runtime that is no loop's",
+        ))
+    }
+}
+
 /// The check before a tokio *registration*: this thread's `TokioEventPort` runtime is the one
 /// entered (module docs, "The tokio runtime").
 pub(crate) fn ensure_loop_thread() -> error::Result<()> {
@@ -177,6 +218,7 @@ const _: () = {
     send_sync::<TokioAddress>();
     send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
+    send_sync::<net::ListenerSockets>();
     send_sync::<watcher::TokioFileWatcher>();
 };
 

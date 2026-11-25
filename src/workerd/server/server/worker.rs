@@ -57,12 +57,16 @@ use crate::channels::WorkerInterface;
 use crate::channels::WorkerInterfaceList;
 use crate::channels::WorkerStub;
 use crate::cluster::ClusterNode;
+use crate::cluster::ResultTask;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
 use crate::config::invalid_config_error;
 use crate::config::text;
+use crate::hub::Done;
+use crate::hub::Mail;
+use crate::hub::Reason;
 use crate::loader::WorkerLoaderNamespace;
 use crate::loader::dynamic_transfer_error;
 
@@ -1134,11 +1138,48 @@ impl ChannelFactory {
         self.0.access_binding_channel.into()
     }
 
+    /// Aborts every evictable actor of this thread.
     pub(crate) fn abort_all_actors(&self, reason: KjMaybe<&ffi::Exception>) {
         let reason = Option::<&ffi::Exception>::from(reason).map(crate::Error::from);
         if let Some(server) = self.0.server.upgrade() {
             server.abort_all_actors(reason.as_ref());
         }
+    }
+
+    /// Whether the process has other loop threads, whose actors `abort_all_actors` and
+    /// `delete_all_actors` leave.
+    pub(crate) fn spans_threads(&self) -> bool {
+        (self.0.server.upgrade()).is_some_and(|server| server.factory().threads() > 1)
+    }
+
+    /// Has every other loop thread abort its evictable actors: done once each has.
+    pub fn abort_all_actors_elsewhere(&self, reason: KjMaybe<&ffi::Exception>) -> Box<ResultTask> {
+        Box::new(self.elsewhere(reason, Mail::AbortAll))
+    }
+
+    /// Has every other loop thread abort its evictable actors and delete their storage: done
+    /// once each has.
+    pub fn delete_all_actors_elsewhere(&self, reason: KjMaybe<&ffi::Exception>) -> Box<ResultTask> {
+        Box::new(self.elsewhere(reason, Mail::DeleteAll))
+    }
+
+    fn elsewhere(
+        &self,
+        reason: KjMaybe<&ffi::Exception>,
+        mail: impl Fn(Option<Reason>, Done) -> Mail,
+    ) -> ResultTask {
+        let reason = Option::<&ffi::Exception>::from(reason).map(crate::Error::from);
+        let reason = reason.map(|e| (e.exception_type(), e.description().to_owned()));
+        let sent = self.0.server.upgrade().map(|server| {
+            let factory = server.factory();
+            factory.broadcast(|done| mail(reason.clone(), done))
+        });
+        ResultTask(Box::pin(async move {
+            match sent {
+                Some(sent) => sent.await,
+                None => Ok(()),
+            }
+        }))
     }
 
     pub(crate) fn delete_all_actors(&self, reason: KjMaybe<&ffi::Exception>) -> Result<()> {
@@ -1150,9 +1191,25 @@ impl ChannelFactory {
     }
 
     pub(crate) async fn evict_all_actors_for_test(&self, hibernate: bool) -> Result<()> {
-        let namespaces = self.0.actor.iter().flatten();
-        let evictions = namespaces.map(|namespace| namespace.evict_all_for_test(hibernate));
-        futures::future::try_join_all(evictions).await?;
+        let namespaces = || self.0.actor.iter().flatten();
+        // The actors of the same namespaces whose home is another loop thread.
+        let elsewhere = self.0.server.upgrade().map(|server| {
+            let named: Vec<(String, String)> = namespaces().map(|ns| ns.name()).collect();
+            server.factory().broadcast(move |done| Mail::EvictAll {
+                namespaces: named.clone(),
+                hibernate,
+                done,
+            })
+        });
+        let evictions = namespaces().map(|namespace| namespace.evict_all_for_test(hibernate));
+        let here = futures::future::try_join_all(evictions);
+        let elsewhere = async {
+            match elsewhere {
+                Some(elsewhere) => elsewhere.await,
+                None => Ok(()),
+            }
+        };
+        futures::future::try_join(here, elsewhere).await?;
         Ok(())
     }
 

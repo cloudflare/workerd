@@ -229,3 +229,115 @@ fn the_cache_view_is_the_simulations() {
         assert_eq!(view(r + 36_000), (alone, false, false));
     });
 }
+
+/// A control plane that a test's data plane never asks.
+struct Unasked;
+
+#[async_trait::async_trait(?Send)]
+impl crate::Open for Unasked {
+    async fn open(&self, _: &str, _: &str, _: u64) -> crate::Result<bool> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn current_epoch(&self, _: &str, _: &str) -> crate::Result<Option<u64>> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl crate::Control for Unasked {
+    async fn claim(&self, _: &str, _: &str, _: u64) -> crate::Result<crate::Claim> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn advance(&self, _: &str, _: &str, _: u64) -> crate::Result<Option<crate::Owned>> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn release(&self, _: &str, _: &str, _: u64) -> crate::Result<bool> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    fn abandon(&self, _: &str, _: &str) {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    fn forget_route(&self, _: &str, _: &str, _: &str) {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn refresh_route(&self, _: &str, _: &str, _: u64) -> crate::Result<()> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn arm_alarm(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<&str>,
+        _: Option<u64>,
+    ) -> crate::Result<()> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn opened_alarm(&self, _: &str, _: &str, _: Option<&str>, _: u64) -> crate::Result<()> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+
+    async fn alarm_elsewhere(&self, _: &str, _: &str, _: &str, _: u64) -> crate::Result<bool> {
+        panic!("a data plane that only reads its lease asked its control plane")
+    }
+}
+
+/// The lease as a thread other than the control plane's reads it is the
+/// expiry the keeper last published, with nothing sent to that thread and
+/// nothing asked of the control plane: its data plane refuses to open an
+/// object before the first renewal and once the published expiry has passed,
+/// and only then.
+#[test]
+fn a_data_plane_on_another_thread_refuses_once_the_published_lease_lapsed() {
+    let bucket = Bucket::memory("");
+    let a = cluster(&bucket, "a");
+    // One data plane, on a thread of its own, asked each time what it would
+    // answer a request for an object.
+    let shared = a.shared().clone();
+    let (ask, asked) = mpsc::channel::<()>();
+    let (answer, answers) = mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let member = crate::Member::new(Bucket::memory(""), shared, Rc::new(Unasked));
+        while asked.recv().is_ok() {
+            let refusal = member.require_lease().map_err(|e| e.to_string());
+            answer.send((member.lease_holds(), refusal)).unwrap();
+        }
+    });
+    let read = || {
+        ask.send(()).unwrap();
+        answers.recv().unwrap()
+    };
+    let holds = (true, Ok(()));
+    let lapsed = (
+        false,
+        Err("this instance's cluster lease in the bucket has lapsed".to_owned()),
+    );
+    block_on(async {
+        assert_eq!(read(), lapsed, "before the first renewal");
+        a.join().await.unwrap();
+        let now = super::now_ms();
+        renew(&a, now).await;
+        assert_eq!(read(), holds);
+        assert!(a.lease_holds());
+        // A renewal sent three leases ago, as the last one a stalled
+        // instance made: what it bought has run out.
+        renew(&a, now - 3 * Timing::DEFAULT.lease_ms).await;
+        assert_eq!(read(), lapsed);
+        assert!(!a.lease_holds());
+        // Within the margin kept for peers' clocks, the lease holds for
+        // nobody here although its record has not expired.
+        renew(&a, now - Timing::DEFAULT.lease_ms + 1_000).await;
+        assert_eq!(read(), lapsed);
+        renew(&a, super::now_ms()).await;
+        assert_eq!(read(), holds);
+    });
+    drop(ask);
+    thread.join().unwrap();
+}

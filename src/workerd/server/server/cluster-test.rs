@@ -205,3 +205,59 @@ fn a_fenced_instance_exits_while_its_lease_holds() {
     assert_eq!(fence_log_wait(ms(5)), None);
     assert_eq!(fence_log_wait(Duration::ZERO), None);
 }
+
+/// Counts that a test advances, as loops would, and the one count the lease thread reads of
+/// them.
+fn loops(n: usize) -> (Vec<Arc<std::sync::atomic::AtomicU64>>, cluster::Progress) {
+    let counts: Vec<_> = (0..n)
+        .map(|_| Arc::<std::sync::atomic::AtomicU64>::default())
+        .collect();
+    let read: Vec<cluster::Progress> = counts
+        .iter()
+        .map(|count| {
+            let count = Arc::clone(count);
+            Box::new(move || count.load(std::sync::atomic::Ordering::SeqCst)) as cluster::Progress
+        })
+        .collect();
+    (counts, every_loop(read))
+}
+
+#[test]
+fn the_watched_count_advances_only_when_every_loop_did() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (counts, watched) = loops(3);
+    // The first reading is of loops that were never read before.
+    let start = watched();
+    assert_eq!(watched(), start, "no loop moved");
+
+    // Two of three move, round after round: the count stands still, as for one stuck loop.
+    for _ in 0..10 {
+        counts[0].fetch_add(1, SeqCst);
+        counts[2].fetch_add(5, SeqCst);
+        assert_eq!(watched(), start);
+    }
+    // The third moves at last: one step, however far the others went.
+    counts[1].fetch_add(1, SeqCst);
+    assert_eq!(watched(), start + 1);
+    assert_eq!(watched(), start + 1);
+
+    // Every loop moves between two readings: a step each time.
+    for step in 2..6 {
+        for count in &counts {
+            count.fetch_add(1, SeqCst);
+        }
+        assert_eq!(watched(), start + step);
+    }
+}
+
+#[test]
+fn one_loop_is_watched_as_it_counts() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (counts, watched) = loops(1);
+    let start = watched();
+    assert_eq!(watched(), start);
+    counts[0].fetch_add(1, SeqCst);
+    assert_eq!(watched(), start + 1);
+    counts[0].fetch_add(7, SeqCst);
+    assert_eq!(watched(), start + 2);
+}

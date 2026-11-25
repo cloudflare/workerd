@@ -32,14 +32,16 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
       Persistent fromPersistentStub,
       FromHandoff fromHandoff,
       kj::Maybe<kj::String> forwardedBy,
-      kj::Array<kj::String> causedBy)
+      kj::Array<kj::String> causedBy,
+      kj::Maybe<ChannelTokenHandler&> restoreTokens)
       : httpOverCapnpFactory(httpOverCapnpFactory),
         service(kj::mv(service)),
         cfBlobJson(kj::mv(cfBlobJson)),
         fromPersistentStub(fromPersistentStub),
         fromHandoff(fromHandoff),
         forwardedBy(kj::mv(forwardedBy)),
-        causedBy(kj::mv(causedBy)) {}
+        causedBy(kj::mv(causedBy)),
+        restoreTokens(restoreTokens) {}
 
   kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
     IoChannelFactory::SubrequestMetadata metadata;
@@ -101,6 +103,39 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     context.getResults().setResult(result.outcome);
   }
 
+  // A stub the peer restores, whose source is the service: what a `restored` channel token of
+  // this loop's would decode to, built from its parts. The service's `[restore]()` runs with the
+  // parameters, and the peer gets what it returns: a service, which takes the peer's events and
+  // the next hop of a restore chain, or an RPC target.
+  kj::Promise<void> restoreService(RestoreServiceContext context) override {
+    KJ_IF_SOME(tokens, restoreTokens) {
+      auto restored = tokens.restoredSubrequestChannel(getService(),
+          tokens.frankenvalueFromCapnp(context.getParams().getParams()), fromPersistentStub);
+      context.initResults(capnp::MessageSize{4, 1})
+          .setService(
+              kj::heap<WorkerdBootstrapImpl>(kj::mv(restored), httpOverCapnpFactory, tokens));
+      return kj::READY_NOW;
+    }
+    return rpc::EventDispatcher::Server::restoreService(context);
+  }
+
+  kj::Promise<void> restoreRpcStub(RestoreRpcStubContext context) override {
+    KJ_IF_SOME(tokens, restoreTokens) {
+      auto channel = tokens.restoredRpcChannel(getService(),
+          tokens.frankenvalueFromCapnp(context.getParams().getParams()), fromPersistentStub);
+      auto session = channel->restore();
+      auto results = context.initResults(capnp::MessageSize{4, 2});
+      results.setTarget(kj::mv(session.cap));
+      // The peer holds the session for as long as it uses the target; dropping it cancels the
+      // event.
+      results.setSession(session.task.attach(kj::mv(channel)).then([]() {
+        return rpc::JsRpcSession::Client(nullptr);
+      }));
+      return kj::READY_NOW;
+    }
+    return rpc::EventDispatcher::Server::restoreRpcStub(context);
+  }
+
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> service;
@@ -109,6 +144,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   FromHandoff fromHandoff;
   kj::Maybe<kj::String> forwardedBy;
   kj::Array<kj::String> causedBy;
+  kj::Maybe<ChannelTokenHandler&> restoreTokens;
 
   kj::Rc<IoChannelFactory::SubrequestChannel> getService() {
     auto result =
@@ -120,6 +156,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   // Events other than HTTP carry no cf blob.
   kj::Own<WorkerInterface> getWorker() {
     IoChannelFactory::SubrequestMetadata metadata;
+    metadata.fromPersistentStub = fromPersistentStub;
     metadata.fromHandoff = fromHandoff;
     metadata.forwardedBy = kj::mv(forwardedBy);
     metadata.causedBy = kj::mv(causedBy);
@@ -132,9 +169,11 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
 };
 
 WorkerdBootstrapImpl::WorkerdBootstrapImpl(kj::Rc<IoChannelFactory::SubrequestChannel> service,
-    capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    kj::Maybe<ChannelTokenHandler&> restoreTokens)
     : service(kj::mv(service)),
-      httpOverCapnpFactory(httpOverCapnpFactory) {}
+      httpOverCapnpFactory(httpOverCapnpFactory),
+      restoreTokens(restoreTokens) {}
 
 kj::Promise<void> WorkerdBootstrapImpl::startEvent(StartEventContext context) {
   auto params = context.getParams();
@@ -143,11 +182,10 @@ kj::Promise<void> WorkerdBootstrapImpl::startEvent(StartEventContext context) {
   kj::Maybe<kj::String> forwardedBy;
   if (params.hasForwardedBy()) forwardedBy = kj::str(params.getForwardedBy());
   context.initResults(capnp::MessageSize{4, 1})
-      .setDispatcher(
-          kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(), kj::mv(cfBlobJson),
-              Persistent(params.getFromPersistentStub()), FromHandoff(params.getFromHandoff()),
-              kj::mv(forwardedBy),
-              KJ_MAP(object, params.getCausedBy()) { return kj::str(object); }));
+      .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(),
+          kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()),
+          FromHandoff(params.getFromHandoff()), kj::mv(forwardedBy),
+          KJ_MAP(object, params.getCausedBy()) { return kj::str(object); }, restoreTokens));
   return kj::READY_NOW;
 }
 
@@ -162,10 +200,14 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
 // =======================================================================================
 // Debug port
 
-WorkerdDebugPortImpl::WorkerdDebugPortImpl(
-    ::rust::Box<ServerHandle> server, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+WorkerdDebugPortImpl::WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    kj::Maybe<uint32_t> callerThread,
+    kj::Maybe<ChannelTokenHandler&> restoreTokens)
     : server(kj::mv(server)),
-      httpOverCapnpFactory(httpOverCapnpFactory) {}
+      httpOverCapnpFactory(httpOverCapnpFactory),
+      callerThread(callerThread),
+      restoreTokens(restoreTokens) {}
 
 kj::Promise<void> WorkerdDebugPortImpl::getEntrypoint(GetEntrypointContext context) {
   auto params = context.getParams();
@@ -176,16 +218,22 @@ kj::Promise<void> WorkerdDebugPortImpl::getEntrypoint(GetEntrypointContext conte
   auto target = subrequest_channel_into_kj(server->resolve_debug_entrypoint(
       toRust(params.getService()), toRust(entrypoint), kj::mv(props)));
   context.initResults(capnp::MessageSize{4, 1})
-      .setEntrypoint(kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory));
+      .setEntrypoint(
+          kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory, restoreTokens));
   return kj::READY_NOW;
 }
 
 kj::Promise<void> WorkerdDebugPortImpl::getActor(GetActorContext context) {
   auto params = context.getParams();
-  auto target = subrequest_channel_into_kj(server->resolve_debug_actor(
-      toRust(params.getService()), toRust(params.getEntrypoint()), toRust(params.getActorId())));
+  kj::Maybe<kj::StringPtr> name;
+  if (params.hasActorName()) name = params.getActorName();
+  auto target = subrequest_channel_into_kj(server->resolve_debug_actor(toRust(params.getService()),
+      toRust(params.getEntrypoint()), toRust(params.getActorId()), toRust(name), callerThread,
+      // Whose requests a caller sends is its word to take only within the process.
+      callerThread == kj::none ? static_cast<uint8_t>(0) : params.getCaller()));
   context.initResults(capnp::MessageSize{4, 1})
-      .setActor(kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory));
+      .setActor(
+          kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory, restoreTokens));
   return kj::READY_NOW;
 }
 
@@ -349,20 +397,70 @@ RpcClient::Impl& RpcClient::getImpl() const {
   return *impl;
 }
 
+namespace {
+// The Frankenvalues of a session with another workerd instance (an external server, a cluster
+// peer). The capabilities a `restore()`'s parameters may hold have no encoding there, so a stub
+// is not restored across one: its calls fail with this error.
+FrankenvalueHandler& getInstanceFrankenvalueHandler() {
+  class InstanceFrankenvalueHandler final: public FrankenvalueHandler {
+   public:
+    void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) override {
+      JSG_FAIL_REQUIRE(Error,
+          "This stub cannot be restored here: restore() is not supported across workerd "
+          "instances, and its source runs on another one.");
+    }
+  };
+  static InstanceFrankenvalueHandler instance;
+  return instance;
+}
+
+kj::Own<RpcClient> newRpcClient(const WorkerFactory& factory,
+    kj::Own<kj::AsyncIoStream> stream,
+    FrankenvalueHandler& frankenvalueHandler) {
+  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream), frankenvalueHandler);
+  auto target = session->bootstrap.castAs<rpc::WorkerdBootstrap>();
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
+}
+}  // namespace
+
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
-  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream));
+  return newRpcClient(factory, kj::mv(stream), getInstanceFrankenvalueHandler());
+}
+
+kj::Own<RpcClient> new_thread_link(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream, uint32_t peer) {
+  auto& impl = factory.getImpl();
+  auto serving = impl.linksServing.addBranch();
+  // The factory outlives its sessions, and with them what they serve.
+  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+  auto served = serving.then([&impl, peer]() -> rpc::WorkerdDebugPort::Client {
+    return kj::heap<WorkerdDebugPortImpl>(
+        impl.getServer().server_clone(), impl.httpOverCapnpFactory, peer, impl.channelTokenHandler);
+  });
+  auto session = kj::refcounted<RpcClient::Impl::Session>(
+      kj::mv(stream), impl.loopFrankenvalueHandler, rpc::WorkerdDebugPort::Client(kj::mv(served)));
   auto target = session->bootstrap.castAs<rpc::WorkerdBootstrap>();
   return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
 }
 
-kj::Own<RpcClient> rpc_client_debug_actor(
-    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId) {
+void factory_serve_links(const WorkerFactory& factory) {
+  factory.getImpl().linksServingFulfiller->fulfill();
+}
+
+kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
+    ::rust::Str service,
+    ::rust::Str className,
+    ::rust::Str actorId,
+    kj::Maybe<::rust::Str> actorName,
+    uint8_t caller) {
   auto& impl = session.getImpl();
   auto peer = impl.session->bootstrap.castAs<rpc::WorkerdDebugPort>();
   auto request = peer.getActorRequest();
   request.setService(kj::str(service));
   request.setEntrypoint(kj::str(className));
   request.setActorId(kj::str(actorId));
+  KJ_IF_SOME(name, actorName) request.setActorName(kj::str(name));
+  request.setCaller(caller);
   return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(
       impl.factory, kj::addRef(*impl.session), request.send().getActor()));
 }
@@ -383,10 +481,9 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
   auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
   KJ_IF_SOME(cf, cfBlobJson) request.setCfBlobJson(kj::str(cf));
   auto dispatcher = request.send().getDispatcher();
-  // Workerd-to-workerd RPC does not support `restore()`, so Frankenvalues need no handler.
   auto& factory = impl.factory.getImpl();
   auto result = co_await event->sendRpc(factory.httpOverCapnpFactory, factory.byteStreamFactory,
-      getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+      impl.session->frankenvalueHandler, kj::mv(dispatcher));
   co_return rust::worker::CustomEventResult{.outcome = rust::worker::toRustOutcome(result.outcome)};
 }
 
@@ -403,7 +500,7 @@ kj::Own<WorkerInterface> rpc_client_start_request(
   auto dispatcher = request.send().getDispatcher();
   auto& factory = impl.factory.getImpl();
   return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,
-      getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+      impl.session->frankenvalueHandler, kj::mv(dispatcher));
 }
 
 kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
@@ -752,8 +849,10 @@ uint startInspector(kj::String inspectorAddress, InspectorServiceIsolateRegistra
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address) {
   auto& impl = factory.getImpl();
-  KJ_REQUIRE(impl.inspectorRegistrar == kj::none, "the inspector is already running");
-  auto& registrar = *impl.inspectorRegistrar.emplace(kj::heap<InspectorServiceIsolateRegistrar>());
+  impl.requirePrimary("start the inspector"_kj);
+  auto lock = impl.shared.inspectorRegistrar.lockExclusive();
+  KJ_REQUIRE(*lock == kj::none, "the inspector is already running");
+  auto& registrar = *lock->emplace(kj::heap<InspectorServiceIsolateRegistrar>());
   return startInspector(kj::str(address), registrar);
 }
 

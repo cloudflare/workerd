@@ -16,6 +16,7 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
         ":cluster-cache-worker.js",
         ":cluster-cron.wd-test",
         ":cluster-deployment.wd-test",
+        ":cluster-harness.mjs",
         ":cluster-node.wd-test",
         ":cluster-on-hibernate-worker.js",
         ":cluster-router.js",
@@ -40,3 +41,26 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
     ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 5),
     ("cluster-cron-test", "^cluster: a cron", "cluster-cron.wd-test", 1),
 ]]
+
+# The cases of instances on several loop threads, in shards of a few cases each: each case starts
+# two instances of three threads, and most wait out a drain, a lease or a stall.
+wd_js_test(
+    name = "cluster-threads-test",
+    size = "large",
+    timeout = "eternal",
+    data = [
+        ":cluster-harness.mjs",
+        ":cluster-threads.wd-test",
+        ":cluster-threads-probe.js",
+        ":cluster-threads-worker.js",
+        ":fake-s3.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "cluster-threads-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WD_TEST_CONFIG": "$(rootpath :cluster-threads.wd-test)",
+    },
+    shard_count = 4,
+    tags = ["js-test"],
+)

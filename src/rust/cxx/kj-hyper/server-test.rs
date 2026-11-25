@@ -1,7 +1,10 @@
 use std::future::pending;
 use std::future::ready;
 use std::str::from_utf8;
+use std::time::Duration;
 
+use futures::future::Either;
+use futures::future::select;
 use kj::http::HeaderId;
 use kj::http::Headers;
 use tokio::io::AsyncReadExt;
@@ -9,6 +12,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::duplex;
 use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::unbounded_channel;
+use tokio::time::sleep;
 
 use super::*;
 use crate::Result;
@@ -39,6 +45,25 @@ impl Handler for Echo<'_> {
     ) -> Result<()> {
         if url == b"/fail" {
             return Err(failed("the handler failed"));
+        }
+        if url == b"/gone" {
+            // What a call fails with when something it depended on went away.
+            let gone = KjExceptionType::Disconnected;
+            return Err(KjError::new(gone, "the handler's peer is gone".to_owned()));
+        }
+        if url == b"/end-then-fail" || url == b"/end-then-return" {
+            // A body of unknown length whose sink is dropped well before the call ends.
+            drop(response.send(200, "OK", &Headers::new(self.0), None)?);
+            sleep(Duration::from_millis(100)).await;
+            return match url {
+                b"/end-then-fail" => Err(failed("the handler failed after its body")),
+                _ => Ok(()),
+            };
+        }
+        if url == b"/hang" {
+            // The head of a body of unknown length, and then nothing.
+            let _body = response.send(200, "OK", &Headers::new(self.0), None)?;
+            return pending().await;
         }
         assert_eq!(method, Method::GET);
         assert_eq!(headers.get(HeaderId::HOST), Some(&b"example.com"[..]));
@@ -266,6 +291,71 @@ fn shutdown_closes_an_idle_connection() {
     });
 }
 
+/// A call that fails as disconnected is not answered, as under kj, and the serve says that
+/// the connection ended that way.
+#[test]
+fn a_call_that_ends_unanswered_fails_the_serve() {
+    let table = table();
+    runtime().block_on(async {
+        let (ours, mut peer) = duplex(1 << 16);
+        let shutdown = Shutdown::new();
+        let served = serve_connection(
+            ours,
+            Box::pin(pending()),
+            &table,
+            Rc::new(ServerSettings::default()),
+            Rc::new(Echo(&table)),
+            &shutdown,
+        );
+        let client = async {
+            peer.write_all(b"GET /gone HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                .await
+                .unwrap();
+            let mut response = Vec::new();
+            let _ = peer.read_to_end(&mut response).await;
+            assert!(response.is_empty());
+        };
+        let (served, ()) = futures::join!(served, client);
+        assert_eq!(
+            served.unwrap_err().description(),
+            "the handler sent no response"
+        );
+    });
+}
+
+/// The answer to a CONNECT that cannot be sent leaves the connection as it was: not upgraded,
+/// so that it still ends when its peer hangs up.
+#[test]
+fn an_upgrade_whose_head_cannot_be_sent_does_not_upgrade_the_connection() {
+    let table = table();
+    let (head, _sent) = oneshot::channel();
+    let hangup: Hangup = Box::pin(pending());
+    let link = Link {
+        upgraded: Arc::default(),
+        hangup: hangup.shared(),
+        draining: None,
+        body_chunks: 1,
+        remote: false,
+    };
+    let responder = Responder {
+        head,
+        upgrade: None,
+        link: link.clone(),
+    };
+    let request = http::Request::connect("example.com:443").body(()).unwrap();
+    let sender = ResponseSender::new(responder, &request.into_parts().0);
+    let headers = Headers::new(&table);
+    let refused = sender.accept_connect(1000, b"Not A Status", HeadersRef::from(&headers).as_ffi());
+    assert_eq!(refused.unwrap_err().description(), "invalid status 1000");
+    assert!(!link.upgraded.load(Ordering::Acquire));
+    // The response is still to be sent, and one that upgrades says so before its head goes.
+    assert!(!sender.sent());
+    sender
+        .accept_connect(200, b"OK", HeadersRef::from(&headers).as_ffi())
+        .unwrap();
+    assert!(link.upgraded.load(Ordering::Acquire));
+}
+
 #[test]
 fn a_failure_to_watch_for_a_hang_up_fails_the_serve() {
     let table = table();
@@ -283,4 +373,258 @@ fn a_failure_to_watch_for_a_hang_up_fails_the_serve() {
         .await;
         assert_eq!(served.unwrap_err().description(), "no watch");
     });
+}
+
+// =======================================================================================
+// A connection served on one runtime, its requests handled on another thread
+
+/// A request on its way from a connection to the test's handler thread.
+struct Sent {
+    request: RemoteRequest,
+    /// Fails once the connection dropped the call.
+    cancelled: oneshot::Receiver<()>,
+    /// Dropped once the call has finished.
+    done: oneshot::Sender<()>,
+}
+
+/// A `dispatch` for [`serve_connection_remote`] that sends each request to the returned queue.
+fn dispatcher() -> (
+    impl Fn(RemoteRequest) -> BoxFuture<'static, ()> + Send + 'static,
+    UnboundedReceiver<Sent>,
+) {
+    let (queue, requests) = unbounded_channel();
+    let dispatch = move |request| {
+        let (cancel, cancelled) = oneshot::channel();
+        let (done, finished) = oneshot::channel::<()>();
+        let _ = queue.send(Sent {
+            request,
+            cancelled,
+            done,
+        });
+        async move {
+            let _cancel = cancel;
+            let _ = finished.await;
+        }
+        .boxed()
+    };
+    (dispatch, requests)
+}
+
+/// A runtime of several threads, as a server's front is.
+fn front() -> Runtime {
+    Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+/// Handles the requests of `requests` on this thread, one at a time, until the queue closes.
+/// Returns how many calls ran to their end and how many were cancelled.
+fn handle_requests(mut requests: UnboundedReceiver<Sent>) -> (u32, u32) {
+    let table = table();
+    let settings = ServerSettings::default();
+    runtime().block_on(async {
+        let (mut finished, mut cancelled) = (0, 0);
+        while let Some(sent) = requests.recv().await {
+            let echo = Echo(&table);
+            let call = pin!(sent.request.handle(&table, &settings, &echo));
+            match select(call, sent.cancelled).await {
+                Either::Left(_) => finished += 1,
+                Either::Right(_) => cancelled += 1,
+            }
+            drop(sent.done);
+        }
+        (finished, cancelled)
+    })
+}
+
+/// [`exchange`], with the connection served on another runtime than the handler's thread.
+fn exchange_remote(request: &'static [u8]) -> String {
+    let front = front();
+    let (dispatch, requests) = dispatcher();
+    let (ours, mut peer) = duplex(1 << 16);
+    let served = front.spawn(async move {
+        let shutdown = Shutdown::new();
+        let timeout = ServerSettings::default().header_timeout;
+        serve_connection_remote(ours, Box::pin(pending()), timeout, &shutdown, dispatch).await
+    });
+    let client = front.spawn(async move {
+        peer.write_all(request).await.unwrap();
+        peer.shutdown().await.unwrap();
+        let mut response = Vec::new();
+        peer.read_to_end(&mut response).await.unwrap();
+        String::from_utf8(response).unwrap()
+    });
+    handle_requests(requests);
+    front.block_on(served).unwrap().unwrap();
+    front.block_on(client).unwrap()
+}
+
+#[test]
+fn a_request_handled_on_another_thread_is_answered_as_a_local_one() {
+    for request in [
+        &b"GET /hello?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n"[..],
+        b"GET /fail HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        b"BREW /pot HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        b"GET /ws HTTP/1.1\r\nHost: example.com\r\nUpgrade: websocket\r\n\
+          Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\
+          Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        b"GET /ws HTTP/1.1\r\nHost: example.com\r\nUpgrade: websocket\r\n\
+          Connection: Upgrade\r\nSec-WebSocket-Version: 12\r\n\r\n",
+        b"GET /a HTTP/1.1\r\nHost: example.com\r\n\r\n\
+          GET /b HTTP/1.1\r\nHost: example.com\r\n\r\n",
+    ] {
+        assert_eq!(exchange_remote(request), exchange(request));
+    }
+}
+
+#[test]
+fn a_connect_handled_on_another_thread_tunnels_the_connection() {
+    let front = front();
+    let (dispatch, requests) = dispatcher();
+    let (ours, mut peer) = duplex(1 << 16);
+    let served = front.spawn(async move {
+        let shutdown = Shutdown::new();
+        let timeout = ServerSettings::default().header_timeout;
+        serve_connection_remote(ours, Box::pin(pending()), timeout, &shutdown, dispatch).await
+    });
+    let client = front.spawn(async move {
+        peer.write_all(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+            .await
+            .unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            peer.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        assert!(head.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        peer.write_all(b"ping").await.unwrap();
+        let mut echoed = [0; 4];
+        peer.read_exact(&mut echoed).await.unwrap();
+        assert_eq!(&echoed, b"ping");
+        peer.shutdown().await.unwrap();
+        let mut rest = Vec::new();
+        peer.read_to_end(&mut rest).await.unwrap();
+        assert!(rest.is_empty());
+    });
+    assert_eq!(handle_requests(requests), (1, 0));
+    front.block_on(served).unwrap().unwrap();
+    front.block_on(client).unwrap();
+}
+
+#[test]
+fn a_hang_up_cancels_the_call_on_the_other_thread() {
+    let front = front();
+    let (dispatch, requests) = dispatcher();
+    let (ours, mut peer) = duplex(1 << 16);
+    let (peer_leaves, peer_left) = oneshot::channel::<()>();
+    let served = front.spawn(async move {
+        let shutdown = Shutdown::new();
+        let timeout = ServerSettings::default().header_timeout;
+        let gone = async move {
+            let _ = peer_left.await;
+            Ok(())
+        };
+        serve_connection_remote(ours, gone.boxed(), timeout, &shutdown, dispatch).await
+    });
+    let client = front.spawn(async move {
+        peer.write_all(b"GET /hang HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .unwrap();
+        // Once the head arrived the call is running; then the peer goes away.
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            peer.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        peer_leaves.send(()).unwrap();
+        peer
+    });
+    assert_eq!(handle_requests(requests), (0, 1));
+    front.block_on(served).unwrap().unwrap();
+    drop(front.block_on(client).unwrap());
+}
+
+#[test]
+fn a_call_dropped_after_its_head_cuts_the_response_short() {
+    let front = front();
+    let (dispatch, mut requests) = dispatcher();
+    let (ours, mut peer) = duplex(1 << 16);
+    let served = front.spawn(async move {
+        let shutdown = Shutdown::new();
+        let timeout = ServerSettings::default().header_timeout;
+        serve_connection_remote(ours, Box::pin(pending()), timeout, &shutdown, dispatch).await
+    });
+    let (got_head, head_arrived) = oneshot::channel::<()>();
+    let client = front.spawn(async move {
+        peer.write_all(b"GET /hang HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        while !response.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            peer.read_exact(&mut byte).await.unwrap();
+            response.push(byte[0]);
+        }
+        got_head.send(()).unwrap();
+        // The connection is dropped; whether that reads as an end or as an error is the pipe's.
+        let _ = peer.read_to_end(&mut response).await;
+        String::from_utf8(response).unwrap()
+    });
+    let table = table();
+    let settings = ServerSettings::default();
+    runtime().block_on(async {
+        let sent = requests.recv().await.unwrap();
+        let echo = Echo(&table);
+        {
+            let mut call = pin!(sent.request.handle(&table, &settings, &echo));
+            // The handler sends its head and then hangs.
+            assert!(futures::poll!(call.as_mut()).is_pending());
+            head_arrived.await.unwrap();
+        }
+        drop(sent.done);
+    });
+    front.block_on(served).unwrap().unwrap();
+    let response = front.block_on(client).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    // A chunked body that ended would say so.
+    assert!(response.ends_with("\r\n\r\n"), "{response}");
+    assert!(!response.contains("\r\n0\r\n"), "{response}");
+}
+
+#[test]
+fn a_request_dropped_unhandled_closes_the_connection_unanswered() {
+    let front = front();
+    let (dispatch, mut requests) = dispatcher();
+    let (ours, mut peer) = duplex(1 << 16);
+    let served = front.spawn(async move {
+        let shutdown = Shutdown::new();
+        let timeout = ServerSettings::default().header_timeout;
+        serve_connection_remote(ours, Box::pin(pending()), timeout, &shutdown, dispatch).await
+    });
+    let client = front.spawn(async move {
+        peer.write_all(b"GET /hello HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        let _ = peer.read_to_end(&mut response).await;
+        response
+    });
+    drop(requests.blocking_recv().unwrap());
+    front.block_on(served).unwrap().unwrap();
+    assert!(front.block_on(client).unwrap().is_empty());
+}
+
+#[test]
+fn a_body_handled_on_another_thread_ends_as_its_call_does() {
+    // The connection sees the sink dropped long before the call fails, and must not take the
+    // body for complete.
+    let failed = exchange_remote(b"GET /end-then-fail HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    assert!(!failed.contains("0\r\n\r\n"), "{failed}");
+    let returned = exchange_remote(b"GET /end-then-return HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    assert!(returned.starts_with("HTTP/1.1 200 OK\r\n"), "{returned}");
+    assert!(returned.ends_with("\r\n\r\n0\r\n\r\n"), "{returned}");
 }

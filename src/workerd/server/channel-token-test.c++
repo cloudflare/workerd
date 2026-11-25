@@ -427,6 +427,28 @@ KJ_TEST("instances of a cluster redeem each other's channel tokens") {
       "failed authentication", stranger.decodeSubrequestChannelToken(Usage::RPC, token));
 }
 
+KJ_TEST("handlers that share a key redeem each other's channel tokens") {
+  MockResolver senderResolver, receiverResolver, strangerResolver;
+  ChannelTokenHandler::Key key;
+  ChannelTokenHandler sender(senderResolver, key);
+  ChannelTokenHandler receiver(receiverResolver, key);
+  ChannelTokenHandler stranger(strangerResolver);
+
+  const byte actorId[] = {12, 34, 56, 78};
+  for (auto usage: {Usage::RPC, Usage::STORAGE}) {
+    auto token = sender.encodeActorChannelToken(
+        usage, "foo-namespace", actorId, "my-actor"_kj, Persistent::YES);
+    auto channel = receiver.decodeSubrequestChannelToken(usage, token).downcast<MockActorChannel>();
+    expectActorChannel(*channel, "foo-namespace", actorId, "my-actor"_kj);
+  }
+
+  // A handler with a random key of its own cannot read an encrypted token.
+  auto token = sender.encodeActorChannelToken(
+      Usage::RPC, "foo-namespace", actorId, "my-actor"_kj, Persistent::NO);
+  KJ_EXPECT_THROW_MESSAGE(
+      "failed authentication", stranger.decodeSubrequestChannelToken(Usage::RPC, token));
+}
+
 KJ_TEST("channel token with nested channels (all synchronous)") {
   MockResolver resolver;
   ChannelTokenHandler handler(resolver);
@@ -553,6 +575,58 @@ KJ_TEST("channel token with nested channel that generates token asynchronously")
   KJ_EXPECT(nestedActor.triplet ==
       ServiceTriplet("async-actor", "AsyncEntry"_kj,
           Frankenvalue::fromJson(kj::str("{\"inner\": \"async\"}"))));
+}
+
+KJ_TEST("a Frankenvalue's capabilities cross to a handler with the same key as tokens") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  ChannelTokenHandler::Key key;
+  MockResolver senderResolver;
+  MockResolver receiverResolver;
+  ChannelTokenHandler sender(senderResolver, key);
+  ChannelTokenHandler receiver(receiverResolver, key);
+
+  const byte actorId[] = {21, 22, 23, 24};
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
+  caps.add(kj::refcounted<MockSubrequestChannel>(sender,
+      ServiceTriplet("a-service", "AnEntry"_kj, Frankenvalue::fromJson(kj::str("{\"inner\": 1}"))),
+      Persistent::YES));
+  caps.add(kj::refcounted<MockActorChannel>(
+      sender, "a-namespace", actorId, "an-actor"_kj, Persistent::YES));
+  auto value = propsWithCaps(kj::mv(caps));
+
+  capnp::MallocMessageBuilder message;
+  auto builder = message.getRoot<rpc::Frankenvalue>();
+  sender.frankenvalueToCapnp(value, builder);
+
+  auto received = receiver.frankenvalueFromCapnp(builder.asReader());
+  auto capTable = received.getCapTable();
+  KJ_ASSERT(capTable.size() == 2);
+  auto& service = KJ_ASSERT_NONNULL(kj::tryDowncast<MockSubrequestChannel>(*capTable[0]));
+  KJ_EXPECT(service.triplet ==
+      ServiceTriplet("a-service", "AnEntry"_kj, Frankenvalue::fromJson(kj::str("{\"inner\": 1}"))));
+  auto& actor = KJ_ASSERT_NONNULL(kj::tryDowncast<MockActorChannel>(*capTable[1]));
+  expectActorChannel(actor, "a-namespace", actorId, "an-actor"_kj);
+
+  // A value without capabilities has no cap table to send.
+  auto plain = Frankenvalue::fromJson(kj::str("{\"plain\": true}"));
+  capnp::MallocMessageBuilder plainMessage;
+  auto plainBuilder = plainMessage.getRoot<rpc::Frankenvalue>();
+  sender.frankenvalueToCapnp(plain, plainBuilder);
+  KJ_EXPECT(!plainBuilder.asReader().hasCapTable());
+  KJ_EXPECT(receiver.frankenvalueFromCapnp(plainBuilder.asReader()).getCapTable().size() == 0);
+
+  // A capability whose token is not ready when the value is written is refused.
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> pendingCaps;
+  pendingCaps.add(kj::refcounted<MockActorClassChannel>(sender,
+      ServiceTriplet("a-class", "AClass"_kj, Frankenvalue::fromJson(kj::str("{}"))),
+      Persistent::YES, kj::mv(paf.promise)));
+  auto pending = propsWithCaps(kj::mv(pendingCaps));
+  capnp::MallocMessageBuilder pendingMessage;
+  KJ_EXPECT_THROW_MESSAGE("its channel token is still being resolved",
+      sender.frankenvalueToCapnp(pending, pendingMessage.getRoot<rpc::Frankenvalue>()));
 }
 
 KJ_TEST("resolving channel props keeps promised caps alive") {

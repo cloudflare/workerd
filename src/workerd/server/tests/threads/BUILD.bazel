@@ -1,0 +1,101 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "threads-test",
+    size = "large",
+    data = [
+        ":config.capnp",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = ["js-test"],
+)
+
+js_test(
+    name = "threads-durable-test",
+    size = "large",
+    data = [
+        ":durable-config.capnp",
+        ":durable-harness.mjs",
+        ":durable-worker.mjs",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "durable-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_DURABLE_CONFIG": "$(rootpath :durable-config.capnp)",
+    },
+    tags = ["js-test"],
+)
+
+# Starts a server for each of its cases, some of them several times: `timeout` is the longest
+# there is.
+js_test(
+    name = "threads-placement-test",
+    size = "large",
+    timeout = "eternal",
+    data = [
+        ":durable-config.capnp",
+        ":durable-harness.mjs",
+        ":durable-worker.mjs",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "placement-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_DURABLE_CONFIG": "$(rootpath :durable-config.capnp)",
+    },
+    tags = ["js-test"],
+)
+
+# Moves more than half a gigabyte through a server built for debugging, which takes most of a
+# minute on a slow machine: `timeout` is the longest there is.
+js_test(
+    name = "threads-front-test",
+    size = "large",
+    timeout = "eternal",
+    data = [
+        ":front-config.capnp",
+        ":front-probe.mjs",
+        ":front-worker.mjs",
+        "//src/workerd/api/tests:connect-handler-server.key",
+        "//src/workerd/api/tests:connect-handler-server.pem",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "front-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_FRONT_CA": "$(rootpath //src/workerd/api/tests:connect-handler-server.pem)",
+        "WORKERD_FRONT_CONFIG": "$(rootpath :front-config.capnp)",
+    },
+    # The config embeds the certificate and key by their paths in the source tree.
+    no_copy_to_bin = [
+        "//src/workerd/api/tests:connect-handler-server.key",
+        "//src/workerd/api/tests:connect-handler-server.pem",
+    ],
+    tags = ["js-test"],
+)
+
+js_test(
+    name = "threads-services-test",
+    size = "large",
+    data = [
+        ":services-config.capnp",
+        ":services-worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "services-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_SERVICES_CONFIG": "$(rootpath :services-config.capnp)",
+    },
+    tags = ["js-test"],
+)

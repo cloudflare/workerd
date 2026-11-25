@@ -456,10 +456,27 @@ impl Ownership {
     /// The epoch own.json names now: the re-read after a bucket upload that
     /// makes the upload an acknowledgement (spec: `TierAck`).
     pub async fn current_epoch(&self, namespace: &str, actor: &str) -> Result<Option<u64>> {
-        Ok(match self.bucket.get(&owner_key(namespace, actor)).await? {
-            None => None,
-            Some((body, _)) => Some(serde_json::from_slice::<OwnerRecord>(&body)?.epoch),
-        })
+        current_epoch(&self.bucket, namespace, actor).await
+    }
+}
+
+/// The epoch the owner record of `actor` in `bucket` names now
+/// (`Ownership::current_epoch`), read with whichever client `bucket` is.
+pub async fn current_epoch(bucket: &Bucket, namespace: &str, actor: &str) -> Result<Option<u64>> {
+    Ok(match bucket.get(&owner_key(namespace, actor)).await? {
+        None => None,
+        Some((body, _)) => Some(serde_json::from_slice::<OwnerRecord>(&body)?.epoch),
+    })
+}
+
+#[async_trait::async_trait(?Send)]
+impl crate::control::Open for Ownership {
+    async fn open(&self, namespace: &str, actor: &str, epoch: u64) -> Result<bool> {
+        Self::open(self, namespace, actor, epoch).await
+    }
+
+    async fn current_epoch(&self, namespace: &str, actor: &str) -> Result<Option<u64>> {
+        Self::current_epoch(self, namespace, actor).await
     }
 }
 
