@@ -438,8 +438,8 @@ bool JsString::containsOnlyOneByte() const {
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
-  auto result = check(inner->Exec(js.v8Context(), input));
-  // v8::RegExp::Exec dispatches to the current RegExp.prototype.exec, which
+  auto result = check(inner->ExecV2(js.v8Context(), input));
+  // v8::RegExp::ExecV2 dispatches to the current RegExp.prototype.exec, which
   // user code can override to return anything. Reject non-Array results so a
   // monkey-patched exec cannot feed arbitrary objects into native code.
   if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
@@ -447,14 +447,14 @@ kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
-  auto result = check(inner->Exec(js.v8Context(), js.str(input)));
+  auto result = check(inner->ExecV2(js.v8Context(), js.str(input)));
   // Same hardening as above: reject non-null, non-Array results.
   if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
 bool JsRegExp::match(Lock& js, kj::StringPtr input) {
-  auto result = check(inner->Exec(js.v8Context(), js.str(input)));
+  auto result = check(inner->ExecV2(js.v8Context(), js.str(input)));
   return !result->IsNull();
 }
 
@@ -1134,24 +1134,24 @@ size_t JsArrayBufferView::getElementSize() const {
 
 JsArrayBuffer JsArrayBufferView::getBuffer() const {
   v8::Local<v8::ArrayBufferView> inner = *this;
-  return JsArrayBuffer(inner->Buffer());
+  return JsArrayBuffer(inner->GetBuffer().As<v8::ArrayBuffer>());
 }
 
 bool JsArrayBufferView::isDetachable() const {
   v8::Local<v8::ArrayBufferView> inner = *this;
-  return inner->Buffer()->IsDetachable();
+  return inner->GetBuffer()->IsDetachable();
 }
 
 bool JsArrayBufferView::isDetached() const {
   v8::Local<v8::ArrayBufferView> inner = *this;
-  return inner->Buffer()->WasDetached();
+  return inner->GetBuffer()->WasDetached();
 }
 
 void JsArrayBufferView::detachInPlace(Lock& js) {
   JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
   JSG_REQUIRE(isDetachable(), TypeError, "ArrayBuffer is not detachable");
   v8::Local<v8::ArrayBufferView> inner = *this;
-  check(inner->Buffer()->Detach({}));
+  check(inner->GetBuffer().As<v8::ArrayBuffer>()->Detach({}));
 }
 
 JsArrayBufferView JsArrayBufferView::detachAndTake(Lock& js) {
@@ -1200,7 +1200,7 @@ JsArrayBufferView JsArrayBufferView::slice(Lock& js, size_t offset, size_t lengt
   auto byteOffset = inner->ByteOffset();
   JSG_REQUIRE(offset <= SIZE_MAX - byteOffset, RangeError, "offset overflow");
   offset = byteOffset + offset;
-  auto buffer = inner->Buffer();
+  auto buffer = inner->GetBuffer();
   auto bufSize = buffer->ByteLength();
   JSG_REQUIRE(offset <= bufSize && length <= bufSize - offset, RangeError,
       "Typed array view extends beyond the ArrayBuffer bounds");
@@ -1240,7 +1240,7 @@ JsArrayBufferView JsArrayBufferView::slice(Lock& js, size_t offset, size_t lengt
 
 bool JsArrayBufferView::isResizable() const {
   v8::Local<v8::ArrayBufferView> inner = *this;
-  return inner->Buffer()->IsResizableByUserJavaScript();
+  return inner->GetBuffer()->IsResizableByUserJavaScript();
 }
 
 JsArrayBufferView::operator JsBufferSource() const {
@@ -1254,13 +1254,13 @@ JsArrayBufferView::operator JsUint8Array() const {
     return jsg::JsUint8Array(inner.As<v8::Uint8Array>());
   }
 
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   return jsg::JsUint8Array(v8::Uint8Array::New(buf, inner->ByteOffset(), inner->ByteLength()));
 }
 
 JsArrayBufferView JsArrayBufferView::clone(jsg::Lock& js) {
   v8::Local<v8::ArrayBufferView> inner = *this;
-  auto backing = inner->Buffer()->GetBackingStore();
+  auto backing = inner->GetBuffer()->GetBackingStore();
   auto ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
 
   auto offset = getOffset();
@@ -1315,7 +1315,7 @@ kj::ArrayPtr<kj::byte> JsBufferSource::asArrayPtr() {
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
     auto view = inner.As<v8::ArrayBufferView>();
-    auto buf = view->Buffer();
+    auto buf = view->GetBuffer();
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -1345,7 +1345,7 @@ kj::ArrayPtr<const kj::byte> JsBufferSource::asArrayPtr() const {
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
     auto view = inner.As<v8::ArrayBufferView>();
-    auto buf = view->Buffer();
+    auto buf = view->GetBuffer();
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -1375,7 +1375,7 @@ size_t JsBufferSource::size() const {
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
     auto view = inner.As<v8::ArrayBufferView>();
-    if (view->Buffer()->WasDetached()) [[unlikely]] {
+    if (view->GetBuffer()->WasDetached()) [[unlikely]] {
       return 0;
     }
     return view->ByteLength();
@@ -1415,7 +1415,7 @@ bool JsBufferSource::isResizable() const {
   if (inner->IsArrayBuffer()) {
     return inner.As<v8::ArrayBuffer>()->IsResizableByUserJavaScript();
   } else if (inner->IsArrayBufferView()) {
-    return inner.As<v8::ArrayBufferView>()->Buffer()->IsResizableByUserJavaScript();
+    return inner.As<v8::ArrayBufferView>()->GetBuffer()->IsResizableByUserJavaScript();
   }
   return false;
 }
@@ -1428,7 +1428,7 @@ bool JsBufferSource::isDetachable() const {
     return false;  // SharedArrayBuffers are never detachable
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
-    return inner.As<v8::ArrayBufferView>()->Buffer()->IsDetachable();
+    return inner.As<v8::ArrayBufferView>()->GetBuffer()->IsDetachable();
   }
 }
 
@@ -1440,7 +1440,7 @@ bool JsBufferSource::isDetached() const {
     return false;  // SharedArrayBuffers are never detachable
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
-    return inner.As<v8::ArrayBufferView>()->Buffer()->WasDetached();
+    return inner.As<v8::ArrayBufferView>()->GetBuffer()->WasDetached();
   }
 }
 
@@ -1456,7 +1456,7 @@ void JsBufferSource::detachInPlace(Lock& js) {
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
     auto view = inner.As<v8::ArrayBufferView>();
-    check(view->Buffer()->Detach({}));
+    check(view->GetBuffer().As<v8::ArrayBuffer>()->Detach({}));
   }
 }
 
@@ -1517,7 +1517,7 @@ size_t JsBufferSource::underlyingArrayBufferSize(Lock& js) const {
   } else {
     KJ_DASSERT(inner->IsArrayBufferView());
     auto view = inner.As<v8::ArrayBufferView>();
-    auto buf = view->Buffer();
+    auto buf = view->GetBuffer();
     if (buf->WasDetached()) [[unlikely]] {
       return 0;
     }
@@ -1534,7 +1534,7 @@ bool JsBufferSource::isImmutable() const {
     return false;  // SharedArrayBuffers are never immutable
   } else if (inner->IsArrayBufferView()) {
     v8::Local<v8::ArrayBufferView> view = inner.As<v8::ArrayBufferView>();
-    return view->Buffer()->IsImmutable();
+    return view->GetBuffer()->IsImmutable();
   }
   KJ_UNREACHABLE;
 }
@@ -1598,25 +1598,23 @@ kj::Array<kj::byte> JsUint8Array::copy() {
 }
 
 JsArrayBuffer JsUint8Array::getBuffer() const {
-  auto buf = inner->Buffer();
-  return JsArrayBuffer(buf);
+  return JsArrayBuffer(inner->GetBuffer().As<v8::ArrayBuffer>());
 }
 
 bool JsUint8Array::isDetachable() const {
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   return buf->IsDetachable();
 }
 
 bool JsUint8Array::isDetached() const {
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   return buf->WasDetached();
 }
 
 void JsUint8Array::detachInPlace(Lock& js) {
   JSG_REQUIRE(!isImmutable(), TypeError, "Uint8Array is immutable");
   JSG_REQUIRE(isDetachable(), TypeError, "Uint8Array is not detachable");
-  auto buf = inner->Buffer();
-  check(buf->Detach({}));
+  check(inner->GetBuffer().As<v8::ArrayBuffer>()->Detach({}));
 }
 
 JsUint8Array JsUint8Array::detachAndTake(Lock& js) {
@@ -1630,7 +1628,7 @@ JsUint8Array JsUint8Array::detachAndTake(Lock& js) {
 }
 
 JsUint8Array JsUint8Array::slice(Lock& js, size_t offset, size_t length) const {
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   auto byteOffset = inner->ByteOffset();
   JSG_REQUIRE(offset <= SIZE_MAX - byteOffset, RangeError, "offset overflow");
   checkViewBounds<sizeof(uint8_t)>(byteOffset + offset, length, buf->ByteLength());
@@ -1638,7 +1636,7 @@ JsUint8Array JsUint8Array::slice(Lock& js, size_t offset, size_t length) const {
 }
 
 bool JsUint8Array::isResizable() const {
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   return buf->IsResizableByUserJavaScript();
 }
 
@@ -1656,7 +1654,7 @@ JsUint8Array JsUint8Array::clone(jsg::Lock& js) {
   // Creates a new Uint8Array view over the same underlying backing store. The ArrayBuffer
   // instance is different but the backing store is shared. So "clone" here is really
   // "shallow clone". Intentionally does not copy the data.
-  auto buf = inner->Buffer();
+  auto buf = inner->GetBuffer();
   auto backing = buf->GetBackingStore();
   v8::Local<v8::ArrayBuffer> ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
   return JsUint8Array(v8::Uint8Array::New(ab, inner->ByteOffset(), inner->ByteLength()));

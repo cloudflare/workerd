@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.8.62.5"
+VERSION = "15.9.128.39"
 
-INTEGRITY = "sha256-8ZCLdqBpJMPk/ij2TxucDnaWv/dpweaIt/x46NNV0mo="
+INTEGRITY = "sha256-yS4vPdON15Ps014dpZfPFHcmRgz4FevdoXcDOe7KW/w="
 
 PATCHES = [
     "2020-03-26-Add-methods-to-get-heap-and-external-memory-sizes-directly.patch",
@@ -81,6 +81,7 @@ PATCHES = [
     "2026-11-17-heap-Check-the-old-generation-limit-in-SetIsLoading-false-without-incremental-marking.patch",
     "2026-11-18-Skip-the-copy-of-zero-bytes-in-SnapshotByteSource-CopyRaw.patch",
     "2026-11-23-Implement-DOMException-and-QuotaExceededError.patch",
+    "2026-11-25-Modify-where-to-look-for-BoringSSL.patch",
 ]
 
 http_archive(
@@ -95,7 +96,7 @@ http_archive(
 git_repository(
     name = "llvm-libc",
     build_file = "//:build/BUILD.llvm-libc",
-    commit = "fe440a8abe663d6878686f147ef6b1a02075ae15",
+    commit = "885e2a900ba002ef0ba7b4757da90b0f3aa309e8",
     remote = "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git",
 )
 

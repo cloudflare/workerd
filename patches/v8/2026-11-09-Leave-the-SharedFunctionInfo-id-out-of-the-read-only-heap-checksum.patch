@@ -22,10 +22,10 @@ checksum, and have an isolate joining an existing read-only heap
 continue past its own snapshot's id.
 
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index cbb8d10920fabb01f10ae26d0249115d39877fcc..8a80cac2db5e4841cc435e7cadb1431b49a31bce 100644
+index 2d98fe5f98a8d2793cd07f90eabb4573f16b6708..eb4b72bcabc60d14192262ddf4ebd7a3a89f75ce 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -1880,6 +1880,17 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -1908,6 +1908,17 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
      CHECK(successfully_exchanged);
    }
  
@@ -125,7 +125,7 @@ index b5cacb224a2c69400d186b3c6516df5fc3a22e4c..7ff61538551ea61b812a769c44a1fbe6
  
    // Initialize the ReadOnlyArtifacts from an Isolate that has just been created
 diff --git a/src/snapshot/read-only-deserializer.cc b/src/snapshot/read-only-deserializer.cc
-index 4e03c368c4d21b6aa223dad84bffcfbee727829e..73300dcd152ad28c6ebbcb360b7140cbd38a84db 100644
+index df8cfd4ca433d8106ad8f39b29f811cf3a4a4ad5..6a4ecdc75605fc2027ac90cd7b56893b8116ee14 100644
 --- a/src/snapshot/read-only-deserializer.cc
 +++ b/src/snapshot/read-only-deserializer.cc
 @@ -34,6 +34,8 @@ class ReadOnlyHeapImageDeserializer final {

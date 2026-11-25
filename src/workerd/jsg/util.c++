@@ -1017,7 +1017,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
 
 // See the ArrayBuffer overload above for the aliasing contract (MPK + write-through).
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
-  auto buffer = arrayBufferView->Buffer();
+  auto buffer = arrayBufferView->GetBuffer();
   if (buffer->IsResizableByUserJavaScript() || buffer->IsImmutable()) {
     // Deep-copy for resizable or immutable ArrayBuffers -- see comment above.
     // CopyContents handles bounds checking internally for out-of-bounds views.

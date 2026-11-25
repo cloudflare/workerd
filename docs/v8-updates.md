@@ -102,6 +102,9 @@ from the V8 directory.
     figure out what version of the github code V8 depends on. Instead, it should be safe
     to just bump these dependencies to the latest version on github.
 
+    `llvm-libc` is pinned in `build/deps/v8.MODULE.bazel` instead. Set its commit to the
+    `third_party/llvm-libc/src` revision in V8's `DEPS`; the update helper does not.
+
     If the new `com_googlesource_chromium_icu` commit changes `U_ICU_VERSION_MAJOR_NUM`
     (in `source/common/unicode/uvernum.h`), update `RUST_ICU_MAJOR_VERSION_NUMBER` in
     `build/deps/rust.MODULE.bazel`. If `rust_icu_sys` has no `bindgen/lib_<version>.rs` for the

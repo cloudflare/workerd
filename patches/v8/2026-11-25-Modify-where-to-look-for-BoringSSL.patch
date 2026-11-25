@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <ecorry@cloudflare.com>
+Date: Wed, 25 Nov 2026 14:59:00 +0100
+Subject: Modify where to look for BoringSSL
+
+workerd names its BoringSSL repository @ssl.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 96b4f45e9918ca4b98c7c3a97bb99f95081ffa15..60363ad322efbe5caec5f72ca379c70aa55a1df4 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -5086,7 +5086,7 @@ v8_library(
+         "@abseil-cpp//absl/container:flat_hash_map",
+         "@abseil-cpp//absl/container:flat_hash_set",
+         "@abseil-cpp//absl/functional:overload",
+-        "@boringssl//:crypto",
++        "@ssl//:crypto",
+         "@highway//:hwy",
+         "@fast_float",
+         "@simdutf",

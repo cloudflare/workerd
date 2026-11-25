@@ -27,7 +27,7 @@ index 7be431b31921a7e72674217416c916cf0b7bfab8..291406a39ffaf7a754e32e541172c9e9
    Data() = delete;
  };
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 9fb39992101d83a4b4b880d644a12809f46956d4..3d9eaa9823815561acf63249af8f9323301fa61b 100644
+index 37f8d2345aae7e0586ab6312895105909033d0ed..c9a9727497a5640f6d93c305cc46d6c740129a25 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -79,6 +79,7 @@
@@ -38,7 +38,7 @@ index 9fb39992101d83a4b4b880d644a12809f46956d4..3d9eaa9823815561acf63249af8f9323
  #include "src/heap/safepoint.h"
  #include "src/heap/visit-object.h"
  #include "src/init/bootstrapper.h"
-@@ -906,6 +907,23 @@ bool Data::IsCppHeapExternal() const {
+@@ -911,6 +912,23 @@ bool Data::IsCppHeapExternal() const {
    return IsCppHeapExternalObject(*Utils::OpenDirectHandle(this));
  }
  

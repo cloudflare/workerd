@@ -29,9 +29,10 @@ SetIsLoading(false) at each idle point.
 With incremental marking enabled, behaviour is unchanged.
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index dc3b36c758999bc10579d54eae8e623a20acd9de..3465a2b9d324d463d988cca39e63d0e5dc03be8a 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1610,8 +1610,11 @@ class V8_EXPORT Isolate {
+@@ -1613,8 +1613,11 @@ class V8_EXPORT Isolate {
     * SetIsLoading(true) when loading starts and SetIsLoading(false) when it
     * ends.
     * It's valid to call SetIsLoading(true) again while loading, which will
@@ -46,9 +47,10 @@ diff --git a/include/v8-isolate.h b/include/v8-isolate.h
     * This is an unfinished experimental feature. Semantics and implementation
     * may change frequently.
 diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+index 00ec2d7dba3099a4fa33789f33987a53d90db26d..a43ebcc141b54f426604526e36b4ea2538b6149d 100644
 --- a/src/heap/heap.cc
 +++ b/src/heap/heap.cc
-@@ -7705,6 +7705,18 @@ void Heap::NotifyLoadingEnded(LeaveHeapState context) {
+@@ -7676,6 +7676,18 @@ void Heap::NotifyLoadingEnded(LeaveHeapState context) {
        // and advance marking if incremental marking is active.
        job->ScheduleTask();
      }
@@ -68,9 +70,10 @@ diff --git a/src/heap/heap.cc b/src/heap/heap.cc
      DCHECK_EQ(context, LeaveHeapState::kReachedTimeout);
      // Nothing to do here because we only trigger this from a GC.
 diff --git a/test/unittests/heap/heap-unittest.cc b/test/unittests/heap/heap-unittest.cc
+index 2c8233997bba1bc9a916b51170c67134fd97bf44..80e279425a1eb477e3d28204668f66383ca69f37 100644
 --- a/test/unittests/heap/heap-unittest.cc
 +++ b/test/unittests/heap/heap-unittest.cc
-@@ -584,6 +584,66 @@ TEST_F(HeapTest, CollectingAllAvailableGarbageShrinksNewSpace) {
+@@ -675,6 +675,66 @@ TEST_F(HeapTest, CollectingAllAvailableGarbageShrinksNewSpace) {
    CHECK_EQ(new_space->TotalCapacity(), new_space->MinimumCapacity());
  }
  

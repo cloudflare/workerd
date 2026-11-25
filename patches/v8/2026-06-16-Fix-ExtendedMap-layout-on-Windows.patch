@@ -41,10 +41,10 @@ index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..9795025976d26792bcc16c0f7120949c
    indexed_interceptor: InterceptorInfo;
    // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index e4ed13a840472b05093dbf537ca5a99be5a0d2f1..b64523914a3670aa150a6d6998264e0cfa2e61e9 100644
+index 9e38cce48cf0e7a3e12bef9f74ec60bddd9fbb39..7a9986b5e8275ee8fdc22b0678ed3ed9b630ec7d 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1259,7 +1259,7 @@ static_assert(offsetof(Map, instance_type_) ==
+@@ -1258,7 +1258,7 @@ static_assert(offsetof(Map, instance_type_) ==
                Internals::kMapInstanceTypeOffset);
  
  // Base class for Maps with extra fields. Subclasses must be defined with
@@ -53,7 +53,7 @@ index e4ed13a840472b05093dbf537ca5a99be5a0d2f1..b64523914a3670aa150a6d6998264e0c
  V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    V8_IT_REUSE_PARENT;
  
-@@ -1292,7 +1292,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1291,7 +1291,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<BitsEx> bit_field_ex_;
@@ -66,7 +66,7 @@ index e4ed13a840472b05093dbf537ca5a99be5a0d2f1..b64523914a3670aa150a6d6998264e0c
  
  constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
 diff --git a/src/objects/map.tq b/src/objects/map.tq
-index cc90e8ae94f3d7ecec74fb799b2161d4a42183a8..a8feedfe614c07c21429af5fd9027b9cc4f81a0a 100644
+index 3fe05f972600b1bda432ffc0fc7f4aabba13d29b..f4c2483df8b810e0759616d7ae4d8d9ac9782567 100644
 --- a/src/objects/map.tq
 +++ b/src/objects/map.tq
 @@ -114,13 +114,17 @@ bitfield struct ExtendedMapBitsEx extends uint8 {
