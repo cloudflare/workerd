@@ -119,7 +119,8 @@ class WebSocketMigrationLink {
   virtual ~WebSocketMigrationLink() noexcept(false) = default;
 
   // Resolves once the embedder has continued the WebSocket somewhere else. The request that carried
-  // it then completes successfully, rather than when the connection ends.
+  // it then completes successfully, rather than when the connection ends. For a WebSocket that never
+  // moves, the promise never settles, even once the link is destroyed.
   //
   // Called at most once, by that request. A WebSocket adopted from another process carries no
   // request, so its link is never asked.
