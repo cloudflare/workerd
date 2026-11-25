@@ -375,6 +375,10 @@ using api::pyodide::PythonConfig;
 
 const PythonConfig defaultPythonConfig{.createSnapshot = false, .createBaselineSnapshot = false};
 
+jsg::V8System& TestFixture::getV8System() {
+  return testV8System;
+}
+
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),
       config(buildConfig(params, configArena)),
@@ -407,7 +411,7 @@ TestFixture::TestFixture(SetupParams&& params)
           *memoryCacheProvider,
           defaultPythonConfig,
           /*inboundListeners=*/nullptr,
-          /*snapshotConfig=*/kj::none,
+          kj::mv(params.snapshotConfig),
           params.embedderBootstrap)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),

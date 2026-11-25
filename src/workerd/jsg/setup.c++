@@ -461,6 +461,23 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
           // Zero-fill provides the 0 terminator V8 expects.
           artifact.externalReferences = kj::heapArray<intptr_t>(kExternalReferencesCapacity);
           artifact.externalReferences.asPtr().fill(0);
+
+          KJ_IF_SOME(baseline, mutableSnapshot.base) {
+            const SnapshotArtifact& base = *baseline.artifact;
+            KJ_REQUIRE(base.blob.data != nullptr, "baseline snapshot artifact holds no blob");
+            KJ_REQUIRE(base.externalReferenceCursor < artifact.externalReferences.size(),
+                "baseline snapshot external references exceed capacity",
+                base.externalReferenceCursor);
+            // Copy the baseline's external-reference table verbatim as the prefix so V8
+            // deserializes `base.blob` at the exact indices it was serialized with, while new
+            // references registered by this SnapshotCreator append after them.
+            size_t count = base.externalReferenceCursor;
+            artifact.externalReferences.asPtr().first(count).copyFrom(
+                base.externalReferences.asPtr().first(count));
+            artifact.externalReferenceCursor = base.externalReferenceCursor;
+            params.snapshot_blob = &base.blob;
+          }
+
           params.external_references = artifact.externalReferences.begin();
 
           // The SnapshotCreator(params) constructor always allocates in the default group, so
@@ -473,6 +490,12 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
         KJ_CASE_ONEOF(finalizedSnapshot, FinalizedSnapshot) {
           const SnapshotArtifact& artifact = *finalizedSnapshot.artifact;
           KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
+          params.snapshot_blob = &artifact.blob;
+          params.external_references = artifact.externalReferences.begin();
+        }
+        KJ_CASE_ONEOF(baselineSnapshot, BaselineSnapshot) {
+          const SnapshotArtifact& artifact = *baselineSnapshot.artifact;
+          KJ_REQUIRE(artifact.blob.data != nullptr, "baseline snapshot artifact holds no blob");
           params.snapshot_blob = &artifact.blob;
           params.external_references = artifact.externalReferences.begin();
         }
@@ -593,6 +616,17 @@ void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContex
           v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
 }
 
+size_t IsolateBase::addSnapshotContext(v8::Local<v8::Context> context,
+    uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  return KJ_ASSERT_NONNULL(snapshotCreator)
+      ->AddContext(context,
+          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount),
+          v8::SerializeContextDataCallback(),
+          v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
+}
+
 void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
   auto& artifact = mutableSnapshotArtifact();
   v8::HandleScope scope(ptr);
@@ -615,21 +649,23 @@ void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contex
         modules::recordIsolateModuleRegistryForSnapshot(context, *getSnapshotCreator());
     return;
   }
-  auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
-      context, ContextPointerSlot::MODULE_REGISTRY));
-  moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
-    bool pin = ref.kind != ModuleRegistry::SnapshotHandleKind::INTERNAL_ONLY &&
-        ref.status != v8::Module::kUninstantiated && !ref.handle.IsEmpty();
-    if (pin) {
-      artifact.moduleRecords.add(SnapshotArtifact::ModuleRecord{
-        .specifier = ref.specifier.toString(false),
-        .moduleType = static_cast<uint8_t>(ref.type),
-        .handleKind = static_cast<uint8_t>(ref.kind),
-        .dataIndex = pinIntoSnapshot(context, ref.handle.Get(ptr)),
-      });
-    }
-    ref.handle.Reset();
-  });
+  KJ_IF_SOME(moduleRegistry,
+      getAlignedPointerFromEmbedderData<ModuleRegistry>(
+          context, ContextPointerSlot::MODULE_REGISTRY)) {
+    moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
+      bool pin = ref.kind != ModuleRegistry::SnapshotHandleKind::INTERNAL_ONLY &&
+          ref.status != v8::Module::kUninstantiated && !ref.handle.IsEmpty();
+      if (pin) {
+        artifact.moduleRecords.add(SnapshotArtifact::ModuleRecord{
+          .specifier = ref.specifier.toString(false),
+          .moduleType = static_cast<uint8_t>(ref.type),
+          .handleKind = static_cast<uint8_t>(ref.kind),
+          .dataIndex = pinIntoSnapshot(context, ref.handle.Get(ptr)),
+        });
+      }
+      ref.handle.Reset();
+    });
+  }
 }
 
 namespace {
@@ -676,7 +712,9 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
     const uint32_t* badTagFieldsCount,
     WrappablesSerializeMetadata* wrappablesMetadata,
-    kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords) {
+    kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords,
+    v8::SnapshotCreator::FunctionCodeHandling codeHandling,
+    v8::Global<v8::Context> extraContextHandle) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
@@ -693,7 +731,8 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 1. Pin every materialized module-registry handle into the snapshot and record
   // (specifier, type, kind) -> index so the START_FROM_SNAPSHOT worker can build its entries
   // around the baked instances. Reset every handle in the same pass.
-  bakeModuleRegistryIntoSnapshot(defaultContextHandle);
+  bakeModuleRegistryIntoSnapshot(
+      extraContextHandle.IsEmpty() ? defaultContextHandle : extraContextHandle);
 
   // 2. Record the native side of every live wrapper while it still exists: a stateless type by
   // its tag alone, a stateful one as a clone. The Wrappables themselves are destroyed in step 3,
@@ -769,18 +808,20 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
 
   // 7. Reset the Global holding the default context, extracted from the script's module
-  // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
-  // consumes it.
+  // context, plus any additional context registered via addSnapshotContext(). The SnapshotCreator
+  // keeps its own handles until CreateBlob() consumes them.
   defaultContextHandle.Reset();
+  extraContextHandle.Reset();
 
-  // 8. Reject a heap holding a suspended generator, such as an async function the top level left
-  // awaiting a promise: CreateBlob(kClear) discards the bytecode it would resume in. Checked last,
-  // when only what CreateBlob() serializes is left to reach it.
-  KJ_REQUIRE(!getSnapshotCreator()->HasSuspendedGenerators(),
-      "PREPARE_SNAPSHOT: a generator or async function is suspended in the zygote's heap");
+  // 8. Reject a heap holding a suspended generator when clearing bytecode: CreateBlob(kClear)
+  // discards the bytecode it would resume in. Checked last, when only what CreateBlob()
+  // serializes is left to reach it.
+  if (codeHandling == v8::SnapshotCreator::FunctionCodeHandling::kClear) {
+    KJ_REQUIRE(!getSnapshotCreator()->HasSuspendedGenerators(),
+        "PREPARE_SNAPSHOT: a generator or async function is suspended in the zygote's heap");
+  }
 
-  artifact.blob =
-      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.blob = getSnapshotCreator()->CreateBlob(codeHandling);
 
   KJ_REQUIRE(*badTagFieldsCount == 0,
       "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
@@ -792,8 +833,14 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 }
 
 void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
-  if (!isStartingFromSnapshot()) return;
-  auto& indices = finalizedSnapshotArtifact().constructorTemplateIndices;
+  // An isolate restores the templates its contexts were built with: a per-worker snapshot's, or
+  // the process-wide baseline's.
+  kj::ArrayPtr<const size_t> indices;
+  if (isStartingFromSnapshot()) {
+    indices = finalizedSnapshotArtifact().constructorTemplateIndices;
+  } else if (isStartingFromBaselineSnapshot()) {
+    indices = baselineSnapshotArtifact().constructorTemplateIndices;
+  }
   if (indices.size() == 0) return;
   jsg::runInV8Stack([&](jsg::V8StackScope&) {
     v8::Isolate::Scope isolateScope(ptr);

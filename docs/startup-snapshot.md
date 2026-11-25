@@ -346,6 +346,40 @@ once.
   `Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum` leaves that id out of the debug build's read-only-heap checksum and has a restored isolate continue
   past it, so that isolates of both kinds can share the heap.
 
+## Baseline snapshots
+
+An embedder can also capture one process-wide baseline snapshot, which baseline-eligible isolates
+boot from before any Worker is evaluated. It is captured with `FunctionCodeHandling::kKeep`, so
+bytecode survives the restore, and holds two contexts:
+
+- **Context #0**, the default context: an empty plain `v8::Context::New()` context with no
+  `ServiceWorkerGlobalScope` and no JSG wrappers, so dummy contexts created without a global
+  template (such as service-worker script compilation and inspector error reporting) work with zero
+  internal fields and zero wrappables.
+- **Context #1** (`SnapshotArtifact::contextSnapshotIndex`): a canonical modern
+  `ServiceWorkerGlobalScope` wired by `Worker::setupContext()` and
+  `captureBaselineBootstrapForSnapshot()` (`src/workerd/api/per-isolate-bootstrap.h`), which runs
+  the unmodified `primordials` and `main` bootstrap scripts for
+  `initCanonicalModernBaselineFlags()`, clears the closed-over `compatFlags` object, and pins the
+  bootstrap state at `SnapshotArtifact::bootstrapStateIndex`. Any live JSG wrappables the bootstrap
+  creates at module scope (such as `TextEncoder`/`TextDecoder`) travel through the same
+  `liveWrappables` serialization pipeline as per-worker snapshots, and the isolate's JSG constructor
+  templates are baked into `constructorTemplateIndices`.
+
+An isolate boots from the baseline snapshot when `canUseBaselineSnapshot()` accepts its flags
+(isolates with legacy or opt-in flags boot normally with build-time compile caches). On restore,
+`newContextWithWrapper()` deserializes Context #1 via `v8::Context::FromSnapshot()` together with
+its `liveWrappables`, and `runPerIsolateBootstrap()` restores the stashed bootstrap state, populates
+`compatFlags` in place for the isolate's own flags, deletes the globals and prototype members of
+flags this isolate disables, and runs any embedder entry point.
+
+- **Shared isolates (`jsg::BaselineSnapshot`)** boot from the baseline blob and its external
+  references.
+- **Zygotes (`jsg::MutableSnapshot::base`)** pass the baseline as `base`: `IsolateBase` copies the
+  baseline's external references as the prefix of the new artifact's table and initializes
+  `v8::SnapshotCreator` from the baseline's blob, so the zygote starts from the baseline snapshot
+  and produces a self-contained per-worker `SnapshotArtifact`.
+
 ## Tests
 
 | Test                                                                 | Covers                                                                     |

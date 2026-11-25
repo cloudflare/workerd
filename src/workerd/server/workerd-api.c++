@@ -9,6 +9,7 @@
 #include <workerd/api/bench-api/ffi.rs.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/memory-cache-api/ffi.rs.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
@@ -1106,6 +1107,90 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
 
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {
   return kj::heap<EmptyReadOnlyActorStorageImpl>();
+}
+
+kj::Own<jsg::SnapshotArtifact> WorkerdApi::buildBaselineSnapshot(jsg::V8System& v8System,
+    kj::Own<jsg::SnapshotArtifact> artifact,
+    kj::Maybe<const EmbedderBootstrap&> embedder) {
+  capnp::MallocMessageBuilder flagsMsg;
+  auto flagsBuilder = flagsMsg.initRoot<CompatibilityFlags>();
+  initCanonicalModernBaselineFlags(flagsBuilder);
+  auto canonicalFlags = flagsBuilder.asReader();
+
+  struct BaselineConfiguration {
+    CompatibilityFlags::Reader features;
+    jsg::JsgConfig jsgConfig;
+
+    explicit BaselineConfiguration(CompatibilityFlags::Reader featuresParam)
+        : features(featuresParam),
+          jsgConfig(jsg::JsgConfig{
+            .fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API),
+          }) {}
+    operator const CompatibilityFlags::Reader() const {
+      return features;
+    }
+    operator const jsg::JsgConfig&() const {
+      return jsgConfig;
+    }
+  };
+
+  kj::Own<jsg::SnapshotArtifact> result;
+  {
+    JsgWorkerdIsolate isolate(v8System, jsg::newIsolateGroup(),
+        BaselineConfiguration(canonicalFlags), kj::heap<jsg::IsolateObserver>(),
+        jsg::defaultExternalStringAllocator(), v8::Isolate::CreateParams{},
+        /*instantiateTypeWrapper=*/true,
+        jsg::SnapshotConfig(jsg::MutableSnapshot{.artifact = kj::mv(artifact)}));
+
+    isolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
+      configureJsgIsolate(lock, canonicalFlags);
+
+      auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+      uint32_t badTagFieldsCount = 0;
+      jsg::WrappablesSerializeMetadata wrappablesMetadata;
+      v8::Global<v8::Context> defaultContextGlobal;
+      v8::Global<v8::Context> modernContextGlobal;
+
+      lock.withinHandleScope([&] {
+        // Context #0: empty plain context so dummy v8::Context::New() calls (e.g. service-worker
+        // compilation and inspector error reporting) work with zero internal fields and wrappables.
+        v8::Local<v8::Context> defaultContext = v8::Context::New(lock.v8Isolate);
+        jsg::setAlignedPointerInEmbedderData(
+            defaultContext, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
+        isolateBase.setSnapshotDefaultContext(
+            defaultContext, &badTagFieldsCount, &wrappablesMetadata);
+
+        // Context #1: canonical modern ServiceWorkerGlobalScope with unmodified bootstrap scripts.
+        auto modernContext = lock.newContext<api::ServiceWorkerGlobalScope>({
+          .enableWeakRef = true,
+          .deferWeakRefDeletion = true,
+          .enableTemporal = false,
+          .skipRestoreTimeGlobalsForZygote = true,
+        });
+        auto modernCtxHandle = modernContext.getHandle(lock);
+        JSG_WITHIN_CONTEXT_SCOPE(lock, modernCtxHandle,
+            [&](jsg::Lock& js) { Worker::setupContext(js, modernCtxHandle); });
+        captureBaselineBootstrapForSnapshot(lock, modernCtxHandle, canonicalFlags, embedder);
+
+        jsg::setAlignedPointerInEmbedderData(
+            modernCtxHandle, jsg::ContextPointerSlot::MODULE_REGISTRY, nullptr);
+        jsg::setAlignedPointerInEmbedderData(
+            modernCtxHandle, jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, nullptr);
+        isolateBase.mutableSnapshotArtifact().contextSnapshotIndex = isolateBase.addSnapshotContext(
+            modernCtxHandle, &badTagFieldsCount, &wrappablesMetadata);
+
+        defaultContextGlobal.Reset(lock.v8Isolate, defaultContext);
+        modernContextGlobal = modernContext.extractContextGlobalForSnapshot();
+        modernContext->clear();
+      });
+
+      isolateBase.createSnapshotBlob(kj::mv(defaultContextGlobal), {}, &badTagFieldsCount,
+          &wrappablesMetadata, {}, v8::SnapshotCreator::FunctionCodeHandling::kKeep,
+          kj::mv(modernContextGlobal));
+      result = isolateBase.extractSnapshotArtifact();
+    });
+  }
+  return result;
 }
 
 }  // namespace workerd::server

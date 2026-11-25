@@ -2280,6 +2280,8 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
   // Save original methods into context so that GC can track them (so they are captured in a
   // snapshot) and we can find them at a known location from the decorator.
   for (size_t i = 0; i < kConsoleMethodsCount; ++i) {
+    jsg::isolateRegisterExternalReference(
+        lock.v8Isolate, reinterpret_cast<intptr_t>(kConsoleMethods[i].callback));
     auto methodStr = lock.strIntern(kConsoleMethods[i].name);
     auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
     jsg::setContextDataSlot(context, jsg::consoleOriginalSlot(i), original);
@@ -2311,8 +2313,7 @@ void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context>
       return;
     }
     auto attrs = jsg::check(global->GetPropertyAttributes(context, wasmStr));
-    jsg::check(
-        global->SetLazyDataProperty(context, wasmStr, webAssemblyLazyGetter, val, attrs));
+    jsg::check(global->SetLazyDataProperty(context, wasmStr, webAssemblyLazyGetter, val, attrs));
   });
 }
 // =======================================================================================
@@ -2436,8 +2437,18 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(
-            context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
+        // A zygote chained from the baseline snapshot inherits ServiceWorkerGlobalScope's canonical
+        // context template (which includes Node.js and Navigator instance properties). When this
+        // Worker disables either, we store the worker context via addSnapshotContext() behind an
+        // empty default context at createSnapshotBlob() time so restored isolates deserialize it
+        // verbatim via FromSnapshot() rather than re-applying the canonical InstanceTemplate.
+        auto features = script->isolate->getApi().getFeatureFlags();
+        bool useAddedSnapshotContext = isolateBase.isStartingFromBaselineSnapshot() &&
+            (!features.getNodeJsCompatV2() || !features.getGlobalNavigator());
+        if (!useAddedSnapshotContext) {
+          isolateBase.setSnapshotDefaultContext(
+              context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
+        }
       }
 
       // Run per-isolate bootstrap for freshly created service worker contexts.
@@ -2754,8 +2765,29 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
-      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
-          &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords));
+      auto features = script->isolate->getApi().getFeatureFlags();
+      bool useAddedSnapshotContext = isolateBase.isStartingFromBaselineSnapshot() &&
+          (!features.getNodeJsCompatV2() || !features.getGlobalNavigator());
+      if (useAddedSnapshotContext) {
+        v8::Global<v8::Context> defaultContextGlobal;
+        lock.withinHandleScope([&] {
+          v8::Local<v8::Context> emptyDefault = v8::Context::New(lock.v8Isolate);
+          jsg::setAlignedPointerInEmbedderData(
+              emptyDefault, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
+          isolateBase.setSnapshotDefaultContext(
+              emptyDefault, &snapshotBadTagFieldsCount, &wrappablesMetadata);
+          isolateBase.mutableSnapshotArtifact().contextSnapshotIndex =
+              isolateBase.addSnapshotContext(contextGlobal.Get(lock.v8Isolate),
+                  &snapshotBadTagFieldsCount, &wrappablesMetadata);
+          defaultContextGlobal.Reset(lock.v8Isolate, emptyDefault);
+        });
+        isolateBase.createSnapshotBlob(kj::mv(defaultContextGlobal), kj::mv(rustTemplateHandles),
+            &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords),
+            v8::SnapshotCreator::FunctionCodeHandling::kClear, kj::mv(contextGlobal));
+      } else {
+        isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
+            &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords));
+      }
     }
   });
 }

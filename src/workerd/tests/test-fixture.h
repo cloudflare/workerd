@@ -9,6 +9,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/snapshot.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
@@ -99,7 +100,11 @@ struct TestFixture {
     // If set, and useRealTimers is not, the time the request clock always reads, so a test can
     // tell it from the system clock. Otherwise the mock timer reads the system clock.
     kj::Maybe<kj::Date> fixedNow;
+    // If set, passed to WorkerdApi so the fixture's isolate runs in that snapshot mode.
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   };
+
+  static jsg::V8System& getV8System();
 
   // A default argument here would need SetupParams' member initializers before TestFixture is
   // complete, so the parameterless constructor delegates instead.

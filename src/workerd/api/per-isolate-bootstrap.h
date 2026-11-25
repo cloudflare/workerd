@@ -45,6 +45,10 @@ class EmbedderBootstrap {
 
   kj::Maybe<jsg::Module::Reader> tryGetScript(kj::StringPtr specifier) const;
 
+  const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& getScripts() const {
+    return scripts;
+  }
+
  private:
   kj::String prefix;
   kj::String entryPoint;
@@ -119,6 +123,29 @@ jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
 // name skip the property get.
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
     jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name);
+
+// Populates `flags` with the canonical modern CompatibilityFlags baked into a process-wide
+// baseline snapshot's pre-built ServiceWorkerGlobalScope context.
+void initCanonicalModernBaselineFlags(CompatibilityFlags::Builder flags);
+
+// Returns true when an isolate with `flags` can boot from a process-wide baseline snapshot
+// (restoring its pre-built canonical modern ServiceWorkerGlobalScope context and applying C++
+// delta deletions for any disabled optional flags). Isolates whose flags are rejected boot
+// without a baseline snapshot and use the embedded compile caches instead.
+bool canUseBaselineSnapshot(CompatibilityFlags::Reader flags);
+
+// Captures the per-isolate bootstrap into a baseline snapshot's canonical modern
+// ServiceWorkerGlobalScope context: runs workerd's bootstrap (`primordials` and `main`) for
+// `canonicalFlags`, clears the closed-over compatFlags object so each restoring isolate populates
+// only its own flags in place, pins the bootstrap state at
+// `SnapshotArtifact::bootstrapStateIndex`, and releases the C++ state. Any embedder entry point
+// runs on restore rather than at capture time. Worker::setupContext() must already have run on
+// `context`.
+void captureBaselineBootstrapForSnapshot(jsg::Lock& js,
+    v8::Local<v8::Context> context,
+    CompatibilityFlags::Reader canonicalFlags,
+    kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
+    const jsg::ModuleSource* moduleSource = nullptr);
 
 // Makes `exports` the exports of the bootstrap module `specifier`, as though the module had been
 // required, so that a test can define classes that the deserializer finds by their

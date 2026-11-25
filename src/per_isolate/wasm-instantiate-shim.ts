@@ -4,10 +4,8 @@
 // registers Wasm instances exporting __instance_signal / __instance_terminated
 // for CPU shutdown signaling.
 //
-// Kept in per_isolate/ so it ships with a build-time compile cache and is
-// pre-evaluated (eagerly compiled) inside process-wide baseline snapshots and
-// carried through ephemeral zygote snapshots rather than compiled from source
-// on every isolate startup.
+// Kept in per_isolate/ so it ships with a build-time compile cache and loads
+// lazily on first access to globalThis.WebAssembly.
 
 const { ObjectDefineProperty, ObjectFreeze, TypeError } = primordials;
 
@@ -106,11 +104,10 @@ function install(
       try {
         // Called with bytes: result is {module, instance}.
         // Called with a Module: result is just the Instance.
-        const asSource = result as Partial<WebAssembly.WebAssemblyInstantiatedSource>;
-        const instance =
-          asSource.instance ?? (result as WebAssembly.Instance);
-        const module =
-          asSource.module ?? (moduleOrBytes as WebAssembly.Module);
+        const asSource =
+          result as Partial<WebAssembly.WebAssemblyInstantiatedSource>;
+        const instance = asSource.instance ?? (result as WebAssembly.Instance);
+        const module = asSource.module ?? (moduleOrBytes as WebAssembly.Module);
         checkAndRegisterShutdown(instance, importObj, module);
       } catch {
         // Intentionally ignored.
@@ -122,7 +119,10 @@ function install(
   // new WebAssembly.Instance(module, imports?)
   // Forward all arguments and new.target so subclassing works correctly.
   // NOTE: Exactly 1 argument defined to match WebAssembly.Instance length.
-  function Instance(this: unknown, module: WebAssembly.Module): WebAssembly.Instance {
+  function Instance(
+    this: unknown,
+    module: WebAssembly.Module
+  ): WebAssembly.Instance {
     // Like the native constructor, throw when called without `new`.
     if (new.target === undefined) {
       throw new TypeError("WebAssembly.Instance must be invoked with 'new'");

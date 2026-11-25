@@ -85,11 +85,12 @@ const {
 
 type ExceptionPolicy = 'report' | 'propagate';
 
-const kSpecCompliantDispatchExceptions =
-  compatFlags['spec_compliant_dispatch_exceptions'] === true;
-
+// Read dynamically from compatFlags so this module works unchanged in contexts
+// restored from a process-wide baseline snapshot (which populates compatFlags
+// in place per isolate).
 function effectiveExceptionPolicy(desired: ExceptionPolicy): ExceptionPolicy {
-  return desired === 'report' && !kSpecCompliantDispatchExceptions
+  return desired === 'report' &&
+    compatFlags['spec_compliant_dispatch_exceptions'] !== true
     ? 'propagate'
     : desired;
 }

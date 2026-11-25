@@ -1742,6 +1742,14 @@ struct NewContextOptions {
   // means removing what V8 already installed.
   bool enableTemporal = false;
 
+  // If true while preparing a snapshot, skips installRestoreTimeGlobalsForZygote() (used when
+  // capturing a pre-built modern context inside a baseline snapshot where no user code runs).
+  bool skipRestoreTimeGlobalsForZygote = false;
+
+  // If set, restores the context via v8::Context::FromSnapshot() using this 0-based AddContext()
+  // snapshot index instead of v8::Context::New() with a global ObjectTemplate.
+  kj::Maybe<size_t> contextSnapshotIndex = kj::none;
+
   // Callback V8 invokes to deserialize the internal fields of a JS object.
   v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
 
@@ -1890,11 +1898,19 @@ class ResourceWrapper {
         "a split isolate type registers context templates only for types that inherit "
         "jsg::ContextGlobal");
     auto isolate = js.v8Isolate;
-    auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
-        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
-        /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
-        options.apiWrapperDeserializer);
+    v8::Local<v8::Context> context;
+    KJ_IF_SOME(snapshotIdx, options.contextSnapshotIndex) {
+      context = check(v8::Context::FromSnapshot(isolate, snapshotIdx,
+          options.internalFieldsDeserializer, /*extensions=*/nullptr,
+          /*global_object=*/v8::MaybeLocal<v8::Value>(), /*microtask_queue=*/nullptr,
+          v8::DeserializeContextDataCallback(), options.apiWrapperDeserializer));
+    } else {
+      auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
+      context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
+          /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
+          /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
+          options.apiWrapperDeserializer);
+    }
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
@@ -1919,9 +1935,10 @@ class ResourceWrapper {
       deleteTemporalGlobals(isolate, context);
     }
 
-    // A context deserialized from a startup snapshot has the globals the zygote's context had.
+    // A context deserialized from a startup or baseline snapshot has the globals the capture
+    // context had.
     if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION) &&
-        !js.isStartingFromSnapshot()) {
+        !js.isStartingFromSnapshot() && !js.isStartingFromBaselineSnapshot()) {
       hideV8DomExceptionGlobals(isolate, context);
     }
 
@@ -1931,8 +1948,11 @@ class ResourceWrapper {
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
 
-    // Expose the type of the global scope in the global scope itself.
-    exposeGlobalScopeType(isolate, context);
+    // Expose the type of the global scope in the global scope itself (already present in a
+    // context restored via FromSnapshot).
+    if (options.contextSnapshotIndex == kj::none) {
+      exposeGlobalScopeType(isolate, context);
+    }
 
     KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
       ptr->setModuleRegistryBackingOwner(JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
