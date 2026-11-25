@@ -1,0 +1,119 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# The cluster of cluster-threads-test.mjs, whose instances serve on several loop threads
+# (`--threads`). As in cluster-test.wd-test, each instance keeps its SQLite files on its own disk
+# ("local") and the cluster's state is in a fake S3 that the test serves at AWS_ENDPOINT_URL.
+#
+# Every Durable Object reports the isolate it runs in, which is its home thread's, and the
+# instance's first thread is the only one that serves the datagram socket `udp`, whose Worker
+# answers with the isolate of the first thread's copy of `main`.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = .cluster,
+);
+
+# As `config`, with a stop timeout of 8 s: the handoff ends 6 s into it, the instance releases
+# what it has stopped by 6.6 s and stops waiting for its connections at 7.2 s
+# (cluster/logic/handoff.rs).
+const shortStop :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 8000,
+    unsafeTimeDivisor = 4,
+  ),
+);
+
+# As `config`, with a tenth of the default lease rather than a quarter: a loop that makes no
+# progress for 6 s fences the instance.
+const shortLease :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 10000,
+    unsafeTimeDivisor = 10,
+  ),
+);
+
+const services :List(Workerd.Service) = [
+  ( name = "local",
+    disk = (
+      writable = true,
+      allowDotfiles = true,
+    )
+  ),
+
+  ( name = "main",
+    worker = (
+      modules = [
+        ( name = "cluster-threads-worker.js", esModule = embed "cluster-threads-worker.js" ),
+      ],
+      compatibilityDate = "2026-01-01",
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [
+        ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+        ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+        ( name = "BLOBS", service = "blobs" ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "Counter", uniqueKey = "cluster-threads-counter", enableSql = true ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+      cacheApiOutbound = "cache",
+    )
+  ),
+
+  # Answers each datagram with what `main` answers `/thread` on the thread that serves the
+  # datagram, the first: a service binding reaches the Worker of the same thread.
+  ( name = "probe",
+    worker = (
+      modules = [
+        ( name = "cluster-threads-probe.js", esModule = embed "cluster-threads-probe.js" ),
+      ],
+      compatibilityDate = "2026-01-01",
+      compatibilityFlags = ["experimental"],
+      bindings = [ ( name = "MAIN", service = "main" ) ],
+    )
+  ),
+
+  # A directory of the cluster's bucket, which each thread serves itself.
+  ( name = "blobs", bucket = ( path = "blobs" ) ),
+  # The instances' shared Cache API, which the threads other than the first reach through it;
+  # its directory is given on the command line.
+  ( name = "cache", cache = () ),
+];
+
+const sockets :List(Workerd.Socket) = [
+  ( name = "http", address = "*:0", http = (), service = "main" ),
+  ( name = "udp", address = "127.0.0.1:0", udp = ( idleTimeoutMs = 200 ), service = "probe" ),
+];
+
+const bucketOptions :List(Text) = [
+  "aws_region=us-east-1",
+  "aws_access_key_id=wdtest",
+  "aws_secret_access_key=wdtest-secret",
+];
+
+# A quarter of the default lease, as in cluster-test.wd-test (`TIME_DIVISOR` in the driver).
+const cluster :Workerd.ClusterConfig = (
+  bucket = "s3://wdtest/cluster",
+  bucketOptions = .bucketOptions,
+  address = "127.0.0.1:0",
+  key = "test-cluster-shared-secret-of-32-bytes",
+  stopTimeoutMs = 10000,
+  unsafeTimeDivisor = 4,
+);
