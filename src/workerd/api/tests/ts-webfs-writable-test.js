@@ -86,9 +86,11 @@ export const createWritableDescriptorMatchesJsg = {
 };
 
 // There is no user-reachable constructor, matching `constructor() = delete` on
-// the C++ class.
+// the C++ class. Its length is 0, as WebIDL gives an interface without a
+// constructor operation.
 export const constructorIsNotCallable = {
   test() {
+    strictEqual(FileSystemWritableFileStream.length, 0);
     throws(() => new FileSystemWritableFileStream(), TypeError);
     // Passing something in the marker position must not get past the gate.
     throws(() => new FileSystemWritableFileStream({}, {}), TypeError);

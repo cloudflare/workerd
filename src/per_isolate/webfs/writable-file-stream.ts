@@ -78,13 +78,15 @@ function isActualObject(value: unknown): boolean {
 class FileSystemWritableFileStream extends WritableStream<unknown> {
   #context: FileSystemWriteContext;
 
-  constructor(marker?: unknown, context?: FileSystemWriteContext) {
-    if (marker !== kConstruct) {
+  // A rest parameter, so that the constructor's length is 0, as WebIDL gives an
+  // interface without a constructor operation.
+  constructor(...args: [marker?: unknown, context?: FileSystemWriteContext]) {
+    if (args[0] !== kConstruct) {
       throw new TypeError('Illegal constructor');
     }
     // The sink closures capture the context rather than `this`, which is in its
     // temporal dead zone until super() returns.
-    const ctx = context as FileSystemWriteContext;
+    const ctx = args[1] as FileSystemWriteContext;
     const sink = {
       __proto__: kNullProtoObject,
       write(chunk: unknown): Promise<void> {
