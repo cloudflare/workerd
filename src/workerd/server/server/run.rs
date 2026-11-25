@@ -745,21 +745,26 @@ fn bazel_test_shard() -> Result<Option<(usize, usize)>> {
         std::fs::File::create(&status)
             .map_err(|e| kj::failed!("TEST_SHARD_STATUS_FILE \"{status}\": {e}"))?;
     }
+    parse_shard(&index, &total).map(Some)
+}
+
+/// This shard's `(index, total)`, from the values of `TEST_SHARD_INDEX` and `TEST_TOTAL_SHARDS`.
+fn parse_shard(index: &str, total: &str) -> Result<(usize, usize)> {
     let parse = |name: &str, value: &str| {
         value
             .parse::<usize>()
             .map_err(|e| kj::failed!("{name} \"{value}\": {e}"))
     };
     let (index, total) = (
-        parse("TEST_SHARD_INDEX", &index)?,
-        parse("TEST_TOTAL_SHARDS", &total)?,
+        parse("TEST_SHARD_INDEX", index)?,
+        parse("TEST_TOTAL_SHARDS", total)?,
     );
     if index >= total {
         return Err(kj::failed!(
             "TEST_SHARD_INDEX {index} is not below TEST_TOTAL_SHARDS {total}"
         ));
     }
-    Ok(Some((index, total)))
+    Ok((index, total))
 }
 
 /// The cases that shard `index` of `total` runs: every `total`-th one, starting at `index`.

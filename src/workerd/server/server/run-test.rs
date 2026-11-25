@@ -23,3 +23,22 @@ fn shards_beyond_the_cases_are_empty() {
 fn one_shard_runs_every_case() {
     assert_eq!(shard_cases(vec!["a", "b", "c"], (0, 1)), ["a", "b", "c"]);
 }
+
+#[test]
+fn shard_variables_parse_to_index_and_total() {
+    assert_eq!(parse_shard("0", "1").ok(), Some((0, 1)));
+    assert_eq!(parse_shard("2", "3").ok(), Some((2, 3)));
+}
+
+#[test]
+fn shard_variables_that_are_not_numbers_are_refused() {
+    assert!(parse_shard("one", "3").is_err());
+    assert!(parse_shard("1", "").is_err());
+    assert!(parse_shard("-1", "3").is_err());
+}
+
+#[test]
+fn shard_index_must_be_below_the_total() {
+    assert!(parse_shard("3", "3").is_err());
+    assert!(parse_shard("0", "0").is_err());
+}
