@@ -705,6 +705,12 @@ pub mod ffi {
             object: &Local,
             names: &mut Vec<Local>,
         ) -> bool;
+        pub unsafe fn local_object_get_property_names_with_prototypes(
+            isolate: *mut Isolate,
+            object: &Local,
+            names: &mut Vec<Local>,
+        ) -> bool;
+        pub unsafe fn local_value_to_object(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
         pub unsafe fn local_object_set_prototype(
             isolate: *mut Isolate,
             object: &Local,
@@ -2142,6 +2148,28 @@ impl<'s, T> Local<'s, T> {
     pub fn is_null_or_undefined(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_null_or_undefined(self.raw()) }
+    }
+
+    /// The value as an object, like JS `Object(value)` for anything but `null` and `undefined`:
+    /// an object is itself, and a primitive is wrapped, so that its prototype's properties can be
+    /// read.
+    ///
+    /// # Errors
+    ///
+    /// For `null` or `undefined`, a `TypeError` is pending, and the error is one for which
+    /// [`Error::is_pending`] is true, as it is if an exception or a termination is already
+    /// pending.
+    pub fn to_object(self, lock: &mut Lock<'s>) -> crate::Result<Local<'s, Object>> {
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_value_to_object(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                ))
+            })
+        })
     }
 
     /// Returns true if the value is a JavaScript object.
@@ -4782,6 +4810,41 @@ impl<'s> Local<'s, Object> {
             // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
             let ok = unsafe {
                 ffi::local_object_get_own_property_names(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    &mut names,
+                )
+            };
+            Ok(ok.then_some(names))
+        })?;
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                // SAFETY: V8 created the names in the current HandleScope, as strings.
+                let name: Local<'s, String> = unsafe { Local::from_ffi(name) };
+                debug_assert!(Local::<Value>::from(name).is_string());
+                name
+            })
+            .collect())
+    }
+
+    /// Returns the names of the object's string-keyed properties, own and inherited from its
+    /// prototype chain, enumerable or not, without integer indices: what completing a property
+    /// name after `obj.` offers, as Node's REPL does. A name inherited from more than one
+    /// prototype comes once.
+    ///
+    /// # Errors
+    ///
+    /// As for [`keys`](Self::keys).
+    pub fn property_names_with_prototypes(
+        self,
+        lock: &mut Lock<'s>,
+    ) -> crate::Result<Vec<Local<'s, String>>> {
+        let names = call_into_js(lock, |lock| {
+            let mut names = Vec::new();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_get_property_names_with_prototypes(
                     lock.isolate().as_ffi(),
                     self.raw(),
                     &mut names,
