@@ -28,8 +28,8 @@ constructor — so that method is replaced on the prototype as well.
 
 `digest-stream.ts` owns only the stream semantics. Hashing is done by a native
 `DigestContextHandle` (`src/workerd/api/crypto/crypto.h`), reached through
-`utils.createDigestContext(name)`, which is registered in
-`src/workerd/api/per-isolate-bootstrap.c++` via the deliberately crypto-free
+`utils.createDigestContext(name)`, which is registered in `makeApiNatives()`
+(`src/workerd/api/per-isolate-bootstrap.c++`) via the deliberately crypto-free
 declaration in `src/workerd/api/crypto/digest-bootstrap.h`.
 
 Two parts of that contract are easy to break:

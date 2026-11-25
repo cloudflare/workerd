@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/snapshot.h>
 
 #include <v8-exception.h>
 #include <v8-value-serializer.h>
@@ -47,8 +48,19 @@ class BootstrapModules {
   // not run JavaScript.
   virtual kj::Maybe<JsValue> tryGetLoadedExports(Lock& js, kj::StringPtr specifier) = 0;
 
+  // The loader whose state these are, by which it finds its own in the slot without RTTI, or
+  // none for a test's stand-in.
+  kj::Maybe<BootstrapLoader> getLoader() const {
+    return loader;
+  }
+
  protected:
+  BootstrapModules() = default;
+  explicit BootstrapModules(BootstrapLoader loader): loader(loader) {}
   ~BootstrapModules() noexcept(false) = default;
+
+ private:
+  kj::Maybe<BootstrapLoader> loader;
 };
 
 // Returns the BootstrapModules of the current context, if any.

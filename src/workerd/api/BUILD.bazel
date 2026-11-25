@@ -769,6 +769,17 @@ kj_test(
     ],
 )
 
+# Sets the autogates for each case itself, to run it with each loader.
+kj_test(
+    src = "per-isolate-bootstrap-test.c++",
+    generate_all_autogates_variant = False,
+    deps = [
+        "//src/workerd/api/tests/embedder-bootstrap:embedder_bootstrap_test",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 kj_test(
     src = "per-isolate-embedder-bootstrap-test.c++",
     deps = [

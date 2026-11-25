@@ -1,8 +1,46 @@
 # src/per_isolate/
 
 Per-isolate JavaScript/TypeScript bootstrap: scripts that run synchronously
-at context creation, before any user code. C++ entry point:
-`src/workerd/api/per-isolate-bootstrap.c++`.
+at context creation, before any user code. Entry point:
+`runPerIsolateBootstrap()` in `src/workerd/api/per-isolate-bootstrap.c++`,
+which runs one of two loaders (see LOADERS).
+
+## LOADERS
+
+The `RUST_PER_ISOLATE_BOOTSTRAP` autogate picks the loader when a context is
+created: the Rust crate `src/workerd/api/per-isolate-bootstrap/` with the
+gate on, the C++ loader in `per-isolate-bootstrap.c++` otherwise. A context
+restored from a startup snapshot keeps the loader that the zygote ran,
+which the snapshot artifact records, whatever the gate says. Both loaders run
+the same scripts the same way. The gate is read only there; everything after
+(`requireBootstrapExport()`, the deserializer's lookups, the snapshot) works
+with whichever loader's state the context holds.
+
+- The pseudo-globals are the parameters of every script's function, named
+  by `jsg::BOOTSTRAP_FUNCTION_PARAMS` in `src/workerd/jsg/modules.capnp`.
+  Both loaders and the compile-cache generator
+  (`src/rust/gen-compile-cache/`) read that list, and the cached code is
+  valid only for it, so a new pseudo-global goes there and nowhere else.
+- `utils` natives come in two kinds:
+  - A native that forwards to a C++ API (compression, digest, filesystem,
+    events, `Performance`, serialization) stays in C++, in
+    `API_NATIVE_NAMES` and `makeApiNatives()`. Both loaders use them; the
+    Rust one through `ScriptHost::api_natives()` (`ffi.h` in the crate).
+  - A native that needs only V8 (the `is*()` type checks, promise and
+    symbol helpers, `utf8Length()`, `defineLazyDataProperty()`) is
+    written in Rust, in the crate's `utils.rs`, and again in C++ in
+    `GENERIC_NATIVE_NAMES` and `makeGenericNatives()` until the C++ loader
+    is removed. Keep the two in step: same name, same behaviour.
+- The loaders differ in ways the scripts must not rely on:
+  - The Rust loader gives a native a fast call only when the isolate
+    enables fast API calls; the C++ loader always gives one, and V8 uses it
+    only when fast calls are on.
+  - `utils` lists the API natives before the V8-only ones in the Rust
+    loader, and after them in the C++ one. Scripts must not depend on the
+    order of its keys.
+  - A rejected compile cache logs a warning naming the script. The Rust
+    loader's comes from Rust JSG's compile shim, so its text doesn't
+    mention the bootstrap.
 
 ## EXECUTION MODEL
 
@@ -153,7 +191,7 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
     destructuring, which read the prototype chain for a property the data
     lacks. It does not use other objects in it, whose own `deserialize()`
     may not have run yet.
-- **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
+- **ASCII runtime text**: both loaders hand V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as
   its UTF-8 bytes, mangled. Error messages use plain ASCII punctuation (no

@@ -50,11 +50,12 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   CppHeapPointerTag the original's wrapper had and, for a stateful type, a snapshotClone() of
 //   the zygote's original. A stateless type (Object::jsgSnapshotStateless) is recorded by its tag
 //   alone. Slots whose index never reached the blob hold no transfer.
-// * `bootstrapStateIndex` is the context-level SnapshotCreator::AddData index of the per-isolate
+// * `bootstrapState` is the context-level SnapshotCreator::AddData index of the per-isolate
 //   bootstrap's JS-held state (require(), primordials, the compatFlags, autogates and utils
 //   objects, the require() cache), bundled into one object and pinned by the zygote right before
-//   CreateBlob. A worker started from the snapshot rebuilds its C++ BootstrapState from it instead
-//   of running the bootstrap scripts again. None when the zygote ran without the per-isolate
+//   CreateBlob, and the loader that pinned it. A worker started from the snapshot rebuilds that
+//   loader's state from it instead of running the bootstrap scripts again: the functions in it
+//   work only with their own loader's state. None when the zygote ran without the per-isolate
 //   bootstrap.
 // * `restoreTimeGlobalsIndex` is the context-level AddData index of the record of what the
 //   zygote's top level left of the properties V8 adds to a context only on restore
@@ -80,6 +81,10 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   callback and receiver its registration derived. The fresh ServiceWorkerGlobalScope built by
 //   newContext() at load discards the zygote's listener map, so the loading worker re-registers
 //   each listener in C++ (EventTarget::restoreSnapshotListener()), without running JavaScript.
+// The two loaders of the per-isolate bootstrap (api/per-isolate-bootstrap.h): the C++ one, and
+// the Rust one under the RUST_PER_ISOLATE_BOOTSTRAP autogate.
+enum class BootstrapLoader : uint8_t { CPP, RUST };
+
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -110,7 +115,11 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   };
   kj::Vector<LiveWrappable> liveWrappables;
 
-  kj::Maybe<size_t> bootstrapStateIndex;
+  struct PinnedBootstrapState {
+    size_t index;
+    BootstrapLoader loader;
+  };
+  kj::Maybe<PinnedBootstrapState> bootstrapState;
 
   // The context-level AddData index of the state the context global's C++ object holds for its
   // JavaScript (the process and Buffer values), when the zygote's top level left any. The

@@ -38,12 +38,13 @@ class EmbedderBootstrap {
   }
 
   // Whether `specifier`, after normalization, names a script in the embedder's namespace, whether
-  // or not the bundle has it.
-  bool isInNamespace(kj::StringPtr specifier) const {
-    return specifier.startsWith(prefix);
+  // or not the bundle has it. Specifiers are taken as character arrays, NUL-terminated or not, so
+  // that the Rust loader passes its own without copying them.
+  bool isInNamespace(kj::ArrayPtr<const char> specifier) const {
+    return specifier.startsWith(prefix.asArray());
   }
 
-  kj::Maybe<jsg::Module::Reader> tryGetScript(kj::StringPtr specifier) const;
+  kj::Maybe<const jsg::Module::Reader&> tryGetScript(kj::ArrayPtr<const char> specifier) const;
 
  private:
   kj::String prefix;
@@ -69,7 +70,8 @@ class EmbedderBootstrap {
 // already in the context, and running them again would install a second set of
 // classes beside the one the zygote's top-level code captured. Instead the
 // bootstrap state is rebuilt from the object the zygote pinned into the snapshot
-// (jsg::SnapshotArtifact::bootstrapStateIndex), which V8 hands out once; the
+// (jsg::SnapshotArtifact::bootstrapState), which V8 hands out once, by the loader
+// that the zygote ran, whatever the RUST_PER_ISOLATE_BOOTSTRAP autogate says; the
 // isolate's `embedder` must then be the zygote's.
 //
 // The bootstrap state (require cache, compat flags) is heap-allocated and stored
@@ -94,8 +96,8 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);
 // Zygote only (preparing a startup snapshot): bundles the bootstrap's JS-held state
 // (require(), the embedder's require() if any, primordials, the
 // compatFlags/autogates/utils objects, the require() cache) into one object, pins
-// it into the snapshot and records the index in
-// jsg::SnapshotArtifact::bootstrapStateIndex, then releases the C++ bootstrap
+// it into the snapshot and records its index and the loader in
+// jsg::SnapshotArtifact::bootstrapState, then releases the loader's bootstrap
 // state exactly as cleanupPerIsolateBootstrap() does.
 void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context);
 

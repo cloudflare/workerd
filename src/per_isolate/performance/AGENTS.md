@@ -34,7 +34,7 @@ is on.
 
 The native half is declared in `src/workerd/api/performance-bootstrap.h`,
 implemented in `performance.c++`, and wired into `utils` in
-`src/workerd/api/per-isolate-bootstrap.c++`. `createUtilsObject()` builds
+`src/workerd/api/per-isolate-bootstrap.c++`. `makeApiNatives()` builds
 these natives only when the autogate is on, and otherwise leaves them off
 `utils`, so with the gate off the bootstrap neither depends on `Performance`
 nor pays for the template and tag-range lookups:
