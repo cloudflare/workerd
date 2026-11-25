@@ -122,6 +122,75 @@ test(`objects on two threads call each other in a cycle ${on}`, () =>
     );
   }));
 
+test(`an eviction from a third thread waits for a call cycle through the object ${on}`, () =>
+  withServer(THREADS, async (server) => {
+    const all = await threadsOf(server);
+    // An object for each pair of homes, on each thread of the pair.
+    const byHome = await homes(server, all, {
+      prefix: 'evict-cycle',
+      per: all.length,
+    });
+    await Promise.all(
+      pairs(all).map(async ([homeA, homeB]) => {
+        const a = byHome.get(homeA)[all.indexOf(homeB)];
+        const b = byHome.get(homeB)[all.indexOf(homeA)];
+        // The cycle is served by one of the other two threads, the hook by the other.
+        const [front, evicting] = all.filter((f) => f !== homeA && f !== homeB);
+        const [cycle, hook] = await Promise.all([
+          get(server, `/cycle-held?a=${a}&b=${b}`, front),
+          (async () => {
+            // A waits for B, which holds its call back to A.
+            for (let tries = 0; ; tries++) {
+              const { held } = await get(server, `/held?name=${b}`);
+              if (held === 1) break;
+              assert(tries < TRIES, `${b} holds no call back to ${a}`);
+              await scheduler.wait(10);
+            }
+            return await get(
+              server,
+              `/evict-during?name=${a}&b=${b}&ms=300`,
+              evicting
+            );
+          })(),
+        ]);
+        const { instance } = cycle;
+        assert.strictEqual(hook.error, null);
+        assert.deepStrictEqual(cycle, {
+          front,
+          isolate: homeA,
+          instance,
+          startedAt: cycle.startedAt,
+          endedAt: cycle.endedAt,
+          pong: {
+            isolate: homeB,
+            instance: cycle.pong.instance,
+            released: true,
+            calledBackAt: cycle.pong.calledBackAt,
+            // B called back the instance that waits for it, by JS RPC and by fetch: the
+            // eviction did not end it meanwhile.
+            rpc: { isolate: homeA, instance },
+            fetched: { isolate: homeA, instance },
+          },
+        });
+        assert.strictEqual(hook.released, 1);
+        // The hook was called while A's call was in flight, B called back after that, and the
+        // hook resolved only once the cycle had ended.
+        assert(
+          cycle.startedAt <= hook.calledAt && hook.calledAt < cycle.endedAt,
+          `the hook was called at ${hook.calledAt}, not during ${cycle.startedAt}-${cycle.endedAt}`
+        );
+        assert(cycle.pong.calledBackAt >= hook.releasedAt);
+        assert(
+          hook.resolvedAt >= cycle.endedAt,
+          `the hook resolved ${cycle.endedAt - hook.resolvedAt} ms before the cycle ended`
+        );
+        // The next call is a new instance of A, at its home.
+        assert.strictEqual(hook.after.isolate, homeA);
+        assert.notStrictEqual(hook.after.instance, instance);
+      })
+    );
+  }));
+
 test(`an alarm fires once, at the object's home ${on}`, () =>
   withServer(THREADS, async (server) => {
     const all = await threadsOf(server);

@@ -59,6 +59,8 @@ export class Counter extends DurableObject {
   #messages = 0;
   #order = [];
   #slowCalls = 0;
+  #held = 0;
+  #releases = [];
   // What the body of the last `/echo-digest` request was: `{ digest, bytes }`, once it ended.
   #received;
 
@@ -129,6 +131,51 @@ export class Counter extends DurableObject {
 
   finish() {
     return this.where();
+  }
+
+  // As `ping`, but `other` holds its call back (`pongHeld`) until it is released: with when this
+  // call started and when it ended.
+  async pingHeld(other) {
+    const startedAt = Date.now();
+    const pong = await other.pongHeld(this.ctx.id.name);
+    return { ...this.where(), startedAt, endedAt: Date.now(), pong };
+  }
+
+  // As `pong`, once `release()` was called, or after 10 seconds: with when it called back.
+  async pongHeld(name) {
+    this.#held++;
+    let timer;
+    const released = await Promise.race([
+      new Promise((resolve) => this.#releases.push(() => resolve(true))),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), 10_000);
+      }),
+    ]);
+    clearTimeout(timer);
+    this.#held--;
+    const calledBackAt = Date.now();
+    const back = this.env.COUNTER.getByName(name);
+    const rpc = await back.finish();
+    const response = await back.fetch('http://object/finish');
+    return {
+      ...this.where(),
+      released,
+      calledBackAt,
+      rpc,
+      fetched: await response.json(),
+    };
+  }
+
+  // How many calls of `pongHeld()` wait to be released.
+  held() {
+    return this.#held;
+  }
+
+  // Releases the calls of `pongHeld()` that wait: how many there were.
+  release() {
+    const releases = this.#releases.splice(0);
+    for (const release of releases) release();
+    return releases.length;
   }
 
   // `service` is a service binding of the caller's thread.
@@ -567,6 +614,38 @@ export default {
         const a = env.COUNTER.getByName(query.get('a'));
         const b = env.COUNTER.getByName(query.get('b'));
         return Response.json({ front, ...(await a.ping(b)) });
+      }
+      case '/cycle-held': {
+        // As `/cycle`, with `b` holding its call back to `a` until `/evict-during` releases it.
+        const a = env.COUNTER.getByName(query.get('a'));
+        const b = env.COUNTER.getByName(query.get('b'));
+        return Response.json({ front, ...(await a.pingHeld(b)) });
+      }
+      case '/held':
+        return Response.json({ front, held: await counter().held() });
+      case '/evict-during': {
+        // Calls the eviction hook of the object `name`, then, `ms` milliseconds later, releases
+        // the calls back that the object `b` holds; once the hook resolved, calls the object
+        // again. When each happened, and where the object runs then.
+        const calledAt = Date.now();
+        const evicted = unsafe.evict(counter()).then(
+          () => ({ error: null, resolvedAt: Date.now() }),
+          (error) => ({ error: error.message })
+        );
+        await scheduler.wait(Number(query.get('ms')));
+        const releasedAt = Date.now();
+        const released = await env.COUNTER.getByName(query.get('b')).release();
+        const { error, resolvedAt } = await evicted;
+        if (error !== null) return Response.json({ front, error });
+        return Response.json({
+          front,
+          error,
+          calledAt,
+          releasedAt,
+          released,
+          resolvedAt,
+          after: await env.COUNTER.getByName(name).where(),
+        });
       }
       case '/slow': {
         const ms = Number(query.get('ms'));
