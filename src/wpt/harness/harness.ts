@@ -740,6 +740,10 @@ class Stats {
     return [this.moduleBase, ...this.coverage.toList(), ...this.pass.toList()];
   }
 }
+
+// Counts test units (see testUnits()), as WPT counts tests: a file that splits into range variants
+// counts once per variant. (Counted by file, it would count once in each shard that runs some of its
+// variants, since wpt_logs.py adds up the stats of a target's shards.)
 class CoverageStats {
   ok: number = 0;
   disabled: number = 0;
