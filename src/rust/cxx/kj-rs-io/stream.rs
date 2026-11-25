@@ -516,18 +516,25 @@ impl TokioStream {
     /// The connected Unix-domain peer's process credentials, with KJ's validity rules
     /// (`kj/async-io-unix.c++` `getIdentity`): a pid is reported only if positive, a uid only
     /// if not `(uid_t)-1`. tokio reads `SO_PEERCRED` (Linux) / `LOCAL_PEERCRED` +
-    /// `LOCAL_PEERPID` (macOS, BSDs) for us.
+    /// `LOCAL_PEERPID` (macOS, BSDs) for us. macOS fails those with `ENOTCONN` once the peer has
+    /// closed, even for a connection still waiting in the listen backlog; such a peer has no
+    /// credentials, and the stream's next read reports EOF.
     fn peer_credentials(&self) -> Result<crate::ffi::PeerCredentials> {
         match &self.shared().socket {
             #[cfg(unix)]
             Socket::Unix(s) => {
-                let cred = s.peer_cred().map_err(op("getsockopt(SO_PEERCRED)"))?;
-                let pid = cred.pid().filter(|pid| *pid > 0);
+                let cred = match s.peer_cred() {
+                    Ok(cred) => Some(cred),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotConnected => None,
+                    Err(e) => return Err(op("getsockopt(SO_PEERCRED)")(e)),
+                };
+                let pid = cred.and_then(|c| c.pid()).filter(|pid| *pid > 0);
+                let uid = cred.map(|c| c.uid()).filter(|uid| *uid != u32::MAX);
                 Ok(crate::ffi::PeerCredentials {
                     has_pid: pid.is_some(),
                     pid: pid.unwrap_or(0),
-                    has_uid: cred.uid() != u32::MAX,
-                    uid: cred.uid(),
+                    has_uid: uid.is_some(),
+                    uid: uid.unwrap_or(0),
                 })
             }
             Socket::Tcp(_) => Err(KjIoError::other(
