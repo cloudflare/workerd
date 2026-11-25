@@ -146,6 +146,34 @@ struct BuildRtti<Configuration, T, std::void_t<typename T::JsgRttiDelegate>> {
   }
 };
 
+// Rust structures
+//
+// A C++ type that converts to/from a Rust JSG resource (src/rust/jsg) can describe itself as that
+// resource by naming its structure:
+//
+//     class MyType {
+//      public:
+//       struct JsgRttiRustStructure {
+//         static constexpr kj::StringPtr NAME = "SomeType"_kj;
+//         static constexpr kj::StringPtr IDENTITY = "some_crate::SomeType"_kj;
+//       };
+//       ...
+//     };
+//
+// NAME is the structure's declared name, and IDENTITY is the Rust type's
+// `std::any::type_name`, which Rust RTTI writes as its fully qualified name. RTTI refers to
+// the structure without describing it, so the RTTI export must describe the Rust type too:
+// register it with `jsg::modules::add_type`, unless a Rust module already reaches it.
+template <typename Configuration, typename T>
+  requires requires { typename T::JsgRttiRustStructure; }
+struct BuildRtti<Configuration, T> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    auto structure = builder.initStructure();
+    structure.setName(T::JsgRttiRustStructure::NAME);
+    structure.setFullyQualifiedName(T::JsgRttiRustStructure::IDENTITY);
+  }
+};
+
 // Primitives
 
 template <typename Configuration>

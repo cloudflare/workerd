@@ -87,6 +87,11 @@ class TestHarness {
 // `Worker::Isolate` does, the isolate-level JSG switches derived from them.
 kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api);
 
+// Has `registerTypes` register types, describes them in an RTTI context whose compatibility flags
+// are `flags`, as the RTTI encoder does, and returns the context's encoded structure groups.
+::rust::Vec<uint8_t> describe_registered_types(::rust::Slice<const uint8_t> flags,
+    ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerTypes);
+
 // Builds a startup snapshot the way a Worker's zygote does and starts an isolate from it. Calls
 // `topLevel` in a context of the zygote, with its Rust realm created from `flags`, and then, if the
 // snapshot was created, `restored` in the context of a new isolate started from it. Returns why the

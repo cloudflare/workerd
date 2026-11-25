@@ -59,6 +59,12 @@ mod ffi {
             fast_api: FastApi,
         ) -> Result<KjOwn<TestHarness>>;
 
+        /// See [`crate::describe_registered_types`].
+        fn describe_registered_types(
+            flags: &[u8],
+            register_types: fn(Pin<&mut ModuleRegistry>),
+        ) -> Vec<u8>;
+
         /// See [`crate::snapshot_round_trip`].
         pub unsafe fn snapshot_round_trip(
             flags: &[u8],
@@ -369,6 +375,16 @@ where
             std::panic::resume_unwind(payload);
         }
     }
+}
+
+/// Describes the types `register_types` registers as the RTTI encoder does, and returns the
+/// encoded structure groups.
+///
+/// `register_types` registers them as a crate registers the types it passes to JavaScript, with
+/// [`jsg::modules::add_type`]. Every compatibility flag is false.
+pub fn describe_registered_types(register_types: fn(Pin<&mut v8::ffi::ModuleRegistry>)) -> Vec<u8> {
+    let words = flags_words(|_| {});
+    ffi::describe_registered_types(capnp::Word::words_to_bytes(&words), register_types)
 }
 
 /// Builds a startup snapshot with `top_level`, and runs `restored` in an isolate started from it.

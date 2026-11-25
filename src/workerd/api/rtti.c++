@@ -182,6 +182,10 @@ struct EncoderModuleRegistryImpl {
     describe(*rustTypes, specifier);
   }
 
+  void addRustType(::workerd::rust::jsg::TypeDescribeCallback describe) {
+    describe(*rustTypes);
+  }
+
   kj::Vector<ModuleInfo> modules;
   ::rust::Box<::workerd::rust::jsg::RttiContext> rustTypes;
 };

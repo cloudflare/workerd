@@ -50,6 +50,7 @@ mod number;
 mod option;
 mod pending_exception;
 mod promise;
+mod registered_types;
 mod resource_callback;
 mod resource_conversion;
 mod resource_from_cpp;
