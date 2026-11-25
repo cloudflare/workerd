@@ -39,6 +39,13 @@
 //! There is no cap on what a loop has in flight: a cap would leave work queued behind
 //! long-lived items (WebSockets, long polls) with loops free to serve it.
 //!
+//! There is one on what is queued and not yet taken (the queue's limit). Loops that are all
+//! busy take nothing, and whoever pushes must not go on collecting what clients send: a push
+//! waits until the queue has room ([`Queue::push`], [`Queue::room`]), in the order the pushes
+//! were made, and what it would have queued stays with its client meanwhile. An item counts
+//! from its push until a loop takes it or its ticket takes it out; what a loop has taken does
+//! not count, so the limit never keeps a loop from taking.
+//!
 //! An item leaves the queue in one of three ways. A loop takes it ([`Worker::poll_take`]), which
 //! is one step under the queue's lock: a loop that has stopped taking (a dropped [`Worker`])
 //! never holds an item it will not serve, and what it leaves queued is for the others, one of
@@ -62,6 +69,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use futures::task::AtomicWaker;
+use tokio::sync::Semaphore;
 
 /// The front's end of the queue.
 pub struct Queue<T> {
@@ -78,6 +86,10 @@ impl<T> Clone for Queue<T> {
 
 struct Shared<T> {
     state: Mutex<State<T>>,
+    /// The queue's room: a permit for each item that may still be queued. A push takes one
+    /// for its item, and whatever takes the item out of the queue gives it back. Closed once
+    /// the queue takes no more items, so that nobody waits for room.
+    room: Semaphore,
     /// How many items are queued, for a loop about to sleep to read without the lock.
     queued: AtomicUsize,
     /// Every item with a smaller id has been taken: a ticket for one has nothing to remove.
@@ -277,10 +289,13 @@ impl<T> State<T> {
 }
 
 impl<T> Queue<T> {
+    /// A queue that holds `limit` items at most (one at least).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(limit: usize) -> Self {
+        let limit = limit.clamp(1, Semaphore::MAX_PERMITS);
         Self {
             shared: Arc::new(Shared {
+                room: Semaphore::new(limit),
                 state: Mutex::new(State {
                     items: Items::new(),
                     next_id: 0,
@@ -296,17 +311,31 @@ impl<T> Queue<T> {
         }
     }
 
-    /// Queues `item` behind what is queued, and wakes a sleeping loop for it if there is one.
+    /// Queues `item` behind what is queued, once the queue has room for it, and wakes a
+    /// sleeping loop for it if there is one. Pushes that wait for room get it in the order
+    /// they were made. Dropping the future drops the item, queued or not.
     ///
     /// The item stays queued for as long as the ticket is kept, or until a loop takes it. A
-    /// queue that is closed or that the last loop has left drops the item instead.
-    pub fn push(&self, item: T) -> Ticket<T> {
+    /// queue that is closed or that the last loop has left drops the item instead, without
+    /// waiting.
+    pub async fn push(&self, item: T) -> Ticket<T> {
         let shared = &self.shared;
+        // The item has its room from here, and whoever takes it out of the queue frees it. A
+        // closed semaphore is a queue that takes no more.
+        let admitted = shared
+            .room
+            .acquire()
+            .await
+            .map(tokio::sync::SemaphorePermit::forget)
+            .is_ok();
         let mut state = shared.lock();
         let id = state.next_id;
         state.next_id += 1;
-        if state.closed || state.deserted {
+        if !admitted || state.closed || state.deserted {
             drop(state);
+            if admitted {
+                shared.room.add_permits(1);
+            }
             drop(item);
             return Ticket {
                 shared: Arc::clone(shared),
@@ -328,13 +357,22 @@ impl<T> Queue<T> {
         }
     }
 
-    /// Says that nothing more will be pushed. The loops take what is queued, and are then done
-    /// ([`Worker::poll_take`]).
+    /// Resolves once the queue has room for an item, or takes no more. The room is not kept:
+    /// this is for a caller that would bring more work in, such as an accept loop, to wait
+    /// behind the pushes that already wait.
+    pub async fn room(&self) {
+        // Closed is as good as room: nothing waits for a queue that takes no more.
+        drop(self.shared.room.acquire().await);
+    }
+
+    /// Says that nothing more will be pushed: a push made or waiting from here on drops its
+    /// item. The loops take what is queued, and are then done ([`Worker::poll_take`]).
     pub fn close(&self) {
         let mut state = self.shared.lock();
         state.closed = true;
         self.shared.changed(&state);
         drop(state);
+        self.shared.room.close();
     }
 
     /// A loop's end of the queue. The loop takes nothing before its [`Parking`] is told that
@@ -361,12 +399,6 @@ impl<T> Queue<T> {
     }
 }
 
-impl<T> Default for Queue<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Keeps an item queued: dropping it removes the item if no loop has taken it.
 pub struct Ticket<T> {
     shared: Arc<Shared<T>>,
@@ -384,19 +416,19 @@ impl<T> Ticket<T> {
 
 impl<T> Drop for Ticket<T> {
     fn drop(&mut self) {
-        let shared = &self.shared;
         let Some(slot) = self.slot else {
             return;
         };
-        if self.id < shared.taken_through.load(SeqCst) {
+        if self.id < self.shared.taken_through.load(SeqCst) {
             return;
         }
-        let mut state = shared.lock();
+        let mut state = self.shared.lock();
         let Some(removed) = state.items.remove(slot, self.id) else {
             return;
         };
-        shared.changed(&state);
+        self.shared.changed(&state);
         drop(state);
+        self.shared.room.add_permits(1);
         // The item may own a great deal; it is dropped without the lock.
         drop(removed);
     }
@@ -417,23 +449,24 @@ impl<T> Worker<T> {
     /// a caller that is running. The [`InFlight`] counts the item as this loop's until it is
     /// dropped.
     pub fn poll_take(&self, cx: &mut Context<'_>) -> Poll<Option<(T, InFlight)>> {
-        let shared = &self.shared;
         self.me.taker.register(cx.waker());
-        if shared.ended.load(SeqCst) {
+        if self.shared.ended.load(SeqCst) {
             return Poll::Ready(None);
         }
         if !self.me.granted.swap(false, SeqCst) {
             return Poll::Pending;
         }
-        let mut state = shared.lock();
+        let mut state = self.shared.lock();
         let Some((id, item)) = state.items.pop_front() else {
             // Another loop was quicker, or the client went away.
             return Poll::Pending;
         };
-        shared.taken_through.store(id + 1, SeqCst);
+        self.shared.taken_through.store(id + 1, SeqCst);
         self.me.in_flight.fetch_add(1, SeqCst);
-        shared.changed(&state);
+        self.shared.changed(&state);
         drop(state);
+        // Which may wake a push that waits for room.
+        self.shared.room.add_permits(1);
         Poll::Ready(Some((item, InFlight(Arc::clone(&self.me)))))
     }
 
@@ -449,16 +482,16 @@ impl<T> Worker<T> {
 
 impl<T> Drop for Worker<T> {
     fn drop(&mut self) {
-        let shared = &self.shared;
         self.me.gone.store(true, SeqCst);
         self.me.asleep.store(false, SeqCst);
-        let mut state = shared.lock();
+        let mut state = self.shared.lock();
         state.loops.retain(|worker| !Arc::ptr_eq(worker, &self.me));
         if state.loops.is_empty() {
             state.deserted = true;
             let abandoned = state.items.take_all();
-            shared.changed(&state);
+            self.shared.changed(&state);
             drop(state);
+            self.shared.room.close();
             drop(abandoned);
             return;
         }

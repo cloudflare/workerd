@@ -255,7 +255,25 @@ pub struct ServeArgs {
         value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
     )]
     pub front_threads: Option<u32>,
+
+    /// With --threads above one: let <N> requests wait for an event-loop thread before the
+    /// front stops taking more (default: 256).
+    ///
+    /// A request, or a connection of a TCP socket, waits in the front's queue until a thread
+    /// has nothing else to run. When that many wait, the front reads no further requests from
+    /// its connections and accepts no further connections until a thread takes one, so clients
+    /// wait in the listen backlog and behind TCP flow control instead of in the server's
+    /// memory. No request is refused or answered with an error for it.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_FRONT_QUEUE)
+    )]
+    pub front_queue: Option<u32>,
 }
+
+/// The most `--front-queue`: more would not be a limit on anything a process can hold.
+const MAX_FRONT_QUEUE: i64 = 1 << 20;
 
 /// The most `--threads`: every thread compiles its own copy of every Worker, so more than a
 /// machine has cores only costs memory.
@@ -588,8 +606,13 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
 pub fn threads_refused(serve: &ServeArgs, serve_or_test: &ServeOrTestArgs) -> Option<&'static str> {
     if serve.threads <= 1 {
         // One thread accepts its connections itself.
-        return serve.front_threads.map(
-            |_| "--front-threads: There is a front only with more than one thread (--threads).",
+        if serve.front_threads.is_some() {
+            return Some(
+                "--front-threads: There is a front only with more than one thread (--threads).",
+            );
+        }
+        return serve.front_queue.map(
+            |_| "--front-queue: There is a front only with more than one thread (--threads).",
         );
     }
     if !serve_or_test.experimental {

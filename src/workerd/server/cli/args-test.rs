@@ -221,6 +221,8 @@ fn bad_values_are_usage_errors() {
         &["serve", "c.capnp", "--threads"],
         &["serve", "c.capnp", "--front-threads=0"],
         &["serve", "c.capnp", "--front-threads=257"],
+        &["serve", "c.capnp", "--front-queue=0"],
+        &["serve", "c.capnp", "--front-queue=1048577"],
         // Only `serve` has threads.
         &["test", "c.capnp", "--threads=2"],
         &["bench", "c.capnp", "--threads=2"],
@@ -559,6 +561,25 @@ fn the_front_has_threads_only_with_several_loop_threads() {
 }
 
 #[test]
+fn the_front_has_a_queue_only_with_several_loop_threads() {
+    let (serve, _) = serve_args(&["--threads=4", "--front-queue=64"]);
+    assert_eq!(serve.front_queue, Some(64));
+    let (serve, _) = serve_args(&["--threads=4"]);
+    assert_eq!(serve.front_queue, None);
+    for args in [
+        &["--front-queue=64"][..],
+        &["--threads=1", "--front-queue=64"],
+    ] {
+        let (serve, serve_or_test) = serve_args(args);
+        let message = threads_refused(&serve, &serve_or_test).unwrap();
+        assert!(message.starts_with("--front-queue: "), "{message}");
+    }
+    let (serve, serve_or_test) = serve_args(&["--threads=2", "--front-queue=64"]);
+    let message = threads_refused(&serve, &serve_or_test).unwrap();
+    assert!(message.contains("`--experimental`"), "{message}");
+}
+
+#[test]
 fn one_thread_is_refused_nothing() {
     // One thread is the server as it is without the flag, whatever else is given.
     for args in [
@@ -611,6 +632,8 @@ fn several_threads_refuse_what_they_do_not_support() {
         &["--threads=2", "--experimental", "--async-trace=trace"],
         &["--threads=2", "--experimental", "--front-threads=1"],
         &["--threads=2", "--experimental", "--front-threads=256"],
+        &["--threads=2", "--experimental", "--front-queue=1"],
+        &["--threads=2", "--experimental", "--front-queue=1048576"],
     ] {
         assert_eq!(refused(args), None, "{args:?}");
     }

@@ -110,6 +110,9 @@ pub struct RunOptions {
     /// `--front-threads`: the threads of the front that several loop threads are served by;
     /// zero for the default.
     pub front_threads: usize,
+    /// `--front-queue`: how many requests and TCP connections the front's queue holds; zero
+    /// for the default.
+    pub front_queue: usize,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -315,7 +318,13 @@ async fn start(
     let replicas = replicas.filter(|_| !server.report().had_errors() && fronted.any());
     // With several loops the front accepts for all of them, and each serves what it takes from
     // the queue; otherwise this thread accepts for itself.
-    let queue = queue.or_else(|| replicas.is_some().then(front::Queue::new));
+    let queue = queue.or_else(|| {
+        let limit = match options.front_queue {
+            0 => front::DEFAULT_QUEUE_LIMIT,
+            limit => limit,
+        };
+        replicas.is_some().then(|| front::Queue::new(limit))
+    });
     let front_sockets = fronted.serve(queue.as_ref(), &context, &mut listeners)?;
     let (mut threads, mut started) = match (replicas, queue) {
         (Some(replicas), Some(queue)) => {

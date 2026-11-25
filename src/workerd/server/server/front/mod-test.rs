@@ -27,8 +27,13 @@ fn bind() -> (ListenerSockets, u16) {
 
 /// A front with one socket of `protocol`, not serving yet: the front, its queue and the port.
 async fn front(protocol: Protocol) -> (Front, Queue, u16) {
+    front_with_limit(protocol, DEFAULT_QUEUE_LIMIT).await
+}
+
+/// [`front`], whose queue holds `limit` items.
+async fn front_with_limit(protocol: Protocol, limit: usize) -> (Front, Queue, u16) {
     let (sockets, port) = bind();
-    let queue = Queue::new();
+    let queue = Queue::new(limit);
     let socket = FrontSocket {
         index: 3,
         sockets,
@@ -216,5 +221,80 @@ fn stopping_the_front_drops_its_connections_and_their_calls() {
         // The connection is gone; whether that reads as an end or a reset is the system's.
         let _ = client.read_to_end(&mut rest);
         assert!(rest.is_empty());
+    });
+}
+
+/// A client that has sent one request for `path`.
+fn request(port: u16, path: &str) -> TcpStream {
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    client.write_all(request.as_bytes()).unwrap();
+    client
+}
+
+/// The path of the request `work` is.
+fn path_of(work: Option<Work>) -> String {
+    let Some(Work::Http(work)) = work else {
+        panic!("an HTTP request is queued as one");
+    };
+    work.request.uri().path().to_owned()
+}
+
+#[test]
+fn a_full_queue_holds_requests_and_connections_back() {
+    run(async {
+        let (front, queue, port) = front_with_limit(HTTP, 2).await;
+        let worker = queue.worker();
+        front.serve();
+        // More clients than the queue holds, one after the other.
+        let mut clients = Vec::new();
+        for index in 0..6 {
+            clients.push(request(port, &format!("/{index}")));
+            if index < 2 {
+                eventually("the request is queued", || queue.len() == index + 1).await;
+            }
+        }
+        // No loop takes anything: the queue stays at its limit, whatever the clients sent.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(queue.len(), 2);
+        // Each item a loop takes makes room for one more, in the order the clients came, and
+        // nobody was answered meanwhile.
+        for index in 0..6 {
+            assert_eq!(path_of(take(&worker).await), format!("/{index}"));
+            let queued = (5 - index).min(2);
+            eventually("the next request is queued", || queue.len() == queued).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert_eq!(queue.len(), queued);
+        }
+    });
+}
+
+// A reset is noticed while nothing is read from the connection, which Windows has no way to do.
+#[cfg(unix)]
+#[test]
+fn a_request_that_waits_for_room_leaves_with_its_client() {
+    run(async {
+        let (front, queue, port) = front_with_limit(HTTP, 1).await;
+        let worker = queue.worker();
+        front.serve();
+        let _first = request(port, "/first");
+        eventually("the request is queued", || queue.len() == 1).await;
+        // The front accepted this connection before the queue was full, or accepts it once it
+        // has room; either way its request is not queued, and the client gives up.
+        let gone = request(port, "/gone");
+        let _last = request(port, "/last");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        socket2::SockRef::from(&gone)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(gone);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(path_of(take(&worker).await), "/first");
+        // A request of a client that is gone may be queued for the moment it takes the front
+        // to notice, and leaves the queue then: the loop is not given it.
+        eventually("the last request is queued", || queue.len() == 1).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(path_of(take(&worker).await), "/last");
+        assert!(queue.is_empty());
     });
 }

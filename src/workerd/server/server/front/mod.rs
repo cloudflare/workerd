@@ -29,10 +29,26 @@
 //! - **A TCP connection** is the accepted transport, after the handshake of a socket with
 //!   implicit TLS; the loop serves it as a `connect()` event.
 //!
-//! A request in flight keeps a [`Call`] on its connection's task. When the client goes away
-//! hyper's serve loop drops it, which takes the request out of the queue if no loop has taken
-//! it, and otherwise has the loop drop the call's KJ promise, as a connection served on the loop
-//! itself would. When the loop is done with the call (or is gone) the `Call` resolves.
+//! A request in flight is a future on its connection's task ([`call`]). When the client goes
+//! away hyper's serve loop drops it, which takes the request out of the queue if no loop has
+//! taken it, and otherwise has the loop drop the call's KJ promise, as a connection served on
+//! the loop itself would. When the loop is done with the call (or is gone) the future resolves.
+//!
+//! # Overload
+//!
+//! The queue holds a limited number of items that no loop has taken ([`DEFAULT_QUEUE_LIMIT`],
+//! `--front-queue`). When loops are all busy, in JavaScript that does not yield for one, the
+//! queue fills, and the front then holds its clients back instead of collecting what they
+//! send: a request that finds the queue full waits on its connection's task, parsed and not
+//! queued, and hyper reads nothing more from that connection, so TCP's flow control holds
+//! the client; and the accept loops accept nothing until the queue has room, so new
+//! connections wait in the listen backlog, as they do when the one thread of a server
+//! without a front is busy. Room is given in the order it was asked for, so the requests
+//! that wait are queued ahead of connections not yet accepted. Nothing is answered with an
+//! error and nothing times out: a request waits for as long as its client does, and leaves
+//! when the client goes away, queued or not. A connection of a TCP socket waits the same
+//! way, accepted and not queued. Requests and connections that a loop has taken do not
+//! count, however long they last.
 //!
 //! # Life
 //!
@@ -58,7 +74,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use futures::FutureExt;
-use futures::future::BoxFuture;
 use futures::future::Either;
 use futures::future::FusedFuture;
 use futures::future::LocalBoxFuture;
@@ -84,6 +99,17 @@ use crate::threads::Phase;
 /// The front's threads when `--front-threads` does not say: accepting, TLS and HTTP framing are
 /// a fraction of what a request costs a loop thread, so a few threads feed many loops.
 pub const DEFAULT_THREADS: usize = 2;
+
+/// How many requests and TCP connections the queue holds when `--front-queue` does not say.
+///
+/// The queue is where work waits for a loop that is free, and a loop takes one item each time
+/// it runs out of other things to do, so a queue deeper than there are loops serves nothing
+/// sooner: what it holds beyond that is only waiting that the server has already taken on.
+/// What each item holds is a parsed request head and, for a client that sends one request
+/// per connection, two descriptors (the socket and the one that watches it for a hang-up).
+/// This many leave a server whose loops are all busy well below the 1024 descriptors a
+/// process commonly gets, and are several times the loops of the largest machine.
+pub const DEFAULT_QUEUE_LIMIT: usize = 256;
 
 /// Connection failures waiting to be logged; further ones are dropped.
 const PENDING_LOG_LINES: usize = 256;
@@ -443,7 +469,11 @@ async fn accept_loop(
     {
         let mut drained = std::pin::pin!(shared.drained());
         loop {
-            let accepting = std::pin::pin!(listener.accept());
+            // A full queue is not given more: the connection waits in the listen backlog.
+            let accepting = std::pin::pin!(async {
+                shared.queue.room().await;
+                listener.accept().await
+            });
             let (socket, peer) = match futures::future::select(drained.as_mut(), accepting).await {
                 Either::Left(_) => break,
                 Either::Right((accepted, _)) => accepted?,
@@ -482,13 +512,13 @@ async fn connection(
             let io = listen::transport(accepted, tls.as_ref(), shared.drained()).await?;
             let dispatch = |request| {
                 let (call, finished) = oneshot::channel();
-                let ticket = shared.queue.push(Work::Http(HttpWork {
+                let work = Work::Http(HttpWork {
                     socket: index,
                     request,
                     cf_blob: cf_blob.clone(),
                     call,
-                }));
-                Call { ticket, finished }.wait()
+                });
+                self::call(shared.queue.clone(), work, finished).boxed()
             };
             let timeout = ServerSettings::default().header_timeout;
             let shutdown = &shared.shutdown;
@@ -514,29 +544,21 @@ async fn connection(
                 peer,
                 starttls,
             };
-            shared.queue.push(Work::Tcp(work)).keep_queued();
+            shared.queue.push(Work::Tcp(work)).await.keep_queued();
             Ok(())
         }
     }
 }
 
-/// A request in flight, for its connection: resolves once the loop that served it is done with
-/// the call. Dropping it takes the request out of the queue, or has the loop drop the call.
-struct Call {
-    ticket: queue::Ticket<Work>,
-    finished: oneshot::Receiver<()>,
-}
-
-impl Call {
-    fn wait(self) -> BoxFuture<'static, ()> {
-        async move {
-            let Self { ticket, finished } = self;
-            // Resolves when the loop drops its end, whether or not the call finished.
-            let _ = finished.await;
-            drop(ticket);
-        }
-        .boxed()
-    }
+/// A request in flight, for its connection: queues `work` once the queue has room for it,
+/// and resolves once the loop that served it is done with the call, which is when it drops the
+/// other end of `finished`. Dropping the future takes the request out of the queue, or has the
+/// loop drop the call; one that still waited for room is just dropped.
+async fn call(queue: Queue, work: Work, finished: oneshot::Receiver<()>) {
+    let ticket = queue.push(work).await;
+    // Resolves when the loop drops its end, whether or not the call finished.
+    let _ = finished.await;
+    drop(ticket);
 }
 
 #[cfg(test)]

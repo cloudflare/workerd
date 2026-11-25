@@ -10,7 +10,19 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::FutureExt;
+
 use super::*;
+
+/// More than any test queues.
+const ROOMY: usize = 1 << 20;
+
+impl<T> Queue<T> {
+    /// Pushes `item` onto a queue that has room for it.
+    fn push_now(&self, item: T) -> Ticket<T> {
+        self.push(item).now_or_never().expect("the queue has room")
+    }
+}
 
 /// A taker's waker that counts its wake-ups.
 struct Wakes {
@@ -123,10 +135,10 @@ impl TestLoop {
 
 #[test]
 fn a_loop_takes_only_when_it_has_nothing_else_to_do() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
-    let _first = queue.push(1);
-    let _second = queue.push(2);
+    let _first = queue.push_now(1);
+    let _second = queue.push_now(2);
     assert_eq!(queue.len(), 2);
     // The loop is awake: nobody wakes it, and a poll for another reason takes nothing.
     assert_eq!(worker.wakes(), 0);
@@ -148,11 +160,11 @@ fn a_loop_takes_only_when_it_has_nothing_else_to_do() {
 
 #[test]
 fn a_push_wakes_one_sleeping_loop_and_no_loop_that_is_awake() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let loops: Vec<_> = (0..4).map(|_| TestLoop::new(&queue)).collect();
     let total = |loops: &[TestLoop]| loops.iter().map(TestLoop::wakes).sum::<usize>();
     // Every loop is awake.
-    let _first = queue.push(1);
+    let _first = queue.push_now(1);
     assert_eq!(total(&loops), 0);
     // Three sleep; the first to find the item queued takes it instead.
     loops[1].parking.before_park();
@@ -163,14 +175,14 @@ fn a_push_wakes_one_sleeping_loop_and_no_loop_that_is_awake() {
     }
     assert_eq!(total(&loops), 1);
     // Each push wakes one of them, and a loop that was woken is not woken again.
-    let _second = queue.push(2);
+    let _second = queue.push_now(2);
     assert_eq!(total(&loops), 2);
-    let _third = queue.push(3);
-    let _fourth = queue.push(4);
+    let _third = queue.push_now(3);
+    let _fourth = queue.push_now(4);
     assert_eq!(total(&loops), 4);
     assert!(loops[1..].iter().all(|worker| worker.wakes() <= 2));
     // No loop sleeps any more: a further push wakes none.
-    let _fifth = queue.push(5);
+    let _fifth = queue.push_now(5);
     assert_eq!(total(&loops), 4);
     let mut taken: Vec<u32> = loops[1..].iter().map(|worker| worker.take().0).collect();
     taken.sort_unstable();
@@ -180,12 +192,12 @@ fn a_push_wakes_one_sleeping_loop_and_no_loop_that_is_awake() {
 
 #[test]
 fn a_push_prefers_the_sleeping_loop_with_the_fewest_items_in_flight() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let busy = TestLoop::new(&queue);
     let free = TestLoop::new(&queue);
     // `busy` holds two items whose requests are suspended.
-    let _a = queue.push(1);
-    let _b = queue.push(2);
+    let _a = queue.push_now(1);
+    let _b = queue.push_now(2);
     busy.parking.before_park();
     let first = busy.take();
     busy.parking.before_park();
@@ -193,7 +205,7 @@ fn a_push_prefers_the_sleeping_loop_with_the_fewest_items_in_flight() {
     busy.sleep();
     free.sleep();
     let (busy_wakes, free_wakes) = (busy.wakes(), free.wakes());
-    let _c = queue.push(3);
+    let _c = queue.push_now(3);
     assert_eq!((busy.wakes(), free.wakes()), (busy_wakes, free_wakes + 1));
     assert_eq!(free.take().0, 3);
     // Once its items are done, `busy` is the one with fewer in flight: `free` still holds one.
@@ -202,7 +214,7 @@ fn a_push_prefers_the_sleeping_loop_with_the_fewest_items_in_flight() {
     busy.sleep();
     free.sleep();
     let (busy_wakes, free_wakes) = (busy.wakes(), free.wakes());
-    let _e = queue.push(5);
+    let _e = queue.push_now(5);
     assert_eq!((busy.wakes(), free.wakes()), (busy_wakes + 1, free_wakes));
     drop(held);
 }
@@ -211,7 +223,7 @@ impl TestLoop {
     /// Pushes `item` and has this loop, about to sleep, take it.
     fn take_after_push(&self, queue: &Queue<u32>, item: u32) -> InFlight {
         // The item stays queued without its ticket only until it is taken, which is now.
-        let ticket = queue.push(item);
+        let ticket = queue.push_now(item);
         self.parking.before_park();
         let (taken, in_flight) = self.take();
         assert_eq!(taken, item);
@@ -222,23 +234,23 @@ impl TestLoop {
 
 #[test]
 fn of_equally_loaded_sleeping_loops_the_last_to_sleep_is_woken() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let loops: Vec<_> = (0..3).map(|_| TestLoop::new(&queue)).collect();
     for worker in &loops {
         worker.parking.before_park();
     }
     // The loop that serves an item sleeps last again, so one item at a time stays on it.
     for item in 0..4 {
-        let _ticket = queue.push(item);
+        let _ticket = queue.push_now(item);
         assert_eq!(loops[2].wakes(), item as usize + 1);
         assert_eq!(loops[2].take().0, item);
         loops[2].sleep();
     }
     assert_eq!((loops[0].wakes(), loops[1].wakes()), (0, 0));
     // An item that arrives while that loop is busy goes to the one that slept last before it.
-    let _ticket = queue.push(10);
+    let _ticket = queue.push_now(10);
     let held = loops[2].take();
-    let _ticket = queue.push(11);
+    let _ticket = queue.push_now(11);
     assert_eq!((loops[0].wakes(), loops[1].wakes()), (0, 1));
     assert_eq!(loops[1].take().0, 11);
     drop(held);
@@ -246,11 +258,11 @@ fn of_equally_loaded_sleeping_loops_the_last_to_sleep_is_woken() {
 
 #[test]
 fn a_dropped_ticket_takes_its_item_out_of_the_queue() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
-    let first = queue.push(1);
-    let second = queue.push(2);
-    let third = queue.push(3);
+    let first = queue.push_now(1);
+    let second = queue.push_now(2);
+    let third = queue.push_now(3);
     drop(second);
     assert_eq!(queue.len(), 2);
     worker.parking.before_park();
@@ -267,10 +279,10 @@ fn a_dropped_ticket_takes_its_item_out_of_the_queue() {
 
 #[test]
 fn a_loop_woken_for_an_item_that_left_takes_nothing() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
     worker.sleep();
-    let ticket = queue.push(1);
+    let ticket = queue.push_now(1);
     assert_eq!(worker.wakes(), 1);
     drop(ticket);
     assert!(worker.takes_nothing());
@@ -278,14 +290,14 @@ fn a_loop_woken_for_an_item_that_left_takes_nothing() {
 
 #[test]
 fn a_loop_that_stops_taking_leaves_the_queue_to_the_others() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let leaving = TestLoop::new(&queue);
     let staying = TestLoop::new(&queue);
     leaving.sleep();
     staying.sleep();
     // The push wakes one of the two; whichever it was, the item is the other's once the first
     // is gone.
-    let _ticket = queue.push(1);
+    let _ticket = queue.push_now(1);
     let woken_first = if leaving.wakes() == 1 {
         leaving
     } else {
@@ -305,7 +317,7 @@ fn a_loop_that_stops_taking_leaves_the_queue_to_the_others() {
 
 #[test]
 fn a_leaving_loop_wakes_a_sleeper_for_what_it_leaves_queued() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let sleeper = TestLoop::new(&queue);
     let leaving = TestLoop::new(&queue);
     // `sleeper` has an item in flight, so of the two sleeping loops the push wakes `leaving`.
@@ -313,7 +325,7 @@ fn a_leaving_loop_wakes_a_sleeper_for_what_it_leaves_queued() {
     sleeper.sleep();
     leaving.sleep();
     let wakes = sleeper.wakes();
-    let _ticket = queue.push(1);
+    let _ticket = queue.push_now(1);
     assert_eq!((leaving.wakes(), sleeper.wakes()), (1, wakes));
     // It leaves instead of taking the item, which nobody else was woken for.
     drop(leaving);
@@ -323,14 +335,14 @@ fn a_leaving_loop_wakes_a_sleeper_for_what_it_leaves_queued() {
 
 #[test]
 fn a_closed_queue_is_served_to_its_end() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
     let idle = TestLoop::new(&queue);
-    let _first = queue.push(1);
+    let _first = queue.push_now(1);
     idle.sleep();
     queue.close();
     // What was queued is still taken; an item pushed after the close is dropped.
-    let _late = queue.push(2);
+    let _late = queue.push_now(2);
     assert_eq!(queue.len(), 1);
     worker.parking.before_park();
     assert_eq!(worker.take().0, 1);
@@ -342,7 +354,7 @@ fn a_closed_queue_is_served_to_its_end() {
 
 #[test]
 fn closing_an_empty_queue_ends_the_loops_at_once() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
     worker.sleep();
     queue.close();
@@ -362,27 +374,27 @@ impl Drop for Dropped {
 #[test]
 fn a_queue_without_loops_drops_its_items() {
     let drops = Arc::new(AtomicUsize::new(0));
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = queue.worker();
-    let _queued = queue.push(Dropped(Arc::clone(&drops)));
+    let _queued = queue.push_now(Dropped(Arc::clone(&drops)));
     assert_eq!(drops.load(SeqCst), 0);
     drop(worker);
     assert_eq!(drops.load(SeqCst), 1);
-    let _refused = queue.push(Dropped(Arc::clone(&drops)));
+    let _refused = queue.push_now(Dropped(Arc::clone(&drops)));
     assert_eq!(drops.load(SeqCst), 2);
     assert!(queue.is_empty());
 }
 
 #[test]
 fn a_loop_that_wakes_for_something_else_hands_its_grant_on() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let idle = TestLoop::new(&queue);
     let woken = TestLoop::new(&queue);
     idle.sleep();
     woken.sleep();
     // The push wakes the loop that slept last, whose thread wakes at that moment for another
     // reason and goes on to other work before its taker has run.
-    let _ticket = queue.push(1);
+    let _ticket = queue.push_now(1);
     assert_eq!((woken.wakes(), idle.wakes()), (1, 0));
     woken.parking.after_unpark();
     woken.parking.before_resume();
@@ -394,18 +406,18 @@ fn a_loop_that_wakes_for_something_else_hands_its_grant_on() {
     // It takes part as before.
     idle.sleep();
     woken.sleep();
-    let _ticket = queue.push(2);
+    let _ticket = queue.push_now(2);
     assert_eq!((woken.wakes(), idle.wakes()), (2, 1));
     assert_eq!(woken.take().0, 2);
 }
 
 #[test]
 fn a_loop_keeps_a_grant_that_no_other_loop_can_use() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let busy = TestLoop::new(&queue);
     let woken = TestLoop::new(&queue);
     woken.sleep();
-    let _ticket = queue.push(1);
+    let _ticket = queue.push_now(1);
     assert_eq!(woken.wakes(), 1);
     woken.parking.after_unpark();
     woken.parking.before_resume();
@@ -416,12 +428,12 @@ fn a_loop_keeps_a_grant_that_no_other_loop_can_use() {
 
 #[test]
 fn a_loop_that_does_not_take_is_not_woken_for_more() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let taking = TestLoop::new(&queue);
     let stuck = TestLoop::new(&queue);
     taking.sleep();
     stuck.sleep();
-    let _first = queue.push(1);
+    let _first = queue.push_now(1);
     assert_eq!((stuck.wakes(), taking.wakes()), (1, 0));
     // Its thread wakes, runs everything that was ready, and sleeps again without its taker
     // having run: what it was woken for goes to a loop that takes.
@@ -432,7 +444,7 @@ fn a_loop_that_does_not_take_is_not_woken_for_more() {
     // While it does not take it is not woken again, by a push or by itself, though it is the
     // loop that went to sleep last.
     taking.sleep();
-    let _second = queue.push(2);
+    let _second = queue.push_now(2);
     assert_eq!((stuck.wakes(), taking.wakes()), (1, 2));
     stuck.parking.after_unpark();
     stuck.parking.before_park();
@@ -442,23 +454,122 @@ fn a_loop_that_does_not_take_is_not_woken_for_more() {
     assert!(taking.takes_nothing());
     taking.sleep();
     stuck.sleep();
-    let _third = queue.push(3);
+    let _third = queue.push_now(3);
     assert_eq!((stuck.wakes(), taking.wakes()), (2, 2));
     assert_eq!(stuck.take().0, 3);
 }
 
+/// A push that is still waiting for room, or the ticket of one that is not.
+fn poll_push<'a>(queue: &'a Queue<u32>, item: u32) -> futures::future::BoxFuture<'a, Ticket<u32>> {
+    let mut push = queue.push(item).boxed();
+    assert!((&mut push).now_or_never().is_none(), "{item} was queued");
+    push
+}
+
+#[test]
+fn a_full_queue_holds_pushes_back_until_it_has_room() {
+    let queue = Queue::new(2);
+    let worker = TestLoop::new(&queue);
+    let first = queue.push_now(1);
+    let _second = queue.push_now(2);
+    // The queue is full: further pushes wait, and so does whoever asks for room.
+    let mut third = poll_push(&queue, 3);
+    let mut fourth = poll_push(&queue, 4);
+    let mut room = queue.room().boxed();
+    assert!((&mut room).now_or_never().is_none());
+    assert_eq!(queue.len(), 2);
+    // A loop that takes an item makes room for the push that has waited longest, and for
+    // that one only.
+    worker.parking.before_park();
+    assert_eq!(worker.take().0, 1);
+    let _third = (&mut third).now_or_never().expect("the third is queued");
+    assert!((&mut fourth).now_or_never().is_none());
+    assert!((&mut room).now_or_never().is_none());
+    assert_eq!(queue.len(), 2);
+    // So does a ticket that takes its item out. The ticket of an item that was taken frees
+    // nothing.
+    drop(first);
+    assert!((&mut fourth).now_or_never().is_none());
+    drop(_third);
+    let _fourth = (&mut fourth).now_or_never().expect("the fourth is queued");
+    assert!((&mut room).now_or_never().is_none());
+    // What the loops have taken does not count: with one item taken and not finished, the
+    // queue has room once the next is taken.
+    worker.parking.before_park();
+    let (taken, _in_flight) = worker.take();
+    assert_eq!(taken, 2);
+    (&mut room).now_or_never().expect("the queue has room");
+    // Asking for room took none of it.
+    let _fifth = queue.push_now(5);
+    assert_eq!(queue.len(), 2);
+    worker.parking.before_park();
+    assert_eq!(worker.take().0, 4);
+    worker.parking.before_park();
+    assert_eq!(worker.take().0, 5);
+}
+
+#[test]
+fn a_push_that_is_given_up_while_it_waits_leaves_nothing_behind() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let queue = Queue::new(1);
+    let worker = queue.worker();
+    let _first = queue.push_now(Dropped(Arc::clone(&drops)));
+    let mut second = queue.push(Dropped(Arc::clone(&drops))).boxed();
+    assert!((&mut second).now_or_never().is_none());
+    let mut third = queue.push(Dropped(Arc::clone(&drops))).boxed();
+    assert!((&mut third).now_or_never().is_none());
+    // Its client went away: the item is dropped, and its turn passes to the next.
+    drop(second);
+    assert_eq!(drops.load(SeqCst), 1);
+    let waker = Waker::noop();
+    worker.parking().before_park();
+    assert!(matches!(
+        worker.poll_take(&mut Context::from_waker(waker)),
+        Poll::Ready(Some(_))
+    ));
+    let _third = (&mut third).now_or_never().expect("the third is queued");
+    assert_eq!(queue.len(), 1);
+}
+
+#[test]
+fn a_queue_that_takes_no_more_keeps_nobody_waiting() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    // Closed, with an item still queued.
+    let queue = Queue::new(1);
+    let _worker = queue.worker();
+    let _first = queue.push_now(Dropped(Arc::clone(&drops)));
+    let mut waiting = queue.push(Dropped(Arc::clone(&drops))).boxed();
+    assert!((&mut waiting).now_or_never().is_none());
+    let mut room = queue.room().boxed();
+    assert!((&mut room).now_or_never().is_none());
+    queue.close();
+    drop((&mut waiting).now_or_never().expect("the push is refused"));
+    (&mut room).now_or_never().expect("nobody waits for room");
+    assert_eq!((drops.load(SeqCst), queue.len()), (1, 1));
+
+    // Left by its last loop.
+    let queue = Queue::new(1);
+    let worker = queue.worker();
+    let _first = queue.push_now(Dropped(Arc::clone(&drops)));
+    let mut waiting = queue.push(Dropped(Arc::clone(&drops))).boxed();
+    assert!((&mut waiting).now_or_never().is_none());
+    drop(worker);
+    drop((&mut waiting).now_or_never().expect("the push is refused"));
+    assert_eq!((drops.load(SeqCst), queue.len()), (3, 0));
+}
+
 #[test]
 fn items_leave_from_anywhere_and_the_rest_keep_their_order() {
-    let queue = Queue::new();
+    let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
-    let mut tickets: Vec<_> = (0..10).map(|item| Some(queue.push(item))).collect();
+    let mut tickets: Vec<_> = (0..10).map(|item| Some(queue.push_now(item))).collect();
     // The newest, the oldest, and some in between, next to each other and apart.
     for item in [9, 0, 4, 5, 7] {
         tickets[item] = None;
     }
     assert_eq!(queue.len(), 5);
     // What is pushed now takes the places of those that left, behind every older item.
-    let _late: Vec<_> = (10..13).map(|item| queue.push(item)).collect();
+    let _late: Vec<_> = (10..13).map(|item| queue.push_now(item)).collect();
     let mut taken = Vec::new();
     for _ in 0..8 {
         worker.parking.before_park();
@@ -467,7 +578,7 @@ fn items_leave_from_anywhere_and_the_rest_keep_their_order() {
     assert_eq!(taken, [1, 2, 3, 6, 8, 10, 11, 12]);
     assert!(queue.is_empty());
     // A ticket whose item was taken, and whose place another item may have, removes nothing.
-    let _next = queue.push(13);
+    let _next = queue.push_now(13);
     drop(tickets);
     assert_eq!(queue.len(), 1);
     worker.parking.before_park();
@@ -482,10 +593,10 @@ fn a_long_queue_is_left_quickly() {
     const ITEMS: usize = 200_000;
     // About as large as the work the front queues.
     type Item = [usize; 32];
-    let queue = Queue::<Item>::new();
+    let queue = Queue::<Item>::new(ROOMY);
     let _worker = queue.worker();
     let mut tickets: Vec<_> = (0..ITEMS)
-        .map(|item| Some(queue.push([item; 32])))
+        .map(|item| Some(queue.push_now([item; 32])))
         .collect();
     let start = std::time::Instant::now();
     // From the middle outwards, which is as far from both ends as an item can be.
@@ -601,7 +712,7 @@ fn stress(round: u64) -> (usize, usize) {
         dropped: counters(),
         gone: AtomicUsize::new(0),
     });
-    let queue = Queue::<Item>::new();
+    let queue = Queue::<Item>::new(STRESS_LIMIT);
     // Few loops in some runs and several in others; two of them stop taking part of the way
     // through. Every loop is registered before the first push: an item is never dropped as
     // deserted.
@@ -635,10 +746,11 @@ fn stress(round: u64) -> (usize, usize) {
                 let mut held = Vec::new();
                 for _ in 0..dice.roll(BURST as u64 + 1) {
                     let id = pushed.fetch_add(1, SeqCst);
-                    let ticket = queue.push(Item {
+                    // The queue is short, so a push often waits for a loop to make room.
+                    let ticket = futures::executor::block_on(queue.push(Item {
                         id,
                         fates: Arc::clone(&fates),
-                    });
+                    }));
                     match dice.roll(4) {
                         // A client that goes away at once, or a little later, while loops
                         // take.
@@ -727,13 +839,16 @@ fn nothing_is_lost_or_taken_twice_under_contention() {
 /// How many runs of [`stress`] the test makes, of 150 bursts each.
 const STRESS_ROUNDS: u64 = 10;
 
+/// The limit of the queue of a [`stress`] run: fewer than its pushers push at once.
+const STRESS_LIMIT: usize = 3;
+
 #[test]
 fn one_pusher_sees_its_items_taken_in_order() {
-    let queue = Queue::<u32>::new();
+    let queue = Queue::<u32>::new(ROOMY);
     let worker = queue.worker();
     let pusher = {
         thread::spawn(move || {
-            let tickets: Vec<_> = (0..5_000).map(|i| queue.push(i)).collect();
+            let tickets: Vec<_> = (0..5_000).map(|i| queue.push_now(i)).collect();
             queue.close();
             tickets
         })

@@ -332,6 +332,12 @@ pub struct RemoteRequest {
 }
 
 impl RemoteRequest {
+    /// The request's target, as the client sent it.
+    #[must_use]
+    pub const fn uri(&self) -> &http::Uri {
+        &self.parts.uri
+    }
+
     /// Calls `handler` with the request, on the calling thread, and answers the connection as
     /// [`serve_connection`] answers its own (module docs): the response the handler sends, the
     /// upgraded transport it takes, or the answer of a call that sends none.
