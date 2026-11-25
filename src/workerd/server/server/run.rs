@@ -732,53 +732,11 @@ impl Running {
     }
 }
 
-/// `(index, total)` when Bazel runs this test as shard `index` of `total` (a test's
-/// `shard_count`), from `TEST_SHARD_INDEX` and `TEST_TOTAL_SHARDS`. Touches the file that
-/// `TEST_SHARD_STATUS_FILE` names, which tells Bazel that the test runner shards. See
-/// <https://bazel.build/reference/test-encyclopedia#test-sharding>.
-fn bazel_test_shard() -> Result<Option<(usize, usize)>> {
-    let var = |name: &str| std::env::var(name).ok();
-    let (Some(index), Some(total)) = (var("TEST_SHARD_INDEX"), var("TEST_TOTAL_SHARDS")) else {
-        return Ok(None);
-    };
-    if let Some(status) = var("TEST_SHARD_STATUS_FILE") {
-        std::fs::File::create(&status)
-            .map_err(|e| kj::failed!("TEST_SHARD_STATUS_FILE \"{status}\": {e}"))?;
-    }
-    parse_shard(&index, &total).map(Some)
-}
-
-/// This shard's `(index, total)`, from the values of `TEST_SHARD_INDEX` and `TEST_TOTAL_SHARDS`.
-fn parse_shard(index: &str, total: &str) -> Result<(usize, usize)> {
-    let parse = |name: &str, value: &str| {
-        value
-            .parse::<usize>()
-            .map_err(|e| kj::failed!("{name} \"{value}\": {e}"))
-    };
-    let (index, total) = (
-        parse("TEST_SHARD_INDEX", index)?,
-        parse("TEST_TOTAL_SHARDS", total)?,
-    );
-    if index >= total {
-        return Err(kj::failed!(
-            "TEST_SHARD_INDEX {index} is not below TEST_TOTAL_SHARDS {total}"
-        ));
-    }
-    Ok((index, total))
-}
-
-/// The cases that shard `index` of `total` runs: every `total`-th one, starting at `index`.
-fn shard_cases<T>(cases: Vec<T>, (index, total): (usize, usize)) -> Vec<T> {
-    cases.into_iter().skip(index).step_by(total).collect()
-}
-
 /// `workerd test`: runs the `test()` handler of every entrypoint matching the patterns (see
-/// `start_local`). When Bazel shards the test, runs only this shard's share of them (see
-/// `shard_cases`).
+/// `start_local`).
 ///
-/// The sockets listen meanwhile (tests can configure them). True if every test this process ran
-/// passed and the patterns matched at least one; `None` for a config `report` refuses, whose
-/// tests do not run.
+/// The sockets listen meanwhile (tests can configure them). True if every test passed and there
+/// was at least one; `None` for a config `report` refuses, whose tests do not run.
 pub async fn test(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -787,16 +745,10 @@ pub async fn test(
     entrypoint_pattern: &str,
 ) -> Result<Option<bool>> {
     let patterns = (service_pattern, entrypoint_pattern);
-    let shard = bazel_test_shard()?;
     let Some((mut running, cases)) =
         start_local(factory, options, report, patterns, "test").await?
     else {
         return Ok(None);
-    };
-    let found = cases.len();
-    let cases = match shard {
-        Some(shard) => shard_cases(cases, shard),
-        None => cases,
     };
 
     // Test harnesses match these lines; they are debug-level because info logging is
@@ -813,23 +765,24 @@ pub async fn test(
         Ok::<bool, crate::Error>(result)
     };
 
-    let failed = running
+    let (passed, failed) = running
         .alongside(async move {
-            let mut failed = 0u32;
+            let (mut passed, mut failed) = (0u32, 0u32);
             for Target { channel, name, .. } in cases {
-                if !run_one(channel, name).await? {
+                if run_one(channel, name).await? {
+                    passed += 1;
+                } else {
                     failed += 1;
                 }
             }
-            Ok(failed)
+            Ok((passed, failed))
         })
         .await?;
 
-    if found == 0 {
+    if passed + failed == 0 {
         tracing::error!("No tests found!");
     }
-    // A shard is left without cases of its own when there are fewer cases than shards.
-    Ok(Some(found > 0 && failed == 0))
+    Ok(Some(passed > 0 && failed == 0))
 }
 
 /// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns.
@@ -885,7 +838,3 @@ pub async fn bench(
         .await?;
     Ok(Some(results))
 }
-
-#[cfg(test)]
-#[path = "run-test.rs"]
-mod tests;
