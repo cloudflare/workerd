@@ -247,8 +247,9 @@ class EsModule final: public Module {
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
     return compileModule(js, newExternalString(js, getEncodedSource().repr), origin, observer,
-        [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+        [&](IsolateCodeCache& cache) -> kj::Maybe<CodeCacheKey> {
       if (type() == Type::BUNDLE) return codeCacheKey;
+      if (!cache.cachesBuiltins()) return kj::none;
       // Memoize the encoded source's key with the definition, independently of cache policy.
       return builtinCodeCacheKey.get([this](kj::SpaceFor<CodeCacheKey>& space) {
         return space.construct(codeCacheKeyForModule(getEncodedSource().repr));

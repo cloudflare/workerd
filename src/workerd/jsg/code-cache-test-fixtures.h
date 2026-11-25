@@ -71,6 +71,7 @@ class FakeStore final: public CodeCacheStore {
     // The keys of the caches release() was given.
     kj::Vector<CodeCacheKey> released;
     ProductionTime productionTime = ProductionTime::END_OF_STARTUP;
+    bool cachesBuiltins = true;
   };
 
   kj::MutexGuarded<State> state;
@@ -116,6 +117,10 @@ class FakeStore final: public CodeCacheStore {
 
   ProductionTime getProductionTime() const override {
     return state.lockShared()->productionTime;
+  }
+
+  bool cachesBuiltins() const override {
+    return state.lockShared()->cachesBuiltins;
   }
 
   bool mayProduce() const override {

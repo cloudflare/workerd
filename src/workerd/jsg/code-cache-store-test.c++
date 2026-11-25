@@ -3,12 +3,58 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Tests of what a CodeCacheStore decides for the isolates that use it: whether the isolate holds
-// the caches it consumed or produced until it is destroyed, and when the isolate produces them.
+// the caches it consumed or produced until it is destroyed, when the isolate produces its caches,
+// and whether builtin modules use the store.
 
 #include "code-cache-test-fixtures.h"
 
 namespace workerd::jsg::test {
 namespace {
+
+KJ_TEST("Builtins do not use a store that does not cache them, in either registry") {
+  auto store = newStore();
+  store->state.lockExclusive()->cachesBuiltins = false;
+  CountingObserver observer;
+  constexpr auto code = "export const value = 'caf\xe9';"_kj;
+  for (auto owned: {false, true}) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto info = owned
+          ? ModuleRegistry::ModuleInfo(js, "builtin", copyToArc(code), nullptr, observer)
+          : ModuleRegistry::ModuleInfo(
+                js, "builtin", StaticExternalStringSource(code.asArray()), nullptr, observer);
+      auto module = info.module.getHandle(js);
+      instantiateModule(js, module);
+      auto ns = JsObject(check(module->GetModuleNamespace()->ToObject(js.v8Context())));
+      KJ_EXPECT(ns.get(js, "value").toString(js) == "café");
+    });
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      const auto base = "file:///"_url;
+      modules::ModuleRegistry::Builder builder(base);
+      modules::ModuleBundle::BuiltinBuilder builtins;
+      constexpr auto defaultCode = "export default 'π🚀';"_kj;
+      if (owned) {
+        builtins.addEsm("test:builtin"_url, copyToArc(defaultCode));
+      } else {
+        builtins.addEsm("test:builtin"_url, defaultCode.asArray());
+      }
+      auto registry = builder.add(builtins.finish()).finish();
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) == "π🚀");
+    }, UseNewModuleRegistry::YES);
+  }
+  {
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 0);
+    KJ_EXPECT(lock->inserts == 0);
+  }
+
+  // The script's own modules still use it.
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 1);
+  KJ_EXPECT(lock->inserts == 1);
+}
 
 kj::Own<FakeStore> newHandOverStore() {
   auto store = newStore();

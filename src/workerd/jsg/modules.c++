@@ -527,7 +527,8 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               observer,
               [&](const v8::ScriptOrigin& origin) {
                 return compileModule(js, jsg::newExternalString(js, content), origin, observer,
-                    [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+                    [&](IsolateCodeCache& cache) -> kj::Maybe<CodeCacheKey> {
+                  if (!cache.cachesBuiltins()) return kj::none;
                   return codeCacheKeyForModule(content);
                 }, {.embeddedCache = compileCache});
               })) {}
@@ -545,7 +546,8 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               [&](const v8::ScriptOrigin& origin) {
                 auto source = content->asPtr();
                 return compileModule(js, jsg::newExternalOneByteString(js, kj::mv(content)), origin,
-                    observer, [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+                    observer, [&](IsolateCodeCache& cache) -> kj::Maybe<CodeCacheKey> {
+                  if (!cache.cachesBuiltins()) return kj::none;
                   return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, source);
                 }, {.embeddedCache = compileCache});
               })) {}

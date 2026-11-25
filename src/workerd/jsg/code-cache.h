@@ -151,6 +151,13 @@ class CodeCacheStore: public kj::AtomicRefcounted {
   virtual bool mayProduce() const {
     return true;
   }
+
+  // Whether builtin modules use the store. Only builtins that ship without a compile cache ask
+  // it. A store whose caches are scoped to one script returns false, so that each script does not
+  // keep its own copy of the same builtin's cache.
+  virtual bool cachesBuiltins() const {
+    return true;
+  }
 };
 
 // One isolate's use of a CodeCacheStore. Owned by IsolateBase; every method must be called with
@@ -204,6 +211,11 @@ class IsolateCodeCache {
   // Forgets the addresses of the sources given to prepare(), whose bytes the caller can no longer
   // vouch for. Their prepared lookups are kept.
   void forgetPreparedSources();
+
+  // Whether builtin modules use the store (see CodeCacheStore::cachesBuiltins()).
+  bool cachesBuiltins() const {
+    return store->cachesBuiltins();
+  }
 
   template <typename T>
   using CompileCallback = kj::FunctionParam<v8::MaybeLocal<T>(
