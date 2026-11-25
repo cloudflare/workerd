@@ -147,21 +147,26 @@ function decodeSpan(bytes) {
   return span;
 }
 
-// opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest, which the runtime fills with
-// one ResourceSpans holding one ScopeSpans.
+// opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest, as one entry per
+// ResourceSpans: the runtime exports one, holding one ScopeSpans, per invocation, and may batch
+// several invocations' exports in a POST.
 function decodeRequest(bytes) {
+  return [...fields(bytes)].map(([, resourceSpans]) =>
+    decodeResource(resourceSpans)
+  );
+}
+
+function decodeResource(resourceSpans) {
   const request = { resource: {}, spans: [] };
-  for (const [, resourceSpans] of fields(bytes)) {
-    for (const [number, value] of fields(resourceSpans)) {
-      if (number === 1) {
-        for (const [, attribute] of fields(value)) {
-          addAttribute(request.resource, attribute);
-        }
+  for (const [number, value] of fields(resourceSpans)) {
+    if (number === 1) {
+      for (const [, attribute] of fields(value)) {
+        addAttribute(request.resource, attribute);
       }
-      if (number === 2) {
-        for (const [number, span] of fields(value)) {
-          if (number === 2) request.spans.push(decodeSpan(span));
-        }
+    }
+    if (number === 2) {
+      for (const [number, span] of fields(value)) {
+        if (number === 2) request.spans.push(decodeSpan(span));
       }
     }
   }
@@ -174,10 +179,10 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/v1/traces') {
-      requests.push({
-        contentType: request.headers.get('content-type'),
-        ...decodeRequest(new Uint8Array(await request.arrayBuffer())),
-      });
+      const contentType = request.headers.get('content-type');
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      for (const r of decodeRequest(bytes))
+        requests.push({ contentType, ...r });
       return new Response(null, { status: 200 });
     }
     if (url.pathname === '/requests') {

@@ -25,7 +25,10 @@ class OtlpExportQueue final: private kj::TaskSet::ErrorHandler {
     virtual kj::Promise<void> post(kj::Array<const kj::byte> request) = 0;
   };
 
-  OtlpExportQueue(kj::Own<Transport> transport, kj::Timer& timer);
+  // With a `linger`, a request waits up to that long to be batched with later ones: until then
+  // one POST at a time is made, and more only once a full batch is pending.
+  OtlpExportQueue(
+      kj::Own<Transport> transport, kj::Timer& timer, kj::Duration linger = 0 * kj::SECONDS);
   ~OtlpExportQueue() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(OtlpExportQueue);
 
@@ -42,7 +45,9 @@ class OtlpExportQueue final: private kj::TaskSet::ErrorHandler {
 
   kj::Maybe<kj::Own<Transport>> transport;
   kj::Timer& timer;
+  kj::Duration linger;
   RingBuffer<kj::Array<const kj::byte>> pending;
+  size_t pendingBytes = 0;
   uint running = 0;
   kj::TaskSet tasks{*this};
 

@@ -1,8 +1,11 @@
+use prost::Message;
 use serde_json::json;
 
-use super::*;
+use super::encode;
+use crate::proto;
 use crate::proto::AnyValue;
 use crate::proto::KeyValue;
+use crate::proto::any_value;
 
 fn kv(key: &str, value: any_value::Value) -> KeyValue {
     KeyValue {
@@ -11,7 +14,7 @@ fn kv(key: &str, value: any_value::Value) -> KeyValue {
     }
 }
 
-fn json(logs: bool, request: &impl Message) -> Value {
+fn json(logs: bool, request: &impl Message) -> serde_json::Value {
     serde_json::from_slice(&encode(logs, &request.encode_to_vec()).unwrap()).unwrap()
 }
 
@@ -108,11 +111,33 @@ fn concatenated_requests_decode_as_one() {
     }
     .encode_to_vec();
     let both = [one.as_slice(), one.as_slice()].concat();
-    let value: Value = serde_json::from_slice(&encode(false, &both).unwrap()).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&encode(false, &both).unwrap()).unwrap();
     assert_eq!(value["resourceSpans"].as_array().unwrap().len(), 2);
 }
 
 #[test]
 fn garbage_is_an_error() {
     assert!(encode(false, &[0xff, 0xff]).is_err());
+}
+
+#[test]
+fn strings_are_escaped_and_non_finite_doubles_are_null() {
+    let request = proto::ExportTraceServiceRequest {
+        resource_spans: vec![proto::ResourceSpans {
+            resource: Some(proto::Resource {
+                attributes: vec![
+                    kv("q\"\n", any_value::Value::String("\u{1}é".into())),
+                    kv("d", any_value::Value::Double(f64::NAN)),
+                ],
+            }),
+            scope_spans: vec![],
+        }],
+    };
+    assert_eq!(
+        json(false, &request)["resourceSpans"][0]["resource"]["attributes"],
+        json!([
+            { "key": "q\"\n", "value": { "stringValue": "\u{1}é" } },
+            { "key": "d", "value": { "doubleValue": null } },
+        ])
+    );
 }

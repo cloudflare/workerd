@@ -414,9 +414,9 @@ struct TracingOptions {
   # Invocations of the designated service itself are not traced. While this is set, user spans are
   # exported over OTLP instead of being delivered to streaming tail workers.
   #
-  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. Queued
-  # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
-  # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
+  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. A request
+  # waits up to a second to be combined with later ones, until a batch reaches 1 MiB. Each POST,
+  # including its response body, has a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
   # no retries.
 
   exportLogs @1 :Bool;

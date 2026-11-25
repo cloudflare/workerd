@@ -11,6 +11,10 @@ namespace workerd::server {
 
 namespace {
 
+// How long a request waits to be batched with later ones, so that a collector writing a file per
+// POST, as the bundled telemetry Worker does, writes about one a second per signal.
+constexpr kj::Duration LINGER = kj::SECONDS;
+
 class CollectorTransport final: public OtlpExportQueue::Transport {
  public:
   // `url` is `/v1/traces` or `/v1/logs` under the collector's path. With `json`, each batch is
@@ -58,7 +62,8 @@ kj::Own<OtlpExportQueue> collectorQueue(::rust::Box<SubrequestChannel> collector
   auto url = kj::str("http://localhost", kj::ArrayPtr<const char>(path.data(), path.size()),
       logs ? "/v1/logs"_kj : "/v1/traces"_kj);
   return kj::heap<OtlpExportQueue>(
-      kj::heap<CollectorTransport>(kj::mv(collector), headerTable, kj::mv(url), logs, json), timer);
+      kj::heap<CollectorTransport>(kj::mv(collector), headerTable, kj::mv(url), logs, json), timer,
+      LINGER);
 }
 
 }  // namespace
