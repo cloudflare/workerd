@@ -282,7 +282,7 @@ const SymbolDispose = Symbol.dispose;
 
 // WeakRef / FinalizationRegistry
 // These globals exist during bootstrap - their deletion from the global is
-// deferred until after bootstrap completes (see runPerIsolateBootstrap) -
+// deferred until after bootstrap completes (see runPostSnapshotBootstrap) -
 // but they are hidden from user code unless the enable_weak_ref compat flag
 // is set. The captures here keep working after the globals are deleted.
 const WeakRefPrototypeDeref = uncurryThis(WeakRef.prototype.deref);

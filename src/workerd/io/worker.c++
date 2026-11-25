@@ -159,13 +159,19 @@ const capnp::JsonCodec& getCdpJsonCodec() {
   return *codec;
 }
 
-void maybePerIsolateBootstrap(
-    const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
+void perIsolateBootstrap(const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
     runPerIsolateBootstrap(
         js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
   });
+}
+
+void perIsolateBootstrapPostSnapshot(
+    const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
+  TRACE_EVENT("workerd", "Worker::perIsolateBootstrapPostSnapshot");
+  JSG_WITHIN_CONTEXT_SCOPE(
+      lock, context, [&](jsg::Lock& js) { runPostSnapshotBootstrap(js, api.getFeatureFlags()); });
 }
 
 }  // namespace
@@ -1609,7 +1615,12 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
 
-        maybePerIsolateBootstrap(isolate->getApi(), lock, context);
+        perIsolateBootstrap(isolate->getApi(), lock, context);
+        // TODO(soon): The post-snapshot call should be called only after
+        // the snapshot is restored to apply anything that is compat flagged.
+        // It's here, immediately after perIsolateBootstrap for now but needs
+        // to be correctly placed.
+        perIsolateBootstrapPostSnapshot(isolate->getApi(), lock, context);
 
         if (lock.isStartingFromSnapshot()) {
           auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
@@ -2444,7 +2455,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
       if (freshContext) {
-        maybePerIsolateBootstrap(script->isolate->getApi(), lock, context);
+        perIsolateBootstrap(script->isolate->getApi(), lock, context);
+        // TODO(soon): The post-snapshot call should be called only after
+        // the snapshot is restored to apply anything that is compat flagged.
+        // It's here, immediately after perIsolateBootstrap for now but needs
+        // to be correctly placed.
+        perIsolateBootstrapPostSnapshot(script->isolate->getApi(), lock, context);
       }
 
       // Install the virtual file system on the context. Keep in mind that for service

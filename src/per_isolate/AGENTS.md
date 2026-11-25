@@ -73,8 +73,11 @@ An embedder can contribute scripts to the same bootstrap. It builds them with
 in an `EmbedderBootstrap` (`src/workerd/api/per-isolate-bootstrap.h`), and
 returns it from `Worker::Api::getEmbedderBootstrap()`.
 
-- Order: `primordials`, workerd's `main`, then `<prefix>main`, all before
-  the WeakRef globals are removed. A failure is fatal, as for workerd's.
+- Order: `primordials`, workerd's `main` and `main-post`, then
+  `<prefix>main`, all before the WeakRef globals are removed. The
+  embedder's scripts run in the post-snapshot phase
+  (`runPostSnapshotBootstrap()`), so they may read `compatFlags` at the top
+  level. A failure is fatal, as for workerd's.
 - Every embedder script is named under the prefix; `require()` takes the
   full specifier (`require('embedder/foo')`, not `require('./foo')`).
 - Embedder scripts share the require() cache and pseudo-globals and can

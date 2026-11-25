@@ -1733,7 +1733,7 @@ struct NewContextOptions {
   // context creation even when enableWeakRef is false. The caller takes
   // responsibility for calling deleteWeakRefGlobals() before any user code runs.
   // Used by the per-isolate bootstrap, which needs to capture these constructors
-  // (runPerIsolateBootstrap performs the deferred deletion).
+  // (runPostSnapshotBootstrap performs the deferred deletion).
   bool deferWeakRefDeletion = false;
 
   // If false, the Temporal global and Date.prototype.toTemporalInstant are deleted from

@@ -1160,6 +1160,7 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 }
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
+// runPostSnapshotBootstrap() runs the rest.
 void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFlags::Reader flags) {
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
@@ -1187,15 +1188,6 @@ void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFla
     // Run the entry point. This synchronously executes main.js, which may
     // require() other scripts. All execution is synchronous.
     state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
-  }
-
-  KJ_IF_SOME(e, state->embedder) {
-    TRACE_EVENT("workerd", "PerIsolateBootstrap::embedderMain");
-    // The embedder's entry point runs once workerd's globals are installed, and before the
-    // WeakRef globals are removed, so that its scripts see the same environment as workerd's.
-    KJ_ASSERT_NONNULL(state->embedderRequireFn)
-        .getHandle(js)
-        .call(js, js.undefined(), js.strIntern(e.getEntryPoint()));
   }
 }
 
@@ -1255,6 +1247,32 @@ void runPerIsolateBootstrap(jsg::Lock& js,
       restoreBootstrapState(js, allocateBootstrapState(js, scripts, embedder, moduleSource), bag);
     } else {
       bootstrapFromScripts(js, allocateBootstrapState(js, scripts, embedder, moduleSource), flags);
+    }
+  }
+  JSG_CATCH(exception) {
+    kj::throwException(js.exceptionToKj(kj::mv(exception)));
+  }
+}
+
+void runPostSnapshotBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
+  auto context = js.v8Context();
+  auto& state =
+      KJ_ASSERT_NONNULL(tryGetBootstrapState(context), "Per-isolate bootstrap is not instantiated");
+
+  JSG_TRY(js) {
+    {
+      TRACE_EVENT("workerd", "PerIsolateBootstrap::postSnapshot");
+      state.requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main-post"_kj));
+    }
+
+    KJ_IF_SOME(e, state.embedder) {
+      TRACE_EVENT("workerd", "PerIsolateBootstrap::embedderMain");
+      // The embedder's entry point runs once all of workerd's globals are installed, and before
+      // the WeakRef globals are removed, so that its scripts see the same environment as
+      // workerd's.
+      KJ_ASSERT_NONNULL(state.embedderRequireFn)
+          .getHandle(js)
+          .call(js, js.undefined(), js.strIntern(e.getEntryPoint()));
     }
 
     if (!flags.getJsWeakRef()) {

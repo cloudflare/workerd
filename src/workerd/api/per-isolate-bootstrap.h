@@ -52,18 +52,18 @@ class EmbedderBootstrap {
   kj::HashMap<kj::StringPtr, jsg::Module::Reader> scripts;
 };
 
-// Runs the per-isolate bootstrap scripts from the compiled-in PER_ISOLATE_BUNDLE, followed by the
-// embedder's, if any.
+// Runs the main phase of the per-isolate bootstrap scripts from the compiled-in
+// PER_ISOLATE_BUNDLE. runPostSnapshotBootstrap() then runs the rest.
 //
 // Must be called within a V8 context scope, after JSG global setup is complete
 // but before any user code evaluation.
 //
 // On a context built from scratch this runs the bootstrap scripts: the entry
 // point script named "main" is loaded via a minimal synchronous require()
-// mechanism, then the embedder's entry point. The require() function and
-// compatFlags object are passed to each script as parameters of the function
-// V8's CompileFunction wraps it in, not via globalThis. Scripts can install
-// properties on globalThis; those become visible to user code.
+// mechanism. The require() function and compatFlags object are passed to each
+// script as parameters of the function V8's CompileFunction wraps it in, not
+// via globalThis. Scripts can install properties on globalThis; those become
+// visible to user code.
 //
 // On a context deserialized from a startup snapshot the scripts' effects are
 // already in the context, and running them again would install a second set of
@@ -86,6 +86,15 @@ void runPerIsolateBootstrap(jsg::Lock& js,
     CompatibilityFlags::Reader flags,
     kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
     const jsg::ModuleSource* moduleSource = nullptr);
+
+// Runs the post-snapshot phase, on the context runPerIsolateBootstrap() set up: workerd's
+// "main-post" script, which installs what depends on compatibility flags, then the embedder's
+// entry point, if any. Then removes the WeakRef globals unless `flags` enables them.
+//
+// Must be called within a V8 context scope, before any user code evaluation.
+//
+// Throws kj::Exception on failure, as runPerIsolateBootstrap() does.
+void runPostSnapshotBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags);
 
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).
