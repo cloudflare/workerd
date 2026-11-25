@@ -65,10 +65,8 @@ class RewritingResponse final: public kj::HttpService::Response {
   kj::HttpService::Response& inner;
   kj::Array<Edit> edits;
 
-  // The result refers to `headers`, which outlive it: they need only last until send() or
-  // acceptWebSocket() returns, and so does the result.
   kj::HttpHeaders rewrite(const kj::HttpHeaders& headers) {
-    auto rewritten = headers.derive();
+    auto rewritten = headers.cloneShallow();
     for (auto& edit: edits) {
       KJ_IF_SOME(value, edit.value) {
         rewritten.setPtr(edit.id, value);
