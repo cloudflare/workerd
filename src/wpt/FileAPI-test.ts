@@ -104,7 +104,7 @@ export default {
   'idlharness.any.js': {
     comment:
       'Blob.text(), arrayBuffer() and bytes() throw synchronously on a bad receiver instead of returning a rejected promise. ' +
-      'Blob.textStream() is not implemented. The File interface object does not inherit from Blob and has the wrong length. ' +
+      'Blob.textStream() is not implemented. The File interface object has the wrong length. ' +
       'FileReader is not implemented, and FileList only exists for <input type=file> and drag and drop in browsers.',
     expectedFailures: [
       'Blob interface: operation text()',
@@ -113,7 +113,6 @@ export default {
       'Blob interface: operation textStream()',
       'Blob interface: new Blob(["TEST"]) must inherit property "textStream()" with the proper type',
       'Blob interface: new File(["myFileBits"], "myFileName") must inherit property "textStream()" with the proper type',
-      'File interface: existence and properties of interface object',
       'File interface object length',
     ],
     omittedTests: [/^FileList /, /^FileReader /, /new FileReader\(\)/],

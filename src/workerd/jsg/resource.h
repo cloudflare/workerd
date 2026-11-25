@@ -1307,6 +1307,12 @@ struct ResourceTypeBuilder {
   inline void registerInherit() {
     constructor->Inherit(
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
+    if constexpr (!isContext) {
+      static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper).parentTemplate =
+          [](TypeWrapper& wrapper, v8::Isolate* isolate) {
+        return wrapper.getTemplate(isolate, static_cast<Type*>(nullptr));
+      };
+    }
     // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
     auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
     // If the parent's template was restored from a startup snapshot, its registerMembers never
@@ -1694,6 +1700,14 @@ struct ResourceTypeBuilder {
         // don't rely on inheriting nested types from parent context classes.
         instance->Set(isolate, name, tmpl, v8::PropertyAttribute::DontEnum);
       }
+
+      auto parent = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper).parentTemplate;
+      if (parent != nullptr) {
+        static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper)
+            .interfaceObjectLinks.add([](TypeWrapper& wrapper, v8::Isolate* isolate) {
+          return wrapper.getTemplate(isolate, static_cast<Type*>(nullptr));
+        }, parent);
+      }
     }
   }
 
@@ -1934,6 +1948,17 @@ class ResourceWrapper {
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
+    // Per Web IDL, the [[Prototype]] of an interface object is its parent interface's interface
+    // object. FunctionTemplate::Inherit() only links the prototype objects, so link the
+    // constructors here. A context deserialized from a startup snapshot is already linked, and
+    // its templates were restored without running registerMembers(), so the list is empty then.
+    auto& wrapper = static_cast<TypeWrapper&>(*this);
+    for (auto& link: interfaceObjectLinks) {
+      auto child = check(link.child(wrapper, isolate)->GetFunction(context));
+      auto parent = check(link.parent(wrapper, isolate)->GetFunction(context));
+      KJ_ASSERT(check(child->SetPrototype(context, parent)));
+    }
+
     KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
       ptr->setModuleRegistryBackingOwner(JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
         // The context must be current for attachToIsolate to succeed.
@@ -2022,6 +2047,21 @@ class ResourceWrapper {
   }
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
+
+  using GetTemplateFunc = v8::Local<v8::FunctionTemplate>(TypeWrapper&, v8::Isolate*);
+
+  // The template of the resource type T names in JSG_INHERIT, if any. Set when T's template is
+  // built.
+  GetTemplateFunc* parentTemplate = nullptr;
+
+  // The types T declares with JSG_NESTED_TYPE that inherit from a resource type, recorded when
+  // T's context template is built. newContext() links each one's interface object to its
+  // parent's.
+  struct InterfaceObjectLink {
+    GetTemplateFunc* child;
+    GetTemplateFunc* parent;
+  };
+  kj::Vector<InterfaceObjectLink> interfaceObjectLinks;
 
   // Ensure T's registerMembers() has run in this isolate, so that side effects recorded on the
   // wrapper itself.

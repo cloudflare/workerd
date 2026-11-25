@@ -849,5 +849,75 @@ KJ_TEST("JSG_PRIVATE_SYMBOL marks instances without exposing a JavaScript symbol
       "boolean", "true");
 }
 
+// ========================================================================================
+
+struct InterfaceObjectContext: public ContextGlobalObject {
+  struct Parent: public Object {
+    static Ref<Parent> constructor(jsg::Lock& js) {
+      return js.alloc<Parent>();
+    }
+
+    static constexpr int PARENT_CONSTANT = 123;
+
+    JSG_RESOURCE_TYPE(Parent) {
+      JSG_STATIC_CONSTANT(PARENT_CONSTANT);
+    }
+  };
+
+  struct Child: public Parent {
+    static Ref<Child> constructor(jsg::Lock& js) {
+      return js.alloc<Child>();
+    }
+
+    JSG_RESOURCE_TYPE(Child) {
+      JSG_INHERIT(Parent);
+    }
+  };
+
+  struct Grandchild: public Child {
+    static Ref<Grandchild> constructor(jsg::Lock& js) {
+      return js.alloc<Grandchild>();
+    }
+
+    JSG_RESOURCE_TYPE(Grandchild) {
+      JSG_INHERIT(Child);
+    }
+  };
+
+  struct ErrorLike: public Object {
+    JSG_RESOURCE_TYPE(ErrorLike) {
+      JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
+    }
+  };
+
+  JSG_RESOURCE_TYPE(InterfaceObjectContext) {
+    JSG_NESTED_TYPE(Parent);
+    JSG_NESTED_TYPE(Child);
+    JSG_NESTED_TYPE(Grandchild);
+    JSG_NESTED_TYPE(ErrorLike);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(InterfaceObjectIsolate,
+    InterfaceObjectContext,
+    InterfaceObjectContext::Parent,
+    InterfaceObjectContext::Child,
+    InterfaceObjectContext::Grandchild,
+    InterfaceObjectContext::ErrorLike);
+
+KJ_TEST("Interface objects inherit from their parent interface object") {
+  Evaluator<InterfaceObjectContext, InterfaceObjectIsolate> e(v8System);
+  e.expectEval("Object.getPrototypeOf(Parent) === Function.prototype", "boolean", "true");
+  e.expectEval("Object.getPrototypeOf(Child) === Parent", "boolean", "true");
+  e.expectEval("Object.getPrototypeOf(Grandchild) === Child", "boolean", "true");
+  e.expectEval("Child.PARENT_CONSTANT", "number", "123");
+  e.expectEval("Object.hasOwn(Child, 'PARENT_CONSTANT')", "boolean", "false");
+}
+
+KJ_TEST("Interface objects of intrinsic subclasses keep Function.prototype") {
+  Evaluator<InterfaceObjectContext, InterfaceObjectIsolate> e(v8System);
+  e.expectEval("Object.getPrototypeOf(ErrorLike) === Function.prototype", "boolean", "true");
+  e.expectEval("Object.getPrototypeOf(ErrorLike.prototype) === Error.prototype", "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
