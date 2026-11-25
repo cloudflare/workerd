@@ -595,9 +595,16 @@ enum SerializationTag {
 
   jsSerializable @23;
   # An instance of a class implemented in JavaScript by the runtime: its "module:Export"
-  # deserializeInfo, flags and, for an error, stack, with its data following the top-level value.
+  # deserializeInfo, with its data following the top-level value.
   # Keep in sync with jsg::SERIALIZATION_TAG_JS_SERIALIZABLE in /src/workerd/jsg/ser.h, which
   # describes the format.
+
+  domExceptionV3 @24;
+  quotaExceededError @25;
+  # V8's DOMException and QuotaExceededError: their name, message, stack, a QuotaExceededError's
+  # amounts, and, with enhanced error serialization, their other own properties. Keep in sync with
+  # jsg::SERIALIZATION_TAG_DOM_EXCEPTION_V3 and jsg::SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR in
+  # /src/workerd/jsg/ser.h, which describes the format.
 }
 
 enum StreamEncoding {

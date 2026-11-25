@@ -94,11 +94,10 @@ export let domExceptionClone = {
     strictEqual(de1.code, de2.code);
     notStrictEqual(de1, de2);
 
-    // TODO(bug): This is supposed to work, but currently doesn't because the "native error"
-    //   handling in jsg::Serializer does not kick in for DOMException. Instead, DOMException's
-    //   own serializer (in dom-exception.c++) is used, and it hasn't been updated to handle
-    //   serializing application properties.
-    // strictEqual(de1.foo, de2.foo);
-    // strictEqual(de2.foo, 'abc');
+    // V8's DOMException, under the V8_DOM_EXCEPTION autogate, is written with its other own
+    // properties, as other errors are with enhanced error serialization. The C++ class, which is
+    // not a native error, is written without them.
+    const usingV8DomException = Error.isError(de1);
+    strictEqual(de2.foo, usingV8DomException ? 'abc' : undefined);
   },
 };

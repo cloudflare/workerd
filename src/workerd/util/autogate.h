@@ -107,14 +107,17 @@ namespace workerd::util {
      they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
      down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
-  /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
-     (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
-     class in jsg/dom-exception.h. */                                                              \
-  V(TS_DOM_EXCEPTION)                                                                              \
+  /* DOMException and QuotaExceededError are V8's, whose instances are native errors, rather       \
+     than the C++ DOMException class in jsg/dom-exception.h and no QuotaExceededError. V8's come   \
+     from patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch. */            \
+  V(V8_DOM_EXCEPTION)                                                                              \
   /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
      bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
      serializer, rather than the C++ method in api/global-scope.h. */                              \
   V(TS_STRUCTURED_CLONE)                                                                           \
+  /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
+     performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
+  V(TS_PERFORMANCE_NOW)                                                                            \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
@@ -141,7 +144,11 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
+     string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
+     isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
+  V(BODY_BUFFER_EXTERNAL_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

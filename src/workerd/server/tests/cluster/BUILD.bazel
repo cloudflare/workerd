@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 
 # One suite, split by test name: cluster-test, and cluster-cron-test, whose
 # config runs a cron trigger. Each runs in shards, each of which should take
@@ -7,7 +7,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 # of the default in cluster-test.wd-test, and the drain tests wait out stop
 # deadlines. `COSTS` in cluster-test.mjs spreads those evenly across the
 # shards. Add takeovers to the simulations instead.
-[js_test(
+[wd_js_test(
     name = name,
     size = "large",
     data = [

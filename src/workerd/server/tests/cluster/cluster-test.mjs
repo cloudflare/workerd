@@ -4274,7 +4274,8 @@ test('cluster: nodes serving a wrangler project join a cluster with --cluster-ad
         ]);
       },
       {
-        config: join(project, 'wrangler.jsonc'),
+        // The project directory, as the container image serves `/app`.
+        config: project,
         configName: null,
         disk: null,
         extraArgs: () => ['--cluster-addr=127.0.0.1:0'],

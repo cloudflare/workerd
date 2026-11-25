@@ -393,12 +393,12 @@ class WritableStreamInternalController: public WritableStreamController {
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     size_t totalBytes;
-    kj::Array<const kj::byte> ownBytes;
-    kj::ArrayPtr<const kj::byte> bytes;
+    // Set while the write is queued; none once the bytes move into the sink's write promise.
+    kj::Maybe<kj::Array<const kj::byte>> ownBytes;
 
     JSG_MEMORY_INFO(Write) {
       tracker.trackField("resolver", promise);
-      if (ownBytes != nullptr) {
+      if (ownBytes != kj::none) {
         tracker.trackFieldWithSize("backing", totalBytes);
       }
     }

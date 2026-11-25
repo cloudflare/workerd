@@ -6,11 +6,14 @@
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
 //! first joins a config without a cluster to one with `--cluster-addr` and adds the deployments in
 //! the cluster's bucket to the config ([`deployments`]), and `deploy` publishes one ([`deploy`]).
+//! `repl` evaluates JavaScript typed at a console ([`repl`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
-// and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
-// Everything else is safe code over std, socket2 and the bridge.
+// Six modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
+// to FFI declarations; socket_fd.rs, where a descriptor number from the command line becomes an
+// owned descriptor; rseq.rs, which reads a glibc symbol and edits the environment before any
+// thread starts; repl/terminal.rs, which puts the terminal in raw mode; and repl/interrupt.rs,
+// which takes SIGINT. Everything else is safe code over std, socket2 and the bridges.
 
 mod args;
 mod bridge;
@@ -19,6 +22,11 @@ mod deploy;
 mod deployments;
 mod help;
 mod process;
+mod repl;
+#[cfg(target_os = "linux")]
+mod rseq;
+#[cfg(target_os = "linux")]
+pub use rseq::reexec_without_glibc_rseq;
 mod socket_fd;
 mod watch;
 mod wrangler;
@@ -210,6 +218,14 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             const_name,
             deploy,
         } => Ok(run_deploy(&project, const_name, &deploy, executable)),
+        args::Command::Repl { repl } => {
+            if !repl.experimental {
+                usage_error::<T>(
+                    "The repl command is experimental. Pass --experimental to use it.",
+                );
+            }
+            repl::run(verbose, repl)
+        }
     }
 }
 
@@ -457,7 +473,9 @@ fn load_config<T: CommandFactory>(
         binary,
         config_file,
     } = config;
-    if data_dir.is_some() && (binary || !wrangler::is_wrangler_config(&config_file)) {
+    let wrangler_path =
+        std::path::Path::new(&config_file).is_dir() || wrangler::is_wrangler_config(&config_file);
+    if data_dir.is_some() && (binary || !wrangler_path) {
         usage_error::<T>(
             "--data-dir: only a wrangler config keeps its state there. A Cap'n Proto config names \
              its disk services' directories, or takes them from --directory-path.",
@@ -485,16 +503,16 @@ fn load_config<T: CommandFactory>(
     if config_file == "-" {
         usage_error::<T>("-: Reading config from stdin is only allowed with --binary.");
     }
-    if wrangler::is_wrangler_config(&config_file) {
+    if let Some(path) =
+        wrangler::named_config(&config_file).unwrap_or_else(|error| usage_error::<T>(error))
+    {
         if let Some(name) = const_name {
             usage_error::<T>(format!("{name}: A wrangler config has no named constants."));
         }
-        if !std::path::Path::new(&config_file).is_file() {
-            usage_error::<T>(format!("{config_file}: No such file."));
-        }
+        let path = path.to_string_lossy();
         let data_dir = data_dir.map(std::path::Path::new);
-        return wrangler::load(&config_file, process, options, data_dir, experimental)
-            .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
+        return wrangler::load(&path, process, options, data_dir, experimental)
+            .unwrap_or_else(|error| config_errors(&[format!("{path}: {error}")], process));
     }
 
     let compiled = ffi::compile_config(
@@ -638,7 +656,7 @@ fn watcher<T: CommandFactory>(
             );
         };
         Some(
-            Watcher::new(executable.path())
+            Watcher::with_executable(executable.path())
                 .unwrap_or_else(|error| usage_error::<T>(format!("--watch: {error}"))),
         )
     }

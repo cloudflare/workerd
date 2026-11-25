@@ -13,6 +13,7 @@ import {
   ServiceStub,
 } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
+import { inspect } from 'node:util';
 
 try {
   waitUntil(null);
@@ -156,9 +157,14 @@ let globalRpcPromise;
 // Promise initialized by testWaitUntil() and then resolved shortly later, in a waitUntil task.
 let globalWaitUntilPromise;
 
+// How many MyService entrypoints this isolate has constructed: one per call through
+// MyServiceLocal.
+let myServiceConstructions = 0;
+
 export class MyService extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
+    ++myServiceConstructions;
 
     assert.strictEqual(this.ctx, ctx);
     assert.strictEqual(this.env, env);
@@ -1959,6 +1965,38 @@ export let serializeHttpTypes = {
   },
 };
 
+// A received Request or Response clones its `cf` with JSON.stringify(), which calls a `toJSON()`
+// that `cf` inherits. It does that once the whole value has been read: while V8 reads a value, no
+// JavaScript can run.
+export let serializeRequestAndResponseCfWithToJson = {
+  async test(controller, env, ctx) {
+    // Made first, so that only the readers call toJSON().
+    const request = new Request('http://foo', { cf: { abc: 123 } });
+    const response = new Response('body', { cf: { foo: 'bar' } });
+    let calls = 0;
+    Object.defineProperty(Object.prototype, 'toJSON', {
+      value() {
+        calls++;
+        return this;
+      },
+      writable: true,
+      configurable: true,
+    });
+    let req;
+    let res;
+    try {
+      req = await env.MyService.roundTrip(request);
+      res = await env.MyService.roundTrip(response);
+    } finally {
+      delete Object.prototype.toJSON;
+    }
+    assert.deepEqual(req.cf, { abc: 123 });
+    assert.deepEqual(res.cf, { foo: 'bar' });
+    assert.strictEqual(await res.text(), 'body');
+    assert.ok(calls > 0);
+  },
+};
+
 export let serializeBlob = {
   async test(controller, env, ctx) {
     // Blob round-trips over RPC, both directly and nested in a plain object.
@@ -2051,6 +2089,13 @@ export let logging = {
     assert.strictEqual(await stub.increment(1), 2);
     console.log(stub);
     assert.strictEqual(await stub.increment(1), 3);
+
+    // A ServiceStub's RPC wildcard makes every property look like a method, `entries` included.
+    // Inspecting the stub must not call it.
+    const constructions = myServiceConstructions;
+    inspect(env.MyServiceLocal);
+    assert.strictEqual(await env.MyServiceLocal.oneArgMethod(1), 12);
+    assert.strictEqual(myServiceConstructions, constructions + 1);
   },
 };
 

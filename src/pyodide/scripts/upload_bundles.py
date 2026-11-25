@@ -33,7 +33,7 @@ def cquery(rule):
 
 
 def bazel_mod_tidy():
-    res = subprocess.run(["bazel", "mod", "tidy"])
+    res = subprocess.run(["bazel", "mod", "tidy", "--lockfile_mode=update"])
     if res.returncode:
         print(res.stdout)
         print(res.stderr)

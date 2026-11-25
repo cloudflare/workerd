@@ -5,15 +5,15 @@
 // Which implementation this cell runs, and the compat flags the suite
 // branches on. The implementation is selected by an autogate, which user
 // code cannot read, so each cell says which one it is meant to run through
-// its USING_TS_IMPL binding.
+// its USING_V8_IMPL binding.
 import { env } from 'cloudflare:workers';
 
-export const usingTsImpl = env.USING_TS_IMPL === true;
+export const usingV8Impl = env.USING_V8_IMPL === true;
 
 const flags = globalThis.Cloudflare.compatibilityFlags;
 
-// Prototypes carry Symbol.toStringTag.
-export const setToStringTag = flags['set_tostring_tag'] === true;
+// Prototypes carry Symbol.toStringTag: V8's always do (ledger #11).
+export const setToStringTag = usingV8Impl || flags['set_tostring_tag'] === true;
 
 // Errors thrown over RPC are serialized rather than tunneled through their
 // description.
@@ -29,6 +29,6 @@ export const immutableApiPrototypes =
   flags['immutable_api_prototypes'] === true;
 
 // Whether the C++ already matches WebIDL for the attributes the opt-in
-// flags control. The TypeScript implementation always does.
-export const webIdlAttributes = usingTsImpl || specCompliantPropertyAttributes;
-export const nonWritablePrototype = usingTsImpl || immutableApiPrototypes;
+// flags control. V8's always does.
+export const webIdlAttributes = usingV8Impl || specCompliantPropertyAttributes;
+export const nonWritablePrototype = usingV8Impl || immutableApiPrototypes;

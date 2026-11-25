@@ -68,6 +68,7 @@ js_run_binary(
         "//:node_modules/capnp-es",
         "//:node_modules/esbuild",
         "//:node_modules/typescript",
+        "//src/per_isolate:per_isolate@tsproject_types",
         "//src/workerd/tools:param_extractor",
     ] + glob(
         [

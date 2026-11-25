@@ -5,7 +5,7 @@
 // Shared by more than one behavior module.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingV8Impl } from 'which-impl';
 
 // A property descriptor's attributes as a short string: its kind ('data'
 // or 'accessor'), then w, e and c for writable, enumerable and
@@ -57,7 +57,7 @@ export const kLegacyCodes = [
 // own properties (ledger #1); both give it a stack (ledger #2). `extra`
 // are keys something else added, such as `retryable`.
 export function instanceKeys(...extra) {
-  const base = usingTsImpl ? ['stack'] : ['code', 'name', 'message', 'stack'];
+  const base = usingV8Impl ? ['stack'] : ['code', 'name', 'message', 'stack'];
   return [...base, ...extra];
 }
 
@@ -75,7 +75,7 @@ export function assertDomException(
   strictEqual(error.name, name);
   strictEqual(error.message, message);
   strictEqual(error.code, code);
-  strictEqual(Error.isError(error), usingTsImpl);
+  strictEqual(Error.isError(error), usingV8Impl);
   deepStrictEqual(Reflect.ownKeys(error).map(String), instanceKeys(...extra));
   if (stack === undefined) {
     strictEqual(typeof error.stack, 'string');

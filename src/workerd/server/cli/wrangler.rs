@@ -427,6 +427,23 @@ pub fn project_config(dir: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// The wrangler config that `<config-file>` names for `serve`, `test`, `bench`, `compile` and
+/// `fuzzilli`: a directory's [`project_config`], or a `.json` / `.jsonc` file. `None` for any other
+/// path, which is a Cap'n Proto config.
+pub fn named_config(path: &str) -> Result<Option<PathBuf>, String> {
+    let given = Path::new(path);
+    if given.is_dir() {
+        return project_config(given).map(Some);
+    }
+    if !is_wrangler_config(path) {
+        return Ok(None);
+    }
+    if !given.is_file() {
+        return Err(format!("{path}: No such file."));
+    }
+    Ok(Some(given.to_owned()))
+}
+
 /// What a wrangler config is translated into.
 enum Target<'a> {
     /// A config to serve with `options`: the worker named after the config's `name`, else `main`,

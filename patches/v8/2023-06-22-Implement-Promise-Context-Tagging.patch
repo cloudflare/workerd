@@ -3,6 +3,20 @@ From: James M Snell <jasnell@gmail.com>
 Date: Thu, 22 Jun 2023 15:29:26 -0700
 Subject: Implement Promise Context Tagging
 
+Every promise records the isolate's current promise context tag, the
+PromiseContextTag root, which Isolate::PromiseContextScope sets.
+Outside any scope the tag is the hole. Following a pending promise
+whose tag is neither the hole nor the current tag calls the
+embedder's PromiseCrossContextCallback, which may return another
+promise to follow instead. Builtins copy and compare the tag inline,
+and call the runtime only when the tags differ.
+
+Optimized code allocates promises inline while the PromiseHook
+protector holds, without tagging them, so setting the callback
+invalidates the protector. PromiseContextTagTest checks the promises
+that Maglev and TurboFan would otherwise allocate inline.
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
 index bca245b6d666d134fe55939cd8426f10bf0fd69d..61e2d8f212af5096ec2c9359766331309777071a 100644
@@ -58,7 +72,7 @@ index 26272489eb2348b1ae3960d7cbd39cc8fdc3c919..2b4eb9c3df147c96078bf619bd92a8e4
  
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 07bca31a38d110cc7d49c9103223ac06d305cbe6..2b7a7508b1f58ef50e62679327eda0c596bb22b7 100644
+index 07bca31a38d110cc7d49c9103223ac06d305cbe6..7d8971c68d61bda25ec27c34a665a46032368161 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -12799,6 +12799,25 @@ std::string SourceLocation::ToString() const {
@@ -77,7 +91,7 @@ index 07bca31a38d110cc7d49c9103223ac06d305cbe6..2b7a7508b1f58ef50e62679327eda0c5
 +  DCHECK(!isolate_->has_promise_context_tag());
 +  DCHECK(!tag.IsEmpty());
 +  i::Handle<i::Object> handle = Utils::OpenHandle(*tag);
-+  isolate_->set_promise_context_tag(*handle);
++  isolate_->set_promise_context_tag(handle);
 +}
 +
 +Isolate::PromiseContextScope::~PromiseContextScope() {
@@ -88,7 +102,7 @@ index 07bca31a38d110cc7d49c9103223ac06d305cbe6..2b7a7508b1f58ef50e62679327eda0c5
  
  #ifdef ENABLE_SLOW_DCHECKS
 diff --git a/src/builtins/promise-abstract-operations.tq b/src/builtins/promise-abstract-operations.tq
-index 1d8db469bad01dfaa105cf90abb2932bb9a664c3..e821fd2469f7977761f3d4bc280518fa9300a712 100644
+index 1d8db469bad01dfaa105cf90abb2932bb9a664c3..4e5429cb8f278daaf2672994a170fe2b1c01cc3c 100644
 --- a/src/builtins/promise-abstract-operations.tq
 +++ b/src/builtins/promise-abstract-operations.tq
 @@ -14,6 +14,9 @@ extern transitioning runtime PromiseRevokeReject(
@@ -101,11 +115,13 @@ index 1d8db469bad01dfaa105cf90abb2932bb9a664c3..e821fd2469f7977761f3d4bc280518fa
  }
  
  // https://tc39.es/ecma262/#sec-promise-abstract-operations
-@@ -475,12 +478,14 @@ transitioning macro PerformPromiseThenImpl(
+@@ -475,12 +478,16 @@ transitioning macro PerformPromiseThenImpl(
      // PromiseReaction holding both the onFulfilled and onRejected callbacks.
      // Once the {promise} is resolved we decide on the concrete handler to
      // push onto the microtask queue.
-+    const delegate = runtime::PromiseContextCheck(promise);
++    const delegate = NeedsPromiseContextSwitch(promise) ?
++        runtime::PromiseContextCheck(promise) :
++        promise;
      const promiseReactions =
 -        UnsafeCast<(Zero | PromiseReaction)>(promise.reactions_or_result);
 +        UnsafeCast<(Zero | PromiseReaction)>(delegate.reactions_or_result);
@@ -118,7 +134,7 @@ index 1d8db469bad01dfaa105cf90abb2932bb9a664c3..e821fd2469f7977761f3d4bc280518fa
    } else {
      const reactionsOrResult = promise.reactions_or_result;
      let microtask: PromiseReactionJobTask;
-@@ -502,8 +507,8 @@ transitioning macro PerformPromiseThenImpl(
+@@ -502,8 +509,8 @@ transitioning macro PerformPromiseThenImpl(
          }
        }
      EnqueueMicrotask(handlerContext, microtask);
@@ -128,66 +144,57 @@ index 1d8db469bad01dfaa105cf90abb2932bb9a664c3..e821fd2469f7977761f3d4bc280518fa
  }
  
  transitioning javascript builtin PerformPromiseThenFunction(
-diff --git a/src/builtins/promise-constructor.tq b/src/builtins/promise-constructor.tq
-index 50677631b5399453eebc6b149272431f74b1fce6..c652bd836b27805865e0a902ef9cf7c1ff254646 100644
---- a/src/builtins/promise-constructor.tq
-+++ b/src/builtins/promise-constructor.tq
-@@ -8,6 +8,9 @@
- namespace runtime {
- extern transitioning runtime PromiseHookInit(
-     implicit context: Context)(Object, Object): JSAny;
-+
-+extern transitioning runtime PromiseContextInit(
-+    implicit context: Context)(JSPromise): JSAny;
- }
- 
- // https://tc39.es/ecma262/#sec-promise-constructor
-@@ -62,6 +65,7 @@ transitioning javascript builtin PromiseConstructor(
-     result = UnsafeCast<JSPromise>(
-         FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
-     PromiseInit(result);
-+    runtime::PromiseContextInit(result);
-     RunAnyPromiseHookInit(result, Undefined);
-   }
- 
 diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
-index c85bb3b4591239a0f137dc0ed3c5cc80e169d66f..5bff2e5d7cee2e4e78c5d2c68b4c1d27c6646bd1 100644
+index c85bb3b4591239a0f137dc0ed3c5cc80e169d66f..b0b4a18e00faffe2efb7ce807e7ab609adc1ff1d 100644
 --- a/src/builtins/promise-misc.tq
 +++ b/src/builtins/promise-misc.tq
-@@ -54,6 +54,7 @@ macro PromiseInit(promise: JSPromise): void {
+@@ -29,6 +29,14 @@ extern macro PromiseBuiltinsAssembler::IsIsolatePromiseHookEnabled(uint32):
+     bool;
+ 
+ extern macro PromiseBuiltinsAssembler::PromiseHookFlags(): uint32;
++extern macro LoadPromiseContextTag(): Object;
++
++// Whether following or settling {promise} has to go through the embedder.
++macro NeedsPromiseContextSwitch(promise: JSPromise): bool {
++  const tag = promise.context_tag;
++  return !TaggedEqual(tag, TheHole) &&
++      !TaggedEqual(tag, LoadPromiseContextTag());
++}
+ 
+ namespace macros {
+ extern macro GetContinuationPreservedEmbedderData(): Object;
+@@ -54,6 +62,7 @@ macro PromiseInit(promise: JSPromise): void {
      is_silent: false,
      async_task_id: kInvalidAsyncTaskId
    });
-+  promise.context_tag = kZero;
++  promise.context_tag = LoadPromiseContextTag();
    promise_internal::ZeroOutEmbedderOffsets(promise);
  }
  
-@@ -74,6 +75,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
+@@ -74,6 +83,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
      is_silent: false,
      async_task_id: kInvalidAsyncTaskId
    });
-+  promise.context_tag = kZero;
++  promise.context_tag = LoadPromiseContextTag();
    return promise;
  }
  
-@@ -273,6 +275,7 @@ transitioning macro NewJSPromise(implicit context: Context)(parent: Object):
-     JSPromise {
-   const instance = InnerNewJSPromise();
-   PromiseInit(instance);
-+  runtime::PromiseContextInit(instance);
-   RunAnyPromiseHookInit(instance, parent);
-   return instance;
- }
-@@ -296,6 +299,7 @@ transitioning macro NewJSPromise(
-   instance.reactions_or_result = result;
-   instance.SetStatus(status);
-   promise_internal::ZeroOutEmbedderOffsets(instance);
-+  runtime::PromiseContextInit(instance);
-   RunAnyPromiseHookInit(instance, Undefined);
-   return instance;
- }
+diff --git a/src/codegen/code-stub-assembler.h b/src/codegen/code-stub-assembler.h
+index 63b3b9c92d22136a87e52584c42d7870569b36dc..94a0f719dff41a3aa33d335a693cc290a054b652 100644
+--- a/src/codegen/code-stub-assembler.h
++++ b/src/codegen/code-stub-assembler.h
+@@ -4592,6 +4592,9 @@ class V8_EXPORT_PRIVATE CodeStubAssembler
+ 
+   // Promise helpers
+   TNode<Uint32T> PromiseHookFlags();
++  TNode<Object> LoadPromiseContextTag() {
++    return LoadRoot(RootIndex::kPromiseContextTag);
++  }
+   TNode<BoolT> HasAsyncEventDelegate();
+ #ifdef V8_ENABLE_JAVASCRIPT_PROMISE_HOOKS
+   TNode<BoolT> IsContextPromiseHookEnabled(TNode<Uint32T> flags);
 diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
-index 2b96d0eed11a5b22e17ed11f1050597936b4dea0..c1ad8ae285a1bcd1191687a5cb6c8c858bc0e60e 100644
+index 2b96d0eed11a5b22e17ed11f1050597936b4dea0..7b0ce1ff96c4a10b7ca12903bda68e0a6faf4524 100644
 --- a/src/compiler/js-create-lowering.cc
 +++ b/src/compiler/js-create-lowering.cc
 @@ -1115,10 +1115,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
@@ -195,7 +202,7 @@ index 2b96d0eed11a5b22e17ed11f1050597936b4dea0..c1ad8ae285a1bcd1191687a5cb6c8c85
                offsetof(JSPromise, reactions_or_result_)),
            jsgraph()->ZeroConstant());
 +  a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kContextTagOffset),
-+          jsgraph()->ZeroConstant());
++          jsgraph()->TheHoleConstant());
    static_assert(v8::Promise::kPending == 0);
    a.Store(AccessBuilder::ForJSObjectOffset(offsetof(JSPromise, flags_)),
            jsgraph()->ZeroConstant());
@@ -217,49 +224,48 @@ index f89b106d883569ad927d6864f1e63361a257907f..e6fa23f0640899a666776c925531bf63
  }
  
 diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
-index de710c8fad334d5fc29ee0d4627b4eb370e58550..fb7d83dd6fcff7aa7aba2ba5ad533fa8b877e1e1 100644
+index de710c8fad334d5fc29ee0d4627b4eb370e58550..38bbd3f3ea4031d7620541fed83c9bd05636a760 100644
 --- a/src/execution/isolate-inl.h
 +++ b/src/execution/isolate-inl.h
-@@ -129,6 +129,25 @@ bool Isolate::is_javascript_execution_allowed() const {
+@@ -129,6 +129,33 @@ bool Isolate::is_javascript_execution_allowed() const {
           javascript_execution_dump();
  }
  
-+Tagged<Object> Isolate::promise_context_tag() { return promise_context_tag_; }
++Handle<Object> Isolate::promise_context_tag() {
++  return root_handle(RootIndex::kPromiseContextTag);
++}
 +
 +bool Isolate::has_promise_context_tag() {
-+  return promise_context_tag_ != ReadOnlyRoots(this).the_hole_value();
++  return heap()->promise_context_tag() != ReadOnlyRoots(this).the_hole_value();
 +}
 +
 +void Isolate::clear_promise_context_tag() {
-+  set_promise_context_tag(ReadOnlyRoots(this).the_hole_value());
++  heap()->set_promise_context_tag(ReadOnlyRoots(this).the_hole_value());
 +}
 +
-+void Isolate::set_promise_context_tag(Tagged<Object> tag) {
-+  promise_context_tag_ = tag;
++void Isolate::set_promise_context_tag(Handle<Object> tag) {
++  heap()->set_promise_context_tag(*tag);
 +}
 +
 +void Isolate::set_promise_cross_context_callback(
 +    PromiseCrossContextCallback callback) {
 +  promise_cross_context_callback_ = callback;
++  // Optimized code allocates promises inline as long as the PromiseHook
++  // protector holds, since inline allocation skips init hooks. It also leaves
++  // the promise untagged, so that its reactions would run in whichever context
++  // settles it. Context tagging is an init hook, so invalidate the protector
++  // to keep promise allocation in builtins and the runtime, which tag it.
++  if (callback != nullptr) UpdatePromiseHookProtector();
 +}
 +
  #ifdef DEBUG
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 2834f8fbac67370a58e47c15882743cb0d7ff111..adb34befdad7cdc763e9f9ad2de6ddb9160245db 100644
+index 2834f8fbac67370a58e47c15882743cb0d7ff111..5553f07618687436f60fadd7fce3f2fa9a7cf81d 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
-@@ -680,6 +680,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
-                       FullObjectSlot(&thread->context_));
-   v->VisitRootPointer(Root::kStackRoots, nullptr,
-                       FullObjectSlot(&thread->last_entered_context_));
-+  v->VisitRootPointer(Root::kStackRoots, nullptr,
-+                      FullObjectSlot(&promise_context_tag_));
- 
-   for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
-        block = block->next_) {
-@@ -6498,6 +6500,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -6498,6 +6498,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,7 +273,7 @@ index 2834f8fbac67370a58e47c15882743cb0d7ff111..adb34befdad7cdc763e9f9ad2de6ddb9
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -8716,5 +8719,40 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
+@@ -8716,5 +8717,40 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
    PrintF("\n");
  }
  
@@ -309,17 +315,17 @@ index 2834f8fbac67370a58e47c15882743cb0d7ff111..adb34befdad7cdc763e9f9ad2de6ddb9
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index c1917812619ca9141599bdd192343d7f6f6e4767..003cb03ac3f846680a47c22e7e3fcf816ce488f5 100644
+index c1917812619ca9141599bdd192343d7f6f6e4767..367f6dc9201abf8ed5fca7d6e0158d91cc8aff95 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
 @@ -2479,6 +2479,15 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
-+  inline Tagged<Object> promise_context_tag();
++  inline Handle<Object> promise_context_tag();
 +  inline bool has_promise_context_tag();
 +  inline void clear_promise_context_tag();
-+  inline void set_promise_context_tag(Tagged<Object> tag);
++  inline void set_promise_context_tag(Handle<Object> tag);
 +  inline void set_promise_cross_context_callback(
 +      PromiseCrossContextCallback callback);
 +  MaybeHandle<JSPromise> RunPromiseCrossContextCallback(
@@ -328,12 +334,11 @@ index c1917812619ca9141599bdd192343d7f6f6e4767..003cb03ac3f846680a47c22e7e3fcf81
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
        compiler::turboshaft::WasmRevecVerifier* verifier) {
-@@ -3023,6 +3032,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -3023,6 +3032,11 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    bool is_frozen_ = false;
  
    friend class HandleScopeImplementer;
-+  Tagged<Object> promise_context_tag_;
-+  PromiseCrossContextCallback promise_cross_context_callback_;
++  PromiseCrossContextCallback promise_cross_context_callback_ = nullptr;
 +  bool in_promise_cross_context_callback_ = false;
 +
 +  class PromiseCrossContextCallbackScope;
@@ -341,7 +346,7 @@ index c1917812619ca9141599bdd192343d7f6f6e4767..003cb03ac3f846680a47c22e7e3fcf81
    friend class GlobalSafepoint;
    friend class heap::HeapTester;
    friend class IsolateForPointerCompression;
-@@ -3030,6 +3045,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -3030,6 +3044,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    friend class IsolateGroup;
    friend class TestSerializer;
    friend class SharedHeapNoClientsTest;
@@ -350,31 +355,27 @@ index c1917812619ca9141599bdd192343d7f6f6e4767..003cb03ac3f846680a47c22e7e3fcf81
  
  // The current entered Isolate and its thread data. Do not access these
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index 400a43dc58ae891a7f56d20335226d12d4210e72..4a738ed0eb86fd46c735fe7c84d946e6f7950b4f 100644
+index 400a43dc58ae891a7f56d20335226d12d4210e72..055690fc81af503d60661a3fb10c9e85b6abc7a1 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4991,6 +4991,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+@@ -4991,6 +4991,7 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
    DisallowGarbageCollection no_gc;
    Tagged<JSPromise> raw = *promise;
    raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
-+  if (!isolate()->has_promise_context_tag()) {
-+    raw->set_context_tag(Smi::zero(), SKIP_WRITE_BARRIER);
-+  } else {
-+    raw->set_context_tag(isolate()->promise_context_tag());
-+  }
-+
++  raw->set_context_tag(isolate()->heap()->promise_context_tag());
    raw->set_flags(JSPromise::Flags());
    // TODO(v8) remove once embedder data slots are always zero-initialized.
    InitEmbedderFields(*promise, Smi::zero());
 diff --git a/src/maglev/maglev-reducer-inl.h b/src/maglev/maglev-reducer-inl.h
-index 4bb1704d2ae9d7a31334363fa85d1b44f5dbdfa9..b2b10f80206ebf21f31b1c4b1a66585240db68ad 100644
+index 4bb1704d2ae9d7a31334363fa85d1b44f5dbdfa9..eb27f044079d7336f9fe23cd40651a673b329a42 100644
 --- a/src/maglev/maglev-reducer-inl.h
 +++ b/src/maglev/maglev-reducer-inl.h
-@@ -6263,9 +6263,10 @@ VirtualObject* MaglevReducer<BaseT>::CreateJSPromiseObject() {
+@@ -6263,9 +6263,11 @@ VirtualObject* MaglevReducer<BaseT>::CreateJSPromiseObject() {
    vobj->set(offsetof(JSObject, elements_),
              GetRootConstant(RootIndex::kEmptyFixedArray));
    vobj->set(offsetof(JSPromise, reactions_or_result_), GetSmiConstant(0));
-+  vobj->set(JSPromise::kContextTagOffset, GetSmiConstant(0));
++  vobj->set(JSPromise::kContextTagOffset,
++            GetRootConstant(RootIndex::kTheHoleValue));
    static_assert(v8::Promise::kPending == 0);
    vobj->set(offsetof(JSPromise, flags_), GetSmiConstant(0));
 -  static_assert(sizeof(JSPromise) == 5 * kTaggedSize);
@@ -400,7 +401,7 @@ index 6526e792e6b1e515bae3d3fa4462f64d3fe67882..c2cef8c2a0d623949ef0845af43db0db
  
  void JSPromise::set_flags(Flags value) { flags_.store(value); }
 diff --git a/src/objects/js-promise.h b/src/objects/js-promise.h
-index 9c6f404386aa1d883ebb782f57d81c466c6992e3..81f8a42bb12696508f6c43ed2eead5aaf53c3181 100644
+index 9c6f404386aa1d883ebb782f57d81c466c6992e3..86c3d78fcd4dc8d27999f73311cbb882e7b4db1e 100644
 --- a/src/objects/js-promise.h
 +++ b/src/objects/js-promise.h
 @@ -38,6 +38,10 @@ V8_OBJECT class JSPromise : public JSObjectWithEmbedderSlots {
@@ -418,7 +419,7 @@ index 9c6f404386aa1d883ebb782f57d81c466c6992e3..81f8a42bb12696508f6c43ed2eead5aa
    // Smi 0 terminated list of PromiseReaction objects in case the JSPromise
    // was not settled yet, otherwise the result.
    TaggedMember<UnionOf<PromiseReaction, JSAny>> reactions_or_result_;
-+  // The context tag (workerd Promise Context Tagging extension).
++  // The hole (default) or a tag object set via Isolate::PromiseContextScope.
 +  TaggedMember<Object> context_tag_;
    SmiBitFieldMember<Flags> flags_;
  
@@ -465,26 +466,28 @@ index 1403701e8d94fd0a20fded046ff75c0f98604023..2ddf8f86c16ab7c3c3f187dad8ccbea2
  }
  
  void V8HeapExplorer::ExtractJSGeneratorObjectReferences(
+diff --git a/src/roots/roots.h b/src/roots/roots.h
+index 1abe1280bd9a33295c1728d1543dd2f7193adeb2..926135995c273e6334b81648c83dadd423fa85e6 100644
+--- a/src/roots/roots.h
++++ b/src/roots/roots.h
+@@ -466,7 +466,8 @@ class RootVisitor;
+   V(FunctionTemplateInfo, error_stack_getter_fun_template,                  \
+     ErrorStackGetterSharedFun)                                              \
+   V(FunctionTemplateInfo, error_stack_setter_fun_template,                  \
+-    ErrorStackSetterSharedFun)
++    ErrorStackSetterSharedFun)                                              \
++  V(Object, promise_context_tag, PromiseContextTag)
+ 
+ // Entries in this list are limited to Smis and are not visited during GC.
+ #define SMI_ROOT_LIST(V)                                                       \
 diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
-index af84ed30bf4e583dffbd253d732d0623bf0005c8..5c2adc6ed9663082571a8e5b88751309c54cb3bc 100644
+index af84ed30bf4e583dffbd253d732d0623bf0005c8..c595fe90bd5bf91230ca34e8200e7ca7ea94e4fa 100644
 --- a/src/runtime/runtime-promise.cc
 +++ b/src/runtime/runtime-promise.cc
-@@ -246,5 +246,41 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
+@@ -246,5 +246,29 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
    return *result;
  }
  
-+RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
-+  HandleScope scope(isolate);
-+  DCHECK_EQ(1, args.length());
-+  if (!isolate->has_promise_context_tag()) {
-+    args.at<JSPromise>(0)->set_context_tag(Smi::zero());
-+  } else {
-+    CHECK(!IsUndefined(isolate->promise_context_tag()));
-+    args.at<JSPromise>(0)->set_context_tag(isolate->promise_context_tag());
-+  }
-+  return ReadOnlyRoots(isolate).undefined_value();
-+}
-+
 +RUNTIME_FUNCTION(Runtime_PromiseContextCheck) {
 +  HandleScope scope(isolate);
 +  DCHECK_EQ(1, args.length());
@@ -494,8 +497,8 @@ index af84ed30bf4e583dffbd253d732d0623bf0005c8..5c2adc6ed9663082571a8e5b88751309
 +  // If promise.context_tag() is strict equal to isolate.promise_context_tag(),
 +  // or if the promise being checked does not have a context tag, we'll just
 +  // return promise directly.
-+  Tagged<Object> obj = promise->context_tag();
-+  if (obj == Smi::zero() || obj == isolate->promise_context_tag()) {
++  Handle<Object> obj(promise->context_tag(), isolate);
++  if (IsTheHole(*obj) || obj.is_identical_to(isolate->promise_context_tag())) {
 +    return *promise;
 +  }
 +
@@ -512,10 +515,10 @@ index af84ed30bf4e583dffbd253d732d0623bf0005c8..5c2adc6ed9663082571a8e5b88751309
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index 1b4e76d9f239918c9421048ffab4fb76502c201f..09926ac1d875e53428b1af0afbb7a3fe17434361 100644
+index 1b4e76d9f239918c9421048ffab4fb76502c201f..ce24b24abb2a4f706f3fde36ef46945984574fb1 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
-@@ -439,18 +439,20 @@ constexpr bool CanTriggerGC(T... properties) {
+@@ -439,18 +439,19 @@ constexpr bool CanTriggerGC(T... properties) {
    F(StrictNotEqual, 2, 1)                  \
    F(ReferenceEqual, 2, 1)
  
@@ -543,8 +546,122 @@ index 1b4e76d9f239918c9421048ffab4fb76502c201f..09926ac1d875e53428b1af0afbb7a3fe
 +  F(ConstructSuppressedError, 3, 1)                         \
 +  F(ConstructAggregateErrorHelper, 4, 1)                    \
 +  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
-+  F(PromiseContextInit, 1, 1)                               \
 +  F(PromiseContextCheck, 1, 1)
  
  #define FOR_EACH_INTRINSIC_PROXY(F, I) \
    F(CheckProxyGetSetTrapResult, 4, 1)  \
+diff --git a/test/unittests/BUILD.gn b/test/unittests/BUILD.gn
+index 27ae1d5c174be15aa70666f0cf3c208bac6b860a..c31c66884947ac27f886eb45d3f9549105d40ad6 100644
+--- a/test/unittests/BUILD.gn
++++ b/test/unittests/BUILD.gn
+@@ -286,6 +286,7 @@ v8_cluster_source_set("v8_unittests_sources") {
+     "api/gc-callbacks-unittest.cc",
+     "api/interceptor-unittest.cc",
+     "api/isolate-unittest.cc",
++    "api/promise-context-tag-unittest.cc",
+     "api/remote-object-unittest.cc",
+     "api/resource-constraints-unittest.cc",
+     "api/smi-tagging-unittest.cc",
+diff --git a/test/unittests/api/promise-context-tag-unittest.cc b/test/unittests/api/promise-context-tag-unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..f082201e39177f73b59af387707915eabecac64a
+--- /dev/null
++++ b/test/unittests/api/promise-context-tag-unittest.cc
+@@ -0,0 +1,97 @@
++// Copyright 2026 the V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <string>
++
++#include "include/v8-context.h"
++#include "include/v8-function.h"
++#include "include/v8-isolate.h"
++#include "include/v8-local-handle.h"
++#include "include/v8-object.h"
++#include "include/v8-promise.h"
++#include "src/flags/flags.h"
++#include "test/common/flag-utils.h"
++#include "test/unittests/test-utils.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace v8 {
++namespace {
++
++// Once optimized, each of these allocates the promise it returns inline, unless
++// promise allocation is kept out of optimized code.
++constexpr const char* kDerivers[] = {
++    "(base) => base.then((value) => value)",
++    "(base) => base.catch(() => {})",
++    "(base) => base.finally(() => {})",
++    "(base) => Promise.all([base]).then(([value]) => value)",
++    "async (base) => { await base; }",
++    "(base) => new Promise((resolve) => { base.then(resolve); })",
++};
++
++// Stores the tag of the promise being followed in the global `followedTag`.
++MaybeLocal<Promise> RecordFollowedTag(Local<Context> context,
++                                      Local<Promise> promise,
++                                      Local<Object> tag) {
++  Isolate* isolate = Isolate::GetCurrent();
++  CHECK(context->Global()
++            ->Set(context, String::NewFromUtf8Literal(isolate, "followedTag"),
++                  tag)
++            .FromJust());
++  return promise;
++}
++
++class PromiseContextTagTest : public TestWithContext {
++ protected:
++  // Optimizes each deriver with the natives syntax function `optimize`, derives
++  // a promise from a pending one under one context tag, and follows the derived
++  // promise under another. The follow must see the first tag, as it does when
++  // the deriver is not optimized.
++  void ExpectOptimizedDerivedPromisesTagged(const std::string& optimize,
++                                            const std::string& active_tier) {
++    i::FlagScope<bool> natives_syntax(&i::v8_flags.allow_natives_syntax, true);
++    isolate()->SetPromiseCrossContextCallback(RecordFollowedTag);
++
++    for (const char* deriver : kDerivers) {
++      SCOPED_TRACE(deriver);
++      SetGlobalProperty("derive", RunJS(deriver));
++      RunJS(("%PrepareFunctionForOptimization(derive);"
++             "derive(Promise.resolve());"
++             "derive(Promise.resolve());"
++             "%" +
++             optimize + "(derive);")
++                .c_str());
++
++      Local<Object> creating_tag = Object::New(isolate());
++      {
++        Isolate::PromiseContextScope scope(isolate(), creating_tag);
++        RunJS("var derived = derive(new Promise(() => {}));");
++      }
++      // The deriver must have run optimized for the check below to mean
++      // anything.
++      ASSERT_TRUE(RunJS(("%" + active_tier + "(derive)").c_str())->IsTrue());
++
++      RunJS("var followedTag = undefined;");
++      {
++        Isolate::PromiseContextScope scope(isolate(), Object::New(isolate()));
++        RunJS("derived.then(() => {});");
++      }
++      EXPECT_TRUE(RunJS("followedTag")->StrictEquals(creating_tag));
++    }
++  }
++};
++
++TEST_F(PromiseContextTagTest, MaglevTagsPromises) {
++  if (!i::v8_flags.maglev) GTEST_SKIP() << "Maglev is disabled";
++  ExpectOptimizedDerivedPromisesTagged("OptimizeMaglevOnNextCall",
++                                       "ActiveTierIsMaglev");
++}
++
++TEST_F(PromiseContextTagTest, TurbofanTagsPromises) {
++  if (!i::v8_flags.turbofan) GTEST_SKIP() << "TurboFan is disabled";
++  ExpectOptimizedDerivedPromisesTagged("OptimizeFunctionOnNextCall",
++                                       "ActiveTierIsTurbofan");
++}
++
++}  // namespace
++}  // namespace v8
