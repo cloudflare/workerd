@@ -135,21 +135,17 @@ struct EncoderModuleRegistryImpl {
   // clang-format misparses this struct from the constructor above on and would put a space
   // before the `*`.
   // clang-format off
-  void addBuiltinBundle(jsg::Bundle::Reader bundle,
+  void addLazyBuiltinBundle(const jsg::BuiltinBundleIndex& index,
       kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none,
-      const jsg::ModuleSource* = nullptr) {
+      const jsg::ModuleSource* = nullptr,
+      kj::Maybe<kj::Function<bool(jsg::Module::Reader)>> predicate = kj::none) {
     // clang-format on
-    for (auto module: bundle.getModules()) {
-      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
-    }
-  }
-
-  template <typename Filter, typename AddModule>
-  void addBuiltinBundleFiltered(jsg::Bundle::Reader bundle, Filter filter, AddModule addModule) {
-    for (auto module: bundle.getModules()) {
-      if (filter(module)) {
-        addModule(module);
+    for (auto module: index.getBundle().getModules()) {
+      if (module.getType() != maybeFilter.orDefault(module.getType())) continue;
+      KJ_IF_SOME(p, predicate) {
+        if (!p(module)) continue;
       }
+      addBuiltinModule(module);
     }
   }
 

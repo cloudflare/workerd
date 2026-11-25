@@ -68,7 +68,9 @@ void registerModules(
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
   registerMessageChannelModule(registry, featureFlags);
-  registry.addBuiltinBundle(CLOUDFLARE_BUNDLE, kj::none, moduleSource);
+  static const jsg::BuiltinBundleIndex* const cloudflareIndex =
+      new jsg::BuiltinBundleIndex(CLOUDFLARE_BUNDLE);
+  registry.addLazyBuiltinBundle(*cloudflareIndex, kj::none, moduleSource);
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
   registerWrappedBindingModule(registry, featureFlags);
