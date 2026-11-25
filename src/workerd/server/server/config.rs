@@ -139,8 +139,10 @@ impl Factory {
 }
 
 /// A malformed config message; the CLI checked the message, so this is a bug.
+// Callers pass this directly to `map_err`, which hands over the error by value.
+#[expect(clippy::needless_pass_by_value)]
 pub fn capnp_error(error: capnp::Error) -> crate::Error {
-    let capnp::Error { extra, .. } = error;
+    let extra = error.extra();
     kj::failed!("{extra}")
 }
 

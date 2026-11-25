@@ -1,8 +1,8 @@
 {
   "binary_crates": [
-    "capnpc 0.27.0"
+    "capnpc 0.28.1"
   ],
-  "checksum": "415e593a094a7e225411c7fd1521ea3684e0ef44090c3dc0f21002c307797ac9",
+  "checksum": "e55dac9976d36f9f23abb7333724e63eefc4627a02f0c1901afa92fd122fdae9",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -35,7 +35,6 @@
       "aarch64-apple-darwin"
     ],
     "cfg(all(target_arch = \"loongarch64\", target_os = \"linux\"))": [],
-    "cfg(all(target_arch = \"wasm32\", target_os = \"wasi\", target_env = \"p2\"))": [],
     "cfg(all(target_arch = \"x86\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86\", target_env = \"msvc\", not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86_64\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": [
@@ -71,7 +70,6 @@
       "x86_64-unknown-linux-gnu"
     ],
     "cfg(any(target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"hurd\", target_os = \"illumos\", target_os = \"cygwin\", all(target_os = \"horizon\", target_arch = \"arm\")))": [],
-    "cfg(any(target_os = \"freebsd\", target_os = \"openbsd\", target_os = \"netbsd\", target_os = \"dragonflybsd\", target_os = \"ios\"))": [],
     "cfg(any(target_os = \"haiku\", target_os = \"redox\", target_os = \"nto\", target_os = \"aix\"))": [],
     "cfg(any(target_os = \"ios\", target_os = \"visionos\", target_os = \"watchos\", target_os = \"tvos\"))": [],
     "cfg(any(target_os = \"linux\", target_os = \"android\"))": [
@@ -82,6 +80,7 @@
       "aarch64-apple-darwin",
       "x86_64-apple-darwin"
     ],
+    "cfg(any(target_os = \"openbsd\", target_os = \"netbsd\", target_os = \"dragonfly\", target_os = \"ios\"))": [],
     "cfg(any(target_vendor = \"apple\"))": [
       "aarch64-apple-darwin",
       "x86_64-apple-darwin"
@@ -105,13 +104,6 @@
       "x86_64-pc-windows-msvc",
       "x86_64-unknown-linux-gnu"
     ],
-    "cfg(not(all(target_arch = \"arm\", target_os = \"none\")))": [
-      "aarch64-apple-darwin",
-      "aarch64-unknown-linux-gnu",
-      "x86_64-apple-darwin",
-      "x86_64-pc-windows-msvc",
-      "x86_64-unknown-linux-gnu"
-    ],
     "cfg(not(windows))": [
       "aarch64-apple-darwin",
       "aarch64-unknown-linux-gnu",
@@ -120,6 +112,7 @@
     ],
     "cfg(target_arch = \"wasm32\")": [],
     "cfg(target_os = \"android\")": [],
+    "cfg(target_os = \"freebsd\")": [],
     "cfg(target_os = \"hermit\")": [],
     "cfg(target_os = \"macos\")": [
       "aarch64-apple-darwin",
@@ -238,72 +231,6 @@
         }
       ],
       "version": "2.0.1"
-    },
-    "ahash 0.8.12": {
-      "build_script_attrs": {
-        "deps": [
-          {
-            "id": "version_check 0.9.5",
-            "target": "version_check"
-          }
-        ]
-      },
-      "common_attrs": {
-        "deps": {
-          "common": [
-            {
-              "id": "cfg-if 1.0.5",
-              "target": "cfg_if"
-            },
-            {
-              "id": "zerocopy 0.8.64",
-              "target": "zerocopy"
-            }
-          ],
-          "selects": {
-            "cfg(not(all(target_arch = \"arm\", target_os = \"none\")))": [
-              {
-                "id": "once_cell 1.21.4",
-                "target": "once_cell"
-              }
-            ]
-          }
-        },
-        "edition": "2018",
-        "extra_deps": [
-          ":build_script_build"
-        ]
-      },
-      "library_target_name": "ahash",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "ahash",
-      "package_url": "https://github.com/tkaitchuck/ahash",
-      "repository": {
-        "Http": {
-          "sha256": "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75",
-          "url": "https://static.crates.io/crates/ahash/0.8.12/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ahash",
-            "crate_root": "src/lib.rs"
-          }
-        },
-        {
-          "BuildScript": {
-            "crate_name": "build_script_build",
-            "crate_root": "build.rs"
-          }
-        }
-      ],
-      "version": "0.8.12"
     },
     "aho-corasick 1.1.5": {
       "common_attrs": {
@@ -456,11 +383,6 @@
     },
     "ascii 1.1.0": {
       "common_attrs": {
-        "crate_features": [
-          "alloc",
-          "default",
-          "std"
-        ],
         "edition": "2015"
       },
       "library_target_name": "ascii",
@@ -488,7 +410,7 @@
       ],
       "version": "1.1.0"
     },
-    "ast_node 7.0.0": {
+    "ast_node 8.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -515,8 +437,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "edf54a7a1bf98e127c22e9e2b9d19619092c74283fdc14e4d67da69780f90db6",
-          "url": "https://static.crates.io/crates/ast_node/7.0.0/download"
+          "sha256": "34b122e4595000b5d0ffa612edeb5e56a6d5a5df8f348d6a66b328ac25358ef1",
+          "url": "https://static.crates.io/crates/ast_node/8.0.0/download"
         }
       },
       "targets": [
@@ -527,7 +449,7 @@
           }
         }
       ],
-      "version": "7.0.0"
+      "version": "8.0.0"
     },
     "async-trait 0.1.92": {
       "common_attrs": {
@@ -634,7 +556,6 @@
       "common_attrs": {
         "crate_features": [
           "alloc",
-          "default",
           "std"
         ],
         "edition": "2018"
@@ -769,7 +690,7 @@
       ],
       "version": "1.8.3"
     },
-    "better_scoped_tls 1.0.1": {
+    "better_scoped_tls 2.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -788,8 +709,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "7cd228125315b132eed175bf47619ac79b945b26e56b848ba203ae4ea8603609",
-          "url": "https://static.crates.io/crates/better_scoped_tls/1.0.1/download"
+          "sha256": "4a3be58af5656af939642a7953f8f890c7038604bb7c8b79ec787f2d531c9d66",
+          "url": "https://static.crates.io/crates/better_scoped_tls/2.0.0/download"
         }
       },
       "targets": [
@@ -800,7 +721,7 @@
           }
         }
       ],
-      "version": "1.0.1"
+      "version": "2.0.0"
     },
     "bitflags 2.13.2": {
       "common_attrs": {
@@ -1115,14 +1036,14 @@
       ],
       "version": "0.2.4"
     },
-    "capnp 0.27.3": {
+    "capnp 0.28.2": {
       "common_attrs": {
         "crate_features": [
           "alloc",
           "default",
           "std"
         ],
-        "edition": "2021"
+        "edition": "2024"
       },
       "library_target_name": "capnp",
       "license": "MIT",
@@ -1134,8 +1055,8 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
-          "sha256": "98216f4102645406ce4dbb0d2b3511cae502537885bae5662812ccc1fe6b04e7",
-          "url": "https://static.crates.io/crates/capnp/0.27.3/download"
+          "sha256": "98d71e4c5b1c0a00179bb0b4bdf78a087fc3686414a49776069da5050d636ba2",
+          "url": "https://static.crates.io/crates/capnp/0.28.2/download"
         }
       },
       "targets": [
@@ -1146,17 +1067,17 @@
           }
         }
       ],
-      "version": "0.27.3"
+      "version": "0.28.2"
     },
-    "capnpc 0.27.0": {
+    "capnpc 0.28.1": {
       "common_attrs": {
         "deps": [
           {
-            "id": "capnp 0.27.3",
+            "id": "capnp 0.28.2",
             "target": "capnp"
           }
         ],
-        "edition": "2021"
+        "edition": "2024"
       },
       "library_target_name": "capnpc",
       "license": "MIT",
@@ -1168,8 +1089,8 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
-          "sha256": "82ca16312ddb64529d31c8dc46148671c22e57b80134fa5f17811ad5a6a79492",
-          "url": "https://static.crates.io/crates/capnpc/0.27.0/download"
+          "sha256": "46e419b5984a8843f3192d7ffa6d51745a872081bbcca7a476e1da4aede7044e",
+          "url": "https://static.crates.io/crates/capnpc/0.28.1/download"
         }
       },
       "targets": [
@@ -1186,7 +1107,7 @@
           }
         }
       ],
-      "version": "0.27.0"
+      "version": "0.28.1"
     },
     "castaway 0.2.4": {
       "common_attrs": {
@@ -1357,6 +1278,58 @@
         }
       ],
       "version": "0.2.2"
+    },
+    "chacha20 0.10.2": {
+      "common_attrs": {
+        "crate_features": [
+          "rng"
+        ],
+        "deps": {
+          "common": [
+            {
+              "id": "cfg-if 1.0.5",
+              "target": "cfg_if"
+            },
+            {
+              "id": "rand_core 0.10.1",
+              "target": "rand_core"
+            }
+          ],
+          "selects": {
+            "cfg(any(target_arch = \"x86_64\", target_arch = \"x86\"))": [
+              {
+                "id": "cpufeatures 0.3.1",
+                "target": "cpufeatures"
+              }
+            ]
+          }
+        },
+        "edition": "2024"
+      },
+      "library_target_name": "chacha20",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "chacha20",
+      "package_url": "https://github.com/RustCrypto/stream-ciphers",
+      "repository": {
+        "Http": {
+          "sha256": "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06",
+          "url": "https://static.crates.io/crates/chacha20/0.10.2/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "chacha20",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.10.2"
     },
     "clang-ast 0.1.36": {
       "common_attrs": {
@@ -2036,9 +2009,6 @@
     },
     "crypto-common 0.1.7": {
       "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
         "deps": [
           {
             "id": "generic-array 0.14.7",
@@ -2464,11 +2434,9 @@
     "digest 0.10.7": {
       "common_attrs": {
         "crate_features": [
-          "alloc",
           "block-buffer",
           "core-api",
-          "default",
-          "std"
+          "default"
         ],
         "deps": [
           {
@@ -2702,11 +2670,11 @@
             "target": "bytes"
           },
           {
-            "id": "capnp 0.27.3",
+            "id": "capnp 0.28.2",
             "target": "capnp"
           },
           {
-            "id": "capnpc 0.27.0",
+            "id": "capnpc 0.28.1",
             "target": "capnpc"
           },
           {
@@ -2810,7 +2778,7 @@
             "target": "nix"
           },
           {
-            "id": "notify 8.2.2",
+            "id": "notify 9.0.0",
             "target": "notify"
           },
           {
@@ -2834,7 +2802,7 @@
             "target": "quote"
           },
           {
-            "id": "rand 0.9.5",
+            "id": "rand 0.10.4",
             "target": "rand"
           },
           {
@@ -2882,11 +2850,11 @@
             "target": "static_assertions"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ts_fast_strip 60.0.1",
+            "id": "swc_ts_fast_strip 61.0.0",
             "target": "swc_ts_fast_strip"
           },
           {
@@ -3065,7 +3033,6 @@
       "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
-          "default",
           "ecma"
         ],
         "edition": "2021",
@@ -3170,7 +3137,6 @@
     "either 1.19.0": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "std",
           "use_std"
         ],
@@ -3607,7 +3573,7 @@
       ],
       "version": "1.2.3"
     },
-    "from_variant 3.0.0": {
+    "from_variant 4.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -3630,8 +3596,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9",
-          "url": "https://static.crates.io/crates/from_variant/3.0.0/download"
+          "sha256": "4bff1743d3da24557b54444a7ac6bb7b5730401a7ce6553d65bfee4665d81cfa",
+          "url": "https://static.crates.io/crates/from_variant/4.0.0/download"
         }
       },
       "targets": [
@@ -3642,7 +3608,7 @@
           }
         }
       ],
-      "version": "3.0.0"
+      "version": "4.0.0"
     },
     "funty 2.0.0": {
       "common_attrs": {
@@ -4195,129 +4161,22 @@
       ],
       "version": "0.2.17"
     },
-    "getrandom 0.3.4": {
-      "build_script_attrs": {},
-      "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
-        "deps": {
-          "common": [
-            {
-              "id": "cfg-if 1.0.5",
-              "target": "cfg_if"
-            }
-          ],
-          "selects": {
-            "cfg(all(any(target_os = \"linux\", target_os = \"android\"), not(any(all(target_os = \"linux\", target_env = \"\"), getrandom_backend = \"custom\", getrandom_backend = \"linux_raw\", getrandom_backend = \"rdrand\", getrandom_backend = \"rndr\"))))": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(all(target_arch = \"wasm32\", target_os = \"wasi\", target_env = \"p2\"))": [
-              {
-                "id": "wasip2 1.0.4+wasi-0.2.12",
-                "target": "wasip2"
-              }
-            ],
-            "cfg(all(target_os = \"uefi\", getrandom_backend = \"efi_rng\"))": [
-              {
-                "id": "r-efi 5.3.0",
-                "target": "r_efi"
-              }
-            ],
-            "cfg(any(target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"hurd\", target_os = \"illumos\", target_os = \"cygwin\", all(target_os = \"horizon\", target_arch = \"arm\")))": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(any(target_os = \"haiku\", target_os = \"redox\", target_os = \"nto\", target_os = \"aix\"))": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(any(target_os = \"ios\", target_os = \"visionos\", target_os = \"watchos\", target_os = \"tvos\"))": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(any(target_os = \"macos\", target_os = \"openbsd\", target_os = \"vita\", target_os = \"emscripten\"))": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(target_os = \"netbsd\")": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(target_os = \"solaris\")": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ],
-            "cfg(target_os = \"vxworks\")": [
-              {
-                "id": "libc 0.2.191",
-                "target": "libc"
-              }
-            ]
-          }
-        },
-        "edition": "2021",
-        "extra_deps": [
-          ":build_script_build"
-        ]
-      },
-      "library_target_name": "getrandom",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "getrandom",
-      "package_url": "https://github.com/rust-random/getrandom",
-      "repository": {
-        "Http": {
-          "sha256": "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd",
-          "url": "https://static.crates.io/crates/getrandom/0.3.4/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "getrandom",
-            "crate_root": "src/lib.rs"
-          }
-        },
-        {
-          "BuildScript": {
-            "crate_name": "build_script_build",
-            "crate_root": "build.rs"
-          }
-        }
-      ],
-      "version": "0.3.4"
-    },
     "getrandom 0.4.3": {
       "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
-          "std"
+          "std",
+          "sys_rng"
         ],
         "deps": {
           "common": [
             {
               "id": "cfg-if 1.0.5",
               "target": "cfg_if"
+            },
+            {
+              "id": "rand_core 0.10.1",
+              "target": "rand_core"
             }
           ],
           "selects": {
@@ -4445,16 +4304,9 @@
     "hashbrown 0.14.5": {
       "common_attrs": {
         "crate_features": [
-          "ahash",
-          "allocator-api2",
-          "default",
-          "inline-more"
+          "allocator-api2"
         ],
         "deps": [
-          {
-            "id": "ahash 0.8.12",
-            "target": "ahash"
-          },
           {
             "id": "allocator-api2 0.2.21",
             "target": "allocator_api2"
@@ -4631,7 +4483,7 @@
       ],
       "version": "0.5.3"
     },
-    "hstr 4.0.3": {
+    "hstr 5.1.0": {
       "common_attrs": {
         "crate_features": [
           "serde"
@@ -4674,8 +4526,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "2b904c58532ecdbf77f46013daec3ecfa9aec83ec17cf4c8053be80a9c1d8d15",
-          "url": "https://static.crates.io/crates/hstr/4.0.3/download"
+          "sha256": "931c3fce5dec69eacf7a22bf9f3c7ebf950406b0b0ed942083ddd5af88075cd7",
+          "url": "https://static.crates.io/crates/hstr/5.1.0/download"
         }
       },
       "targets": [
@@ -4686,7 +4538,7 @@
           }
         }
       ],
-      "version": "4.0.3"
+      "version": "5.1.0"
     },
     "http 1.5.0": {
       "common_attrs": {
@@ -5761,7 +5613,6 @@
     "indexmap 2.14.2": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "std"
         ],
         "deps": [
@@ -7142,11 +6993,11 @@
       ],
       "version": "0.32.0"
     },
-    "notify 8.2.2": {
+    "notify 9.0.0": {
+      "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
           "default",
-          "fsevent-sys",
           "macos_fsevent",
           "objc2-core-foundation",
           "objc2-core-services"
@@ -7168,6 +7019,10 @@
             {
               "id": "walkdir 2.5.1",
               "target": "walkdir"
+            },
+            {
+              "id": "xxhash-rust 0.8.21",
+              "target": "xxhash_rust"
             }
           ],
           "selects": {
@@ -7181,7 +7036,17 @@
                 "target": "objc2_core_services"
               }
             ],
-            "cfg(any(target_os = \"freebsd\", target_os = \"openbsd\", target_os = \"netbsd\", target_os = \"dragonflybsd\", target_os = \"ios\"))": [
+            "cfg(any(target_os = \"linux\", target_os = \"android\"))": [
+              {
+                "id": "inotify 0.11.5",
+                "target": "inotify"
+              },
+              {
+                "id": "mio 1.2.5",
+                "target": "mio"
+              }
+            ],
+            "cfg(any(target_os = \"openbsd\", target_os = \"netbsd\", target_os = \"dragonfly\", target_os = \"ios\"))": [
               {
                 "id": "kqueue 1.2.1",
                 "target": "kqueue"
@@ -7191,10 +7056,14 @@
                 "target": "mio"
               }
             ],
-            "cfg(any(target_os = \"linux\", target_os = \"android\"))": [
+            "cfg(target_os = \"freebsd\")": [
               {
                 "id": "inotify 0.11.5",
                 "target": "inotify"
+              },
+              {
+                "id": "kqueue 1.2.1",
+                "target": "kqueue"
               },
               {
                 "id": "mio 1.2.5",
@@ -7225,7 +7094,10 @@
             ]
           }
         },
-        "edition": "2021"
+        "edition": "2024",
+        "extra_deps": [
+          ":build_script_build"
+        ]
       },
       "library_target_name": "notify",
       "license": "CC0-1.0",
@@ -7237,8 +7109,8 @@
       "package_url": "https://github.com/notify-rs/notify.git",
       "repository": {
         "Http": {
-          "sha256": "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab",
-          "url": "https://static.crates.io/crates/notify/8.2.2/download"
+          "sha256": "5482d5bd11b91a337521980e5d52fe115bdccfb4c217099daaf0abd69159dc4e",
+          "url": "https://static.crates.io/crates/notify/9.0.0/download"
         }
       },
       "targets": [
@@ -7247,9 +7119,15 @@
             "crate_name": "notify",
             "crate_root": "src/lib.rs"
           }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs"
+          }
         }
       ],
-      "version": "8.2.2"
+      "version": "9.0.0"
     },
     "notify-types 2.3.1": {
       "common_attrs": {
@@ -7289,9 +7167,7 @@
     "num-bigint 0.4.8": {
       "common_attrs": {
         "crate_features": [
-          "default",
-          "serde",
-          "std"
+          "serde"
         ],
         "deps": [
           {
@@ -7337,8 +7213,7 @@
     "num-integer 0.1.47": {
       "common_attrs": {
         "crate_features": [
-          "i128",
-          "std"
+          "i128"
         ],
         "deps": [
           {
@@ -7384,8 +7259,7 @@
       },
       "common_attrs": {
         "crate_features": [
-          "i128",
-          "std"
+          "i128"
         ],
         "edition": "2021",
         "extra_deps": [
@@ -7762,10 +7636,8 @@
     "phf 0.11.3": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "macros",
-          "phf_macros",
-          "std"
+          "phf_macros"
         ],
         "deps": [
           {
@@ -8029,9 +7901,6 @@
     },
     "phf_shared 0.11.3": {
       "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
         "deps": [
           {
             "id": "siphasher 1.0.4",
@@ -8203,45 +8072,6 @@
         }
       ],
       "version": "0.1.6"
-    },
-    "ppv-lite86 0.2.21": {
-      "common_attrs": {
-        "crate_features": [
-          "simd",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "zerocopy 0.8.64",
-            "target": "zerocopy"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "ppv_lite86",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "ppv-lite86",
-      "package_url": "https://github.com/cryptocorrosion/cryptocorrosion",
-      "repository": {
-        "Http": {
-          "sha256": "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9",
-          "url": "https://static.crates.io/crates/ppv-lite86/0.2.21/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "ppv_lite86",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.2.21"
     },
     "precomputed-hash 0.1.1": {
       "common_attrs": {
@@ -8465,35 +8295,6 @@
       ],
       "version": "1.0.47"
     },
-    "r-efi 5.3.0": {
-      "common_attrs": {
-        "edition": "2018"
-      },
-      "library_target_name": "r_efi",
-      "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
-      "license_ids": [
-        "Apache-2.0",
-        "LGPL-2.1",
-        "MIT"
-      ],
-      "name": "r-efi",
-      "package_url": "https://github.com/r-efi/r-efi",
-      "repository": {
-        "Http": {
-          "sha256": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
-          "url": "https://static.crates.io/crates/r-efi/5.3.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "r_efi",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "5.3.0"
-    },
     "r-efi 6.0.0": {
       "common_attrs": {
         "edition": "2018"
@@ -8561,6 +8362,56 @@
       ],
       "version": "0.7.0"
     },
+    "rand 0.10.4": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "std",
+          "std_rng",
+          "sys_rng",
+          "thread_rng"
+        ],
+        "deps": [
+          {
+            "id": "chacha20 0.10.2",
+            "target": "chacha20"
+          },
+          {
+            "id": "getrandom 0.4.3",
+            "target": "getrandom"
+          },
+          {
+            "id": "rand_core 0.10.1",
+            "target": "rand_core"
+          }
+        ],
+        "edition": "2024"
+      },
+      "library_target_name": "rand",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "rand",
+      "package_url": "https://github.com/rust-random/rand",
+      "repository": {
+        "Http": {
+          "sha256": "8f6fa277c67e6ea590466f04c3fe82cb509f0864fe470643e5570de9514a9b11",
+          "url": "https://static.crates.io/crates/rand/0.10.4/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "rand",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.10.4"
+    },
     "rand 0.8.8": {
       "common_attrs": {
         "crate_features": [
@@ -8599,93 +8450,34 @@
       ],
       "version": "0.8.8"
     },
-    "rand 0.9.5": {
+    "rand_core 0.10.1": {
       "common_attrs": {
-        "crate_features": [
-          "alloc",
-          "os_rng",
-          "std",
-          "std_rng",
-          "thread_rng"
-        ],
-        "deps": [
-          {
-            "id": "rand_chacha 0.9.0",
-            "target": "rand_chacha"
-          },
-          {
-            "id": "rand_core 0.9.5",
-            "target": "rand_core"
-          }
-        ],
-        "edition": "2021"
+        "edition": "2024"
       },
-      "library_target_name": "rand",
+      "library_target_name": "rand_core",
       "license": "MIT OR Apache-2.0",
       "license_file": "LICENSE-APACHE",
       "license_ids": [
         "Apache-2.0",
         "MIT"
       ],
-      "name": "rand",
-      "package_url": "https://github.com/rust-random/rand",
+      "name": "rand_core",
+      "package_url": "https://github.com/rust-random/rand_core",
       "repository": {
         "Http": {
-          "sha256": "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41",
-          "url": "https://static.crates.io/crates/rand/0.9.5/download"
+          "sha256": "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69",
+          "url": "https://static.crates.io/crates/rand_core/0.10.1/download"
         }
       },
       "targets": [
         {
           "Library": {
-            "crate_name": "rand",
+            "crate_name": "rand_core",
             "crate_root": "src/lib.rs"
           }
         }
       ],
-      "version": "0.9.5"
-    },
-    "rand_chacha 0.9.0": {
-      "common_attrs": {
-        "crate_features": [
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "ppv-lite86 0.2.21",
-            "target": "ppv_lite86"
-          },
-          {
-            "id": "rand_core 0.9.5",
-            "target": "rand_core"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "rand_chacha",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "rand_chacha",
-      "package_url": "https://github.com/rust-random/rand",
-      "repository": {
-        "Http": {
-          "sha256": "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb",
-          "url": "https://static.crates.io/crates/rand_chacha/0.9.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "rand_chacha",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.9.0"
+      "version": "0.10.1"
     },
     "rand_core 0.6.4": {
       "common_attrs": {
@@ -8715,45 +8507,6 @@
         }
       ],
       "version": "0.6.4"
-    },
-    "rand_core 0.9.5": {
-      "common_attrs": {
-        "crate_features": [
-          "os_rng",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "getrandom 0.3.4",
-            "target": "getrandom"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "rand_core",
-      "license": "MIT OR Apache-2.0",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "rand_core",
-      "package_url": "https://github.com/rust-random/rand",
-      "repository": {
-        "Http": {
-          "sha256": "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c",
-          "url": "https://static.crates.io/crates/rand_core/0.9.5/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "rand_core",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.9.5"
     },
     "regex 1.13.2": {
       "common_attrs": {
@@ -10191,6 +9944,7 @@
       "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "default",
           "raw_value",
           "std",
@@ -10301,10 +10055,6 @@
     },
     "sha1 0.10.7": {
       "common_attrs": {
-        "crate_features": [
-          "default",
-          "std"
-        ],
         "deps": {
           "common": [
             {
@@ -10858,7 +10608,7 @@
       ],
       "version": "1.0.0"
     },
-    "string_enum 1.0.2": {
+    "string_enum 2.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -10885,8 +10635,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "ae36a4951ca7bd1cfd991c241584a9824a70f6aff1e7d4f693fb3f2465e4030e",
-          "url": "https://static.crates.io/crates/string_enum/1.0.2/download"
+          "sha256": "a4a16d4a157a0ad540a3c17dcc5d5c078c58213f095017792db227148d4cb915",
+          "url": "https://static.crates.io/crates/string_enum/2.0.0/download"
         }
       },
       "targets": [
@@ -10897,7 +10647,7 @@
           }
         }
       ],
-      "version": "1.0.2"
+      "version": "2.0.0"
     },
     "subtle 2.6.1": {
       "common_attrs": {
@@ -10927,7 +10677,7 @@
       ],
       "version": "2.6.1"
     },
-    "swc_allocator 5.0.1": {
+    "swc_allocator 6.0.0": {
       "common_attrs": {
         "crate_features": [
           "hashbrown"
@@ -10961,8 +10711,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "0f2e587c2b183333ba3547a916d180b7caaaa90610f1be5699710837bb635b8a",
-          "url": "https://static.crates.io/crates/swc_allocator/5.0.1/download"
+          "sha256": "c95e61d933ac4c44456f38a17b387fcc3f8c7398d3291cfdc360ebb0d1e02616",
+          "url": "https://static.crates.io/crates/swc_allocator/6.0.0/download"
         }
       },
       "targets": [
@@ -10973,13 +10723,13 @@
           }
         }
       ],
-      "version": "5.0.1"
+      "version": "6.0.0"
     },
-    "swc_atoms 10.0.1": {
+    "swc_atoms 11.0.0": {
       "common_attrs": {
         "deps": [
           {
-            "id": "hstr 4.0.3",
+            "id": "hstr 5.1.0",
             "target": "hstr"
           },
           {
@@ -11002,8 +10752,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "50bb5f0ddb3d05cf1d46368de41dd82db7401fdd53f4b8271612be91573308a3",
-          "url": "https://static.crates.io/crates/swc_atoms/10.0.1/download"
+          "sha256": "4dc7367819a76b11456cdc06373f393dfb514fd7fb8e10819e17c8592cba9532",
+          "url": "https://static.crates.io/crates/swc_atoms/11.0.0/download"
         }
       },
       "targets": [
@@ -11014,9 +10764,9 @@
           }
         }
       ],
-      "version": "10.0.1"
+      "version": "11.0.0"
     },
-    "swc_common 27.0.0": {
+    "swc_common 28.0.0": {
       "common_attrs": {
         "crate_features": [
           "default",
@@ -11028,7 +10778,7 @@
             "target": "anyhow"
           },
           {
-            "id": "better_scoped_tls 1.0.1",
+            "id": "better_scoped_tls 2.0.0",
             "target": "better_scoped_tls"
           },
           {
@@ -11060,7 +10810,7 @@
             "target": "siphasher"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
@@ -11068,7 +10818,7 @@
             "target": "swc_sourcemap"
           },
           {
-            "id": "swc_visit 2.0.2",
+            "id": "swc_visit 3.0.0",
             "target": "swc_visit"
           },
           {
@@ -11087,15 +10837,15 @@
         "edition": "2021",
         "proc_macro_deps": [
           {
-            "id": "ast_node 7.0.0",
+            "id": "ast_node 8.0.0",
             "target": "ast_node"
           },
           {
-            "id": "from_variant 3.0.0",
+            "id": "from_variant 4.0.0",
             "target": "from_variant"
           },
           {
-            "id": "swc_eq_ignore_macros 1.0.1",
+            "id": "swc_eq_ignore_macros 2.0.0",
             "target": "swc_eq_ignore_macros"
           }
         ]
@@ -11109,8 +10859,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "1953f0e786c305582e21ef5a093cfe16cfeaa4231f56f780db82e4952b7ef5b2",
-          "url": "https://static.crates.io/crates/swc_common/27.0.0/download"
+          "sha256": "4362316d2865a917e6f9915cb32fede122761f5c605d559ea380730e591c0e1e",
+          "url": "https://static.crates.io/crates/swc_common/28.0.0/download"
         }
       },
       "targets": [
@@ -11121,9 +10871,9 @@
           }
         }
       ],
-      "version": "27.0.0"
+      "version": "28.0.0"
     },
-    "swc_config 6.0.1": {
+    "swc_config 7.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -11150,7 +10900,7 @@
         "edition": "2021",
         "proc_macro_deps": [
           {
-            "id": "swc_config_macro 1.0.1",
+            "id": "swc_config_macro 2.0.0",
             "target": "swc_config_macro"
           }
         ]
@@ -11164,8 +10914,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "bf6924ef781f1f8af3dfdac9674e94f0ab0c20af6b88b2e116af57b1e755b591",
-          "url": "https://static.crates.io/crates/swc_config/6.0.1/download"
+          "sha256": "90d3236f524081811d7e6b97d2a515842e8a214b4f39680eecbc8d5a9f285d39",
+          "url": "https://static.crates.io/crates/swc_config/7.0.0/download"
         }
       },
       "targets": [
@@ -11176,9 +10926,9 @@
           }
         }
       ],
-      "version": "6.0.1"
+      "version": "7.0.0"
     },
-    "swc_config_macro 1.0.1": {
+    "swc_config_macro 2.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -11209,8 +10959,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "7b416e8ce6de17dc5ea496e10c7012b35bbc0e3fef38d2e065eed936490db0b3",
-          "url": "https://static.crates.io/crates/swc_config_macro/1.0.1/download"
+          "sha256": "41d45cf971042540deca60c09daf6dfad2be616a88291273f16826e592333acb",
+          "url": "https://static.crates.io/crates/swc_config_macro/2.0.0/download"
         }
       },
       "targets": [
@@ -11221,9 +10971,9 @@
           }
         }
       ],
-      "version": "1.0.1"
+      "version": "2.0.0"
     },
-    "swc_ecma_ast 30.0.2": {
+    "swc_ecma_ast 31.0.0": {
       "common_attrs": {
         "crate_features": [
           "default"
@@ -11250,15 +11000,15 @@
             "target": "rustc_hash"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_visit 2.0.2",
+            "id": "swc_visit 3.0.0",
             "target": "swc_visit"
           },
           {
@@ -11273,7 +11023,7 @@
             "target": "is_macro"
           },
           {
-            "id": "string_enum 1.0.2",
+            "id": "string_enum 2.0.0",
             "target": "string_enum"
           }
         ]
@@ -11287,8 +11037,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "86bef17958307218ffee375556423bd47a82deb8f6ef8b54bc5a4086958cd1d1",
-          "url": "https://static.crates.io/crates/swc_ecma_ast/30.0.2/download"
+          "sha256": "b1d3a9541fb51e6b8112991f219af1d2e23c656a0f1d5343a9f0c10389cdd2dc",
+          "url": "https://static.crates.io/crates/swc_ecma_ast/31.0.0/download"
         }
       },
       "targets": [
@@ -11299,9 +11049,9 @@
           }
         }
       ],
-      "version": "30.0.2"
+      "version": "31.0.0"
     },
-    "swc_ecma_codegen 33.0.2": {
+    "swc_ecma_codegen 34.0.1": {
       "common_attrs": {
         "deps": [
           {
@@ -11341,23 +11091,23 @@
             "target": "serde"
           },
           {
-            "id": "swc_allocator 5.0.1",
+            "id": "swc_allocator 6.0.0",
             "target": "swc_allocator"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_utils 36.1.1",
+            "id": "swc_ecma_utils 37.0.1",
             "target": "swc_ecma_utils"
           },
           {
@@ -11368,7 +11118,7 @@
         "edition": "2021",
         "proc_macro_deps": [
           {
-            "id": "swc_ecma_codegen_macros 2.0.2",
+            "id": "swc_ecma_codegen_macros 3.0.0",
             "target": "swc_ecma_codegen_macros"
           }
         ]
@@ -11382,8 +11132,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "9a43ff5dc87e695cfa251e346df018b62d47a7db87e487c6254df4e28509ede7",
-          "url": "https://static.crates.io/crates/swc_ecma_codegen/33.0.2/download"
+          "sha256": "65e203a8b3d4c4f082e8bf5b601ed5cc62b8232bfb91a8a73fef6775cf09ec91",
+          "url": "https://static.crates.io/crates/swc_ecma_codegen/34.0.1/download"
         }
       },
       "targets": [
@@ -11394,9 +11144,9 @@
           }
         }
       ],
-      "version": "33.0.2"
+      "version": "34.0.1"
     },
-    "swc_ecma_codegen_macros 2.0.2": {
+    "swc_ecma_codegen_macros 3.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -11423,8 +11173,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "e276dc62c0a2625a560397827989c82a93fd545fcf6f7faec0935a82cc4ddbb8",
-          "url": "https://static.crates.io/crates/swc_ecma_codegen_macros/2.0.2/download"
+          "sha256": "46745e175b2d544dfeaa689c921f91f29239f4b8d7171cfd3d7da85c598907f1",
+          "url": "https://static.crates.io/crates/swc_ecma_codegen_macros/3.0.0/download"
         }
       },
       "targets": [
@@ -11435,25 +11185,25 @@
           }
         }
       ],
-      "version": "2.0.2"
+      "version": "3.0.0"
     },
-    "swc_ecma_hooks 2.0.0": {
+    "swc_ecma_hooks 3.0.0": {
       "common_attrs": {
         "deps": [
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           }
         ],
@@ -11468,8 +11218,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "af2927f285c88c51f7fed0a07316389ca1311a02761fbd31c0f3d29d53774a1a",
-          "url": "https://static.crates.io/crates/swc_ecma_hooks/2.0.0/download"
+          "sha256": "e37d534ee2286e0d52b567ce5b6a208b112bcb64e2ec6ea8630ad8d2a016fe64",
+          "url": "https://static.crates.io/crates/swc_ecma_hooks/3.0.0/download"
         }
       },
       "targets": [
@@ -11480,9 +11230,9 @@
           }
         }
       ],
-      "version": "2.0.0"
+      "version": "3.0.0"
     },
-    "swc_ecma_parser 47.1.0": {
+    "swc_ecma_parser 48.1.0": {
       "common_attrs": {
         "crate_features": [
           "typescript",
@@ -11514,15 +11264,15 @@
             "target": "serde"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
@@ -11547,8 +11297,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "961dd171ed366688569bbcd6fae5a60e4429b8420fd6bd55435b3efdbdb1411f",
-          "url": "https://static.crates.io/crates/swc_ecma_parser/47.1.0/download"
+          "sha256": "1aeb93c8091af3f8347661a835cfb8f2e76d7da25b3e7d8c7341692c4dea6525",
+          "url": "https://static.crates.io/crates/swc_ecma_parser/48.1.0/download"
         }
       },
       "targets": [
@@ -11559,13 +11309,13 @@
           }
         }
       ],
-      "version": "47.1.0"
+      "version": "48.1.0"
     },
-    "swc_ecma_transforms_base 51.0.3": {
+    "swc_ecma_transforms_base 52.0.1": {
       "common_attrs": {
         "deps": [
           {
-            "id": "better_scoped_tls 1.0.1",
+            "id": "better_scoped_tls 2.0.0",
             "target": "better_scoped_tls"
           },
           {
@@ -11593,27 +11343,27 @@
             "target": "serde"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_parser 47.1.0",
+            "id": "swc_ecma_parser 48.1.0",
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_utils 36.1.1",
+            "id": "swc_ecma_utils 37.0.1",
             "target": "swc_ecma_utils"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           },
           {
@@ -11632,8 +11382,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "68c154a1557d8c32aac0891321b273b7f4c313a55ad7cc97f7b3114da9cb6b77",
-          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/51.0.3/download"
+          "sha256": "a897146308d1765cbb3759337750ce517729738498b6f8a12c8007a886251e6e",
+          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/52.0.1/download"
         }
       },
       "targets": [
@@ -11644,12 +11394,11 @@
           }
         }
       ],
-      "version": "51.0.3"
+      "version": "52.0.1"
     },
-    "swc_ecma_transforms_react 57.0.2": {
+    "swc_ecma_transforms_react 58.0.0": {
       "common_attrs": {
         "crate_features": [
-          "default",
           "serde",
           "serde-impl"
         ],
@@ -11683,46 +11432,46 @@
             "target": "sha1"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_config 6.0.1",
+            "id": "swc_config 7.0.0",
             "target": "swc_config"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_hooks 2.0.0",
+            "id": "swc_ecma_hooks 3.0.0",
             "target": "swc_ecma_hooks"
           },
           {
-            "id": "swc_ecma_parser 47.1.0",
+            "id": "swc_ecma_parser 48.1.0",
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.3",
+            "id": "swc_ecma_transforms_base 52.0.1",
             "target": "swc_ecma_transforms_base"
           },
           {
-            "id": "swc_ecma_utils 36.1.1",
+            "id": "swc_ecma_utils 37.0.1",
             "target": "swc_ecma_utils"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           }
         ],
         "edition": "2021",
         "proc_macro_deps": [
           {
-            "id": "string_enum 1.0.2",
+            "id": "string_enum 2.0.0",
             "target": "string_enum"
           }
         ]
@@ -11736,8 +11485,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "976dc553655e405a6879d9c2d5977bb76165a7a2ab249d5687768632ffb86c66",
-          "url": "https://static.crates.io/crates/swc_ecma_transforms_react/57.0.2/download"
+          "sha256": "90063f7e63001501347e58f79628677206cddadb4434d2e1d0648827eebb9ea6",
+          "url": "https://static.crates.io/crates/swc_ecma_transforms_react/58.0.0/download"
         }
       },
       "targets": [
@@ -11748,9 +11497,9 @@
           }
         }
       ],
-      "version": "57.0.2"
+      "version": "58.0.0"
     },
-    "swc_ecma_transforms_typescript 57.0.3": {
+    "swc_ecma_transforms_typescript 58.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -11766,31 +11515,31 @@
             "target": "serde"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.3",
+            "id": "swc_ecma_transforms_base 52.0.1",
             "target": "swc_ecma_transforms_base"
           },
           {
-            "id": "swc_ecma_transforms_react 57.0.2",
+            "id": "swc_ecma_transforms_react 58.0.0",
             "target": "swc_ecma_transforms_react"
           },
           {
-            "id": "swc_ecma_utils 36.1.1",
+            "id": "swc_ecma_utils 37.0.1",
             "target": "swc_ecma_utils"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           }
         ],
@@ -11805,8 +11554,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "8ec0a0850a03db3a20d2950f8217f27edab0cab6bf941a4f5d15ec944fab88c2",
-          "url": "https://static.crates.io/crates/swc_ecma_transforms_typescript/57.0.3/download"
+          "sha256": "8f11ef8893bad1cabd307e03bae3bbdc943b390b26fa100f8cf4ba2c562138d0",
+          "url": "https://static.crates.io/crates/swc_ecma_transforms_typescript/58.0.0/download"
         }
       },
       "targets": [
@@ -11817,9 +11566,9 @@
           }
         }
       ],
-      "version": "57.0.3"
+      "version": "58.0.0"
     },
-    "swc_ecma_utils 36.1.1": {
+    "swc_ecma_utils 37.0.1": {
       "common_attrs": {
         "deps": [
           {
@@ -11851,19 +11600,19 @@
             "target": "rustc_hash"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           },
           {
@@ -11882,8 +11631,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "c5e753a61f04b7ac33f6c6a896cff766e45e28d5dff1f656e8158a153bdee0c3",
-          "url": "https://static.crates.io/crates/swc_ecma_utils/36.1.1/download"
+          "sha256": "b7ff65050ce973959f01dc773b671b2156b154b93f5b0bea60f33a6ec4a3f920",
+          "url": "https://static.crates.io/crates/swc_ecma_utils/37.0.1/download"
         }
       },
       "targets": [
@@ -11894,9 +11643,9 @@
           }
         }
       ],
-      "version": "36.1.1"
+      "version": "37.0.1"
     },
-    "swc_ecma_visit 30.0.0": {
+    "swc_ecma_visit 31.0.0": {
       "common_attrs": {
         "crate_features": [
           "default"
@@ -11911,19 +11660,19 @@
             "target": "num_bigint"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_visit 2.0.2",
+            "id": "swc_visit 3.0.0",
             "target": "swc_visit"
           },
           {
@@ -11942,8 +11691,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "bc14fd3354020d23d7d4bbe37136c01f9887e84f106967e965ea2c03c002b6ea",
-          "url": "https://static.crates.io/crates/swc_ecma_visit/30.0.0/download"
+          "sha256": "4136cfa9751a439b5d229b86d1655efb90eee76fb2b718b235ccd8733ed1d7b8",
+          "url": "https://static.crates.io/crates/swc_ecma_visit/31.0.0/download"
         }
       },
       "targets": [
@@ -11954,9 +11703,9 @@
           }
         }
       ],
-      "version": "30.0.0"
+      "version": "31.0.0"
     },
-    "swc_eq_ignore_macros 1.0.1": {
+    "swc_eq_ignore_macros 2.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -11983,8 +11732,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "c16ce73424a6316e95e09065ba6a207eba7765496fed113702278b7711d4b632",
-          "url": "https://static.crates.io/crates/swc_eq_ignore_macros/1.0.1/download"
+          "sha256": "9de7905c0881b7f3a0d2385a072e1ebb92b290581680bb9ea6f8f7defb900de5",
+          "url": "https://static.crates.io/crates/swc_eq_ignore_macros/2.0.0/download"
         }
       },
       "targets": [
@@ -11995,7 +11744,7 @@
           }
         }
       ],
-      "version": "1.0.1"
+      "version": "2.0.0"
     },
     "swc_macros_common 1.0.2": {
       "common_attrs": {
@@ -12111,7 +11860,7 @@
       ],
       "version": "10.0.4"
     },
-    "swc_ts_fast_strip 60.0.1": {
+    "swc_ts_fast_strip 61.0.0": {
       "common_attrs": {
         "crate_features": [
           "default"
@@ -12126,39 +11875,39 @@
             "target": "serde"
           },
           {
-            "id": "swc_atoms 10.0.1",
+            "id": "swc_atoms 11.0.0",
             "target": "swc_atoms"
           },
           {
-            "id": "swc_common 27.0.0",
+            "id": "swc_common 28.0.0",
             "target": "swc_common"
           },
           {
-            "id": "swc_ecma_ast 30.0.2",
+            "id": "swc_ecma_ast 31.0.0",
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_codegen 33.0.2",
+            "id": "swc_ecma_codegen 34.0.1",
             "target": "swc_ecma_codegen"
           },
           {
-            "id": "swc_ecma_parser 47.1.0",
+            "id": "swc_ecma_parser 48.1.0",
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.3",
+            "id": "swc_ecma_transforms_base 52.0.1",
             "target": "swc_ecma_transforms_base"
           },
           {
-            "id": "swc_ecma_transforms_react 57.0.2",
+            "id": "swc_ecma_transforms_react 58.0.0",
             "target": "swc_ecma_transforms_react"
           },
           {
-            "id": "swc_ecma_transforms_typescript 57.0.3",
+            "id": "swc_ecma_transforms_typescript 58.0.0",
             "target": "swc_ecma_transforms_typescript"
           },
           {
-            "id": "swc_ecma_visit 30.0.0",
+            "id": "swc_ecma_visit 31.0.0",
             "target": "swc_ecma_visit"
           }
         ],
@@ -12173,8 +11922,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "904614f790237c0bc3166e57280dd108cf96ed31b27ec1b6ab125cc44f0a1078",
-          "url": "https://static.crates.io/crates/swc_ts_fast_strip/60.0.1/download"
+          "sha256": "141f70283df7224f1ba5734c727aaa90855483d1c790028547ee21599b049b79",
+          "url": "https://static.crates.io/crates/swc_ts_fast_strip/61.0.0/download"
         }
       },
       "targets": [
@@ -12185,9 +11934,9 @@
           }
         }
       ],
-      "version": "60.0.1"
+      "version": "61.0.0"
     },
-    "swc_visit 2.0.2": {
+    "swc_visit 3.0.0": {
       "common_attrs": {
         "deps": [
           {
@@ -12206,8 +11955,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "e7df72a1be54e379864cebf04f26abb4d7ee637977f62f8ec8387233f7a27e88",
-          "url": "https://static.crates.io/crates/swc_visit/2.0.2/download"
+          "sha256": "2590162a5acb3a8c1957cbb3fe560e95fae68d1ace8268ca35b644777ba05004",
+          "url": "https://static.crates.io/crates/swc_visit/3.0.0/download"
         }
       },
       "targets": [
@@ -12218,7 +11967,7 @@
           }
         }
       ],
-      "version": "2.0.2"
+      "version": "3.0.0"
     },
     "syn 2.0.119": {
       "common_attrs": {
@@ -12972,7 +12721,6 @@
       "common_attrs": {
         "crate_features": [
           "attributes",
-          "default",
           "std",
           "tracing-attributes"
         ],
@@ -13100,22 +12848,6 @@
     },
     "triomphe 0.1.17": {
       "common_attrs": {
-        "crate_features": [
-          "default",
-          "serde",
-          "stable_deref_trait",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "serde 1.0.229",
-            "target": "serde"
-          },
-          {
-            "id": "stable_deref_trait 1.2.1",
-            "target": "stable_deref_trait"
-          }
-        ],
         "edition": "2021"
       },
       "library_target_name": "triomphe",
@@ -13637,41 +13369,6 @@
       ],
       "version": "0.11.1+wasi-snapshot-preview1"
     },
-    "wasip2 1.0.4+wasi-0.2.12": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "wit-bindgen 0.57.1",
-            "target": "wit_bindgen"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "wasip2",
-      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "wasip2",
-      "package_url": "https://github.com/bytecodealliance/wasi-rs",
-      "repository": {
-        "Http": {
-          "sha256": "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487",
-          "url": "https://static.crates.io/crates/wasip2/1.0.4+wasi-0.2.12/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "wasip2",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "1.0.4+wasi-0.2.12"
-    },
     "wasm-bindgen 0.2.130": {
       "build_script_attrs": {
         "link_deps": [
@@ -14042,6 +13739,7 @@
               "Win32_System",
               "Win32_System_Console",
               "Win32_System_IO",
+              "Win32_System_LibraryLoader",
               "Win32_System_Pipes",
               "Win32_System_SystemInformation",
               "Win32_System_SystemServices",
@@ -14477,45 +14175,6 @@
       ],
       "version": "0.52.6"
     },
-    "wit-bindgen 0.57.1": {
-      "build_script_attrs": {},
-      "common_attrs": {
-        "edition": "2024",
-        "extra_deps": [
-          ":build_script_build"
-        ]
-      },
-      "library_target_name": "wit_bindgen",
-      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "MIT"
-      ],
-      "name": "wit-bindgen",
-      "package_url": "https://github.com/bytecodealliance/wit-bindgen",
-      "repository": {
-        "Http": {
-          "sha256": "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e",
-          "url": "https://static.crates.io/crates/wit-bindgen/0.57.1/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "wit_bindgen",
-            "crate_root": "src/lib.rs"
-          }
-        },
-        {
-          "BuildScript": {
-            "crate_name": "build_script_build",
-            "crate_root": "build.rs"
-          }
-        }
-      ],
-      "version": "0.57.1"
-    },
     "writeable 0.6.4": {
       "common_attrs": {
         "crate_features": [
@@ -14625,6 +14284,37 @@
       ],
       "version": "0.3.1"
     },
+    "xxhash-rust 0.8.21": {
+      "common_attrs": {
+        "crate_features": [
+          "xxh3"
+        ],
+        "edition": "2018"
+      },
+      "library_target_name": "xxhash_rust",
+      "license": "BSL-1.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "BSL-1.0"
+      ],
+      "name": "xxhash-rust",
+      "package_url": "https://github.com/DoumanAsh/xxhash-rust",
+      "repository": {
+        "Http": {
+          "sha256": "40de123dbb523ebcc00d61ec01840ad192578afc378d859f3429caa38308fad5",
+          "url": "https://static.crates.io/crates/xxhash-rust/0.8.21/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "xxhash_rust",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.8.21"
+    },
     "yoke 0.8.4": {
       "common_attrs": {
         "crate_features": [
@@ -14719,104 +14409,6 @@
         }
       ],
       "version": "0.8.4"
-    },
-    "zerocopy 0.8.64": {
-      "build_script_attrs": {},
-      "common_attrs": {
-        "crate_features": [
-          "simd"
-        ],
-        "edition": "2021",
-        "extra_deps": [
-          ":build_script_build"
-        ],
-        "proc_macro_deps": {
-          "common": [],
-          "selects": {
-            "cfg(any())": [
-              {
-                "id": "zerocopy-derive 0.8.64",
-                "target": "zerocopy_derive"
-              }
-            ]
-          }
-        }
-      },
-      "library_target_name": "zerocopy",
-      "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "BSD-2-Clause",
-        "MIT"
-      ],
-      "name": "zerocopy",
-      "package_url": "https://github.com/google/zerocopy",
-      "repository": {
-        "Http": {
-          "sha256": "ed43f3060383c64b000f3c630550aebdfa9d3b76d48de32390483dd2cc7e0865",
-          "url": "https://static.crates.io/crates/zerocopy/0.8.64/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "zerocopy",
-            "crate_root": "src/lib.rs"
-          }
-        },
-        {
-          "BuildScript": {
-            "crate_name": "build_script_build",
-            "crate_root": "build.rs"
-          }
-        }
-      ],
-      "version": "0.8.64"
-    },
-    "zerocopy-derive 0.8.64": {
-      "common_attrs": {
-        "deps": [
-          {
-            "id": "proc-macro2 1.0.107",
-            "target": "proc_macro2"
-          },
-          {
-            "id": "quote 1.0.47",
-            "target": "quote"
-          },
-          {
-            "id": "syn 2.0.119",
-            "target": "syn"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "zerocopy_derive",
-      "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
-      "license_file": "LICENSE-APACHE",
-      "license_ids": [
-        "Apache-2.0",
-        "BSD-2-Clause",
-        "MIT"
-      ],
-      "name": "zerocopy-derive",
-      "package_url": "https://github.com/google/zerocopy",
-      "repository": {
-        "Http": {
-          "sha256": "a5cbd820fe3e35fb38c83b6dc7e6b1618bc46e0cd10073ae94e8d52dc468d8b9",
-          "url": "https://static.crates.io/crates/zerocopy-derive/0.8.64/download"
-        }
-      },
-      "targets": [
-        {
-          "ProcMacro": {
-            "crate_name": "zerocopy_derive",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.8.64"
     },
     "zerofrom 0.1.8": {
       "common_attrs": {
@@ -15204,8 +14796,8 @@
     "async-trait 0.1.92",
     "base64 0.23.1",
     "bytes 1.12.2",
-    "capnp 0.27.3",
-    "capnpc 0.27.0",
+    "capnp 0.28.2",
+    "capnpc 0.28.1",
     "cc 1.11.3",
     "clang-ast 0.1.36",
     "clap 4.6.9",
@@ -15231,13 +14823,13 @@
     "lol_html_c_api 1.4.0",
     "memchr 2.8.3",
     "nix 0.32.0",
-    "notify 8.2.2",
+    "notify 9.0.0",
     "percent-encoding 2.3.2",
     "pico-args 0.5.0",
     "proc-macro2 1.0.107",
     "prost 0.14.6",
     "quote 1.0.47",
-    "rand 0.9.5",
+    "rand 0.10.4",
     "regex 1.13.2",
     "ring 0.17.14",
     "rust_icu_sys 5.8.0",
@@ -15250,8 +14842,8 @@
     "sha1 0.11.0",
     "socket2 0.6.5",
     "static_assertions 1.1.0",
-    "swc_common 27.0.0",
-    "swc_ts_fast_strip 60.0.1",
+    "swc_common 28.0.0",
+    "swc_ts_fast_strip 61.0.0",
     "syn 2.0.119",
     "temporal_capi 0.2.6",
     "temporal_rs 0.2.6",
