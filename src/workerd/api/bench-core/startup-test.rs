@@ -160,11 +160,11 @@ fn stops_at_the_sampling_budget_once_it_has_enough_samples() {
 fn under_quick_skips_the_warmup_and_caps_the_samples() {
     let starts = Cell::new(0);
     let message = run(&params("startup:total", 1000, true, 0), fake_start(&starts));
-    assert_eq!(starts.get(), 5);
+    assert_eq!(starts.get(), QUICK_SAMPLES);
     let cases = group(&message).get_cases().unwrap();
     assert_eq!(cases.len(), 1);
     let wall = cases.get(0).get_wall_ns().unwrap().get_samples().unwrap();
-    assert_eq!(wall.len(), 5);
+    assert_eq!(wall.len(), QUICK_SAMPLES);
     assert_eq!(wall.get(0), 10000.0);
 }
 

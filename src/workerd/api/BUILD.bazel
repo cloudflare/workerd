@@ -726,6 +726,8 @@ kj_test(
     # Each injection point drains microtasks and forces a full GC, including under ASan.
     size = "large",
     src = "streams/termination-injection-test.c++",
+    # Each of its 7 cases runs a group of the independent scenarios; shards run them in parallel.
+    shard_count = 7,
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:promise-wrapper",
@@ -873,6 +875,8 @@ kj_test(
 kj_test(
     size = "large",
     src = "js-readable-stream-test.c++",
+    # Over a hundred cases, each with a fixture of its own; shards run them in parallel.
+    shard_count = 4,
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

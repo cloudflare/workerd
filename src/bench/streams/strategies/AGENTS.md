@@ -8,7 +8,7 @@ implementations. Suite rules: `src/bench/streams/AGENTS.md`.
 | Module | Group | Cases |
 | --- | --- | --- |
 | `strategy-objects.js` | `strategyObjects` | 16 operations per call, synchronous: constructing each strategy, its `size()`, and its `highWaterMark` getter |
-| `queue-accounting.js` | `queueAccounting` | A `ReadableStream` with 256 chunks enqueued in `start()` and read to the end, and a `WritableStream` with 256 queued writes, each with no strategy, each strategy, and a `size()` function |
+| `queue-accounting.js` | `queueAccounting` | A `ReadableStream` with 256 chunks enqueued in `start()` and read to the end, and a `WritableStream` with 256 queued writes, each with no strategy, each strategy, and a `size()` function. Under `--quick`, 16 chunks |
 
 ## Comparing
 

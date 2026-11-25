@@ -112,7 +112,10 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    return impl->request(method, url.asBytes().as<kj_rs::Rust>(), headers, requestBody, response);
+    // The Rust bridge carries only the methods kj lists.
+    KJ_REQUIRE(method.known() != kj::HttpMethod::Known::OTHER, "unknown method", method);
+    return impl->request(
+        method.known(), url.asBytes().as<kj_rs::Rust>(), headers, requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,

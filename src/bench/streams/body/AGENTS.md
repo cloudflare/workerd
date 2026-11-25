@@ -9,6 +9,11 @@ The JavaScript stream shapes are `256 x 64 B`, `64 x 4 KiB` and
 `16 x 64 KiB` (`SHAPES` in `helpers.js`). Bodies and writes copy their
 bytes, so each size's buffer is shared.
 
+Under `--quick`, `read`, `pipe`, `clone`, `serviceBinding` and
+`htmlRewriter` cases move a sixteenth as many bytes (`scaled()` in
+`helpers.js`), so that the `@smoke` tests stay fast in sanitizer and debug
+builds. Their names show the sizes a run used.
+
 The configs bind `SELF` to the worker itself. `main.js`'s default export is
 `service-binding.js`'s fetch handler, which the `serviceBinding` cases call.
 
