@@ -852,6 +852,25 @@ wd_test(
     data = ["caught-exception-reset-test.js"],
 )
 
+# These tests assert when full GCs run. --gc-stress forces them, and so does predictable mode,
+# after every request in KJ_DEBUG builds (see maybeAddGcPassForTest). Each test sets the autogates
+# it expects, which are kill switches.
+[wd_test(
+    src = src,
+    data = [
+        "gc-when-idle-test.js",
+        "gc-when-idle-test-target.js",
+    ],
+    generate_all_autogates_variant = False,
+    generate_gc_stress_variant = False,
+    predictable = False,
+) for src in [
+    "gc-when-idle-test.wd-test",
+    "gc-when-idle-disabled-test.wd-test",
+    "gc-when-idle-no-idle-gc-test.wd-test",
+    "gc-when-idle-no-loading-test.wd-test",
+]]
+
 wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],

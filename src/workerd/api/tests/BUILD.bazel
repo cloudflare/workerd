@@ -1480,6 +1480,11 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-handlers-test.wd-test",
+    data = ["websocket-handlers-test.js"],
+)
+
+wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],
@@ -1505,6 +1510,11 @@ wd_test(
 wd_test(
     src = "websocket-buffered-amount-test.wd-test",
     data = ["websocket-buffered-amount-test.js"],
+)
+
+wd_test(
+    src = "websocket-send-blob-test.wd-test",
+    data = ["websocket-send-blob-test.js"],
 )
 
 wd_test(
