@@ -110,6 +110,22 @@ class URLPattern final: public jsg::Object {
     tracker.trackField("inner", inner);
   }
 
+  // Transfers through a startup snapshot as a copy of its compiled pattern, and its RegExps as
+  // snapshot values, so that a restored pattern compiles nothing.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<URLPattern>(SnapshotCloneTag{}, inner.clone()));
+  }
+  kj::Array<v8::Local<v8::Value>> snapshotValues(jsg::Lock& js) const override;
+  void snapshotRestoreValues(
+      jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) override;
+
+ private:
+  struct SnapshotCloneTag {};
+
+ public:
+  // The copy snapshotClone() makes, whose RegExps snapshotRestoreValues() sets.
+  URLPattern(SnapshotCloneTag, jsg::UrlPattern inner): inner(kj::mv(inner)) {}
+
  private:
   jsg::UrlPattern inner;
 #define V(_, name) jsg::JsRef<jsg::JsRegExp> name##Regex;

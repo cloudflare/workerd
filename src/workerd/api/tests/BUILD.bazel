@@ -1408,8 +1408,8 @@ wd_test(
 )
 
 # Live API objects (Headers, URL, TextEncoder, crypto, navigator, performance, tracing spans,
-# node:fs, file system handles, bindings) across a startup snapshot, and the cases that must fall
-# back. Only the @all-autogates variant runs the pipeline.
+# node:fs, file system handles, bindings, EventTarget, AbortController, caches) across a startup
+# snapshot, and the cases that must fall back. Only the @all-autogates variant runs the pipeline.
 wd_test(
     # About 25 startup snapshots are built before any case runs, which takes over 15 seconds in
     # an arm64 debug build.

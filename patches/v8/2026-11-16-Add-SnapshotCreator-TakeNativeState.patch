@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cormick Holland <cormick@cloudflare.com>
+Date: Mon, 16 Nov 2026 03:27:16 +0000
+Subject: Add SnapshotCreator::TakeNativeState()
+
+A snapshot can refer to C++ objects that no blob can carry, which an
+embedder then has to keep alongside the blob and give to every
+isolate created from it. SnapshotCreator::TakeNativeState() hands them
+over after CreateBlob(), and CreateParams::snapshot_native_state gives
+them to an isolate. Nothing produces native state yet, so the state is
+always null; the fast serializer's managed objects are the first user.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -367,6 +367,12 @@ class V8_EXPORT Isolate {
+      */
+     const intptr_t* external_references = nullptr;
+ 
++    /**
++     * The native state of |snapshot_blob| (SnapshotCreator::TakeNativeState()),
++     * which must stay valid for the entire lifetime of the isolate.
++     */
++    const void* snapshot_native_state = nullptr;
++
+     /**
+      * Whether calling Atomics.wait (a function that may block) is allowed in
+      * this isolate. This can also be configured via SetAllowAtomicsWait.
+diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
+--- a/include/v8-snapshot.h
++++ b/include/v8-snapshot.h
+@@ -290,6 +290,22 @@ class V8_EXPORT SnapshotCreator {
+    */
+   bool HasSuspendedGenerators();
+ 
++  /**
++   * Returns the type name of an unsupported managed V8 object (e.g. a mutable
++   * CppGCManaged<IcuBreakIteratorWithText> behind an Intl.Segments object, or a
++   * shared Managed<T>) reachable in the heap that CreateBlob() with
++   * --fast-serializer cannot carry, or nullptr if none is reachable.
++   */
++  const char* FindUnsupportedManagedObject();
++
++  /**
++   * After CreateBlob() with --fast-serializer: the C++ objects of the managed
++   * objects the blob holds (Intl's and Temporal's), which the blob refers to,
++   * or null if it holds none. Keep it as long as the blob, and pass it to
++   * every isolate created from the blob (CreateParams::snapshot_native_state).
++   */
++  std::shared_ptr<void> TakeNativeState();
++
+   // Disallow copying and assigning.
+   SnapshotCreator(const SnapshotCreator&) = delete;
+   void operator=(const SnapshotCreator&) = delete;
+diff --git a/src/api/api.cc b/src/api/api.cc
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -473,6 +473,14 @@ StartupData SnapshotCreator::CreateBlob(
+   return impl_->CreateBlob(function_code_handling);
+ }
+ 
++const char* SnapshotCreator::FindUnsupportedManagedObject() {
++  return nullptr;
++}
++
++std::shared_ptr<void> SnapshotCreator::TakeNativeState() {
++  return std::move(impl_->native_state_);
++}
++
+ bool SnapshotCreator::HasSuspendedGenerators() {
+   i::Isolate* i_isolate = impl_->isolate();
+   // Only what CreateBlob() would serialize counts: it collects all garbage
+@@ -10437,6 +10445,7 @@ void Isolate::Initialize(Isolate* v8_isolate,
+   }
+ 
+   i_isolate->set_api_external_references(params.external_references);
++  i_isolate->set_snapshot_native_state(params.snapshot_native_state);
+   i_isolate->set_allow_atomics_wait(params.allow_atomics_wait);
+ 
+   CppHeap* cpp_heap = params.cpp_heap;
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -527,6 +527,7 @@ using DebugObjectCache = std::vector<Handle<HeapObject>>;
+   V(DebugObjectCache*, string_stream_debug_object_cache, nullptr)           \
+   V(Tagged<Object>, string_stream_current_security_token, Tagged<Object>()) \
+   V(const intptr_t*, api_external_references, nullptr)                      \
++  V(const void*, snapshot_native_state, nullptr)                            \
+   V(AddressToIndexHashMap*, external_reference_map, nullptr)                \
+   V(HeapObjectToIndexHashMap*, root_index_map, nullptr)                     \
+   V(CodeTracer*, code_tracer, nullptr)                                      \
+diff --git a/src/snapshot/snapshot.h b/src/snapshot/snapshot.h
+--- a/src/snapshot/snapshot.h
++++ b/src/snapshot/snapshot.h
+@@ -219,6 +219,9 @@ class SnapshotCreatorImpl final {
+   Isolate* const isolate_;
+   std::unique_ptr<v8::ArrayBuffer::Allocator> array_buffer_allocator_;
+   std::vector<SerializableContext> contexts_;
++  std::shared_ptr<void> native_state_;
++
++  friend class v8::SnapshotCreator;
+ };
+ 
+ }  // namespace internal

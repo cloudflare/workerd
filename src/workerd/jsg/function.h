@@ -270,6 +270,11 @@ class Function<Ret(Args...)> {
     __builtin_unreachable();
   }
 
+  // True when backed by a JavaScript function rather than a C++ NativeFunction.
+  bool isJs() const {
+    return impl.template is<JsImpl>();
+  }
+
   // Like getHandle() but if there's no wrapper yet, returns null.
   kj::Maybe<v8::Local<v8::Function>> tryGetHandle(v8::Isolate* isolate) {
     KJ_SWITCH_ONEOF(impl) {

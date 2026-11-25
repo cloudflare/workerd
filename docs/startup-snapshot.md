@@ -54,7 +54,9 @@ all of these hold:
    in a serializer-enabled isolate and adds them when the context is restored
    (`Error.stackTraceLimit`, `WebAssembly`, `SharedArrayBuffer`, the Iterator helpers behind
    shipped flags, `Temporal` and `Date.prototype.toTemporalInstant`). The zygote installs
-   `Error.stackTraceLimit` as the data property V8 would, and the others as fail-closed accessors
+   `Error.stackTraceLimit` and `SharedArrayBuffer` as the data properties V8 would (the latter's
+   value is the realm's constructor, the same object the restored context gets), and the others
+   as fail-closed accessors
    that throw and record the use, so top-level code sees a normal context and cannot bake a wrong
    feature test in, even when it catches the error. The Temporal names are fail-closed only in a
    Worker with the `temporal` flag; without it they are absent, as in a normal context. See the
@@ -82,7 +84,8 @@ all of these hold:
      changed behind the record's back, and the live-object record below keys wrappers by a
      cppgc shim address that is unique only while nothing allocates;
    - `removeRestoreTimeGlobalsBeforeSnapshot()` records what the top level left of
-     `Error.stackTraceLimit`, and which fail-closed properties it deleted, and removes every
+     `Error.stackTraceLimit` and `SharedArrayBuffer`, and which fail-closed properties it deleted,
+     and removes every
      restore-time property, so that V8 can add them back on restore. A fail-closed property the
      top level used (whether or not it caught the error), a property it defined in their place,
      or a holder it made non-extensible, fails the zygote here;
@@ -155,16 +158,20 @@ long as the isolate does. In order:
    and the consumer are the same binary.
 2. `newContext()` runs `prepareWrappableDeserializeMetadata()`: for each `liveWrappables` slot it
    builds the object the restored wrapper will be attached to (a stateless type's constructor,
-   or a second `snapshotClone()` of the stored clone) and pre-allocates its CppgcShim, since the
+   or a second `snapshotClone()` of the stored clone), initializes its `JSG_REFLECTION` members as
+   wrapping would, and pre-allocates its CppgcShim, since the
    deserializer callback runs under V8's `DisallowGarbageCollection` and may not allocate.
 3. `v8::Context::New()` deserializes the context. `deserializeInternalFields()` restores the
    wrapper-tag marker of every wrapper; `deserializeApiWrapperCallback()` links each wrapper to
    the shim pre-allocated for its payload's slot (`HeapTracer::linkRestoredWrapper()`). Then
+   `checkDeserializedSlots()` verifies every serialized slot was linked exactly once before
    `relinkReferences()` hands each restored object that referred to other transferred objects
    (`Wrappable::snapshotReferences()`, such as `Crypto`'s `subtle`) their restored instances
-   (`snapshotRelink()`), `releaseSlotsWithChecks()` verifies every serialized slot was linked
-   exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
-   `Error.stackTraceLimit` state and deletions on top of the defaults V8 just installed.
+   (`snapshotRelink()`), `restoreValues()` hands each one whose original held JavaScript values
+   (`Wrappable::snapshotValues()`) those values (`snapshotRestoreValues()`), `releaseSlots()` drops
+   the temporary persistent roots, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the
+   recorded `Error.stackTraceLimit` and `SharedArrayBuffer` state and deletions on top of the
+   defaults V8 just installed.
 4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
    pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), hands the
    fresh global scope the recorded `process`/`Buffer` state (`restoreSnapshotState()`),
@@ -200,7 +207,7 @@ long as the isolate does. In order:
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
-| `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
+| `Error.stackTraceLimit` and `SharedArrayBuffer` as the top level left them, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
 | `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
 | New module registry's resolutions            | pinned `v8::Module`s, rebuilt into the restored registry    | `newModuleRegistryRecords`        |
@@ -226,9 +233,10 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   type's `Lock&` constructor, or its default constructor. The type must be `final` (a
   `static_assert` enforces it), since a subclass would inherit the flag.
 - an override of `Wrappable::snapshotClone()` returning a deep, isolate-independent copy
-  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`, `Performance`): no V8 handles, no
-  IoContext, and no `jsg::Ref` members except to a fresh object the copy owns, which has never
-  been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
+  (`Headers`, `URL`, `TextDecoder`, `CryptoKey`, `FileSystemModule`, `Performance`): no V8
+  handles, no IoContext, and no `jsg::Ref` members except to a fresh object the copy owns, which
+  has never been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy
+  holds, or the
   `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
   live original, and once more per started worker on the stored copy.
 - for a Rust JSG resource, an impl of `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`); see
@@ -242,6 +250,14 @@ also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Cry
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
 
+A type whose state includes JavaScript values (`EventTarget`'s listeners, an `AbortSignal`'s
+reason, a `CryptoKey`'s cached `algorithm`/`usages`) also overrides `Wrappable::snapshotValues()`,
+which returns them in the zygote, and `snapshotRestoreValues()`, which takes them back on the
+restored instance. The values (and any live wrappers named by `snapshotReferences()`) are attached
+to the wrapper object via private symbols, so they travel if and only if the wrapper itself
+survives `CreateBlob()`'s GC, and the restored instance holds the zygote's own objects. A subclass
+that inherits its base's `snapshotClone()` without overriding it is unclonable: its clone would be
+of the base type.
 `jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
 two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
 `snapshot_references()` and `snapshot_relink()` for their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
@@ -289,7 +305,7 @@ Two outcomes are possible for a Worker that qualifies:
   loaded Worker. No zygote runs.
 - **The zygote fails.** A KJ exception while compiling, evaluating, recording or serializing: a
   top-level exception or parse error (the `Worker` constructor throws before anything is
-  recorded), an unclonable type reachable from the context such as an aborted `AbortSignal`, an
+  recorded), an unclonable type reachable from the context such as a `FormData`, an
   RPC method taken off a stub (`const { ping } = env.RPC`) or a C++ promise continuation that is
   still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
   left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
@@ -358,7 +374,7 @@ once.
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder (also one streaming between characters), crypto, navigator, CryptoKeys (including RSA and keys with cached `algorithm`/`usages`), EventTargets with their listeners, AbortControllers and AbortSignals (also aborted before `signal` was read, or with an unretained `signal`, or with the default reason), DOMExceptions, URLSearchParams (also a URL's, which still shares its query), `caches` (and the identity of `caches.default`), `scheduler`, URLPatterns (both implementations), performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, a `TextDecoder` holding part of a character, a listener registered with a `signal`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

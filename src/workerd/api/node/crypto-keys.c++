@@ -46,6 +46,10 @@ class SecretKey final: public CryptoKey::Impl {
     OPENSSL_cleanse(keyData.begin(), keyData.size());
   }
 
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(kj::heap<SecretKey>(kj::heapArray(keyData.asPtr())));
+  }
+
   kj::StringPtr getAlgorithmName() const override {
     return "secret"_kj;
   }
@@ -174,6 +178,11 @@ class AsymmetricKey final: public CryptoKey::Impl {
       : CryptoKey::Impl(true, CryptoKeyUsageSet::privateKeyMask()),
         key(kj::mv(key)),
         isPrivate(isPrivate) {}
+
+  // The copy shares the EVP_PKEY, which BoringSSL lets several threads use at once.
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(kj::heap<AsymmetricKey>(key.clone(), isPrivate));
+  }
 
   kj::StringPtr getAlgorithmName() const override {
     if (!key) return nullptr;

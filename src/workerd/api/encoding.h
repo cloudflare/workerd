@@ -39,6 +39,13 @@ class IcuDecoder final: public Decoder {
 
   void reset() override;
 
+  // A fresh decoder in this one's state, for a startup snapshot. Between inputs that is a fresh
+  // decoder of the same encoding and options. Mid-stream, a converter's state is in general more
+  // than the bytes it holds (a UTF-16 converter keeps an odd byte outside its count of pending
+  // bytes, and stateful encodings keep a shift state), so only a UTF-8 decoder holding no part of
+  // a sequence carries over, as whether it has seen a BOM; otherwise kj::none.
+  kj::Maybe<IcuDecoder> cloneForSnapshot(bool midStream) const;
+
  private:
   struct ConverterDeleter {
     void operator()(UConverter* pointer) const {
@@ -123,8 +130,8 @@ class TextDecoder final: public jsg::Object {
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush);
 
   // A decoder between inputs transfers through a startup snapshot as its encoding and options: the
-  // copy is a fresh decoder of the same kind. One that a streaming decode left with part of an
-  // input pending does not transfer.
+  // copy is a fresh decoder of the same kind. Mid-stream, only a UTF-8 decoder that holds no part
+  // of a sequence transfers (see IcuDecoder::cloneForSnapshot()).
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
  private:

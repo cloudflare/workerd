@@ -46,6 +46,12 @@ class DOMException: public Object {
  public:
   DOMException(kj::String message, kj::String name): message(kj::mv(message)), name(kj::mv(name)) {}
 
+  // Its C++ state is its message and name; its stack is a property of its wrapper, which the
+  // snapshot carries.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<DOMException>(kj::str(message), kj::str(name)));
+  }
+
   // JS API
 
   static Ref<DOMException> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,

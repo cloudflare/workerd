@@ -486,12 +486,48 @@ bool Rsa::isRSAPrivateKey(kj::ArrayPtr<const kj::byte> keyData) {
 // Web Crypto Impl: RSASSA-PKCS1-V1_5, RSA-PSS, RSA-OEAP, RSA-RAW
 
 namespace {
+struct RsaKeyParams {
+  kj::StringPtr name;
+  uint16_t modulusLength = 0;
+  kj::Array<kj::byte> publicExponent;
+  jsg::Optional<CryptoKey::KeyAlgorithm> hash;
+
+  RsaKeyParams clone() const {
+    return {
+      .name = name,
+      .modulusLength = modulusLength,
+      .publicExponent = kj::heapArray(publicExponent.asPtr()),
+      .hash = hash,
+    };
+  }
+
+  CryptoKey::RsaKeyAlgorithm toAlgorithm(jsg::Lock& js) const {
+    auto data = publicExponent.asPtr();
+    jsg::JsBufferSource exp = FeatureFlags::get(js).getCryptoPreservePublicExponent()
+        ? jsg::JsBufferSource(jsg::JsUint8Array::create(js, data))
+        : jsg::JsBufferSource(jsg::JsArrayBuffer::create(js, data));
+    return {
+      .name = name,
+      .modulusLength = modulusLength,
+      .publicExponent = exp.addRef(js),
+      .hash = hash,
+    };
+  }
+
+  JSG_MEMORY_INFO(RsaKeyParams) {
+    tracker.trackField("publicExponent", publicExponent);
+  }
+};
+
 class RsaBase: public AsymmetricKeyCryptoKeyImpl {
  public:
-  explicit RsaBase(
-      AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
+  explicit RsaBase(AsymmetricKeyData keyData, RsaKeyParams keyAlgorithm, bool extractable)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
+
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
+    return keyAlgorithm.toAlgorithm(js);
+  }
 
   kj::StringPtr jsgGetMemoryName() const override {
     return "AsymmetricKey";
@@ -505,7 +541,12 @@ class RsaBase: public AsymmetricKeyCryptoKeyImpl {
   }
 
  protected:
-  CryptoKey::RsaKeyAlgorithm keyAlgorithm;
+  template <typename Key>
+  kj::Own<CryptoKey::Impl> copyAs() const {
+    return kj::heap<Key>(shareKeyData(), keyAlgorithm.clone(), isExtractable());
+  }
+
+  RsaKeyParams keyAlgorithm;
 
  private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
@@ -528,20 +569,20 @@ class RsaBase: public AsymmetricKeyCryptoKeyImpl {
 
 class RsassaPkcs1V15Key final: public RsaBase {
  public:
-  explicit RsassaPkcs1V15Key(
-      AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
+  explicit RsassaPkcs1V15Key(AsymmetricKeyData keyData, RsaKeyParams keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return keyAlgorithm.clone(js);
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<RsassaPkcs1V15Key>();
   }
+
   kj::StringPtr getAlgorithmName() const override {
     return "RSASSA-PKCS1-v1_5";
   }
 
   kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
-    return kj::heap<RsassaPkcs1V15Key>(kj::mv(publicKeyData), keyAlgorithm.clone(js), true);
+    return kj::heap<RsassaPkcs1V15Key>(kj::mv(publicKeyData), keyAlgorithm.clone(), true);
   }
 
   kj::StringPtr chooseHash(
@@ -562,20 +603,20 @@ class RsassaPkcs1V15Key final: public RsaBase {
 
 class RsaPssKey final: public RsaBase {
  public:
-  explicit RsaPssKey(
-      AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
+  explicit RsaPssKey(AsymmetricKeyData keyData, RsaKeyParams keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return keyAlgorithm.clone(js);
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<RsaPssKey>();
   }
+
   kj::StringPtr getAlgorithmName() const override {
     return keyAlgorithm.name;
   }
 
   kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
-    return kj::heap<RsaPssKey>(kj::mv(publicKeyData), keyAlgorithm.clone(js), true);
+    return kj::heap<RsaPssKey>(kj::mv(publicKeyData), keyAlgorithm.clone(), true);
   }
 
   kj::StringPtr chooseHash(
@@ -608,22 +649,21 @@ class RsaOaepKey final: public RsaBase {
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
 
  public:
-  explicit RsaOaepKey(
-      AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
+  explicit RsaOaepKey(AsymmetricKeyData keyData, RsaKeyParams keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return keyAlgorithm.clone(js);
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<RsaOaepKey>();
   }
+
   kj::StringPtr getAlgorithmName() const override {
     return keyAlgorithm.name;
   }
 
   kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
-    return kj::heap<RsaOaepKey>(kj::mv(publicKeyData), keyAlgorithm.clone(js), true);
+    return kj::heap<RsaOaepKey>(kj::mv(publicKeyData), keyAlgorithm.clone(), true);
   }
-
   kj::StringPtr chooseHash(
       const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash)
       const override {
@@ -679,13 +719,16 @@ class RsaOaepKey final: public RsaBase {
 
 class RsaRawKey final: public RsaBase {
  public:
-  explicit RsaRawKey(
-      AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
+  explicit RsaRawKey(AsymmetricKeyData keyData, RsaKeyParams keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
+
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<RsaRawKey>();
+  }
 
   kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
-    return kj::heap<RsaRawKey>(kj::mv(publicKeyData), keyAlgorithm.clone(js), true);
+    return kj::heap<RsaRawKey>(kj::mv(publicKeyData), keyAlgorithm.clone(), true);
   }
 
   jsg::JsArrayBuffer sign(jsg::Lock& js,
@@ -700,10 +743,6 @@ class RsaRawKey final: public RsaBase {
       kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const override {
     KJ_UNIMPLEMENTED("RawRsa Verification currently unsupported");
-  }
-
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return keyAlgorithm.clone(js);
   }
 
   kj::StringPtr getAlgorithmName() const override {
@@ -729,11 +768,10 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js,
     kj::StringPtr normalizedName,
     kj::Own<EVP_PKEY> privateEvpPKey,
     kj::Own<EVP_PKEY> publicEvpPKey,
-    CryptoKey::RsaKeyAlgorithm&& keyAlgorithm,
+    RsaKeyParams&& keyAlgorithm,
     bool privateKeyExtractable,
     CryptoKeyUsageSet usages) {
-  auto privateKeyAlgorithm = keyAlgorithm.clone(js);
-
+  auto privateKeyAlgorithm = keyAlgorithm.clone();
   AsymmetricKeyData publicKeyData{
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
@@ -894,11 +932,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(publicEvpPKey.get(), rsaPublicKey));
 
-  // Create a JsUint8Array copy of the public exponent for the key algorithm struct.
-  auto expCopy = jsg::JsUint8Array::create(js, publicExponent.asArrayPtr());
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = normalizedName,
+  auto keyAlgorithm = RsaKeyParams{.name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = jsg::JsBufferSource(expCopy).addRef(js),
+    .publicExponent = kj::heapArray(publicExponent.asArrayPtr()),
     .hash = KeyAlgorithm{normalizedHashName}};
 
   return generateRsaPair(js, normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
@@ -992,9 +1028,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent.asArrayPtr(), true);
 
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = normalizedName,
+  auto keyAlgorithm = RsaKeyParams{.name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = jsg::JsBufferSource(publicExponent).addRef(js),
+    .publicExponent = kj::heapArray(publicExponent.asArrayPtr()),
     .hash = KeyAlgorithm{normalizedHashName}};
   if (normalizedName == "RSASSA-PKCS1-v1_5") {
     return kj::heap<RsassaPkcs1V15Key>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
@@ -1057,9 +1093,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent.asArrayPtr(), true);
 
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = "RSA-RAW"_kj,
+  auto keyAlgorithm = RsaKeyParams{.name = "RSA-RAW"_kj,
     .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = jsg::JsBufferSource(publicExponent).addRef(js)};
+    .publicExponent = kj::heapArray(publicExponent.asArrayPtr())};
 
   return kj::heap<RsaRawKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
 }
@@ -1073,9 +1109,9 @@ kj::Own<CryptoKey::Impl> fromRsaKey(jsg::Lock& js, kj::Own<EVP_PKEY> key) {
                                        .keyType = KeyType::PUBLIC,
                                        .usages = CryptoKeyUsageSet::decrypt() |
                                            CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify()},
-      CryptoKey::RsaKeyAlgorithm{
+      RsaKeyParams{
         .name = "RSA"_kj,
-        .publicExponent = jsg::JsBufferSource(publicExponent).addRef(js),
+        .publicExponent = kj::heapArray(publicExponent.asArrayPtr()),
       },
       true);
 }

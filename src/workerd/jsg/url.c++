@@ -523,6 +523,17 @@ kj::Array<const char> UrlSearchParams::toStr() const {
   return kj::Array<const char>(result.data, result.length, AdaOwnedStringDisposer::INSTANCE);
 }
 
+UrlSearchParams UrlSearchParams::clone() const {
+  UrlSearchParams copy;
+  auto entries = getEntries();
+  while (entries.hasNext()) {
+    KJ_IF_SOME(entry, entries.next()) {
+      copy.append(entry.key, entry.value);
+    }
+  }
+  return copy;
+}
+
 UrlSearchParams::KeyIterator::KeyIterator(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool UrlSearchParams::KeyIterator::hasNext() const {
@@ -2389,6 +2400,16 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
     }
   }
   KJ_UNREACHABLE;
+}
+
+UrlPattern UrlPattern::clone() const {
+  auto copy = [](const Component& c) {
+    return Component(kj::str(c.getPattern()), kj::str(c.getRegex()),
+        KJ_MAP(name, c.getNames()) { return kj::str(name); });
+  };
+  return UrlPattern(kj::arr(copy(protocol), copy(username), copy(password), copy(hostname),
+                        copy(port), copy(pathname), copy(search), copy(hash)),
+      ignoreCase);
 }
 
 UrlPattern::UrlPattern(kj::Array<Component> components, bool ignoreCase)
