@@ -5,7 +5,7 @@ implemented in workerd, derived from — and kept in lockstep with — the test
 suite in this directory. **The tests are the normative artifact.** Both the
 C++ implementation (`src/workerd/api/streams/readable.h`) and the
 TypeScript implementation (`src/per_isolate/webstreams/strategies.ts`,
-behind `typescript_implemented_streams`) are covered.
+behind the `TS_WEB_STREAMS` autogate) are covered.
 
 The WPT `streams/queuing-strategies.any.js` runs against both
 implementations; its 12 C++ expectedFailures in `src/wpt/streams-test.ts`

@@ -117,13 +117,18 @@ dictionary EventSourceInit {
 | `spec_compliant_dispatch_exceptions` (2026-09-15) | reporting listener exceptions | `legacyThrowingMessageListener` |
 | `spec_compliant_property_attributes` (dateless) | accessor names; lengths; non-configurable constants; the global as an own property | the main cells (the `-opt-in` cell enables it) |
 | `immutable_api_prototypes` (dateless) | nothing: the constructor's `prototype` is non-writable regardless | `constructorAttributes` (the `-opt-in` cell enables it) |
-| `typescript_implemented_streams` (experimental) | the streams an EventSource reads | the `eventsource` and `-opt-in` cells (the `-ts-streams` cell enables it) |
 
 The main cells pin the two dated flags on; the legacy cell pins them off
 by their disable names, so every cell keeps its `@all-compat-flags`
 variant. The main cells also pin `nodejs_compat` (`node:assert`,
 `node:util`), `enable_weak_ref` and `rpc` (for `gc.js`), and
 `streams_enable_constructors`.
+
+The `-ts-streams` cell reads the TypeScript streams, which the
+`TS_WEB_STREAMS` autogate selects for the whole process. `flags.js` learns
+which streams a cell reads from the cell's `USING_TS_IMPL` binding. The
+other cells' `@all-autogates` variants leave that autogate out
+(`all_autogates_variant_excludes` in `BUILD.bazel`).
 
 ## Assertion catalogue
 

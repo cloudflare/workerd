@@ -94,7 +94,11 @@ KJ_TEST("native pipe read retains its source until the read is destroyed") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  // Pipes C++ streams, so not under the @all-autogates variant's TS_WEB_STREAMS.
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .excludedFromAllAutogates = kj::arr(util::AutogateKey::TS_WEB_STREAMS),
+  });
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto read = kj::newPromiseAndFulfiller<size_t>();
     auto destroyed = kj::newPromiseAndFulfiller<void>();

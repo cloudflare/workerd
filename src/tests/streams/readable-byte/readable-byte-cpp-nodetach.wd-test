@@ -18,6 +18,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-nodetach", esModule = embed "legacy-nodetach.js"),
         ],
         compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

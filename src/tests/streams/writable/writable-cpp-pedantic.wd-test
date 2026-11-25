@@ -30,6 +30,7 @@ const unitTests :Workerd.Config = (
           "pedantic_wpt",
           "enable_weak_ref",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

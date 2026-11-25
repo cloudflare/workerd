@@ -9,12 +9,12 @@ identity_bench_srcs = glob(["*.js"]) + ["identity-modules.capnp"]
 wd_bench(
     size = "large",
     src = "identity-cpp.wd-bench",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = identity_bench_srcs,
 )
 
 wd_bench(
     size = "large",
     src = "identity-ts.wd-bench",
-    args = ["--experimental"],
     data = identity_bench_srcs,
 )

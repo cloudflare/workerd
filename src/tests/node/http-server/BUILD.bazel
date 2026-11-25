@@ -5,6 +5,9 @@ load("//:build/wd_test.bzl", "wd_test")
 # against the TypeScript implementation. The worker is bound to itself
 # (SERVICE), so a test's fetch() enters the worker's default handler, which
 # routes it to the test's node http.Server.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 http_server_suite_srcs = glob(["*.js"]) + ["http-server-modules.capnp"]
 
@@ -18,6 +21,7 @@ http_server_size = "large"
 wd_test(
     size = http_server_size,
     src = "http-server-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = http_server_suite_srcs,
 )
 
@@ -35,6 +39,7 @@ wd_test(
 wd_test(
     size = http_server_size,
     src = "http-server-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = http_server_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

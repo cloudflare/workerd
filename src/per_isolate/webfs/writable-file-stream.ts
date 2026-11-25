@@ -12,8 +12,9 @@
 // Nothing constructs this from JavaScript: the class has no user-reachable
 // constructor and instances come only from FileSystemFileHandle.createWritable().
 // That method is a C++ JSG method, so the TypeScript version is installed over
-// it on the prototype by main.ts, and createWritable() below is what runs. The
-// C++ createWritable() stays in place and is what runs when the flag is off.
+// it on the prototype by main-post.ts, through webstreams/installer, and
+// createWritable() below is what runs. The C++ createWritable() stays in place
+// and is what runs when the TypeScript streams are off.
 //
 // WRITES BYPASS THE QUEUE
 //
@@ -173,7 +174,7 @@ function readKeepExistingData(options: unknown): boolean {
   return !!(options as { keepExistingData?: unknown }).keepExistingData;
 }
 
-// Installed over FileSystemFileHandle.prototype.createWritable by main.ts.
+// Installed over FileSystemFileHandle.prototype.createWritable by main-post.ts.
 //
 // Deliberately not an async function. JSG unwraps arguments before the method
 // body runs, so a bad option bag is a synchronous throw in C++, while a file

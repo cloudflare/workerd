@@ -2,7 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import { env } from 'cloudflare:workers';
+
 // Distinguishes which streams implementation this worker is running, so
 // tests can pin each side of a deliberate divergence exactly.
-export const usingTsImpl =
-  globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'];
+// The TS_WEB_STREAMS autogate selects the implementation, and user code
+// cannot read autogates, so each cell declares the one it runs through its
+// USING_TS_IMPL binding.
+export const usingTsImpl = env.USING_TS_IMPL === true;

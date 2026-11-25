@@ -26,6 +26,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "SELF", service = "streams-readable-cpp-pedantic" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
       )
     ),

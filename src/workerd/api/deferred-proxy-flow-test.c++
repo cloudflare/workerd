@@ -165,10 +165,7 @@ kj::Promise<void> settleTurns(int n) {
 }
 
 TestFixture makeTsStreamsFixture() {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({.featureFlags = flags.asReader()});
+  return TestFixture({.autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
 }
 
 template <typename Decompressor>

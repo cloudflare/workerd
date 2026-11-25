@@ -6,7 +6,7 @@ directory. **The tests are the normative artifact**; this document is the
 index that maps every specified behavior to the test that asserts it. Both
 the legacy C++ implementation (`src/workerd/api/streams/`) and the
 TypeScript implementation (`src/per_isolate/webstreams/identity.ts`, behind
-`typescript_implemented_streams`) are covered; where they deliberately
+the `TS_WEB_STREAMS` autogate) are covered; where they deliberately
 diverge, both sides are specified and pinned.
 
 Unless marked otherwise, behaviors below describe the **current default**

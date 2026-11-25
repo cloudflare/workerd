@@ -36,6 +36,7 @@ const unitTests :Workerd.Config = (
           "writable_stream_spec_compliant_writer",
           "enable_weak_ref",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

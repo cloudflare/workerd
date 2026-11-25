@@ -319,6 +319,12 @@ export async function report(extraChecks = {}) {
   return {
     mode: MODE,
     snapshotUsed: unsafe.startedFromStartupSnapshot(),
+    // Whether this Worker's streams are the TypeScript implementation: under the TS_WEB_STREAMS
+    // autogate they are for every Worker, the cpp-streams cases included. User code cannot read
+    // an autogate, but unlike a JSG class, a TypeScript class's source text is not [native code].
+    tsStreams: !Function.prototype.toString
+      .call(ReadableStream)
+      .includes('[native code]'),
     envKeys: Object.keys(env),
     checks: { ...(await checks()), ...extraChecks },
   };
@@ -380,18 +386,30 @@ async function test(ctrl, env) {
     'unclonable',
     ...(tsUrl ? [] : ['searchparams']),
     'midstream-decoder',
-    // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
-    'cpp-streams-pending-pull',
-    'cpp-streams-pending-cancel',
     // A recorded performance entry is JavaScript state the clone cannot carry.
     'performance-entries',
   ];
+  // Streams the top level leaves awaiting a promise. A C++ stream chains a C++ continuation onto
+  // it, which the snapshot cannot carry, so the case is a plain Worker. Under the TS_WEB_STREAMS
+  // autogate the case gets TypeScript streams, whose continuations are JavaScript reactions the
+  // snapshot carries; the case's report says which it got.
+  const pendingStreams = [
+    'cpp-streams-pending-pull',
+    'cpp-streams-pending-cancel',
+  ];
 
+  // expectedSnapshotUsed is a boolean, or a function of the case's report.
   const run = async (name, expectedSnapshotUsed) => {
     const response = await env[name].fetch('http://case/');
     const r = await response.json();
     strictEqual(r.mode, name);
-    strictEqual(r.snapshotUsed, expectedSnapshotUsed, `${name}: snapshotUsed`);
+    strictEqual(
+      r.snapshotUsed,
+      typeof expectedSnapshotUsed === 'function'
+        ? expectedSnapshotUsed(r)
+        : expectedSnapshotUsed,
+      `${name}: snapshotUsed`
+    );
     for (const [check, value] of Object.entries(r.checks)) {
       strictEqual(value, true, `${name}: ${check}`);
     }
@@ -410,6 +428,9 @@ async function test(ctrl, env) {
   }
   for (const name of fallback) {
     await run(name, false);
+  }
+  for (const name of pendingStreams) {
+    await run(name, (r) => pipelineOn && r.tsStreams);
   }
 }
 

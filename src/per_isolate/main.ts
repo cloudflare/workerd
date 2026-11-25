@@ -45,14 +45,13 @@ if (autogates['ts-performance-now']) {
   require('performance/now').install(utils.getPerformancePrototype());
 }
 
-if (compatFlags['typescript_implemented_streams']) {
-  const {
-    installWebStreams,
-    maybeInstallDrainingReader,
-  } = require('webstreams/installer');
+if (autogates['ts-web-streams']) {
+  const { installWebStreams } = require('webstreams/installer');
   installWebStreams();
-  maybeInstallDrainingReader();
 }
+// TODO(soon): Note that while the TS web streams are still compat flag
+// gated, nothing in here can eagerly depend on the web streams impl,
+// as it might not get installed until main-post.
 
 // MessageChannel and MessagePort are loaded on first use, since few Workers
 // use them: through the globals defined here, or through
@@ -74,33 +73,6 @@ if (compatFlags['expose_global_message_channel']) {
     defineLazyDataProperty(globalThis, 'MessageChannel', specifier, false);
     defineLazyDataProperty(globalThis, 'MessagePort', specifier, false);
   }
-}
-
-// EventSource is always a global. Loaded after the streams globals above,
-// whose reader it captures, and installed as JSG_NESTED_TYPE installs a
-// global class: on the global scope's prototype, with all three attributes
-// true, and under spec_compliant_property_attributes also as an own property
-// of the global, non-enumerable per Web IDL.
-const { EventSource } = require('eventsource/eventsource');
-ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-  EventSource: {
-    __proto__: null,
-    configurable: true,
-    enumerable: true,
-    writable: true,
-    value: EventSource,
-  },
-});
-if (compatFlags['spec_compliant_property_attributes']) {
-  ObjectDefineProperties(globalThis, {
-    EventSource: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: EventSource,
-    },
-  });
 }
 
 // The TypeScript URL and URLSearchParams replace the C++ ones, which

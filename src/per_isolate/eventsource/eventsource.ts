@@ -112,9 +112,9 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
-// Whichever streams implementation main.ts installed before loading this
-// module; a Response body and anything EventSource.from() accepts are its
-// streams.
+// Whichever streams implementation the bootstrap installed before
+// main-post.ts loads this module, before any user code runs; a Response body
+// and anything EventSource.from() accepts are its streams.
 type Reader = ReadableStreamDefaultReader<unknown>;
 const ReadableStreamGetReader = uncurryThis(
   globalThis.ReadableStream.prototype.getReader
@@ -161,6 +161,7 @@ const kEventStreamMimeType = 'text/event-stream';
 // What a draining read of each streams implementation throws for a chunk
 // that is not bytes; a non-byte chunk fails the EventSource with it.
 const kNotBytes =
+  autogates['ts-web-streams'] === true ||
   compatFlags['typescript_implemented_streams'] === true
     ? 'This ReadableStream did not return bytes.'
     : 'Draining read encountered a value that cannot be converted to bytes';

@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The queuing strategies suite runs the same test modules under two
 # configs: strategies-cpp against the C++ implementation, strategies-ts
 # against the TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 strategies_suite_srcs = glob(["*.js"]) + ["strategies-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "strategies-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = strategies_suite_srcs,
 )
 
@@ -24,5 +28,6 @@ wd_test(
 wd_test(
     size = "large",
     src = "strategies-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = strategies_suite_srcs,
 )

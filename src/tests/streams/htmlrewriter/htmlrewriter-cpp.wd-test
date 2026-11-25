@@ -18,6 +18,7 @@ const unitTests :Workerd.Config = (
           "fixup-transform-stream-backpressure",
           "html_rewriter_treats_esi_include_as_void_tag",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

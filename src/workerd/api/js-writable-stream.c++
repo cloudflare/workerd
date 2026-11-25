@@ -6,10 +6,8 @@
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/worker-rpc.h>
-#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/common.h>
@@ -284,7 +282,7 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
     kj::Maybe<kj::Own<ByteStreamObserver>> observer,
     kj::Maybe<uint64_t> maybeHighWaterMark,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable) {
-  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (isTypeScriptStreamsEnabled(js)) {
     // TypeScript-implemented streams: wrap the native sink in a WritableStreamNativeSink
     // -- whose instances are born carrying the kNativeSink marker (JSG_PRIVATE_SYMBOL)
     // that the TypeScript WritableStream constructor detects -- and construct the
@@ -312,7 +310,7 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
 
 JsWritableStream JsWritableStream::fromWrite(
     jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write) {
-  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (!isTypeScriptStreamsEnabled(js)) {
     UnderlyingSink underlyingSink;
     underlyingSink.write = [write = kj::mv(write)](jsg::Lock& js, jsg::JsValue chunk,
                                UnderlyingSink::Controller) mutable { return write(js, chunk); };
@@ -610,7 +608,7 @@ kj::Maybe<JsWritableStream> JsWritableStream::tryUnwrapTs(
   // Without the flag there is no TypeScript implementation (and no bootstrap export to
   // ask), so nothing can match. This also keeps the flag-off unwrap path allocation- and
   // JS-call-free.
-  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (!isTypeScriptStreamsEnabled(js)) {
     return kj::none;
   }
   KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {

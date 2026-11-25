@@ -1,6 +1,6 @@
 # A JS-backed WritableStream transferred over JS RPC and abandoned unclosed, so the RPC
-# adapter's destructor schedules the writer's abort during request teardown. Neither service
-# enables typescript_implemented_streams: this pins the writer-driven legacy adapter path.
+# adapter's destructor schedules the writer's abort during request teardown. Both services run
+# the C++ streams implementation: this pins the writer-driven legacy adapter path.
 # See the header comment in the JS file.
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -18,6 +18,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
       )
     ),
@@ -31,6 +32,7 @@ const unitTests :Workerd.Config = (
           "streams_enable_constructors",
           "rpc",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

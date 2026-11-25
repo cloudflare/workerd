@@ -105,6 +105,8 @@ namespace workerd::util {
      (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
      api/urlpattern-standard.h. */                                                                 \
   V(TS_URL_PATTERN)                                                                                \
+  /* Enables the TypeScript web streams implementation */                                          \
+  V(TS_WEB_STREAMS)                                                                                \
   /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \

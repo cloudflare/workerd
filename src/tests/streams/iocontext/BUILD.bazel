@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The iocontext suite runs the same test modules under two configs:
 # iocontext-cpp against the C++ implementation, iocontext-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 iocontext_suite_srcs = glob(["*.js"]) + ["iocontext-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "iocontext-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = iocontext_suite_srcs,
 )
 

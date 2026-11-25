@@ -43,13 +43,14 @@ measures what a newly created worker gets. `@all-compat-flags` runs at
 2999-12-31. (The test suites pin those flags because their default variant
 runs at 2000-01-01.)
 
-The TS cell adds only what selects the implementation: the
-`typescript_implemented_streams` flag, `--experimental` in its
-`wd_bench()` (the flag is experimental). The flag alone
-selects the implementation: the C++ cell's `@all-autogates` variant enables
-the autogate too and still runs C++ streams. Unlike the test suites' TS
-cells, the TS cells don't set the catch-all `experimental` flag, which would
-give them in-development APIs that the C++ cells lack.
+The TS cell adds only what selects the implementation: the `TS_WEB_STREAMS`
+autogate, in its config's `autogates` list. The autogate applies to the
+whole process, so the C++ cell's `wd_bench()` sets
+`all_autogates_variant_excludes = ["ts-web-streams"]`, so that its
+`@all-autogates` variant enables every other autogate without swapping in
+the TypeScript implementation. Unlike the test suites' TS cells, the
+TS cells don't set the catch-all `experimental` flag, which would give them
+in-development APIs that the C++ cells lack.
 
 ## Writing cases
 

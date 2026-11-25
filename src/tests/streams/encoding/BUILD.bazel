@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The encoding streams suite runs the same test modules under two configs:
 # encoding-cpp against the C++ implementation, encoding-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 encoding_suite_srcs = glob(["*.js"]) + ["encoding-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "encoding-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = encoding_suite_srcs,
 )
 
@@ -24,6 +28,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "encoding-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = encoding_suite_srcs,
 )
 
@@ -33,6 +38,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "encoding-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
@@ -40,6 +46,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "encoding-cpp-legacy-bp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
@@ -47,6 +54,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "encoding-cpp-legacy-hwm.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

@@ -23,10 +23,11 @@ KJ_TEST("embedder bootstrap scripts run after workerd's, in the same bootstrap")
 
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
+  flags.setNodeJsCompat(true);
 
   TestFixture fixture({
     .featureFlags = flags.asReader(),
+    .autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS),
     .embedderBootstrap = embedder,
   });
   fixture.runInIoContext([](const TestFixture::Environment& env) {
@@ -44,6 +45,7 @@ KJ_TEST("embedder bootstrap scripts run after workerd's, in the same bootstrap")
     // globals are removed.
     KJ_EXPECT(exports.get(js, "hasUtils").strictEquals(js.boolean(true)));
     KJ_EXPECT(exports.get(js, "sawCompatFlag").strictEquals(js.boolean(true)));
+    KJ_EXPECT(exports.get(js, "sawAutogate").strictEquals(js.boolean(true)));
     KJ_EXPECT(exports.get(js, "weakRefType").strictEquals(js.str("function"_kj)));
     KJ_EXPECT(js.global().get(js, "WeakRef").isUndefined());
 

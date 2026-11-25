@@ -6,7 +6,7 @@ suite in this directory. **The tests are the normative artifact.** Both the
 C++ implementation (`src/workerd/api/streams/compression.{h,c++}`, built on
 internal streams over the shared `api/compression.h` CodecStage) and the
 TypeScript implementation (`src/per_isolate/webstreams/compression.ts`,
-behind `typescript_implemented_streams`) are covered. The two wrap the SAME
+behind the `TS_WEB_STREAMS` autogate) are covered. The two wrap the SAME
 C++ codec (the TS pair drives `utils.newCompressionCodec` handles), so
 codec output is parity by construction; divergences live in the stream
 wrappers.

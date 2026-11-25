@@ -34,6 +34,7 @@ const unitTests :Workerd.Config = (
           (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
           (name = "current", service = "context-current"),
           (name = "legacy", service = "context-legacy"),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
         durableObjectNamespaces = [
           (className = "EventSourceGcDo", uniqueKey = "6984eceb22924037ab88556a7dc2eb6e"),

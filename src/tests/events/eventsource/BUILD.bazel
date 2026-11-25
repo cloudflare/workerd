@@ -8,12 +8,17 @@ load("//:build/wd_test.bzl", "wd_test")
 # All but the legacy cell are large: their tests wait out real reconnection
 # delays, about 9 s in all, which a loaded machine can stretch past a medium
 # test's 15 s.
+#
+# The cells that read the C++ streams leave the ts-web-streams autogate out
+# of their @all-autogates variants, since it would swap in the TypeScript
+# streams.
 
 eventsource_suite_srcs = glob(["*.js"]) + ["eventsource-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "eventsource.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = eventsource_suite_srcs,
 )
 
@@ -27,11 +32,13 @@ wd_test(
 wd_test(
     size = "large",
     src = "eventsource-opt-in.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = eventsource_suite_srcs,
 )
 
 wd_test(
     src = "eventsource-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = eventsource_suite_srcs,
 )

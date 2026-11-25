@@ -14,12 +14,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # suite guards the TypeScript queues), and it costs 35-60 s per variant on
 # CI (an identity write is ~375 us there). Run it explicitly with
 # `bazel test //src/tests/streams/scaling:scaling-cpp@ --test_tag_filters=`.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 scaling_suite_srcs = glob(["*.js"]) + ["scaling-modules.capnp"]
 
 wd_test(
     timeout = "eternal",
     src = "scaling-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = scaling_suite_srcs,
     generate_gc_stress_variant = False,
     tags = [

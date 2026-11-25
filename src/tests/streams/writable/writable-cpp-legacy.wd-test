@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-ctor-gate", esModule = embed "legacy-ctor-gate.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

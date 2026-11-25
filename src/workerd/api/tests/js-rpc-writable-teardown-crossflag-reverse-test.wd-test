@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
           (name = "EXPECT_CROSS_IMPL", json = "true"),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
       )
     ),
@@ -32,6 +33,7 @@ const unitTests :Workerd.Config = (
           "rpc",
           "typescript_implemented_streams",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],

@@ -15,8 +15,9 @@ const unitTests :Workerd.Config = (
       ],
       compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
                             "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
-                            "fetcher_no_get_put_delete", "typescript_implemented_streams"],
+                            "fetcher_no_get_put_delete"],
     )),
     (name = "platform", worker = NativeR2.platformWorker),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

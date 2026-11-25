@@ -9,12 +9,12 @@ piping_bench_srcs = glob(["*.js"]) + ["piping-modules.capnp"]
 wd_bench(
     size = "large",
     src = "piping-cpp.wd-bench",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = piping_bench_srcs,
 )
 
 wd_bench(
     size = "large",
     src = "piping-ts.wd-bench",
-    args = ["--experimental"],
     data = piping_bench_srcs,
 )

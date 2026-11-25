@@ -8,11 +8,11 @@ readable_byte_bench_srcs = glob(["*.js"]) + ["readable-byte-modules.capnp"]
 
 wd_bench(
     src = "readable-byte-cpp.wd-bench",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_byte_bench_srcs,
 )
 
 wd_bench(
     src = "readable-byte-ts.wd-bench",
-    args = ["--experimental"],
     data = readable_byte_bench_srcs,
 )

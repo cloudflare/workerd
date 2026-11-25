@@ -10,7 +10,12 @@
     "types": ["@types/node"]
   },
   "include": ["**/*.ts"],
-  // r2-binding-service has its own project; the other entries repeat the base config's exclude,
-  // which this one replaces.
-  "exclude": ["node_modules", "**/*.mjs", "r2-binding-service"]
+  // r2-binding-service and embedder-bootstrap have projects of their own; the other entries
+  // repeat the base config's exclude, which this one replaces.
+  "exclude": [
+    "node_modules",
+    "**/*.mjs",
+    "r2-binding-service",
+    "embedder-bootstrap"
+  ]
 }

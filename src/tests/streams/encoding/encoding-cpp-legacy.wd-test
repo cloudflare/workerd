@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-identity-fallback", esModule = embed "legacy-identity-fallback.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

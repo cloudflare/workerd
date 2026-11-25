@@ -3,6 +3,9 @@ load("//:build/wd_test.bzl", "wd_test")
 # The digest streams suite runs the same test modules under two configs:
 # digest-cpp against the C++ implementation, digest-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 digest_suite_srcs = glob(
     ["*.js"],
@@ -12,6 +15,7 @@ digest_suite_srcs = glob(
 wd_test(
     size = "large",
     src = "digest-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = digest_suite_srcs,
 )
 
@@ -27,6 +31,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "digest-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = digest_suite_srcs,
 )
 
@@ -36,6 +41,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "digest-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = digest_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

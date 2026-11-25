@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The r2-patterns suite runs the same test modules under two configs:
 # r2-patterns-cpp against the C++ implementation, r2-patterns-ts against
 # the TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 r2_patterns_suite_srcs = glob(["*.js"]) + ["r2-patterns-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "r2-patterns-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = r2_patterns_suite_srcs,
 )
 

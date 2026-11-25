@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The inspect suite runs the same test modules under two configs:
 # inspect-cpp against the C++ implementation, inspect-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 inspect_suite_srcs = glob(["*.js"]) + ["inspect-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "inspect-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = inspect_suite_srcs,
 )
 

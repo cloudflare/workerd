@@ -14,10 +14,10 @@ const unitTests :Workerd.Config = (
         modules = WritableModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "experimental",
           "enable_weak_ref",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
@@ -29,4 +29,5 @@ const unitTests :Workerd.Config = (
     "--invocation-count-for-maglev=5",
     "--minimum-invocations-after-ic-update=2",
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

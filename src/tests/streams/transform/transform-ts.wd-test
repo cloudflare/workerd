@@ -14,10 +14,10 @@ const unitTests :Workerd.Config = (
         modules = TransformModules.modules,
         bindings = [
           ( name = "SELF", service = "streams-transform-ts" ),
+          ( name = "USING_TS_IMPL", json = "true" ),
         ],
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "expose_draining_reader",
           "experimental",
           "enable_weak_ref",
@@ -27,4 +27,5 @@ const unitTests :Workerd.Config = (
   ],
   # For gc.js (added with the expansion pass).
   v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

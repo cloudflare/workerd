@@ -41,6 +41,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "SELF", service = "streams-readable-cpp" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
       )
     ),

@@ -29,6 +29,7 @@ const unitTests :Workerd.Config = (
           "fixup-transform-stream-backpressure",
           "writable_stream_spec_compliant_writer",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

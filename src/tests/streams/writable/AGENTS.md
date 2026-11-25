@@ -6,7 +6,7 @@ suite in this directory. **The tests are the normative artifact.** Both the
 C++ implementation (`src/workerd/api/streams/writable.{h,c++}` over
 `standard.c++`'s `WritableImpl`/`WritableStreamJsController`) and the
 TypeScript implementation (`src/per_isolate/webstreams/writable.ts`, behind
-`typescript_implemented_streams`) are covered.
+the `TS_WEB_STREAMS` autogate) are covered.
 
 The suite COMPLEMENTS WPT (`//src/wpt:streams` runs writable-streams/
 against both implementations): behaviors WPT already asserts identically on

@@ -20,7 +20,7 @@ async function contentsOf(handle) {
   return await (await handle.getFile()).text();
 }
 
-// The reason this implementation exists: with typescript_implemented_streams
+// The reason this implementation exists: with the TypeScript streams
 // enabled, the C++ FileSystemWritableFileStream inherits from the C++
 // WritableStream, which is no longer the WritableStream user code sees. These
 // assertions fail against the C++ implementation, so they double as proof that

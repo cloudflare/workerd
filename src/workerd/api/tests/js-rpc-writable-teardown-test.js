@@ -9,18 +9,22 @@
 // IncomingRequest is gone (during TaskSet teardown). IoContext::run() requires a current
 // IncomingRequest, so the abort must be skipped in that window rather than attempted.
 //
-// Same-implementation and cross-implementation configurations embed this file. Without
-// typescript_implemented_streams the JS-backed sink below has no WritableStreamSink to detach and
-// serializes through the legacy adapter; with the flag it serializes through the TypeScript writer
-// sink. The cross-implementation configurations also cover each received-stream implementation.
+// Same-implementation and cross-implementation configurations embed this file. Under the C++
+// streams implementation the JS-backed sink below has no WritableStreamSink to detach and
+// serializes through the legacy adapter; under the TypeScript one it serializes through the
+// TypeScript writer sink. The cross-implementation configurations also cover each
+// received-stream implementation.
+//
+// The TypeScript-only configuration selects its implementation with the TS_WEB_STREAMS autogate,
+// which user code cannot read, and the cross-implementation ones with the
+// typescript_implemented_streams compat flag, so every service declares the implementation it
+// runs through its USING_TS_IMPL binding.
 
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint, env } from 'cloudflare:workers';
 import * as assert from 'node:assert';
 
 const enc = new TextEncoder();
-const usingTsImpl =
-  globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'] ===
-  true;
+const usingTsImpl = env.USING_TS_IMPL === true;
 
 export class Peer extends WorkerEntrypoint {
   usesTypeScriptStreams() {

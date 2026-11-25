@@ -22,6 +22,7 @@ const unitTests :Workerd.Config = (
           "transformstream_enable_standard_constructor",
           "capture_async_api_throws",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

@@ -48,6 +48,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "SELF", service = "streams-compression-cpp" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
       )
     ),

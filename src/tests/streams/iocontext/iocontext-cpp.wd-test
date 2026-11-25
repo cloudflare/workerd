@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "self", service = "streams-iocontext-cpp" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
       )
     ),

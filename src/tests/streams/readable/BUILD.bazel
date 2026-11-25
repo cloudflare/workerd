@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The readable streams suite runs the same test modules under two
 # configs: readable-cpp against the C++ implementation, readable-ts
 # against the TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 readable_suite_srcs = glob(["*.js"]) + ["readable-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "readable-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_suite_srcs,
 )
 
@@ -25,6 +29,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_suite_srcs,
 )
 
@@ -34,6 +39,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

@@ -18,7 +18,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "experimental",
-          "typescript_implemented_streams",
         ],
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
@@ -30,6 +29,7 @@ const unitTests :Workerd.Config = (
           (name = "NET_RESET_PORT", fromEnvironment = "NET_RESET_PORT"),
           (name = "NET_TRICKLE_PORT", fromEnvironment = "NET_TRICKLE_PORT"),
           (name = "NET_UTF8_SPLIT_PORT", fromEnvironment = "NET_UTF8_SPLIT_PORT"),
+          (name = "USING_TS_IMPL", json = "true"),
         ],
       )
     ),
@@ -39,4 +39,5 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

@@ -6,7 +6,7 @@ derived from — and kept in lockstep with — the test suite in this
 directory. **The tests are the normative artifact.** Both the C++
 implementation (`src/workerd/api/crypto/crypto.{h,c++}`) and the TypeScript
 implementation (`src/per_isolate/crypto/digest-stream.ts`, behind
-`typescript_implemented_streams`) are covered. Both drive the SAME native
+the `TS_WEB_STREAMS` autogate) are covered. Both drive the SAME native
 digest context (`utils.createDigestContext` → CRC/OpenSSL contexts and the
 WTF-8/toWellFormed string encoder), so hashing, string encoding, and byte
 counting are parity by construction; divergences live in the stream

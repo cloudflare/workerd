@@ -19,13 +19,14 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "enable_nodejs_http_modules",
           "enable_nodejs_http_server_modules",
-          "typescript_implemented_streams",
           "experimental",
         ],
         bindings = [
           (name = "SERVICE", service = "node-http-server-ts"),
+          (name = "USING_TS_IMPL", json = "true"),
         ],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

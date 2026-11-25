@@ -4,6 +4,14 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// Whether the streams are the TypeScript implementation (the TS_WEB_STREAMS
+// autogate), whose FileSystemWritableFileStream is a class that extends the
+// TypeScript WritableStream. User code cannot read an autogate, but unlike a
+// JSG class, a TypeScript class's source text is not [native code].
+const usingTsStreams = !Function.prototype.toString
+  .call(WritableStream)
+  .includes('[native code]');
+
 const root = await navigator.storage.getDirectory();
 const tmp = await root.getDirectoryHandle('tmp');
 // The root is read-only, so we need to use a writable subdirectory
@@ -196,7 +204,11 @@ export default {
       'FileSystemDirectoryHandle interface: operation getDirectoryHandle(USVString, optional FileSystemGetDirectoryOptions)',
       'FileSystemDirectoryHandle interface: operation removeEntry(USVString, optional FileSystemRemoveOptions)',
       'FileSystemDirectoryHandle interface: operation resolve(FileSystemHandle)',
-      'FileSystemWritableFileStream interface: existence and properties of interface object',
+      ...(usingTsStreams
+        ? []
+        : [
+            'FileSystemWritableFileStream interface: existence and properties of interface object',
+          ]),
       'FileSystemWritableFileStream interface: operation write(FileSystemWriteChunkType)',
       'FileSystemWritableFileStream interface: operation seek(unsigned long long)',
       'FileSystemWritableFileStream interface: operation truncate(unsigned long long)',

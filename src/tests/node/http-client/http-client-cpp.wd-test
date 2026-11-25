@@ -34,6 +34,7 @@ const unitTests :Workerd.Config = (
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "HTTP_SERVER_PORT", fromEnvironment = "HTTP_SERVER_PORT"),
           (name = "HTTP_RAW_PORT", fromEnvironment = "HTTP_RAW_PORT"),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
       )
     ),

@@ -33,6 +33,12 @@ class TransformStreamDefaultController;
 
 using rpc::StreamEncoding;
 
+// Whether the TypeScript streams implementation replaces the C++ one: for the whole process
+// under the TS_WEB_STREAMS autogate, otherwise for a worker whose flags enable
+// typescript_implemented_streams. The second form reads the current worker's flags.
+bool isTypeScriptStreamsEnabled(CompatibilityFlags::Reader flags);
+bool isTypeScriptStreamsEnabled(jsg::Lock& js);
+
 enum class ReadAllTextOption : uint8_t {
   NONE = 0,
   NULL_TERMINATE = 1 << 0,

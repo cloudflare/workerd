@@ -5,6 +5,25 @@
 import assert from 'node:assert';
 import util from 'node:util';
 
+// util.inspect()'s text for a request's or response's unread body of the given
+// length. The TypeScript streams (the TS_WEB_STREAMS autogate) show none of
+// the C++ stream's internal state. User code cannot read an autogate, but
+// unlike a JSG class, a TypeScript class's source text is not [native code].
+const usingTsStreams = !Function.prototype.toString
+  .call(ReadableStream)
+  .includes('[native code]');
+function inspectedBody(length: number): string {
+  if (usingTsStreams) {
+    return 'ReadableStream {}';
+  }
+  return `ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: ${length}n
+  }`;
+}
+
 export default {
   async fetch() {
     return new Response(null, { status: 404 });
@@ -146,12 +165,7 @@ export const cacheMode = {
   webSocket: null,
   cf: undefined,
   type: 'default',
-  body: ReadableStream {
-    locked: false,
-    [state]: 'readable',
-    [supportsBYOB]: true,
-    [length]: 0n
-  },
+  body: ${inspectedBody(0)},
   bodyUsed: false
 }`
         );

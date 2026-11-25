@@ -114,11 +114,60 @@ const expected = usingTsImpl ? RangeError : TypeError;
 throws(() => new IdentityTransformStream({ highWaterMark: -1 }), expected);
 ```
 
-`which-impl.js` reads
-`globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams']`.
-This pins every known divergence: if either implementation changes its side,
-the corresponding cell fails. Document each divergence in the header comment
-of the file that asserts it.
+`which-impl.js` reads the cell's `USING_TS_IMPL` binding (see Selecting the
+implementation). This pins every known divergence: if either implementation
+changes its side, the corresponding cell fails. Document each divergence in
+the header comment of the file that asserts it.
+
+## Selecting the implementation
+
+The `TS_WEB_STREAMS` autogate swaps in the TypeScript implementation for
+the whole process, so the `<name>-ts.wd-test` config enables it in its
+`autogates` list. User code cannot read autogates, so every cell of a suite
+with a `which-impl.js` also declares the implementation it runs through a
+`USING_TS_IMPL` JSON binding on its test worker: `true` in the TypeScript
+cell, `false` in the C++ cells. The C++ cells set
+`all_autogates_variant_excludes = ["ts-web-streams"]` in `BUILD.bazel`, so
+that their `@all-autogates` variants enable every other autogate without
+swapping in the TypeScript implementation.
+
+A config that runs both implementations side by side, such as the
+cross-implementation JS RPC tests, cannot use a process-wide autogate. It
+keeps selecting the TypeScript implementation per worker with the
+`typescript_implemented_streams` compatibility flag.
+
+## What enabling TS_WEB_STREAMS changes
+
+The autogate swaps the implementation for every Worker in the process,
+whatever its compatibility date, so a Worker that runs on the C++
+implementation meets every divergence the moment the gate is on; no
+compatibility flag holds any of them back. Enabling it accepts all of
+them. The suites' ledgers are the full list:
+
+| Suite | Ledger rows |
+| --- | --- |
+| `compression/` | 17 |
+| `digest/` | 3 |
+| `encoding/` | 8 |
+| `identity/` | 26 |
+| `piping/` | 18 |
+| `r2-patterns/` | 5 |
+| `readable/` | 37 |
+| `readable-byte/` | 46 |
+| `strategies/` | 7 |
+| `transform/` | 28 |
+| `writable/` | 20 |
+
+`inspect/` has no ledger: its one divergence is the whole suite, the
+TypeScript streams having no custom `util.inspect`, so that every stream
+inspects as a bare `ClassName {}`. The node suites (`src/tests/node/`)
+carry ledgers of their own. Some kinds of divergence recur across suites:
+
+- **Error messages.** Rows in nine of the ledgers differ only, or also, in
+  a message, such as the TypeError a locked stream fails a pipe with
+  (`piping/` #18).
+- **Constructor source text**, which is `[native code]` only under C++
+  (`encoding/` #5, and `identity/`'s `api-surface.js`).
 
 ## Running
 
@@ -126,14 +175,15 @@ of the file that asserts it.
 bazel test //src/tests/streams/...
 ```
 
-Targets per suite: `<name>-cpp@`, `<name>-ts@`, each with `@all-compat-flags`
-and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
-`--test_tag_filters=`). `workerd test` requires an exported `test()` handler
-per case; assertions come from `node:assert` (`nodejs_compat` is in both
-configs' flag lists). The `scaling/` suite is the exception to the
-variant set: it times shapes at 80k-160k entries, so it has no
-`@gc-stress` variant, skips the sanitizer builds, and its C++ cell is
-`off-by-default` (see its `AGENTS.md`).
+Targets per suite: `<name>-cpp@`, `<name>-ts@`, each with an
+`@all-compat-flags` variant, plus `@gc-stress` (off-by-default; run with
+`--test_tag_filters=`), and an `@all-autogates` variant, which leaves the
+C++ cells on the C++ implementation.
+`workerd test` requires an exported `test()` handler per case; assertions
+come from `node:assert` (`nodejs_compat` is in both configs' flag lists).
+The `scaling/` suite is the exception to the variant set: it times shapes at
+80k-160k entries, so it has no `@gc-stress` variant, skips the sanitizer
+builds, and its C++ cell is `off-by-default` (see its `AGENTS.md`).
 
 ## Streams tests that live elsewhere (by design)
 

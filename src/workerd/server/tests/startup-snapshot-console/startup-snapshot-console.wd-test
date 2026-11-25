@@ -9,7 +9,6 @@ const compatibilityDate :Text = "2025-09-01";
 
 const compatibilityFlags :List(Text) = [
   "nodejs_compat",
-  "typescript_implemented_streams",
   "experimental",
 ];
 
@@ -30,9 +29,10 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  # typescript_implemented_streams needs the per-isolate bootstrap.
+  # The TypeScript streams need the per-isolate bootstrap.
   autogates = [
     "workerd-autogate-startup-snapshot",
     "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-ts-web-streams",
   ],
 );

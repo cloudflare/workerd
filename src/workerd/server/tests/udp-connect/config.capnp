@@ -11,10 +11,11 @@ const config :Workerd.Config = (
 
 const tsStreams :Workerd.Config = (
   services = [
-    ( name = "main", worker = .tsWorker ),
+    ( name = "main", worker = .worker ),
     ( name = "disabled", worker = .disabledWorker ),
   ],
   sockets = .sockets,
+  autogates = ["workerd-autogate-ts-web-streams"],
 );
 
 const sockets :List(Workerd.Socket) = [
@@ -41,10 +42,4 @@ const worker :Workerd.Worker = (
   modules = .modules,
   compatibilityDate = "2024-01-01",
   compatibilityFlags = [ "udp_ingress" ],
-);
-
-const tsWorker :Workerd.Worker = (
-  modules = .modules,
-  compatibilityDate = "2024-01-01",
-  compatibilityFlags = [ "udp_ingress", "typescript_implemented_streams" ],
 );

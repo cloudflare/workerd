@@ -20,6 +20,7 @@ const unitTests :Workerd.Config = (
           "transformstream_enable_standard_constructor",
           "fixup-transform-stream-backpressure",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

@@ -4,7 +4,7 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
-// The fetch/api expectations under typescript_implemented_streams. Entries
+// The fetch/api expectations under the TS_WEB_STREAMS autogate. Entries
 // that differ from api-test.ts are listed in the ledger in AGENTS.md.
 
 export default {

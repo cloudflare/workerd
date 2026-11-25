@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
           (name = "round-trip", esModule = embed "round-trip.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The formdata streams suite runs the same test modules under two
 # configs: formdata-cpp against the C++ implementation, formdata-ts
 # against the TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 formdata_suite_srcs = glob(["*.js"]) + ["formdata-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "formdata-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = formdata_suite_srcs,
 )
 

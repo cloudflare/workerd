@@ -5,6 +5,9 @@ load("//:build/wd_test.bzl", "wd_test")
 # http-client-cpp against the C++ streams implementation, http-client-ts
 # against the TypeScript implementation. A sidecar provides the HTTP server
 # the client talks to.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 js_binary(
     name = "http-servers",
@@ -28,6 +31,7 @@ http_client_size = "large"
 wd_test(
     size = http_client_size,
     src = "http-client-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = http_client_suite_srcs,
     sidecar = "http-servers",
     sidecar_port_bindings = http_client_ports,

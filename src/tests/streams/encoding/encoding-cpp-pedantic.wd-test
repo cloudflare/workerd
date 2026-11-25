@@ -26,6 +26,7 @@ const unitTests :Workerd.Config = (
           "set_tostring_tag",
           "pedantic_wpt",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],
