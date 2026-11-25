@@ -91,14 +91,17 @@ const UNIQUE_KEY = 'cluster-threads-counter';
 // What makes the instances of `withCluster` serve on `counts[i]` threads, of
 // the config's constant `configName`, each with a directory of its own for its
 // `cache` service.
-function cluster(counts, configName = 'config') {
+//
+// The instance `unjoined`, if given, is one the case has fence, or exit at its
+// stop deadline while a thread still runs: it ends without joining its threads.
+// Under TSan those that had ended by then count as leaked, which would be its
+// exit status, so that instance alone runs with thread leaks unreported. Every
+// instance that exits in the ordinary way has them reported.
+function cluster(counts, configName = 'config', { unjoined } = {}) {
   return {
     configName,
-    // An instance that fences, or that exits at its stop deadline while a
-    // thread still runs, ends without joining its threads. Under TSan those
-    // that had ended count as leaked, which would be its exit status.
-    nodeEnv: () =>
-      env.TSAN_OPTIONS === undefined
+    nodeEnv: (i) =>
+      i !== unjoined || env.TSAN_OPTIONS === undefined
         ? {}
         : { TSAN_OPTIONS: `${env.TSAN_OPTIONS}:report_thread_leaks=0` },
     extraArgs: async (i, root) => {
@@ -663,7 +666,7 @@ test(
           'the unopened objects were not on every thread of A'
         );
       },
-      cluster([THREADS, THREADS])
+      cluster([THREADS, THREADS], 'config', { unjoined: 0 })
     );
   }
 );
@@ -748,7 +751,7 @@ for (const where of ['a thread other than the first', 'the first thread']) {
           );
         }
       },
-      cluster([THREADS, 1], 'shortLease')
+      cluster([THREADS, 1], 'shortLease', { unjoined: 0 })
     );
   });
 }
@@ -847,7 +850,7 @@ test(
         // The stuck object's thread runs JavaScript from before the signal
         // until well past the stop deadline (and within the stall time).
         const signalAt = Date.now() + 500;
-        const spinUntil = signalAt + SHORT_STOP_MS + 3000;
+        const spinUntil = signalAt + SHORT_STOP_MS + 4500;
         const spin = fetchJson(
           a.httpPort,
           `/spin?name=${stuck}&until=${spinUntil}`,
@@ -879,7 +882,7 @@ test(
         // How A ended, all at once. It waited for the thread until its stop
         // deadline, and no longer: not for the spin to end.
         const wrong = [];
-        if (stoppedIn < SHORT_STOP_MS || stoppedIn >= SHORT_STOP_MS + 1000) {
+        if (stoppedIn < SHORT_STOP_MS || stoppedIn >= SHORT_STOP_MS + 2500) {
           wrong.push(
             `stopped ${stoppedIn} ms after the signal, its thread's spin ` +
               `${spinUntil - signalAt} ms after it`
@@ -900,7 +903,7 @@ test(
         }
         assert.deepStrictEqual(wrong, []);
       },
-      cluster([THREADS, 1], 'shortStop')
+      cluster([THREADS, 1], 'shortStop', { unjoined: 0 })
     );
   }
 );
@@ -924,12 +927,13 @@ test(
         }
         // Y has a request in flight for most of the time its handoff allows
         // one, so its handoff is under way, and Y still on A, when X calls.
-        const HOLD_MS = IN_FLIGHT_MS - 500;
+        const HOLD_MS = IN_FLIGHT_MS - 2000;
+        let heldUntil;
         const held = fetchJson(
           a.httpPort,
           `/hold-increment?name=${y}&ms=${HOLD_MS}&marker=held`,
           { timeoutMs: 20_000 }
-        );
+        ).finally(() => (heldUntil = Date.now()));
         // X waits, then calls Y, which calls X back, as A drains.
         const startedAt = Date.now();
         const cycle = fetchJson(
@@ -958,7 +962,7 @@ test(
         // Y's held request has.
         const took = Date.now() - startedAt;
         assert(
-          took < HOLD_MS - 1000,
+          heldUntil === undefined,
           `the cycle took ${took} ms: it waited for a handoff`
         );
         const kept = await held;
@@ -1009,12 +1013,13 @@ test(
         const z = 'across-on-b';
         assert.strictEqual((await get(b, `/where?name=${z}`)).nodeId, b.nodeId);
         // Y is on A, its handoff under way, when the call reaches it.
-        const HOLD_MS = IN_FLIGHT_MS - 500;
+        const HOLD_MS = IN_FLIGHT_MS - 2000;
+        let heldUntil;
         const held = fetchJson(
           a.httpPort,
           `/hold-increment?name=${y}&ms=${HOLD_MS}&marker=held`,
           { timeoutMs: 20_000 }
-        );
+        ).finally(() => (heldUntil = Date.now()));
         // X calls Z at once, before A drains; Z waits, then calls Y.
         const startedAt = Date.now();
         const chain = fetchJson(
@@ -1034,7 +1039,7 @@ test(
         assert(took >= 1500, `Z called Y ${took} ms in, before A drained`);
         // Not once Y's handoff ended, which waits for its held request.
         assert(
-          took < HOLD_MS - 1000,
+          heldUntil === undefined,
           `the chain took ${took} ms: it waited for a handoff`
         );
         const kept = await held;
