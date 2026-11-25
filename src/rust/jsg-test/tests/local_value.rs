@@ -191,3 +191,69 @@ fn to_detail_string_describes_a_dom_exception_by_its_name_and_message() {
         Ok(())
     });
 }
+
+#[test]
+fn to_object_wraps_primitives_and_rejects_null_and_undefined() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let object = ctx.eval_raw(lock, "({ a: 1 })").unwrap();
+        let converted: v8::Local<'_, v8::Value> = object.to_object(lock).unwrap().into();
+        assert_eq!(converted, object);
+
+        let string = ctx.eval_raw(lock, "'abc'").unwrap();
+        let wrapped = string.to_object(lock).unwrap();
+        let length = wrapped.get(lock, "length").unwrap();
+        assert_eq!(u32::from_js(lock, length).unwrap(), 3);
+
+        for code in ["null", "undefined"] {
+            let value = ctx.eval_raw(lock, code).unwrap();
+            let caught = lock
+                .try_catch(|lock| value.to_object(lock))
+                .unwrap()
+                .unwrap_err();
+            let message = String::from_js(lock, caught).unwrap();
+            assert!(message.starts_with("TypeError"), "{code}: {message}");
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn property_names_with_prototypes_include_inherited_and_skip_indices_and_symbols() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(
+                lock,
+                "class Base { inherited() {} }
+                 const o = Object.assign(new Base(), { own: 1, 0: 'index', [Symbol('s')]: 2 });
+                 Object.defineProperty(o, 'hidden', { value: 3, enumerable: false });
+                 o",
+            )
+            .unwrap();
+        let object = v8::Local::<v8::Object>::try_from(value).unwrap();
+        let names: Vec<String> = object
+            .property_names_with_prototypes(lock)
+            .unwrap()
+            .into_iter()
+            .map(|name| String::from_js(lock, name.into()).unwrap())
+            .collect();
+        for expected in [
+            "own",
+            "hidden",
+            "inherited",
+            "constructor",
+            "hasOwnProperty",
+        ] {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "{expected}: {names:?}"
+            );
+        }
+        assert!(!names.iter().any(|name| name == "0"), "{names:?}");
+        assert_eq!(
+            names.iter().filter(|name| *name == "constructor").count(),
+            1,
+            "{names:?}"
+        );
+        Ok(())
+    });
+}

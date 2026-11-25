@@ -476,6 +476,13 @@ MaybeLocal local_object_get_property_by_global_name(
 // the exception pending.
 bool local_object_get_own_property_names(
     Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
+// As local_object_get_own_property_names(), for the names of every string-keyed property, own
+// and inherited, enumerable or not, without integer indices.
+bool local_object_get_property_names_with_prototypes(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
+// The value converted to an object, as v8::Value::ToObject() does, or none with a TypeError
+// pending for null or undefined.
+MaybeLocal local_value_to_object(Isolate* isolate, const Local& value);
 
 // Local<Promise>
 PromiseState local_promise_state(const Local& promise);

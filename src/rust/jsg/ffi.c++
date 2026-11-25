@@ -852,6 +852,38 @@ bool local_object_get_own_property_names(
   return true;
 }
 
+bool local_object_get_property_names_with_prototypes(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
+  if (exceptionPending(isolate)) return false;
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  v8::Local<v8::Array> array;
+  if (!v8_obj
+           ->GetPropertyNames(context, v8::KeyCollectionMode::kIncludePrototypes,
+               static_cast<v8::PropertyFilter>(v8::ALL_PROPERTIES | v8::SKIP_SYMBOLS),
+               v8::IndexFilter::kSkipIndices, v8::KeyConversionMode::kConvertToString)
+           .ToLocal(&array)) {
+    return false;
+  }
+  names.reserve(array->Length());
+  for (uint32_t i = 0; i < array->Length(); i++) {
+    // The elements are the array's own, so reading them runs no JavaScript.
+    v8::Local<v8::Value> name;
+    if (!array->Get(context, i).ToLocal(&name)) {
+      names.clear();
+      return false;
+    }
+    names.push_back(to_ffi(kj::mv(name)));
+  }
+  return true;
+}
+
+MaybeLocal local_value_to_object(Isolate* isolate, const Local& value) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::Value>(value)->ToObject(isolate->GetCurrentContext()));
+}
+
 // Local<Promise>
 static_assert(static_cast<uint8_t>(PromiseState::Pending) == v8::Promise::kPending);
 static_assert(static_cast<uint8_t>(PromiseState::Fulfilled) == v8::Promise::kFulfilled);
