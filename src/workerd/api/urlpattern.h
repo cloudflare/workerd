@@ -102,7 +102,7 @@ class URLPattern final: public jsg::Object {
     JSG_METHOD(test);
     JSG_METHOD(exec);
 
-    // Declared in types/defines/urlpattern.d.ts.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts.
     JSG_TS_OVERRIDE(type URLPattern = never);
   }
 

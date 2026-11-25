@@ -451,6 +451,7 @@ pub use crate::extern_type::kind;
 pub use crate::shared_ptr::SharedPtr;
 pub use crate::string::CxxString;
 pub use crate::unique_ptr::UniquePtr;
+pub use crate::unwind::panic_message;
 pub use crate::weak_ptr::WeakPtr;
 
 /// Synonym for `CxxString`.
@@ -498,6 +499,7 @@ pub mod private {
     pub use crate::string::StackString;
     pub use crate::unique_ptr::UniquePtrTarget;
     pub use crate::unwind::catch_unwind;
+    pub use crate::unwind::panic_description;
     pub use crate::unwind::prevent_unwind;
     pub use crate::unwind::try_unwind;
     pub use crate::weak_ptr::WeakPtrTarget;

@@ -7,38 +7,22 @@
 
 #include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/jsg/script.h>
-#include <workerd/jsg/ser.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/strong-bool.h>
 
-#include <capnp/message.h>
-#include <kj/encoding.h>
 #include <kj/test.h>
 
 namespace workerd::api {
-
-WD_STRONG_BOOL(EnhancedErrorSerialization);
-
 namespace {
 
 using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
 
 // Runs `body` as the body of a function of `helpers` (the exports of the bootstrap's serialization
-// module), `setTestExports`, `roundTrip(value, preserveStackInErrors)`, `serialize(value)`, which
-// returns the serialized value in hex, and `deserialize(hex, preserveStackInErrors)`, returning
-// its result as a string. setTestExports() makes its argument the exports of a bootstrap module
-// "test", so that the deserializer finds the classes the script defines by their
-// deserializeInfo. A script can pass what serialize() returns to another, so that one isolate
-// reads what another, with other compatibility flags, wrote.
-kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErrorSerialization) {
+// module) and `setTestExports`, returning its result as a string. setTestExports() makes its
+// argument the exports of a bootstrap module "test", so that the deserializer finds the classes
+// the script defines by their deserializeInfo.
+kj::String runScript(kj::StringPtr body) {
   // The bootstrap loads the serialization module whatever the compatibility flags are.
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  if (enhancedErrorSerialization) {
-    flags.setEnhancedErrorSerialization(true);
-    flags.setWorkerdExperimental(true);
-  }
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  TestFixture fixture;
 
   kj::String result;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -54,45 +38,11 @@ kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErro
       return js.undefined();
     }));
 
-    auto roundTrip = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-      auto content = ({
-        jsg::Serializer ser(js);
-        ser.write(js, jsg::JsValue(info[0]));
-        ser.release();
-      });
-      jsg::Deserializer deser(js, content.data, kj::none, kj::none,
-          jsg::Deserializer::Options{.preserveStackInErrors = info[1]->IsTrue()});
-      return deser.readValue(js);
-    }));
-
-    auto serialize = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-      jsg::Serializer ser(js);
-      ser.write(js, jsg::JsValue(info[0]));
-      return js.str(kj::encodeHex(ser.release().data));
-    }));
-
-    auto deserialize = js.wrapReturningFunction(context,
-        Callback([](jsg::Lock& js,
-                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-      auto data = kj::decodeHex(jsg::JsValue(info[0]).toString(js));
-      KJ_ASSERT(!data.hadErrors);
-      jsg::Deserializer deser(js, data, kj::none, kj::none,
-          jsg::Deserializer::Options{.preserveStackInErrors = info[1]->IsTrue()});
-      return deser.readValue(js);
-    }));
-
-    auto code =
-        kj::str("((helpers, setTestExports, roundTrip, serialize, deserialize) => {", body, "})");
+    auto code = kj::str("((helpers, setTestExports) => {", body, "})");
     auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "serialization-test.js"_kj)
                                     .runAndReturn(js)
                                     .tryCast<jsg::JsFunction>());
-    result = fn.call(js, js.undefined(), helpers, jsg::JsValue(setTestExports),
-                   jsg::JsValue(roundTrip), jsg::JsValue(serialize), jsg::JsValue(deserialize))
-                 .toString(js);
+    result = fn.call(js, js.undefined(), helpers, jsg::JsValue(setTestExports)).toString(js);
   });
   return result;
 }
@@ -108,25 +58,15 @@ constexpr kj::StringPtr CLASSES = R"js(
   const pointCloneable =
       makeCloneable(Point, 'test:Point', (p) => p.x, (p, data) => { p.x = data + 1; });
 
-  class TestError extends Error {
-    constructor(message) { super(message); markCloneable(this, testErrorCloneable); }
-  }
-  const testErrorCloneable = makeCloneable(TestError, 'test:TestError', (e) => e.message,
-      (e, data) => {
-    Object.defineProperty(e, 'message', { value: data, writable: true, configurable: true });
-  });
-
   class Opaque {
     constructor() { markUncloneable(this); }
   }
 
-  setTestExports({ Point, TestError });
+  setTestExports({ Point });
 )js"_kj;
 
-void expectScript(kj::StringPtr body,
-    kj::StringPtr expected,
-    EnhancedErrorSerialization enhancedErrorSerialization = EnhancedErrorSerialization::NO) {
-  auto result = runScript(kj::str(CLASSES, body), enhancedErrorSerialization);
+void expectScript(kj::StringPtr body, kj::StringPtr expected) {
+  auto result = runScript(kj::str(CLASSES, body));
   KJ_EXPECT(result == expected, result, expected);
 }
 
@@ -148,60 +88,6 @@ KJ_TEST("The class that marked an instance decides how it is serialized") {
     return [Object.getPrototypeOf(copy) === Point.prototype, copy.x].join();
   )js"_kj,
       "true,2"_kj);
-}
-
-KJ_TEST("An instance of a cloneable class inheriting from Error is a native error") {
-  expectScript(R"js(
-    const e = structuredClone(new TestError('boom'));
-    return [e instanceof TestError, Object.prototype.toString.call(e), e.message].join();
-  )js"_kj,
-      "true,[object Error],boom"_kj);
-}
-
-// Whether an instance of TestError, and a native error, keep the writer's stack when read with
-// preserveStackInErrors, then without, then through structuredClone().
-constexpr kj::StringPtr KEEPS_STACKS = R"js(
-  const keepsStack = (error, read) => {
-    error.stack = 'sender stack';
-    return read(error).stack === 'sender stack';
-  };
-  const reads = [(e) => roundTrip(e, true), (e) => roundTrip(e, false), structuredClone];
-  return reads.map((read) =>
-      `${keepsStack(new TestError('boom'), read)} ${keepsStack(new Error('boom'), read)}`).join();
-)js"_kj;
-
-KJ_TEST("An instance of a cloneable class inheriting from Error keeps a native error's stack") {
-  // As a native error does, it loses the writer's stack only without preserveStackInErrors.
-  expectScript(KEEPS_STACKS, "true true,false false,true true"_kj, EnhancedErrorSerialization::YES);
-  // Without enhanced error serialization, native errors keep their stacks whatever the options.
-  expectScript(KEEPS_STACKS, "true true,true true,true true"_kj);
-}
-
-// An instance of TestError and a native error, each with the writer's stack, serialized in hex.
-constexpr kj::StringPtr WRITE_ERRORS = R"js(
-  const withStack = (error) => {
-    error.stack = 'sender stack';
-    return error;
-  };
-  return serialize([withStack(new TestError('boom')), withStack(new Error('boom'))]);
-)js"_kj;
-
-// Whether the errors that `data` (WRITE_ERRORS's result) holds keep the writer's stack when read
-// without preserveStackInErrors.
-kj::String keepsStacksScript(kj::StringPtr data) {
-  return kj::str(
-      "return deserialize('", data, "', false).map((e) => e.stack === 'sender stack').join();");
-}
-
-KJ_TEST("A cloneable error keeps a native error's stack across enhanced error serialization") {
-  // The writer's setting decides, not the reader's. A reader without enhanced error serialization
-  // drops both stacks that a writer with it wrote.
-  auto enhanced = runScript(kj::str(CLASSES, WRITE_ERRORS), EnhancedErrorSerialization::YES);
-  expectScript(keepsStacksScript(enhanced), "false,false"_kj);
-  // A reader with it keeps both stacks that a writer without it wrote, as V8's own format keeps a
-  // native error's.
-  auto legacy = runScript(kj::str(CLASSES, WRITE_ERRORS), EnhancedErrorSerialization::NO);
-  expectScript(keepsStacksScript(legacy), "true,true"_kj, EnhancedErrorSerialization::YES);
 }
 
 KJ_TEST("getOwnDataProperty() reads neither the prototype chain nor an accessor") {
@@ -265,11 +151,23 @@ KJ_TEST("A class inheriting from a built-in that V8 serializes itself cannot be 
         if (!(e instanceof TypeError)) throw e;
       }
     }
-    class DerivedError extends TypeError {}
-    makeCloneable(DerivedError, 'test:DerivedError', () => 0, () => {});
     return results.join();
   )js"_kj,
       "true 2"_kj);
+}
+
+KJ_TEST("A class inheriting from Error cannot be cloneable") {
+  // The deserializer makes an ordinary object, never an error.
+  expectScript(R"js(
+    class DerivedError extends TypeError {}
+    try {
+      makeCloneable(DerivedError, 'test:DerivedError', () => 0, () => {});
+      return 'accepted';
+    } catch (e) {
+      return `${e.name}: ${e.message}`;
+    }
+  )js"_kj,
+      "TypeError: test:DerivedError inherits from Error, so it cannot be cloneable."_kj);
 }
 
 }  // namespace

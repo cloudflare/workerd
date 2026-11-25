@@ -438,7 +438,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     null;
 
   statusCode = 200;
-  statusMessage = 'unknown';
+  // As in Node.js, this stays undefined until writeHead() fills in the
+  // standard reason phrase for the status code.
+  statusMessage!: string;
 
   #fetchResponse: Promise<Response>;
 

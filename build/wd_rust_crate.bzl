@@ -13,7 +13,8 @@ def rust_cxx_bridge(
         include_prefix = None,
         tags = [],
         local_defines = [],
-        features = []):
+        features = [],
+        testonly = False):
     native.genrule(
         name = "%s/generated" % name,
         srcs = [src],
@@ -23,6 +24,7 @@ def rust_cxx_bridge(
         ],
         cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["//src/rust/cxx:codegen"],
+        testonly = testonly,
     )
     cc_library(
         name = name,
@@ -43,6 +45,7 @@ def rust_cxx_bridge(
             "@platforms//cpu:aarch64": ["-mcrc"],
             "@platforms//cpu:x86_64": ["-msse4.2"],
         }),
+        testonly = testonly,
     )
 
 def rust_cxx_include_prefix():

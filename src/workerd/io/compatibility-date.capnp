@@ -1828,11 +1828,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   exposeSerializationTestClass @205 :Bool
       $compatEnableFlag("expose_serialization_test_class")
       $experimental;
-  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
-  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
-  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
-  # RPC. This flag is intended for internal testing only and may never have its experimental
-  # annotation removed.
+  # Exposes the internal CloneableTestBox class on globalThis: a class implemented in the
+  # per-isolate bootstrap that is structured cloneable, for testing the protocol by which such
+  # classes are serialized (src/per_isolate/serialization.ts), such as over RPC. This flag is
+  # intended for internal testing only and may never have its experimental annotation removed.
 
   pythonDedicatedSnapshotKeepImportCaches @206 :Bool
       $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
@@ -1880,4 +1879,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  udpIngress @210 :Bool
+      $compatEnableFlag("udp_ingress")
+      $compatDisableFlag("no_udp_ingress")
+      $compatEnableDate("2026-12-16");
+  # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
+  # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
 }

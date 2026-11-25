@@ -337,10 +337,10 @@ wpt_test(
     wpt_directory = "@wpt//:webidl@module",
 )
 
-# The TypeScript DOMException, against the same expectations.
+# V8's DOMException, against the same expectations.
 wpt_test(
-    name = "webidl-ts",
-    autogates = ["workerd-autogate-ts-dom-exception"],
+    name = "webidl-v8",
+    autogates = ["workerd-autogate-v8-dom-exception"],
     config = "webidl-test.ts",
     wpt_directory = "@wpt//:webidl@module",
 )

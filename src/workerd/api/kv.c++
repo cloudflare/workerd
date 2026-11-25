@@ -730,7 +730,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
         getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr, traceContext);
 
     auto promise = context.waitForOutputLocks().then(
-        [headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
+        [client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers)]() mutable {
       return client->request(kj::HttpMethod::DELETE, urlStr, headers, static_cast<uint64_t>(0))
           .response
           .then([](kj::HttpClient::Response&& response) mutable {

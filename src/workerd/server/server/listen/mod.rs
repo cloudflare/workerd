@@ -527,6 +527,7 @@ impl Handler for HttpConnection {
         body: Pin<&'a mut worker::AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
+        perfetto::trace_event_async!("HttpConnection::request()");
         async {
             let table = header_table(&self.context.factory);
             let rewriter = &self.socket.rewriter;
@@ -570,6 +571,7 @@ impl Handler for HttpConnection {
         headers: HeadersRef<'a>,
         connect: Connect,
     ) -> Result<()> {
+        perfetto::trace_event_async!("HttpConnection::connect()");
         async {
             let table = header_table(&self.context.factory);
             if let Some(capnp_host) = self.socket.rewriter.capnp_connect_host()

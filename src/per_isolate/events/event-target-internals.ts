@@ -33,10 +33,11 @@
 //   activates a trampoline listener at the end of the listener list, which
 //   keeps its position across reassignment; assigning anything else
 //   deactivates it, so the next assignment takes a fresh position. Only a
-//   callable value is ever invoked, with the global object as its receiver;
-//   returning true cancels the event. The getter returns the exact value
-//   assigned, or null. Once set, on<type> is no longer read as a plain
-//   property during dispatch, which would fire the handler twice.
+//   callable value is ever invoked, with the target as its receiver (the
+//   global object without set_event_target_this); returning true cancels the
+//   event. The getter returns the exact value assigned, or null. Once set,
+//   on<type> is no longer read as a plain property during dispatch, which
+//   would fire the handler twice.
 //
 // effectiveExceptionPolicy(desired)
 //   What a dispatch that wants `desired` must use: 'report' falls back to
@@ -70,12 +71,12 @@
 //   isTrusted, neither bubbling nor cancelable, an empty message and
 //   filename, and line and column 0.
 
-const { EventTarget } = primordials;
+const { EventTarget, FunctionPrototypeCall, SafeWeakMap } = primordials;
 
 const {
   setListenerCountHook,
-  getEventHandlerAttribute,
-  setEventHandlerAttribute,
+  getEventHandlerAttribute: utilsGetEventHandlerAttribute,
+  setEventHandlerAttribute: utilsSetEventHandlerAttribute,
   dispatchEvent: utilsDispatchEvent,
   createTrustedEvent,
   createTrustedMessageEvent,
@@ -92,6 +93,35 @@ function effectiveExceptionPolicy(desired: ExceptionPolicy): ExceptionPolicy {
   return desired === 'report' && !kSpecCompliantDispatchExceptions
     ? 'propagate'
     : desired;
+}
+
+const kSetEventTargetThis = compatFlags['set_event_target_this'] === true;
+
+// Under set_event_target_this, the C++ attribute holds a trampoline in place of
+// each callable value, which calls it with the target as `this`. Maps each
+// trampoline back to its value for the getter.
+const trampolineValues = new SafeWeakMap() as WeakMap<object, unknown>;
+
+function getEventHandlerAttribute(target: EventTarget, type: string): unknown {
+  const value = utilsGetEventHandlerAttribute(target, type);
+  return trampolineValues.get(value as object) ?? value;
+}
+
+function setEventHandlerAttribute(
+  target: EventTarget,
+  type: string,
+  value: unknown
+): void {
+  if (kSetEventTargetThis && typeof value === 'function') {
+    const fn = value;
+    const trampoline = function (event: Event): unknown {
+      return FunctionPrototypeCall(fn, target, event);
+    };
+    trampolineValues.set(trampoline, fn);
+    utilsSetEventHandlerAttribute(target, type, trampoline);
+    return;
+  }
+  utilsSetEventHandlerAttribute(target, type, value);
 }
 
 function dispatchEvent(

@@ -253,3 +253,57 @@ fn an_unreachable_resource_without_snapshot_transfer_does_not_matter() {
     )
     .unwrap();
 }
+
+/// A function that `Function::from_callback` creates crosses the snapshot: V8 serializes its
+/// callback by its index in the external-reference table.
+#[test]
+fn a_function_from_a_callback_crosses_the_snapshot() {
+    crate::snapshot_round_trip(
+        |lock, ctx| {
+            let f = jsg::v8::Function::from_callback(
+                lock,
+                jsg::function_callback(|_lock, args| args.set_return_number(42.0)),
+            )?;
+            ctx.set_global(lock, "f", f);
+            Ok(())
+        },
+        |lock, ctx| {
+            assert_eq!(ctx.eval::<u32>(lock, "f()").unwrap(), 42);
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+/// A function that `Function::new` creates fails the zygote, as one that C++ JSG wraps does: the
+/// Wrappable that owns its data has no snapshot form.
+#[test]
+fn a_function_with_data_fails_the_zygote() {
+    let failure = crate::snapshot_round_trip(
+        |lock, ctx| {
+            let f = jsg::v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined()))?;
+            ctx.set_global(lock, "f", f);
+            Ok(())
+        },
+        |_, _| panic!("no isolate starts from a snapshot that was not created"),
+    )
+    .unwrap_err();
+    assert!(failure.contains("WrappableFunction"), "{failure}");
+}
+
+/// So does a pending promise with a Rust reaction.
+#[test]
+fn a_pending_rust_reaction_fails_the_zygote() {
+    let failure = crate::snapshot_round_trip(
+        |lock, ctx| {
+            let promise = jsg::v8::PromiseResolver::new(lock)?.promise();
+            let reacted = promise.then(lock, (), |_lock, (), value| Ok(value))?;
+            ctx.set_global(lock, "p", reacted);
+            ctx.set_global(lock, "q", promise);
+            Ok(())
+        },
+        |_, _| panic!("no isolate starts from a snapshot that was not created"),
+    )
+    .unwrap_err();
+    assert!(failure.contains("WrappableFunction"), "{failure}");
+}
