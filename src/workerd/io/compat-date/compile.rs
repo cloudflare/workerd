@@ -325,7 +325,7 @@ pub(crate) fn compile_with_today<'a>(
     for (index, info) in table.fields.iter().enumerate() {
         let mut enable_by_flag = false;
         let mut disable_by_flag = false;
-        for (_, kind) in info.flags_in_match_order() {
+        for &(_, kind) in &info.flags_in_match_order {
             let named = pending.take(slot(index, kind));
             match kind {
                 FlagKind::Enable => enable_by_flag = named,

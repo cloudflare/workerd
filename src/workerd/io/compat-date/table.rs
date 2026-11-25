@@ -86,9 +86,9 @@ pub struct FlagInfo {
     pub name: &'static str,
     pub enable_flag: Option<&'static str>,
     pub disable_flag: Option<&'static str>,
-    /// Whether `$compatDisableFlag` comes before `$compatEnableFlag`, which decides the order
-    /// the compiler matches them to the configuration's flags.
-    pub disable_flag_first: bool,
+    /// The field's flags in the order the schema gives them, which is the order the compiler
+    /// matches them to the configuration's flags.
+    pub flags_in_match_order: Vec<(&'static str, FlagKind)>,
     pub date_rules: Vec<DateRule>,
     pub experimental: bool,
     pub needed_by_fl: bool,
@@ -96,18 +96,6 @@ pub struct FlagInfo {
 }
 
 impl FlagInfo {
-    /// The field's flags, in the order the compiler matches them to the configuration's.
-    pub fn flags_in_match_order(&self) -> impl Iterator<Item = (&'static str, FlagKind)> {
-        let enable = self.enable_flag.map(|f| (f, FlagKind::Enable));
-        let disable = self.disable_flag.map(|f| (f, FlagKind::Disable));
-        let (first, second) = if self.disable_flag_first {
-            (disable, enable)
-        } else {
-            (enable, disable)
-        };
-        first.into_iter().chain(second)
-    }
-
     /// The last `$compatEnableDate` date, which a warning about a redundant flag names.
     pub fn enable_date(&self) -> Option<CompatDate> {
         self.date_rules.iter().rev().find_map(|rule| match rule {
@@ -185,7 +173,7 @@ impl FlagTable {
         };
         let mut slots = HashMap::new();
         for (index, info) in fields.iter().enumerate() {
-            for (name, kind) in info.flags_in_match_order() {
+            for &(name, kind) in &info.flags_in_match_order {
                 slots
                     .entry(name.as_bytes())
                     .or_insert_with(|| slot(index, kind));
@@ -233,7 +221,7 @@ fn read_field(schema: StructSchema, field: Field) -> Result<FlagInfo, SchemaErro
         name,
         enable_flag: None,
         disable_flag: None,
-        disable_flag_first: false,
+        flags_in_match_order: Vec::new(),
         date_rules: Vec::new(),
         experimental: false,
         needed_by_fl: false,
@@ -244,21 +232,14 @@ fn read_field(schema: StructSchema, field: Field) -> Result<FlagInfo, SchemaErro
         let value = annotation.get_value()?;
         match annotation.get_id() {
             compatibility_flags::compat_enable_flag::ID => {
-                set_flag(
-                    &mut info.enable_flag,
-                    text(value, name)?,
-                    name,
-                    "compatEnableFlag",
-                )?;
+                let flag = text(value, name)?;
+                set_flag(&mut info.enable_flag, flag, name, "compatEnableFlag")?;
+                info.flags_in_match_order.push((flag, FlagKind::Enable));
             }
             compatibility_flags::compat_disable_flag::ID => {
-                set_flag(
-                    &mut info.disable_flag,
-                    text(value, name)?,
-                    name,
-                    "compatDisableFlag",
-                )?;
-                info.disable_flag_first = info.enable_flag.is_none();
+                let flag = text(value, name)?;
+                set_flag(&mut info.disable_flag, flag, name, "compatDisableFlag")?;
+                info.flags_in_match_order.push((flag, FlagKind::Disable));
             }
             compatibility_flags::compat_enable_date::ID => {
                 let on = date(text(value, name)?, name)?;

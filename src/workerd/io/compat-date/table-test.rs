@@ -26,6 +26,32 @@ fn reads_enable_and_disable_flags() {
 }
 
 #[test]
+fn gives_a_flag_with_no_disable_flag_a_slot() {
+    let table = FlagTable::get().unwrap();
+    let info = table
+        .fields
+        .iter()
+        .find(|f| f.name == "workerdExperimental")
+        .unwrap();
+    assert_eq!(info.enable_flag, Some("experimental"));
+    assert_eq!(info.disable_flag, None);
+    assert_eq!(
+        table.slots.get(b"experimental".as_slice()),
+        Some(&slot(usize::from(info.index), FlagKind::Enable))
+    );
+}
+
+#[test]
+fn gives_every_flag_a_slot() {
+    let table = FlagTable::get().unwrap();
+    for info in &table.fields {
+        for flag in [info.enable_flag, info.disable_flag].into_iter().flatten() {
+            assert!(table.slots.contains_key(flag.as_bytes()), "{flag}");
+        }
+    }
+}
+
+#[test]
 fn reads_implied_by_after_date() {
     let table = FlagTable::get().unwrap();
     let info = table
