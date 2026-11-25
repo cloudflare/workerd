@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "subrequest",
+      worker = (
+        modules = [(name = "worker", esModule = embed "subrequest.js")],
+        bindings = [
+          (name = "TARGET", service = "target"),
+          (name = "TARGET_RPC", service = (name = "target", entrypoint = "Rpc")),
+          (name = "COUNTERS", durableObjectNamespace = "Counter"),
+          (name = "LOADER", workerLoader = ()),
+          (name = "RESTORER", service = (name = "restorer", entrypoint = "Restorer")),
+        ],
+        durableObjectNamespaces = [
+          (className = "Counter", uniqueKey = "subrequest-bench-counter"),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+    # Mints the restored stub, which needs `ctx.restore()` and so the flag.
+    ( name = "restorer",
+      worker = (
+        modules = [(name = "worker", esModule = embed "restorer.js")],
+        compatibilityFlags = ["allow_irrevocable_stub_storage"],
+        bindings = [(name = "TARGET", service = "target")],
+      )
+    ),
+    ( name = "target",
+      worker = (
+        modules = [(name = "worker", esModule = embed "target.js")],
+      )
+    ),
+  ],
+);
