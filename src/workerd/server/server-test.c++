@@ -443,6 +443,11 @@ class Server: public kj::PtrTarget {
         .attach(kj::mv(drain), reports(server));
   }
 
+  // Sends the server the drain signal, as SIGTERM does.
+  void drain() {
+    get().drain();
+  }
+
   kj::Promise<bool> test(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::StringPtr servicePattern,
@@ -526,6 +531,7 @@ class Server: public kj::PtrTarget {
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
     auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
+    started.mock_internet();
     for (auto& [deployment, service]: deploymentServices) {
       started.add_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
           service.asPtr().as<kj_rs::RustUncheckedUtf8>());
@@ -1170,7 +1176,7 @@ KJ_TEST("Server: a short cluster key is refused") {
   TestServer test(clusterConfig("0123456789abcdef"));
   test.server.allowExperimental();
   test.expectErrors(R"(
-    cluster.key must be at least 32 bytes. Fix it in the config, or leave it empty and set WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE.
+    cluster.key must be at least 32 bytes. Fix it in the config, or set WORKERD_CLUSTER_KEY or a file named by WORKERD_CLUSTER_KEY_FILE, which override it.
   )"_blockquote);
 }
 
@@ -5791,6 +5797,105 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 
   // And then the connection is, in fact, closed.
   KJ_EXPECT(conn2.isEof());
+}
+
+// A worker that answers "hello" on "test-addr", served with `shutdownDelayMs` set to `delayMs`.
+kj::String helloWithShutdownDelay(kj::StringPtr delayMs) {
+  return kj::str(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          serviceWorkerScript =
+              `addEventListener("fetch", event => {
+              `  event.respondWith(new Response("hello"));
+              `})
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    shutdownDelayMs = )"_kj,
+      delayMs, R"(
+  ))"_kj);
+}
+
+KJ_TEST("Server: the shutdown delay serves on after the drain signal, then drains") {
+  TestServer test(helloWithShutdownDelay("20000"));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "hello");
+
+  test.server.drain();
+
+  // Until the delay ends, open connections and new ones are served as before.
+  conn.httpGet200("/", "hello");
+  KJ_EXPECT(!conn.isEof());
+  test.wait(19);
+  conn.httpGet200("/", "hello");
+  auto conn2 = test.connect("test-addr");
+  conn2.httpGet200("/", "hello");
+  conn2.send("GET");
+
+  // Then the server drains: idle connections close, the one with a request in progress finishes
+  // it, and new ones are not accepted.
+  test.wait(1);
+  KJ_EXPECT(conn.isEof());
+  KJ_EXPECT(!conn2.isEof());
+  KJ_EXPECT(test.connectHangs("test-addr"));
+  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
+  conn2.recv(R"(
+    HTTP/1.1 200 OK
+    Connection: close
+    Content-Length: 5
+    Content-Type: text/plain;charset=UTF-8
+
+    hello)"_blockquote);
+  KJ_EXPECT(conn2.isEof());
+}
+
+KJ_TEST("Server: a second drain signal cuts the shutdown delay short") {
+  TestServer test(helloWithShutdownDelay("1000000"));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  auto conn2 = test.connect("test-addr");
+  test.server.drain();
+  conn.httpGet200("/", "hello");
+  conn2.httpGet200("/", "hello");
+  conn2.send("GET");
+  KJ_EXPECT(!conn.isEof());
+
+  test.server.drain();
+  KJ_EXPECT(conn.isEof());
+  KJ_EXPECT(!conn2.isEof());
+  KJ_EXPECT(test.connectHangs("test-addr"));
+  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
+  conn2.recv(R"(
+    HTTP/1.1 200 OK
+    Connection: close
+    Content-Length: 5
+    Content-Type: text/plain;charset=UTF-8
+
+    hello)"_blockquote);
+  KJ_EXPECT(conn2.isEof());
+}
+
+KJ_TEST("Server: a drain signal sent before the server serves drains it at once") {
+  TestServer test(helloWithShutdownDelay("20000"));
+  // `run()` creates the server, which starts once the promise is polled: the signal is pending
+  // as it starts, as a SIGTERM that arrives while the process starts is.
+  auto run = test.server.run(v8System, *test.config);
+  test.server.drain();
+
+  // With no connections to finish, the run ends without the timer advancing.
+  KJ_EXPECT(run.poll(test.ws));
+  run.wait(test.ws);
 }
 
 // =======================================================================================

@@ -132,13 +132,14 @@ KJ_TEST("A DOMException from jsg::Lock domException serializes its stack") {
     JSG_WITHIN_CONTEXT_SCOPE(lock,
         lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
         [&](jsg::Lock& js) {
-      auto roundTrip = [&](JsValue value) {
+      auto roundTrip = [&](JsValue value, bool preserveStackInErrors = true) {
         auto content = ({
           Serializer serializer(js);
           serializer.write(js, value);
           serializer.release();
         });
-        Deserializer deserializer(js, content);
+        Deserializer deserializer(js, content.data, kj::none, kj::none,
+            Deserializer::Options{.preserveStackInErrors = preserveStackInErrors});
         return KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
       };
 
@@ -150,6 +151,11 @@ KJ_TEST("A DOMException from jsg::Lock domException serializes its stack") {
       auto capturedStack = captured.get(js, "stack"_kj).toString(js);
       KJ_EXPECT(capturedStack.startsWith("AbortError: m"_kj), capturedStack);
       KJ_EXPECT(roundTrip(captured).get(js, "stack"_kj).toString(js) == capturedStack);
+
+      // Without preserveStackInErrors, the received stack is dropped and the local one is used.
+      auto localStack = roundTrip(given, false).get(js, "stack"_kj).toString(js);
+      KJ_EXPECT(localStack != "given stack"_kj, localStack);
+      KJ_EXPECT(localStack.startsWith("AbortError: m"_kj), localStack);
     });
   });
 }
@@ -165,7 +171,7 @@ KJ_TEST("DOMException deserializes the legacy tag") {
     0x22, 7, 'm', 'e', 's', 's', 'a', 'g', 'e',
     0x22, 4, 'b', 'o', 'o', 'm',
     0x22, 5, 's', 't', 'a', 'c', 'k',
-    0x22, 16, 'A', 'b', 'o', 'r', 't', 'E', 'r', 'r', 'o', 'r', ':', ' ', 'b', 'o', 'o', 'm',
+    0x22, 1, 'S',
     0x7b, 2,                                       // end object, two properties
   };
   // clang-format on
@@ -175,12 +181,62 @@ KJ_TEST("DOMException deserializes the legacy tag") {
     JSG_WITHIN_CONTEXT_SCOPE(lock,
         lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
         [&](jsg::Lock& js) {
-      Deserializer deser(js, payload);
-      auto exception = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
+      auto read = [&](bool preserveStackInErrors) {
+        Deserializer deser(js, payload, kj::none, kj::none,
+            Deserializer::Options{.preserveStackInErrors = preserveStackInErrors});
+        return KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
+      };
+      auto exception = read(true);
       KJ_EXPECT(exception.get(js, "name"_kj).toString(js) == "AbortError"_kj);
       KJ_EXPECT(exception.get(js, "message"_kj).toString(js) == "boom"_kj);
       KJ_EXPECT(exception.get(js, "code"_kj).toString(js) == "20"_kj);
-      KJ_EXPECT(exception.get(js, "stack"_kj).toString(js) == "AbortError: boom"_kj);
+      KJ_EXPECT(exception.get(js, "stack"_kj).toString(js) == "S"_kj);
+
+      // Without preserveStackInErrors, the received stack is dropped and the local one is used.
+      auto localStack = read(false).get(js, "stack"_kj).toString(js);
+      KJ_EXPECT(localStack.startsWith("AbortError: boom"_kj), localStack);
+    });
+  });
+}
+
+KJ_TEST("DOMException's legacy tag is read from the payload's own properties") {
+  // As the legacy format, but the object holding the message and the stack has no message.
+  // clang-format off
+  kj::byte payload[] = {
+    0xff, 0x0f,                                    // V8 header, version 15
+    0x5c, DOMException::SERIALIZATION_TAG,         // host object, tag
+    10, 'A', 'b', 'o', 'r', 't', 'E', 'r', 'r', 'o', 'r',
+    0x6f,                                          // begin object
+    0x22, 5, 's', 't', 'a', 'c', 'k',
+    0x22, 16, 'A', 'b', 'o', 'r', 't', 'E', 'r', 'r', 'o', 'r', ':', ' ', 'b', 'o', 'o', 'm',
+    0x7b, 1,                                       // end object, one property
+  };
+  // clang-format on
+
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      // A getter that would supply the message if the reader looked past the payload's own
+      // properties.
+      auto define =
+          js.str("globalThis.calls = 0;\n"
+                 "Object.defineProperty(Object.prototype, 'message', {\n"
+                 "  get() { calls++; return 'from a getter'; }, configurable: true });"_kj);
+      check(check(v8::Script::Compile(js.v8Context(), define))->Run(js.v8Context()));
+
+      js.tryCatch([&]() {
+        Deserializer deser(js, payload);
+        deser.readValue(js);
+        KJ_FAIL_EXPECT("the read should fail");
+      }, [&](Value exception) {
+        auto error = KJ_ASSERT_NONNULL(JsValue(exception.getHandle(js)).tryCast<JsObject>());
+        KJ_EXPECT(error.get(js, "name"_kj).toString(js) == "DataCloneError"_kj);
+        KJ_EXPECT(error.get(js, "message"_kj).toString(js) ==
+            "Deserialization failed: DOMException message is not a string"_kj);
+      });
+      KJ_EXPECT(js.global().get(js, "calls"_kj).toString(js) == "0"_kj);
     });
   });
 }

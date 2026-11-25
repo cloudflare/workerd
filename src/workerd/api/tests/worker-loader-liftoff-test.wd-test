@@ -16,5 +16,4 @@ const unitTests :Workerd.Config = (
     ),
   ],
   v8Flags = ["--allow-natives-syntax", "--liftoff-only"],
-  autogates = ["workerd-autogate-skip-isolate-memory-pressure-hint"],
 );

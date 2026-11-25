@@ -20,6 +20,9 @@
 // src/tests/events/eventsource/AGENTS.md specifies the class, and indexes
 // where the suite pins each of these.
 //
+// The Workers types declare the class with eventsource.public.d.ts, which
+// the class below is checked against.
+//
 // HOW IT FITS TOGETHER
 //
 // The EventSource extends the C++ EventTarget through
@@ -36,16 +39,20 @@
 // body's read resumes through IoContext::run(), which takes the input lock,
 // and a JavaScript stream's chunks are enqueued under it already.
 
-import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
 import type { MimeTypeModule } from '../mime/mime-type';
 import type { RuntimeClassHelpers } from '../runtime-class';
+import type {
+  EventSource as PublishedEventSource,
+  EventSourceEventSourceInit,
+} from './eventsource.public';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayPrototypePush,
+  DOMException,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
@@ -100,7 +107,6 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
-const { DOMException } = require('dom-exception') as DomExceptionModule;
 const { MimeType } = require('mime/mime-type') as MimeTypeModule;
 
 // Whichever streams implementation main.ts installed before loading this
@@ -889,7 +895,7 @@ ObjectDefineProperty(proto, 'constructor', {
   configurable: true,
 } as PropertyDescriptor);
 
-const from = EventSource.fromStream;
+const from = EventSource.fromStream satisfies typeof PublishedEventSource.from;
 delete (EventSource as unknown as Record<string, unknown>).fromStream;
 // Under spec_compliant_property_attributes, lengths count the required
 // arguments.
@@ -907,8 +913,18 @@ ObjectDefineProperties(EventSource, {
     configurable: true,
   },
 });
+// The class agrees with its published declaration: the names and types of
+// the constants that the constructor gets above, its constructor and
+// instances here, and from() above.
+({ CONNECTING, OPEN, CLOSED }) satisfies Pick<
+  typeof PublishedEventSource,
+  'CONNECTING' | 'OPEN' | 'CLOSED'
+>;
 setNameAndLength(
-  EventSource,
+  EventSource satisfies new (
+    url: string,
+    init?: EventSourceEventSourceInit
+  ) => PublishedEventSource,
   'EventSource',
   kSpecCompliantPropertyAttributes ? 1 : 0
 );

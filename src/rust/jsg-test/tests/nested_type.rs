@@ -11,6 +11,7 @@ use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
+use super::panic_message;
 use crate::EvalContext;
 
 #[jsg_resource]
@@ -218,14 +219,6 @@ struct CycleB {}
 
 #[jsg_resource(nested_types(CycleA))]
 impl CycleB {}
-
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(ToString::to_string)
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_default()
-}
 
 /// Creating the template of a resource type that nests itself panics, every
 /// time.

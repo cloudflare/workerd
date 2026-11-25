@@ -115,6 +115,7 @@ pub mod ffi {
         unsafe fn test_cpp_greeter_new(isolate: *mut Isolate, greeting: &str) -> MaybeLocal;
         unsafe fn test_cpp_derived_new(isolate: *mut Isolate) -> MaybeLocal;
         unsafe fn test_cpp_holder_new(isolate: *mut Isolate) -> MaybeLocal;
+        unsafe fn test_cpp_finisher_new(isolate: *mut Isolate, value: Local) -> MaybeLocal;
         unsafe fn test_cpp_holder_new_holding_host(
             isolate: *mut Isolate,
             label: &str,

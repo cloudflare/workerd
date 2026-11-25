@@ -54,7 +54,13 @@ class JsReadableStream final {
     kj::Array<const kj::byte> owned;
     kj::ArrayPtr<const kj::byte> view;
 
-    explicit Buffer(kj::Array<const kj::byte> data);
+    // Reports `owned` to the isolate as external memory. V8 sees only a small wrapper for each
+    // Request or Response, so without this, bodies held by objects awaiting collection don't
+    // prompt a GC and aren't counted against the isolate's memory limit. Reports nothing unless
+    // the BODY_BUFFER_EXTERNAL_MEMORY autogate is enabled.
+    jsg::ExternalMemoryAdjustment externalMemoryAdjustment;
+
+    Buffer(jsg::Lock& js, kj::Array<const kj::byte> data);
     Buffer(jsg::Lock& js, jsg::Ref<Blob> data);
   };
 

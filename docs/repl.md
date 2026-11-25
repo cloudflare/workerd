@@ -1,0 +1,637 @@
+# The workerd REPL
+
+`workerd repl` evaluates JavaScript typed at a console, in a Worker's global scope, and prints each
+result. Its `workerd` global loads configs, serves them in the same process as `workerd serve`
+would, and calls into their services and sockets. Use it to try out an API, inspect what a value
+looks like at runtime, or poke at a config's Workers without writing a test. Piped a script
+instead, it runs the script, as `node` does (see [A script](#a-script)).
+
+The REPL is a tool for developing workerd. It is experimental: it requires `--experimental`, and
+its behavior, commands and JavaScript API may change or go away in any release.
+
+## Quick start
+
+Build workerd and start the REPL:
+
+```sh
+bazel build //src/workerd/server:workerd
+bazel-bin/src/workerd/server/workerd repl --experimental
+```
+
+Type JavaScript at the `>` prompt. An input can `await` at top level:
+
+```
+workerd REPL (experimental). ".help" for help; ".exit" or Ctrl+D to quit.
+> 1 + 1
+2
+> const { Buffer } = await import('node:buffer'); Buffer.from('hi').toString('base64')
+'aGk='
+> (await fetch('data:text/plain,hello')).status
+200
+> await new Promise((resolve) => setTimeout(() => resolve('later'), 10))
+'later'
+> throw new Error('boom')
+Uncaught Error: boom
+    at file:///bundle/repl.js:1:7
+```
+
+Load a config and call its Workers:
+
+```
+> s = await workerd.loadConfig('config.capnp')
+> r = await s.service('main').fetch('http://example.com/')
+> await r.text()
+> await s.service('main', { entrypoint: 'Api' }).add(2, 3)
+> await (await s.socket('http').fetch('http://example.com/')).text()
+> await s.close()
+```
+
+Or name the config on the command line, and the REPL loads it into `s` before the first prompt:
+
+```sh
+bazel-bin/src/workerd/server/workerd repl --experimental config.capnp
+```
+
+Press Ctrl+D, or type `.exit`, to quit.
+
+## Command line
+
+```
+workerd repl --experimental [options] [<config-file> [<const-name>]]
+```
+
+A `<config-file>` is loaded into the global `s`, as
+`s = await workerd.loadConfig('<config-file>', { constName: '<const-name>' })` would load it. The
+REPL prints its result, and when it shows prompts, shows that input at the first. A config that
+fails to load is reported like any failed input, and the REPL carries on with `s` unset. Before a
+[script](#a-script), the load prints nothing unless it fails, which keeps the script from running.
+
+| Option                      | Effect                                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--experimental`            | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
+| `--compat-date=<date>`      | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
+| `--compat-flag=<flag>`      | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly. So is `unhandled_rejection_after_microtask_checkpoint` unless a flag turns it on or off; see below. |
+| `--autogate=<name>`         | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
+| `--v8-flag=<flag>`          | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
+| `--input-timeout=<seconds>` | Stops awaiting an input once it has taken this many seconds, such as `30` or `0.5`; see [Interrupting](#interrupting).                                                                                                     |
+| `-i`, `--interactive`       | Reads a stdin that isn't a terminal a line at a time, as it reads a terminal, rather than as one [script](#a-script); see [A line at a time](#a-line-at-a-time).                                                           |
+
+The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
+Workers use their own settings from the config.
+
+`unhandled_rejection_after_microtask_checkpoint` is on so that an awaited call that fails at once,
+such as an RPC call through a stub a [reload](#reloading) left behind, is reported once, as the
+input's failure. Without it, the call's promise counts as unhandled until the input's `await`
+handles it a microtask later, and the failure is also printed as `Uncaught (in promise)`.
+
+Autogates and V8 flags are set once for the process, so they apply to the REPL's JavaScript and to
+every config it loads.
+
+Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
+
+The REPL exits with status 1 if an input failed, or if the REPL itself did, and 0 otherwise. An
+input fails if it throws, if the promise it awaits rejects, if it is a command the REPL doesn't
+know, if it [times out](#interrupting), or if it is still [unfinished](#typing-input) when the
+REPL's input ends. The REPL prints the failure and goes on to the next input, so later inputs
+still run. A config named on the command line that fails to load is an input that failed. An
+input that Ctrl+C stops awaiting, or that `.break` abandons, hasn't failed. A
+[script](#a-script) is one input, and fails as one does.
+
+The REPL also exits with status 1 if something failed in the background, in its JavaScript or in
+an [environment](#other-compatibility-settings) it started: a timer callback that threw, a
+`waitUntil()` task that rejected, or a rejection nothing handled, which the REPL prints as
+`Uncaught (in promise)`. The first two print nothing; `--verbose` logs them.
+
+## Typing input
+
+An input runs once it is finished. While a bracket, a template literal or a `/* */` comment is still
+open, Enter continues the input on the next line, at a `...` prompt:
+
+```
+> function f() {
+...   return 42
+... }
+undefined
+> f()
+42
+```
+
+Enter also continues the input after a line that ends inside a string with a backslash. A string
+left open at the end of any other line is a syntax error, as it is in JavaScript.
+
+A closing bracket that doesn't match the bracket it would close, as the `)` in `f([)`, finishes the
+input, which then fails with a syntax error.
+
+To abandon an unfinished input, type `.break` on a line of its own, or press Ctrl+C on a terminal.
+An input still unfinished when the REPL's input ends doesn't run: the REPL says which construct it
+leaves open, and on which of its lines that starts, and the input counts as failed (see
+[Command line](#command-line)):
+
+```
+Error: The input ended inside the `(` opened on its line 1, so it did not run.
+```
+
+As in Node's REPL, an input that starts with `{` and doesn't end with `;` is an object literal if
+it can be one, rather than a block: `{ a: 1, b: 2 }` prints `{ a: 1, b: 2 }`. One that can't, such
+as `{ let x = 1; x }`, is a block, and prints `1`.
+
+Each result is printed with Node's `util.inspect()`. An exception prints as `Uncaught` followed by
+the error and its stack.
+
+As in Node's REPL, `_` holds the last result and `_error` the last exception. Assigning to one of
+them keeps the assigned value: it no longer follows the inputs.
+
+### Top-level `await`
+
+An input that uses `await` outside a function runs inside an async function, and the REPL prints
+what that function's last statement evaluates to, once it settles. The event loop keeps running
+while the REPL waits, so timers, `fetch()` and the loaded servers all make progress.
+
+A declaration inside an async function would be local to it. So in an input that awaits at top
+level, a `const`, `let` or `var` declaration at the input's top level (not in a block) that gives
+each of its names a value, such as `const x = await f()`, declares its names at the top level,
+ahead of the function, and the function assigns them, as in Node's REPL. Later inputs see them,
+and declaring one again is the error it would be without `await`. Two things differ from the
+declaration as written: a `const` is declared with `let`, so it can be reassigned, and the names
+are declared before the input runs, so those of an input that fails stay declared, as
+`undefined`. Such a declaration prints `undefined` when it ends the input, as a declaration does.
+Other declarations stay local to the input: one with a destructuring pattern (assign instead, as
+in `({ a } = await f())`), one with a name it gives no value, such as `let x;`, one in a block,
+and a function or class declaration.
+
+An input that doesn't await at top level runs as a script. A promise it produces prints as a
+promise; `await` it to see what it settles to.
+
+### The environment
+
+The REPL's JavaScript runs in a Worker with no bindings and no handlers: it never receives an
+event. Its global scope has the Workers APIs its compatibility date and flags give it, and
+`workerd`. `import()` resolves as it would from a Worker's main module, so built-in modules such as
+`node:buffer` and `cloudflare:workers` can be imported.
+
+One request context lasts the whole session. Timers, promises and `waitUntil()` tasks keep running
+between inputs, and I/O objects such as a response body stay usable from one input to the next.
+`console.log()` writes to stdout.
+
+## Commands
+
+A line that starts with `.` and a letter, at the start of an input, is a command. In an
+unfinished input, only `.break`, on a line of its own, is a command; it is one even inside a
+template literal.
+
+| Command    | Effect                                                     |
+| ---------- | ---------------------------------------------------------- |
+| `.help`    | Shows the commands, keys and `workerd` API.                |
+| `.servers` | Prints the loaded configs' servers (`workerd.servers`).    |
+| `.clear`   | Clears the screen.                                         |
+| `.break`   | Abandons the unfinished input being typed.                 |
+| `.exit`    | Quits, closing every loaded server first (as Ctrl+D does). |
+
+## Keys
+
+On a Unix terminal, the REPL edits lines itself:
+
+| Key                   | Effect                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Enter                 | Submits the line. The input runs if it is finished.                                     |
+| Left, Right, Ctrl+B/F | Moves the cursor by a character.                                                        |
+| Home, End, Ctrl+A/E   | Moves the cursor to the start or end of the line.                                       |
+| Up, Down, Ctrl+P/N    | Steps through earlier lines, including earlier sessions' (see [History](#history)).     |
+| Backspace, Delete     | Deletes the character before or under the cursor.                                       |
+| Ctrl+K, Ctrl+U        | Deletes to the end, or to the start, of the line.                                       |
+| Ctrl+W                | Deletes the word before the cursor.                                                     |
+| Ctrl+L                | Clears the screen.                                                                      |
+| Tab                   | Completes a global's name, or a property name after `a.b.`; see below.                  |
+| Ctrl+C                | Abandons the input being typed. While an input runs, see [Interrupting](#interrupting). |
+| Ctrl+D                | Quits on an empty line; otherwise deletes the character under the cursor.               |
+
+Tab completes the name before the cursor. With a dot, the names are the properties, own and
+inherited, of the value before it (an identifier chain such as `s.service`); without one, they are
+the global scope's. Completing evaluates that chain, so it can run property getters. Tab inserts as
+much as the candidates have in common; when there is nothing more to insert, it lists them.
+
+Pasted text is taken as text in a terminal that marks pastes (bracketed paste mode, which most
+terminals support): its tabs are inserted rather than completing, and its other control characters
+and escape sequences are dropped. Each line of a paste is submitted as Enter submits a line, so a
+pasted multi-line input runs once its last line is in.
+
+### Interrupting
+
+On Unix, Ctrl+C while an input awaits stops awaiting it, whether or not input comes from a
+terminal. The REPL says `Interrupted`, and prompts for the next input. The input's promise isn't
+canceled, and what it started, such as a request, goes on; `_` and `_error` stay as they were.
+JavaScript that runs without awaiting, such as a loop, can't be stopped that way: press Ctrl+C
+again to end the REPL. On Windows, Ctrl+C ends the REPL. So does Ctrl+C while the REPL reads or
+runs a [script](#a-script), as it ends `node`.
+
+Ctrl+C at a terminal, and `kill -INT` from elsewhere, send the REPL SIGINT. One that arrives while
+no input runs ends the REPL, unless the terminal is editing a line, which takes Ctrl+C as a key.
+A REPL started with SIGINT ignored, as a shell without job control starts a background job,
+ignores it: SIGINT neither stops awaiting an input nor ends the REPL.
+
+SIGTERM, SIGHUP and SIGQUIT end the REPL as they end other programs, and a REPL started with one of
+them ignored, as `nohup` ignores SIGHUP, ignores it. A signal that ends the REPL while it edits a
+line first gives the terminal back the modes it had, and turns bracketed paste mode off.
+
+With `--input-timeout=<seconds>`, the REPL stops awaiting an input once it has taken that long, as
+Ctrl+C does, and says `Timed out`. The input counts as failed. As for Ctrl+C, JavaScript that runs
+without awaiting runs on. A script is one input, so the timeout limits the whole script, and the
+config loaded before it gets a timeout of its own.
+
+### History
+
+On a terminal, each line you submit is saved to `~/.workerd_repl_history` as you submit it, and
+the next session's history starts with the latest 1000 lines. Set `WORKERD_REPL_HISTORY` to save
+them in another file, or to the empty string not to save them. The file is created readable by
+its owner only. If it can't be read or written, the REPL warns once and saves no more history for
+the session. A line that repeats the one before it, or is empty, isn't saved.
+
+### Without a terminal
+
+Input piped in is one [script](#a-script), unless `-i` is given. Elsewhere, such as on Windows or
+with `-i`, the REPL reads plain lines and saves no history. Results go to stdout, and the REPL's
+own messages to stderr. When stdin is a terminal, the banner and prompts go to stderr too. When it
+isn't, the REPL shows neither, so stderr holds only what went wrong and what JavaScript writes
+there, such as with `console.error()`. [Scripts and agents](#scripts-and-agents) says more about
+driving the REPL from a program.
+
+## Loading configs
+
+`await workerd.loadConfig(path, { constName, watch })` loads a config and starts serving it. It resolves
+to a server handle once every socket listens. `path` is relative to the working directory, and
+names a Cap'n Proto config or a `wrangler.json` / `wrangler.jsonc`, read as `workerd serve` reads
+it. `constName` names the constant that holds a Cap'n Proto config, as `workerd serve`'s second
+argument does. If the config doesn't load or has errors, the promise rejects with an error that
+lists them, and nothing is left running. With `watch: true`, the config [reloads](#reloading)
+whenever a file it was loaded from changes.
+
+Each config is served by a server of its own, as `workerd serve` would serve it, in the REPL's
+process. A config can be loaded more than once, and several configs can be loaded at the same time,
+as long as no two of them store the same [Durable Objects](#durable-objects) or listen on the same
+UDP address.
+
+- The config's HTTP, HTTPS and TCP sockets listen on in-process names instead of their addresses.
+  A config whose ports are in use still loads, and nothing outside the process can connect to it.
+  Use `socket()` to send it requests.
+- A UDP socket listens on its address, as under `workerd serve`. Two servers on one address would
+  both bind it, and the later would take every datagram. So a config is refused if one of its UDP
+  sockets has the address, as written, of a loaded server's UDP socket:
+  `Error: <path> listens for UDP datagrams on <address>, as the server for <other path> does.`
+  An address with port 0, or with no port, binds a port the system chooses, and is never refused.
+- Outbound connections, such as those of a `network` or `external` service, reach the network as
+  they do under `workerd serve`.
+- The config's `v8Flags` and `autogates` are ignored, with a warning: those are set once per
+  process, and the REPL has set them already. Pass `--v8-flag` and `--autogate` to the REPL
+  instead.
+- The Workers' `console.log()` writes to stdout.
+
+`workerd.servers` lists the servers loaded and not yet closed. `workerd.version` is the version of
+workerd. `workerd.evict()` evicts a [Durable Object](#durable-objects).
+
+### The server handle
+
+| Member                                   | What it is                                                                                                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`                                   | The config's path, as given to `loadConfig()`.                                                                                                  |
+| `warnings`                               | The warnings reported while the config loaded, or last reloaded.                                                                                |
+| `closed`                                 | Whether `close()` has been called.                                                                                                              |
+| `watching`                               | Whether a change to a file the config was loaded from reloads it: `loadConfig()` was given `watch: true`, and the server isn't closed.          |
+| `service(name, { entrypoint, props })`   | A `Fetcher` for the config's service `name`, for `fetch()` and RPC: its `entrypoint` (the default export if none), with `props` as `ctx.props`. |
+| `socket(name)`                           | A `Fetcher` whose `fetch()` sends the request to the config's HTTP socket `name`, as a client connecting to the socket would.                   |
+| `durableObject(service, className, key)` | A stub for the [Durable Object](#durable-objects) `key` names, of the class `className` that the config's service `service` exports.            |
+| `reload()`                               | Loads the config again, closes the old server, and serves the new one in its place. Resolves to the handle once the new server is serving.      |
+| `close()`                                | Drains the server and shuts it down. Resolves once it has; calling it again is harmless.                                                        |
+
+`service()` reaches any service in the config, not only a Worker, as a binding to it would. It
+throws if the config has no such service, or the Worker has no such entrypoint.
+
+The REPL's JavaScript has the `service_binding_extra_handlers` flag, so a `Fetcher` from
+`service()` also runs the Worker's `scheduled()` and `queue()` handlers:
+
+```
+> await s.service('main').scheduled({ cron: '*/5 * * * *' })
+{ outcome: 'ok', noRetry: false }
+> (await s.service('main').queue('jobs', [{ id: '1', timestamp: new Date(), attempts: 1, body: { n: 1 } }])).outcome
+'ok'
+```
+
+`socket()` takes HTTP sockets only, not HTTPS, TCP or UDP ones, and its `Fetcher` supports only
+`fetch()`. The request goes through the socket as a client's would: the URL's host becomes the
+`Host` header, the socket's HTTP options apply, and the Worker sees the request as it would see
+one that arrived at the socket.
+
+A `Fetcher` from `service()`, `socket()` or `durableObject()` can't be passed to another Worker,
+such as in an RPC call to a loaded Worker; that fails with a `DataCloneError`.
+
+### Durable Objects
+
+`s.durableObject(service, className, key)` is a stub for one of the config's Durable Objects, for
+RPC and `fetch()`, as a binding to the class would reach it. `key` is the object's name, as
+`idFromName()` takes it, `{ name }`, or `{ id }` with the object's id as `idFromString()` takes it.
+The objects of an ephemeral class have names but no ids.
+
+`await workerd.evict(stub, { webSockets })` evicts the object behind a stub, as the runtime evicts
+an idle one, and as `evict()` from `cloudflare:unsafe` does. Its durable storage is kept, and on
+its next request it starts again, running its constructor. Its hibernatable WebSockets hibernate,
+or close with `webSockets: 'close'`. The promise rejects if the object isn't running.
+
+```
+> c = s.durableObject('main', 'Counter', 'alice')
+> await c.increment()
+1
+> await workerd.evict(c)
+undefined
+```
+
+Two servers can't store the same Durable Objects, just as two `workerd serve` processes can't share
+a storage directory: both would write the objects' SQLite files. A config is refused if one of its
+classes stores its objects where a loaded server's does, in the same `localDisk` directory under
+the same `uniqueKey`, whichever [environment](#other-compatibility-settings) loaded that server:
+
+```
+> await workerd.loadConfig('copy.capnp')
+Uncaught Error: copy.capnp stores Durable Objects in /home/me/app/storage/counter, as the server for config.capnp does. Close that server first.
+```
+
+### Reloading
+
+`await s.reload()` reads the config again, as `loadConfig()` read it. Then it closes the old
+server, as `close()` would close it, and starts a new server in its place behind the handle. What
+the old server handed out fails with `Error: The server for <path> was reloaded.`, so ask the
+handle for new `Fetcher`s and Durable Object stubs. Durable Objects and other state held in memory
+start afresh. Until the new server is serving, the handle's `service()`, `socket()` and
+`durableObject()` throw `Error: The server for <path> is reloading.` The old server goes first
+because the two can't both run: a config's Durable Objects and UDP addresses belong to one server
+at a time.
+
+If the config no longer loads, or is [refused](#durable-objects), the promise rejects with the
+problems, and the old server runs on. If it loads but the new server doesn't start, nothing serves
+the config, as under `workerd serve --watch`. The promise rejects with
+`Error: <path> did not reload, and nothing serves it:` and the problems. Until a reload starts a
+server, `service()`, `socket()` and `durableObject()` throw
+`Error: Nothing serves <path>: its last reload failed to start the new server.`
+
+A config loaded with `watch: true` reloads by itself whenever one of the files it was loaded from
+changes: the config, the files it imports and embeds, or for a `wrangler.json`, the Worker's
+modules. The REPL waits until changes stop arriving for half a second, then reloads, and reports
+the outcome on stderr, after whatever the console has written so far, such as a prompt:
+
+```
+> s = await workerd.loadConfig('config.capnp', { watch: true })
+ReplServer {
+  path: 'config.capnp',
+  closed: false,
+  watching: true,
+  warnings: [ [length]: 0 ]
+}
+> Reloaded config.capnp: a file it was loaded from changed.
+```
+
+A reload that fails is reported the same way, with whether the old server runs on, and the next
+change reloads again, so fixing the config brings the server up to date. Reloads, asked for or
+not, run one at a time.
+
+### Closing
+
+Closing a server drains it at once, without waiting out the config's `shutdownDelayMs`, and revokes
+everything it handed out. Requests still in progress are canceled, and every later use of a
+`Fetcher`, RPC stub or unread response body from that server fails with
+`Error: The server for <path> was closed.` Quitting the REPL closes every server that is still
+loaded, then waits for the REPL's `waitUntil()` tasks to finish.
+
+## Other compatibility settings
+
+The REPL's JavaScript has the compatibility date and flags given on the command line.
+`await workerd.environment({ compatibilityDate, compatibilityFlags })` starts another environment
+like the REPL's, in an isolate of its own, with the date and flags given instead: today's date
+without one, and `nodejs_compat` and `unhandled_rejection_after_microtask_checkpoint` unless the
+flags take a position on them, as for the REPL. Its
+handle's `eval(input)` evaluates `input` there, as the REPL evaluates a line typed at it, and
+resolves to what the REPL would print for it, as a string:
+
+```
+> old = await workerd.environment({ compatibilityDate: '2022-01-01' })
+ReplEnvironmentHandle {
+  compatibilityDate: '2022-01-01',
+  compatibilityFlags: [ [length]: 0 ],
+  closed: false
+}
+> await old.eval('typeof navigator')
+"'undefined'"
+> typeof navigator
+'object'
+```
+
+An environment keeps its globals from one input to the next, and has a `workerd` global of its own,
+so it can load configs too. Only the rendering crosses between environments, not values.
+`compatibilityDate` and `compatibilityFlags` are the settings given, `closed` whether `close()`
+has been called. `close()` closes the environment's servers and ends its JavaScript; the
+evaluations in progress fail with `Error: The environment was closed.` Quitting the REPL closes
+every environment still open.
+
+## Scripts and agents
+
+A program, such as a coding agent, can pipe the REPL a script, or drive it a line at a time in a
+long-running session. Either way:
+
+- Pass `--compat-date`, so that what the REPL's JavaScript can do doesn't change with the day it
+  runs.
+- `--input-timeout` stops awaiting a promise that never settles. It doesn't stop JavaScript that
+  runs without awaiting, such as `for (;;) {}`, nor the wait for the REPL's `waitUntil()` tasks
+  once its input ends. Limit the whole run as well, such as with GNU `timeout(1)` (`gtimeout` on
+  macOS with Homebrew's coreutils), or kill the REPL.
+- Once its input ends, the REPL [closes its servers](#closing), waits for its `waitUntil()` tasks,
+  and exits. It doesn't wait for a timer still pending then, which may never fire; await what
+  needs to finish.
+- `import()` can't load files from disk. To run a file's code, load a config with a Worker that
+  has it, and call the Worker through `service()`.
+
+### A script
+
+Piped to the REPL without `-i`, stdin is one script, which runs once stdin ends, as `node` runs a
+script piped to it. A quoted heredoc keeps the shell from expanding `$` and backticks in the
+JavaScript:
+
+```sh
+timeout 60 workerd repl --experimental --compat-date=2025-01-01 --input-timeout=10 \
+  config.capnp <<'EOF'
+const r = await s.service('main').fetch('http://example.com/');
+console.log(r.status, await r.text());
+EOF
+```
+
+The REPL loads `config.capnp` into `s`, then runs the script. Nothing runs until the REPL has read
+the whole script, so a statement can continue on the next line, as it can in any script.
+
+- The REPL prints nothing of its own unless something fails, and doesn't print the script's
+  result. So stdout holds what the script writes with `console.log()`, and stderr what it writes
+  with `console.error()` and what failed.
+- An exception the script doesn't catch ends it, as in any script, and prints on stderr as
+  `Uncaught` followed by the error. The [exit status](#command-line) is 1 if the script failed: it
+  threw, the promise it awaited rejected, or it timed out. It is 1 too if the config named on the
+  command line failed to load, which keeps the script from running, or if something failed in the
+  background.
+- The end of the script is the end of the REPL's input, so the REPL doesn't wait for a timer the
+  script doesn't await, which may never fire. To let one fire, await it, such as with
+  `await new Promise((resolve) => setTimeout(resolve, 100))`.
+- A script that awaits at top level runs as the body of an async function, so what it declares is
+  the function's own rather than global. One that doesn't runs as it is, in the global scope.
+- [Commands](#commands) are lines of the REPL's input: a line of a script that starts with `.` is
+  JavaScript.
+- Ctrl+C ends the REPL while it reads or runs the script (see [Interrupting](#interrupting)).
+
+### A line at a time
+
+With `-i`, the REPL reads piped input a line at a time, as it reads a terminal, and runs each input
+once it is finished. These rules apply:
+
+- A line that leaves no bracket, template literal or `/* */` comment open ends the input, and the
+  input runs before the REPL reads the next line. A statement continued on the next line runs
+  without that line, which then runs as an input of its own. That can fail, as a line starting
+  with `.` does (it is taken as a command) or one starting with `else`, or it can quietly mean
+  something else: after `t = 1`, a line `+ 2` prints `2` and leaves `t` at 1, and the line after
+  a braceless `if (a)` runs whatever `a` is. Put each statement on one line, or keep a bracket
+  open across its lines.
+- Without a terminal the REPL doesn't echo the inputs, so stdout holds the results, one per input,
+  in order. The loaded Workers' `console.log()` writes there too, as does the REPL's.
+- Results print as `util.inspect()` prints them. A string is quoted, and cut after 10000
+  characters; an array shows its first 100 items; and an object or array nested more than two
+  levels deep shows as `[Object]` or `[Array]`. To see a value in full, print it instead:
+  `console.log(text)`, or `console.log(JSON.stringify(value))`.
+- An exception prints on stdout, as `Uncaught` followed by the error. The REPL's own errors go to
+  stderr, such as `Error: Timed out after 30s: ...` and `Unknown command: ...`, along with
+  `console.error()` and `console.warn()`, unhandled rejections, and the reports of reloads.
+
+Every input runs, even after one fails, and the [exit status](#command-line) is 1 if any failed:
+
+```sh
+printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
+    "await (await s.service('main').fetch('http://x/')).text()" |
+  workerd repl --experimental -i
+```
+
+### A session
+
+To keep state from one command to the next, such as a loaded server or a Durable Object held in
+memory, start the REPL with `-i` in the background, reading from a FIFO:
+
+```sh
+dir=$(mktemp -d) && mkfifo "$dir/in" && touch "$dir/out" "$dir/err"
+# Holds the FIFO open for writing, so that the REPL's input doesn't end between sends.
+nohup sleep 86400 > "$dir/in" 2> /dev/null & echo $! > "$dir/holder.pid"
+nohup workerd repl --experimental -i --compat-date=2025-01-01 --input-timeout=30 \
+  config.capnp < "$dir/in" > "$dir/out" 2> "$dir/err" & echo $! > "$dir/repl.pid"
+echo "$dir"
+```
+
+Then send it inputs with a script such as this one, `repl-send <dir> <input>`, which waits for the
+input to finish and prints what it wrote to stdout and to stderr:
+
+```sh
+#!/bin/sh
+dir=$1
+marker="'@@done-$$'"
+out=$(wc -c < "$dir/out")
+err=$(wc -c < "$dir/err")
+# The REPL reads a line only once the input before it has run, so the .break abandons the input
+# only if it is unfinished. The marker is an input of its own, and its result ends this one's
+# output.
+printf '%s\n.break\n%s\n' "$2" "$marker" > "$dir/in"
+tries=0
+until tail -c +$((out + 1)) "$dir/out" | grep -qxF "$marker"; do
+  tries=$((tries + 1))
+  if [ "$tries" -gt 600 ] || ! kill -0 "$(cat "$dir/repl.pid")" 2> /dev/null; then
+    echo "repl-send: no result after 60 s, or the REPL exited" >&2
+    break
+  fi
+  sleep 0.1
+done
+tail -c +$((out + 1)) "$dir/out" | grep -vxF "$marker"
+tail -c +$((err + 1)) "$dir/err" >&2
+```
+
+Without the `.break`, an unfinished input, such as `f(`, would take the marker in as one of its
+lines and wait for more, and so would every later send. With it, the input is abandoned, and
+prints nothing at all: every input that runs prints at least `undefined`, or an error.
+
+A session has no exit status for each input, so tell a failure from its output: `Uncaught` on
+stdout, or `Error:` or `Unknown command` on stderr. What a timer or a Worker prints after its
+input has finished shows up in a later send's output.
+
+To end the session, end the REPL's input: `kill "$(cat "$dir/holder.pid")"`. The REPL closes its
+servers and exits. If it doesn't, because JavaScript runs without awaiting or a `waitUntil()` task
+never settles, kill it: `kill "$(cat "$dir/repl.pid")"`. `kill -INT` stops awaiting an input, as
+Ctrl+C does, but ends the REPL if no input is awaiting, and does nothing if the REPL was started
+with SIGINT ignored (see [Interrupting](#interrupting)). `--input-timeout` stops awaiting without
+the signal.
+
+## Limitations
+
+- Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
+  wide characters, such as CJK, or tabs, or a line longer than the terminal is wide.
+- Only an input that awaits can be [interrupted](#interrupting) without ending the REPL.
+- A Durable Object's alarm runs when it is due, and not before: an alarm runs only at the time it
+  is set for, which only the object can change.
+- The REPL has no inspector, so DevTools can't attach to it or to the loaded configs.
+
+## How it works
+
+This section is for people working on the REPL. The code is in `src/workerd/server/cli/repl/`
+(Rust) and `src/workerd/server/repl/` (C++), and `src/workerd/server/AGENTS.md` maps the files.
+The paths below are relative to `src/workerd/server/`.
+
+**Two threads.** The console (`cli/repl/console.rs`) runs on a thread of its own, blocked reading
+input, so that the event loop keeps running between inputs. It sends each finished input to the
+session loop (`cli/repl/session.rs`), which runs on the event loop's thread and owns V8. Before it
+sends an input, the console works out without a parser (`cli/repl/input.rs`) whether the input is
+finished, and a few _candidates_: ways to compile it, such as a plain script or, for an input that
+awaits at top level, an async function that returns its last statement's value. The session
+evaluates the first candidate that compiles, except that it passes over the plain script if the
+script uses `await` as a name: a script reads `await (x)` as a call to a function named `await`.
+Compiling the script in a class static block, where `await` can't be a name, tells. A
+[script](#a-script) piped in is one input, which the console sends once stdin ends, with candidates
+of its own: the script as it is and, if it awaits, the script as the body of an async function,
+whose declarations stay its own.
+
+**The environment.** `ReplEnvironment` (`repl/repl-environment.h`) is a Worker that never receives
+an event, compiled on the REPL's isolate under the new module registry. One `IoContext` serves the
+whole session, so I/O objects created by one input stay usable in the next. The `workerd` global
+and the server handles are C++ JSG types (`repl/repl-api.h`), registered with the workerd API
+isolate but not part of the Workers API's types. A handle holds its server or environment through
+the `IoContext` (`IoOwn`), so that collecting it, though it may be the last to hold it, destroys
+no KJ I/O objects.
+
+**Loaded configs.** `workerd.loadConfig()` reads the config as `workerd serve` does
+(`repl_load_config`, `cli/repl/session.rs`), then builds a `WorkerFactory` for it over the REPL's
+V8 and event loop and hands it to the Rust server's `InProcessServer` (`server/in_process.rs`).
+`InProcessServer::start()` serves the config in the background, its stream sockets on `loopback:`
+names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds. A reload
+reads the config and builds the new `InProcessServer`, closes the old one, then starts the new.
+Before a load or a reload builds anything, it claims the Durable Object directories the config
+names in `ReplServerClaims`, which the REPL keeps for the whole session, so that a config another
+server's directories are in is refused before anything of it runs. The
+config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
+text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
+`repl_load_config` registers each file it reads with.
+
+**Other environments.** `workerd.environment()` constructs another `ReplEnvironment`, held by the
+one whose JavaScript asked for it and closed when that one drains. The candidates of what its
+`eval()` is given come from the console's rules (`repl_candidates`, `cli/repl/input.rs`), and the
+input runs on the event loop, under that environment's isolate lock rather than the REPL's.
+
+**Host channels.** `service()` and `socket()` are the in-process server's host channels
+(`server/in_process/host.rs`). The REPL's `IoContext` keys headers by its own
+`kj::HttpHeaderTable`, and each loaded server by its factory's, and a header id from one table
+must not be used with headers of another. So the factory takes the REPL's table as
+`WorkerFactory::Options::hostHeaderTable`, and headers cross between the two tables by name. A
+socket's channel is an HTTP client of the socket's `loopback:` name. Every channel and every
+request started on one is held through a revoker: closing the server revokes them all before the
+server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
+
+**Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text,
+with watches the test fires; `repl/repl-api-test.c++` drops handles where JavaScript objects are
+destroyed; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
+the command line, the console and the file watcher do;
+`cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line
+editor, the history file and the input heuristics; `server/in_process/host-test.rs` covers
+revocation.

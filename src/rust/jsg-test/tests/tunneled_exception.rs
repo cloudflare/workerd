@@ -7,7 +7,8 @@
 
 use jsg::v8;
 
-use super::dom_exception::set_up_bootstrap_dom_exception;
+use super::dom_exception::DomExceptionClass;
+use super::dom_exception::set_autogates_for;
 use crate::EvalContext;
 use crate::Harness;
 
@@ -193,15 +194,14 @@ fn copies_like_cpp_jsg_with_enhanced_error_serialization() {
     assert_like_cpp(true);
 }
 
-/// With the bootstrap's `DOMException`, the copy of a `DOMException` is an instance of the
-/// bootstrap's class, as C++ JSG's copy is.
+/// Under the `V8_DOM_EXCEPTION` autogate, the copy of a `DOMException` is an instance of V8's, as
+/// C++ JSG's copy is.
 #[test]
-fn copies_the_bootstrap_dom_exception_like_cpp_jsg() {
-    const IS_BOOTSTRAP: &str = "Object.getPrototypeOf(v) === DOMException.prototype";
-    let abort_error_check = format!(
-        "{IS_BOOTSTRAP} && v.name === 'AbortError' && v.message === 'm' && v !== abortError"
-    );
-    let data_error_check = format!("{IS_BOOTSTRAP} && v.name === 'DataError' && v.message === 'd'");
+fn copies_v8s_dom_exception_like_cpp_jsg() {
+    const IS_V8: &str = "Object.getPrototypeOf(v) === DOMException.prototype";
+    let abort_error_check =
+        format!("{IS_V8} && v.name === 'AbortError' && v.message === 'm' && v !== abortError");
+    let data_error_check = format!("{IS_V8} && v.name === 'DataError' && v.message === 'd'");
     let exceptions = [
         ("abortError", abort_error_check.as_str()),
         (
@@ -217,8 +217,8 @@ fn copies_the_bootstrap_dom_exception_like_cpp_jsg() {
     for enhanced in [false, true] {
         let harness =
             Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
+        let _autogates = set_autogates_for(DomExceptionClass::V8);
         harness.run_in_context(|lock, ctx| {
-            set_up_bootstrap_dom_exception(lock, ctx);
             set_up(lock, ctx);
             assert_copies_like_cpp(lock, ctx, &exceptions, enhanced);
             Ok(())

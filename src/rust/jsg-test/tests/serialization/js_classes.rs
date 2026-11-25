@@ -10,7 +10,6 @@ use jsg::v8;
 use super::Unserializable;
 use super::assert_deserialization_throws;
 use super::assert_error;
-use super::assert_read;
 use super::assert_round_trip;
 use super::deserialize_exception;
 use super::eval;
@@ -18,6 +17,7 @@ use super::header;
 use super::serialize_exception;
 use crate::EvalContext;
 use crate::Harness;
+use crate::cpp_interop::ffi;
 
 /// Classes implemented in JavaScript, as the per-isolate bootstrap's `serialization.ts` sets them
 /// up. Evaluates to the exports of the module "test", among which the deserializers look them up
@@ -56,38 +56,6 @@ const JS_CLASSES: &str = r"
   }
   const holderCloneable = makeCloneable(Holder, 'test:Holder', (h) => ({ value: h[kX] }),
       (h, data) => { h[kX] = data.value; });
-
-  class TestError extends Error {
-    constructor(message) { super(message); this[kMode] = testErrorCloneable; }
-  }
-  TestError.prototype.name = 'TestError';
-  const testErrorCloneable = makeCloneable(TestError, 'test:TestError', (e) => e.message,
-      (e, data) => {
-    Object.defineProperty(e, 'message', { value: data, writable: true, configurable: true });
-  });
-
-  // Stands in for the bootstrap's DOMException.prototype, whose instances hold their name and
-  // message as the bootstrap's do.
-  const domExceptionPrototype = Object.create(Error.prototype, {
-    name: { get() { return this[kName]; } },
-    message: { get() { return this[kMessage]; } },
-  });
-  domExceptionPrototype[kDomExceptionPrototype] = true;
-
-  // A DOMException with an amount, as the bootstrap's QuotaExceededError is one with a quota.
-  // newAmountError() makes its instances.
-  class AmountError {
-    get amount() { return this[kX]; }
-  }
-  Object.setPrototypeOf(AmountError.prototype, domExceptionPrototype);
-  const amountErrorCloneable = makeCloneable(AmountError, 'test:AmountError',
-      (e) => ({ message: e.message, amount: e[kX] }), (e, data) => {
-    // In the bootstrap's constructors' order.
-    e[kBrand] = true;
-    e[kName] = 'AmountError';
-    e[kMessage] = data.message;
-    e[kX] = data.amount;
-  });
 
   // Accepts only a number as its data.
   class Strict {
@@ -131,8 +99,8 @@ const JS_CLASSES: &str = r"
   class Lazy {}
   Lazy.prototype[kCloneable] = descriptor('lazy:Lazy', () => 1, () => {});
 
-  ({ Point, Holder, TestError, AmountError, Strict, Throws, NoDeserialize, NotADescriptor,
-      NoDeserializeFunction, LazyDeserialize, notAFunction: 1 })
+  ({ Point, Holder, Strict, Throws, NoDeserialize, NotADescriptor, NoDeserializeFunction,
+      LazyDeserialize, notAFunction: 1 })
 ";
 
 /// Defines `JS_CLASSES` in the context, with the private symbols it uses as globals, and returns
@@ -141,10 +109,6 @@ fn define_classes<'s>(lock: &mut jsg::Lock<'s>, ctx: &EvalContext<'_>) -> v8::Lo
     for (global, name) in [
         ("kMode", "workerd:serializeMode"),
         ("kCloneable", "workerd:cloneable"),
-        ("kDomExceptionPrototype", "workerd:domExceptionPrototype"),
-        ("kBrand", "workerd:domException"),
-        ("kName", "workerd:errorName"),
-        ("kMessage", "workerd:errorMessage"),
         ("kX", "test:x"),
     ] {
         let symbol = Harness::private_symbol(lock, name);
@@ -157,31 +121,6 @@ fn define_classes<'s>(lock: &mut jsg::Lock<'s>, ctx: &EvalContext<'_>) -> v8::Lo
 fn set_up_classes(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>) {
     let exports = define_classes(lock, ctx);
     ctx.set_bootstrap_module(lock, "test", exports);
-}
-
-/// Makes an `AmountError` as the bootstrap's `QuotaExceededError` constructor makes one: an
-/// instance of the bootstrap's `DOMException`, which [`Harness::new_bootstrap_dom_exception`]
-/// stands in for, marked as cloneable.
-fn new_amount_error<'s>(
-    lock: &mut jsg::Lock<'s>,
-    ctx: &EvalContext<'_>,
-    message: &str,
-    amount: u32,
-) -> v8::Local<'s, v8::Value> {
-    let prototype = eval(lock, ctx, "AmountError.prototype");
-    let error = Harness::new_bootstrap_dom_exception(
-        lock,
-        prototype,
-        "AmountError",
-        message,
-        "sender stack",
-    );
-    ctx.set_global(lock, "newError", error);
-    eval(
-        lock,
-        ctx,
-        &format!("newError[kMode] = amountErrorCloneable; newError[kX] = {amount}; newError"),
-    )
 }
 
 /// Returns the calls that `log` records, and clears it.
@@ -210,32 +149,14 @@ fn assert_serialization_throws(
 }
 
 /// What `jsg::Serializer` writes for an instance of a class implemented in JavaScript, after the
-/// header: V8's tag for a host object, then the record, which is its tag, its length-delimited
-/// `deserializeInfo`, its flags, and the values the flags say follow. Each length and the flags
-/// must be below 128, a byte each as varints.
-fn record(
-    lock: &mut jsg::Lock<'_>,
-    deserialize_info: &str,
-    flags: u8,
-    fields: &[&[u8]],
-) -> Vec<u8> {
+/// header: V8's tag for a host object, then the record, which is its tag and its length-delimited
+/// `deserializeInfo`. The length must be below 128, a byte as a varint.
+fn record(lock: &mut jsg::Lock<'_>, deserialize_info: &str) -> Vec<u8> {
     let length = u8::try_from(deserialize_info.len()).unwrap();
-    assert!(length < 128 && flags < 128);
+    assert!(length < 128);
     let mut data = header(lock);
     data.extend_from_slice(&[b'\\', 0x17, length]);
     data.extend_from_slice(deserialize_info.as_bytes());
-    data.push(flags);
-    for field in fields {
-        data.extend_from_slice(field);
-    }
-    data
-}
-
-/// `string`, which must be ASCII and shorter than 128 bytes, in V8's format.
-fn v8_string(string: &str) -> Vec<u8> {
-    assert!(string.is_ascii() && string.len() < 128);
-    let mut data = vec![b'"', u8::try_from(string.len()).unwrap()];
-    data.extend_from_slice(string.as_bytes());
     data
 }
 
@@ -248,11 +169,6 @@ fn describe<'s>(
     ctx.set_global(lock, "e", exception);
     ctx.eval(lock, "`${e?.name}: ${e?.message}`").unwrap()
 }
-
-/// The integer 1 in V8's format.
-const V8_ONE: &[u8] = b"I\x02";
-/// An empty object in V8's format.
-const V8_EMPTY_OBJECT: &[u8] = b"o{\x00";
 
 const UNKNOWN_CLASS: &str = "Deserialization failed: unknown class implemented in JavaScript.";
 
@@ -351,208 +267,40 @@ fn instances_round_trip() {
 }
 
 #[test]
-fn errors_round_trip() {
-    for enhanced in [false, true] {
-        let harness = Harness::with_flags(move |mut flags| {
-            flags.set_enhanced_error_serialization(enhanced);
-        });
-        harness.run_in_context(|lock, ctx| {
-            set_up_classes(lock, ctx);
-            for (expr, check) in [
-                // A class inheriting from Error makes native errors, with no own message until
-                // initialized.
-                (
-                    "new TestError('boom')",
-                    "v instanceof TestError && Object.prototype.toString.call(v) === \
-                     '[object Error]' && v.message === 'boom'",
-                ),
-                // Its stack is written as a native error's is, and restored as an own data
-                // property that, like the stack it replaces, is not enumerable.
-                (
-                    "Object.assign(new TestError('boom'), { stack: 'sender stack' })",
-                    "(() => { \
-                       const { value, enumerable } = Object.getOwnPropertyDescriptor(v, 'stack'); \
-                       return value === 'sender stack' && !enumerable; \
-                     })()",
-                ),
-                // Without one, it keeps the stack captured when it was made, whose first line, as
-                // a native error's does, gives its name and the writer's message.
-                (
-                    "(() => { const e = new TestError('boom'); delete e.stack; return e; })()",
-                    "v.stack.split('\\n')[0] === 'TestError: boom' && \
-                     !Object.getOwnPropertyDescriptor(v, 'stack').enumerable",
-                ),
-                // A stack that is not a string is not written, so one that refers back to the
-                // error, which a reader could not resolve, does not make the error unreadable.
-                (
-                    "(() => { const e = new TestError('boom'); e.stack = { e }; return e; })()",
-                    "v.stack.split('\\n')[0] === 'TestError: boom'",
-                ),
-            ] {
-                assert_round_trip(lock, ctx, expr, check);
-            }
-
-            // A class whose prototype inherits from the bootstrap's DOMException.prototype makes
-            // instances of the bootstrap's DOMException.
-            let error = new_amount_error(lock, ctx, "over", 5);
-            ctx.set_global(lock, "error", error);
-            eval(
-                lock,
-                ctx,
-                "globalThis.isCopy = (e) => \
-                   Object.getPrototypeOf(e) === AmountError.prototype && e[kBrand] === true && \
-                   e.name === 'AmountError' && e.message === 'over' && e.amount === 5 && \
-                   e.stack === 'sender stack' && \
-                   !Object.getOwnPropertyDescriptor(e, 'stack').enumerable",
-            );
-            for (expr, check) in [
-                ("error", "isCopy(v)"),
-                (
-                    "({ error, again: error })",
-                    "isCopy(v.error) && v.again === v.error",
-                ),
-            ] {
-                assert_round_trip(lock, ctx, expr, check);
-            }
-            Ok(())
-        });
-    }
-
+fn instances_round_trip_inside_native_errors() {
     // With enhanced error serialization, an instance can be inside a native error, which the
     // serializer writes itself.
     let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
     harness.run_in_context(|lock, ctx| {
         set_up_classes(lock, ctx);
-        let error = new_amount_error(lock, ctx, "over", 5);
-        ctx.set_global(lock, "error", error);
         assert_round_trip(
             lock,
             ctx,
-            "new Error('outer', { cause: [new Point(1), error] })",
-            "v.cause[0] instanceof Point && v.cause[0].x === 2 && v.cause[1].amount === 5",
+            "new Error('outer', { cause: [new Point(1), new Holder('inner')] })",
+            "v.cause[0] instanceof Point && v.cause[0].x === 2 && \
+             v.cause[1] instanceof Holder && v.cause[1].value === 'inner'",
+        );
+        // So can a Map or a Set, which V8 fills by calling builtins, holding objects and instances.
+        assert_round_trip(
+            lock,
+            ctx,
+            "new Error('outer', { cause: new Map([\
+               ['k', { a: 1 }], ['point', new Point(1)], ['set', new Set([{ b: [2] }])]]) })",
+            "v.cause.get('k').a === 1 && v.cause.get('point').x === 2 && \
+             [...v.cause.get('set')][0].b[0] === 2",
         );
         Ok(())
     });
 }
 
-/// Without `preserve_stack_in_errors`, the reader keeps an instance's stack only if the writer was
-/// not using enhanced error serialization, which keeps a native error's stack, as
-/// `jsg::Deserializer` does.
+/// A record that ends too soon is malformed wherever it ends: in the deserializeInfo, in its
+/// length, or in the tag before them.
 #[test]
-fn errors_keep_their_stacks_as_native_errors_do() {
-    for (enhanced, check) in [
-        (false, "v.stack === 'sender stack'"),
-        (true, "v.stack.split('\\n')[0] === 'TestError: boom'"),
-    ] {
-        let harness = Harness::with_flags(move |mut flags| {
-            flags.set_enhanced_error_serialization(enhanced);
-        });
-        harness.run_in_context(|lock, ctx| {
-            set_up_classes(lock, ctx);
-            let value = eval(
-                lock,
-                ctx,
-                "Object.assign(new TestError('boom'), { stack: 'sender stack' })",
-            );
-            let data = jsg::ser::serialize(lock, value)?;
-            assert_eq!(data, Harness::cpp_serialize(lock, value));
-            let options = jsg::ser::DeserializeOptions {
-                preserve_stack_in_errors: false,
-            };
-            let copy = jsg::ser::deserialize_with(lock, &data, options)?;
-            ctx.set_global(lock, "v", copy);
-            assert!(ctx.eval::<bool>(lock, check).unwrap(), "{check}");
-            Ok(())
-        });
-    }
-}
-
-/// The record's flags say whether a stack follows (1), whether the writer was not using enhanced
-/// error serialization (2), and whether a message follows (4).
-#[test]
-fn records_are_read_as_their_flags_say() {
+fn truncated_records_are_malformed() {
     Harness::new().run_in_context(|lock, ctx| {
         set_up_classes(lock, ctx);
-        let message = v8_string("header");
-        let stack = v8_string("forged stack");
-        let data = v8_string("m");
-
-        // A stack is kept, with preserve_stack_in_errors.
-        let mut bytes = record(lock, "test:TestError", 1, &[&stack]);
-        bytes.extend_from_slice(&data);
-        assert_read(
-            lock,
-            ctx,
-            &bytes,
-            "v.stack === 'forged stack' && v.message === 'm'",
-        );
-
-        // A stack or message of a class that doesn't inherit from Error is ignored.
-        let mut bytes = record(lock, "test:Point", 5, &[&message, &stack]);
-        bytes.extend_from_slice(V8_ONE);
-        assert_read(
-            lock,
-            ctx,
-            &bytes,
-            "!Object.hasOwn(v, 'stack') && !Object.hasOwn(v, 'message') && v.x === 2",
-        );
-
-        // Without preserve_stack_in_errors, a stack is kept only with flag 2. Otherwise the stack
-        // captured when the error is made begins with the record's message, not the one
-        // deserialize() sets.
-        for (flags, fields, check) in [
-            (
-                5,
-                &[&message[..], &stack][..],
-                "v.stack.split('\\n')[0] === 'TestError: header' && !v.stack.includes('forged') \
-                 && v.message === 'm'",
-            ),
-            (
-                1,
-                &[&stack[..]],
-                "v.stack.split('\\n')[0] === 'TestError' && v.message === 'm'",
-            ),
-            (
-                3,
-                &[&stack[..]],
-                "v.stack === 'forged stack' && v.message === 'm'",
-            ),
-        ] {
-            let mut bytes = record(lock, "test:TestError", flags, fields);
-            bytes.extend_from_slice(&data);
-            let options = jsg::ser::DeserializeOptions {
-                preserve_stack_in_errors: false,
-            };
-            let copy = jsg::ser::deserialize_with(lock, &bytes, options)?;
-            ctx.set_global(lock, "v", copy);
-            assert!(ctx.eval::<bool>(lock, check).unwrap(), "{flags}: {check}");
-        }
-
-        // A message or stack that isn't a string is rejected, and so are flags this version
-        // doesn't know.
-        for (bytes, message) in [
-            (
-                record(lock, "test:TestError", 4, &[V8_ONE]),
-                "Deserialization failed: message of an object implemented in JavaScript is not a \
-                 string.",
-            ),
-            (
-                record(lock, "test:TestError", 1, &[V8_EMPTY_OBJECT]),
-                "Deserialization failed: stack of an object implemented in JavaScript is not a \
-                 string.",
-            ),
-            (
-                record(lock, "test:Point", 8, &[]),
-                "Deserialization failed: unsupported object implemented in JavaScript.",
-            ),
-        ] {
-            assert_deserialization_throws(lock, ctx, &bytes, "DataCloneError", message);
-        }
-
-        // A record that ends too soon is malformed wherever it ends: in the flags, in the
-        // deserializeInfo, in its length, or in the tag before them.
-        let bytes = record(lock, "test:Point", 0, &[]);
-        for drop in [1, 2, 12, 13] {
+        let bytes = record(lock, "test:Point");
+        for drop in [1, 11, 12] {
             assert_deserialization_throws(
                 lock,
                 ctx,
@@ -562,7 +310,7 @@ fn records_are_read_as_their_flags_say() {
             );
         }
         // Cut off before V8's tag, it is V8's own error.
-        deserialize_exception(lock, &bytes[..bytes.len() - 14]);
+        deserialize_exception(lock, &bytes[..bytes.len() - 13]);
         Ok(())
     });
 }
@@ -723,15 +471,6 @@ fn what_clone_and_deserialize_throw_stays_pending() {
             "RangeError",
             "throw from clone",
         );
-        // So does what reading an error's message throws.
-        assert_serialization_throws(
-            lock,
-            ctx,
-            "Object.defineProperty(new TestError('e'), 'message', \
-               { get() { throw new URIError('u'); } })",
-            "URIError",
-            "u",
-        );
 
         // What a deserialize function throws reaches the caller, such as its rejection of data
         // that no instance of its class would have written.
@@ -785,6 +524,111 @@ fn instances_cannot_be_read_while_javascript_is_disallowed() {
     });
 }
 
+/// A workerd API object whose deserializer leaves work that runs JavaScript until the value is read
+/// (`Deserializer::afterRead()`), as C++ JSG runs it: once the instances are initialized, in
+/// order, failing the read if it throws, and not where JavaScript execution is disallowed.
+#[test]
+fn api_objects_finish_once_instances_are_initialized() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_up_classes(lock, ctx);
+        eval(
+            lock,
+            ctx,
+            "globalThis.seen = [];\n\
+             globalThis.afterRead = (v) => {\n\
+               seen.push(v instanceof Point ? v.x : v);\n\
+               if (v === 'throw') throw new Error('boom');\n\
+             };",
+        );
+        for (global, expr) in [
+            ("point", "new Point(1)"),
+            ("a", "'a'"),
+            ("b", "'b'"),
+            ("throws", "'throw'"),
+            (
+                "map",
+                "new Map([['k', { a: 1 }], ['set', new Set([{ b: [2] }])]])",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            // SAFETY: called with the lock's isolate, in its scope, with a handle in that scope.
+            let finisher: v8::Local<v8::Value> = unsafe {
+                v8::Local::from_ffi_maybe(ffi::test_cpp_finisher_new(
+                    lock.isolate().as_ffi(),
+                    value.into_ffi(),
+                ))
+            }
+            .expect("the C++ constructor threw");
+            ctx.set_global(lock, global, finisher);
+        }
+
+        // The Point that one holds is read through the Rust deserializer, and initialized first.
+        assert_round_trip(
+            lock,
+            ctx,
+            "[point, a, b]",
+            "seen.splice(0).join() === '2,a,b'",
+        );
+        // V8 fills a Map or a Set that one holds by calling builtins.
+        assert_round_trip(
+            lock,
+            ctx,
+            "[map]",
+            "(m => m.get('k').a === 1 && [...m.get('set')][0].b[0] === 2)(seen.splice(0)[0])",
+        );
+
+        // One that throws fails the read, and the rest are not called.
+        let value = eval(lock, ctx, "[a, throws, b]");
+        let data = jsg::ser::serialize(lock, value)?;
+        let rust = lock
+            .try_catch(|lock| jsg::ser::deserialize(lock, &data))
+            .unwrap();
+        assert!(
+            ctx.eval::<bool>(lock, "seen.splice(0).join() === 'a,throw'")
+                .unwrap()
+        );
+        let cpp = lock
+            .try_catch(|lock| Harness::cpp_try_deserialize(lock, &data))
+            .unwrap();
+        assert!(
+            ctx.eval::<bool>(lock, "seen.splice(0).join() === 'a,throw'")
+                .unwrap()
+        );
+        for caught in [rust, cpp] {
+            assert_error(
+                lock,
+                ctx,
+                caught.expect_err("the read should throw"),
+                "Error",
+                "boom",
+            );
+        }
+
+        // None is called where JavaScript execution is disallowed.
+        let value = eval(lock, ctx, "a");
+        let data = jsg::ser::serialize(lock, value)?;
+        Harness::set_javascript_execution_disallowed(lock, true);
+        let rust = lock
+            .try_catch(|lock| jsg::ser::deserialize(lock, &data))
+            .unwrap();
+        let cpp = lock
+            .try_catch(|lock| Harness::cpp_try_deserialize(lock, &data))
+            .unwrap();
+        Harness::set_javascript_execution_disallowed(lock, false);
+        for caught in [rust, cpp] {
+            assert_error(
+                lock,
+                ctx,
+                caught.expect_err("the read should throw"),
+                "DataCloneError",
+                "This value cannot be deserialized here.",
+            );
+        }
+        assert!(ctx.eval::<bool>(lock, "seen.length === 0").unwrap());
+        Ok(())
+    });
+}
+
 /// Whatever class and data a peer names, Rust JSG reads it as C++ JSG does: both read a value, or
 /// both throw the same exception. The peer is a `Forged` instance naming any class, or a random
 /// string, with any data. The pseudo-random sequence is fixed, so every run reads the same data.
@@ -802,8 +646,8 @@ fn arbitrary_instances_are_read_as_cpp_jsg_reads_them() {
                 seed = (seed * 48271) % 2147483647;
                 return seed % n;
               }
-              const names = ['test:Point', 'test:Holder', 'test:TestError', 'test:AmountError',
-                  'test:Strict', 'test:Throws', 'test:NoDeserialize', 'test:NotADescriptor',
+              const names = ['test:Point', 'test:Holder', 'test:Strict', 'test:Throws',
+                  'test:NoDeserialize', 'test:NotADescriptor',
                   'test:NoDeserializeFunction', 'test:notAFunction', 'test:Missing',
                   'test:toString', 'other:Point', 'test', '', ':', 'test:', 'test:Point:',
                   '\0test:Point'];
@@ -816,8 +660,7 @@ fn arbitrary_instances_are_read_as_cpp_jsg_reads_them() {
               const values = [
                 () => undefined, () => null, () => random(100), () => -0.5, () => 'x', () => ({}),
                 () => [], () => ({ value: new Point(1) }), () => new Point(2),
-                () => new Holder(null), () => new Strict(3), () => new TestError('e'),
-                () => new Error('e'), () => new Uint8Array(2), () => new Map([[1, new Point(4)]]),
+                () => new Holder(null), () => new Strict(3), () => new Error('e'), () => new Uint8Array(2), () => new Map([[1, new Point(4)]]),
                 () => ({ message: 'm', amount: 1 }), () => new Forged(randomName(), random(10)),
                 () => new Forged(randomName(), new Forged(randomName())),
               ];

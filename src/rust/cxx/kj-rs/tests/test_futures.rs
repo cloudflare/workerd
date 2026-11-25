@@ -339,6 +339,44 @@ pub async fn new_error_handling_future_void_infallible() {
     assert!(err.what().contains("test error"));
 }
 
+// =======================================================================================
+// Panic test helpers
+
+/// Panics on its first poll, with a `&'static str` payload.
+pub async fn new_panicking_future_void() -> Result<()> {
+    panic!("fallible future panicked");
+}
+
+/// A future whose output is not a `Result`. Panics on its first poll, with a `String` payload.
+pub async fn new_panicking_future_i32() -> i32 {
+    panic!("infallible future panicked with {}", 42);
+}
+
+/// A future whose output is not a `Result`. Waits for `fulfill_stored_promise()`, then panics on
+/// the poll that the fulfillment wakes it for.
+pub async fn new_awaiting_then_panicking_future_void() {
+    crate::ffi::new_fulfillable_promise_void()
+        .await
+        .expect("should not throw");
+    panic!("future panicked after awaiting");
+}
+
+/// Panics when dropped.
+struct PanicOnDrop;
+
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("future panicked while dropped");
+    }
+}
+
+/// Never completes, and panics when C++ cancels it.
+pub async fn new_panicking_on_drop_future_void() -> Result<()> {
+    let _guard = PanicOnDrop;
+    future::pending::<()>().await;
+    Ok(())
+}
+
 pub async fn new_promise_i32_awaiting_future_void() -> Result<()> {
     let value = crate::ffi::new_ready_promise_i32(123)
         .await

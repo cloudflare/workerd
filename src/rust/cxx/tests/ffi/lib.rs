@@ -526,6 +526,7 @@ pub mod ffi {
         fn r_aliased_function(x: i32) -> String;
 
         fn r_panic(s: &str);
+        fn r_panic_literal();
     }
 
     struct Dag0 {
@@ -1039,4 +1040,9 @@ fn r_aliased_function(x: i32) -> String {
 
 fn r_panic(s: &str) {
     panic!("{s}");
+}
+
+// A panic with no format arguments carries a &'static str payload.
+fn r_panic_literal() {
+    panic!("literal panic");
 }

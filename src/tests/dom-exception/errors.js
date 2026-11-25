@@ -6,20 +6,20 @@
 // a string, the attributes' brand checks, and writes to its attributes.
 
 import { strictEqual, throws } from 'node:assert';
-import { usingTsImpl, setToStringTag } from 'which-impl';
+import { usingV8Impl, setToStringTag } from 'which-impl';
 
 export const isAnError = {
   test() {
     const error = new DOMException('m', 'AbortError');
     strictEqual(error instanceof Error, true);
     // Ledger #3: WebIDL gives DOMException [[ErrorData]].
-    strictEqual(Error.isError(error), usingTsImpl);
+    strictEqual(Error.isError(error), usingV8Impl);
     strictEqual(
       Error.isError(new (class extends DOMException {})()),
-      usingTsImpl
+      usingV8Impl
     );
-    strictEqual(Error.isError(AbortSignal.abort().reason), usingTsImpl);
-    strictEqual(Error.isError(structuredClone(error)), usingTsImpl);
+    strictEqual(Error.isError(AbortSignal.abort().reason), usingV8Impl);
+    strictEqual(Error.isError(structuredClone(error)), usingV8Impl);
     strictEqual(Error.isError(DOMException.prototype), false);
     strictEqual(Error.isError(Object.create(DOMException.prototype)), false);
   },
@@ -50,7 +50,7 @@ export const errorToString = {
 export const attributesAreBrandChecked = {
   test() {
     const notADomException = Object.create(DOMException.prototype);
-    if (usingTsImpl) {
+    if (usingV8Impl) {
       // Ledger #6: the getters throw for anything but a DOMException.
       for (const attribute of ['name', 'message', 'code']) {
         throws(() => notADomException[attribute], TypeError);
@@ -113,7 +113,7 @@ export const deletingAttributes = {
     strictEqual(delete error.name, true);
     strictEqual(delete error.message, true);
     strictEqual(delete error.code, true);
-    if (usingTsImpl) {
+    if (usingV8Impl) {
       // Ledger #1: nothing own to delete.
       strictEqual(error.name, 'AbortError');
       strictEqual(error.message, 'm');

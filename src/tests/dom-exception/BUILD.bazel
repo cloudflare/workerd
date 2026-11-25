@@ -6,8 +6,8 @@ load("//:build/wd_test.bzl", "wd_test")
 # enable_web_file_system and enable_abortsignal_rpc.
 #
 # The C++ cells disable the @all-autogates variant: enabling every autogate
-# enables TS_DOM_EXCEPTION, which swaps in the TypeScript implementation
-# under a cell whose USING_TS_IMPL binding says C++.
+# enables V8_DOM_EXCEPTION, which swaps in V8's implementation under a cell
+# whose USING_V8_IMPL binding says C++.
 
 dom_exception_suite_srcs = glob(["*.js"]) + ["dom-exception-modules.capnp"]
 
@@ -23,7 +23,7 @@ dom_exception_suite_srcs = glob(["*.js"]) + ["dom-exception-modules.capnp"]
 ]]
 
 [wd_test(
-    src = "dom-exception%s-ts.wd-test" % cell,
+    src = "dom-exception%s-v8.wd-test" % cell,
     args = ["--experimental"],
     data = dom_exception_suite_srcs,
 ) for cell in [

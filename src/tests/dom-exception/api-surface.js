@@ -7,7 +7,7 @@
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 import {
-  usingTsImpl,
+  usingV8Impl,
   setToStringTag,
   specCompliantPropertyAttributes,
   webIdlAttributes,
@@ -46,13 +46,18 @@ export const prototypeShape = {
     strictEqual(attributesOf(proto, 'constructor'), 'datawc');
 
     // Ledger #1: WebIDL attributes are prototype accessors; the C++ makes
-    // them own properties of each instance. Ledger #5: JSG's inspect hook.
+    // them own properties of each instance. Ledger #5: JSG's symbols.
     const symbols = Object.getOwnPropertySymbols(proto).map(String);
-    const expectedSymbols = ['Symbol(cloudflare:internal-class)'];
+    const expectedSymbols = [];
     if (setToStringTag) expectedSymbols.push('Symbol(Symbol.toStringTag)');
-    if (!usingTsImpl) expectedSymbols.push('Symbol(kResourceTypeInspect)');
+    if (!usingV8Impl) {
+      expectedSymbols.push(
+        'Symbol(cloudflare:internal-class)',
+        'Symbol(kResourceTypeInspect)'
+      );
+    }
     deepStrictEqual(symbols.sort(), expectedSymbols.sort());
-    const attributeNames = usingTsImpl ? ['code', 'message', 'name'] : [];
+    const attributeNames = usingV8Impl ? ['code', 'message', 'name'] : [];
     deepStrictEqual(
       Object.getOwnPropertyNames(proto).sort(),
       ['constructor', ...attributeNames, ...kConstantNames].sort()
@@ -67,7 +72,7 @@ export const attributeAccessors = {
         DOMException.prototype,
         attribute
       );
-      if (!usingTsImpl) {
+      if (!usingV8Impl) {
         strictEqual(descriptor, undefined);
         continue;
       }
@@ -108,7 +113,7 @@ export const toStringTag = {
     // Ledger #11: JSG's tag is writable.
     strictEqual(
       attributesOf(DOMException.prototype, Symbol.toStringTag),
-      usingTsImpl ? 'datac' : 'datawc'
+      usingV8Impl ? 'datac' : 'datawc'
     );
   },
 };
@@ -117,7 +122,7 @@ export const instanceShape = {
   test() {
     const error = new DOMException('m', 'AbortError');
     deepStrictEqual(Reflect.ownKeys(error).map(String), instanceKeys());
-    if (usingTsImpl) {
+    if (usingV8Impl) {
       // Ledger #2: V8's own stack.
       strictEqual(attributesOf(error, 'stack'), 'accessorc');
     } else {
@@ -151,10 +156,19 @@ export const subclassing = {
 
 export const globalPlacement = {
   test() {
-    // Where JSG_NESTED_TYPE puts it, which the TypeScript implementation
-    // matches: on the global scope's prototype, and under
-    // spec_compliant_property_attributes also an own, non-enumerable
-    // property of the global.
+    // Ledger #15: V8's is an own, non-enumerable property of the global,
+    // whatever the flags.
+    if (usingV8Impl) {
+      strictEqual(
+        attributesOf(Object.getPrototypeOf(globalThis), 'DOMException'),
+        'none'
+      );
+      strictEqual(attributesOf(globalThis, 'DOMException'), 'datawc');
+      return;
+    }
+    // Where JSG_NESTED_TYPE puts the C++ one: on the global scope's
+    // prototype, and under spec_compliant_property_attributes also an own,
+    // non-enumerable property of the global.
     strictEqual(
       attributesOf(Object.getPrototypeOf(globalThis), 'DOMException'),
       'datawec'

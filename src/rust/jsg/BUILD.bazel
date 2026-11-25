@@ -1,5 +1,5 @@
-load("@rules_python//python:defs.bzl", "py_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_py_test.bzl", "wd_py_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # Rust JSG's C++ shim files. To have cpp-jsg-allowlist-test check a shim file in another
@@ -18,7 +18,7 @@ CPP_SHIMS = glob([
 ]
 
 # Fails when a shim adds a use of C++ JSG; see cpp-jsg-allowlist-test.py.
-py_test(
+wd_py_test(
     name = "cpp-jsg-allowlist-test",
     srcs = ["cpp-jsg-allowlist-test.py"],
     args = ["$(location cpp-jsg-allowlist.txt)"] + ["$(location %s)" % shim for shim in CPP_SHIMS],
@@ -27,7 +27,7 @@ py_test(
 )
 
 # Tests the checker itself on small allowlists and shim files.
-py_test(
+wd_py_test(
     name = "cpp-jsg-allowlist-checker-test",
     srcs = ["cpp-jsg-allowlist-checker-test.py"],
     data = ["cpp-jsg-allowlist-test.py"],

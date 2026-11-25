@@ -52,8 +52,15 @@ Generated bridges use KJ's exception model:
 - A Rust function or future whose error is a `cxx::KjException` (`Result<T, cxx::KjException>`
   in its Rust signature) fails in C++ with that exception as it is, stack trace included, rather
   than with a new `FAILED` exception holding only its description.
-- `kj::CanceledException` is preserved in both directions.
-- Rust panics cross into C++ as `kj::Exception` rather than aborting the process.
+- `kj::CanceledException` is preserved in both directions, except out of a Rust future: a
+  promise rejects only with a `kj::Exception`, so a future that panics with a
+  `CanceledException` payload while C++ polls it fails with a `FAILED` exception.
+- Rust panics cross into C++ as `kj::Exception` rather than aborting the process. A panic while
+  C++ polls a Rust future, whatever its output type, rejects the future's promise with a `FAILED`
+  exception that holds the panic's message; a panic while C++ drops one, when it cancels the
+  promise, is logged with `KJ_LOG(ERROR)`.
+- `cxx::panic_message()` reads the message of a caught panic from its payload, for code that
+  catches panics of its own.
 
 ### `#[nothrow]` C++ functions
 

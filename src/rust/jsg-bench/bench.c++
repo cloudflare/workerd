@@ -195,6 +195,22 @@ class Target final: public Object {
   void fail() {
     JSG_FAIL_REQUIRE(TypeError, "benchmark error");
   }
+  jsg::Promise<double> resolved(Lock& js, double a) {
+    return js.resolvedPromise(a + 1);
+  }
+  jsg::Promise<void> resolvedVoid(Lock& js) {
+    return js.resolvedPromise();
+  }
+  JsPromise untypedVoid(Lock& js) {
+    return js.resolvedJsPromise(js.undefined());
+  }
+  jsg::Promise<double> thenAdd(Lock& js, jsg::Promise<double> a) {
+    return a.then(js, [](Lock&, double n) { return n + 1; });
+  }
+  jsg::Promise<void> callAsync(Lock& js, JsFunction a) {
+    a.call(js, js.undefined());
+    return js.resolvedPromise();
+  }
 
   JSG_RESOURCE_TYPE(Target) {
     JSG_METHOD(noop);
@@ -228,6 +244,11 @@ class Target final: public Object {
     JSG_METHOD(takeNode);
     JSG_METHOD(callback);
     JSG_METHOD(fail);
+    JSG_METHOD(resolved);
+    JSG_METHOD(resolvedVoid);
+    JSG_METHOD(untypedVoid);
+    JSG_METHOD(thenAdd);
+    JSG_METHOD(callAsync);
   }
 
  private:
@@ -301,6 +322,8 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
   Isolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](auto& js) {
     if (binding == Binding::CPP_STRUCT_FAST) js.setUsingFastJsgStruct();
+    // As with the capture_async_api_throws flag, which Workers on recent compatibility dates have.
+    js.setCaptureThrowsAsRejections(true);
     capnp::MallocMessageBuilder message;
     auto flagsRoot = message.initRoot<CompatibilityFlags>();
     if (binding == Binding::RUST_STRUCT_FAST) flagsRoot.setFastJsgStruct(true);
@@ -569,6 +592,24 @@ int registerCases() {
   add("error/conversion",
       "function attempt(){try{t.add(Symbol());}catch(e){return e instanceof TypeError ? 1 : 0;}}",
       "attempt()", "attempt()===1", "1", 64);
+  // Each call also runs the microtasks, so the reactions the call adds run inside the batch. The
+  // validation settles the promise `call` returns and checks what it settled with as `g`.
+  auto addPromise = [&](kj::StringPtr name, kj::StringPtr setup, kj::StringPtr timed,
+                        kj::StringPtr call, kj::StringPtr check) {
+    constexpr auto drain = "%PerformMicrotaskCheckpoint()"_kjc;
+    add(name, setup, kj::str("(", timed, ",", drain, ",1)"),
+        kj::str("(()=>{let g;", call, ".then(v=>g=v,r=>g=r);", drain, ";return ", check, ";})()"),
+        "1", 256);
+  };
+  addPromise("promise/resolved", "", "t.resolved(i&255)", "t.resolved(7)", "g===8");
+  addPromise("promise/resolved-void", "", "t.resolvedVoid()", "t.resolvedVoid()", "g===undefined");
+  addPromise("promise/untyped-void", "", "t.untypedVoid()", "t.untypedVoid()", "g===undefined");
+  addPromise("promise/then-promise", "const p=Promise.resolve(7);", "t.thenAdd(p)", "t.thenAdd(p)",
+      "g===8");
+  addPromise("promise/then-value", "", "t.thenAdd(i&255)", "t.thenAdd(7)", "g===8");
+  addPromise("promise/throw-captured",
+      "const e=new Error('x');const f=()=>{throw e;};const h=()=>1;", "t.callAsync(f).catch(h)",
+      "t.callAsync(f)", "g===e");
   add("gc/empty", "", "(gc(),1)", "true", "1", 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
   for (auto size: smokeTesting() ? std::initializer_list<int>{10, 20}
                                  : std::initializer_list<int>{1000, 10000}) {

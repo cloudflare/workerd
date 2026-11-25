@@ -529,6 +529,15 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+jsg::Optional<api::RustCacheContext> Worker::Api::getCtxCacheRustProperty(jsg::Lock& js) const {
+  return kj::none;
+}
+
+kj::Maybe<bool> Worker::Api::isCtxCacheRustInstance(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) const {
+  return false;
+}
+
 v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
     v8::Local<v8::Value> handler,
     v8::Local<v8::Value> env,
@@ -1292,12 +1301,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
     // This notification has no lasting effect: V8 handles it synchronously because we hold the
     // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
-    // starting incremental marking, which we disable. What it does do is free caches shared by the
-    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
-    // the Wasm it runs, and it empties the isolate group's memory pools.
-    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
-      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
-    }
+    // starting incremental marking, which we disable. What it does do is empty the isolate group's
+    // memory pools, which the whole process shares.
+    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
@@ -5117,16 +5123,18 @@ kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
   return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
-      kj::mv(observer), kj::mv(workerTracer), kj::mv(selfTokenFactory)));
+      kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext), kj::mv(selfTokenFactory)));
 }
 
 kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
   // without the request tracking that addRef() adds.
@@ -5142,10 +5150,9 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   });
 
   RequestObserver& observerRef = *observer;
-  auto incomingRequest =
-      kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
-          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */,
-          kj::none /* accessInfo */, kj::mv(selfTokenFactory));
+  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
+      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext),
+      kj::none /* accessInfo */, kj::mv(selfTokenFactory));
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
   }

@@ -43,18 +43,9 @@ using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
-// The V8 private symbols under which a class implemented in the per-isolate bootstrap keeps an
-// error's name and message, as strings, when its `name` and `message` are accessors, as WebIDL
-// attributes are. V8's ToDetailString() reads only data properties, so it can't describe such an
-// error; toDetailString(), and so kj::str() of a handle, reads these instead.
-constexpr kj::StringPtr ERROR_NAME_KEY = "workerd:errorName"_kj;
-constexpr kj::StringPtr ERROR_MESSAGE_KEY = "workerd:errorMessage"_kj;
-
-// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does,
-// except that an object holding strings under ERROR_NAME_KEY and ERROR_MESSAGE_KEY is described
-// as V8 describes an error with that name and message, as `name: message`. Runs no JavaScript,
-// and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims. Requires an
-// entered context. Fails, as ToDetailString() does, only if execution is terminating.
+// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does. Runs
+// no JavaScript, and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims.
+// Requires an entered context. Fails, as ToDetailString() does, only if execution is terminating.
 v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
 kj::String stringifyHandle(v8::Local<v8::Value> value);
@@ -3366,8 +3357,8 @@ class Lock {
 
   // Creates a DOMException without running JavaScript. Its stack is `stackValue` if given, or
   // else captured from the current one.
-  virtual JsObject domException(
-      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
+  JsObject domException(
+      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none);
 
   struct DomExceptionInfo {
     kj::String name;
@@ -3376,7 +3367,7 @@ class Lock {
 
   // If `value` is a DOMException, returns the name and message it was created with, which own
   // properties shadowing its attributes do not change. Does not run JavaScript.
-  virtual kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) = 0;
+  kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value);
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //
@@ -3384,6 +3375,24 @@ class Lock {
   // of the class object.
   template <typename T>
   JsObject getPrototypeFor();
+
+  // Get the FunctionTemplate for the given C++ type (which must be a JSG_RESOURCE_TYPE). Its
+  // HasInstance() is the exact receiver check JSG applies to the type's own members: unlike
+  // TypeHandler::tryUnwrap(), it does not accept objects that merely inherit from an instance.
+  // The template is per isolate, so callers on a hot path may cache it.
+  template <typename T>
+  v8::Local<v8::FunctionTemplate> getTemplateFor() {
+    return getTemplateFor(typeid(T));
+  }
+
+  // Get the CppHeapPointerTag range of the given JSG_RESOURCE_TYPE and its subclasses: the range
+  // JSG's own member dispatch passes to Wrappable::unwrapFromShimInRangeOrAbort(). It depends on
+  // every type the isolate's TypeWrapper knows, so code that cannot see the TypeWrapper gets it
+  // here. Like the template, it is fixed per isolate and callers on a hot path may cache it.
+  template <typename T>
+  v8::CppHeapPointerTagRange getWrappableTagRangeFor() {
+    return getWrappableTagRangeFor(typeid(T));
+  }
 
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
@@ -3591,6 +3600,15 @@ class Lock {
   friend class JsObject;
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
   virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
+  virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) = 0;
+  virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(const std::type_info& type) = 0;
+
+  // domException() and tryGetDomExceptionInfo() for the C++ DOMException class
+  // (jsg/dom-exception.h), the global without the V8_DOM_EXCEPTION autogate, which needs the
+  // isolate's TypeWrapper.
+  virtual JsObject newCppDomException(
+      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue) = 0;
+  virtual kj::Maybe<DomExceptionInfo> tryGetCppDomExceptionInfo(const JsValue& value) = 0;
 };
 
 template <typename T>

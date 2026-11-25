@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Divy Srivastava <divy@cloudflare.com>
+Date: Wed, 18 Nov 2026 12:00:00 +0000
+Subject: Skip the copy of zero bytes in SnapshotByteSource::CopyRaw()
+
+The serializer writes the backing store of an off-heap typed array even
+when it is empty, as for `new Uint8Array(new ArrayBuffer(0))`; the
+ArrayBuffer path skips empty ones. On deserialization BackingStore::
+Allocate() returns a store whose buffer_start() is null for zero bytes,
+and CopyRaw() then calls memcpy() with a null destination, which is
+undefined behavior even for a zero length, and which UBSan reports.
+
+diff --git a/src/snapshot/snapshot-source-sink.h b/src/snapshot/snapshot-source-sink.h
+index b82238830b7340affa673af003d0fc1ef6ce5785..1bd3a43eb05ee805eb2fb167779f9b65c603977e 100644
+--- a/src/snapshot/snapshot-source-sink.h
++++ b/src/snapshot/snapshot-source-sink.h
+@@ -58,6 +58,9 @@ class SnapshotByteSource final {
+ 
+   void CopyRaw(void* to, size_t number_of_bytes) {
+     DCHECK_LE(position_ + number_of_bytes, length_);
++    // An empty destination, such as the backing store of an empty typed array,
++    // can be null, and memcpy() must not be passed a null pointer.
++    if (number_of_bytes == 0) return;
+     memcpy(to, data_ + position_, number_of_bytes);
+     position_ += number_of_bytes;
+   }
