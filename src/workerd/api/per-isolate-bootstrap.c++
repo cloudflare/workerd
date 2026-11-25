@@ -11,6 +11,8 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/per-isolate-bootstrap/ffi.h>
+#include <workerd/api/per-isolate-bootstrap/ffi.rs.h>
 #include <workerd/api/performance-bootstrap.h>
 #include <workerd/api/request-io.h>
 #include <workerd/api/url-bootstrap.h>
@@ -22,6 +24,7 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/use-perfetto-categories.h>
@@ -33,7 +36,12 @@
 #endif
 
 #include <capnp/dynamic.h>
+#include <capnp/message.h>
 #include <capnp/schema.h>
+
+#include <algorithm>
+#include <array>
+#include <memory>
 
 namespace workerd {
 
@@ -109,7 +117,8 @@ struct BootstrapState final: public jsg::BootstrapModules {
   BootstrapState(const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts,
       kj::Maybe<const EmbedderBootstrap&> embedder,
       const jsg::ModuleSource* moduleSource)
-      : scripts(scripts),
+      : jsg::BootstrapModules(jsg::BootstrapLoader::CPP),
+        scripts(scripts),
         embedder(embedder),
         moduleSource(moduleSource) {}
 
@@ -526,8 +535,9 @@ static void DefineLazyDataProperty(const v8::FunctionCallbackInfo<v8::Value>& ar
     // specifier, and the getter requires the module in the context it is read in.
     jsg::isolateRegisterExternalReference(
         js.v8Isolate, reinterpret_cast<intptr_t>(&LazyDataPropertyGetter));
-    KJ_ASSERT(jsg::check(v8::Local<v8::Object>(target)->SetLazyDataProperty(
-        js.v8Context(), args[1].As<v8::Name>(), &LazyDataPropertyGetter, args[2], attributes)));
+    JSG_REQUIRE(jsg::check(v8::Local<v8::Object>(target)->SetLazyDataProperty(js.v8Context(),
+                    args[1].As<v8::Name>(), &LazyDataPropertyGetter, args[2], attributes)),
+        TypeError, "Cannot define a lazy data property on the object");
     return js.v8Undefined();
   });
 }
@@ -690,63 +700,67 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
   return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect);
 }
 
-// Creates an object with methods for performing fast type checks on JS values.
-// Because we are not fully bootstrapped at this point, we don't want to rely
-// on jsg::Object and the type wrapper system, etc. Instead, just use a plain
-// object with some properties set. (Members implemented in the api layer, like
-// newCompressionCodec, keep their knowledge there and are wired here by name;
-// their callbacks may use the type wrapper at CALL time -- the isolate is fully
-// set up by then -- through jsg::Lock's type-handler lookup.)
-jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
-  static constexpr std::string_view names[] = {
-#define V(Name) "is" #Name,
-    // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-    VALUE_METHOD_MAP(V)
-#undef V
-        "isAnyArrayBuffer",
-    "markPromiseHandled",
-    "getApiSymbol",
-    "newCompressionCodec",
-    "createDigestContext",
-    "createFileSystemWriteContext",
-    "addAbortAlgorithm",
-    "utf8Length",
-    "encodeUtf8",
-    "getPrivateSymbol",
-    "setListenerCountHook",
-    "getEventHandlerAttribute",
-    "setEventHandlerAttribute",
-    "dispatchEvent",
-    "createTrustedMessageEvent",
-    "createTrustedEvent",
-    "cloneMessageData",
-    "queueReaction",
-    "defineLazyDataProperty",
-    "createTrustedOpenEvent",
-    "createTrustedErrorEvent",
-    "createRequestIo",
-    "isFetcher",
-    "parseUrl",
-    "urlParse",
-    "urlCanParse",
-    "urlUpdate",
-    "urlOrigin",
-    "createLegacyUrl",
-    "tryCreateLegacyUrl",
-    "createLegacySearchParams",
-    "urlPatternCompile",
-    "urlPatternProcessInit",
-    "legacyUrlPatternCompile",
-    "legacyUrlPatternProcessInit",
-    "mimeTypeEssence",
-    "readableStreamState",
-    "structuredClone",
-    "performanceNow",
-    "requirePerformance",
-    "getPerformancePrototype",
-  };
-  auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+// The natives of `utils` that forward to the C++ API layer. Both loaders give them to the
+// scripts. (Members implemented in the api layer, like newCompressionCodec, keep their knowledge
+// there and are wired here by name; their callbacks may use the type wrapper at CALL time -- the
+// isolate is fully set up by then -- through jsg::Lock's type-handler lookup.)
+constexpr std::string_view API_NATIVE_NAMES[] = {
+  "newCompressionCodec",
+  "createDigestContext",
+  "createFileSystemWriteContext",
+  "addAbortAlgorithm",
+  "encodeUtf8",
+  "setListenerCountHook",
+  "getEventHandlerAttribute",
+  "setEventHandlerAttribute",
+  "dispatchEvent",
+  "createTrustedMessageEvent",
+  "createTrustedEvent",
+  "cloneMessageData",
+  "createTrustedOpenEvent",
+  "createTrustedErrorEvent",
+  "createRequestIo",
+  "isFetcher",
+  "parseUrl",
+  "urlParse",
+  "urlCanParse",
+  "urlUpdate",
+  "urlOrigin",
+  "createLegacyUrl",
+  "tryCreateLegacyUrl",
+  "createLegacySearchParams",
+  "urlPatternCompile",
+  "urlPatternProcessInit",
+  "legacyUrlPatternCompile",
+  "legacyUrlPatternProcessInit",
+  "mimeTypeEssence",
+  "readableStreamState",
+  "structuredClone",
+  "performanceNow",
+  "requirePerformance",
+  "getPerformancePrototype",
+};
 
+// The natives of `utils` that need nothing but V8. The Rust loader makes its own
+// (api/per-isolate-bootstrap/utils.rs).
+constexpr std::string_view GENERIC_NATIVE_NAMES[] = {
+#define V(Name) "is" #Name,
+  // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
+  VALUE_METHOD_MAP(V)
+#undef V
+      "isAnyArrayBuffer",
+  "markPromiseHandled",
+  "getApiSymbol",
+  "utf8Length",
+  "getPrivateSymbol",
+  "queueReaction",
+  "defineLazyDataProperty",
+};
+
+using ApiNatives = std::array<v8::MaybeLocal<v8::Value>, kj::size(API_NATIVE_NAMES)>;
+using GenericNatives = std::array<v8::MaybeLocal<v8::Value>, kj::size(GENERIC_NATIVE_NAMES)>;
+
+ApiNatives makeApiNatives(jsg::Lock& js) {
   // The Performance natives exist only for the TypeScript performance.now(),
   // and building them requires the isolate's TypeWrapper to know Performance.
   // Without the autogate their properties are left off (empty values).
@@ -762,20 +776,12 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getPerformancePrototype = getMethod(js, GetPerformancePrototype);
   }
 
-  v8::MaybeLocal<v8::Value> values[] = {
-#define V(Name) getFastMethodNoSideEffect(js, Is##Name, &fast_is_##Name##_),
-    VALUE_METHOD_MAP(V)
-#undef V
-        getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
-    getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
-    getMethod(js, GetApiSymbol),
+  return {
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
-    getMethod(js, Utf8Length),
     getMethod(js, EncodeUtf8),
-    getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),
     getMethod(js, SetEventHandlerAttribute),
@@ -783,8 +789,6 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateTrustedMessageEvent),
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
-    getMethod(js, QueueReaction),
-    getMethod(js, DefineLazyDataProperty),
     getMethod(js, CreateTrustedOpenEvent),
     getMethod(js, CreateTrustedErrorEvent),
     getMethod(js, CreateRequestIo),
@@ -808,55 +812,87 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     requirePerformance,
     getPerformancePrototype,
   };
+}
 
-  static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
+GenericNatives makeGenericNatives(jsg::Lock& js) {
+  return {
+#define V(Name) getFastMethodNoSideEffect(js, Is##Name, &fast_is_##Name##_),
+    VALUE_METHOD_MAP(V)
+#undef V
+        getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
+    getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
+    getMethod(js, GetApiSymbol),
+    getMethod(js, Utf8Length),
+    getMethod(js, GetPrivateSymbol),
+    getMethod(js, QueueReaction),
+    getMethod(js, DefineLazyDataProperty),
+  };
+}
+
+// The object with the natives of `utils` that forward to the C++ API layer, for the Rust loader.
+jsg::JsObject createApiNativesObject(jsg::Lock& js) {
+  auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, API_NATIVE_NAMES);
+  auto values = makeApiNatives(js);
+  return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values));
+}
+
+// Creates the `utils` object: methods for fast type checks on JS values, and the natives that
+// forward to the API layer. Because we are not fully bootstrapped at this point, we don't want to
+// rely on jsg::Object and the type wrapper system, etc. Instead, just use a plain object with
+// some properties set.
+jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
+  constexpr size_t count = kj::size(GENERIC_NATIVE_NAMES) + kj::size(API_NATIVE_NAMES);
+  static const auto names = [] {
+    std::array<std::string_view, count> names;
+    auto end =
+        std::copy(std::begin(GENERIC_NATIVE_NAMES), std::end(GENERIC_NATIVE_NAMES), names.begin());
+    std::copy(std::begin(API_NATIVE_NAMES), std::end(API_NATIVE_NAMES), end);
+    return names;
+  }();
+  auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+
+  std::array<v8::MaybeLocal<v8::Value>, count> values;
+  auto generic = makeGenericNatives(js);
+  auto apiValues = makeApiNatives(js);
+  auto end = std::copy(generic.begin(), generic.end(), values.begin());
+  std::copy(apiValues.begin(), apiValues.end(), end);
 
   return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
 }
 
-// The pseudo-global variables that scripts access directly (e.g. `require`, `compatFlags`,
-// `primordials`). Each script is compiled as a function taking them as parameters, in this
-// order. gen-compile-cache (src/rust/gen-compile-cache/cxx-bridge.c++) compiles the scripts
-// with the same parameter list, which must match for V8 to accept the cache.
-//
-// They are parameters rather than the properties of a context extension object because an
-// extension object makes V8 resolve every free variable in the script (`undefined` included)
-// with a dynamic lookup slot: a runtime call that walks the context chain on every access,
-// even in optimized code.
-constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
-  "require"_kj,
-  "compatFlags"_kj,
-  "autogates"_kj,
-  "module"_kj,
-  "exports"_kj,
-  "primordials"_kj,
-  "utils"_kj,
-};
-constexpr size_t PSEUDO_GLOBAL_COUNT = kj::size(PSEUDO_GLOBAL_NAMES);
-
-// The values of PSEUDO_GLOBAL_NAMES for a script, in the same order.
+// The values of the pseudo-globals (jsg::BOOTSTRAP_FUNCTION_PARAMS) for a script, in order.
 v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
     BootstrapState& state,
     const jsg::JsObject& moduleObj,
     const jsg::JsObject& exportsObj,
     kj::Maybe<jsg::JsFunction> require) {
-  v8::LocalVector<v8::Value> values(js.v8Isolate,
-      {
-        js.v8Undefined(),  // require
-        v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
-        v8::Local<v8::Value>(moduleObj),
-        v8::Local<v8::Value>(exportsObj),
-        js.v8Undefined(),  // primordials
-        v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
-      });
-  KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
-
-  KJ_IF_SOME(fn, require) {
-    values[0] = v8::Local<v8::Value>(fn);
-  }
-  KJ_IF_SOME(primordials, state.primordials) {
-    values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+  auto names = *jsg::BOOTSTRAP_FUNCTION_PARAMS;
+  v8::LocalVector<v8::Value> values(js.v8Isolate);
+  values.reserve(names.size());
+  for (const auto& name: names) {
+    v8::Local<v8::Value> value = js.v8Undefined();
+    if (name == "require"_kj) {
+      KJ_IF_SOME(fn, require) {
+        value = fn;
+      }
+    } else if (name == "compatFlags"_kj) {
+      value = state.compatFlagsObj.getHandle(js);
+    } else if (name == "autogates"_kj) {
+      value = state.autogatesObj.getHandle(js);
+    } else if (name == "module"_kj) {
+      value = moduleObj;
+    } else if (name == "exports"_kj) {
+      value = exportsObj;
+    } else if (name == "primordials"_kj) {
+      KJ_IF_SOME(primordials, state.primordials) {
+        value = primordials.getHandle(js);
+      }
+    } else if (name == "utils"_kj) {
+      value = state.utilsObj.getHandle(js);
+    } else {
+      KJ_FAIL_ASSERT("unknown per-isolate bootstrap pseudo-global", name);
+    }
+    values.push_back(value);
   }
   return values;
 }
@@ -869,7 +905,10 @@ kj::Maybe<BootstrapState&> tryGetBootstrapState(v8::Local<v8::Context> context) 
   KJ_IF_SOME(modules,
       jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
           context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
-    return kj::downcast<BootstrapState>(modules);
+    // The Rust loader's state is not ours; see chooseLoader().
+    if (modules.getLoader() == jsg::BootstrapLoader::CPP) {
+      return kj::downcast<BootstrapState>(modules);
+    }
   }
   return kj::none;
 }
@@ -996,12 +1035,14 @@ void requireImpl(const v8::FunctionCallbackInfo<v8::Value>& info, RequireScope s
         options = v8::ScriptCompiler::kConsumeCodeCache;
       }
 
-      v8::Local<v8::String> params[PSEUDO_GLOBAL_COUNT];
-      for (auto i: kj::indices(params)) {
-        params[i] = js.strIntern(PSEUDO_GLOBAL_NAMES[i]);
+      auto paramNames = *jsg::BOOTSTRAP_FUNCTION_PARAMS;
+      v8::LocalVector<v8::String> params(js.v8Isolate);
+      params.reserve(paramNames.size());
+      for (const auto& name: paramNames) {
+        params.push_back(js.strIntern(name));
       }
       auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
-          js.v8Context(), &compilerSource, PSEUDO_GLOBAL_COUNT, params, 0, nullptr, options)));
+          js.v8Context(), &compilerSource, params.size(), params.data(), 0, nullptr, options)));
 
       if (options == v8::ScriptCompiler::kConsumeCodeCache) {
         if (compilerSource.GetCachedData()->rejected) {
@@ -1117,8 +1158,10 @@ constexpr kj::StringPtr STASH_CACHE = "cache"_kj;
 kj::Maybe<jsg::JsObject> tryTakeSnapshotBootstrapState(
     jsg::Lock& js, v8::Local<v8::Context> context) {
   auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
-  KJ_IF_SOME(idx, isolateBase.finalizedSnapshotArtifact().bootstrapStateIndex) {
-    return jsg::JsObject(isolateBase.extractOnceFromSnapshot(context, idx));
+  KJ_IF_SOME(pinned, isolateBase.finalizedSnapshotArtifact().bootstrapState) {
+    KJ_REQUIRE(pinned.loader == jsg::BootstrapLoader::CPP,
+        "the Rust loader pinned this snapshot's per-isolate bootstrap state");
+    return jsg::JsObject(isolateBase.extractOnceFromSnapshot(context, pinned.index));
   }
   return kj::none;
 }
@@ -1199,6 +1242,152 @@ void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFla
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// The Rust loader (api/per-isolate-bootstrap/), under the RUST_PER_ISOLATE_BOOTSTRAP autogate.
+
+namespace rust_bootstrap = api::per_isolate_bootstrap;
+
+// The loader that bootstraps a new context. Only the bootstrap reads the gate: a test can change
+// the gates between creating a context and disposing of it, so everything else goes by which
+// loader's state the context holds (getCurrentBootstrap()). A context deserialized from a startup
+// snapshot goes to the loader that pinned the zygote's state, whatever the gate says now: the
+// functions in that state work only with their own loader's.
+jsg::BootstrapLoader chooseLoader(jsg::Lock& js) {
+  if (js.isStartingFromSnapshot()) {
+    KJ_IF_SOME(pinned,
+        jsg::IsolateBase::from(js.v8Isolate).finalizedSnapshotArtifact().bootstrapState) {
+      return pinned.loader;
+    }
+  }
+  return util::Autogate::isEnabled(util::AutogateKey::RUST_PER_ISOLATE_BOOTSTRAP)
+      ? jsg::BootstrapLoader::RUST
+      : jsg::BootstrapLoader::CPP;
+}
+
+// The current context's bootstrap state, the C++ loader's or the Rust loader's, read from the
+// slot once.
+using CurrentBootstrap = kj::OneOf<BootstrapState*, const rust_bootstrap::State*>;
+CurrentBootstrap getCurrentBootstrap(jsg::Lock& js) {
+  auto& modules = KJ_REQUIRE_NONNULL(jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
+                                         js.v8Context(), jsg::ContextPointerSlot::BOOTSTRAP_STATE),
+      "per-isolate bootstrap state not initialized");
+  switch (KJ_REQUIRE_NONNULL(modules.getLoader(), "not a per-isolate bootstrap's state")) {
+    case jsg::BootstrapLoader::CPP:
+      return &kj::downcast<BootstrapState>(modules);
+    case jsg::BootstrapLoader::RUST:
+      return &rust_bootstrap::state_of(modules);
+  }
+  KJ_UNREACHABLE;
+}
+
+// A specifier or name as the Rust lookups take it.
+::rust::Slice<const uint8_t> toRustBytes(kj::StringPtr str) {
+  return ::rust::Slice<const uint8_t>(str.asBytes().begin(), str.size());
+}
+
+// A Rust string as the script tables take it, without a copy. The tables are keyed by StringPtr,
+// whose bytes hash as the array's do, and compare equal to it through ArrayPtr's operator==.
+kj::ArrayPtr<const char> toKjChars(::rust::Str str) {
+  return kj::arrayPtr(str.data(), str.size());
+}
+
+::rust::Str toRust(kj::StringPtr str) {
+  return ::rust::Str(str.begin(), str.size());
+}
+
+// Throws JsExceptionThrown, for the caller's JSG_TRY, if the Rust loader left an exception
+// pending.
+jsg::JsValue checkRust(rust_bootstrap::MaybeLocal result) {
+  return jsg::JsValue(jsg::check(rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(result))));
+}
+
+// The scripts of a context's bootstrap, for the Rust loader.
+class RustScriptHost final: public rust_bootstrap::ScriptHost {
+ public:
+  RustScriptHost(const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts,
+      kj::Maybe<const EmbedderBootstrap&> embedder,
+      const jsg::ModuleSource* moduleSource)
+      : scripts(scripts),
+        embedder(embedder),
+        moduleSource(moduleSource) {}
+
+  bool in_embedder_namespace(::rust::Str specifier) const override {
+    KJ_IF_SOME(e, embedder) {
+      return e.isInNamespace(toKjChars(specifier));
+    }
+    return false;
+  }
+
+  const rust_bootstrap::Script* find_workerd_script(::rust::Str specifier) const override {
+    KJ_IF_SOME(script, scripts.find(toKjChars(specifier))) {
+      return &script;
+    }
+    return nullptr;
+  }
+
+  const rust_bootstrap::Script* find_embedder_script(::rust::Str specifier) const override {
+    KJ_IF_SOME(e, embedder) {
+      KJ_IF_SOME(script, e.tryGetScript(toKjChars(specifier))) {
+        return &script;
+      }
+    }
+    return nullptr;
+  }
+
+  ::rust::Str embedder_entry_point() const override {
+    KJ_IF_SOME(e, embedder) {
+      return toRust(e.getEntryPoint());
+    }
+    return {};
+  }
+
+  rust_bootstrap::MaybeLocal module_source(
+      rust_bootstrap::Isolate* isolate, const rust_bootstrap::Script& script) const override {
+    if (moduleSource == nullptr) {
+      return rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::String>());
+    }
+    auto& js = jsg::Lock::from(isolate);
+    return rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::String>(
+        jsg::newExternalString(js, moduleSource->get(script.getSrc().asChars()))));
+  }
+
+  rust_bootstrap::MaybeLocal api_natives(rust_bootstrap::Isolate* isolate) const override {
+    // Building the Performance natives can throw a kj::Exception; Rust gets it as a pending
+    // JavaScript exception.
+    auto result = jsg::liftKj<v8::Local<v8::Value>>(isolate,
+        [&]() -> v8::Local<v8::Value> { return createApiNativesObject(jsg::Lock::from(isolate)); });
+    return rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
+  }
+
+ private:
+  const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
+  kj::Maybe<const EmbedderBootstrap&> embedder;
+  const jsg::ModuleSource* moduleSource;
+};
+
+void runRustBootstrap(jsg::Lock& js,
+    CompatibilityFlags::Reader flags,
+    kj::Maybe<const EmbedderBootstrap&> embedder,
+    const jsg::ModuleSource* moduleSource) {
+  auto host = std::make_unique<RustScriptHost>(getScriptTable(), embedder, moduleSource);
+  auto canonicalFlags = capnp::canonicalize(flags);
+  checkRust(
+      rust_bootstrap::run(js.v8Isolate, kj::mv(host), canonicalFlags.asBytes().as<kj_rs::Rust>()));
+}
+
+void stashRustBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context) {
+  // CreateBlob rejects live global handles: release the state as for any context being
+  // disposed, whether or not the stash succeeds.
+  KJ_DEFER(rust_bootstrap::cleanup(context));
+  // The zygote's top-level evaluation has left its context scope; making the stash needs the
+  // context entered.
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+    if (rust_bootstrap::current_state(js.v8Isolate) != nullptr) {
+      checkRust(rust_bootstrap::stash_for_snapshot(js.v8Isolate));
+    }
+  });
+}
+
 }  // namespace
 
 EmbedderBootstrap::EmbedderBootstrap(jsg::Bundle::Reader bundle, kj::StringPtr prefix)
@@ -1220,11 +1409,9 @@ EmbedderBootstrap::EmbedderBootstrap(jsg::Bundle::Reader bundle, kj::StringPtr p
       "embedder bootstrap bundle is missing its entry point", entryPoint);
 }
 
-kj::Maybe<jsg::Module::Reader> EmbedderBootstrap::tryGetScript(kj::StringPtr specifier) const {
-  KJ_IF_SOME(script, scripts.find(specifier)) {
-    return script;
-  }
-  return kj::none;
+kj::Maybe<const jsg::Module::Reader&> EmbedderBootstrap::tryGetScript(
+    kj::ArrayPtr<const char> specifier) const {
+  return scripts.find(specifier);
 }
 
 void runPerIsolateBootstrap(jsg::Lock& js,
@@ -1243,6 +1430,11 @@ void runPerIsolateBootstrap(jsg::Lock& js,
       "per-isolate bootstrap bundle is missing 'main' entry point");
 
   JSG_TRY(js) {
+    if (chooseLoader(js) == jsg::BootstrapLoader::RUST) {
+      // Also restores from a snapshot and removes the WeakRef globals, as below.
+      runRustBootstrap(js, flags, embedder, moduleSource);
+      return;
+    }
     if (js.isStartingFromSnapshot()) {
       // A context deserialized from a startup snapshot. The scripts' effects came with it: the
       // globals main installed, every module's exports, the closures holding require(),
@@ -1267,6 +1459,7 @@ void runPerIsolateBootstrap(jsg::Lock& js,
 }
 
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
+  rust_bootstrap::cleanup(context);
   KJ_IF_SOME(state, tryGetBootstrapState(context)) {
     delete &state;
     jsg::setAlignedPointerInEmbedderData(
@@ -1276,6 +1469,13 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
 
 void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context) {
   KJ_REQUIRE(js.isPreparingSnapshot());
+  if (tryGetBootstrapState(context) == kj::none) {
+    stashRustBootstrapForSnapshot(js, context);
+    return;
+  }
+  // CreateBlob rejects live global handles: release the C++ state as for any context being
+  // disposed, whether or not the stash succeeds.
+  KJ_DEFER(cleanupPerIsolateBootstrap(js, context));
   KJ_IF_SOME(state, tryGetBootstrapState(context)) {
     // The zygote's top-level evaluation has left its context scope; creating the objects and
     // setting their properties needs the context entered.
@@ -1301,30 +1501,66 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
               .getHandle(js));
       bag.set(js, STASH_CACHE, cache);
       auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
-      isolateBase.mutableSnapshotArtifact().bootstrapStateIndex =
-          isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(bag));
+      // Outside a braced initializer, which the macro would split at its commas.
+      auto index = isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(bag));
+      isolateBase.mutableSnapshotArtifact().bootstrapState =
+          jsg::SnapshotArtifact::PinnedBootstrapState(index, jsg::BootstrapLoader::CPP);
     });
   }
-  // CreateBlob rejects live global handles: release the C++ state as for any context being
-  // disposed.
-  cleanupPerIsolateBootstrap(js, context);
 }
 
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
-  return getBootstrapState(js).tryGetLoadedExports(js, specifier);
+  KJ_SWITCH_ONEOF(getCurrentBootstrap(js)) {
+    KJ_CASE_ONEOF(state, const rust_bootstrap::State*) {
+      auto result = rust::jsg::maybe_local_from_ffi<v8::Value>(
+          rust_bootstrap::loaded_exports(js.v8Isolate, *state, toRustBytes(specifier)));
+      v8::Local<v8::Value> exports;
+      if (result.ToLocal(&exports)) {
+        return jsg::JsValue(exports);
+      }
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(state, BootstrapState*) {
+      return state->tryGetLoadedExports(js, specifier);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::JsValue requireBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
-  auto& state = getBootstrapState(js);
-  KJ_IF_SOME(exports, state.tryGetLoadedExports(js, specifier)) {
-    return exports;
+  KJ_SWITCH_ONEOF(getCurrentBootstrap(js)) {
+    KJ_CASE_ONEOF(state, const rust_bootstrap::State*) {
+      return checkRust(
+          rust_bootstrap::require_exports(js.v8Isolate, *state, toRustBytes(specifier)));
+    }
+    KJ_CASE_ONEOF(state, BootstrapState*) {
+      KJ_IF_SOME(exports, state->tryGetLoadedExports(js, specifier)) {
+        return exports;
+      }
+      return state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern(specifier));
+    }
   }
-  return state.requireFn.getHandle(js).call(js, js.undefined(), js.strIntern(specifier));
+  KJ_UNREACHABLE;
 }
 
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
     jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name) {
-  auto& state = getBootstrapState(js);
+  BootstrapState* cppState = nullptr;
+  KJ_SWITCH_ONEOF(getCurrentBootstrap(js)) {
+    KJ_CASE_ONEOF(state, const rust_bootstrap::State*) {
+      // `undefined` if there is no such function.
+      auto function = checkRust(rust_bootstrap::exported_function(
+          js.v8Isolate, *state, toRustBytes(specifier), toRustBytes(name)));
+      if (function.isUndefined()) {
+        return kj::none;
+      }
+      return jsg::JsFunction(v8::Local<v8::Value>(function).As<v8::Function>());
+    }
+    KJ_CASE_ONEOF(state, BootstrapState*) {
+      cppState = state;
+    }
+  }
+  auto& state = *cppState;
   auto normalized = normalizeSpecifier(specifier);
 
   KJ_IF_SOME(functions, state.functionCache.find(normalized)) {
@@ -1347,10 +1583,17 @@ kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
 }
 
 void setBootstrapExportForTest(jsg::Lock& js, kj::StringPtr specifier, jsg::JsValue exports) {
-  auto& state = getBootstrapState(js);
-  auto normalized = normalizeSpecifier(specifier);
-  state.functionCache.erase(normalized);
-  state.cache.upsert(kj::str(normalized), exports.addRef(js));
+  KJ_SWITCH_ONEOF(getCurrentBootstrap(js)) {
+    KJ_CASE_ONEOF(state, const rust_bootstrap::State*) {
+      rust_bootstrap::set_exports_for_test(js.v8Isolate, *state, toRustBytes(specifier),
+          rust::jsg::to_ffi(v8::Local<v8::Value>(exports)));
+    }
+    KJ_CASE_ONEOF(state, BootstrapState*) {
+      auto normalized = normalizeSpecifier(specifier);
+      state->functionCache.erase(normalized);
+      state->cache.upsert(kj::str(normalized), exports.addRef(js));
+    }
+  }
 }
 
 }  // namespace workerd

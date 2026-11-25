@@ -37,6 +37,8 @@ namespace workerd::util {
 //    `my-new-feature`. At runtime, the full autogate name will expand to
 //    `workerd-autogate-my-new-feature`.
 // 2. Guard your code with Autogate::isEnabled(AutogateKey::YOUR_GATE_KEY).
+//    Rust code lists the enabled gates by name with `autogate::enabled()`
+//    (//src/workerd/util/autogate).
 //
 // Testing autogated code paths:
 //
@@ -160,7 +162,11 @@ namespace workerd::util {
   V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
   /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
      than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
-  V(RUST_COMPAT_DATE)
+  V(RUST_COMPAT_DATE)                                                                              \
+  /* The per-isolate bootstrap's loader (require(), its cache and the snapshot stash) is the Rust  \
+     one in src/workerd/api/per-isolate-bootstrap/ rather than the C++ one in                      \
+     api/per-isolate-bootstrap.c++. */                                                             \
+  V(RUST_PER_ISOLATE_BOOTSTRAP)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -43,6 +43,16 @@ mod ffi {
         Minor = 1,
     }
 
+    /// What became of the compile caches given to a harness's isolate, as its
+    /// `jsg::IsolateObserver` heard.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct CompileCacheCounts {
+        /// Caches that V8 used.
+        found: u32,
+        /// Caches refused by the compatibility check or by V8 while compiling.
+        rejected: u32,
+    }
+
     /// Whether resource methods get V8 Fast API callbacks.
     enum FastApi {
         Disabled = 0,
@@ -218,12 +228,6 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
 
-        /// The key of the V8 private property `name`, as the per-isolate bootstrap gives it to
-        /// JavaScript.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
-        pub unsafe fn private_symbol(isolate: *mut Isolate, name: &str) -> Result<Local>;
-
         /// Disallows JavaScript execution as JSG code sees it, or allows it again. Fails if it
         /// allows it more often than it disallowed it.
         #[expect(clippy::allow_attributes)]
@@ -246,6 +250,12 @@ mod ffi {
             isolate: *mut Isolate,
             module: KjOwn<CompiledWasmModule>,
         ) -> Result<Local>;
+
+        /// `v8::ScriptCompiler::CreateCodeCacheForFunction()` of `function`.
+        pub unsafe fn create_code_cache(isolate: *mut Isolate, function: Local) -> Result<Vec<u8>>;
+
+        /// What became of the compile caches given to the isolate of a `TestHarness`.
+        pub unsafe fn compile_cache_counts(isolate: *mut Isolate) -> CompileCacheCounts;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
@@ -284,6 +294,8 @@ mod ffi {
         pub unsafe fn cpp_sees_root_frame(isolate: *mut Isolate) -> bool;
     }
 }
+
+pub use ffi::CompileCacheCounts;
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
 
@@ -778,6 +790,28 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// A code cache of `function`, which V8 accepts when compiling the same source again.
+    ///
+    /// # Panics
+    ///
+    /// If V8 makes no code cache of the function.
+    pub fn create_code_cache(
+        lock: &mut jsg::Lock<'_>,
+        function: jsg::v8::Local<'_, jsg::v8::Function>,
+    ) -> Vec<u8> {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock), and `function` is in its
+        // scope.
+        unsafe { ffi::create_code_cache(lock.isolate().as_ffi(), function.into_ffi()) }
+            .expect("V8 should make a code cache of a compiled function")
+    }
+
+    /// What became of the compile caches given to the harness's isolate so far.
+    #[must_use]
+    pub fn compile_cache_counts(lock: &mut jsg::Lock<'_>) -> ffi::CompileCacheCounts {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock), and a harness made it.
+        unsafe { ffi::compile_cache_counts(lock.isolate().as_ffi()) }
+    }
+
     /// The local handles alive in all of the isolate's open handle scopes. Tests compare it with
     /// counts taken earlier.
     #[must_use]
@@ -834,14 +868,10 @@ impl Harness {
     ///
     /// Panics if creating it throws.
     pub fn private_symbol<'s>(lock: &mut jsg::Lock<'s>, name: &str) -> v8::Local<'s, v8::Value> {
-        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which the result belongs to.
-        unsafe {
-            v8::Local::from_ffi(
-                ffi::private_symbol(lock.isolate().as_ffi(), name)
-                    .expect("creating the symbol should not throw"),
-            )
-        }
+        let name = v8::String::new_from_str(lock, name).expect("the name should fit in a string");
+        v8::Private::for_api(lock, name)
+            .to_property_key(lock)
+            .expect("creating the symbol should not throw")
     }
 
     /// Disallows JavaScript execution as JSG code sees it, as `jsg::DisallowJavaScriptScope`

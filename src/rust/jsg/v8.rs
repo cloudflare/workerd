@@ -478,6 +478,8 @@ pub mod ffi {
         #[nothrow]
         pub unsafe fn local_is_promise(value: &Local) -> bool;
         #[nothrow]
+        pub unsafe fn local_is_data_view(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_name(value: &Local) -> bool;
@@ -689,6 +691,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             object: &Local,
             prototype: Local,
+        ) -> KjMaybe<bool>;
+        // Leaves what a Proxy trap throws pending.
+        pub unsafe fn local_object_delete_property(
+            isolate: *mut Isolate,
+            object: &Local,
+            key: &Local,
         ) -> KjMaybe<bool>;
 
         // Local<Promise>
@@ -1172,6 +1180,8 @@ pub mod ffi {
         Int32,
         Uint32,
         Float64,
+        /// A JavaScript value, passed as its `v8::Local<v8::Value>`.
+        Value,
     }
 
     pub struct FastApiDescriptor {
@@ -1333,6 +1343,71 @@ pub mod ffi {
         pub unsafe fn utf8_value_drop(value: Utf8Value);
         pub unsafe fn utf8_value_length(value: &Utf8Value) -> usize;
         pub unsafe fn utf8_value_data(value: &Utf8Value) -> *const u8;
+    }
+
+    /// Whether a native function has side effects, as V8's debugger and REPL need to know.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SideEffectType {
+        HasSideEffect,
+        HasNoSideEffect,
+    }
+
+    /// What [`super::FunctionTemplate::new`] passes to `v8::FunctionTemplate::New()`: the
+    /// callback, whether the function can be called with `new`, whether it has side effects,
+    /// and the fast callback V8 may call instead.
+    pub struct FunctionTemplateDescriptor {
+        pub callback: usize,
+        pub behavior: ConstructorBehavior,
+        pub side_effect: SideEffectType,
+        pub fast: KjMaybe<FastApiDescriptor>,
+    }
+
+    // Native functions, keys and scripts for the runtime's internal JavaScript; see `ffi.h`.
+    unsafe extern "C++" {
+        pub unsafe fn function_template_new(
+            isolate: *mut Isolate,
+            descriptor: &FunctionTemplateDescriptor,
+        ) -> Local;
+        pub unsafe fn local_function_template_get_function(
+            isolate: *mut Isolate,
+            tmpl: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn symbol_for_api(isolate: *mut Isolate, name: &Local) -> Local;
+        pub unsafe fn private_for_api(isolate: *mut Isolate, name: &Local) -> Local;
+        pub unsafe fn private_to_property_key(
+            isolate: *mut Isolate,
+            private_symbol: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_object_set_lazy_data_property(
+            isolate: *mut Isolate,
+            object: &Local,
+            key: &Local,
+            getter: usize,
+            data: &Local,
+            attributes: u8,
+        ) -> KjMaybe<bool>;
+        pub unsafe fn pci_get_data(info: *mut PropertyCallbackInfo) -> Local;
+        pub unsafe fn string_new_external_one_byte(
+            isolate: *mut Isolate,
+            bytes: &'static [u8],
+        ) -> MaybeLocal;
+        pub unsafe fn script_compiler_compile_function(
+            isolate: *mut Isolate,
+            source: &Local,
+            origin: &str,
+            params: &[&str],
+            compile_cache: &[u8],
+        ) -> MaybeLocal;
+        pub unsafe fn isolate_is_starting_from_snapshot(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_is_preparing_snapshot(isolate: *mut Isolate) -> bool;
+        pub unsafe fn context_pin_into_snapshot(
+            isolate: *mut Isolate,
+            value: &Local,
+        ) -> KjMaybe<usize>;
+        pub unsafe fn context_extract_once_from_snapshot(
+            isolate: *mut Isolate,
+            index: usize,
+        ) -> MaybeLocal;
     }
 
     /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
@@ -1506,6 +1581,27 @@ impl String {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe { Local::from_ffi(ffi::local_string_empty(isolate.as_ffi())) }
+    }
+
+    /// Creates a one-byte (Latin-1) string over `data` without copying it, like C++
+    /// `v8::String::NewExternalOneByte()`. Under the address sanitizer, which cannot trace V8's
+    /// external string resources, the bytes are copied.
+    ///
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes or V8 fails to create
+    /// the string.
+    pub fn new_external_one_byte<'s>(
+        lock: &mut crate::Lock<'s>,
+        data: &'static [u8],
+    ) -> Option<Local<'s, Self>> {
+        Self::v8_length(data.len())?;
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active; `data`
+        // lives for the rest of the process.
+        unsafe {
+            Local::from_ffi_maybe(ffi::string_new_external_one_byte(
+                lock.isolate().as_ffi(),
+                data,
+            ))
+        }
     }
 
     /// Creates a new string from a `&str`.
@@ -1695,6 +1791,32 @@ impl String {
 pub struct Object;
 pub struct Function;
 pub struct FunctionTemplate;
+/// C++ `v8::ScriptCompiler`, which has only static functions.
+pub struct ScriptCompiler;
+/// A V8 private symbol (`v8::Private`): the key of a property that is never inherited,
+/// reflected or seen by a Proxy trap. Not a [`Value`]; see [`Local::<Private>::to_property_key`].
+pub struct Private;
+
+/// The attributes of a property, as C++ `v8::PropertyAttribute`: none, or any of the others
+/// combined with `|`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PropertyAttribute(u8);
+
+impl PropertyAttribute {
+    /// Writable, enumerable and configurable.
+    pub const NONE: Self = Self(0);
+    pub const READ_ONLY: Self = Self(1);
+    pub const DONT_ENUM: Self = Self(2);
+    pub const DONT_DELETE: Self = Self(4);
+}
+
+impl std::ops::BitOr for PropertyAttribute {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
 pub struct DictionaryTemplate;
 pub struct Array;
 pub struct TypedArray;
@@ -2241,6 +2363,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_shared_array_buffer(self.raw()) }
     }
 
+    /// Returns true if the value is a `DataView`.
+    pub fn is_data_view(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_data_view(self.raw()) }
+    }
+
     /// Returns true if the value is a JavaScript function.
     pub fn is_function(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -2435,6 +2563,99 @@ impl<T: Traced> GarbageCollected for FunctionData<T> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
+    }
+}
+
+impl FunctionTemplate {
+    /// Creates a function template, like C++ `v8::FunctionTemplate::New()` with a plain
+    /// callback and no data, signature or length. [`Local::<FunctionTemplate>::get_function`]
+    /// makes its function.
+    ///
+    /// `behavior` says whether the function can be called with `new`, and `side_effect` tells
+    /// V8's debugger whether calling it has side effects. With fast calls enabled for the
+    /// isolate, V8 may call `fast` instead of `callback` from optimized code; see
+    /// [`crate::fast_api::function`]. The callbacks are registered for startup snapshots.
+    ///
+    /// [`crate::function_callback`] turns a closure into a callback.
+    pub fn new<'s>(
+        lock: &mut Lock<'s>,
+        callback: crate::RawFunctionCallback,
+        behavior: ffi::ConstructorBehavior,
+        side_effect: ffi::SideEffectType,
+        fast: Option<crate::fast_api::FastCallback>,
+    ) -> Local<'s, Self> {
+        let descriptor = ffi::FunctionTemplateDescriptor {
+            callback: callback as usize,
+            behavior,
+            side_effect,
+            fast: fast.map(crate::fast_api::FastCallback::into_ffi).into(),
+        };
+        // SAFETY: isolate is valid and locked, with a HandleScope open (guaranteed by Lock);
+        // `callback` is a V8 function callback, and `fast`, which `fast_api` made, a fast
+        // callback whose signature its descriptor states.
+        unsafe {
+            Local::from_ffi(ffi::function_template_new(
+                lock.isolate().as_ffi(),
+                &descriptor,
+            ))
+        }
+    }
+}
+
+impl<'s> Local<'s, FunctionTemplate> {
+    /// The template's function in the entered context, like C++
+    /// `v8::FunctionTemplate::GetFunction()`: the same function for every call in a context.
+    ///
+    /// Fails as [`Function::new`] does.
+    pub fn get_function(self, lock: &mut Lock<'s>) -> crate::Result<Local<'s, Function>> {
+        self.debug_assert_isolate(lock);
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock); the template is a handle in its scope.
+        unsafe {
+            Local::from_ffi_maybe(ffi::local_function_template_get_function(
+                lock.isolate().as_ffi(),
+                self.raw(),
+            ))
+        }
+        .ok_or_else(Error::pending)
+    }
+}
+
+impl ScriptCompiler {
+    /// Compiles `source` as the body of a function whose parameters are named `params`, like
+    /// C++ `v8::ScriptCompiler::CompileFunction()`, with the script origin `origin`.
+    ///
+    /// Consumes `compile_cache`, the code cache of the same source and parameters, if it is
+    /// non-empty and V8 accepts it, and tells the isolate's observer whether V8 did. A cache
+    /// that V8 rejects only costs the compile.
+    ///
+    /// # Errors
+    ///
+    /// If the source does not compile, or an exception or a termination is already pending,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
+    /// true.
+    pub fn compile_function<'s>(
+        lock: &mut Lock<'s>,
+        source: Local<'s, String>,
+        origin: &str,
+        params: &[&str],
+        compile_cache: &[u8],
+    ) -> crate::Result<Local<'s, Function>> {
+        source.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+            // (guaranteed by Lock); `source` is a handle in its scope, and `compile_cache`
+            // outlives the call.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::script_compiler_compile_function(
+                    lock.isolate().as_ffi(),
+                    source.raw(),
+                    origin,
+                    params,
+                    compile_cache,
+                ))
+            })
+        })
     }
 }
 
@@ -4260,6 +4481,52 @@ impl Symbol {
             Local::from_ffi(handle)
         }
     }
+
+    /// The symbol of the isolate's API registry for `name`, like C++ `v8::Symbol::ForApi()`:
+    /// every call with an equal name returns the same symbol, which JavaScript cannot get from
+    /// `Symbol.for()`.
+    pub fn for_api<'s>(lock: &mut crate::Lock<'s>, name: Local<'s, String>) -> Local<'s, Self> {
+        name.debug_assert_isolate(lock);
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active; `name` is
+        // a handle in it.
+        unsafe { Local::from_ffi(ffi::symbol_for_api(lock.isolate().as_ffi(), name.raw())) }
+    }
+}
+
+impl Private {
+    /// The private symbol of the isolate's API registry for `name`, like C++
+    /// `v8::Private::ForApi()`: every call with an equal name returns the same one, which C++
+    /// `jsg::JsObject::getPrivate()` also reaches by that name.
+    pub fn for_api<'s>(lock: &mut crate::Lock<'s>, name: Local<'s, String>) -> Local<'s, Self> {
+        name.debug_assert_isolate(lock);
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active; `name` is
+        // a handle in it.
+        unsafe { Local::from_ffi(ffi::private_for_api(lock.isolate().as_ffi(), name.raw())) }
+    }
+}
+
+impl<'s> Local<'s, Private> {
+    /// The private symbol as a value that JavaScript can use as a property key:
+    /// `object[key]` reads and writes the private property, as C++
+    /// `v8::Object::GetPrivate()` and `SetPrivate()` do. V8's API offers no such conversion, so
+    /// this reads it back from an object made from a template that holds it, as Node.js does.
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, or V8 fails to make the object.
+    pub fn to_property_key(self, lock: &mut crate::Lock<'s>) -> crate::Result<Local<'s, Value>> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: Lock guarantees the isolate is locked, a context entered and a
+            // HandleScope active; `self` is a handle in it.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::private_to_property_key(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                ))
+            })
+        })
+    }
 }
 
 impl<'s> Local<'s, Symbol> {
@@ -4607,6 +4874,70 @@ impl<'s> Local<'s, Object> {
                     name.raw(),
                 ))
             })
+        })
+    }
+
+    /// Defines `key` as a data property with `attributes`, whose value `getter` computes when the
+    /// property is first read, like C++ `v8::Object::SetLazyDataProperty()`. V8 then replaces the property with a data property
+    /// holding the value, so a read that returns calls `getter` once; one that throws leaves the
+    /// property lazy. The getter gets `data` from [`PropertyCallbackInfo::data`], and is
+    /// registered for startup snapshots, which serialize `data` into the isolate's snapshot
+    /// while the property is still lazy: `data` must not be specific to one context.
+    ///
+    /// [`crate::accessor_name_getter_callback`] turns a closure into a getter.
+    ///
+    /// # Errors
+    ///
+    /// If the object refuses the property (a Proxy, or a non-extensible object), or an
+    /// exception or a termination is pending.
+    pub fn set_lazy_data_property(
+        self,
+        lock: &mut Lock<'s>,
+        key: Local<'s, Name>,
+        getter: crate::RawGetterCallback,
+        data: Local<'s, Value>,
+        attributes: PropertyAttribute,
+    ) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        key.debug_assert_isolate(lock);
+        data.debug_assert_isolate(lock);
+        // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock);
+        // the handles are in its scope, and `getter` is a V8 named property getter.
+        match Option::from(unsafe {
+            ffi::local_object_set_lazy_data_property(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                key.raw(),
+                getter as usize,
+                data.raw(),
+                attributes.0,
+            )
+        }) {
+            Some(true) => Ok(()),
+            Some(false) => Err(Error::new_type_error(
+                "Cannot define a lazy data property on the object",
+            )),
+            None => Err(Error::pending()),
+        }
+    }
+
+    /// Deletes the own property `key`, like JS `delete obj[key]` in sloppy mode: true if the
+    /// object has no such property afterwards, false if the property is not configurable.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `deleteProperty` trap throws, or an exception or a termination is already
+    /// pending, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn delete(self, lock: &mut Lock<'s>, key: Local<'s, Name>) -> crate::Result<bool> {
+        self.debug_assert_isolate(lock);
+        key.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock);
+            // both handles are in its scope.
+            Ok(Option::from(unsafe {
+                ffi::local_object_delete_property(lock.isolate().as_ffi(), self.raw(), key.raw())
+            }))
         })
     }
 
@@ -5133,6 +5464,12 @@ impl<'cb> PropertyCallbackInfo<'cb> {
     pub fn this(&self) -> Local<'cb, Value> {
         // SAFETY: self.0 is valid (guaranteed by constructor).
         unsafe { Local::from_ffi(ffi::pci_get_this(self.0)) }
+    }
+
+    /// The data the property was defined with, as by [`Local::<Object>::set_lazy_data_property`].
+    pub fn data(&self) -> Local<'cb, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(ffi::pci_get_data(self.0)) }
     }
 
     pub fn set_return_value(&mut self, value: Local<'cb, Value>) {

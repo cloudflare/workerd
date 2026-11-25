@@ -1,6 +1,7 @@
 #include "cxx-bridge.h"
 
 #include <workerd/jsg/compile-cache.h>
+#include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/type-wrapper.h>
 #include <workerd/rust/gen-compile-cache/main.rs.h>
@@ -56,9 +57,8 @@ State& getState(::rust::Slice<const ::rust::String> v8Flags) {
   return state;
 }
 
-// For scripts the runtime loads via CompileFunction with the pseudo-global parameters (see
-// PSEUDO_GLOBAL_NAMES in per-isolate-bootstrap.c++). The parameter list must match the
-// consumer's.
+// For scripts the runtime loads via CompileFunction with the pseudo-global parameters
+// (jsg::BOOTSTRAP_FUNCTION_PARAMS).
 //
 // TODO(cormick): Only the top-level wrapper is compiled here (everything, with `eager`), so inner
 // functions are still lazily compiled per isolate. Executing the scripts first would need the
@@ -69,21 +69,14 @@ v8::ScriptCompiler::CachedData* compileAsFunction(jsg::Lock& js,
     v8::ScriptCompiler::CompileOptions compileOptions) {
   v8::ScriptOrigin origin(resourceName);
   auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
-  static constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
-    "require"_kj,
-    "compatFlags"_kj,
-    "autogates"_kj,
-    "module"_kj,
-    "exports"_kj,
-    "primordials"_kj,
-    "utils"_kj,
-  };
-  v8::Local<v8::String> params[kj::size(PSEUDO_GLOBAL_NAMES)];
-  for (auto i: kj::indices(params)) {
-    params[i] = js.strIntern(PSEUDO_GLOBAL_NAMES[i]);
+  auto paramNames = *jsg::BOOTSTRAP_FUNCTION_PARAMS;
+  v8::LocalVector<v8::String> params(js.v8Isolate);
+  params.reserve(paramNames.size());
+  for (const auto& name: paramNames) {
+    params.push_back(js.strIntern(name));
   }
   auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-      js.v8Context(), &source, kj::size(params), params, 0, nullptr, compileOptions));
+      js.v8Context(), &source, params.size(), params.data(), 0, nullptr, compileOptions));
   return v8::ScriptCompiler::CreateCodeCacheForFunction(fn);
 }
 

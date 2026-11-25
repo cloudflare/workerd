@@ -144,14 +144,53 @@ impl FastApiReturn for () {
 
 /// A fast callback and the C signature V8 calls it with.
 ///
-/// Only [`method`] and [`static_method`] make one, from a closure, and nothing can change it, so
-/// the signature is always that of the callback.
+/// Only [`method`], [`static_method`] and [`function`] make one, from a closure, and nothing can
+/// change it, so the signature is always that of the callback.
 pub struct FastCallback(ffi::FastApiDescriptor);
 
 impl FastCallback {
     pub(crate) fn into_ffi(self) -> ffi::FastApiDescriptor {
         self.0
     }
+}
+
+/// Returns the fast callback of a native function that takes one JavaScript value, for
+/// [`crate::v8::FunctionTemplate::new`].
+///
+/// `f` gets the value as V8 passed it. A fast callback runs without a [`crate::Lock`] and must
+/// not call into JavaScript or allocate on the V8 heap, so `f` can only inspect the value or
+/// change state that needs no context, as `Promise::mark_as_handled` does.
+pub fn function<T, F>(f: F) -> FastCallback
+where
+    T: FastApiReturn,
+    F: UnitType + for<'a> Fn(crate::v8::Local<'a, crate::v8::Value>) -> T,
+{
+    unsafe extern "C" fn callback<T, F>(
+        _receiver: ffi::Local,
+        value: ffi::Local,
+        options: *mut ffi::FastApiCallbackOptions,
+    ) -> T::Raw
+    where
+        T: FastApiReturn,
+        F: UnitType + for<'a> Fn(crate::v8::Local<'a, crate::v8::Value>) -> T,
+    {
+        record_call();
+        // SAFETY: V8 passes the call's options, and the argument as a valid handle that lives
+        // for the call.
+        unsafe {
+            run(options, || {
+                // SAFETY: `function()` was handed a value of `F`.
+                let f = unit_value::<F>();
+                Ok(f(crate::v8::Local::from_ffi(value)))
+            })
+        }
+    }
+    let _ = f;
+    FastCallback(ffi::FastApiDescriptor {
+        callback: callback::<T, F> as *const () as usize,
+        return_type: T::TYPE,
+        arg_types: vec![FastApiType::Value],
+    })
 }
 
 /// Returns the fast callback of a method of `R`, which `#[jsg_method]` passes as `f`.

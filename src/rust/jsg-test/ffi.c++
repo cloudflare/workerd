@@ -61,11 +61,26 @@ namespace {
 // must start before any thread that will use it. `--allow-natives-syntax` lets tests optimize
 // functions on demand to reach fast callbacks.
 ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
+
+// Counts what became of the compile caches the isolate was given; compile_cache_counts() reads
+// the counts.
+class CountingObserver final: public ::workerd::jsg::IsolateObserver {
+ public:
+  void onCompileCacheFound(v8::Isolate*) const override {
+    ++found;
+  }
+  void onCompileCacheRejected(v8::Isolate*) const override {
+    ++rejected;
+  }
+
+  mutable uint32_t found = 0;
+  mutable uint32_t rejected = 0;
+};
 }  // namespace
 
 TestHarness::TestHarness(
     ::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags, FastApi fastApi)
-    : isolate(kj::heap<TestIsolate>(v8System, kj::heap<::workerd::jsg::IsolateObserver>())),
+    : isolate(kj::heap<TestIsolate>(v8System, kj::heap<CountingObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
@@ -557,19 +572,6 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
   }
 }
 
-::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  // A template's property may be a private symbol, which reading it gives as a symbol value.
-  v8::Local<v8::String> slot = js.strIntern("key"_kj);
-  auto holder = v8::ObjectTemplate::New(isolate);
-  holder->Set(slot,
-      v8::Private::ForApi(isolate, js.str(kj::ArrayPtr<const char>(name.data(), name.size()))));
-  auto context = js.v8Context();
-  v8::Local<v8::Value> key = ::workerd::jsg::check(
-      ::workerd::jsg::check(holder->NewInstance(context))->Get(context, slot));
-  return ::workerd::rust::jsg::to_ffi(kj::mv(key));
-}
-
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed) {
   ::workerd::jsg::Lock::from(isolate).setDisallowJavascriptExecution(disallowed);
 }
@@ -582,6 +584,25 @@ void set_allow_eval(Isolate* isolate, bool allow) {
     Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module) {
   return ::workerd::rust::jsg::to_ffi(
       ::workerd::jsg::check(v8::WasmModuleObject::FromCompiledModule(isolate, *module)));
+}
+
+::rust::Vec<uint8_t> create_code_cache(Isolate*, ::workerd::rust::jsg::Local function) {
+  auto* cache = v8::ScriptCompiler::CreateCodeCacheForFunction(
+      ::workerd::rust::jsg::local_from_ffi<v8::Function>(kj::mv(function)));
+  KJ_REQUIRE(cache != nullptr, "V8 made no code cache for the function");
+  KJ_DEFER(delete cache);
+  ::rust::Vec<uint8_t> bytes;
+  bytes.reserve(cache->length);
+  for (auto byte: kj::arrayPtr(cache->data, cache->length)) {
+    bytes.push_back(byte);
+  }
+  return bytes;
+}
+
+CompileCacheCounts compile_cache_counts(Isolate* isolate) {
+  auto& observer =
+      kj::downcast<CountingObserver>(::workerd::jsg::IsolateBase::from(isolate).getObserver());
+  return {.found = observer.found, .rejected = observer.rejected};
 }
 
 bool isolates_share_group(Isolate* a, Isolate* b) {

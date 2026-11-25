@@ -191,3 +191,19 @@ fn to_detail_string_describes_a_dom_exception_by_its_name_and_message() {
         Ok(())
     });
 }
+
+#[test]
+fn is_data_view_is_true_only_for_data_views() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        for (code, expected) in [
+            ("new DataView(new ArrayBuffer(4))", true),
+            ("new Uint8Array(4)", false),
+            ("new ArrayBuffer(4)", false),
+            ("({})", false),
+        ] {
+            let value = ctx.eval_raw(lock, code).unwrap();
+            assert_eq!(value.is_data_view(), expected, "{code}");
+        }
+        Ok(())
+    });
+}

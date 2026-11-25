@@ -98,6 +98,7 @@ pub use scope::RawSetterCallback;
 pub use scope::RawWildcardGetterCallback;
 pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
+pub use scope::accessor_name_getter_callback;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
@@ -916,6 +917,54 @@ impl<'s> Lock<'s> {
         unsafe {
             v8::Local::from_ffi(v8::ffi::isolate_current_context_global(
                 self.isolate().as_ffi(),
+            ))
+        }
+    }
+
+    /// Whether the isolate is being restored from a startup snapshot, so that the entered
+    /// context came from it.
+    pub fn is_starting_from_snapshot(&self) -> bool {
+        // SAFETY: Lock guarantees the isolate is valid and locked.
+        unsafe { v8::ffi::isolate_is_starting_from_snapshot(self.isolate().as_ffi()) }
+    }
+
+    /// Whether the isolate is a zygote preparing a startup snapshot.
+    pub fn is_preparing_snapshot(&self) -> bool {
+        // SAFETY: Lock guarantees the isolate is valid and locked.
+        unsafe { v8::ffi::isolate_is_preparing_snapshot(self.isolate().as_ffi()) }
+    }
+
+    /// Pins `value` into the snapshot of the entered context, and returns the index that
+    /// [`Lock::extract_once_from_snapshot`] takes it back by in a context restored from it.
+    ///
+    /// # Errors
+    ///
+    /// While an exception or a termination is pending, fails with an error for which
+    /// [`Error::is_pending`] is true, and pins nothing.
+    ///
+    /// # Panics
+    ///
+    /// Unless the isolate is preparing a snapshot.
+    pub fn pin_into_snapshot(&mut self, value: v8::Local<'s, v8::Value>) -> Result<usize, Error> {
+        assert!(self.is_preparing_snapshot(), "not preparing a snapshot");
+        value.debug_assert_isolate(self);
+        // SAFETY: Lock guarantees the isolate is valid and locked, with a context entered;
+        // `value` is a handle in its scope.
+        let index =
+            unsafe { v8::ffi::context_pin_into_snapshot(self.isolate().as_ffi(), value.raw()) };
+        Option::from(index).ok_or_else(Error::pending)
+    }
+
+    /// The value that the zygote pinned under `index` into the snapshot that the entered context
+    /// was restored from, or `None` if there is none, it was taken already (V8 hands each pinned
+    /// value out once), or an exception or a termination is pending.
+    pub fn extract_once_from_snapshot(&mut self, index: usize) -> Option<v8::Local<'s, v8::Value>> {
+        // SAFETY: Lock guarantees the isolate is valid and locked, with a context entered; the
+        // result is a handle in its scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(v8::ffi::context_extract_once_from_snapshot(
+                self.isolate().as_ffi(),
+                index,
             ))
         }
     }

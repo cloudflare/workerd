@@ -2727,7 +2727,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         });
 
         // Bundle the per-isolate bootstrap's JS-held state and pin it, the last of the record
-        // steps. This also releases the bootstrap's C++ state, which createSnapshotBlob() would
+        // steps. This also releases the loader's native state, which createSnapshotBlob() would
         // otherwise reject as a live handle; a context the zygote abandons releases it when the
         // context is disposed.
         stashPerIsolateBootstrapForSnapshot(lock, context);

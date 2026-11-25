@@ -407,7 +407,7 @@ TestFixture::TestFixture(SetupParams&& params)
           *memoryCacheProvider,
           defaultPythonConfig,
           /*inboundListeners=*/nullptr,
-          /*snapshotConfig=*/kj::none,
+          kj::mv(params.snapshotConfig),
           params.embedderBootstrap)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
@@ -493,6 +493,14 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
           [](kj::Function<kj::Own<Worker::Actor::WaitUntilTaskTracker>()>& factory) {
     return factory();
   }));
+}
+
+kj::Own<jsg::SnapshotArtifact> TestFixture::extractSnapshotArtifact() {
+  kj::Own<jsg::SnapshotArtifact> artifact;
+  workerIsolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& js) {
+    artifact = jsg::IsolateBase::from(js.v8Isolate).extractSnapshotArtifact();
+  });
+  return artifact;
 }
 
 void TestFixture::resetActor() {

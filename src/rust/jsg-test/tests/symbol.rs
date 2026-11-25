@@ -142,3 +142,33 @@ fn symbol_into_value_preserves_is_symbol() {
         Ok(())
     });
 }
+
+// =============================================================================
+// Symbol::for_api — the isolate's API registry
+// =============================================================================
+
+#[test]
+fn symbol_for_api_returns_one_symbol_per_name() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for (global, name) in [("a1", "test:a"), ("a2", "test:a"), ("b", "test:b")] {
+            let name = v8::String::new_from_str(lock, name).unwrap();
+            let symbol = v8::Symbol::for_api(lock, name);
+            ctx.set_global(lock, global, symbol);
+        }
+        assert!(ctx.eval::<bool>(lock, "a1 === a2 && a1 !== b").unwrap());
+        // Not the registry JavaScript reaches.
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "a1 !== Symbol.for('test:a') && a1.description === 'test:a'"
+            )
+            .unwrap()
+        );
+        let a: Local<'_, v8::Value> = ctx.eval_raw(lock, "a1").unwrap();
+        let a = Local::<v8::Symbol>::try_from(a).unwrap();
+        let description = a.description(lock).unwrap().to_string(lock);
+        assert_eq!(description, "test:a");
+        Ok(())
+    });
+}

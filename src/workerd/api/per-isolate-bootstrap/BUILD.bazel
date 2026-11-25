@@ -1,0 +1,43 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The loader of the per-isolate bootstrap (src/per_isolate/) in Rust.
+# api/per-isolate-bootstrap.c++ calls it under the RUST_PER_ISOLATE_BOOTSTRAP autogate.
+wd_rust_crate(
+    name = "per-isolate-bootstrap",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "utils.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/jsg:modules_capnp",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io:compat-date",
+        "//src/workerd/util/autogate",
+        "//src/workerd/util/perfetto",
+        "@crates_vendor//foldhash",
+    ],
+)
+
+# Separate from the bridge's :ffi.rs@cxx, which only includes ffi.h, so that the bridge never
+# closes a cycle through it.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/jsg",
+    ],
+)

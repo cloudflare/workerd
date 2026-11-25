@@ -145,6 +145,16 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-per-isolate-bootstrap",
+    srcs = ["bench-per-isolate-bootstrap.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/io",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-trace-scopes",
     srcs = ["bench-trace-scopes.c++"],
     deps = [":test-fixture"],

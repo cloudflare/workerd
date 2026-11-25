@@ -370,6 +370,10 @@ bool local_is_function(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
 }
 
+bool local_is_data_view(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsDataView();
+}
+
 bool local_is_promise(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsPromise();
 }
@@ -1693,6 +1697,8 @@ v8::CTypeInfo cTypeOf(FastApiType type) {
       return v8::CTypeInfo(v8::CTypeInfo::Type::kUint32);
     case FastApiType::Float64:
       return v8::CTypeInfo(v8::CTypeInfo::Type::kFloat64);
+    case FastApiType::Value:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kV8Value);
   }
   KJ_UNREACHABLE;
 }
@@ -2507,6 +2513,204 @@ void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::r
 
 void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount) {
   unwrap(adjustment).set(capAmount(amount));
+}
+
+// Native functions, keys and scripts for the runtime's internal JavaScript
+
+Local function_template_new(Isolate* isolate, const FunctionTemplateDescriptor& descriptor) {
+  // Both end up in the heap; a startup snapshot can only serialize them if they are in the
+  // isolate's external-reference table.
+  ::workerd::jsg::isolateRegisterExternalReference(
+      isolate, static_cast<intptr_t>(descriptor.callback));
+  const v8::CFunction* cFunction = nullptr;
+  if (::workerd::jsg::IsolateBase::from(isolate).isFastApiEnabled()) {
+    KJ_IF_SOME(fast, descriptor.fast) {
+      cFunction = &getFastCFunction(fast);
+      ::workerd::jsg::isolateRegisterExternalReference(
+          isolate, reinterpret_cast<intptr_t>(cFunction));
+    }
+  }
+  auto sideEffect = descriptor.side_effect == SideEffectType::HasNoSideEffect
+      ? v8::SideEffectType::kHasNoSideEffect
+      : v8::SideEffectType::kHasSideEffect;
+  return to_ffi(v8::FunctionTemplate::New(isolate,
+      reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)), {}, {},
+      0, static_cast<v8::ConstructorBehavior>(descriptor.behavior), sideEffect, cFunction));
+}
+
+MaybeLocal local_function_template_get_function(Isolate* isolate, const Local& tmpl) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Function>());
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::FunctionTemplate>(tmpl)->GetFunction(isolate->GetCurrentContext()));
+}
+
+Local symbol_for_api(Isolate* isolate, const Local& name) {
+  // No exceptionPending() check: Symbol::ForApi takes no context.
+  return to_ffi(
+      v8::Local<v8::Value>(v8::Symbol::ForApi(isolate, local_as_ref_from_ffi<v8::String>(name))));
+}
+
+Local private_for_api(Isolate* isolate, const Local& name) {
+  // No exceptionPending() check: Private::ForApi takes no context.
+  return to_ffi(v8::Private::ForApi(isolate, local_as_ref_from_ffi<v8::String>(name)));
+}
+
+MaybeLocal private_to_property_key(Isolate* isolate, const Local& priv) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  // The API does not type a private symbol as a v8::Value, so it is handed over as a template
+  // property, as Node.js hands over its own.
+  auto context = isolate->GetCurrentContext();
+  auto slot = ::workerd::jsg::v8StrIntern(isolate, "key"_kj);
+  auto holder = v8::ObjectTemplate::New(isolate);
+  holder->Set(slot, local_as_ref_from_ffi<v8::Private>(priv));
+  v8::Local<v8::Object> instance;
+  if (!holder->NewInstance(context).ToLocal(&instance)) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
+  return maybe_local_to_ffi(instance->Get(context, slot));
+}
+
+kj::Maybe<bool> local_object_set_lazy_data_property(Isolate* isolate,
+    const Local& object,
+    const Local& key,
+    size_t getter,
+    const Local& data,
+    uint8_t attributes) {
+  static_assert(v8::PropertyAttribute::ReadOnly == 1 && v8::PropertyAttribute::DontEnum == 2 &&
+      v8::PropertyAttribute::DontDelete == 4);
+  if (exceptionPending(isolate)) return kj::none;
+  // A property still lazy when a zygote takes its snapshot keeps the getter, and its data, in
+  // the heap.
+  ::workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(getter));
+  auto result = local_as_ref_from_ffi<v8::Object>(object)->SetLazyDataProperty(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Name>(key),
+      reinterpret_cast<v8::AccessorNameGetterCallback>(reinterpret_cast<void*>(getter)),
+      local_as_ref_from_ffi<v8::Value>(data), static_cast<v8::PropertyAttribute>(attributes));
+  if (exceptionPending(isolate)) return kj::none;
+  return result.FromMaybe(false);
+}
+
+kj::Maybe<bool> local_object_delete_property(
+    Isolate* isolate, const Local& object, const Local& key) {
+  if (exceptionPending(isolate)) return kj::none;
+  auto result = local_as_ref_from_ffi<v8::Object>(object)->Delete(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Name>(key));
+  if (result.IsNothing()) return kj::none;
+  return result.FromJust();
+}
+
+Local pci_get_data(PropertyCallbackInfo* info) {
+  return to_ffi(info->DataV2().As<v8::Value>());
+}
+
+namespace {
+
+// A one-byte external string over bytes that live for the rest of the process.
+class StaticOneByteString final: public v8::String::ExternalOneByteStringResource {
+ public:
+  StaticOneByteString(const char* data, size_t length): data_(data), length_(length) {}
+  const char* data() const override {
+    return data_;
+  }
+  size_t length() const override {
+    return length_;
+  }
+
+ private:
+  const char* data_;
+  size_t length_;
+};
+
+}  // namespace
+
+MaybeLocal string_new_external_one_byte(Isolate* isolate, ::rust::Slice<const uint8_t> bytes) {
+  auto resource =
+      new StaticOneByteString(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  // Only V8's heap, which LSAN can't trace, refers to the resource until V8 frees it.
+  __lsan_ignore_object(resource);
+#endif
+  return maybe_local_to_ffi(v8::String::NewExternalOneByte(isolate, resource));
+}
+
+MaybeLocal script_compiler_compile_function(Isolate* isolate,
+    const Local& source,
+    ::rust::Str origin,
+    ::rust::Slice<const ::rust::Str> params,
+    ::rust::Slice<const uint8_t> compile_cache) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Function>());
+  auto context = isolate->GetCurrentContext();
+  auto& observer = ::workerd::jsg::IsolateBase::from(isolate).getObserver();
+  auto originName = makeInternedStr(isolate, origin);
+  auto originText = kj::str(kj::arrayPtr(origin.data(), origin.size()));
+
+  // V8 takes ownership of the CachedData instance but not of its buffer, which the caller keeps
+  // alive.
+  v8::ScriptCompiler::CachedData* cachedData = nullptr;
+  if (compile_cache.size() > 0) {
+    cachedData = new v8::ScriptCompiler::CachedData(compile_cache.data(),
+        static_cast<int>(compile_cache.size()), v8::ScriptCompiler::CachedData::BufferNotOwned);
+    auto check = cachedData->CompatibilityCheck(isolate);
+    if (check != v8::ScriptCompiler::CachedData::kSuccess) {
+      LOG_WARNING_ONCE("NOSENTRY compile cache failed its compatibility check; scripts will be "
+                       "compiled from source",
+          originText, static_cast<int>(check));
+      observer.onCompileCacheRejected(isolate);
+      delete cachedData;
+      cachedData = nullptr;
+    }
+  }
+
+  // Source takes ownership of cachedData.
+  v8::ScriptCompiler::Source compilerSource(
+      local_as_ref_from_ffi<v8::String>(source), v8::ScriptOrigin(originName), cachedData);
+  auto options = v8::ScriptCompiler::kNoCompileOptions;
+  auto cached = compilerSource.GetCachedData();
+  if (cached != nullptr && !cached->rejected) {
+    options = v8::ScriptCompiler::kConsumeCodeCache;
+  }
+
+  v8::LocalVector<v8::String> paramNames(isolate);
+  paramNames.reserve(params.size());
+  for (auto param: params) {
+    paramNames.push_back(makeInternedStr(isolate, param));
+  }
+  auto result = v8::ScriptCompiler::CompileFunction(
+      context, &compilerSource, paramNames.size(), paramNames.data(), 0, nullptr, options);
+
+  if (options == v8::ScriptCompiler::kConsumeCodeCache && !result.IsEmpty()) {
+    if (compilerSource.GetCachedData()->rejected) {
+      LOG_WARNING_ONCE("NOSENTRY compile cache was rejected by V8 while compiling; scripts will "
+                       "be compiled from source",
+          originText);
+      observer.onCompileCacheRejected(isolate);
+    } else {
+      observer.onCompileCacheFound(isolate);
+    }
+  }
+  return maybe_local_to_ffi(result);
+}
+
+// Snapshots
+
+bool isolate_is_starting_from_snapshot(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).isStartingFromSnapshot();
+}
+
+bool isolate_is_preparing_snapshot(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).isPreparingSnapshot();
+}
+
+kj::Maybe<size_t> context_pin_into_snapshot(Isolate* isolate, const Local& value) {
+  if (exceptionPending(isolate)) return kj::none;
+  return ::workerd::jsg::IsolateBase::from(isolate).pinIntoSnapshot(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value));
+}
+
+MaybeLocal context_extract_once_from_snapshot(Isolate* isolate, size_t index) {
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(
+      isolate->GetCurrentContext()->GetDataFromSnapshotOnce<v8::Value>(index));
 }
 
 }  // namespace workerd::rust::jsg

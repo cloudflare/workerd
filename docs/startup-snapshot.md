@@ -93,7 +93,8 @@ all of these hold:
      level resolved or assigned (`ServiceWorkerGlobalScope::getSnapshotState()`), is pinned
      (`artifact.globalScopeStateIndex`);
    - `stashPerIsolateBootstrapForSnapshot()` bundles the per-isolate bootstrap's JS-held state
-     into one object and pins it (`artifact.bootstrapStateIndex`), the last of the record steps.
+     into one object and pins it (`artifact.bootstrapState`, with the loader that ran), the last
+     of the record steps.
 
    Only a top level that ran to completion is recorded. If it failed (a parse error, an uncaught
    exception, a startup limit: `impl->permanentException` is set), none of the record steps run
@@ -165,8 +166,9 @@ long as the isolate does. In order:
    (`snapshotRelink()`), `releaseSlotsWithChecks()` verifies every serialized slot was linked
    exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
    `Error.stackTraceLimit` state and deletions on top of the defaults V8 just installed.
-4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
-   pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), hands the
+4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's state from the
+   pinned object instead of running the bootstrap scripts, with the loader the artifact names
+   (`restoreBootstrapState()` in C++, `run_from_snapshot()` in Rust), hands the
    fresh global scope the recorded `process`/`Buffer` state (`restoreSnapshotState()`),
    re-registers each recorded listener in C++ (`EventTarget::restoreSnapshotListener()`, which
    runs no JavaScript and does not consult the global's possibly replaced `addEventListener`),
@@ -199,7 +201,7 @@ long as the isolate does. In order:
 | Rust JSG resource templates                  | isolate-level `AddData`, by `TypeId`                        | `rustResourceTemplates`           |
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
-| Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
+| Per-isolate bootstrap state                  | one pinned object, and the loader that made it              | `bootstrapState`                  |
 | `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
 | `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
