@@ -14,12 +14,10 @@
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/http.h>
-#include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
-#include <workerd/api/tracing.h>
 #include <workerd/api/util.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/access-info.h>
@@ -65,30 +63,6 @@ kj::Exception makeNeuterException(NeuterReason reason) {
 
 }  // namespace
 
-void ExecutionContext::waitUntil(kj::Promise<void> promise) {
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
-void ExecutionContext::passThroughOnException() {
-  IoContext::current().setFailOpen();
-}
-
-jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
-    jsg::JsObject params,
-    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
-    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
-  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
-}
-
-jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
-  // Hook for the embedding application to provide a CacheContext.
-  // The default Worker::Api implementation returns kj::none.
-  if (IoContext::hasCurrent()) {
-    return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
-  }
-  return kj::none;
-}
-
 jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
     CachePurgeOptions options,
     const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
@@ -103,15 +77,6 @@ jsg::Promise<CachePurgeResult> CacheContext::invalidate(jsg::Lock& js,
     const jsg::TypeHandler<CachePurgeResult>& resultHandler,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
   JSG_FAIL_REQUIRE(Error, "Cache invalidation is not available in this context.");
-}
-
-jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
-  // A new Tracing handle is allocated on first access only - `JSG_LAZY_INSTANCE_PROPERTY`
-  // uses V8's SetLazyDataProperty, which caches the getter result on the instance after the
-  // first call. So `ctx.tracing === ctx.tracing` and only one allocation per
-  // ExecutionContext. Tracing itself is stateless (no fields); the per-request state lives
-  // on IoContext::getCurrentUserTraceSpan(), which enterSpan consults at call time.
-  return js.alloc<Tracing>();
 }
 
 kj::StringPtr AccessContext::getAud() {
@@ -150,99 +115,14 @@ jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
   return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Undefined(js.v8Isolate)));
 }
 
-jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
-  // Pull the per-request AccessInfo (if any) off the current IncomingRequest.
-  if (!IoContext::hasCurrent()) return kj::none;
-  auto& ioctx = IoContext::current();
-  KJ_IF_SOME(info, ioctx.getAccessInfo()) {
-    return js.alloc<AccessContext>(ioctx.addObject(kj::addRef(info)));
-  }
-  return kj::none;
-}
-
-kj::String ExecutionContext::mapVirtualHost(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
-  // Set up override, or return existing magic hostname if override already exists.
-  return fetcher->mapVirtualHost(js, port);
-}
-
-void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
-  KJ_IF_SOME(r, reason) {
-    IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
-  } else {
-    IoContext::current().abort(IoContext::abortWithoutReasonException());
-  }
-
-  js.terminateExecutionNow();
-}
-
-kj::Maybe<jsg::JsValue> ExecutionContext::versionToJs(
-    jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo) {
-  auto featureFlags = FeatureFlags::get(js);
-  if (!featureFlags.getEnableVersionApi()) return kj::none;
-  return kj::mv(versionInfo).map([&js, &featureFlags](Worker::VersionInfo v) {
-    return v.toJs(js,
-        featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
-                                                   : PopulateVersionInfoMetadata::NO);
-  });
-}
-
 namespace exportedhandler {
 
-ExecutionContext::ExecutionContext(jsg::Ref<api::ExecutionContext> ctx): impl(kj::mv(ctx)) {}
-ExecutionContext::ExecutionContext(jsg::JsRef<jsg::JsObject> rust): impl(kj::mv(rust)) {}
-ExecutionContext::ExecutionContext(ExecutionContext&& other) = default;
-ExecutionContext& ExecutionContext::operator=(ExecutionContext&& other) = default;
-ExecutionContext::~ExecutionContext() noexcept(false) = default;
-
-ExecutionContext ExecutionContext::fromRust(jsg::Lock& js, jsg::JsObject wrapper) {
-  return ExecutionContext(jsg::JsRef<jsg::JsObject>(js, wrapper));
-}
-
-kj::Maybe<ExecutionContext> ExecutionContext::tryUnwrapRust(
+kj::Maybe<ExecutionContext> ExecutionContext::tryUnwrap(
     jsg::Lock& js, v8::Local<v8::Value> handle) {
-  if (!handle->IsObject() ||
-      !Worker::Isolate::from(js).getApi().isRustExecutionContext(js, handle)) {
+  if (!handle->IsObject() || !Worker::Isolate::from(js).getApi().isExecutionContext(js, handle)) {
     return kj::none;
   }
-  return fromRust(js, jsg::JsObject(handle.As<v8::Object>()));
-}
-
-ExecutionContext ExecutionContext::addRef(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
-      return ExecutionContext(cpp.addRef());
-    }
-    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
-      return ExecutionContext(rust.addRef(js));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-jsg::JsObject ExecutionContext::getHandle(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
-      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<api::ExecutionContext>>(),
-          "ExecutionContext is missing from the isolate type list");
-      return jsg::JsObject(handler.wrap(js, cpp.addRef()).As<v8::Object>());
-    }
-    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
-      return rust.getHandle(js);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-void ExecutionContext::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(impl) {
-    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
-      visitor.visit(cpp);
-    }
-    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
-      visitor.visit(rust);
-    }
-  }
+  return ExecutionContext(js, jsg::JsObject(handle.As<v8::Object>()));
 }
 
 }  // namespace exportedhandler

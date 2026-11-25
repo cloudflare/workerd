@@ -529,14 +529,6 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
-api::exportedhandler::ExecutionContext Worker::Api::newExecutionContext(jsg::Lock& js,
-    jsg::JsValue exports,
-    jsg::JsValue props,
-    kj::Maybe<VersionInfo> versionInfo) const {
-  return api::exportedhandler::ExecutionContext(
-      js.alloc<api::ExecutionContext>(js, exports, props, kj::mv(versionInfo)));
-}
-
 v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
     v8::Local<v8::Value> handler,
     v8::Local<v8::Value> env,

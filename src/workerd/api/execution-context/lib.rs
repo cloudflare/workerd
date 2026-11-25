@@ -5,12 +5,12 @@
 //! `ExecutionContext`, the `ctx` that the runtime passes to the handlers of a stateless
 //! entrypoint, and to the constructor of a `WorkerEntrypoint` or `WorkflowEntrypoint` class.
 //!
-//! It behaves as the C++ `api::ExecutionContext` (`src/workerd/api/global-scope.h`) does, which
-//! it replaces under the `rust-execution-context` autogate. C++ holds either one as an
-//! `api::exportedhandler::ExecutionContext`, and creates this one through
-//! `api::newRustExecutionContext()` (`execution-context.h`).
+//! C++ holds one as an `api::exportedhandler::ExecutionContext`, and creates it through
+//! `api::newExecutionContext()` (`execution-context.h`).
 
 mod ffi;
+
+use std::pin::Pin;
 
 use channel_interop::Fetcher;
 use ffi::bridge;
@@ -26,9 +26,7 @@ use jsg_macros::jsg_resource;
 
 /// The `ctx` of a request to a stateless entrypoint.
 ///
-/// Its members are those of the C++ class, in the same order and with the same placement: the
-/// methods on the prototype and the properties as lazy own data properties, gated by the same
-/// compatibility flags.
+/// The methods are on the prototype, and the properties are lazy own data properties.
 #[jsg_resource(name = "ExecutionContext")]
 pub struct ExecutionContext {
     /// `ctx.exports`: the Worker's loopback exports.
@@ -82,8 +80,10 @@ impl ExecutionContext {
         self.props.as_local(lock)
     }
 
-    /// Calls the `[restore]()` method of the current entrypoint with `params`, returning a value
-    /// that can be persisted in storage; see C++ `ExecutionContext::restore()`.
+    /// Calls the `[restore]()` method of the current entrypoint with `params`, and returns its
+    /// result, except that the returned value can be persisted in storage. Persistence works by
+    /// replaying the call whenever the value is loaded from storage again, so the contents of
+    /// `params` must themselves be storable. The result must be a `Fetcher` or an `RpcStub`.
     #[jsg_method]
     pub fn restore<'s>(
         &self,
@@ -171,5 +171,56 @@ impl Resource for ExecutionContext {
         registry.add(Self::map_virtual_host_member());
         registry.add(Self::get_tracing_member(PropertyPlacement::LazyInstance));
         registry.add(Self::abort_member());
+        registry.ts_override(
+            match (
+                flags.get_enable_ctx_exports(),
+                flags.get_enable_version_api(),
+            ) {
+                (true, true) => {
+                    "<Props = unknown> {
+                      readonly props: Props;
+                      readonly exports: Cloudflare.Exports;
+                      readonly version?: {
+                        readonly metadata?: { readonly id: string; };
+                        readonly cohort?: string;
+                        readonly key?: string;
+                        readonly override?: string;
+                      };
+                      readonly access?: CloudflareAccessContext;
+                    }"
+                }
+                (true, false) => {
+                    "<Props = unknown> {
+                      readonly props: Props;
+                      readonly exports: Cloudflare.Exports;
+                      readonly access?: CloudflareAccessContext;
+                    }"
+                }
+                (false, true) => {
+                    "<Props = unknown> {
+                      readonly props: Props;
+                      readonly version?: {
+                        readonly metadata?: { readonly id: string; };
+                        readonly cohort?: string;
+                        readonly key?: string;
+                        readonly override?: string;
+                      };
+                      readonly access?: CloudflareAccessContext;
+                    }"
+                }
+                (false, false) => {
+                    "<Props = unknown> {
+                      readonly props: Props;
+                      readonly access?: CloudflareAccessContext;
+                    }"
+                }
+            },
+        );
     }
+}
+
+/// Registers `ExecutionContext` with the RTTI export. No module exports it: C++ RTTI refers to it
+/// through `api::exportedhandler::ExecutionContext`, the `ctx` of the handler signatures.
+fn register_types(registry: Pin<&mut jsg::v8::ffi::ModuleRegistry>) {
+    jsg::modules::add_type::<ExecutionContext>(registry);
 }

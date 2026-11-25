@@ -10,19 +10,15 @@
 
 namespace workerd::api {
 
-// Whether Worker::Api::newExecutionContext() creates Rust ExecutionContexts (lib.rs) rather than
-// C++ ones: the `rust-execution-context` autogate. An implementation of Worker::Api that can
-// create them calls newRustExecutionContext() when this is true, and overrides
-// Worker::Api::isRustExecutionContext() with isRustExecutionContext().
-bool rustExecutionContextEnabled();
-
-// Creates a Rust ExecutionContext, the `ctx` of a stateless entrypoint.
-exportedhandler::ExecutionContext newRustExecutionContext(jsg::Lock& js,
+// Creates an ExecutionContext (lib.rs), the `ctx` of a stateless entrypoint, for an
+// implementation of Worker::Api::newExecutionContext().
+exportedhandler::ExecutionContext newExecutionContext(jsg::Lock& js,
     jsg::JsValue exports,
     jsg::JsValue props,
     kj::Maybe<Worker::VersionInfo> versionInfo);
 
-// Whether `value` is a Rust ExecutionContext.
-bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value);
+// Whether `value` is an ExecutionContext, for an implementation of
+// Worker::Api::isExecutionContext().
+bool isExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value);
 
 }  // namespace workerd::api

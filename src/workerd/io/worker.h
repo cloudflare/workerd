@@ -55,7 +55,6 @@ struct QueueExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class CacheContext;
-class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
@@ -744,20 +743,18 @@ class Worker::Api {
     return kj::none;
   }
 
-  // Creates the `ctx` passed to a stateless entrypoint's handlers, or to its class constructor.
-  // `versionInfo` is the version of the Worker handling the request, if known. The default
-  // implementation creates a C++ api::ExecutionContext.
+  // Creates the `ctx` passed to a stateless entrypoint's handlers, or to its class constructor:
+  // the Rust ExecutionContext of src/workerd/api/execution-context/, which io cannot depend on.
+  // `versionInfo` is the version of the Worker handling the request, if known. An implementation
+  // calls api::newExecutionContext() (execution-context.h).
   virtual api::exportedhandler::ExecutionContext newExecutionContext(jsg::Lock& js,
       jsg::JsValue exports,
       jsg::JsValue props,
-      kj::Maybe<VersionInfo> versionInfo) const;
+      kj::Maybe<VersionInfo> versionInfo) const = 0;
 
-  // Whether `value` is a Rust ExecutionContext, which a handler may be passed as its `ctx`; see
-  // newExecutionContext(). An implementation that creates them overrides this. The default
-  // returns false.
-  virtual bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const {
-    return false;
-  }
+  // Whether `value` is an ExecutionContext, for converting a value from JavaScript to one. An
+  // implementation calls api::isExecutionContext() (execution-context.h).
+  virtual bool isExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const = 0;
 
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).

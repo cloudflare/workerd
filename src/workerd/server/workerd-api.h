@@ -78,7 +78,7 @@ class WorkerdApi final: public Worker::Api {
       jsg::JsValue exports,
       jsg::JsValue props,
       kj::Maybe<Worker::VersionInfo> versionInfo) const override;
-  bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const override;
+  bool isExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const override;
   const jsg::IsolateObserver& getObserver() const override;
   void setIsolateObserver(IsolateObserver&) override;
 

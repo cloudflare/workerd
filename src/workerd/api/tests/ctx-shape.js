@@ -2,9 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// The shape of `ctx` as JavaScript observes it. The rust-execution-context autogate swaps the C++
-// ExecutionContext for the Rust one, so the @all-autogates variant runs these assertions against
-// the Rust class, and the other variants against the C++ class.
+// The shape of `ctx` as JavaScript observes it.
 
 import {
   deepStrictEqual,

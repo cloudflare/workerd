@@ -13,16 +13,28 @@
 #include <workerd/api/tracing.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/access-info.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
-bool rustExecutionContextEnabled() {
-  return util::Autogate::isEnabled(util::AutogateKey::RUST_EXECUTION_CONTEXT);
+namespace {
+
+// The value of `ctx.version` for `versionInfo`: none unless the `enable_version_api`
+// compatibility flag is on and there is version information.
+kj::Maybe<jsg::JsValue> versionToJs(jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo) {
+  auto featureFlags = FeatureFlags::get(js);
+  if (!featureFlags.getEnableVersionApi()) return kj::none;
+  return kj::mv(versionInfo).map([&js, &featureFlags](Worker::VersionInfo v) {
+    return v.toJs(js,
+        featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
+                                                   : PopulateVersionInfoMetadata::NO);
+  });
 }
 
-exportedhandler::ExecutionContext newRustExecutionContext(jsg::Lock& js,
+}  // namespace
+
+exportedhandler::ExecutionContext newExecutionContext(jsg::Lock& js,
     jsg::JsValue exports,
     jsg::JsValue props,
     kj::Maybe<Worker::VersionInfo> versionInfo) {
@@ -30,7 +42,7 @@ exportedhandler::ExecutionContext newRustExecutionContext(jsg::Lock& js,
   using ::workerd::rust::jsg::maybe_local_to_ffi;
   using ::workerd::rust::jsg::to_ffi;
   v8::MaybeLocal<v8::Value> version;
-  KJ_IF_SOME(v, ExecutionContext::versionToJs(js, kj::mv(versionInfo))) {
+  KJ_IF_SOME(v, versionToJs(js, kj::mv(versionInfo))) {
     version = v8::Local<v8::Value>(v);
   }
   auto created =
@@ -40,10 +52,10 @@ exportedhandler::ExecutionContext newRustExecutionContext(jsg::Lock& js,
   if (!maybe_local_from_ffi<v8::Value>(kj::mv(created)).ToLocal(&wrapper)) {
     throw jsg::JsExceptionThrown();
   }
-  return exportedhandler::ExecutionContext::fromRust(js, jsg::JsObject(wrapper.As<v8::Object>()));
+  return exportedhandler::ExecutionContext(js, jsg::JsObject(wrapper.As<v8::Object>()));
 }
 
-bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) {
+bool isExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) {
   KJ_IF_SOME(is,
       execution_context::execution_context_is(
           js.v8Isolate, ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>(value)))) {
@@ -127,7 +139,7 @@ jsg_cpp::MaybeLocal restore_current_entrypoint(v8::Isolate* isolate, jsg_cpp::Lo
         jsg::JsObject(::workerd::rust::jsg::local_from_ffi<v8::Object>(kj::mv(params))),
         fetcherHandler, rpcStubHandler);
     // Returns the promise through a reaction, as C++ JSG returns a jsg::Promise<jsg::Value>, so
-    // that it settles in the same microtask as with the C++ ExecutionContext.
+    // that it settles in the same microtask as the result of a C++ method would.
     auto context = js.v8Context();
     auto then = jsg::check(
         v8::Function::New(context, &passValueOn, {}, 1, v8::ConstructorBehavior::kThrow));

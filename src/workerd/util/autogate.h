@@ -141,13 +141,7 @@ namespace workerd::util {
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
-  /* The `ctx` of a stateless entrypoint is the Rust ExecutionContext                              \
-     (src/workerd/api/execution-context/) rather than the C++ class in api/global-scope.h. The     \
-     C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
-     toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
-     ones are of the other. */                                                                     \
-  V(RUST_EXECUTION_CONTEXT)
+  V(RUST_FAILURE_WORKER_INTERFACE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

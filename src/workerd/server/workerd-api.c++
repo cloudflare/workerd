@@ -299,14 +299,11 @@ api::exportedhandler::ExecutionContext WorkerdApi::newExecutionContext(jsg::Lock
     jsg::JsValue exports,
     jsg::JsValue props,
     kj::Maybe<Worker::VersionInfo> versionInfo) const {
-  if (api::rustExecutionContextEnabled()) {
-    return api::newRustExecutionContext(js, exports, props, kj::mv(versionInfo));
-  }
-  return Worker::Api::newExecutionContext(js, exports, props, kj::mv(versionInfo));
+  return api::newExecutionContext(js, exports, props, kj::mv(versionInfo));
 }
 
-bool WorkerdApi::isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const {
-  return api::isRustExecutionContext(js, value);
+bool WorkerdApi::isExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const {
+  return api::isExecutionContext(js, value);
 }
 
 const jsg::IsolateObserver& WorkerdApi::getObserver() const {

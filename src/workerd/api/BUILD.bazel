@@ -427,6 +427,8 @@ wd_cc_library(
         ":urlpattern",
         ":urlpattern-standard",
         ":worker-loader",
+        "//src/workerd/api/execution-context",
+        "//src/workerd/api/execution-context:ffi",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],

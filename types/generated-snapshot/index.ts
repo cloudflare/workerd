@@ -435,17 +435,6 @@ export declare function setImmediate(
 export declare function clearImmediate(immediate: Immediate | null): void;
 export declare const navigator: Navigator;
 export interface TestController {}
-export interface ExecutionContext<Props = unknown> {
-  waitUntil(promise: Promise<any>): void;
-  passThroughOnException(): void;
-  readonly exports: Cloudflare.Exports;
-  readonly props: Props;
-  cache?: CacheContext;
-  readonly access?: CloudflareAccessContext;
-  mapVirtualHost(fetcher: Fetcher, port: number): string;
-  tracing: Tracing;
-  abort(reason?: any): void;
-}
 export type ExportedHandlerFetchHandler<
   Env = unknown,
   CfHostMetadata = unknown,
@@ -4141,6 +4130,17 @@ export interface TracingSpanContext {
   traceId: string;
   spanId: string;
   traceFlags: number;
+}
+export interface ExecutionContext<Props = unknown> {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
+  cache?: CacheContext;
+  readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
+  tracing: Tracing;
+  abort(reason?: any): void;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
