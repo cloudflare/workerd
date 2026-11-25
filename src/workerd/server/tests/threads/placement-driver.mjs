@@ -76,22 +76,22 @@ test(`an object's counter is exact under requests of every thread ${on}`, () =>
     const all = await threadsOf(server);
     const byHome = await homes(server, all, { prefix: 'exact' });
     const PER_THREAD = 50;
-    await Promise.all(
-      [...byHome].map(async ([home, [name]]) => {
-        // Each thread makes its increments at once.
-        const answers = await Promise.all(
-          all.map((front) =>
-            get(server, `/increments?name=${name}&n=${PER_THREAD}`, front)
-          )
-        );
-        const results = answers.flatMap((answer) => answer.results);
-        for (const { isolate } of results) assert.strictEqual(isolate, home);
-        assert.deepStrictEqual(
-          results.map((r) => r.count).sort((a, b) => a - b),
-          Array.from({ length: all.length * PER_THREAD }, (_, i) => i + 1)
-        );
-      })
-    );
+    // One object after another: every thread is busy with the one at hand, and a request for a
+    // thread that is busy takes long to steer.
+    for (const [home, [name]] of byHome) {
+      // Each thread makes its increments at once.
+      const answers = await Promise.all(
+        all.map((front) =>
+          get(server, `/increments?name=${name}&n=${PER_THREAD}`, front)
+        )
+      );
+      const results = answers.flatMap((answer) => answer.results);
+      for (const { isolate } of results) assert.strictEqual(isolate, home);
+      assert.deepStrictEqual(
+        results.map((r) => r.count).sort((a, b) => a - b),
+        Array.from({ length: all.length * PER_THREAD }, (_, i) => i + 1)
+      );
+    }
   }));
 
 test(`objects on two threads call each other in a cycle ${on}`, () =>
