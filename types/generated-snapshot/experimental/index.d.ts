@@ -4447,9 +4447,27 @@ interface TracingSpanLink {
 declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
-  setAttribute(key: string, value: boolean | number | string): this;
+  setAttribute(
+    key: string,
+    value:
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>,
+  ): this;
   setAttributes(
-    attributes: Record<string, boolean | number | string | undefined>,
+    attributes: Record<
+      string,
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>
+      | undefined
+    >,
   ): this;
   recordException(
     exception:
@@ -18822,11 +18840,11 @@ declare namespace TailStream {
     readonly name: string;
     readonly value:
       | string
-      | string[]
+      | (string | null)[]
       | boolean
-      | boolean[]
+      | (boolean | null)[]
       | number
-      | number[]
+      | (number | null)[]
       | bigint
       | bigint[];
   }
