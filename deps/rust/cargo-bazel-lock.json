@@ -1,8 +1,8 @@
 {
   "binary_crates": [
-    "capnpc 0.27.0"
+    "capnpc 0.28.1"
   ],
-  "checksum": "fb001bc3f2609661f1a6a340a4c5c64cd2c15ad3e0cf738fe9794030279c5430",
+  "checksum": "6f52453ef8f0541ca33ee9b88527f28a704ba44cf3d272f66da9429d6a4b9c8c",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -1115,14 +1115,14 @@
       ],
       "version": "0.2.4"
     },
-    "capnp 0.27.3": {
+    "capnp 0.28.2": {
       "common_attrs": {
         "crate_features": [
           "alloc",
           "default",
           "std"
         ],
-        "edition": "2021"
+        "edition": "2024"
       },
       "library_target_name": "capnp",
       "license": "MIT",
@@ -1134,8 +1134,8 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
-          "sha256": "98216f4102645406ce4dbb0d2b3511cae502537885bae5662812ccc1fe6b04e7",
-          "url": "https://static.crates.io/crates/capnp/0.27.3/download"
+          "sha256": "98d71e4c5b1c0a00179bb0b4bdf78a087fc3686414a49776069da5050d636ba2",
+          "url": "https://static.crates.io/crates/capnp/0.28.2/download"
         }
       },
       "targets": [
@@ -1146,17 +1146,17 @@
           }
         }
       ],
-      "version": "0.27.3"
+      "version": "0.28.2"
     },
-    "capnpc 0.27.0": {
+    "capnpc 0.28.1": {
       "common_attrs": {
         "deps": [
           {
-            "id": "capnp 0.27.3",
+            "id": "capnp 0.28.2",
             "target": "capnp"
           }
         ],
-        "edition": "2021"
+        "edition": "2024"
       },
       "library_target_name": "capnpc",
       "license": "MIT",
@@ -1168,8 +1168,8 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
-          "sha256": "82ca16312ddb64529d31c8dc46148671c22e57b80134fa5f17811ad5a6a79492",
-          "url": "https://static.crates.io/crates/capnpc/0.27.0/download"
+          "sha256": "46e419b5984a8843f3192d7ffa6d51745a872081bbcca7a476e1da4aede7044e",
+          "url": "https://static.crates.io/crates/capnpc/0.28.1/download"
         }
       },
       "targets": [
@@ -1186,7 +1186,7 @@
           }
         }
       ],
-      "version": "0.27.0"
+      "version": "0.28.1"
     },
     "castaway 0.2.4": {
       "common_attrs": {
@@ -2702,11 +2702,11 @@
             "target": "bytes"
           },
           {
-            "id": "capnp 0.27.3",
+            "id": "capnp 0.28.2",
             "target": "capnp"
           },
           {
-            "id": "capnpc 0.27.0",
+            "id": "capnpc 0.28.1",
             "target": "capnpc"
           },
           {
@@ -15200,8 +15200,8 @@
     "async-trait 0.1.92",
     "base64 0.23.1",
     "bytes 1.12.2",
-    "capnp 0.27.3",
-    "capnpc 0.27.0",
+    "capnp 0.28.2",
+    "capnpc 0.28.1",
     "cc 1.11.3",
     "clang-ast 0.1.36",
     "clap 4.6.9",

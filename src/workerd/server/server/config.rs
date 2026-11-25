@@ -140,7 +140,7 @@ impl Factory {
 
 /// A malformed config message; the CLI checked the message, so this is a bug.
 pub fn capnp_error(error: capnp::Error) -> crate::Error {
-    let capnp::Error { extra, .. } = error;
+    let extra = error.extra();
     kj::failed!("{extra}")
 }
 
