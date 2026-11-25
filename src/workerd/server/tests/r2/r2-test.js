@@ -205,9 +205,11 @@ export const copyValues = {
 // cursor that resumes after its last key.
 export const largeListings = {
   async test(ctrl, env) {
-    const customMetadata = { m: 'x'.repeat(6000) };
+    // Each object carries as much customMetadata as a put accepts, so few
+    // objects fill a page.
+    const customMetadata = { m: 'x'.repeat(8000) };
     const keys = Array.from(
-      { length: 100 },
+      { length: 70 },
       (_, i) => `l/${String(i).padStart(3, '0')}`
     );
     await Promise.all(
@@ -231,10 +233,10 @@ export const largeListings = {
     await env.BUCKET.delete(keys);
 
     // The budget is bytes, not characters, and counts prefixes, which a
-    // page may stop at: here each object is over 10 KB of UTF-8 in 3,500
+    // page may stop at: here each object is 12 KB of UTF-8 in 4,000
     // characters, and is followed by a prefix of almost 1 KB.
-    const wide = { customMetadata: { m: '字'.repeat(3500) } };
-    const names = keys.map((k) => `w/${k.slice(2)}`);
+    const wide = { customMetadata: { m: '字'.repeat(4000) } };
+    const names = keys.slice(0, 45).map((k) => `w/${k.slice(2)}`);
     const long = (n) => `${n}${'x'.repeat(900)}/`;
     await Promise.all(
       names.flatMap((n) => [
