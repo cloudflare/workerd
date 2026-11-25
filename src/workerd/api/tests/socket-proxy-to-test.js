@@ -127,6 +127,41 @@ export const proxyToFailsWhenAborted = {
   },
 };
 
+// An abort fails the relay, and closes both sockets, while a write the application made before
+// handing the socket to proxyTo() is still pending.
+export const proxyToCanBeAbortedWithAWritePending = {
+  async test(ctrl, env) {
+    const echo = env.ECHO.connect('echo.example:1');
+    const silent = env.SILENT.connect('silent.example:1');
+    const writer = echo.writable.getWriter();
+    // Swallow the write's outcome; this test is about proxyTo().
+    writer.write(new TextEncoder().encode('data')).catch(() => {});
+    writer.releaseLock();
+
+    const controller = new AbortController();
+    echo.proxyTo(silent, { signal: controller.signal });
+    controller.abort(new Error('relay aborted'));
+
+    await rejects(echo.closed, { message: 'relay aborted' });
+    await rejects(silent.closed, { message: 'relay aborted' });
+  },
+};
+
+// A signal that has already been aborted fails the relay and closes both sockets.
+export const proxyToFailsWithAnAlreadyAbortedSignal = {
+  async test(ctrl, env) {
+    const echo = env.ECHO.connect('echo.example:1');
+    const silent = env.SILENT.connect('silent.example:1');
+
+    echo.proxyTo(silent, {
+      signal: AbortSignal.abort(new Error('relay aborted')),
+    });
+
+    await rejects(echo.closed, { message: 'relay aborted' });
+    await rejects(silent.closed, { message: 'relay aborted' });
+  },
+};
+
 // The relay keeps a connect() handler's connection open after the handler has returned (see
 // proxyToOutlivesTheConnectHandler), and a relay that fails then lets the connection go, even
 // though the far side of the relay would never end it. The failure fails the handler's request, and
@@ -140,7 +175,8 @@ export const proxyToFailureEndsTheConnectHandlersConnection = {
   },
 };
 
-// proxyTo() refuses, before it has taken either socket, any socket it can't relay.
+// proxyTo() refuses, before it has taken either socket, any socket it can't relay, and the relay
+// leaves neither socket usable once it has ended.
 export const proxyToRefusesSocketsItCannotRelay = {
   async test(ctrl, env) {
     const echo = env.ECHO.connect('echo.example:1');
@@ -173,6 +209,15 @@ export const proxyToRefusesSocketsItCannotRelay = {
       message: 'The socket is already being relayed by proxyTo().',
     });
     await Promise.all([echo.closed, greeter.closed]);
+
+    const other = env.SILENT.connect('silent.example:1');
+    for (const ended of [echo, greeter]) {
+      throws(() => other.proxyTo(ended), {
+        name: 'TypeError',
+        message: 'proxyTo() cannot relay a socket that is closed or closing.',
+      });
+    }
+    await other.close();
   },
 };
 
