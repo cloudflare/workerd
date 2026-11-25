@@ -696,6 +696,22 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
 
     auto& context = IoContext::current();
 
+    // An embedder may be able to continue a hibernatable WebSocket in another process without
+    // closing the client connection. Its link sees the connection before any message crosses it.
+    kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink;
+    KJ_IF_SOME(peerRef, maybePeerRef) {
+      if (peerRef->isHibernatable()) {
+        KJ_IF_SOME(actor, context.getActor()) {
+          if (actor.getHibernationManager() != kj::none) {
+            KJ_IF_SOME(link, request.tryCreateWebSocketMigrationLink()) {
+              other = link->wrapConnection(kj::mv(other));
+              migrationLink = kj::mv(link);
+            }
+          }
+        }
+      }
+    }
+
     auto upstream = other->pumpTo(*self);
     auto downstream = self->pumpTo(*other);
     kj::Maybe<kj::Promise<void>> whenMigrated;
@@ -774,16 +790,13 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
         }
         co_return;
       }
-      // An embedder may be able to move a hibernatable WebSocket to another process without
-      // closing the client connection. Once it has, this connection is no longer needed, and the
-      // request completes successfully.
-      KJ_IF_SOME(link, request.tryCreateWebSocketMigrationLink()) {
-        KJ_IF_SOME(actor, context.getActor()) {
-          KJ_IF_SOME(manager, actor.getHibernationManager()) {
-            whenMigrated = link->whenMigrated();
-            manager->attachMigrationLink(*peerRef, kj::mv(link));
-          }
-        }
+      // Once the embedder has continued the WebSocket elsewhere, this connection is no longer
+      // needed, and the request completes successfully.
+      KJ_IF_SOME(link, migrationLink) {
+        auto manager =
+            KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(context.getActor()).getHibernationManager());
+        whenMigrated = link->whenMigrated();
+        manager->attachMigrationLink(*peerRef, kj::mv(link));
       }
 
       // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.

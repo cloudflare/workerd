@@ -25,6 +25,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
  public:
   LegacyHibernationManagerImpl(
       kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType);
+
+  // Creates a manager for an actor that doesn't exist yet, such as one whose WebSockets are adopted
+  // from another process before the actor starts. Events wait until setLoopback().
+  explicit LegacyHibernationManagerImpl(uint16_t hibernationEventType);
   ~LegacyHibernationManagerImpl() noexcept(false);
 
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags

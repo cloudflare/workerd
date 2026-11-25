@@ -16,6 +16,10 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
+namespace kj {
+class WebSocket;
+}
+
 namespace workerd {
 
 class IoContext;
@@ -125,6 +129,11 @@ class WebSocketMigrationLink {
   // Called at most once, by that request. A WebSocket adopted from another process carries no
   // request, so its link is never asked.
   virtual kj::Promise<void> whenMigrated() = 0;
+
+  // Wraps the connection that carries the WebSocket in this process, before any message crosses
+  // it, so that the embedder sees every message in both directions. Called at most once, by the
+  // request that carried the WebSocket. Returns `connection` unchanged by default.
+  virtual kj::Own<kj::WebSocket> wrapConnection(kj::Own<kj::WebSocket> connection);
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.

@@ -11,6 +11,10 @@
 
 namespace workerd {
 
+kj::Own<kj::WebSocket> WebSocketMigrationLink::wrapConnection(kj::Own<kj::WebSocket> connection) {
+  return kj::mv(connection);
+}
+
 kj::Own<WorkerInterface> RequestObserver::wrapSubrequestClient(
     kj::Own<WorkerInterface> client, CountSubrequest) {
   return kj::mv(client);

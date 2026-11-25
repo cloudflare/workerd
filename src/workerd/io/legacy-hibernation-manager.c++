@@ -187,8 +187,12 @@ jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
 
 LegacyHibernationManagerImpl::LegacyHibernationManagerImpl(
     kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType)
-    : loopback(kj::mv(loopback)),
-      hibernationEventType(hibernationEventType),
+    : LegacyHibernationManagerImpl(hibernationEventType) {
+  this->loopback = kj::mv(loopback);
+}
+
+LegacyHibernationManagerImpl::LegacyHibernationManagerImpl(uint16_t hibernationEventType)
+    : hibernationEventType(hibernationEventType),
       onDisconnect(DisconnectHandler{}),
       readLoopTasks(onDisconnect) {}
 
@@ -827,6 +831,25 @@ void LegacyHibernationManagerImpl::attachMigrationLink(
   }
 }
 
+namespace {
+
+kj::WebSocket::Message cloneMessage(const kj::WebSocket::Message& message) {
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(text, kj::String) {
+      return kj::str(text);
+    }
+    KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      return kj::heapArray(data.asPtr());
+    }
+    KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
+      return kj::WebSocket::Close{.code = close.code, .reason = kj::str(close.reason)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+}  // namespace
+
 class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
  public:
   MigrationImpl(
@@ -848,9 +871,10 @@ class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
     return sockets.size();
   }
 
-  WebSocketMigrationLink& getLink(size_t index) override {
+  kj::Maybe<WebSocketMigrationLink&> getLink(size_t index) override {
     KJ_REQUIRE(!finished, "the migration already finished");
-    return *KJ_ASSERT_NONNULL(sockets[index]->migrationLink);
+    return sockets[index]->migrationLink.map(
+        [](kj::Own<WebSocketMigrationLink>& link) -> WebSocketMigrationLink& { return *link; });
   }
 
   kj::Promise<void> whenReceived(size_t index, uint64_t count) override {
@@ -879,7 +903,7 @@ class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
     return kj::joinPromisesFailFast(barriers.finish());
   }
 
-  Finished finish() override {
+  void requireUnchanged() {
     KJ_REQUIRE(!finished, "the migration already finished");
     KJ_REQUIRE(manager->allWs.size() == sockets.size(),
         "a WebSocket was accepted while its actor's WebSockets were moving");
@@ -888,29 +912,42 @@ class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
       KJ_REQUIRE(hib->activeOrPackage.is<api::WebSocket::HibernationPackage>(),
           "a WebSocket woke up while it was moving");
     }
+  }
 
-    finished = true;
+  kj::Array<MigratedWebSocket> exportWebSockets() override {
+    requireUnchanged();
     auto result = kj::heapArrayBuilder<MigratedWebSocket>(sockets.size());
-    auto connections = kj::heapArrayBuilder<kj::Rc<kj::WebSocket>>(sockets.size());
     for (auto hib: sockets) {
       auto& package = hib->activeOrPackage.get<api::WebSocket::HibernationPackage>();
+      auto copy = [](const kj::Maybe<kj::String>& value) {
+        return value.map([](const kj::String& s) { return kj::str(s); });
+      };
       auto pending = kj::heapArrayBuilder<kj::WebSocket::Message>(hib->pendingMessages.size());
       for (auto& message: hib->pendingMessages) {
-        pending.add(kj::mv(message));
+        pending.add(cloneMessage(message));
       }
-      hib->pendingMessages.clear();
       result.add(MigratedWebSocket{
-        .url = kj::mv(package.url),
-        .protocol = kj::mv(package.protocol),
-        .extensions = kj::mv(package.extensions),
-        .serializedAttachment = kj::mv(package.serializedAttachment),
+        .url = copy(package.url),
+        .protocol = copy(package.protocol),
+        .extensions = copy(package.extensions),
+        .serializedAttachment = package.serializedAttachment.map(
+            [](const kj::Array<kj::byte>& bytes) { return kj::heapArray(bytes.asPtr()); }),
         .tags = hib->getTags(),
         .closedOutgoingConnection = package.closedOutgoingConnection,
         .allowHalfOpen = package.allowHalfOpen == api::AllowHalfOpen::YES,
         .autoResponseTimestamp = hib->autoResponseTimestamp,
         .pendingMessages = pending.finish(),
       });
+    }
+    return result.finish();
+  }
 
+  kj::Own<void> finish() override {
+    requireUnchanged();
+    finished = true;
+    auto connections = kj::heapArrayBuilder<kj::Rc<kj::WebSocket>>(sockets.size());
+    for (auto hib: sockets) {
+      hib->pendingMessages.clear();
       // The caller keeps the connection open until its request has completed. Stop receiving
       // first, since the receiver borrows the connection.
       hib->receiverTask = kj::none;
@@ -922,10 +959,7 @@ class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
       ++manager->exportedCount;
       hib->wakeDelivery();
     }
-    return Finished{
-      .webSockets = result.finish(),
-      .connections = kj::heap(connections.finish()),
-    };
+    return kj::heap(connections.finish());
   }
 
  private:
@@ -942,8 +976,8 @@ kj::Maybe<kj::Own<Worker::Actor::HibernationManager::Migration>> LegacyHibernati
   }
   auto sockets = kj::heapArrayBuilder<HibernatableWebSocket*>(allWs.size());
   for (auto& hib: allWs) {
-    if (hib->migrationLink == kj::none || hib->receiveError != kj::none || hib->exported ||
-        hib->hasDispatchedClose || !hib->activeOrPackage.is<api::WebSocket::HibernationPackage>()) {
+    if (hib->receiveError != kj::none || hib->exported || hib->hasDispatchedClose ||
+        !hib->activeOrPackage.is<api::WebSocket::HibernationPackage>()) {
       return kj::none;
     }
     sockets.add(hib.get());
