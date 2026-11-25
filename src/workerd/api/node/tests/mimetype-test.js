@@ -416,7 +416,8 @@ export const test_params = {
 // kept once, lowercased, with its first value, in order.
 export const test_many_params = {
   test() {
-    const count = 20000;
+    // Kept small, as debug builds run this file under a 15-second timeout.
+    const count = 2000;
     const parts = ['text/plain'];
     for (let i = 0; i < count; i++) parts.push(`Name${i}=v${i}`);
     for (let i = 0; i < count; i++) parts.push(`nAME${i}=other`);
@@ -425,7 +426,7 @@ export const test_many_params = {
     strictEqual(entries.length, count);
     deepStrictEqual(entries[0], ['name0', 'v0']);
     deepStrictEqual(entries[count - 1], [`name${count - 1}`, `v${count - 1}`]);
-    strictEqual(mt.params.get('name12345'), 'v12345');
+    strictEqual(mt.params.get('name1234'), 'v1234');
     ok(mt.toString().startsWith('text/plain;name0=v0;name1=v1;'));
   },
 };

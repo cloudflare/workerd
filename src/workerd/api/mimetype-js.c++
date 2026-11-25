@@ -9,8 +9,6 @@
 
 #include <kj/map.h>
 
-#include <cstring>
-
 namespace workerd::api {
 
 namespace ffi = rust::mimetype;
@@ -101,7 +99,7 @@ class Utf8Strings {
         slices(strings.size()) {
     // writeInto() can leave part of the buffer untouched for a string corrupted inside the V8
     // sandbox, so the buffer must not hold leftover memory.
-    memset(buffer.begin(), 0, buffer.size());
+    buffer.asPtr().fill(0);
     size_t offset = 0;
     for (size_t i = 0; i < strings.size(); i++) {
       auto written = strings[i].writeInto(js, buffer.asPtr().slice(offset)).written;
@@ -128,7 +126,7 @@ class Utf8Strings {
 // The names and values in `params`, read once.
 kj::Vector<jsg::JsString> readParamStrings(
     jsg::Lock& js, jsg::JsObject params, uint32_t paramCount, size_t extra) {
-  kj::Vector<jsg::JsString> strings(extra + 2 * size_t(paramCount));
+  kj::Vector<jsg::JsString> strings(extra + 2 * static_cast<size_t>(paramCount));
   for (uint32_t i = 0; i < 2 * paramCount; i++) {
     strings.add(readString(js, params, i));
   }
@@ -165,7 +163,7 @@ MimeType::MimeParams readParams(jsg::Lock& js, jsg::JsObject params, uint32_t pa
 
 kj::Maybe<jsg::JsArray> parseMimeTypeToJs(jsg::Lock& js, jsg::JsString input) {
   kj::SmallArray<char, 256> utf8(input.utf8Length(js));
-  memset(utf8.begin(), 0, utf8.size());
+  utf8.asPtr().fill(0);
   auto inputChars = utf8.asPtr().first(input.writeInto(js, utf8.asPtr()).written);
 
   if (!useRust()) {
