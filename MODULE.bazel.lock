@@ -405,7 +405,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "aUnZ+AoWpFdaQMtN8R52Un7rBdqIBV2u1b5A5AQ1SFs=",
+        "usagesDigest": "J50iKzmUBkn0/FznpHoXc8FsfLnr8REfLp1VtPqhSRs=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -433,10 +433,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "a3e0399efb7661a08629d086a46f50d19cef9df0df6f4312bc3cd06b30da4424",
-              "strip_prefix": "capnproto-capnproto-bd9bff3/c++",
+              "sha256": "eaec7cfedc67a23e73fc736e6552938f447ef9c13f8407b4cfb63c64d363e9a8",
+              "strip_prefix": "capnproto-capnproto-52b2ed4/c++",
               "type": "tgz",
-              "url": "https://github.com/capnproto/capnproto/tarball/bd9bff30ef39c0d990698be2efc1fdd56f03c8e7",
+              "url": "https://github.com/capnproto/capnproto/tarball/52b2ed40a87091ee634ea92e2a824e1be1f259df",
               "urls": [],
               "workspace_file_content": ""
             }
@@ -1599,7 +1599,7 @@
     },
     "@@aspect_rules_esbuild+//esbuild:extensions.bzl%esbuild": {
       "general": {
-        "bzlTransitiveDigest": "OhEA7evujMGMX8gXUo7RHcA3g7GhBNmPIIqnNQowJlw=",
+        "bzlTransitiveDigest": "w/8BpGHTamNqmdY8cUKScJ97DuROozLGMnAmKqFNlkM=",
         "usagesDigest": "ZqBbSnzAi8ZyBL3PXnAGtDMIdC2pcuieJWMY3/94lvA=",
         "recordedInputs": [
           "REPO_MAPPING:aspect_rules_esbuild+,aspect_rules_js aspect_rules_js+",
@@ -1819,7 +1819,7 @@
     },
     "@@rules_rust+//crate_universe/private:internal_extensions.bzl%cu_nr": {
       "general": {
-        "bzlTransitiveDigest": "FspHcH64e01QGYf+un6pOx1pyVm69kIJs0HJKHQYbKQ=",
+        "bzlTransitiveDigest": "xnYrSm1ss6/E2NUdJ9UB64V6GF/70ZF9sZhUC2EMjRs=",
         "usagesDigest": "/bGmDj4Nr856OGWTjcSOPnxG0gSTFtYse380wG1a98A=",
         "recordedInputs": [
           "REPO_MAPPING:apple_support+,bazel_skylib bazel_skylib+",
