@@ -2191,17 +2191,25 @@ for (const threads of [THREADS, 1]) {
             assert.strictEqual(rest, 0, 'bytes after the response');
           }
           // The requests that started after a connection was refused were still queued when
-          // the drain began, and their responses say that the connection closes after them.
-          // The first thread may take a queued request before it handles the signal; the
-          // head of such a request goes out before the drain.
+          // the drain began. The first thread may take a queued request before it handles
+          // the signal; the head of such a request goes out before the drain.
           const late = queued.filter(({ start }) => start > refusedAt);
-          for (const { connection } of late) {
-            assert.strictEqual(connection, 'close');
-          }
           assert(
             late.length >= 2,
             `${late.length} queued requests started after a connection was refused at ` +
               `${refusedAt}: they started at ${starts.join(', ')}`
+          );
+          // A response whose head goes out while the server drains says that the connection
+          // closes after it. The front stops accepting a moment before it tells its
+          // connections, so that holds for a request that started well after the refusal,
+          // as the last one did.
+          for (const { start, connection } of queued) {
+            if (start > refusedAt + 200)
+              assert.strictEqual(connection, 'close');
+          }
+          assert(
+            Math.max(...starts) > refusedAt + 200,
+            'no request started late'
           );
           for (const { end } of spun.slice(1)) {
             assert(end > refusedAt, 'a thread was free when the drain began');
