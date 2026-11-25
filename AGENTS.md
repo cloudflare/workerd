@@ -123,7 +123,8 @@ Key elements: `modules` (embed JS/TS files), `compatibilityFlags`, `bindings` (s
 
 - **Cap'n Proto source code** available in `external/+http+capnp-cpp/` - it contains KJ C++ base library and
   capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
-  `kj::` and `capnp::` namespaces.
+  `kj::` and `capnp::` namespaces. It is built with workerd's patches (`patches/capnp-cpp/`), so
+  it is not always upstream's code.
 
 The other core runtime dependencies include:
 
@@ -151,7 +152,7 @@ The other core runtime dependencies include:
 
 These dependencies are vendored via Bazel into the `external/` directory. See `MODULE.bazel` and the `build/deps/` directory for how they are integrated into the build system. (The project uses bzlmod; the legacy `WORKSPACE` file may still exist but is no longer the primary mechanism.)
 
-For several of these dependencies (notably V8, boringssl, capnp-cpp, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
+For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
 
 Be aware that workerd uses tcmalloc for memory allocation in the typical case. When analyzing memory usage or debugging memory issues, be aware that tcmalloc's behavior may differ from the standard allocator. Any memory usage analysis that you perform should take this into account.
 
