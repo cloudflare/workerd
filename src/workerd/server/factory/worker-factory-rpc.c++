@@ -226,9 +226,8 @@ kj::Promise<void> WorkerdDebugPortImpl::getActor(GetActorContext context) {
   auto params = context.getParams();
   kj::Maybe<kj::StringPtr> name;
   if (params.hasActorName()) name = params.getActorName();
-  auto target = subrequest_channel_into_kj(
-      server->resolve_debug_actor(toRust(params.getService()), toRust(params.getEntrypoint()),
-          toRust(params.getActorId()), toRust(name), callerThread));
+  auto target = subrequest_channel_into_kj(server->resolve_debug_actor(toRust(params.getService()),
+      toRust(params.getEntrypoint()), toRust(params.getActorId()), toRust(name), callerThread));
   context.initResults(capnp::MessageSize{4, 1})
       .setActor(
           kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory, restoreTokens));
@@ -238,8 +237,8 @@ kj::Promise<void> WorkerdDebugPortImpl::getActor(GetActorContext context) {
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
   auto& impl = factory.getImpl();
-  capnp::TwoPartyServer rpcServer(rpc::WorkerdDebugPort::Client(kj::heap<WorkerdDebugPortImpl>(
-      impl.getServer().server_clone(), impl.httpOverCapnpFactory)));
+  capnp::TwoPartyServer rpcServer(rpc::WorkerdDebugPort::Client(
+      kj::heap<WorkerdDebugPortImpl>(impl.getServer().server_clone(), impl.httpOverCapnpFactory)));
   co_await rpcServer.accept(*stream);
 }
 
@@ -428,14 +427,15 @@ kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::Asyn
 kj::Own<RpcClient> new_thread_link(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream, uint32_t peer) {
   auto& impl = factory.getImpl();
+  auto serving = impl.linksServing.addBranch();
   // The factory outlives its sessions, and with them what they serve.
   // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
-  auto served = impl.linksServing.addBranch().then([&impl, peer]() -> rpc::WorkerdDebugPort::Client {
-    return kj::heap<WorkerdDebugPortImpl>(impl.getServer().server_clone(),
-        impl.httpOverCapnpFactory, peer, impl.channelTokenHandler);
+  auto served = serving.then([&impl, peer]() -> rpc::WorkerdDebugPort::Client {
+    return kj::heap<WorkerdDebugPortImpl>(
+        impl.getServer().server_clone(), impl.httpOverCapnpFactory, peer, impl.channelTokenHandler);
   });
-  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream),
-      impl.loopFrankenvalueHandler, rpc::WorkerdDebugPort::Client(kj::mv(served)));
+  auto session = kj::refcounted<RpcClient::Impl::Session>(
+      kj::mv(stream), impl.loopFrankenvalueHandler, rpc::WorkerdDebugPort::Client(kj::mv(served)));
   auto target = session->bootstrap.castAs<rpc::WorkerdBootstrap>();
   return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
 }

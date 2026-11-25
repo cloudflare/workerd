@@ -340,7 +340,7 @@ struct RehomedAlarm {
 
 // The home thread of the rehome tests' actors: their ids start with a letter, which picks it.
 uint homeOf(kj::StringPtr actorId, uint threads) {
-  return uint(actorId[0] - 'a') % threads;
+  return static_cast<uint>(actorId[0] - 'a') % threads;
 }
 
 kj::Function<uint(kj::StringPtr)> homeFn(uint threads) {
