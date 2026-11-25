@@ -172,14 +172,21 @@ struct Running {
     threads: Option<Threads>,
 }
 
-/// The other threads of a run on several loop threads. The front is the first field, so it is
-/// dropped first: it has stopped, and dropped its connections, before the loops it queues work
-/// for end.
+/// The other threads of a run on several loop threads. Dropping it stops the front, which
+/// drops its connections, then stops and joins the replicas, and only then drops the front:
+/// its runtime, which the transports the loops hold are registered with, outlives the loops.
 struct Threads {
-    /// What accepts for the loop threads.
-    front: Front,
     /// The loop threads besides the first.
     replicas: Replicas,
+    /// What accepts for the loop threads.
+    front: Front,
+}
+
+impl Drop for Threads {
+    fn drop(&mut self) {
+        // The fields are then dropped in their order.
+        self.front.stop();
+    }
 }
 
 impl Threads {
@@ -211,7 +218,7 @@ impl Threads {
             threads => threads,
         };
         let front = Front::new(threads, queue, sockets).await?;
-        Ok((Self { front, replicas }, started))
+        Ok((Self { replicas, front }, started))
     }
 
     /// Lets the replicas serve and the front accept.
@@ -817,13 +824,14 @@ pub async fn run(
     } else {
         shutdown_delay(&factory)?
     };
-    // The other threads are bound last, so they are dropped first: the front, and with that
-    // stopped, then the replicas, stopped and joined, and only then this thread's server.
+    // What is bound last is dropped first: this thread's listeners, and with them what it took
+    // from the front, then the other threads (the front stopped, the replicas stopped and
+    // joined, the front's runtime), and only then this thread's server.
     let Some(Running {
         server,
+        threads,
         mut listeners,
         drain: draining,
-        threads,
     }) = start(factory, options, report, false, Role::First).await?
     else {
         return Ok(());

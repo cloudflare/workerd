@@ -25,7 +25,10 @@
 //! is how a loop that stops or fails ends, drops every call's KJ promise and gives up the
 //! loop's place at the queue in the same step: what it has not taken stays queued for the other
 //! loops. A call is also dropped when its connection drops it (the client went away), which is
-//! how a Worker sees the abort.
+//! how a Worker sees the abort. A call tells its connection when it is over, and only once it
+//! has let go of whatever it had of the connection (an upgraded transport, a TCP connection):
+//! the front keeps the connection, and the runtime its transport is registered with, until
+//! then.
 
 use std::future::poll_fn;
 use std::pin::pin;
@@ -33,6 +36,7 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use futures::StreamExt;
+use futures::future::Either;
 use futures::future::LocalBoxFuture;
 use futures::stream::FuturesUnordered;
 use kj_hyper::server::ServerSettings;
@@ -189,11 +193,12 @@ async fn http_call(
         futures::future::select(handling, dropped).await;
     }
     drop(in_flight);
-    // Tells the connection that the call is over.
+    // Tells the connection that the call is over, and whatever transport it had dropped.
     drop(call);
 }
 
-/// One TCP connection, until its `connect()` event has ended.
+/// One TCP connection, until its `connect()` event has ended or the front has dropped the
+/// connection.
 async fn tcp_call(
     context: Rc<ListenContext>,
     channel: Rc<dyn Channel>,
@@ -201,18 +206,33 @@ async fn tcp_call(
     work: TcpWork,
     in_flight: InFlight,
 ) {
-    let serve = async {
-        let worker = start_tcp(&*channel, work.peer)?;
-        let connection = TcpConnection {
-            io: work.io,
-            hangup: work.hangup,
-            starttls: work.starttls,
-            of_front: true,
-        };
-        tcp_connection(&context, worker, &authority, connection).await
-    };
-    if let Err(error) = serve.await {
-        log_connection_error("TCP connect() handler threw", &error);
+    let TcpWork {
+        io,
+        hangup,
+        peer,
+        starttls,
+        mut call,
+        ..
+    } = work;
+    {
+        let serving = pin!(async {
+            let worker = start_tcp(&*channel, peer)?;
+            let connection = TcpConnection {
+                io,
+                hangup,
+                starttls,
+                of_front: true,
+            };
+            tcp_connection(&context, worker, &authority, connection).await
+        });
+        // The front dropped the connection, which it does only when it stops.
+        let dropped = pin!(call.closed());
+        if let Either::Left((Err(error), _)) = futures::future::select(serving, dropped).await {
+            log_connection_error("TCP connect() handler threw", &error);
+        }
     }
     drop(in_flight);
+    // The transport is gone: the front, whose runtime it was registered with, need not keep
+    // the connection any longer.
+    drop(call);
 }

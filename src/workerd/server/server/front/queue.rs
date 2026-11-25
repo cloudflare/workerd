@@ -407,13 +407,6 @@ pub struct Ticket<T> {
     slot: Option<usize>,
 }
 
-impl<T> Ticket<T> {
-    /// Leaves the item queued until a loop takes it, whatever becomes of who queued it.
-    pub fn keep_queued(mut self) {
-        self.slot = None;
-    }
-}
-
 impl<T> Drop for Ticket<T> {
     fn drop(&mut self) {
         let Some(slot) = self.slot else {

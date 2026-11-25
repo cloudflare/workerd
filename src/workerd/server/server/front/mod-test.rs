@@ -298,3 +298,144 @@ fn a_request_that_waits_for_room_leaves_with_its_client() {
         assert!(queue.is_empty());
     });
 }
+
+const TCP: Protocol = Protocol::Tcp { tls: None };
+
+/// A client of a TCP socket that has sent `ping`.
+fn tcp_client(port: u16) -> TcpStream {
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    client.write_all(b"ping").unwrap();
+    client
+}
+
+/// Reads the `ping` of a connection a loop took and answers `pong`, which the client gets:
+/// the connection works in both directions.
+async fn ping_pong(work: &mut TcpWork, client: &mut TcpStream) {
+    use tokio::io::AsyncWriteExt;
+    let mut ping = [0; 4];
+    work.io.read_exact(&mut ping).await.unwrap();
+    assert_eq!(&ping, b"ping");
+    work.io.write_all(b"pong").await.unwrap();
+    work.io.flush().await.unwrap();
+    let mut pong = [0; 4];
+    client.read_exact(&mut pong).unwrap();
+    assert_eq!(&pong, b"pong");
+}
+
+#[test]
+fn a_drained_front_waits_for_the_tcp_connections_the_loops_serve() {
+    run(async {
+        let (mut front, queue, port) = front(TCP).await;
+        let worker = queue.worker();
+        let mut watch = front.watch();
+        front.serve();
+        let mut taken_client = tcp_client(port);
+        let Some(Work::Tcp(mut taken)) = take(&worker).await else {
+            panic!("a TCP connection is queued as one");
+        };
+        let mut queued_client = tcp_client(port);
+        eventually("the connection is queued", || queue.len() == 1).await;
+
+        // The front stops accepting. The connection a loop serves and the one still queued
+        // are its connections until the loops are done with them: the queue stays open, and
+        // the front's runtime, which the streams are registered with, stays up.
+        front.drain();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(is_pending(&mut watch).await);
+        assert_eq!(queue.len(), 1);
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+        ping_pong(&mut taken, &mut taken_client).await;
+        let Some(Work::Tcp(mut queued)) = take(&worker).await else {
+            panic!("a queued TCP connection is served after the drain");
+        };
+        ping_pong(&mut queued, &mut queued_client).await;
+
+        // The loops finish them, one after the other; only then has the front drained.
+        drop(taken);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(is_pending(&mut watch).await);
+        drop(queued);
+        assert!(take(&worker).await.is_none());
+        watch.await.unwrap();
+    });
+}
+
+// A reset is noticed while nothing is read from the connection, which Windows has no way to do.
+#[cfg(unix)]
+#[test]
+fn a_tcp_connection_whose_client_went_away_leaves_the_queue() {
+    run(async {
+        let (front, queue, port) = front(TCP).await;
+        let _worker = queue.worker();
+        front.serve();
+        let client = tcp_client(port);
+        let _stays = tcp_client(port);
+        eventually("the connections are queued", || queue.len() == 2).await;
+        socket2::SockRef::from(&client)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(client);
+        eventually("the connection leaves the queue", || queue.len() == 1).await;
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tcp_connection_a_loop_took_is_the_loops_to_end_when_its_client_goes_away() {
+    run(async {
+        let (mut front, queue, port) = front(TCP).await;
+        let worker = queue.worker();
+        let mut watch = front.watch();
+        front.serve();
+        let client = tcp_client(port);
+        let Some(Work::Tcp(mut work)) = take(&worker).await else {
+            panic!("a TCP connection is queued as one");
+        };
+        socket2::SockRef::from(&client)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(client);
+        // The loop learns of it by the connection's own signal, and its `connect()` event is
+        // not dropped for it: the front waits.
+        (&mut work.hangup).await.unwrap();
+        front.drain();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(is_pending(&mut std::pin::pin!(work.call.closed())).await);
+        assert!(is_pending(&mut watch).await);
+        drop(work);
+        watch.await.unwrap();
+    });
+}
+
+#[test]
+fn a_stopped_front_keeps_its_runtime_for_the_streams_the_loops_hold() {
+    run(async {
+        let (front, queue, port) = front(TCP).await;
+        let worker = queue.worker();
+        front.serve();
+        let mut client = tcp_client(port);
+        let Some(Work::Tcp(mut work)) = take(&worker).await else {
+            panic!("a TCP connection is queued as one");
+        };
+        ping_pong(&mut work, &mut client).await;
+        // Stopping drops the front's connections, which the loop that serves one sees.
+        front.stop();
+        tokio::time::timeout(Duration::from_secs(30), work.call.closed())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // The stream is registered with the front's runtime, which is there for as long as
+        // the front is: a loop that has not stopped yet is still woken for what arrives.
+        let mut late = [0; 4];
+        let mut read = std::pin::pin!(work.io.read_exact(&mut late));
+        assert!(is_pending(&mut read).await);
+        client.write_all(b"late").unwrap();
+        tokio::time::timeout(Duration::from_secs(30), read)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&late, b"late");
+        drop(work);
+        drop(front);
+    });
+}

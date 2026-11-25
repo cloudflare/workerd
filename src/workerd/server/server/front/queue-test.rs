@@ -756,11 +756,8 @@ fn stress(round: u64) -> (usize, usize) {
                         // take.
                         0 => drop(ticket),
                         1 => held.push(ticket),
-                        // A request that is served whatever becomes of its connection.
-                        _ => {
-                            ticket.keep_queued();
-                            kept.push(id);
-                        }
+                        // A client that stays until its request is served.
+                        _ => kept.push((id, ticket)),
                     }
                     // The next push comes as the loops go back to sleep, which they do when
                     // they find the queue empty: a push at that moment is the one a loop
@@ -817,7 +814,7 @@ fn stress(round: u64) -> (usize, usize) {
         assert_eq!(count(&fates.dropped, id), 1, "item {id} of round {round}");
         assert!(count(&fates.taken, id) <= 1, "item {id} of round {round}");
     }
-    for id in &kept {
+    for (id, _) in &kept {
         assert_eq!(count(&fates.taken, *id), 1, "item {id} of round {round}");
     }
     let taken: usize = (0..total).map(|id| count(&fates.taken, id)).sum();

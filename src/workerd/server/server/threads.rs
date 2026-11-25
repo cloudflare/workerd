@@ -59,8 +59,10 @@
 //!   loop, which cancels what it had in flight on the first thread, as a client hanging up
 //!   does. A replica whose session ends while it serves fails the same way.
 //! - **Drain.** The first thread tells the replicas ([`Replicas::drain`]) and the front, which
-//!   stops accepting and shuts its connections down gracefully: an idle one closes, one with a
-//!   request in flight after its response. Requests still queued are served. Once every
+//!   stops accepting and shuts its HTTP connections down gracefully: an idle one closes, one
+//!   with a request in flight after its response. A connection of a TCP socket is the front's
+//!   until its `connect()` event has ended, and is waited for as a listener on one thread
+//!   waits for its own. Requests and connections still queued are served. Once every
 //!   connection has ended the front closes its queue, and a loop is done when the queue has
 //!   ended and what it took has finished. The first thread keeps its actors and serves the
 //!   sessions until every replica is, so a replica's requests in flight finish as its own do;
@@ -69,11 +71,14 @@
 //! - **Teardown.** A replica drops its server, then its factory, then its loop, on its own
 //!   thread, and waits for nothing of the first thread to do so: what it has in flight there are
 //!   futures it drops, and the pipe's wake-ups cross threads without waiting. The first thread
-//!   stops the front first, which drops every connection and joins the front's threads, then
-//!   drops the `Replicas`, which tells those still running to stop at once and joins every
-//!   thread, so the first thread's server, which serves the sessions, and its factory, and with
-//!   it the process's `SharedFactory` and V8, outlive every other loop. A loop that stops drops
-//!   the calls it had taken, whose connections close, and leaves what is queued to the others.
+//!   drops what it took from the front itself, then stops the front, which drops every
+//!   connection, then drops the `Replicas`, which tells those still running to stop at once and
+//!   joins every thread, and only then ends the front's runtime and joins its threads: a
+//!   transport a loop holds (a TCP connection, a WebSocket) is registered with that runtime,
+//!   which so outlives every loop's use of it. The first thread's server, which serves the
+//!   sessions, and its factory, and with it the process's `SharedFactory` and V8, outlive every
+//!   other loop. A loop that stops drops the calls it had taken, whose connections close, and
+//!   leaves what is queued to the others.
 
 use std::cell::RefCell;
 use std::rc::Rc;

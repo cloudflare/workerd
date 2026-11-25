@@ -27,12 +27,20 @@
 //!   the front's runtime, whose driver wakes the loop for it; with TLS, the loop then does the
 //!   record encryption of that connection.
 //! - **A TCP connection** is the accepted transport, after the handshake of a socket with
-//!   implicit TLS; the loop serves it as a `connect()` event.
+//!   implicit TLS; the loop serves it as a `connect()` event. It stays a connection of the
+//!   front, on a task that waits there, until that event has ended: the transport is
+//!   registered with the front's runtime for as long as the loop uses it.
 //!
 //! A request in flight is a future on its connection's task ([`call`]). When the client goes
 //! away hyper's serve loop drops it, which takes the request out of the queue if no loop has
 //! taken it, and otherwise has the loop drop the call's KJ promise, as a connection served on
 //! the loop itself would. When the loop is done with the call (or is gone) the future resolves.
+//!
+//! A TCP connection that is queued leaves the queue when its client goes away, and is closed,
+//! where the system reports that for a connection nobody reads from (unix, for a client that
+//! resets it; one that only shuts down its side may still want an answer). Once a loop has
+//! taken it the connection is the loop's to end, as on one thread: the `connect()` handler
+//! sees the hang-up through its socket.
 //!
 //! # Overload
 //!
@@ -55,12 +63,17 @@
 //! [`Front::new`] makes the runtime, on a thread of its own that owns it, and registers the
 //! listeners there; nothing is accepted before [`Front::serve`], which the first loop thread
 //! calls once every loop can take work and it has written its `listen` events.
-//! [`Front::drain`] stops the accept loops and shuts the connections down gracefully (an idle
-//! one closes, one with a request in flight closes after its response); once every connection
-//! has ended, the queue is closed, which is what ends the loops' takers after the work that was
-//! still queued has been served. Dropping the `Front` stops the runtime, dropping every
-//! connection, and joins its threads; the first loop thread does that before it stops the other
-//! loops.
+//! [`Front::drain`] stops the accept loops and shuts the HTTP connections down gracefully (an
+//! idle one closes, one with a request in flight closes after its response); a TCP connection
+//! lasts until its `connect()` event ends, queued or taken, as it does on one thread. Once
+//! every connection has ended, the queue is closed, which is what ends the loops' takers after
+//! the work that was still queued has been served.
+//!
+//! [`Front::stop`] drops the accept loops and every connection without waiting, which has the
+//! loops drop the calls they took. The runtime stays: a loop that still holds a transport (a
+//! TCP connection, a WebSocket) is woken for it by the front's runtime, so the first loop
+//! thread stops the front, then stops and joins the other loops, and only then drops the
+//! `Front`, which ends the runtime and joins its threads.
 //!
 //! The front logs nothing itself (its threads are not set up for the process's logger): what a
 //! connection failed with goes to the first loop thread ([`Front::watch`]), which logs it. A
@@ -69,8 +82,10 @@
 
 pub mod queue;
 
+use std::future::poll_fn;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::task::Poll;
 use std::thread::JoinHandle;
 
 use futures::FutureExt;
@@ -153,6 +168,9 @@ pub struct TcpWork {
     pub peer: Option<SocketAddr>,
     /// The socket's TLS configuration if its `connect()` handler may upgrade the connection.
     pub starttls: Option<Arc<rustls::ServerConfig>>,
+    /// The connection's tie to the front, as an HTTP call's: closed once the front has dropped
+    /// the connection, and dropped by the loop when the `connect()` event has ended.
+    pub call: oneshot::Sender<()>,
 }
 
 /// What the front does with the connections of a stream socket.
@@ -191,6 +209,8 @@ struct Events {
 pub struct Front {
     phase: watch::Sender<Phase>,
     events: Option<Events>,
+    /// Dropped to have the front's thread drop its runtime.
+    release: Option<oneshot::Sender<std::convert::Infallible>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -202,6 +222,7 @@ impl Front {
         let (log, log_lines) = mpsc::channel(PENDING_LOG_LINES);
         let (end, outcome) = oneshot::channel();
         let (registered, registration) = oneshot::channel();
+        let (release, released) = oneshot::channel();
         let main = Main {
             queue,
             phase: phase.subscribe(),
@@ -209,7 +230,7 @@ impl Front {
         };
         let thread = std::thread::Builder::new()
             .name("front".to_owned())
-            .spawn(move || main.run_thread(threads, sockets, registered, end))
+            .spawn(move || main.run_thread(threads, sockets, registered, end, released))
             .map_err(|e| kj::failed!("starting the front: {e}"))?;
         let front = Self {
             phase,
@@ -217,6 +238,7 @@ impl Front {
                 log: log_lines,
                 outcome,
             }),
+            release: Some(release),
             thread: Some(thread),
         };
         match registration.await {
@@ -234,6 +256,12 @@ impl Front {
     /// Has the front stop accepting and shut its connections down gracefully.
     pub fn drain(&self) {
         self.advance(Phase::Draining);
+    }
+
+    /// Has the front drop its accept loops and its connections, without waiting for either.
+    /// Its runtime stays up, for the transports the loops hold, until the `Front` is dropped.
+    pub fn stop(&self) {
+        self.advance(Phase::Stopping);
     }
 
     fn advance(&self, phase: Phase) {
@@ -292,7 +320,8 @@ impl Front {
 
 impl Drop for Front {
     fn drop(&mut self) {
-        self.advance(Phase::Stopping);
+        self.stop();
+        drop(self.release.take());
         if let Some(thread) = self.thread.take() {
             // The thread ends once its runtime has: a task that panicked did not take it down.
             let _ = thread.join();
@@ -343,15 +372,16 @@ struct Main {
 }
 
 impl Main {
-    /// The front's thread: builds the runtime, runs the front on it, and drops it, which stops
-    /// its threads. `registered` is told whether the listeners could be made, and `end` how
-    /// the front ended.
+    /// The front's thread: builds the runtime, runs the front on it, and drops it once
+    /// `released` says that the `Front` is gone, which stops its threads. `registered` is told
+    /// whether the listeners could be made, and `end` how the front ended.
     fn run_thread(
         self,
         threads: usize,
         sockets: Vec<FrontSocket>,
         registered: oneshot::Sender<Result<()>>,
         end: oneshot::Sender<Result<()>>,
+        released: oneshot::Receiver<std::convert::Infallible>,
     ) {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(threads.max(1))
@@ -368,13 +398,15 @@ impl Main {
         let outcome = runtime.block_on(self.run(sockets, registered));
         // Nobody listens once the first loop thread is ending.
         let _ = end.send(outcome);
-        // Dropping the runtime drops every task still on it: the connections, and with them
-        // the calls they have in flight on the loops. The log's last sender goes with them,
-        // which tells the first loop thread that the front is gone.
+        // The front has drained, or its tasks are being dropped: either way the loops may still
+        // hold transports that the runtime's driver wakes them for, until the `Front` is
+        // dropped.
+        let _ = released.blocking_recv();
     }
 
     /// Registers the listeners, then accepts from each until the front drains, and waits for
-    /// the connections. Returns early when the front is told to stop.
+    /// the connections. Returns early when the front is told to stop, which drops the accept
+    /// loops and, with them, the connections.
     async fn run(
         self,
         sockets: Vec<FrontSocket>,
@@ -451,47 +483,70 @@ impl Main {
 }
 
 /// Accepts from `listener` until the front drains, each connection a task, then waits for the
-/// connections. A failure to accept is the front's; a connection's is logged.
+/// connections. A failure to accept is the front's; a connection's is logged. Dropping the
+/// future drops the connections.
 async fn accept_loop(
     shared: Arc<Shared>,
     index: usize,
     listener: Box<TokioListener>,
     protocol: Protocol,
 ) -> Result<()> {
+    /// What the loop waited for.
+    enum Next<A> {
+        Drained,
+        Ended,
+        Accepted(A),
+    }
     let protocol = Arc::new(protocol);
     let what = match *protocol {
         Protocol::Http { .. } => "HTTP connection failed",
         Protocol::Tcp { .. } => "TCP connection failed",
     };
-    // Every connection's task holds a sender, so the channel closes when the last has ended,
-    // however it ended.
-    let (alive, mut ended) = mpsc::channel::<std::convert::Infallible>(1);
+    // The connections' tasks, which end with this one if it is dropped.
+    let mut connections = JoinSet::new();
     {
-        let mut drained = std::pin::pin!(shared.drained());
+        let mut drained = std::pin::pin!(shared.drained().fuse());
         loop {
-            // A full queue is not given more: the connection waits in the listen backlog.
-            let accepting = std::pin::pin!(async {
-                shared.queue.room().await;
-                listener.accept().await
-            });
-            let (socket, peer) = match futures::future::select(drained.as_mut(), accepting).await {
-                Either::Left(_) => break,
-                Either::Right((accepted, _)) => accepted?,
+            let next = {
+                // A full queue is not given more: the connection waits in the listen backlog.
+                let accepting = std::pin::pin!(
+                    async {
+                        shared.queue.room().await;
+                        listener.accept().await
+                    }
+                    .fuse()
+                );
+                // The tasks that have ended are taken out as they do.
+                let ended = std::pin::pin!(
+                    poll_fn(|cx| match connections.poll_join_next(cx) {
+                        Poll::Ready(Some(_)) => Poll::Ready(()),
+                        Poll::Ready(None) | Poll::Pending => Poll::Pending,
+                    })
+                    .fuse()
+                );
+                let (mut accepting, mut ended) = (accepting, ended);
+                futures::select_biased! {
+                    () = drained => Next::Drained,
+                    () = ended => Next::Ended,
+                    accepted = accepting => Next::Accepted(accepted),
+                }
+            };
+            let (socket, peer) = match next {
+                Next::Drained => break,
+                Next::Ended => continue,
+                Next::Accepted(accepted) => accepted?,
             };
             let accepted = Accepted::Socket(socket, peer);
             let (shared, protocol) = (Arc::clone(&shared), Arc::clone(&protocol));
-            let alive = alive.clone();
-            tokio::spawn(async move {
+            connections.spawn(async move {
                 if let Err(error) = connection(&shared, index, &protocol, accepted).await {
                     shared.log(what, error);
                 }
-                drop(alive);
             });
         }
     }
     drop(listener);
-    drop(alive);
-    let _ = ended.recv().await;
+    while connections.join_next().await.is_some() {}
     Ok(())
 }
 
@@ -535,16 +590,37 @@ async fn connection(
                 None => (None, None),
             };
             let io = listen::transport(accepted, implicit, shared.drained()).await?;
-            // The connection is the loop's from here: the loop that takes it serves it to its
-            // end, as it does a connection it accepted, and until one does it stays queued.
+            // The loop that takes the connection gets the signal with it; this task watches
+            // it while no loop has.
+            let gone = hangup.shared();
+            let (call, mut finished) = oneshot::channel();
             let work = TcpWork {
                 socket: index,
                 io,
-                hangup,
+                hangup: gone.clone().boxed(),
                 peer,
                 starttls,
+                call,
             };
-            shared.queue.push(Work::Tcp(work)).await.keep_queued();
+            // A client that goes away before the queue has room for its connection was never
+            // queued: the connection goes with the push.
+            let ticket = {
+                let push = std::pin::pin!(shared.queue.push(Work::Tcp(work)));
+                match futures::future::select(push, gone.clone()).await {
+                    Either::Left((ticket, _)) => ticket,
+                    Either::Right((hung_up, _)) => return hung_up,
+                }
+            };
+            // The connection is this task's until the loop that takes it has served it to its
+            // end, which is when the loop drops its end of `finished`.
+            if let Either::Right((hung_up, _)) = futures::future::select(&mut finished, gone).await
+            {
+                // The client is gone. A connection that is still queued leaves the queue, which
+                // closes it; one that a loop took is the loop's to end.
+                drop(ticket);
+                let _ = finished.await;
+                return hung_up;
+            }
             Ok(())
         }
     }
