@@ -343,18 +343,22 @@ fn pending_unless(succeeded: bool) -> jsg::Result<()> {
 }
 
 /// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.
-pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>);
+///
+/// Neither it nor its output is `Send`: C++ polls and drops the future, and runs the callback
+/// that takes the output, only on its `IoContext`'s thread. The functions that make one bound
+/// what they accept.
+pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any>>>>);
 
 /// The future that `io_context_add_wait_until()` waits for as a waitUntil task: an
 /// [`AwaitJs`](crate::AwaitJs) whose value is discarded.
 pub struct WaitUntilFuture(pub Pin<Box<dyn Future<Output = Result<(), cxx::KjException>> + Send>>);
 
 /// The output of an [`IoFuture`].
-pub struct IoOutput(Box<dyn Any + Send>);
+pub struct IoOutput(Box<dyn Any>);
 
 /// What [`IoCallback`] calls.
 pub type IoCallbackFn =
-    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()>>;
+    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any>) -> jsg::Result<()>>;
 
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);
