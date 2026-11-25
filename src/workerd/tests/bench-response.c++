@@ -75,10 +75,11 @@ BENCHMARK_F(Response, arrayBufferBody)(benchmark::State& state) {
   fixture->runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
     for (auto _: state) {
-      auto bytes = kj::heapArray<byte>(11);
-      memcpy(bytes.begin(), "Hello World", 11);
-      auto view = bytes.asPtr();
-      auto rs = api::newMemorySource(view, kj::heap(kj::mv(bytes)));
+      auto rs = [] {
+        auto bytes = kj::heapArray<byte>("Hello World"_kjb);
+        auto view = bytes.asPtr();
+        return api::newMemorySource(view, kj::heap(kj::mv(bytes)));
+      }();
       auto body =
           api::Body::Initializer(api::JsReadableStream::create(js, env.context, kj::mv(rs)));
       benchmark::DoNotOptimize(api::Response::constructor(js, kj::mv(body), kj::none));
