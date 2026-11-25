@@ -17,3 +17,14 @@ wd_js_test(
     env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
     tags = ["js-test"],
 )
+
+# `workerd serve --threads=4` of the Workflows engine: instances created
+# through every thread, homed on threads but the first.
+wd_js_test(
+    name = "workflows-threads-test",
+    size = "large",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "workflows-threads-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

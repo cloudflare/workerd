@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -15,6 +16,26 @@ wd_js_test(
     name = "kv-wrangler-test",
     data = ["//src/workerd/server:workerd"],
     entry_point = "kv-wrangler-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)
+
+# What the tests of the helper Workers under `--threads` share.
+js_library(
+    name = "threads-harness_js_lib",
+    srcs = ["threads-harness.mjs"],
+    visibility = ["//src/workerd/server/tests:__subpackages__"],
+)
+
+# `workerd serve --threads=4` of a wrangler.jsonc's kv_namespaces.
+wd_js_test(
+    name = "kv-threads-test",
+    size = "large",
+    data = [
+        ":threads-harness_js_lib",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "kv-threads-test.mjs",
     env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
     tags = ["js-test"],
 )
