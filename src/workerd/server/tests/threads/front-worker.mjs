@@ -27,6 +27,9 @@ const notes = new Map();
 // The holds of this isolate that a `/release` can end, by their ids: what ends each.
 const holds = new Map();
 
+// How many `connect()` events this isolate has had.
+let connects = 0;
+
 function note(marker, what) {
   if (!notes.has(marker)) notes.set(marker, []);
   notes.get(marker).push(what);
@@ -121,7 +124,10 @@ export default {
     switch (url.pathname) {
       case '/':
         // `start`: when this isolate began to handle the request.
-        return Response.json({ front, start: Date.now() }, { headers });
+        return Response.json({ front, marker, start: Date.now() }, { headers });
+
+      case '/connects':
+        return Response.json({ front, connects }, { headers });
 
       case '/where':
         // Answers after `ms` milliseconds, if given, so that requests sent together are in
@@ -408,17 +414,65 @@ export default {
     return new Response('not found', { status: 404, headers });
   },
 
-  // Greets with this isolate's identity, echoes what arrives, and once the client has finished
-  // sending says how many bytes it got and closes.
+  // Serves a connection of the `starttls` socket with `upgrade`, every other with `echo`.
   async connect(socket) {
-    const writer = socket.writable.getWriter();
-    await writer.write(encoder.encode(`hello ${isolateId()}\n`));
-    let received = 0;
-    for await (const chunk of socket.readable) {
-      received += chunk.byteLength;
-      await writer.write(chunk);
+    connects++;
+    if (socket.secureTransport === 'starttls') {
+      await upgrade(socket);
+    } else {
+      await echo(socket);
     }
-    await writer.write(encoder.encode(`bye ${received}\n`));
-    await writer.close();
   },
 };
+
+// Greets with this isolate's identity, echoes what arrives, and once the client has finished
+// sending says how many bytes it got and closes.
+async function echo(socket) {
+  const writer = socket.writable.getWriter();
+  await writer.write(encoder.encode(`hello ${isolateId()}\n`));
+  let received = 0;
+  for await (const chunk of socket.readable) {
+    received += chunk.byteLength;
+    await writer.write(chunk);
+  }
+  await writer.write(encoder.encode(`bye ${received}\n`));
+  await writer.close();
+}
+
+// Greets in plaintext with this isolate's identity and echoes each line until the client sends
+// `starttls`, which it answers with `go ahead`; then performs the TLS handshake as the server
+// (`startTls()`) and serves the connection over TLS with `echo`. A client that finishes sending
+// before `starttls` is closed; one that sends anything past `starttls` before the handshake
+// fails the connection.
+async function upgrade(socket) {
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+  await writer.write(encoder.encode(`hello ${isolateId()}\n`));
+  const decoder = new TextDecoder();
+  let text = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      await writer.close();
+      return;
+    }
+    text += decoder.decode(value, { stream: true });
+    let newline;
+    while ((newline = text.indexOf('\n')) !== -1) {
+      const line = text.slice(0, newline + 1);
+      text = text.slice(newline + 1);
+      if (line !== 'starttls\n') {
+        await writer.write(encoder.encode(line));
+        continue;
+      }
+      if (text !== '') {
+        throw new Error('front-test: plaintext past starttls');
+      }
+      await writer.write(encoder.encode('go ahead\n'));
+      reader.releaseLock();
+      writer.releaseLock();
+      await echo(socket.startTls());
+      return;
+    }
+  }
+}

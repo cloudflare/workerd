@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 import dgram from 'node:dgram';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -49,7 +49,17 @@ const CA = readFileSync(
     )
 );
 // The sockets of the config, each of which gets a `listen` event.
-const SOCKETS = ['http', 'alt', 'tcp', 'https', 'rewrite', 'proxy', 'udp'];
+const SOCKETS = [
+  'http',
+  'alt',
+  'tcp',
+  'tcp-tls',
+  'starttls',
+  'https',
+  'rewrite',
+  'proxy',
+  'udp',
+];
 
 // Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
 // there.
@@ -894,6 +904,11 @@ async function within(promise, ms, what) {
   }
 }
 
+// How many descriptors the server has open (Linux).
+function descriptors(server) {
+  return readdirSync(`/proc/${server.child.pid}/fd`).length;
+}
+
 // Waits until `condition()` holds, checking every few milliseconds; fails after `ms`.
 async function until(condition, ms, what) {
   const end = Date.now() + ms;
@@ -1626,11 +1641,13 @@ for (const threads of [1, THREADS]) {
       );
       socket.resetAndDestroy();
       // The Worker learns at once, in one of two ways. Its call is dropped: its response body
-      // is cancelled, and then `request.signal` aborts. That is what one thread always does,
-      // which sees the hang-up before anything else. Or the read of the request body that it
-      // waits for fails, and the call ends by that failure, so nothing is left to abort:
-      // on several threads the connection's end reaches the loop both as the end of the
-      // body it reads and as the drop of the call, and now and then the body comes first.
+      // is cancelled, and then `request.signal` aborts. That is what one thread always does
+      // where the system reports the hang-up, which the thread sees before anything else. Or
+      // the read of the request body that it waits for fails, and the call ends by that
+      // failure, so nothing is left to abort. That is how one thread learns of it on Windows,
+      // where only the read tells. On several threads the connection's end reaches the loop
+      // both as the end of the body it reads and as the drop of the call, and now and then
+      // the body comes first.
       const cancelled = ['response cancelled: undefined', 'signal aborted'];
       const failed = ['request body failed: Network connection lost.'];
       const ended = (notes) =>
@@ -1639,10 +1656,13 @@ for (const threads of [1, THREADS]) {
       // Nothing more follows either.
       await scheduler.wait(300);
       const notes = await notesOf(server, front, marker, ended);
-      if (several && notes[0] === failed[0]) {
-        assert.deepStrictEqual(notes, failed);
+      if (several) {
+        assert.deepStrictEqual(
+          notes,
+          notes[0] === failed[0] ? failed : cancelled
+        );
       } else {
-        assert.deepStrictEqual(notes, cancelled);
+        assert.deepStrictEqual(notes, SEES_RESETS ? cancelled : failed);
       }
     });
 
@@ -1828,6 +1848,63 @@ for (const threads of [1, THREADS]) {
         return { socket, incoming };
       };
       await (await tcpSession(open)).finish();
+    });
+
+    test(`the connections of a tcp socket with TLS are connect() events on different threads ${on}`, async () => {
+      const { server } = shared;
+      const open = async () => {
+        const socket = await connect(server.ports['tcp-tls'], { tls: true });
+        return { socket, incoming: new Incoming(socket) };
+      };
+      // As for the plain tcp socket, connections stay open until two threads serve one.
+      const sessions = [];
+      const fronts = new Set();
+      try {
+        for (let i = 0; i < TRIES && fronts.size < Math.min(threads, 2); i++) {
+          const session = await tcpSession(open);
+          sessions.push(session);
+          fronts.add(session.front);
+        }
+      } finally {
+        for (const session of sessions) await session.finish();
+      }
+      assert.strictEqual(
+        fronts.size,
+        Math.min(threads, 2),
+        'isolates that served'
+      );
+    });
+
+    test(`the connect() handler of a starttls socket upgrades its connection with startTls() ${on}`, async () => {
+      const { server } = shared;
+      let plain;
+      const open = async () => {
+        const socket = await connect(server.ports.starttls);
+        try {
+          const incoming = new Incoming(socket);
+          plain = /^hello ([0-9a-f-]{36})\n$/.exec(await incoming.until('\n'));
+          assert(plain !== null, 'the handler greets with its identity');
+          socket.write('in plaintext\n');
+          assert.strictEqual(await incoming.until('\n'), 'in plaintext\n');
+          socket.write('starttls\n');
+          assert.strictEqual(await incoming.until('\n'), 'go ahead\n');
+          // Nothing but the handshake follows on the connection.
+          const secure = tls.connect({
+            socket,
+            ca: CA,
+            servername: 'localhost',
+          });
+          await once(secure, 'secureConnect');
+          return { socket: secure, incoming: new Incoming(secure) };
+        } catch (error) {
+          socket.destroy();
+          throw error;
+        }
+      };
+      const session = await tcpSession(open);
+      // The handler that greeted in plaintext is the one that serves over TLS.
+      assert.strictEqual(session.front, plain[1]);
+      await session.finish();
     });
 
     test(`an https socket serves requests and WebSockets ${on}`, async () => {
@@ -2175,7 +2252,320 @@ for (const threads of [THREADS, 1]) {
       }
     }
   );
+
+  test(
+    `SIGTERM leaves an open tcp connection working until it closes ${on}`,
+    { skip },
+    async () => {
+      const server = await serve({ threads });
+      try {
+        const socket = await connect(server.ports.tcp);
+        const incoming = new Incoming(socket);
+        assert.match(await incoming.until('\n'), /^hello [0-9a-f-]{36}\n$/);
+        let sent = 0;
+        const exchange = async (line) => {
+          socket.write(line);
+          sent += line.length;
+          assert.strictEqual(await incoming.until('\n'), line);
+        };
+        for (const line of ['before 1\n', 'before 2\n', 'before 3\n']) {
+          await exchange(line);
+        }
+        server.child.kill('SIGTERM');
+        if (several) {
+          // The accept loops stop together; one of the tcp socket's would make a connect()
+          // event of each connection that finds it still accepting.
+          await refused(server.http.port);
+        } else {
+          // One thread says nothing when it begins to drain.
+          await scheduler.wait(500);
+        }
+        await scheduler.wait(500);
+        for (const line of ['after 1\n', 'after 2\n', 'after 3\n']) {
+          await exchange(line);
+        }
+        assert.strictEqual(server.child.exitCode, null, 'the server exited');
+        socket.end();
+        assert.strictEqual(await incoming.until('\n'), `bye ${sent}\n`);
+        assert.strictEqual((await incoming.rest()).length, 0);
+        socket.destroy();
+        assert.deepStrictEqual(await server.exited(), [0, null]);
+        const failures = server.log
+          .split('\n')
+          .filter(
+            (line) =>
+              line.includes('connect() handler threw') ||
+              (line.includes('error:') && /TCP|connect/.test(line))
+          );
+        assert.deepStrictEqual(failures, [], 'failures the server logged');
+      } catch (error) {
+        await server.kill();
+        throw error;
+      }
+    }
+  );
+
+  test(
+    `SIGTERM serves the tcp connections that are still queued ${on}`,
+    { skip: skip || (!several && 'one thread has no queue') },
+    async () => {
+      const server = await serve({ threads });
+      try {
+        // The first thread's isolate: that thread handles SIGTERM.
+        const first = await firstThread(server);
+        // Every thread is kept busy, each until a time chosen here: the first thread until
+        // `firstUntil`, every other 3000 ms longer. The first thread handles SIGTERM only
+        // once its spin ends.
+        const firstUntil = Date.now() + 3000;
+        const spinners = [await spin(server, { until: firstUntil }, first)];
+        for (let i = 1; i < threads; i++) {
+          spinners.push(await spin(server, { until: firstUntil + 3000 }));
+        }
+        assert.strictEqual(spinners[0].front, first);
+        assert.strictEqual(new Set(spinners.map((s) => s.front)).size, threads);
+        // Requests that keep the thread that takes them in JavaScript for 300 ms each, sent
+        // 50 ms apart so that they are queued in the order sent, ahead of the tcp
+        // connections: once its spin has ended the first thread serves them one after
+        // another, and handles SIGTERM between two of them.
+        const answers = [];
+        for (let i = 0; i < 4; i++) {
+          const socket = await connect(server.http.port);
+          const incoming = new Incoming(socket);
+          await write(
+            socket,
+            `GET /spin?ms=300&marker=${unique('queued')} HTTP/1.1\r\n` +
+              'Host: localhost\r\n\r\n'
+          );
+          const response = incoming.response();
+          response.finally(() => socket.destroy()).catch(() => {});
+          answers.push(response);
+          await scheduler.wait(50);
+        }
+        // Connections of the tcp socket, each of which sends a line before anything arrived;
+        // `greeted` resolves with when the greeting arrived.
+        const connections = [];
+        for (let i = 0; i < 3; i++) {
+          const socket = await connect(server.ports.tcp);
+          const incoming = new Incoming(socket);
+          const line = `queued ${i}\n`;
+          socket.write(line);
+          const greeted = incoming.until('\n').then((hello) => {
+            assert.match(hello, /^hello [0-9a-f-]{36}\n$/);
+            return Date.now();
+          });
+          greeted.catch(() => {});
+          connections.push({ socket, incoming, line, greeted });
+        }
+        const signaledAt = Date.now();
+        server.child.kill('SIGTERM');
+        assert(
+          signaledAt < firstUntil,
+          `SIGTERM was sent ${signaledAt - firstUntil} ms after the first thread's spin ` +
+            'ended: the test is too slow to show anything'
+        );
+        // The accept loops stop together: see the case above.
+        await refused(server.http.port);
+        const refusedAt = Date.now();
+        const greetings = await within(
+          Promise.all(connections.map(({ greeted }) => greeted)),
+          20_000,
+          'the greetings'
+        );
+        const responses = await within(
+          Promise.all(answers),
+          20_000,
+          'the answers'
+        );
+        for (const res of responses) assert.strictEqual(res.status, 200);
+        const spun = await Promise.all(spinners.map((s) => s.done));
+        // Every HTTP connection has ended, the spins' too, and nothing is queued any more: a
+        // front that took itself for drained now would be gone by the time the connections
+        // are used again.
+        await scheduler.wait(500);
+        assert.strictEqual(server.child.exitCode, null, 'the server exited');
+        for (const { socket, incoming, line } of connections) {
+          try {
+            assert.strictEqual(await incoming.until('\n'), line);
+            socket.write('after\n');
+            assert.strictEqual(await incoming.until('\n'), 'after\n');
+            socket.end();
+            const bytes = line.length + 'after\n'.length;
+            assert.strictEqual(await incoming.until('\n'), `bye ${bytes}\n`);
+            assert.strictEqual((await incoming.rest()).length, 0);
+          } finally {
+            socket.destroy();
+          }
+        }
+        console.log(
+          `queued tcp connections: refused at +${refusedAt - signaledAt} ms, greeted at ` +
+            `${greetings.map((at) => `+${at - signaledAt}`).join(', ')} ms after SIGTERM`
+        );
+        // Each was still queued when the drain was seen to have begun.
+        for (const at of greetings) {
+          assert(
+            at > refusedAt,
+            `a tcp connection was greeted ${refusedAt - at} ms before a connection was refused`
+          );
+        }
+        for (const { end } of spun.slice(1)) {
+          assert(end > refusedAt, 'a thread was free when the drain began');
+        }
+        assert.deepStrictEqual(await server.exited(), [0, null]);
+        assert(
+          !server.log.includes('connect() handler threw'),
+          'a connect() handler threw'
+        );
+      } catch (error) {
+        await server.kill();
+        throw error;
+      }
+    }
+  );
 }
+
+// The number of `connect()` events the isolates `all` have had, together.
+async function connectsOf(server, all) {
+  let connects = 0;
+  for (const thread of all) {
+    connects += (await get(server.http, '/connects', thread)).connects;
+  }
+  return connects;
+}
+
+test(
+  `a queued tcp connection whose client resets is closed and never reaches a Worker on ${THREADS} threads`,
+  { skip: !SEES_RESETS && 'Windows does not notice the reset' },
+  () =>
+    withServer({}, async (server) => {
+      const linux = process.platform === 'linux';
+      const { all } = await threadsOf(server);
+      const connectsBefore = await connectsOf(server, all);
+      // Every thread spins until `T`, so that every connection below stays queued.
+      const T = Date.now() + 8000;
+      const spinners = [];
+      for (let i = 0; i < THREADS; i++) {
+        spinners.push(await spin(server, { until: T }));
+      }
+      assert.strictEqual(new Set(spinners.map((s) => s.front)).size, THREADS);
+      const before = linux ? descriptors(server) : 0;
+      for (let i = 0; i < 100; i++) {
+        const socket = await connect(server.ports.tcp);
+        await write(socket, `reset ${i}\n`);
+        socket.resetAndDestroy();
+      }
+      // The front notices each hang-up when the system reports it.
+      if (linux) {
+        const end = Date.now() + 3000;
+        let now = descriptors(server);
+        while (now > before + 8 && Date.now() < end) {
+          await scheduler.wait(20);
+          now = descriptors(server);
+        }
+        console.log(
+          `descriptors with 100 reset tcp connections: ${now}, ${before} before`
+        );
+        assert(
+          now <= before + 8,
+          `the server has ${now} descriptors open, ${before} before the connections`
+        );
+      } else {
+        await scheduler.wait(1000);
+      }
+      assert(
+        Date.now() < T,
+        `the descriptors settled ${Date.now() - T} ms after the spins ended: the test is ` +
+          'too slow to show anything'
+      );
+      await Promise.all(spinners.map((s) => s.done));
+      assert.strictEqual(
+        await connectsOf(server, all),
+        connectsBefore,
+        'connect() events'
+      );
+      const open = async () => {
+        const socket = await connect(server.ports.tcp);
+        return { socket, incoming: new Incoming(socket) };
+      };
+      await (await tcpSession(open)).finish();
+    })
+);
+
+test(`with every thread busy the front holds no more than its queue's limit on ${THREADS} threads`, () =>
+  withServer({ args: ['--front-queue=8'] }, async (server) => {
+    const linux = process.platform === 'linux';
+    // Every thread spins until `T`, so that nothing queued is taken before then.
+    const T = Date.now() + 6000;
+    const spinners = [];
+    for (let i = 0; i < THREADS; i++) {
+      spinners.push(await spin(server, { until: T }));
+    }
+    assert.strictEqual(new Set(spinners.map((s) => s.front)).size, THREADS);
+    const before = linux ? descriptors(server) : 0;
+    const rssBefore = RSS ? server.rss() : 0;
+    // Connections of three pipelined requests each, few enough for the listen backlog of
+    // any system to hold those that are not accepted. A client's connection is open once the
+    // system has completed its handshake, accepted or not, so nothing is waited for.
+    const connections = [];
+    for (let c = 0; c < 60; c++) {
+      const socket = net.connect({ host: '127.0.0.1', port: server.http.port });
+      const incoming = new Incoming(socket);
+      const markers = [0, 1, 2].map((k) => `${c}-${k}`);
+      socket.write(
+        markers
+          .map(
+            (marker) =>
+              `GET /?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
+          )
+          .join('')
+      );
+      connections.push({ socket, incoming, markers });
+      await scheduler.wait(5);
+    }
+    await scheduler.wait(500);
+    assert(
+      Date.now() < T,
+      `the connections were made ${Date.now() - T} ms after the spins ended: the test is ` +
+        'too slow to show anything'
+    );
+    // An accepted connection costs two descriptors: its socket and the one that watches it
+    // for a hang-up. Past the limit's 8 the front may accept a few connections for one free
+    // place; 60 connections would cost 120.
+    if (linux) {
+      const growth = descriptors(server) - before;
+      console.log(`descriptors with 60 connections held back: +${growth}`);
+      assert(
+        growth <= 2 * (8 + 8),
+        `the server opened ${growth} descriptors for the connections`
+      );
+    }
+    if (RSS) {
+      const growth = server.rss() - rssBefore;
+      assert(growth < 64 * MiB, `RSS grew ${growth}`);
+    }
+    await Promise.all(spinners.map((s) => s.done));
+    // Every request is answered, those of a connection in the order they were sent.
+    await within(
+      Promise.all(
+        connections.map(async ({ incoming, markers }) => {
+          for (const marker of markers) {
+            const res = await incoming.response();
+            assert.strictEqual(res.status, 200, res.body.toString());
+            assert.strictEqual(JSON.parse(res.body).marker, marker);
+          }
+        })
+      ),
+      20_000,
+      'the responses'
+    );
+    for (const { socket } of connections) socket.destroy();
+    if (linux) {
+      await until(
+        () => descriptors(server) <= before + 8,
+        3000,
+        `the descriptors returning to ${before}`
+      );
+    }
+  }));
 
 for (const front of [1, 4]) {
   test(`--front-threads=${front} serves on every thread`, () =>
