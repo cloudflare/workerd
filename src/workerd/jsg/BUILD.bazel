@@ -366,6 +366,7 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "code-cache-store-test.c++",
         "code-cache-test.c++",
         "compile-cache-test.c++",
         "fast-api-test.c++",
@@ -427,13 +428,35 @@ kj_test(
     ],
 )
 
-kj_test(
-    src = "code-cache-test.c++",
+wd_cc_library(
+    name = "code-cache-test-fixtures",
+    testonly = True,
+    hdrs = ["code-cache-test-fixtures.h"],
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
         ":jsg",
         ":script",
+    ],
+)
+
+kj_test(
+    src = "code-cache-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":code-cache-test-fixtures",
+        ":jsg",
+        ":script",
         "@capnp-cpp//src/capnp",
+    ],
+)
+
+kj_test(
+    src = "code-cache-store-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":code-cache-test-fixtures",
+        ":jsg",
+        ":script",
     ],
 )
 

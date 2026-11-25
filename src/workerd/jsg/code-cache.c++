@@ -38,6 +38,7 @@ kj::uint CodeCacheKey::hashCode() const {
 IsolateCodeCache::IsolateCodeCache(kj::Own<const CodeCacheStore> store): store(kj::mv(store)) {}
 
 void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
+  if (ended) return;
   auto key = CodeCacheKey::compute(unit, utf8Source);
   prepare(key);
   preparedSources.upsert(
@@ -45,6 +46,9 @@ void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char>
 }
 
 void IsolateCodeCache::prepare(const CodeCacheKey& key) {
+  // The embedder prepares as it opens a window, which deferProduction() keeps closed once
+  // production ended.
+  if (ended) return;
   KJ_REQUIRE(deferring, "code cache lookups are prepared only inside a production window");
   // Identical sources share a lookup and at most one producer election.
   preparedLookups.findOrCreate(key, [&]() -> decltype(preparedLookups)::Entry {
@@ -66,6 +70,14 @@ void IsolateCodeCache::forgetPreparedSources() {
 
 CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& key) {
   KJ_IF_SOME(prepared, preparedLookups.find(key)) {
+    if (prepared.lazyHit != kj::none) {
+      // The first compile takes a lazy hit, so that its decoded bytes are freed once that compile
+      // is done. Identical sources compiled later, which are rare, look the key up again.
+      auto taken = kj::mv(prepared);
+      preparedLookups.erase(key);
+      decodeHit(taken);
+      return taken;
+    }
     // Keep the result for other modules with identical source. Only the first compile takes
     // the producer; later compiles reuse the hit or compile from source without another lookup.
     return {
@@ -73,7 +85,20 @@ CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& ke
       .producer = kj::mv(prepared.producer),
     };
   }
-  return store->lookup(key, MayElect(deferring));
+  auto result = store->lookup(key, MayElect(deferring));
+  decodeHit(result);
+  return result;
+}
+
+void IsolateCodeCache::decodeHit(CodeCacheStore::LookupResult& lookup) {
+  KJ_IF_SOME(lazyHit, lookup.lazyHit) {
+    auto decoded = lazyHit->decode(MayElect(deferring));
+    lookup.lazyHit = kj::none;
+    lookup.hit = kj::mv(decoded.hit);
+    // A store that could not decode its own cache, or refused to, counted why. V8 rejected
+    // nothing, so the compile goes on as after a miss.
+    if (lookup.producer == kj::none) lookup.producer = kj::mv(decoded.producer);
+  }
 }
 
 template <typename T>
@@ -153,16 +178,38 @@ template v8::MaybeLocal<v8::Function> IsolateCodeCache::compile<v8::Function>(v8
     CompileCallback<v8::Function>);
 
 void IsolateCodeCache::deferProduction() {
-  // The window is per isolate, but each script opens its own, so a second window would mean a
-  // second script, whose code would be produced or discarded with the first one's.
-  KJ_ASSERT(!deferring, "code cache production window is already open");
+  if (ended) return;
+  if (deferring) {
+    // The window is per isolate, but each script opens its own, so a second window would mean a
+    // second script, whose code would be produced or discarded with the first one's. That is
+    // only acceptable when the embedder closes the window, and so decides when both are done.
+    KJ_ASSERT(store->getProductionTime() == CodeCacheStore::ProductionTime::ON_EMBEDDER_REQUEST,
+        "code cache production window is already open");
+    return;
+  }
   deferring = true;
 }
 
+void IsolateCodeCache::finishStartup(v8::Isolate* isolate, const CompilationObserver& observer) {
+  if (!deferring) return;
+  if (store->getProductionTime() == CodeCacheStore::ProductionTime::END_OF_STARTUP) {
+    produceDeferred(isolate, observer);
+    return;
+  }
+  startupFinished = true;
+}
+
+void IsolateCodeCache::failStartup() {
+  if (!startupFinished) discardDeferred();
+}
+
 void IsolateCodeCache::produceDeferred(v8::Isolate* isolate, const CompilationObserver& observer) {
+  if (!deferring) return;
   closeWindow();
   auto entries = kj::mv(pending);
   for (auto& entry: entries) {
+    // Dropping the rest ends their elections.
+    if (!store->mayProduce()) break;
     KJ_IF_SOME(module, entry.compiled.tryGet<v8::Global<v8::Module>>()) {
       v8::HandleScope scope(isolate);
       // An errored module's code is complete, but the cache policy does not retain it.
@@ -177,8 +224,14 @@ void IsolateCodeCache::discardDeferred() {
   pending.clear();
 }
 
+void IsolateCodeCache::endProduction() {
+  ended = true;
+  discardDeferred();
+}
+
 void IsolateCodeCache::closeWindow() {
   deferring = false;
+  startupFinished = false;
   forgetPreparedSources();
   preparedLookups.clear();
 }
