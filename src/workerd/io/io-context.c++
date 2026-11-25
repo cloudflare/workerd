@@ -1583,12 +1583,28 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+IoContext::RequestTraceScope::RequestTraceScope(Worker::Lock& lock, IoContext& context) {
+  jsg::Lock& js = lock;
+  if (context.actor == kj::none && !context.getMetrics().getSpan().isObserved() &&
+      !context.getRootUserTraceSpan().isObserved() &&
+      jsg::AsyncContextFrame::current(js) == kj::none) {
+    return;
+  }
   jsg::AsyncContextFrame::StorageEntry entries[] = {
-    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
-    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+    {lock.getTraceAsyncContextKey(), context.makeTraceScopeValue(lock, kj::none)},
+    {lock.getUserTraceAsyncContextKey(),
+      KJ_ASSERT_NONNULL(context.getRootUserTraceScope(lock)).addRef(js)},
   };
-  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+  scope.emplace(js, entries);
+}
+
+kj::Maybe<jsg::Value&> IoContext::getRootUserTraceScope(Worker::Lock& lock) {
+  if (incomingRequests.empty()) return kj::none;
+  auto& request = getCurrentIncomingRequest();
+  KJ_IF_SOME(value, request.rootUserTraceScope) {
+    return value;
+  }
+  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none));
 }
 
 jsg::Value IoContext::makeTraceScopeValue(
@@ -1681,6 +1697,9 @@ SpanParent IoContext::getCurrentTraceSpan() {
 
   // If async context is unavailable (unset, from another request, or JS lock is not held), fall
   // back to heuristic of using the trace info from the most recent active request.
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  }
   return getMetrics().getSpan();
 }
 

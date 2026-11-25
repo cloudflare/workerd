@@ -146,9 +146,12 @@ class AsyncContextFrame final: public Wrappable {
   static Ref<AsyncContextFrame> create(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries);
 
   // Wraps the given JavaScript function such that whenever the wrapper function is called,
-  // the root AsyncContextFrame will be entered.
-  static v8::Local<v8::Function> wrapRoot(
-      Lock& js, v8::Local<v8::Function> fn, kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
+  // the root AsyncContextFrame will be entered. The validate function is called first; if it
+  // throws, the wrapper will throw.
+  static v8::Local<v8::Function> wrapRoot(Lock& js,
+      v8::Local<v8::Function> fn,
+      jsg::Function<void()> validate,
+      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
 
   // Returns a function that captures the current frame and calls the function passed
   // in as an argument within that captured context. Equivalent to wrapping a function

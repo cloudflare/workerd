@@ -282,6 +282,11 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // The user trace scope value for rootUserTraceSpan, made the first time
+  // IoContext::getRootUserTraceScope() needs it. The request's trace frames hold it, and
+  // tracing.getActiveSpan() caches the request's root span on it.
+  kj::Maybe<jsg::Value> rootUserTraceScope;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
@@ -1349,8 +1354,29 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Captures the request's internal and user tracing contexts in a single async frame.
-  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
-      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  //
+  // A stateless request that starts in the root frame and observes neither span gets no frame:
+  // with no entry, readers fall back to the current request's spans, and its IoContext runs no
+  // other request. Actors still get a frame, so that a continuation of an unobserved request keeps
+  // masking the spans of a newer, observed request in the same IoContext. So does a request that
+  // starts inside another frame, whose entries it would otherwise inherit.
+  class RequestTraceScope {
+   public:
+    RequestTraceScope(Worker::Lock& lock, IoContext& context);
+    KJ_DISALLOW_COPY_AND_MOVE(RequestTraceScope);
+
+   private:
+    kj::Maybe<jsg::AsyncContextFrame::StorageScope> scope;
+  };
+  [[nodiscard]] RequestTraceScope makeRequestTraceScope(Worker::Lock& lock) {
+    return RequestTraceScope(lock, *this);
+  }
+
+  // The user trace scope value of the current request's root user span, made once per request.
+  // The request's trace frames hold it, and tracing.getActiveSpan() uses it for code that runs
+  // outside them, so the request's root span is the same object either way. Returns nothing if the
+  // IoContext has no current request.
+  kj::Maybe<jsg::Value&> getRootUserTraceScope(Worker::Lock& lock);
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.

@@ -338,6 +338,9 @@ def update_python_metadata_bzl(res: list[tuple[str, list[tuple[str, str]]]]):
         )
 
     metadata_path.write_text(content)
+    # Snapshot file names name the Pyodide extension's repositories, so update their use_repo list
+    # and the extension's entry in MODULE.bazel.lock.
+    subprocess.run(["bazel", "mod", "tidy", "--lockfile_mode=update"], check=True)
 
 
 def upload_snapshots(outdir: Path):

@@ -6,6 +6,7 @@
 // other on<type> property is called as EventTarget calls it.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
+import { setEventTargetThis } from 'flags';
 import { nextEvent, streamOf } from 'helpers';
 
 export const handlersDefaultToNull = {
@@ -44,5 +45,24 @@ export const onPropertyForANamedEvent = {
     source.ontest = (event) => data.push(event.data);
     await nextEvent(source, 'error');
     deepStrictEqual(data, ['first', 'second']);
+  },
+};
+
+// Each handler is called with the EventSource as `this`, or the global object
+// without set_event_target_this.
+export const handlerReceiver = {
+  async test() {
+    const source = EventSource.from(streamOf(['data: hello\n\n']));
+    const receivers = new Map();
+    source.onmessage = function () {
+      receivers.set('message', this);
+    };
+    source.onerror = function () {
+      receivers.set('error', this);
+    };
+    await nextEvent(source, 'error');
+    const expected = setEventTargetThis ? source : globalThis;
+    strictEqual(receivers.get('message'), expected);
+    strictEqual(receivers.get('error'), expected);
   },
 };

@@ -16,7 +16,7 @@
 //!   their own serializers, and a `DOMException`, whichever implementation made it, as C++ JSG
 //!   writes it. Rust resources are not serializable.
 //! - Instances of the runtime's classes implemented in JavaScript that opt into the per-isolate
-//!   bootstrap's protocol for them, such as `QuotaExceededError`. [`serialize`] writes the data
+//!   bootstrap's protocol for them. [`serialize`] writes the data
 //!   that the class's `clone` function returns for an instance, and [`deserialize`] makes the
 //!   copy from the class's prototype, without calling its constructor, and passes it the data
 //!   with the class's `deserialize` function once it has read the whole value.
