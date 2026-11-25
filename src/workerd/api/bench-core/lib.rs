@@ -37,8 +37,11 @@ pub const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
 pub const DEFAULT_SAMPLES: u32 = 50;
 
 /// Under `--quick`, the sampling budget and the number of samples are capped at these.
+///
+/// A quick run checks that cases work rather than measuring them, so two samples are enough: a
+/// case still runs more than once, and a slow one costs a few calls rather than several.
 pub const QUICK_MIN_TIME_NS: u64 = 10_000_000;
-pub const QUICK_SAMPLES: u32 = 5;
+pub const QUICK_SAMPLES: u32 = 2;
 
 /// The most samples a case can ask for.
 pub const MAX_SAMPLES: u32 = 1_000_000;
