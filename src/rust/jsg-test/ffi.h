@@ -22,6 +22,7 @@ namespace rust::jsg_test {
 using Isolate = v8::Isolate;
 
 struct EvalResult;
+struct CompileCacheCounts;
 
 class TestBootstrapModules;
 
@@ -171,10 +172,6 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 ::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
     Isolate* isolate, ::workerd::rust::jsg::Local exception);
 
-// The key of the V8 private property `name`, as the per-isolate bootstrap's
-// utils.getPrivateSymbol() gives it to JavaScript.
-::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name);
-
 // Disallows JavaScript execution, as jsg::DisallowJavaScriptScope does for JSG code, without V8's
 // own guard, or allows it again.
 void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
@@ -186,6 +183,12 @@ void set_allow_eval(Isolate* isolate, bool allow);
 // compiled module to does. Throws a KJ exception if V8 creates none.
 ::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
     Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module);
+
+// v8::ScriptCompiler::CreateCodeCacheForFunction() of `function`.
+::rust::Vec<uint8_t> create_code_cache(Isolate* isolate, ::workerd::rust::jsg::Local function);
+
+// What became of the compile caches given to the isolate of a TestHarness.
+CompileCacheCounts compile_cache_counts(Isolate* isolate);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);

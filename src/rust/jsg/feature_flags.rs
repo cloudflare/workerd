@@ -26,7 +26,7 @@ impl FeatureFlags {
     /// # Panics
     ///
     /// Panics if `data` is empty or not word-aligned.
-    pub(crate) fn from_bytes(data: &[u8]) -> Self {
+    pub fn from_bytes(data: &[u8]) -> Self {
         assert!(!data.is_empty(), "FeatureFlags data must not be empty");
         assert!(
             data.len().is_multiple_of(8),

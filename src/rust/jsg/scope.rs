@@ -728,6 +728,39 @@ where
     callback::<F>
 }
 
+/// Turns `f` into a V8 `AccessorNameGetterCallback` that also gets the property's name, as for
+/// [`crate::v8::Local::<crate::v8::Object>::set_lazy_data_property`], as [`getter_callback`] does
+/// otherwise.
+pub fn accessor_name_getter_callback<F>(f: F) -> RawGetterCallback
+where
+    F: UnitType
+        + for<'s> Fn(&mut Lock<'s>, v8::Local<'s, v8::Name>, &mut v8::PropertyCallbackInfo<'s>),
+{
+    #[expect(unsafe_code, reason = "V8 calls this with a raw PropertyCallbackInfo")]
+    unsafe extern "C" fn callback<F>(name: usize, info: *mut v8::ffi::PropertyCallbackInfo)
+    where
+        F: UnitType
+            + for<'s> Fn(&mut Lock<'s>, v8::Local<'s, v8::Name>, &mut v8::PropertyCallbackInfo<'s>),
+    {
+        // SAFETY: V8 calls a property getter with the property's name and its
+        // `PropertyCallbackInfo`, with the isolate locked, a context entered and a `HandleScope`
+        // open for the duration of the call.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(info) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `info` is the running callback's, and `lock` the lock of its scope.
+            let mut args = unsafe { v8::PropertyCallbackInfo::new(lock, info) };
+            // SAFETY: `name` is the `v8::Local<v8::Name>` V8 passed, which lives for the call.
+            let name = unsafe { v8::Local::from_ffi(v8::ffi::Local { ptr: name }) };
+            // SAFETY: `accessor_name_getter_callback` was handed a value of `F`.
+            let f = unsafe { unit_value::<F>() };
+            f(lock, name, &mut args);
+        });
+    }
+
+    let _ = f;
+    callback::<F>
+}
+
 /// Turns `f` into a V8 native data property setter, as [`function_callback`] does for
 /// functions.
 pub fn setter_callback<F>(f: F) -> RawSetterCallback

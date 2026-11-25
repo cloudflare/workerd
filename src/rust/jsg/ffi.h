@@ -41,6 +41,7 @@ using ExternalMemoryTarget = const ::workerd::jsg::ExternalMemoryTarget;
 using CompiledWasmModule = v8::CompiledWasmModule;
 struct ModuleRegistry;
 struct Local;
+struct FunctionTemplateDescriptor;
 struct ArrayElement;
 struct MaybeLocal;
 struct Global;
@@ -318,6 +319,7 @@ bool local_is_array_buffer_view(const Local& val);
 bool local_is_shared_array_buffer(const Local& val);
 bool local_is_function(const Local& val);
 bool local_is_promise(const Local& val);
+bool local_is_data_view(const Local& val);
 bool local_is_symbol(const Local& val);
 bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
@@ -901,5 +903,58 @@ int64_t external_memory_target_pending_update_for_test(ExternalMemoryTarget& tar
 size_t external_memory_adjustment_amount(const ExternalMemoryAdjustment& adjustment);
 void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::rust::isize delta);
 void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount);
+
+// Native functions, keys and scripts for the runtime's internal JavaScript
+//
+// v8::FunctionTemplate::New() with `descriptor.callback`, no data, signature or length, and
+// `descriptor.fast` as the CFunction if fast calls are enabled for the isolate. Registers the
+// callbacks for snapshots.
+Local function_template_new(Isolate* isolate, const FunctionTemplateDescriptor& descriptor);
+// FunctionTemplate::GetFunction() in the current context; empty if an exception or a termination
+// is pending.
+MaybeLocal local_function_template_get_function(Isolate* isolate, const Local& tmpl);
+// The symbol v8::Symbol::ForApi() returns for `name`, a string.
+Local symbol_for_api(Isolate* isolate, const Local& name);
+// v8::Private::ForApi() for `name`, a string.
+Local private_for_api(Isolate* isolate, const Local& name);
+// The private symbol `priv` as a value that works as a property key: `object[key]` reads and
+// writes the private property. Empty if an exception or a termination is pending.
+MaybeLocal private_to_property_key(Isolate* isolate, const Local& priv);
+// Object::SetLazyDataProperty() with the AccessorNameGetterCallback `getter`, which is
+// registered for snapshots. False if the object refused the property, none if an exception or a
+// termination is pending.
+kj::Maybe<bool> local_object_set_lazy_data_property(Isolate* isolate,
+    const Local& object,
+    const Local& key,
+    size_t getter,
+    const Local& data,
+    uint8_t attributes);
+Local pci_get_data(PropertyCallbackInfo* info);
+// Object::Delete(); none if it threw or an exception or a termination is pending.
+kj::Maybe<bool> local_object_delete_property(
+    Isolate* isolate, const Local& object, const Local& key);
+// A one-byte string over `bytes`, which must live for the rest of the process, without copying
+// them (but copied under ASan, which can't trace V8's external string resources).
+MaybeLocal string_new_external_one_byte(Isolate* isolate, ::rust::Slice<const uint8_t> bytes);
+// Compiles `source` as a function with the parameters `params`, as
+// v8::ScriptCompiler::CompileFunction() does, with the script origin `origin`. Consumes
+// `compile_cache`, which must outlive the call, if it is non-empty and V8 accepts it, and tells
+// the isolate's observer whether it did. Empty if compiling throws or an exception or a
+// termination is already pending, with the exception left pending.
+MaybeLocal script_compiler_compile_function(Isolate* isolate,
+    const Local& source,
+    ::rust::Str origin,
+    ::rust::Slice<const ::rust::Str> params,
+    ::rust::Slice<const uint8_t> compile_cache);
+
+// Startup snapshots, for values pinned into a context's snapshot
+bool isolate_is_starting_from_snapshot(Isolate* isolate);
+bool isolate_is_preparing_snapshot(Isolate* isolate);
+// Pins `value` into the snapshot of the current context. Only while preparing a snapshot. None,
+// pinning nothing, while an exception is pending.
+kj::Maybe<size_t> context_pin_into_snapshot(Isolate* isolate, const Local& value);
+// The value pinned under `index` into the snapshot the current context was deserialized from, or
+// empty, as while an exception is pending. V8 hands each pinned value out once.
+MaybeLocal context_extract_once_from_snapshot(Isolate* isolate, size_t index);
 
 }  // namespace workerd::rust::jsg

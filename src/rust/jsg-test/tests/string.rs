@@ -910,3 +910,33 @@ fn string_from_two_byte_with_one_surrogate_matches_from_utf16_lossy() {
         Ok(())
     });
 }
+
+// =============================================================================
+// String::new_external_one_byte — V8 reads the bytes in place
+// =============================================================================
+
+static LATIN1: &[u8] = b"caf\xe9 au lait";
+
+#[test]
+fn new_external_one_byte_reads_latin1() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let string = JsString::new_external_one_byte(lock, LATIN1).unwrap();
+        assert_eq!(usize::try_from(string.length()).unwrap(), LATIN1.len());
+        assert_eq!(string.to_string(lock), "café au lait");
+        ctx.set_global(lock, "s", string);
+        assert!(
+            ctx.eval::<bool>(lock, "s === 'caf\\u00e9 au lait'")
+                .unwrap()
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn new_external_one_byte_of_nothing_is_empty() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let string = JsString::new_external_one_byte(lock, b"").unwrap();
+        assert_eq!(string.length(), 0);
+        Ok(())
+    });
+}

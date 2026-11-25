@@ -307,3 +307,64 @@ fn a_pending_rust_reaction_fails_the_zygote() {
     .unwrap_err();
     assert!(failure.contains("WrappableFunction"), "{failure}");
 }
+
+#[test]
+fn lock_knows_which_side_of_a_snapshot_it_is_on() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        assert!(!lock.is_preparing_snapshot());
+        assert!(!lock.is_starting_from_snapshot());
+        Ok(())
+    });
+    crate::snapshot_round_trip(
+        |lock, _ctx| {
+            assert!(lock.is_preparing_snapshot());
+            assert!(!lock.is_starting_from_snapshot());
+            Ok(())
+        },
+        |lock, _ctx| {
+            assert!(!lock.is_preparing_snapshot());
+            assert!(lock.is_starting_from_snapshot());
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn pinned_value_is_extracted_once_from_the_snapshot() {
+    let index = std::cell::Cell::new(None);
+    crate::snapshot_round_trip(
+        |lock, ctx| {
+            let value = ctx
+                .eval_raw(lock, "({ answer: 42, nested: [1, 2] })")
+                .unwrap();
+            index.set(Some(lock.pin_into_snapshot(value)?));
+            Ok(())
+        },
+        |lock, ctx| {
+            let index = index.get().expect("the zygote pinned a value");
+            let value = lock
+                .extract_once_from_snapshot(index)
+                .expect("the snapshot holds the pinned value");
+            ctx.set_global(lock, "pinned", value);
+            assert_eq!(
+                ctx.eval::<String>(lock, "`${pinned.answer},${pinned.nested}`")
+                    .unwrap(),
+                "42,1,2"
+            );
+            assert!(lock.extract_once_from_snapshot(index).is_none());
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+#[should_panic(expected = "not preparing a snapshot")]
+fn pin_into_snapshot_requires_a_zygote() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let value = 1.to_js(lock)?;
+        lock.pin_into_snapshot(value)?;
+        Ok(())
+    });
+}
