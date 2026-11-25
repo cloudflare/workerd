@@ -15242,6 +15242,78 @@ declare abstract class D1PreparedStatement {
   }): Promise<[string[], ...T[]]>;
   raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
 }
+// Types for a Platform Worker that implements a custom D1 binding. These types
+// are not global: import them from `cloudflare:workers`.
+declare namespace CloudflareWorkersModule {
+  /**
+   * Interface that a Platform Worker implements to intercept the calls of a
+   * custom D1 binding. The runtime translates the D1 API calls of the User
+   * Worker, such as `prepare().bind().all()`, into calls to `query()`.
+   *
+   * To reject an operation, throw an error from `query()`.
+   */
+  export interface D1BindingService {
+    /**
+     * Executes one or more SQL queries in a single transaction.
+     */
+    query(params: D1QueryRequest): Promise<D1QueryResponse>;
+  }
+  export interface D1QueryRequest {
+    /**
+     * SQL queries to execute in a single transaction.
+     */
+    queries: D1QuerySql[];
+    /**
+     * The session constraint or the bookmark that selects the database instance.
+     */
+    bookmark?: D1SessionConstraint | (D1SessionBookmark & {});
+  }
+  export interface D1QueryResponse {
+    /**
+     * The result of each SQL query in the request, in request order.
+     */
+    results: D1QuerySqlResult[];
+    /**
+     * The session bookmark after the execution of the queries.
+     */
+    bookmark?: D1SessionBookmark;
+  }
+  export interface D1QuerySql {
+    /**
+     * SQL statement with optional placeholders bound from `params`.
+     */
+    sql: string;
+    /**
+     * Positional parameters bound to the placeholders in the SQL statement.
+     */
+    params?: unknown[];
+  }
+  export interface D1QuerySqlResult {
+    /**
+     * Metadata about the query execution.
+     */
+    meta: D1Meta;
+    /**
+     * Rows and columns that the query returned.
+     */
+    data: D1QuerySqlResultData;
+  }
+  export interface D1QuerySqlResultData {
+    /**
+     * Discriminator for the format of the result data. Other kinds can be
+     * added in the future, so check this value before you read the data.
+     */
+    kind: "raw";
+    /**
+     * Column names of the returned rows.
+     */
+    columns: string[];
+    /**
+     * Returned rows. Each row contains one value for each column, in column order.
+     */
+    rows: unknown[][];
+  }
+}
 // `Disposable` was added to TypeScript's standard lib types in version 5.2.
 // To support older TypeScript versions, define an empty `Disposable` interface.
 // Users won't be able to use `using`/`Symbol.dispose` without upgrading to 5.2,
