@@ -257,15 +257,21 @@ fn a_full_queue_holds_requests_and_connections_back() {
         // No loop takes anything: the queue stays at its limit, whatever the clients sent.
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(queue.len(), 2);
-        // Each item a loop takes makes room for one more, in the order the clients came, and
-        // nobody was answered meanwhile.
+        // Each item a loop takes makes room for one more, and nobody was answered meanwhile.
+        // The two that were queued come first; the others in the order the front's threads
+        // got to them, which for connections that arrive together is not the order they
+        // were made in.
+        let mut paths = Vec::new();
         for index in 0..6 {
-            assert_eq!(path_of(take(&worker).await), format!("/{index}"));
+            paths.push(path_of(take(&worker).await));
             let queued = (5 - index).min(2);
             eventually("the next request is queued", || queue.len() == queued).await;
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert_eq!(queue.len(), queued);
         }
+        assert_eq!(paths[..2], ["/0", "/1"]);
+        paths.sort_unstable();
+        assert_eq!(paths, ["/0", "/1", "/2", "/3", "/4", "/5"]);
     });
 }
 
@@ -512,5 +518,108 @@ fn a_panic_in_a_connections_task_ends_that_connection_and_is_logged() {
             description.contains("the connection's task went wrong"),
             "{description}"
         );
+    });
+}
+
+#[test]
+fn a_front_that_drains_before_it_serves_accepts_nothing() {
+    run(async {
+        let (mut front, queue, port) = front(HTTP).await;
+        let worker = queue.worker();
+        let watch = front.watch();
+        let _client = request(port, "/");
+        front.drain();
+        // It has drained at once: the queue ends without the request, which was never read.
+        assert!(take(&worker).await.is_none());
+        watch.await.unwrap();
+        assert!(queue.is_empty());
+    });
+}
+
+#[test]
+fn a_front_is_stopped_before_it_serves() {
+    run(async {
+        let (front, queue, port) = front(HTTP).await;
+        let _worker = queue.worker();
+        let _client = request(port, "/");
+        // Joins the front's thread, which was still waiting to be told to serve.
+        drop(front);
+        assert!(queue.is_empty());
+    });
+}
+
+#[test]
+fn a_socket_whose_options_name_a_cf_blob_header_gets_no_blob_of_the_peer() {
+    run(async {
+        let (front, queue, port) = front(Protocol::Http {
+            tls: None,
+            peer_cf_blob: false,
+        })
+        .await;
+        let worker = queue.worker();
+        front.serve();
+        let _client = request(port, "/");
+        let Some(Work::Http(work)) = take(&worker).await else {
+            panic!("an HTTP request is queued as one");
+        };
+        assert!(work.cf_blob.is_none());
+    });
+}
+
+/// The requests of a loop that stops: those it took end unanswered, which closes their
+/// connections, and those still queued are another loop's.
+#[test]
+fn a_loop_that_stops_drops_what_it_took_and_leaves_the_rest_to_the_others() {
+    run(async {
+        let (front, queue, port) = front(HTTP).await;
+        let stopping = queue.worker();
+        let staying = queue.worker();
+        front.serve();
+        let mut taken_client = request(port, "/taken");
+        let taken = take(&stopping).await;
+        let _queued_client = request(port, "/queued");
+        eventually("the request is queued", || queue.len() == 1).await;
+
+        // The loop ends: it drops its end of the queue and the calls it had.
+        drop(stopping);
+        drop(taken);
+        let mut rest = Vec::new();
+        taken_client.read_to_end(&mut rest).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(path_of(take(&staying).await), "/queued");
+    });
+}
+
+// A reset is noticed while nothing is read from the connection, which Windows has no way to do.
+#[cfg(unix)]
+#[test]
+fn a_tcp_connection_that_waits_for_room_leaves_with_its_client() {
+    run(async {
+        let (front, queue, port) = front_with_limit(TCP, 1).await;
+        let worker = queue.worker();
+        front.serve();
+        let _first = tcp_client(port);
+        eventually("the connection is queued", || queue.len() == 1).await;
+        // Accepted or not, this one is not queued while the first is, and its client leaves.
+        let gone = tcp_client(port);
+        let last = tcp_client(port);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        socket2::SockRef::from(&gone)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(gone);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let Some(Work::Tcp(_first_work)) = take(&worker).await else {
+            panic!("a TCP connection is queued as one");
+        };
+        // The loop is given the connection of the client that stayed, not of the one that
+        // left.
+        eventually("the last connection is queued", || queue.len() == 1).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let Some(Work::Tcp(work)) = take(&worker).await else {
+            panic!("a TCP connection is queued as one");
+        };
+        assert_eq!(work.peer, Some(last.local_addr().unwrap()));
+        assert!(queue.is_empty());
     });
 }

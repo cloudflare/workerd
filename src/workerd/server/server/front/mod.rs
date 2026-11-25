@@ -52,7 +52,10 @@
 //! the client; and the accept loops accept nothing until the queue has room, so new
 //! connections wait in the listen backlog, as they do when the one thread of a server
 //! without a front is busy. Room is given in the order it was asked for, so the requests
-//! that wait are queued ahead of connections not yet accepted. Nothing is answered with an
+//! that wait are queued ahead of connections not yet accepted. An accept loop does not keep
+//! the room it waited for (an idle connection would hold it), so for one free place it may
+//! accept the few connections that arrive before the first of them has queued its request;
+//! their requests then wait as above. Nothing is answered with an
 //! error and nothing times out: a request waits for as long as its client does, and leaves
 //! when the client goes away, queued or not. A connection of a TCP socket waits the same
 //! way, accepted and not queued. Requests and connections that a loop has taken do not

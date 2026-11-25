@@ -559,6 +559,68 @@ fn a_queue_that_takes_no_more_keeps_nobody_waiting() {
 }
 
 #[test]
+fn a_grant_for_an_item_that_left_is_handed_to_nobody() {
+    let queue = Queue::new(ROOMY);
+    let idle = TestLoop::new(&queue);
+    let woken = TestLoop::new(&queue);
+    idle.sleep();
+    woken.sleep();
+    let ticket = queue.push_now(1);
+    assert_eq!((woken.wakes(), idle.wakes()), (1, 0));
+    // The client went away before the loop that was woken for its request ran its taker.
+    drop(ticket);
+    woken.parking.after_unpark();
+    woken.parking.before_resume();
+    woken.parking.before_park();
+    assert_eq!(idle.wakes(), 0);
+    assert!(woken.takes_nothing());
+}
+
+#[test]
+fn the_thread_of_a_loop_that_left_is_not_counted_asleep() {
+    let queue = Queue::new(ROOMY);
+    let staying = TestLoop::new(&queue);
+    let leaving = TestLoop::new(&queue);
+    let TestLoop {
+        worker,
+        parking,
+        wakes,
+    } = leaving;
+    drop(worker);
+    // Its thread goes on sleeping and waking for other things for as long as it runs.
+    parking.before_park();
+    staying.sleep();
+    let _ticket = queue.push_now(1);
+    assert_eq!((wakes.count.load(SeqCst), staying.wakes()), (0, 1));
+    parking.after_unpark();
+    parking.before_resume();
+    assert_eq!(staying.take().0, 1);
+}
+
+#[test]
+fn a_closed_queue_ends_when_its_last_item_is_taken_out_by_its_ticket() {
+    let queue = Queue::new(ROOMY);
+    let worker = TestLoop::new(&queue);
+    let ticket = queue.push_now(1);
+    queue.close();
+    // The loop is busy with other things, and the request's client goes away meanwhile.
+    assert!(worker.takes_nothing());
+    assert_eq!(worker.wakes(), 0);
+    drop(ticket);
+    // Nothing is left for the loops, which are told.
+    assert_eq!(worker.wakes(), 1);
+    assert!(matches!(worker.poll(), Poll::Ready(None)));
+}
+
+#[test]
+fn a_queue_holds_one_item_at_least() {
+    let queue = Queue::new(0);
+    let _worker = queue.worker();
+    let _first = queue.push_now(1);
+    assert!(queue.push(2).now_or_never().is_none());
+}
+
+#[test]
 fn items_leave_from_anywhere_and_the_rest_keep_their_order() {
     let queue = Queue::new(ROOMY);
     let worker = TestLoop::new(&queue);
