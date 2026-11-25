@@ -2484,9 +2484,11 @@ fn cluster_services(
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
-        // A `cache` and a `bucket` keep state a process has once: on a replica each is the first
-        // loop thread's, which checked it.
-        if factory.thread() != 0 {
+        // A `cache` keeps state a process has once, and so does a `bucket` that is a local
+        // store: on a replica each is the first loop thread's, which checked it. A `bucket` of
+        // the cluster's bucket is every thread's own, over the thread's client of it.
+        let own = matches!(conf.which(), Ok(service::Which::Bucket(_))) && cluster.is_some();
+        if factory.thread() != 0 && !own {
             if matches!(
                 conf.which(),
                 Ok(service::Which::Bucket(_) | service::Which::Cache(_))
