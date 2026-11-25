@@ -68,6 +68,17 @@ impl Attributes {
     }
 }
 
+/// An OpenTelemetry homogeneous primitive array, built one element at a time. A missing element is
+/// an `AnyValue` with nothing set, OTLP's form of an OpenTelemetry null slot.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AttributeArray(proto::ArrayValue);
+
+impl AttributeArray {
+    pub fn push(&mut self, value: Option<Value>) {
+        self.0.values.push(proto::AnyValue { value });
+    }
+}
+
 pub fn key_value(key: impl Into<String>, value: impl IntoValue) -> proto::KeyValue {
     proto::KeyValue {
         key: key.into(),
@@ -117,3 +128,13 @@ impl IntoValue for f64 {
         Value::Double(self)
     }
 }
+
+impl IntoValue for AttributeArray {
+    fn into_value(self) -> Value {
+        Value::Array(self.0)
+    }
+}
+
+#[cfg(test)]
+#[path = "attributes-test.rs"]
+mod tests;

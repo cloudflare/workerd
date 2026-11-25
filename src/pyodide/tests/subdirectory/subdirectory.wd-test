@@ -5,6 +5,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # subdirectory-keep-import-caches.wd-test covers keeping them.
 
 const unitTests :Workerd.Config = (
+  # Tiering Pyodide up to TurboFan costs these short tests more CPU than it saves.
+  v8Flags = ["--liftoff-only"],
   services = [
     ( name = "main",
       worker = (

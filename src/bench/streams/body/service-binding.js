@@ -14,6 +14,7 @@ import {
   bytesOf,
   drainBytes,
   expectEqual,
+  scaled,
   shapeLabel,
   sizeLabel,
   valueStream,
@@ -58,22 +59,23 @@ async function echo(self, body, size) {
 
 export const serviceBinding = {
   bench(b, env) {
-    for (const size of [1024, 65536, 1048576]) {
+    for (const size of [1024, 65536, 1048576].map((size) => scaled(b, size))) {
       const bytes = bytesOf(size);
       b.run(`POST a Uint8Array, echoed, ${sizeLabel(size)}`, () =>
         echo(env.SELF, bytes, size)
       );
     }
-    for (const [count, size] of SHAPES) {
+    const shapes = SHAPES.map(([count, size]) => [scaled(b, count), size]);
+    for (const [count, size] of shapes) {
       b.run(`POST a value stream, echoed, ${shapeLabel(count, size)}`, () =>
         echo(env.SELF, valueStream(count, size), count * size)
       );
     }
-    const [count, size] = SHAPES[1];
+    const [count, size] = shapes[1];
     b.run(`POST a byte stream, echoed, ${shapeLabel(count, size)}`, () =>
       echo(env.SELF, byteStream(count, size), count * size)
     );
-    for (const size of [65536, 1048576]) {
+    for (const size of [65536, 1048576].map((size) => scaled(b, size))) {
       b.run(`GET, read with a reader, ${sizeLabel(size)}`, async () => {
         const response = await env.SELF.fetch(`http://self/bytes/${size}`);
         expectEqual(
@@ -83,11 +85,12 @@ export const serviceBinding = {
         );
       });
     }
-    b.run('GET, 256 tokens through TextEncoderStream', async () => {
-      const response = await env.SELF.fetch('http://self/tokens/256');
+    const tokens = scaled(b, 256);
+    b.run(`GET, ${tokens} tokens through TextEncoderStream`, async () => {
+      const response = await env.SELF.fetch(`http://self/tokens/${tokens}`);
       expectEqual(
         await drainBytes(response.body.getReader()),
-        256 * TOKEN.length,
+        tokens * TOKEN.length,
         'bytes read'
       );
     });

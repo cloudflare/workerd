@@ -4,6 +4,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # caches that a dedicated snapshot restores.
 
 const unitTests :Workerd.Config = (
+  # Tiering Pyodide up to TurboFan costs these short tests more CPU than it saves.
+  v8Flags = ["--liftoff-only"],
   services = [
     ( name = "main",
       worker = (

@@ -17,9 +17,15 @@ export default {
         resolve(msg.data);
       });
     });
+    const closePromise = new Promise((resolve) => {
+      ws.addEventListener('close', resolve);
+    });
     ws.send('test');
 
     await messagePromise;
-    ws.close();
+    // The Durable Object replies to the close, so the handshake finishes now rather than when the
+    // idle Durable Object is evicted.
+    ws.close(1000, 'done');
+    await closePromise;
   },
 };

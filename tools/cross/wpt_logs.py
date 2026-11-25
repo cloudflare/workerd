@@ -69,16 +69,20 @@ class Log:
 
 
 def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
-    return [
-        parse_log(log_file, options)
-        for log_file in sorted(logs_dir.glob("**/src/wpt/**/*@/test.xml"))
-    ]
+    # A sharded target (shard_count) has a log in a shard_<n>_of_<count> directory for each shard.
+    log_files = list(logs_dir.glob("**/src/wpt/**/*@/test.xml")) + list(
+        logs_dir.glob("**/src/wpt/**/*@/shard_*_of_*/test.xml")
+    )
+    return [parse_log(log_file, options) for log_file in sorted(log_files)]
 
 
 def parse_log(log_file: Path, options: Options) -> Log:
     log = Log()
 
-    if log_file.parent.name in EXCLUDED_TESTS:
+    target_dir = log_file.parent
+    if target_dir.name.startswith("shard_"):
+        target_dir = target_dir.parent
+    if target_dir.name in EXCLUDED_TESTS:
         return log
 
     parser = ElementTree.XMLParser(encoding="utf-8")
@@ -112,17 +116,43 @@ def parse_log(log_file: Path, options: Options) -> Log:
     return log
 
 
-def stats_table(logs: list[Log]) -> str:
-    cells = []
+def percent(part: int, total: int) -> str:
+    return f"{part / total * 100:.0f}" if total else "NaN"
+
+
+def merge_stats(logs: list[Log]) -> list[list[Any]]:
+    """
+    Sum the stats of each module over its shards.
+
+    Each row is [module, ok, disabled, total, % ok, pass, fail, disabled, total, % pass].
+    """
+
+    merged: dict[str, list[Any]] = {}
 
     for log in logs:
         if not log.stats:
             continue
 
-        cells.append(
-            [f"<td>{log.stats[0]}</td>"]
-            + [f"<td align='right'>{value}</td>" for value in log.stats[1:]]
-        )
+        module, *values = log.stats
+        if module not in merged:
+            merged[module] = [module, *values]
+            continue
+
+        row = merged[module]
+        for i in (1, 2, 3, 5, 6, 7, 8):
+            row[i] += log.stats[i]
+        row[4] = percent(row[1], row[3])
+        row[9] = percent(row[5], row[8])
+
+    return list(merged.values())
+
+
+def stats_table(logs: list[Log]) -> str:
+    cells = [
+        [f"<td>{stats[0]}</td>"]
+        + [f"<td align='right'>{value}</td>" for value in stats[1:]]
+        for stats in merge_stats(logs)
+    ]
 
     if not cells:
         return ""

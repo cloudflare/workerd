@@ -125,7 +125,18 @@ function serve(dir) {
     ],
     { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }
   );
-  const port = new Promise((resolve) => {
+  const exited = new Promise((resolve) =>
+    child.once('exit', (code, signal) => resolve(code ?? signal))
+  );
+  // An exit stop() didn't ask for fails whatever waits on the server at
+  // once, rather than at the test's timeout.
+  let stopping = false;
+  const died = exited.then((how) => {
+    if (!stopping) throw new Error(`workerd exited (${how})`);
+  });
+  died.catch(() => {});
+  const port = new Promise((resolve, reject) => {
+    died.catch(reject);
     let control = '';
     child.stdio[3].setEncoding('utf8').on('data', (d) => {
       control += d;
@@ -141,7 +152,8 @@ function serve(dir) {
   const logged = [];
   const waiters = new Set();
   const ran = (n) =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
+      died.catch(reject);
       const check = () => {
         if (logged.length < n) return;
         waiters.delete(check);
@@ -165,8 +177,8 @@ function serve(dir) {
   };
   read(child.stdout);
   read(child.stderr);
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  return { ran, get, stop: (signal) => (child.kill(signal), exited) };
+  const stop = (signal) => ((stopping = true), child.kill(signal), exited);
+  return { ran, get, stop };
 }
 
 test('a restart goes on from a sleep, done steps not run again', async () => {
