@@ -22,11 +22,30 @@ js_test(
     size = "large",
     data = [
         ":durable-config.capnp",
+        ":durable-harness.mjs",
         ":durable-worker.mjs",
         ":worker.mjs",
         "//src/workerd/server:workerd",
     ],
     entry_point = "durable-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_DURABLE_CONFIG": "$(rootpath :durable-config.capnp)",
+    },
+    tags = ["js-test"],
+)
+
+js_test(
+    name = "threads-placement-test",
+    size = "large",
+    data = [
+        ":durable-config.capnp",
+        ":durable-harness.mjs",
+        ":durable-worker.mjs",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "placement-driver.mjs",
     env = {
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_DURABLE_CONFIG": "$(rootpath :durable-config.capnp)",
@@ -42,6 +61,7 @@ js_test(
     timeout = "eternal",
     data = [
         ":front-config.capnp",
+        ":front-probe.mjs",
         ":front-worker.mjs",
         "//src/workerd/api/tests:connect-handler-server.key",
         "//src/workerd/api/tests:connect-handler-server.pem",

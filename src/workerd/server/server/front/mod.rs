@@ -452,6 +452,10 @@ impl Main {
         }
         let serve = async {
             let ended = async {
+                // A front without a socket accepts nothing, and ends when it drains.
+                if accepting.is_empty() {
+                    shared.drained().await;
+                }
                 while let Some(joined) = accepting.join_next().await {
                     match joined {
                         Ok(result) => result?,

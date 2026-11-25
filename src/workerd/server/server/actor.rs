@@ -18,11 +18,13 @@
 //! Whatever else holds a container's `Rc` keeps it from the cleanup loop: a stub's channel and a
 //! request in flight (each a [`Client`]), and an eviction in progress.
 //!
-//! With several loop threads (threads.rs) every actor is on the first: only its namespaces have
-//! storage and containers. A replica's namespace is a name for the first thread's: the channel it
-//! gives a stub ([`ForwardedChannel`]) is a capability, over the replica's session, for the
-//! channel the first thread's namespace gives a stub of its own, so the first thread holds the
-//! actor's container for as long as the replica holds the stub, and for each request in flight.
+//! With several loop threads (threads.rs) every thread has the namespace, with its storage open,
+//! and an actor has one home thread among them, which the threads' hub names
+//! ([`ActorNamespace::home`]): only the home thread's namespace has the actor's container. On
+//! any other thread the channel the namespace gives a stub ([`ForwardedChannel`]) is a
+//! capability, over the session of the two threads, for the channel the home thread's namespace
+//! gives a stub of its own, so the home thread holds the actor's container for as long as the
+//! other holds the stub, and for each request in flight.
 
 use std::cell::Cell;
 use std::cell::OnceCell;
@@ -82,6 +84,7 @@ use crate::cluster::moved;
 use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
+use crate::hub::Mail;
 use crate::placement::Scope;
 use crate::tasks::TaskHandle;
 
@@ -442,11 +445,7 @@ impl ActorNamespace {
     /// The channel of the actor with `id` for a stub on loop thread `thread` of the process,
     /// which sent for it over its session with this thread: the channel a stub on this thread
     /// gets. Whether the stub is persistent arrives with each of its requests.
-    pub fn channel_from_thread(
-        &self,
-        id: KjOwn<ActorIdHandle>,
-        thread: usize,
-    ) -> Rc<dyn Channel> {
+    pub fn channel_from_thread(&self, id: KjOwn<ActorIdHandle>, thread: usize) -> Rc<dyn Channel> {
         self.channel_for(id, false, false, None, Some(thread))
     }
 
@@ -596,9 +595,8 @@ impl ActorNamespace {
         handoffs.collect()
     }
 
-    /// Aborts every actor and deletes the namespace's storage and alarms.
+    /// Aborts every actor of this thread and deletes the namespace's storage and alarms here.
     pub fn delete_all(&self, reason: Option<&crate::Error>) -> Result<()> {
-        self.require_actors_here("delete Durable Objects")?;
         // The databases are reset while their connections are open, before the abort closes
         // them: Windows releases file locks late.
         for container in self.actors.borrow().values() {
@@ -611,11 +609,10 @@ impl ActorNamespace {
         }
     }
 
-    /// Test hook: shuts down every running actor of the namespace (hibernating or closing its
-    /// WebSockets), keeping its container so that the next request rebuilds it. Nothing for a
-    /// namespace with `preventEviction`.
+    /// Test hook: shuts down every running actor of the namespace on this thread (hibernating
+    /// or closing its WebSockets), keeping its container so that the next request rebuilds it.
+    /// Nothing for a namespace with `preventEviction`.
     pub async fn evict_all_for_test(&self, hibernate: bool) -> Result<()> {
-        self.require_actors_here("evict Durable Objects")?;
         if !self.is_evictable() {
             return Ok(());
         }
@@ -631,9 +628,26 @@ impl ActorNamespace {
             .collect::<Result<()>>()
     }
 
-    /// Whether `link` has opened the namespace's storage, or the namespace has none to open.
+    /// Test hook for one actor, for a stub on another loop thread: evicts the root actor `key`,
+    /// whose home is this thread, as its own stub's hook would.
+    pub async fn evict_for_test(&self, key: &str, hibernate: bool) -> Result<()> {
+        let container = self.actors.borrow().get(key).cloned();
+        match container {
+            Some(container) => container.evict_for_test(hibernate).await,
+            None => Err(kj::failed!(
+                "jsg.Error: Cannot evict Durable Object: it is not currently running."
+            )),
+        }
+    }
+
+    /// The worker service and class that name the namespace on every loop thread.
+    pub fn name(&self) -> (String, String) {
+        (self.service.clone(), self.class_name.clone())
+    }
+
+    /// Whether `link` has opened the namespace's storage.
     pub fn is_linked(&self) -> bool {
-        self.storage.get().is_some() || self.forwards()
+        self.storage.get().is_some()
     }
 
     /// The loop thread the root actor `key` lives on, with its facets.
@@ -645,30 +659,11 @@ impl ActorNamespace {
         self.factory.home(&scope, key)
     }
 
-    /// Whether the namespace's actors are on another loop thread, the first: this is a
-    /// replica's namespace (threads.rs), which has no storage and no containers.
-    pub fn forwards(&self) -> bool {
-        self.factory.thread() != 0
-    }
-
-    /// Fails on a replica, for what only the thread that has the actors can do.
-    pub fn require_actors_here(&self, what: &str) -> Result<()> {
-        if self.forwards() {
-            return Err(kj::failed!(
-                "jsg.Error: Cannot {what} from this thread: with --threads, Durable Objects run \
-                 on the server's first thread, and only a request that thread serves can do this."
-            ));
-        }
-        Ok(())
-    }
-
     /// Opens the namespace's storage. `storage_path` is the directory of the worker's
-    /// `durableObjectStorage.localDisk` service; none for in-memory storage. Nothing on a
-    /// replica: the first loop thread's namespace has the storage, and its alarms.
+    /// `durableObjectStorage.localDisk` service; none for in-memory storage. Every loop thread
+    /// opens it, for the actors whose home it is; an actor's files have one thread's
+    /// connections, and each thread has an alarm database of its own (`start_alarms`).
     pub fn link(&self, storage_path: Option<&str>) -> Result<()> {
-        if self.forwards() {
-            return Ok(());
-        }
         if self.is_linked() {
             return Err(kj::failed!("already called link()"));
         }
@@ -699,13 +694,28 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        // Checked above; nothing else sets it.
+        let _ = self.storage.set(storage);
+        if self.factory.alarms_started() {
+            self.start_alarms()?;
+        }
+        Ok(())
+    }
+
+    /// Starts the namespace's alarm scheduler: this thread's, for the actors whose home it is.
+    /// The first thread's moves the alarms an earlier process left to the thread each belongs
+    /// to now, so it runs before any other thread's.
+    pub fn start_alarms(&self) -> Result<()> {
+        let storage = self.storage()?;
+        let index = |n: usize| u32::try_from(n).map_err(|_| kj::failed!("too many loop threads"));
+        let thread = index(self.factory.thread())?;
+        let threads = index(self.factory.threads())?;
+        ffi::actor_storage_start_alarms(storage, thread, threads)?;
         if self.cluster().is_some() {
             // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
             // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
+            ffi::actor_storage_delete_all(storage)?;
         }
-        // Checked above; nothing else sets it.
-        let _ = self.storage.set(storage);
         Ok(())
     }
 
@@ -771,7 +781,7 @@ fn claim_directory(directory: &str) -> Result<()> {
     let databases = std::fs::read_dir(directory).into_iter().flatten().flatten();
     let held = databases.map(|e| e.file_name()).any(|name| {
         let name = name.to_string_lossy();
-        name.ends_with(".sqlite") && name != "metadata.sqlite"
+        name.ends_with(".sqlite") && !is_alarm_database(&name)
     });
     if held {
         return Err(kj::failed!(
@@ -785,6 +795,16 @@ fn claim_directory(directory: &str) -> Result<()> {
         .map_err(|e| kj::failed!("{}: {e}", marker.display()))
 }
 
+/// Whether `name` is a loop thread's alarm database in a namespace's directory:
+/// `metadata.sqlite`, the first thread's, or `metadata-<n>.sqlite`.
+fn is_alarm_database(name: &str) -> bool {
+    name == "metadata.sqlite"
+        || name
+            .strip_prefix("metadata-")
+            .and_then(|rest| rest.strip_suffix(".sqlite"))
+            .is_some_and(|thread| !thread.is_empty() && thread.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl ActorNamespaceHandle {
     pub(crate) fn actor_for_alarm(
         &self,
@@ -794,6 +814,14 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
+        // A thread schedules the alarms of the actors whose home it is, and hosts no other.
+        let home = namespace.home(&ffi::actor_id_key(&id));
+        let here = namespace.factory.thread();
+        if home != here {
+            return Err(kj::failed!(
+                "loop thread {here} has the alarm of a Durable Object whose home is thread {home}"
+            ));
+        }
         let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
         let Some(node) = namespace.cluster().map(Rc::clone) else {
             return namespace.container_for(id).start_request(metadata);
@@ -871,6 +899,11 @@ impl ActorNamespaceHandle {
 
     pub(crate) fn replicated(&self) -> bool {
         self.namespace().is_some_and(|ns| ns.cluster().is_some())
+    }
+
+    pub(crate) fn alarm_home(&self, actor: &str) -> u32 {
+        let home = self.namespace().map_or(0, |ns| ns.home(actor));
+        u32::try_from(home).unwrap_or(0)
     }
 
     pub(crate) fn check_open(&self) -> Result<()> {
@@ -2479,14 +2512,13 @@ impl Channel for ActorChannel {
     }
 }
 
-/// A stub's channel to an actor, on a replica (threads.rs): the actor is on the first loop
-/// thread.
+/// A stub's channel to an actor whose home is another loop thread (threads.rs).
 ///
-/// `actor` is that thread's channel for a stub of its own (`ActorNamespace::channel`), as a
-/// capability of the replica's session. The first thread holds that channel while this one
-/// lives, so a stub here keeps the actor's container as a stub there does and lets it go when
-/// dropped; in a cluster it stays, like a stub there, with the instance its first request found
-/// the object on. A request is an event started on that channel: HTTP with its bodies,
+/// `actor` is the home thread's channel for a stub of its own (`ActorNamespace::channel`), as a
+/// capability of this thread's session with it. The home thread holds that channel while this
+/// one lives, so a stub here keeps the actor's container as a stub there does and lets it go
+/// when dropped; in a cluster it stays, like a stub there, with the instance its first request
+/// found the object on. A request is an event started on that channel: HTTP with its bodies,
 /// WebSockets and JS RPC cross as capnp, in the order the stub's requests were made. So does the
 /// `restore()` of a stub whose source is the actor, which runs the actor's `[restore]()`.
 struct ForwardedChannel {
@@ -2510,8 +2542,11 @@ impl Channel for ForwardedChannel {
         &self,
         mut metadata: KjOwn<RequestMetadata>,
     ) -> Result<KjOwn<WorkerInterface>> {
-        // The first thread's channel is not persistent; the request says whether this one is.
+        // The home thread's channel is not persistent; the request says whether this one is.
         ffi::request_metadata_set_from_persistent_stub(metadata.as_mut(), self.persistent);
+        // What made the request, if it is the work of an actor of this thread: the home thread
+        // has no way to tell.
+        ffi::stamp_current_actor_cause(metadata.as_mut());
         let actor = self.actor.as_ref().map_err(Clone::clone)?;
         let interface = ffi::rpc_client_start_request(actor, metadata);
         Ok(attach(interface, Rc::clone(actor)))
@@ -2528,7 +2563,7 @@ impl Channel for ForwardedChannel {
     }
 
     /// The token names the namespace and the id, which every loop thread resolves in its own
-    /// graph: here to another channel like this one, on the first thread to the actor's.
+    /// graph: here to another channel like this one, on the home thread to the actor's.
     fn token(&self, usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
         let namespace = self.namespace()?;
         let unique_key = namespace
@@ -2543,10 +2578,21 @@ impl Channel for ForwardedChannel {
         )?)
     }
 
-    fn evict_for_test(&self, _hibernate: bool) -> LocalBoxFuture<'_, Result<()>> {
+    fn evict_for_test(&self, hibernate: bool) -> LocalBoxFuture<'_, Result<()>> {
         Box::pin(async move {
-            self.namespace()?
-                .require_actors_here("evict a Durable Object")
+            let namespace = self.namespace()?;
+            let key = ffi::actor_id_key(&self.id);
+            let (service, class) = namespace.name();
+            let asked = namespace
+                .factory
+                .ask(namespace.home(&key), |done| Mail::Evict {
+                    service,
+                    class,
+                    key,
+                    hibernate,
+                    done,
+                });
+            asked.await
         })
     }
 }

@@ -217,10 +217,12 @@ jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
   auto& context = IoContext::current();
 
   auto exception = JSG_KJ_EXCEPTION(FAILED, Error, "Application called abortAllDurableObjects().");
-  context.abortAllActors(exception);
-
   // We used to perform the abort asynchronously, but that became no longer necessary when
-  // `Worker::Actor`'s destructor stopped requiring taking the isolate lock.
+  // `Worker::Actor`'s destructor stopped requiring taking the isolate lock. A runtime with actors
+  // it cannot abort at once says when it is done with them.
+  KJ_IF_SOME(done, context.getIoChannelFactory().abortAllActorsEverywhere(exception)) {
+    return context.awaitIo(js, kj::mv(done));
+  }
   return js.resolvedPromise();
 }
 
@@ -228,8 +230,9 @@ jsg::Promise<void> UnsafeModule::deleteAllDurableObjects(jsg::Lock& js) {
   auto& context = IoContext::current();
 
   auto exception = JSG_KJ_EXCEPTION(FAILED, Error, "Application called deleteAllDurableObjects().");
-  context.deleteAllActors(exception);
-
+  KJ_IF_SOME(done, context.getIoChannelFactory().deleteAllActorsEverywhere(exception)) {
+    return context.awaitIo(js, kj::mv(done));
+  }
   return js.resolvedPromise();
 }
 

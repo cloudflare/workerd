@@ -9,8 +9,9 @@
 //! then starts the others, the replicas (`threads.rs`); each builds the graph again for itself
 //! (`run_replica`). No loop then accepts from a stream socket: the first thread gives the ones it
 //! bound to the front (`front/mod.rs`), and every loop serves the work it takes from the front's
-//! queue (`listen::dispatch`). The Durable Objects and the cluster are the first thread's alone,
-//! which the replicas reach over their sessions with it.
+//! queue (`listen::dispatch`). The Durable Objects are spread over the loops, each of which
+//! reaches those of another over its session with it; a cluster node's part in the cluster, and
+//! with it every one of its Durable Objects, is the first thread's alone.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -206,13 +207,7 @@ impl Threads {
         let deployments = server.report().replica_deployments();
         let overrides = &options.overrides;
         let started = replicas
-            .start(
-                server.factory(),
-                &ports.front_sockets(),
-                &queue,
-                overrides,
-                &deployments,
-            )
+            .start(&ports.front_sockets(), &queue, overrides, &deployments)
             .await?;
         let threads = match options.front_threads {
             0 => front::DEFAULT_THREADS,
@@ -258,7 +253,7 @@ enum Role {
 ///
 /// A replica (see `threads.rs`) gets no `options` but the overrides, so it has no control
 /// channel, inspector or debug port, it arms no cron trigger, and it does not join the cluster:
-/// its factory forwards to the first loop thread what needs one (`Factory::hub`).
+/// what needs one it reaches on the first loop thread (`Factory::link`).
 #[expect(clippy::too_many_lines, reason = "a server's start, in order")]
 async fn start(
     factory: Rc<Factory>,
@@ -279,7 +274,10 @@ async fn start(
 
     // What several threads cannot serve is a config error. A reporter that serves despite errors
     // (`--watch`) then serves on this thread alone, like any config with an error.
-    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory));
+    // A cluster node's part in the cluster is its first thread's, and with it every actor.
+    let spread = !config.has_cluster();
+    let replicas =
+        (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory, spread));
     if replicas.is_some() {
         for obstacle in threads::obstacles(options.inspector.is_some()) {
             report.error(obstacle);
@@ -326,11 +324,17 @@ async fn start(
         return Ok(None);
     }
     // The graph is built: what the other loop threads send this one is answered from here on.
-    factory.serve_links();
+    factory.serve_links(&server);
     // The replicas build their graphs once this thread accepted the config, and are ready
-    // before the process says it listens. Without a stream socket they would have nothing to
-    // serve.
-    let replicas = replicas.filter(|_| !server.report().had_errors() && fronted.any());
+    // before the process says it listens. They run with or without a stream socket to serve:
+    // each has the Durable Objects whose home it is.
+    let replicas = replicas.filter(|_| !server.report().had_errors());
+    // How many loop threads there are is settled, and with it where each actor lives: the
+    // first thread takes its seat, and every thread schedules the alarms that are its own.
+    if let Some(replicas) = &replicas {
+        replicas.seat(&factory)?;
+    }
+    server.start_alarms()?;
     // With several loops the front accepts for all of them, and each serves what it takes from
     // the queue; otherwise this thread accepts for itself.
     let queue = queue.or_else(|| {
@@ -575,10 +579,6 @@ enum Serves {
 struct StreamSockets(Vec<(usize, BoundSocket, Serves)>);
 
 impl StreamSockets {
-    fn any(&self) -> bool {
-        !self.0.is_empty()
-    }
-
     /// The listeners of this thread over the sockets, which it bound.
     fn listen(
         self,

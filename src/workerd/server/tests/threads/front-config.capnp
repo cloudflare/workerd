@@ -14,6 +14,16 @@ const config :Workerd.Config = (
         durableObjectStorage = (inMemory = void),
       )
     ),
+    # Answers each datagram with what `front` answers `/where` on the thread that serves the
+    # datagram: a service binding reaches the Worker of the same thread.
+    ( name = "probe",
+      worker = (
+        modules = [(name = "worker", esModule = embed "front-probe.mjs")],
+        compatibilityDate = "2025-06-01",
+        compatibilityFlags = ["experimental"],
+        bindings = [(name = "FRONT", service = "front")],
+      )
+    ),
   ],
   sockets = [
     (name = "http", address = "127.0.0.1:0", http = (), service = "front"),
@@ -43,5 +53,7 @@ const config :Workerd.Config = (
       service = "front",
     ),
     (name = "proxy", address = "127.0.0.1:0", http = (style = proxy), service = "front"),
+    # A datagram socket, which the first thread serves: a test learns that thread by it.
+    (name = "udp", address = "127.0.0.1:0", udp = (idleTimeoutMs = 200), service = "probe"),
   ],
 );

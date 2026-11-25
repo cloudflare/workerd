@@ -13,6 +13,7 @@
 // (409), and the test sends it again until the one it names serves it. What the driver must read
 // whatever thread wrote it goes through a Durable Object (`/ledger`), which every thread reaches.
 import { spawn } from 'node:child_process';
+import dgram from 'node:dgram';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -48,7 +49,7 @@ const CA = readFileSync(
     )
 );
 // The sockets of the config, each of which gets a `listen` event.
-const SOCKETS = ['http', 'alt', 'tcp', 'https', 'rewrite', 'proxy'];
+const SOCKETS = ['http', 'alt', 'tcp', 'https', 'rewrite', 'proxy', 'udp'];
 
 // Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
 // there.
@@ -399,10 +400,34 @@ async function notesOf(server, thread, marker, done, ms = 10_000) {
   }
 }
 
-// The isolates of `front`, one per thread, by identity: `first` is the first thread's, which has
-// the Durable Objects; `replicas` are the others'. A round sends a request per thread at once,
-// each answered after a while: a thread with one in flight is passed over for one with none, so
-// a round usually finds every thread.
+// The isolate of `front` on the server's first thread, which handles SIGTERM: the one thread
+// that serves the datagram socket, whose Worker asks the `front` of its thread.
+async function firstThread(server) {
+  const socket = dgram.createSocket('udp4');
+  try {
+    const greeting = once(socket, 'message');
+    for (let tries = 0; ; tries++) {
+      socket.send('hello', server.ports.udp, '127.0.0.1');
+      const answered = await Promise.race([
+        greeting,
+        scheduler.wait(500).then(() => undefined),
+      ]);
+      if (answered !== undefined) {
+        const { front } = JSON.parse(answered[0].toString());
+        assert.match(front, UUID);
+        return front;
+      }
+      assert(tries < 20, 'the datagram socket did not answer');
+    }
+  } finally {
+    socket.close();
+  }
+}
+
+// The isolates of `front`, one per thread, by identity: `first` is the one the `Ledger` object
+// lives on, its home thread; `replicas` are the others'. A round sends a request per thread at
+// once, each answered after a while: a thread with one in flight is passed over for one with
+// none, so a round usually finds every thread.
 async function threadsOf(server) {
   const fronts = new Set();
   let first;
@@ -1729,9 +1754,13 @@ for (const threads of [1, THREADS]) {
         threads
       );
       a.sendText('one');
-      assert.deepStrictEqual(JSON.parse((await a.next()).text), {
+      const one = JSON.parse((await a.next()).text);
+      // The room runs on its home thread, which is one of the server's.
+      const room = one.isolate;
+      assert([first, ...replicas].includes(room), `the room runs in ${room}`);
+      assert.deepStrictEqual(one, {
         echo: 'one',
-        isolate: first,
+        isolate: room,
         sockets: 1,
       });
       const b = await webSocket(
@@ -1743,13 +1772,13 @@ for (const threads of [1, THREADS]) {
       b.sendText('two');
       assert.deepStrictEqual(JSON.parse((await b.next()).text), {
         echo: 'two',
-        isolate: first,
+        isolate: room,
         sockets: 2,
       });
       a.sendText('three');
       assert.deepStrictEqual(JSON.parse((await a.next()).text), {
         echo: 'three',
-        isolate: first,
+        isolate: room,
         sockets: 2,
       });
       for (const ws of [a, b]) {
@@ -1958,9 +1987,9 @@ test('every socket gets one listen event, and a burst of requests sent as one is
         .sort(),
       [...SOCKETS].sort()
     );
-    for (const { port } of listens()) {
+    for (const { socket, port } of listens()) {
       assert(Number.isInteger(port) && port > 0, `port ${port}`);
-      (await connect(port)).destroy();
+      if (socket !== 'udp') (await connect(port)).destroy();
     }
     const fronts = new Set((await first).map((answer) => answer.front));
     for (let i = 0; i < ROUNDS && fronts.size < THREADS; i++) {
@@ -1987,7 +2016,7 @@ for (const threads of [THREADS, 1]) {
       const server = await serve({ threads });
       try {
         // The first thread's isolate: that thread handles SIGTERM.
-        const first = several ? (await threadsOf(server)).first : undefined;
+        const first = several ? await firstThread(server) : undefined;
         // An idle keep-alive connection.
         const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
         const idle = await send(server.http, '/', { agent });

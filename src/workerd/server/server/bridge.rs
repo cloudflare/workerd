@@ -44,6 +44,7 @@ pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
 pub use crate::entry::run_pending_command;
+pub use crate::hub::Seat;
 pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
@@ -53,7 +54,6 @@ pub use crate::log::thread_body_run;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
-pub use crate::hub::Seat;
 pub use crate::worker::bench_clock_now;
 
 #[cxx::bridge(namespace = "workerd::server")]
@@ -624,6 +624,16 @@ pub mod ffi {
             unique_key: &str,
             actors: Box<ActorNamespaceHandle>,
         ) -> Result<KjOwn<ActorStorage>>;
+        /// Starts the namespace's alarm scheduler on loop thread `thread` of the process's
+        /// `threads`, over that thread's alarm database in the namespace's directory. The first
+        /// thread first moves every alarm in the directory to the database of the thread that
+        /// `ActorNamespaceHandle::alarm_home` names, so it starts its scheduler before any
+        /// other thread does. Once; nothing schedules an alarm before.
+        fn actor_storage_start_alarms(
+            storage: &ActorStorage,
+            thread: u32,
+            threads: u32,
+        ) -> Result<()>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
         /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
@@ -1157,8 +1167,20 @@ pub mod ffi {
         /// The channel of the worker's Cloudflare Access identity binding, whose props come from
         /// the request's access blob, if the worker has one.
         fn access_binding_channel(self: &ChannelFactory) -> KjMaybe<u32>;
-        fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
+        /// Aborts, or aborts and deletes, every evictable actor of this loop thread.
+        fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>);
         fn delete_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
+        /// Whether the process has other loop threads, whose actors the two above leave.
+        fn spans_threads(self: &ChannelFactory) -> bool;
+        /// The same on every other loop thread of the process: done once each has.
+        fn abort_all_actors_elsewhere(
+            self: &ChannelFactory,
+            reason: KjMaybe<&Exception>,
+        ) -> Box<ResultTask>;
+        fn delete_all_actors_elsewhere(
+            self: &ChannelFactory,
+            reason: KjMaybe<&Exception>,
+        ) -> Box<ResultTask>;
         async unsafe fn evict_all_actors_for_test<'a>(
             self: &'a ChannelFactory,
             hibernate: bool,
@@ -1221,6 +1243,9 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerInterface>>;
         /// Whether the cluster replicates the namespace's actors.
         fn replicated(self: &ActorNamespaceHandle) -> bool;
+        /// The loop thread that schedules the alarm of root actor `actor` (its id's hex): its
+        /// home.
+        fn alarm_home(self: &ActorNamespaceHandle, actor: &str) -> u32;
         /// Called as SQLite opens one of the namespace's files: fails once this instance's
         /// cluster lease has lapsed.
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;

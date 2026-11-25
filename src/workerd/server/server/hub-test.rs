@@ -141,3 +141,77 @@ fn the_hub_and_a_seat_cross_threads() {
     sync::<Hub>();
     send::<Seat>();
 }
+
+/// Polls a future that needs no wake-up to finish.
+fn now<T>(future: impl Future<Output = T>) -> Option<T> {
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+    let mut future = std::pin::pin!(future);
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(output) => Some(output),
+        Poll::Pending => None,
+    }
+}
+
+#[test]
+fn a_broadcast_reaches_every_other_thread_and_waits_for_each() {
+    let (hub, mut seats) = hub(4);
+    let mut sent = hub.broadcast(2, |done| Mail::AbortAll(None, done));
+    assert!(now(&mut sent).is_none());
+    // The thread that asked gets no mail.
+    assert!(seats[2].inbox.try_recv().is_err());
+    let mut answers = Vec::new();
+    for thread in [0, 1, 3] {
+        let Ok(Mail::AbortAll(None, done)) = seats[thread].inbox.try_recv() else {
+            panic!("thread {thread} was not asked");
+        };
+        answers.push(done);
+    }
+    // It is done only once the last thread said so.
+    for done in answers.drain(..2) {
+        done.send(Ok(())).unwrap();
+        assert!(now(&mut sent).is_none());
+    }
+    answers.pop().unwrap().send(Ok(())).unwrap();
+    assert_eq!(now(&mut sent), Some(Ok(())));
+}
+
+#[test]
+fn a_broadcast_fails_with_a_threads_error_or_its_end() {
+    let (hub, mut seats) = hub(3);
+    let mut sent = hub.broadcast(0, |done| Mail::DeleteAll(None, done));
+    let Ok(Mail::DeleteAll(None, done)) = seats[1].inbox.try_recv() else {
+        panic!("thread 1 was not asked");
+    };
+    done.send(Err("disk full".to_owned())).unwrap();
+    // The other thread still has to answer.
+    assert!(now(&mut sent).is_none());
+    let Ok(Mail::DeleteAll(None, done)) = seats[2].inbox.try_recv() else {
+        panic!("thread 2 was not asked");
+    };
+    done.send(Ok(())).unwrap();
+    assert_eq!(now(&mut sent), Some(Err("disk full".to_owned())));
+
+    // A thread that ended drops its mail, and with it the answer.
+    drop(seats.pop());
+    let mut sent = hub.broadcast(0, |done| Mail::AbortAll(None, done));
+    let Ok(Mail::AbortAll(None, done)) = seats[1].inbox.try_recv() else {
+        panic!("thread 1 was not asked");
+    };
+    done.send(Ok(())).unwrap();
+    assert_eq!(
+        now(&mut sent),
+        Some(Err("loop thread 2 has ended".to_owned()))
+    );
+}
+
+#[test]
+fn the_only_thread_broadcasts_to_nobody() {
+    let (hub, _seats) = hub(1);
+    let sent = hub.broadcast(0, |done| Mail::AbortAll(None, done));
+    assert_eq!(now(sent), Some(Ok(())));
+}

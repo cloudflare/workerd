@@ -480,6 +480,18 @@ class IoChannelFactory: public virtual kj::Refcounted {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
+  // abortAllActors() and deleteAllActors() for a runtime in which they return before every
+  // actor is aborted, as one that runs actors on several threads does: the promise, if there is
+  // one, resolves once the rest are.
+  virtual kj::Maybe<kj::Promise<void>> abortAllActorsEverywhere(kj::Maybe<kj::Exception&> reason) {
+    abortAllActors(reason);
+    return kj::none;
+  }
+  virtual kj::Maybe<kj::Promise<void>> deleteAllActorsEverywhere(kj::Maybe<kj::Exception&> reason) {
+    deleteAllActors(reason);
+    return kj::none;
+  }
+
   // Test-only: gracefully evict every currently-running actor in the evictable namespaces this
   // worker can address, simulating idle teardown. Unlike abortAllActors(), this leaves durable
   // storage intact, so DOs rebuild on their next request. Depending on webSocketMode, hibernatable

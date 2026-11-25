@@ -26,6 +26,52 @@ std::default_random_engine makeSeededRandomEngine() {
   return engine;
 }
 
+enum class AlarmTable { ABSENT, WITHOUT_NAME, WITH_NAME };
+
+// Whether `db` has the `_cf_ALARM` table, and whether that has the `actor_name` column.
+AlarmTable inspectAlarmTable(SqliteDatabase& db) {
+  auto info = db.run("PRAGMA table_info(_cf_ALARM);");
+  if (info.isDone()) {
+    return AlarmTable::ABSENT;
+  }
+  while (!info.isDone()) {
+    // Column 1 of table_info output is the column name.
+    if (info.getText(1) == "actor_name"_kj) {
+      return AlarmTable::WITH_NAME;
+    }
+    info.nextRow();
+  }
+  return AlarmTable::WITHOUT_NAME;
+}
+
+// The thread whose scheduler database `name` is, the inverse of `AlarmScheduler::databasePath()`,
+// or none if `name` is not such a database.
+kj::Maybe<uint> parseDatabaseName(kj::StringPtr name) {
+  if (name == "metadata.sqlite"_kj) {
+    return 0u;
+  }
+  constexpr auto prefix = "metadata-"_kj;
+  constexpr auto suffix = ".sqlite"_kj;
+  if (!name.startsWith(prefix) || !name.endsWith(suffix)) {
+    return kj::none;
+  }
+  auto digits = name.slice(prefix.size(), name.size() - suffix.size());
+  if (digits.size() == 0 || digits[0] < '1' || digits[0] > '9') {
+    return kj::none;
+  }
+  uint64_t thread = 0;
+  for (char c: digits) {
+    if (c < '0' || c > '9') {
+      return kj::none;
+    }
+    thread = thread * 10 + (c - '0');
+    if (thread > static_cast<uint>(kj::maxValue)) {
+      return kj::none;
+    }
+  }
+  return static_cast<uint>(thread);
+}
+
 }  // namespace
 
 AlarmScheduler::AlarmScheduler(const kj::Clock& clock,
@@ -61,20 +107,146 @@ void AlarmScheduler::ensureInitialized(SqliteDatabase& db) {
 
   // Migrate databases created before the `actor_name` column existed. SQLite has no
   // "ADD COLUMN IF NOT EXISTS", so detect the column via PRAGMA table_info first.
-  bool hasNameColumn = false;
-  {
-    auto info = db.run("PRAGMA table_info(_cf_ALARM);");
-    while (!info.isDone()) {
-      // Column 1 of table_info output is the column name.
-      if (info.getText(1) == "actor_name"_kj) {
-        hasNameColumn = true;
-        break;
-      }
-      info.nextRow();
+  if (inspectAlarmTable(db) != AlarmTable::WITH_NAME) {
+    db.run("ALTER TABLE _cf_ALARM ADD COLUMN actor_name TEXT;");
+  }
+}
+
+kj::Path AlarmScheduler::databasePath(uint thread) {
+  if (thread == 0) {
+    return kj::Path("metadata.sqlite"_kj);
+  }
+  return kj::Path(kj::str("metadata-", thread, ".sqlite"));
+}
+
+void AlarmScheduler::rehome(const SqliteDatabase::Vfs& vfs,
+    const kj::Directory& directory,
+    uint threads,
+    kj::Function<uint(kj::StringPtr actorId)> home) {
+  KJ_REQUIRE(threads > 0);
+
+  struct Row {
+    kj::String actorId;
+    int64_t scheduledTime;
+    kj::Maybe<kj::String> name;
+  };
+  struct Source {
+    uint thread;
+    // The actors of the rows that move out of this database.
+    kj::Vector<kj::String> movedOut;
+  };
+
+  kj::Vector<Source> sources;
+  for (auto& name: directory.listNames()) {
+    KJ_IF_SOME(thread, parseDatabaseName(name)) {
+      sources.add(Source{.thread = thread, .movedOut = {}});
     }
   }
-  if (!hasNameColumn) {
-    db.run("ALTER TABLE _cf_ALARM ADD COLUMN actor_name TEXT;");
+
+  auto incomingBuilder = kj::heapArrayBuilder<kj::Vector<Row>>(threads);
+  for (uint i = 0; i < threads; i++) {
+    incomingBuilder.add();
+  }
+  auto incoming = incomingBuilder.finish();
+
+  // A database of a thread past `threads` is removed even when it has no rows.
+  bool changes = false;
+
+  for (auto& source: sources) {
+    if (source.thread >= threads) {
+      changes = true;
+    }
+
+    SqliteDatabase db(vfs, databasePath(source.thread), kj::WriteMode::MODIFY);
+    auto collect = [&](SqliteDatabase::Query& query) {
+      while (!query.isDone()) {
+        auto actorId = query.getText(0);
+        uint to = home(actorId);
+        KJ_REQUIRE(to < threads, "an actor's home thread must be one of the run's", to, threads);
+        if (to != source.thread) {
+          incoming[to].add(Row{
+            .actorId = kj::str(actorId),
+            .scheduledTime = query.getInt64(1),
+            .name = query.getMaybeText(2).map([](kj::StringPtr n) { return kj::str(n); }),
+          });
+          source.movedOut.add(kj::str(actorId));
+          changes = true;
+        }
+        query.nextRow();
+      }
+    };
+    switch (inspectAlarmTable(db)) {
+      case AlarmTable::ABSENT:
+        break;
+      case AlarmTable::WITHOUT_NAME: {
+        auto query = db.run("SELECT actor_id, scheduled_time, NULL FROM _cf_ALARM;");
+        collect(query);
+        break;
+      }
+      case AlarmTable::WITH_NAME: {
+        auto query = db.run("SELECT actor_id, scheduled_time, actor_name FROM _cf_ALARM;");
+        collect(query);
+        break;
+      }
+    }
+  }
+
+  if (!changes) {
+    return;
+  }
+
+  // Every row is written to its destination before any is deleted from its source.
+  for (uint to = 0; to < threads; to++) {
+    auto& rows = incoming[to];
+    if (rows.empty()) {
+      continue;
+    }
+    SqliteDatabase db(vfs, databasePath(to), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    ensureInitialized(db);
+    db.run("BEGIN TRANSACTION;");
+    {
+      auto stmt = db.prepare(R"(
+        INSERT INTO _cf_ALARM VALUES(?, ?, ?)
+          ON CONFLICT DO UPDATE SET
+            scheduled_time = MIN(_cf_ALARM.scheduled_time, excluded.scheduled_time),
+            actor_name = COALESCE(_cf_ALARM.actor_name, excluded.actor_name);
+      )");
+      for (auto& row: rows) {
+        SqliteDatabase::Query::ValuePtr nameParam = nullptr;
+        KJ_IF_SOME(n, row.name) {
+          nameParam = n.asPtr();
+        }
+        stmt.run(row.actorId.asPtr(), row.scheduledTime, nameParam);
+      }
+    }
+    db.run("COMMIT TRANSACTION;");
+  }
+
+  for (auto& source: sources) {
+    if (source.thread >= threads || source.movedOut.empty()) {
+      continue;
+    }
+    SqliteDatabase db(vfs, databasePath(source.thread), kj::WriteMode::MODIFY);
+    db.run("BEGIN TRANSACTION;");
+    {
+      auto stmt = db.prepare("DELETE FROM _cf_ALARM WHERE actor_id = ?;");
+      for (auto& actorId: source.movedOut) {
+        stmt.run(actorId.asPtr());
+      }
+    }
+    db.run("COMMIT TRANSACTION;");
+  }
+
+  // Every database is closed by now, so the files of the threads past `threads` can go.
+  for (auto& source: sources) {
+    if (source.thread < threads) {
+      continue;
+    }
+    auto path = databasePath(source.thread);
+    auto name = path.toString();
+    directory.tryRemove(path);
+    directory.tryRemove(kj::Path(kj::str(name, "-wal")));
+    directory.tryRemove(kj::Path(kj::str(name, "-shm")));
   }
 }
 

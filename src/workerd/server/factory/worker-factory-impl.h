@@ -257,7 +257,14 @@ class ActorStorage::Impl final: public kj::Refcounted {
   kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
   kj::String uniqueKey;
-  kj::Own<AlarmScheduler> alarmScheduler;
+  kj::Timer& timer;
+  // This loop thread's scheduler for the namespace, once started (`actor_storage_start_alarms`).
+  kj::Maybe<kj::Own<AlarmScheduler>> alarmScheduler;
+
+  AlarmScheduler& getAlarmScheduler() {
+    return *KJ_REQUIRE_NONNULL(
+        alarmScheduler, "the namespace's alarm scheduler has not been started");
+  }
 
   // The facet index of the root actor `rootKey`, read from disk for one operation; none when it
   // does not exist (so no facet can have storage).

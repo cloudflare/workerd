@@ -11226,7 +11226,7 @@ KJ_TEST("Server: a loop thread without the actors reaches them on the primary lo
     kj::Thread thread([&]() {
       KJ_DEFER(done.fulfiller->fulfill());
       LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(seat));
-      // Its own factory cannot open the namespace's storage, and did not have to.
+      // It opens the namespace's storage too, and hosts none of its actors.
       for (uint round = 0; round < ROUNDS; round++) {
         auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);
         for (uint i = 0; i < REQUESTS_PER_ROUND; i++) bodies.add(secondary.get("test-addr"_kj));

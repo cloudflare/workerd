@@ -5,8 +5,11 @@
 #include "alarm-scheduler.h"
 
 #include <kj/async-io.h>
+#include <kj/filesystem.h>
 #include <kj/test.h>
 #include <kj/timer.h>
+
+#include <algorithm>
 
 namespace workerd::server {
 namespace {
@@ -326,6 +329,276 @@ KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending")
 
   AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
   KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+}
+
+// An alarm a rehome test seeds and then expects to find in its actor's home database.
+struct RehomedAlarm {
+  kj::StringPtr actorId;
+  kj::Date time;
+  kj::Maybe<kj::StringPtr> name;
+};
+
+// The home thread of the rehome tests' actors: their ids start with a letter, which picks it.
+uint homeOf(kj::StringPtr actorId, uint threads) {
+  return uint(actorId[0] - 'a') % threads;
+}
+
+kj::Function<uint(kj::StringPtr)> homeFn(uint threads) {
+  return [threads](kj::StringPtr actorId) { return homeOf(actorId, threads); };
+}
+
+void seedAlarms(const SqliteDatabase::Vfs& vfs,
+    kj::Timer& timer,
+    uint thread,
+    kj::ArrayPtr<const RehomedAlarm> alarms) {
+  AlarmScheduler scheduler(
+      kj::nullClock(), timer, vfs, AlarmScheduler::databasePath(thread), failingGetActor());
+  for (auto& alarm: alarms) {
+    scheduler.setAlarm(ActorKey(alarm.actorId, alarm.name), alarm.time);
+  }
+}
+
+// Checks that each alarm is in the database of its home among `threads` threads, with its time
+// and name, and in no other.
+void expectRehomed(const SqliteDatabase::Vfs& vfs,
+    kj::Timer& timer,
+    uint threads,
+    kj::ArrayPtr<const RehomedAlarm> alarms) {
+  for (uint thread = 0; thread < threads; thread++) {
+    {
+      AlarmScheduler scheduler(
+          kj::nullClock(), timer, vfs, AlarmScheduler::databasePath(thread), failingGetActor());
+      for (auto& alarm: alarms) {
+        auto found = scheduler.getAlarm(ActorKey(alarm.actorId, kj::none));
+        if (homeOf(alarm.actorId, threads) == thread) {
+          KJ_EXPECT(found == alarm.time, alarm.actorId, thread);
+        } else {
+          KJ_EXPECT(found == kj::none, alarm.actorId, thread);
+        }
+      }
+    }
+
+    SqliteDatabase db(vfs, AlarmScheduler::databasePath(thread), kj::WriteMode::MODIFY);
+    int64_t homed = 0;
+    for (auto& alarm: alarms) {
+      if (homeOf(alarm.actorId, threads) != thread) {
+        continue;
+      }
+      homed++;
+      auto query = db.run(
+          "SELECT scheduled_time, actor_name FROM _cf_ALARM WHERE actor_id = ?", alarm.actorId);
+      KJ_ASSERT(!query.isDone(), alarm.actorId, thread);
+      KJ_EXPECT(query.getInt64(0) == toNs(alarm.time), alarm.actorId, thread);
+      KJ_EXPECT(query.getMaybeText(1) == alarm.name, alarm.actorId, thread);
+    }
+    auto count = db.run("SELECT COUNT(*) FROM _cf_ALARM");
+    KJ_EXPECT(count.getInt64(0) == homed, thread);
+  }
+}
+
+// The directory's file names, sorted, without the `-wal` files SQLite may leave behind.
+kj::String listFiles(const kj::Directory& dir) {
+  auto names = dir.listNames();
+  std::sort(names.begin(), names.end());
+  kj::Vector<kj::StringPtr> kept;
+  for (auto& name: names) {
+    if (!name.endsWith("-wal")) {
+      kept.add(name);
+    }
+  }
+  return kj::strArray(kept, " ");
+}
+
+void writeFile(const kj::Directory& dir, kj::StringPtr name, kj::StringPtr content) {
+  dir.openFile(kj::Path(name), kj::WriteMode::CREATE)->writeAll(content);
+}
+
+kj::String readFile(const kj::Directory& dir, kj::StringPtr name) {
+  return dir.openFile(kj::Path(name))->readAllText();
+}
+
+KJ_TEST("AlarmScheduler::databasePath names thread 0's database metadata.sqlite") {
+  KJ_EXPECT(AlarmScheduler::databasePath(0).toString() == "metadata.sqlite");
+  KJ_EXPECT(AlarmScheduler::databasePath(1).toString() == "metadata-1.sqlite");
+  KJ_EXPECT(AlarmScheduler::databasePath(13).toString() == "metadata-13.sqlite");
+}
+
+KJ_TEST("AlarmScheduler::rehome spreads the alarms of metadata.sqlite over four threads") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  const RehomedAlarm alarms[] = {
+    {"a-one"_kj, kj::UNIX_EPOCH + 24 * kj::HOURS, "first"_kj},
+    {"b-one"_kj, kj::UNIX_EPOCH + 25 * kj::HOURS, "second"_kj},
+    {"c-one"_kj, kj::UNIX_EPOCH + 26 * kj::HOURS, kj::none},
+    {"d-one"_kj, kj::UNIX_EPOCH + 27 * kj::HOURS, "fourth"_kj},
+    {"e-one"_kj, kj::UNIX_EPOCH + 28 * kj::HOURS, "fifth"_kj},
+    {"b-two"_kj, kj::UNIX_EPOCH + 29 * kj::HOURS, kj::none},
+    {"h-one"_kj, kj::UNIX_EPOCH + 30 * kj::HOURS, "eighth"_kj},
+  };
+  seedAlarms(vfs, timer, 0, alarms);
+
+  AlarmScheduler::rehome(vfs, *dir, 4, homeFn(4));
+
+  KJ_EXPECT(
+      listFiles(*dir) == "metadata-1.sqlite metadata-2.sqlite metadata-3.sqlite metadata.sqlite");
+  expectRehomed(vfs, timer, 4, alarms);
+}
+
+KJ_TEST("AlarmScheduler::rehome shrinks four threads to two and then to one") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  const RehomedAlarm alarms[] = {
+    {"a-one"_kj, kj::UNIX_EPOCH + 24 * kj::HOURS, "first"_kj},
+    {"b-one"_kj, kj::UNIX_EPOCH + 25 * kj::HOURS, kj::none},
+    {"c-one"_kj, kj::UNIX_EPOCH + 26 * kj::HOURS, "third"_kj},
+    {"d-one"_kj, kj::UNIX_EPOCH + 27 * kj::HOURS, "fourth"_kj},
+    {"c-two"_kj, kj::UNIX_EPOCH + 28 * kj::HOURS, kj::none},
+    {"d-two"_kj, kj::UNIX_EPOCH + 29 * kj::HOURS, "eighth"_kj},
+  };
+  seedAlarms(vfs, timer, 0, alarms);
+  AlarmScheduler::rehome(vfs, *dir, 4, homeFn(4));
+  expectRehomed(vfs, timer, 4, alarms);
+
+  // Side files of the databases that go must go with them.
+  writeFile(*dir, "metadata-2.sqlite-shm", "");
+  writeFile(*dir, "metadata-3.sqlite-shm", "");
+  writeFile(*dir, "metadata-3.sqlite-wal", "");
+
+  AlarmScheduler::rehome(vfs, *dir, 2, homeFn(2));
+  KJ_EXPECT(listFiles(*dir) == "metadata-1.sqlite metadata.sqlite");
+  for (auto& name: dir->listNames()) {
+    KJ_EXPECT(!name.startsWith("metadata-2") && !name.startsWith("metadata-3"), name);
+  }
+  expectRehomed(vfs, timer, 2, alarms);
+
+  AlarmScheduler::rehome(vfs, *dir, 1, homeFn(1));
+  KJ_EXPECT(listFiles(*dir) == "metadata.sqlite");
+  for (auto& name: dir->listNames()) {
+    KJ_EXPECT(!name.startsWith("metadata-"), name);
+  }
+  expectRehomed(vfs, timer, 1, alarms);
+}
+
+KJ_TEST("AlarmScheduler::rehome keeps the earlier time of an alarm found in two databases") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  auto early = kj::UNIX_EPOCH + 24 * kj::HOURS;
+  auto late = kj::UNIX_EPOCH + 48 * kj::HOURS;
+
+  // Both actors are at home on thread 1 of two. `b-one` is earlier where it does not belong,
+  // `d-one` is earlier at home; each has its name in only one of the two databases.
+  const RehomedAlarm away[] = {
+    {"b-one"_kj, early, "bee"_kj},
+    {"d-one"_kj, late, "dee"_kj},
+  };
+  const RehomedAlarm atHome[] = {
+    {"b-one"_kj, late, kj::none},
+    {"d-one"_kj, early, kj::none},
+  };
+  seedAlarms(vfs, timer, 0, away);
+  seedAlarms(vfs, timer, 1, atHome);
+
+  AlarmScheduler::rehome(vfs, *dir, 2, homeFn(2));
+
+  const RehomedAlarm expected[] = {
+    {"b-one"_kj, early, "bee"_kj},
+    {"d-one"_kj, early, "dee"_kj},
+  };
+  expectRehomed(vfs, timer, 2, expected);
+}
+
+KJ_TEST("AlarmScheduler::rehome leaves files that are not scheduler databases alone") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  // None of these is a database, so opening any as one would fail.
+  const kj::StringPtr others[] = {
+    "0123456789abcdef.sqlite"_kj,
+    "metadata-+1.sqlite"_kj,
+    "metadata-.sqlite"_kj,
+    "metadata-0.sqlite"_kj,
+    "metadata-01.sqlite"_kj,
+    "metadata-1.sqlite.bak"_kj,
+    "metadata-1x.sqlite"_kj,
+    "metadata-x.sqlite"_kj,
+    "metadata.3.sqlite"_kj,
+    "metadata.sqlite.bak"_kj,
+  };
+  for (auto name: others) {
+    writeFile(*dir, name, kj::str("not a database: ", name));
+  }
+
+  const RehomedAlarm alarms[] = {
+    {"a-one"_kj, kj::UNIX_EPOCH + 24 * kj::HOURS, "first"_kj},
+    {"b-one"_kj, kj::UNIX_EPOCH + 25 * kj::HOURS, "second"_kj},
+  };
+  seedAlarms(vfs, timer, 3, alarms);
+
+  AlarmScheduler::rehome(vfs, *dir, 1, homeFn(1));
+
+  for (auto name: others) {
+    KJ_EXPECT(dir->exists(kj::Path(name)), name);
+    KJ_EXPECT(readFile(*dir, name) == kj::str("not a database: ", name), name);
+  }
+  KJ_EXPECT(!dir->exists(kj::Path("metadata-3.sqlite")));
+  expectRehomed(vfs, timer, 1, alarms);
+}
+
+KJ_TEST("AlarmScheduler::rehome creates nothing when there is nothing to move") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+
+  // An empty directory stays empty.
+  {
+    auto dir = kj::newInMemoryDirectory(kj::nullClock());
+    SqliteDatabase::Vfs vfs(*dir);
+    AlarmScheduler::rehome(vfs, *dir, 4, homeFn(4));
+    KJ_EXPECT(dir->listNames().size() == 0);
+  }
+
+  // So does one without a scheduler database.
+  {
+    auto dir = kj::newInMemoryDirectory(kj::nullClock());
+    SqliteDatabase::Vfs vfs(*dir);
+    writeFile(*dir, "0123456789abcdef.sqlite", "not a database");
+    AlarmScheduler::rehome(vfs, *dir, 4, homeFn(4));
+    KJ_EXPECT(listFiles(*dir) == "0123456789abcdef.sqlite");
+    KJ_EXPECT(readFile(*dir, "0123456789abcdef.sqlite") == "not a database");
+  }
+
+  // A metadata.sqlite whose alarms are all at home on thread 0 is not written.
+  {
+    auto dir = kj::newInMemoryDirectory(kj::nullClock());
+    SqliteDatabase::Vfs vfs(*dir);
+    const RehomedAlarm alarms[] = {
+      {"a-one"_kj, kj::UNIX_EPOCH + 24 * kj::HOURS, "first"_kj},
+      {"e-one"_kj, kj::UNIX_EPOCH + 25 * kj::HOURS, kj::none},
+    };
+    seedAlarms(vfs, timer, 0, alarms);
+    auto before = dir->openFile(kj::Path("metadata.sqlite"))->readAllBytes();
+
+    AlarmScheduler::rehome(vfs, *dir, 4, homeFn(4));
+
+    KJ_EXPECT(listFiles(*dir) == "metadata.sqlite");
+    KJ_EXPECT(dir->openFile(kj::Path("metadata.sqlite"))->readAllBytes().asPtr() == before.asPtr());
+    expectRehomed(vfs, timer, 4, alarms);
+  }
 }
 
 }  // namespace

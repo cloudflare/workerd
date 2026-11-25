@@ -4,7 +4,7 @@
 
 // The Worker behind every socket of `front-config.capnp`. Each thread runs its own copy, so
 // global state is per thread; what the driver must read wherever it is written goes through the
-// `Ledger` object, which lives on the first thread.
+// `Ledger` object, which lives on one of the threads.
 import { DurableObject } from 'cloudflare:workers';
 
 const MiB = 1024 * 1024;

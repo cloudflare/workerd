@@ -10,8 +10,8 @@ import {
 import unsafe from 'workerd:unsafe';
 
 // The identity of this isolate: global state, so each loop thread's copy of the Worker has its
-// own. The Durable Objects are classes of this Worker and run in the copy of the thread that has
-// them, so an object reports that thread's identity.
+// own. The Durable Objects are classes of this Worker, and each runs in the copy of its home
+// thread, so an object reports the identity of that thread.
 let isolate;
 
 function isolateId() {
@@ -21,6 +21,14 @@ function isolateId() {
 
 // The `x-attempt` of every request this isolate acted on.
 const attempts = new Set();
+
+const encoder = new TextEncoder();
+
+function hex(buffer) {
+  return [...new Uint8Array(buffer)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 function upperCase() {
   return new TransformStream({
@@ -51,6 +59,8 @@ export class Counter extends DurableObject {
   #messages = 0;
   #order = [];
   #slowCalls = 0;
+  // What the body of the last `/echo-digest` request was: `{ digest, bytes }`, once it ended.
+  #received;
 
   where() {
     return { isolate: isolateId(), instance: this.#instance };
@@ -77,6 +87,14 @@ export class Counter extends DurableObject {
     return this.#slowCalls;
   }
 
+  async put(value) {
+    await this.ctx.storage.put('value', value);
+  }
+
+  async value() {
+    return (await this.ctx.storage.get('value')) ?? null;
+  }
+
   record(n) {
     this.#order.push(n);
   }
@@ -94,9 +112,34 @@ export class Counter extends DurableObject {
     return await other.increment();
   }
 
+  // The first leg of a cycle of calls: `other`, a stub of another object, calls this object
+  // back by name.
+  async ping(other) {
+    const pong = await other.pong(this.ctx.id.name);
+    return { ...this.where(), pong };
+  }
+
+  // The second leg: calls the object `name` back, by JS RPC and by fetch.
+  async pong(name) {
+    const back = this.env.COUNTER.getByName(name);
+    const rpc = await back.finish();
+    const response = await back.fetch('http://object/finish');
+    return { ...this.where(), rpc, fetched: await response.json() };
+  }
+
+  finish() {
+    return this.where();
+  }
+
   // `service` is a service binding of the caller's thread.
   async askService(service) {
     const response = await service.fetch('http://back/');
+    return await response.json();
+  }
+
+  // What this object's own service binding answers.
+  async askOwnService() {
+    const response = await this.env.BACK.fetch('http://back/');
     return await response.json();
   }
 
@@ -113,6 +156,14 @@ export class Counter extends DurableObject {
       class: this.ctx.exports.Bumper,
     }));
     return await facet.bump();
+  }
+
+  cloneFacet(from, to) {
+    this.ctx.facets.clone(from, to);
+  }
+
+  deleteFacet(name) {
+    this.ctx.facets.delete(name);
   }
 
   fail() {
@@ -151,13 +202,31 @@ export class Counter extends DurableObject {
     await this.ctx.storage.setAlarm(Date.now() + ms);
   }
 
-  async alarm() {
-    const alarms = ((await this.ctx.storage.get('alarms')) ?? 0) + 1;
-    await this.ctx.storage.put('alarms', alarms);
+  async setAlarmAt(ms) {
+    await this.ctx.storage.setAlarm(ms);
   }
 
+  // Counts its runs, and notes the isolate of each.
+  async alarm() {
+    const alarms = ((await this.ctx.storage.get('alarms')) ?? 0) + 1;
+    const isolates = (await this.ctx.storage.get('alarm-isolates')) ?? [];
+    await this.ctx.storage.put({
+      alarms,
+      'alarm-isolates': [...isolates, isolateId()],
+    });
+  }
+
+  // How many times `alarm()` ran, and in which isolates.
   async alarms() {
-    return (await this.ctx.storage.get('alarms')) ?? 0;
+    return {
+      alarms: (await this.ctx.storage.get('alarms')) ?? 0,
+      isolates: (await this.ctx.storage.get('alarm-isolates')) ?? [],
+    };
+  }
+
+  // What the body of the last `/echo-digest` request was.
+  async received() {
+    return await this.#received;
   }
 
   async fetch(request) {
@@ -166,6 +235,28 @@ export class Counter extends DurableObject {
       return new Response(request.body.pipeThrough(upperCase()), {
         headers: { 'x-object': isolateId() },
       });
+    }
+    if (url.pathname === '/echo-digest') {
+      // As `/echo`, and notes the digest and the length of what arrived.
+      const [kept, echoed] = request.body.tee();
+      const digest = new crypto.DigestStream('SHA-256');
+      let bytes = 0;
+      const counted = new TransformStream({
+        transform(chunk, controller) {
+          bytes += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+      });
+      this.#received = kept
+        .pipeThrough(counted)
+        .pipeTo(digest)
+        .then(async () => ({ digest: hex(await digest.digest), bytes }));
+      return new Response(echoed.pipeThrough(upperCase()), {
+        headers: { 'x-object': isolateId() },
+      });
+    }
+    if (url.pathname === '/finish') {
+      return Response.json(this.where());
     }
     if (url.pathname === '/ws') {
       const [client, server] = Object.values(new WebSocketPair());
@@ -202,7 +293,7 @@ export class Counter extends DurableObject {
 
   async connect(socket) {
     const writer = socket.writable.getWriter();
-    await writer.write(new TextEncoder().encode(`object ${isolateId()}`));
+    await writer.write(encoder.encode(`object ${isolateId()}`));
     await writer.close();
   }
 }
@@ -230,6 +321,10 @@ export class Bumper extends DurableObject {
 export class Ephemeral extends DurableObject {
   #count = 0;
 
+  where() {
+    return isolateId();
+  }
+
   increment() {
     return { count: ++this.#count, isolate: isolateId() };
   }
@@ -249,6 +344,10 @@ export class Keeper extends WorkerEntrypoint {
   async add(n) {
     return await this.ctx.props.stub.add(n);
   }
+
+  async where() {
+    return await this.ctx.props.stub.where();
+  }
 }
 
 async function readAll(readable) {
@@ -263,6 +362,13 @@ async function readAll(readable) {
 async function features(env, ctx, name) {
   const counter = env.COUNTER.getByName(name);
   const result = { name: await counter.idName() };
+  // Where each object of this case runs.
+  result.homes = {
+    counter: (await counter.where()).isolate,
+    other: (await env.COUNTER.getByName(`${name}-other`).where()).isolate,
+    exported: (await env.COUNTER.getByName(`${name}-exported`).where()).isolate,
+    ephemeral: await env.EPHEMERAL.get(`${name}-ephemeral`).where(),
+  };
 
   // A stub the object returns, and calls on it in the order they were made.
   using session = await counter.session();
@@ -277,6 +383,8 @@ async function features(env, ctx, name) {
   result.other = await counter.incrementOther(other);
   result.otherAgain = await other.increment();
   result.service = await counter.askService(env.BACK);
+  result.ownService = await counter.askOwnService();
+  result.frontService = await (await env.BACK.fetch('http://back/')).json();
   result.greeter = await counter.greetWith(
     ctx.exports.Greeter({ props: { greeting: 'hello' } })
   );
@@ -343,6 +451,31 @@ async function features(env, ctx, name) {
   return result;
 }
 
+// Runs the test hook `hook` of `workerd:unsafe` (`abort`, `delete`, `evict-all`, or `evict`
+// for the object `counter()` makes a stub of), then calls each of the objects `names` once its
+// promise has resolved: when the hook was called and when it resolved, and where each object
+// runs and what it stored.
+async function hookThenCall(env, hook, counter, names) {
+  const calledAt = Date.now();
+  try {
+    if (hook === 'abort') await unsafe.abortAllDurableObjects();
+    else if (hook === 'delete') await unsafe.deleteAllDurableObjects();
+    else if (hook === 'evict-all') await unsafe.evictAllDurableObjects();
+    else if (hook === 'evict') await unsafe.evict(counter());
+    else throw new Error(`no hook ${hook}`);
+  } catch (error) {
+    return { error: error.message };
+  }
+  const resolvedAt = Date.now();
+  const objects = await Promise.all(
+    names.map(async (name) => {
+      const object = env.COUNTER.getByName(name);
+      return { ...(await object.where()), value: await object.value() };
+    })
+  );
+  return { error: null, calledAt, resolvedAt, objects };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const front = isolateId();
@@ -368,54 +501,146 @@ export default {
     }
     if (attempt !== null) attempts.add(attempt);
     const url = new URL(request.url);
-    const name = url.searchParams.get('name') ?? 'default';
-    const counter = env.COUNTER.getByName(name);
+    const query = url.searchParams;
+    const name = query.get('name') ?? 'default';
+    // A stub of the object `name`, made by the requests that use one only.
+    let stub;
+    const counter = () => (stub ??= env.COUNTER.getByName(name));
     switch (url.pathname) {
+      case '/front':
+        // Answers after `ms` milliseconds, and calls no object.
+        await scheduler.wait(Number(query.get('ms') ?? 0));
+        return Response.json({ front });
       case '/spin': {
         // Keeps this isolate's thread from serving anything else for a while.
-        const until = Date.now() + Number(url.searchParams.get('ms'));
+        const until = Date.now() + Number(query.get('ms'));
         while (Date.now() < until) {}
         return Response.json({ front });
+      }
+      case '/spin-body': {
+        // The head goes out first; then the body's first pull keeps this thread in JavaScript
+        // for `ms` milliseconds, during which it serves nothing else. The body says when the
+        // spin started and ended.
+        const ms = Number(query.get('ms'));
+        const body = new ReadableStream(
+          {
+            pull(controller) {
+              const start = Date.now();
+              while (Date.now() < start + ms) {}
+              const end = Date.now();
+              controller.enqueue(
+                encoder.encode(JSON.stringify({ front, start, end }))
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 }
+        );
+        return new Response(body, { headers: { 'x-front': front } });
       }
       case '/count': {
         // The response waits for the end of the request body, which the client decides.
         await request.arrayBuffer();
-        return Response.json({ front, ...(await counter.increment()) });
+        return Response.json({ front, ...(await counter().increment()) });
+      }
+      case '/increments': {
+        // `n` increments of the object at once, each through a stub of its own.
+        const results = await Promise.all(
+          Array.from({ length: Number(query.get('n')) }, () =>
+            env.COUNTER.getByName(name).increment()
+          )
+        );
+        return Response.json({ front, results });
+      }
+      case '/calls': {
+        // `n` calls of the object one after another, each with when it started and ended.
+        const calls = [];
+        for (let i = 0; i < Number(query.get('n')); i++) {
+          const start = Date.now();
+          const { isolate } = await counter().where();
+          calls.push({ start, end: Date.now(), isolate });
+        }
+        return Response.json({ front, calls });
+      }
+      case '/cycle': {
+        // The object `a` calls `b`, which calls `a` back.
+        const a = env.COUNTER.getByName(query.get('a'));
+        const b = env.COUNTER.getByName(query.get('b'));
+        return Response.json({ front, ...(await a.ping(b)) });
       }
       case '/slow': {
-        const ms = Number(url.searchParams.get('ms'));
-        return Response.json({ front, ...(await counter.incrementSlowly(ms)) });
+        const ms = Number(query.get('ms'));
+        return Response.json({
+          front,
+          ...(await counter().incrementSlowly(ms)),
+        });
       }
       case '/slow-calls':
-        return Response.json({ front, calls: await counter.slowCalls() });
+        return Response.json({ front, calls: await counter().slowCalls() });
       case '/where':
         // Answers after `ms` milliseconds, if given, so that requests sent together are in
         // flight together, each on a thread of its own.
-        await scheduler.wait(Number(url.searchParams.get('ms') ?? 0));
-        return Response.json({ front, ...(await counter.where()) });
+        await scheduler.wait(Number(query.get('ms') ?? 0));
+        return Response.json({ front, ...(await counter().where()) });
+      case '/put':
+        await counter().put(query.get('value'));
+        return Response.json({ front });
+      case '/value':
+        return Response.json({ front, value: await counter().value() });
       case '/features':
         return Response.json({ front, ...(await features(env, ctx, name)) });
+      case '/facet': {
+        // `op` on the facet `facet` of the object: `bump`, `clone` (to `to`) or `delete`.
+        const facet = query.get('facet');
+        const op = query.get('op');
+        if (op === 'bump') {
+          return Response.json({
+            front,
+            ...(await counter().bumpFacet(facet)),
+          });
+        }
+        if (op === 'clone') await counter().cloneFacet(facet, query.get('to'));
+        else if (op === 'delete') await counter().deleteFacet(facet);
+        else return new Response(`no op ${op}`, { status: 400 });
+        return Response.json({ front });
+      }
+      case '/restore': {
+        // A stub the object vends, called from this thread, then restored here from what
+        // restores it: each says where it runs.
+        using vended = await counter().vend();
+        const keeper = ctx.exports.Keeper({ props: { stub: vended } });
+        return Response.json({
+          front,
+          vended: await vended.add(1),
+          vendedAt: await vended.where(),
+          restored: await keeper.add(1),
+          restoredAt: await keeper.where(),
+        });
+      }
       case '/alarm':
-        await counter.setAlarmIn(Number(url.searchParams.get('ms')));
+        await counter().setAlarmIn(Number(query.get('ms')));
+        return Response.json({ front });
+      case '/alarm-at':
+        await counter().setAlarmAt(Number(query.get('at')));
         return Response.json({ front });
       case '/alarms':
-        return Response.json({ front, alarms: await counter.alarms() });
-      case '/abort-all':
-      case '/delete-all': {
-        // The test hooks of `workerd:unsafe`, which act on the objects of this thread.
-        const hook =
-          url.pathname === '/abort-all'
-            ? unsafe.abortAllDurableObjects
-            : unsafe.deleteAllDurableObjects;
-        try {
-          await hook.call(unsafe);
-          return Response.json({ front, error: null });
-        } catch (error) {
-          return Response.json({ front, error: error.message });
-        }
+        return Response.json({ front, ...(await counter().alarms()) });
+      case '/hook': {
+        const names = (query.get('names') ?? '').split(',').filter(Boolean);
+        return Response.json({
+          front,
+          ...(await hookThenCall(env, query.get('hook'), counter, names)),
+        });
       }
-      case '/echo': {
-        const response = await counter.fetch('http://object/echo', {
+      case '/hibernate':
+        // Evicts the object; its hibernatable WebSockets stay open.
+        await unsafe.evict(counter(), { webSockets: 'hibernate' });
+        return Response.json({ front });
+      case '/received':
+        return Response.json({ front, ...(await counter().received()) });
+      case '/echo':
+      case '/echo-digest': {
+        const response = await counter().fetch(`http://object${url.pathname}`, {
           method: 'POST',
           body: request.body,
         });
@@ -424,7 +649,7 @@ export default {
         return new Response(response.body, { headers });
       }
       case '/ws': {
-        const response = await counter.fetch(request);
+        const response = await counter().fetch(request);
         return new Response(null, {
           status: 101,
           webSocket: response.webSocket,

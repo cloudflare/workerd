@@ -875,6 +875,19 @@ class RustIoChannelFactory final: public IoChannelFactory {
   void deleteAllActors(kj::Maybe<kj::Exception&> reason) override {
     channels->delete_all_actors(reason);
   }
+  // This loop thread's actors are aborted before these return, as above; the promise is for
+  // those of the process's other loop threads.
+  kj::Maybe<kj::Promise<void>> abortAllActorsEverywhere(kj::Maybe<kj::Exception&> reason) override {
+    channels->abort_all_actors(reason);
+    if (!channels->spans_threads()) return kj::none;
+    return result_task_run(channels->abort_all_actors_elsewhere(reason)).attach(kj::addRef(*this));
+  }
+  kj::Maybe<kj::Promise<void>> deleteAllActorsEverywhere(
+      kj::Maybe<kj::Exception&> reason) override {
+    channels->delete_all_actors(reason);
+    if (!channels->spans_threads()) return kj::none;
+    return result_task_run(channels->delete_all_actors_elsewhere(reason)).attach(kj::addRef(*this));
+  }
   kj::Promise<void> evictAllActorsForTest(EvictWebSocketMode mode) override {
     return channels->evict_all_actors_for_test(mode == EvictWebSocketMode::HIBERNATE)
         .attach(kj::addRef(*this));

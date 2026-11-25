@@ -6,11 +6,10 @@
 //!
 //! The first loop thread is the process's main thread and has everything a process has one of:
 //! it binds the sockets, reports the config's errors, handles SIGTERM, writes the `--control-fd`
-//! events, owns the front, and serves the UDP sockets, the cron triggers and the debug port. It
-//! also has the
-//! Durable Objects: every actor with its storage, alarms, facets, container and hibernated
-//! WebSockets, and in cluster mode the instance's whole part in the cluster (its lease, the
-//! objects it owns, the peer port and sessions, the bucket's client).
+//! events, owns the front and the hub, and serves the UDP sockets, the cron triggers and the
+//! debug port. In cluster mode it also has the instance's whole part in the cluster (its lease,
+//! the objects it owns, the peer port and sessions, the bucket's client), and with it every
+//! Durable Object.
 //!
 //! No loop thread accepts from a stream socket. The front does (`front/mod.rs`): a tokio runtime
 //! of its own that owns the HTTP, HTTPS and TCP sockets the first thread bound, accepts, performs
@@ -28,59 +27,83 @@
 //! `getCode` callback returned on that thread, so if the callback can return different code for
 //! one name, threads can run different code under it.
 //!
-//! What a replica lacks it reaches on the first thread, over its session with it
-//! ([`ThreadLink`]): a two-way capnp `WorkerdDebugPort` session, as a cluster instance keeps
-//! with a peer, over an in-process pipe. The threads' hub (`hub.rs`) says which thread an actor
-//! lives on and makes the pipe of two threads' session the first time either needs it; the two
-//! then talk directly. A replica's Durable Object
-//! namespaces have no storage and no actors: the channel of a stub is a capability of the session
-//! for the channel the first thread gives a stub of its own, so the first thread treats the
-//! request of a replica as it treats a request it accepted itself, in a cluster too
-//! (`actor::ForwardedChannel`). A `bucket` or `cache` service is forwarded the same way. HTTP
-//! with its bodies, WebSockets and JS RPC cross the session as capnp; a stub or a service binding
-//! passed in a JS RPC call crosses as a channel token, which every thread decodes with the
-//! process's key and resolves in its own graph. A stub whose source is an object is restored
-//! (`restore()`) from a replica by an event of the same session, whose parameters carry their
-//! capabilities as channel tokens too; the object's `[restore]()` runs on the first thread.
+//! **Durable Objects** are spread over the loop threads, the first like the others. An actor has
+//! one home thread for the life of the process, which the threads' hub names (`hub.rs`: a hash
+//! of the namespace and the actor's key over the threads, `placement.rs`), and its facets live
+//! with it. Every thread's namespaces open the namespace's storage, but only the home thread
+//! makes the actor's container, opens its databases, schedules its alarm (each thread has an
+//! alarm database of its own in the namespace's directory, see `ActorNamespace::start_alarms`)
+//! and keeps its hibernated WebSockets. On any other thread the channel of a stub is a
+//! capability for the channel the home thread gives a stub of its own
+//! (`actor::ForwardedChannel`), over the two threads' session ([`ThreadLink`]): a two-way capnp
+//! `WorkerdDebugPort` session, as a cluster instance keeps with a peer, over an in-process pipe.
+//! The hub makes the pipe of a pair of threads the first time either needs it and tells the
+//! other through its inbox ([`take_mail`]); the two then talk directly, so a call for an actor
+//! of another thread takes one hop, and no third thread, however busy, has a part in it. HTTP
+//! with its bodies, WebSockets and JS RPC cross the session as capnp, in the order one stub's
+//! calls were made; a stub or a service binding passed in a JS RPC call crosses as a channel
+//! token, which every thread decodes with the process's key and resolves in its own graph. A
+//! stub whose source is an object is restored (`restore()`) from another thread by an event of
+//! the same session, whose parameters carry their capabilities as channel tokens too; the
+//! object's `[restore]()` runs on its home thread. A thread that is sent for an actor the hub
+//! places elsewhere refuses, and passes no call on.
+//!
+//! What acts on every actor is sent to every thread through the inboxes and is done once each
+//! thread said so: `abortAllDurableObjects()`, `deleteAllDurableObjects()` and the eviction test
+//! hooks (`hub::Mail`).
+//!
+//! In cluster mode the hub places every actor on the first thread (`Placement::spread` is off),
+//! which routes a replica's request as its own (owned here, on a peer, or being handed off). A
+//! `bucket` or `cache` service is the first thread's on every thread
+//! (`services::ForwardedService`), with or without a cluster.
 //!
 //! What the threads share besides is [`Phase`], which the first thread sets and the replicas
-//! follow, and the events a replica sends back: that it is ready, and how it ended.
+//! follow, and the events a replica sends back: that it is ready, that it has drained, and how
+//! it ended.
 //!
 //! - **Start.** The first thread builds its graph first. Only a config it accepts without an
-//!   error gets replicas ([`Replicas::start`]), which build theirs at the same time; an error in
+//!   error gets replicas, which build theirs at the same time ([`Replicas::start`]); an error in
 //!   a replica's graph is that thread's failure, not a config error reported again. (What the
 //!   first thread attributed to a cluster deployment, a replica attributes to it too, and
-//!   serves.) Once every replica is ready, and so can take work, the first thread makes the
-//!   front, which registers the listeners, and writes its `listen` events; then
-//!   [`Replicas::serve`] lets the replicas serve and the front accepts.
-//! - **Failure.** A replica that fails, or stops serving before the server drains, fails the
-//!   future [`Started::watch`] makes, which the first thread serves as one of its listeners:
-//!   the process ends with that error as it does with a listener's. One that has ended before
-//!   the first thread advertises its cluster lease or writes its `listen` events fails the
-//!   start instead ([`Started::check`]). Its pipe closes with its
-//!   loop, which cancels what it had in flight on the first thread, as a client hanging up
-//!   does. A replica whose session ends while it serves fails the same way.
+//!   serves.) With how many threads there are settled, the first thread takes its seat at the
+//!   hub ([`Replicas::seat`]) and starts its alarm schedulers, which first move the alarms an
+//!   earlier process left to the database of the thread each belongs to now; only then do the
+//!   replicas start, and theirs. A thread answers what the others send it once its graph is
+//!   built (`Factory::serve_links`); what was sent before waits. Once every replica is ready,
+//!   and so can take work, the first thread makes the front, which registers the listeners, and
+//!   writes its `listen` events; then [`Replicas::serve`] lets the replicas serve and the front
+//!   accepts.
+//! - **Failure.** A replica that fails, or ends before the first thread quiesces the threads,
+//!   fails the future [`Started::watch`] makes, which the first thread serves as one of its
+//!   listeners: the process ends with that error as it does with a listener's. One that has
+//!   ended before the first thread advertises its cluster lease or writes its `listen` events
+//!   fails the start instead ([`Started::check`]). A session between two threads that ends
+//!   before the process quiesced fails each of the two that notices (`Factory::link_lost`):
+//!   the Durable Object calls between them are lost with it.
 //! - **Drain.** The first thread tells the replicas ([`Replicas::drain`]) and the front, which
 //!   stops accepting and shuts its HTTP connections down gracefully: an idle one closes, one
 //!   with a request in flight after its response. A connection of a TCP socket is the front's
 //!   until its `connect()` event has ended, and is waited for as a listener on one thread
 //!   waits for its own. Requests and connections still queued are served. Once every
-//!   connection has ended the front closes its queue, and a loop is done when the queue has
-//!   ended and what it took has finished. The first thread keeps its actors and serves the
-//!   sessions until every replica is, so a replica's requests in flight finish as its own do;
-//!   only then does it stop its containers. In a cluster the front accepts for as long as the
-//!   first thread serves on, through its handoff and the grace period after it.
+//!   connection has ended the front closes its queue, and a loop has drained when the queue has
+//!   ended and what it took has finished. A replica that has drained says so and stays, with
+//!   its actors, serving what the other threads send them; the first thread does the same.
+//!   Once every thread has drained, or the first thread waits no longer (a cluster's stop
+//!   deadline), it quiesces them ([`Replicas::quiesce`]): each thread then stops its actors'
+//!   containers and ends. Work an actor starts after that (an alarm, a timer) fails its calls
+//!   to other threads as disconnected. In a cluster the front accepts for as long as the first
+//!   thread serves on, through its handoff and the grace period after it.
 //! - **Teardown.** A replica drops its server, then its factory, then its loop, on its own
-//!   thread, and waits for nothing of the first thread to do so: what it has in flight there are
-//!   futures it drops, and the pipe's wake-ups cross threads without waiting. The first thread
+//!   thread, and waits for nothing of another thread to do so: what it has in flight there are
+//!   futures it drops, and the pipes' wake-ups cross threads without waiting. The first thread
 //!   drops what it took from the front itself, then stops the front, which drops every
-//!   connection, then drops the `Replicas`, which tells those still running to stop at once and
-//!   joins every thread, and only then ends the front's runtime and joins its threads: a
-//!   transport a loop holds (a TCP connection, a WebSocket) is registered with that runtime,
-//!   which so outlives every loop's use of it. The first thread's server, which serves the
-//!   sessions, and its factory, and with it the process's `SharedFactory` and V8, outlive every
-//!   other loop. A loop that stops drops the calls it had taken, whose connections close, and
-//!   leaves what is queued to the others.
+//!   connection, then drops the `Replicas`, which tells those it has not quiesced to stop at
+//!   once and joins every thread, and only then ends the front's runtime and joins its threads:
+//!   a transport a loop holds (a TCP connection, a WebSocket) is registered with that runtime,
+//!   which so outlives every loop's use of it. The first thread's server and its factory, and
+//!   with it the process's `SharedFactory` and V8, outlive every other loop. A loop that stops
+//!   drops the calls it had taken, whose connections close, and leaves what is queued to the
+//!   others.
 
 use std::cell::OnceCell;
 use std::cell::RefCell;
@@ -104,7 +127,9 @@ use crate::bridge::ffi;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
+use crate::config::Server;
 use crate::front;
+use crate::hub::Done;
 use crate::hub::Hub;
 use crate::hub::Mail;
 use crate::hub::Seat;
@@ -196,6 +221,9 @@ impl Signals {
 /// The replicas of a run, for the first loop thread. Dropping it stops and joins them.
 pub struct Replicas {
     count: usize,
+    spread: bool,
+    /// The replicas' seats, from when the first thread has taken its own until they start.
+    seats: RefCell<Vec<Seat>>,
     shared: KjArc<ffi::SharedFactory>,
     phase: watch::Sender<Phase>,
     threads: RefCell<Vec<JoinHandle<()>>>,
@@ -206,10 +234,14 @@ pub struct Replicas {
 
 impl Replicas {
     /// `count` replicas of the server of `factory`, the first loop thread's; none runs yet.
+    /// The threads' actors are spread over them if `spread`, else every actor's home is the
+    /// first.
     #[must_use]
-    pub fn new(count: usize, factory: &Factory) -> Self {
+    pub fn new(count: usize, factory: &Factory, spread: bool) -> Self {
         Self {
             count,
+            spread,
+            seats: RefCell::new(Vec::new()),
             shared: factory.shared(),
             phase: watch::Sender::new(Phase::Starting),
             threads: RefCell::new(Vec::new()),
@@ -223,25 +255,13 @@ impl Replicas {
         self.count
     }
 
-    /// Starts the threads and waits until each has built its graph and can take work from
-    /// `queue`, the front's, for `sockets`. A thread that fails to, or has ended by then, is
-    /// the error.
-    ///
-    /// What it returns watches the threads from then on ([`Started`]).
-    pub async fn start(
-        &self,
-        factory: &Rc<Factory>,
-        sockets: &FrontSockets,
-        queue: &front::Queue,
-        overrides: &Overrides,
-        deployments: &Deployments,
-    ) -> Result<Started> {
-        let (events, received) = mpsc::unbounded_channel();
-        let count = self.count;
-        // Every actor's home is the first thread.
+    /// Makes the hub of the run's loop threads and seats the first, `factory`'s, which from
+    /// then on places actors as the hub does. Before [`Self::start`], and before the first
+    /// thread schedules an alarm.
+    pub fn seat(&self, factory: &Rc<Factory>) -> Result<()> {
         let placement = Placement {
-            count: count + 1,
-            spread: false,
+            count: self.count + 1,
+            spread: self.spread,
         };
         let (hub, seats) = Hub::new(placement);
         let _ = self.hub.set(hub);
@@ -250,6 +270,28 @@ impl Replicas {
             .next()
             .ok_or_else(|| kj::failed!("the hub made no seat for the first loop thread"))?;
         factory.join(first)?;
+        *self.seats.borrow_mut() = seats.collect();
+        Ok(())
+    }
+
+    /// Starts the threads and waits until each has built its graph and can take work from
+    /// `queue`, the front's, for `sockets`. A thread that fails to, or has ended by then, is
+    /// the error.
+    ///
+    /// What it returns watches the threads from then on ([`Started`]).
+    pub async fn start(
+        &self,
+        sockets: &FrontSockets,
+        queue: &front::Queue,
+        overrides: &Overrides,
+        deployments: &Deployments,
+    ) -> Result<Started> {
+        let (events, received) = mpsc::unbounded_channel();
+        let count = self.count;
+        let seats = std::mem::take(&mut *self.seats.borrow_mut());
+        if seats.len() != count {
+            return Err(kj::failed!("the loop threads have no seats"));
+        }
         for seat in seats {
             let index = seat.index;
             let replica = Replica {
@@ -539,10 +581,12 @@ pub fn session_pipe() -> (SessionEnd, SessionEnd) {
     (SessionEnd(a), SessionEnd(b))
 }
 
-/// A loop thread's session with another loop thread of the process: a two-way capnp
-/// `WorkerdDebugPort` session, the one a cluster node keeps with a peer, over an in-process pipe
-/// the hub made for the two (`Hub::link`). Everything that crosses between two loop threads as
-/// capabilities crosses one of these, and nothing outside this type knows how.
+/// A loop thread's session with another loop thread of the process.
+///
+/// It is a two-way capnp `WorkerdDebugPort` session, the one a cluster node keeps with a peer,
+/// over an in-process pipe the hub made for the two (`Hub::link`). Everything that crosses
+/// between two loop threads as capabilities crosses one of these, and nothing outside this
+/// type knows how.
 ///
 /// Each end names an actor or a service of the other end's graph and starts events on it: a
 /// stub to an actor of another thread is a capability of the session for the actor's channel
@@ -617,8 +661,63 @@ pub async fn take_mail(factory: Rc<Factory>, mut inbox: mpsc::UnboundedReceiver<
                     );
                 }
             }
+            Mail::AbortAll(reason, done) => {
+                let reason = reason.map(|(kind, description)| crate::Error::new(kind, description));
+                answer(done, &factory, |server| {
+                    server.abort_all_actors(reason.as_ref());
+                    Ok(())
+                });
+            }
+            Mail::DeleteAll(reason, done) => {
+                let reason = reason.map(|(kind, description)| crate::Error::new(kind, description));
+                answer(done, &factory, |server| {
+                    server.delete_all_actors(reason.as_ref())
+                });
+            }
+            Mail::EvictAll {
+                namespaces,
+                hibernate,
+                done,
+            } => {
+                // An eviction waits for the actor's requests, and the mail behind it must not.
+                let serving = Rc::clone(&factory);
+                factory.spawn_detached(async move {
+                    let evicted = async {
+                        let server = serving.server()?;
+                        for (service, class) in &namespaces {
+                            let namespace = server.actor_namespace(service, class)?;
+                            namespace.evict_all_for_test(hibernate).await?;
+                        }
+                        Ok::<_, crate::Error>(())
+                    };
+                    let _ = done.send(evicted.await.map_err(|e| e.description().to_owned()));
+                });
+            }
+            Mail::Evict {
+                service,
+                class,
+                key,
+                hibernate,
+                done,
+            } => {
+                let serving = Rc::clone(&factory);
+                factory.spawn_detached(async move {
+                    let evicted = async {
+                        let namespace = serving.server()?.actor_namespace(&service, &class)?;
+                        namespace.evict_for_test(&key, hibernate).await
+                    };
+                    let _ = done.send(evicted.await.map_err(|e| e.description().to_owned()));
+                });
+            }
         }
     }
+}
+
+/// Answers a mail through `done` with what `act` makes of this thread's server.
+fn answer(done: Done, factory: &Factory, act: impl FnOnce(&Server) -> Result<()>) {
+    let result = factory.server().and_then(|server| act(&server));
+    // The thread that asked may have ended.
+    let _ = done.send(result.map_err(|e| e.description().to_owned()));
 }
 
 /// Why a run cannot be served by several loop threads, if it cannot: what a process has one of

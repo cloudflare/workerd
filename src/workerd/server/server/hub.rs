@@ -15,8 +15,8 @@
 //!   loop thread asks it for every stub it makes, and does not work a home out itself, so the
 //!   policy ([`Placement`]: a fixed-key hash over the threads) can become a table without the
 //!   threads knowing. The front can ask too, with what names the actor.
-//! - **Links.** Two loop threads talk over a session of their own ([`ThreadLink`]
-//!   (crate::threads::ThreadLink)): the hub makes the pipe it runs over the first time either
+//! - **Links.** Two loop threads talk over a session of their own (`threads::ThreadLink`): the
+//!   hub makes the pipe it runs over the first time either
 //!   asks ([`Hub::link`]), keeps each thread's end until that thread takes it, and tells the
 //!   other thread through its inbox. There is one pipe for a pair of threads, however many
 //!   stubs cross it and whichever thread asked first, so the calls of one stub arrive in the
@@ -34,7 +34,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
+use futures::future::BoxFuture;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use crate::placement::Placement;
 use crate::placement::Scope;
@@ -46,7 +48,36 @@ pub enum Mail {
     /// The hub has an end of a session with this thread for the thread to take
     /// ([`Hub::link`]): another thread asked for the link.
     Link(usize),
+    /// Abort every evictable actor of this thread, with the reason if there is one
+    /// (`abortAllDurableObjects()` on another thread).
+    AbortAll(Option<Reason>, Done),
+    /// Abort every evictable actor of this thread and delete its storage and alarms
+    /// (`deleteAllDurableObjects()` on another thread).
+    DeleteAll(Option<Reason>, Done),
+    /// The eviction test hook for every running actor of this thread in the namespaces named,
+    /// each by its worker service and class; `hibernate` as for the hook.
+    EvictAll {
+        namespaces: Vec<(String, String)>,
+        hibernate: bool,
+        done: Done,
+    },
+    /// The eviction test hook for the root actor `key` of the namespace of `service`'s `class`,
+    /// whose home is this thread.
+    Evict {
+        service: String,
+        class: String,
+        key: String,
+        hibernate: bool,
+        done: Done,
+    },
 }
+
+/// Why actors are aborted: the exception's type and description.
+pub type Reason = (cxx::KjExceptionType, String);
+
+/// Where a thread says that it did what a mail asked, or why it could not: the description of
+/// the error. Dropped unsent by a thread that ended first.
+pub type Done = oneshot::Sender<Result<(), String>>;
 
 /// The hub of a process's loop threads. See the module.
 pub struct Hub {
@@ -55,8 +86,11 @@ pub struct Hub {
     inboxes: Vec<mpsc::UnboundedSender<Mail>>,
     /// The ends of the pipes made so far that their threads have not taken, by the pair of
     /// threads, lower index first: the lower thread's end, and the higher's.
-    links: Mutex<HashMap<(usize, usize), (Option<SessionEnd>, Option<SessionEnd>)>>,
+    links: Mutex<HashMap<(usize, usize), Ends>>,
 }
+
+/// The ends of a pipe that their threads have not taken: the lower thread's, and the higher's.
+type Ends = (Option<SessionEnd>, Option<SessionEnd>);
 
 /// A loop thread's seat among the process's: which thread it is, the hub, and its inbox. Made
 /// with the hub, for the thread that takes it (`Factory::join`).
@@ -115,15 +149,21 @@ impl Hub {
             // A thread that is gone takes no end: its end is dropped, which ends the session
             // for the other.
             if !self.post(to, Mail::Link(from)) {
-                drop(if to < from { ends.0.take() } else { ends.1.take() });
+                drop(if to < from {
+                    ends.0.take()
+                } else {
+                    ends.1.take()
+                });
             }
             ends
         });
-        if from < to {
+        let end = if from < to {
             ends.0.take()
         } else {
             ends.1.take()
-        }
+        };
+        drop(links);
+        end
     }
 
     /// Sends `mail` to thread `to`'s inbox; false if the thread is gone, or none of the
@@ -132,6 +172,35 @@ impl Hub {
         self.inboxes
             .get(to)
             .is_some_and(|inbox| inbox.send(mail).is_ok())
+    }
+
+    /// Sends every thread but `from` the mail `make` makes for it, and resolves once each has
+    /// done what its mail asked: with the first error among them, or that of a thread that
+    /// ended without an answer.
+    pub fn broadcast(
+        &self,
+        from: usize,
+        make: impl Fn(Done) -> Mail,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        let answers: Vec<_> = (0..self.threads())
+            .filter(|thread| *thread != from)
+            .map(|thread| {
+                let (done, answer) = oneshot::channel();
+                // A thread that is gone drops the mail, and with it `done`.
+                let _ = self.post(thread, make(done));
+                (thread, answer)
+            })
+            .collect();
+        Box::pin(async move {
+            let mut result = Ok(());
+            for (thread, answer) in answers {
+                let answer = answer
+                    .await
+                    .unwrap_or_else(|_| Err(format!("loop thread {thread} has ended")));
+                result = result.and(answer);
+            }
+            result
+        })
     }
 }
 

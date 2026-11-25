@@ -1,7 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 # A Worker with Durable Objects for `workerd serve --threads`: `front` answers on whichever
-# thread takes the request and calls its objects, which run on the server's first thread.
+# thread takes the request and calls its objects, each of which runs on its home thread.
 const config :Workerd.Config = (
   services = [
     ( name = "front",

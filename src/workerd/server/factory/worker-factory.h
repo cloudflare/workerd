@@ -110,8 +110,7 @@ inline kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> word
 // =======================================================================================
 
 // Whether a per-loop factory is the one of the process's first loop thread, which owns what a
-// process has one of: the inspector and the Durable Object storage of every namespace, and with
-// it every actor, which the other loops reach over their sessions with this one.
+// process has one of: the inspector.
 WD_STRONG_BOOL(PrimaryLoop);
 
 // What the loop threads of one run share, which outlives every loop: the config and the options,
@@ -385,6 +384,11 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Box<ActorNamespaceHandle> actors);
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
+// Starts the namespace's alarm scheduler on loop thread `thread` of the process's `threads`,
+// over that thread's database in the namespace's directory (`AlarmScheduler::databasePath`). The
+// first thread's moves the alarms of the directory to the database of each one's home thread
+// first (`AlarmScheduler::rehome`), so it is started before any other thread's.
+void actor_storage_start_alarms(const ActorStorage& storage, uint32_t thread, uint32_t threads);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.

@@ -51,12 +51,12 @@ use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
 use crate::config::text;
-use crate::listen::loopback::LoopbackListener;
-use crate::run::RunOptions;
-use crate::services::make_external_service;
 use crate::hub::Hub;
 use crate::hub::Seat;
+use crate::listen::loopback::LoopbackListener;
 use crate::placement::Placement;
+use crate::run::RunOptions;
+use crate::services::make_external_service;
 
 pub struct InProcessServer {
     factory: Rc<Factory>,
@@ -408,9 +408,10 @@ impl InProcessServer {
     }
 
     /// Makes this server, which runs, the first of two loop threads (threads.rs), and returns
-    /// the seat of the other. Once.
+    /// the seat of the other, which reaches this one's actors and hosts none. Once.
     pub fn add_loop_thread(&self) -> Result<Box<Seat>> {
-        // Every actor's home is the first thread.
+        // This server has run alone, so the actors it has stay where they are: every actor's
+        // home is this thread.
         let placement = Placement {
             count: 2,
             spread: false,

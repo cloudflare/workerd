@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::rc::Weak;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,6 +30,7 @@ use kj_rs::KjArc;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use workerd_capnp::config;
 use workerd_capnp::service;
@@ -63,11 +65,12 @@ use crate::channels::WorkerInterface;
 use crate::cluster::ClusterNode;
 use crate::cluster::PeerSession;
 use crate::cluster::SessionService;
-use crate::listen::loopback::Loopback;
-use crate::loader::WorkerLoaderNamespace;
+use crate::hub::Done;
 use crate::hub::Hub;
 use crate::hub::Mail;
 use crate::hub::Seat;
+use crate::listen::loopback::Loopback;
+use crate::loader::WorkerLoaderNamespace;
 use crate::placement::Scope;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
@@ -93,6 +96,11 @@ pub struct Factory {
     serving_links: Cell<bool>,
     /// The thread at the other end of a session that ended, once one has.
     lost_link: watch::Sender<Option<usize>>,
+    /// This thread's server, from when its graph is built (`serve_links`).
+    server: RefCell<Weak<Server>>,
+    /// Whether the namespaces' alarm schedulers run (`Server::start_alarms`): how many loop
+    /// threads the process has is settled.
+    alarms_started: Cell<bool>,
 }
 
 impl Factory {
@@ -106,6 +114,8 @@ impl Factory {
             inbox: RefCell::new(None),
             serving_links: Cell::new(false),
             lost_link: watch::Sender::new(None),
+            server: RefCell::new(Weak::new()),
+            alarms_started: Cell::new(false),
         }
     }
 
@@ -174,13 +184,81 @@ impl Factory {
         Ok(link)
     }
 
+    /// How many loop threads the process has.
+    #[must_use]
+    pub fn threads(&self) -> usize {
+        self.seat.get().map_or(1, |(_, hub)| hub.threads())
+    }
+
+    /// Sends every other loop thread the mail `make` makes for it, and resolves once each did
+    /// what it asks; at once for the process's only thread.
+    pub fn broadcast(&self, make: impl Fn(Done) -> Mail) -> LocalBoxFuture<'static, Result<()>> {
+        let sent = self
+            .seat
+            .get()
+            .map(|(index, hub)| hub.broadcast(*index, make));
+        Box::pin(async move {
+            match sent {
+                Some(sent) => sent
+                    .await
+                    .map_err(|description| kj::failed!("{description}")),
+                None => Ok(()),
+            }
+        })
+    }
+
+    /// Sends loop thread `thread` the mail `make` makes, and resolves once it did what it asks.
+    pub fn ask(
+        &self,
+        thread: usize,
+        make: impl FnOnce(Done) -> Mail,
+    ) -> LocalBoxFuture<'static, Result<()>> {
+        let (done, answer) = oneshot::channel();
+        let sent = self
+            .seat
+            .get()
+            .is_some_and(|(_, hub)| hub.post(thread, make(done)));
+        Box::pin(async move {
+            if !sent {
+                return Err(kj::disconnected!("loop thread {thread} has ended"));
+            }
+            match answer.await {
+                Ok(result) => result.map_err(|description| kj::failed!("{description}")),
+                Err(_) => Err(kj::disconnected!("loop thread {thread} has ended")),
+            }
+        })
+    }
+
+    /// This thread's server, once its graph is built.
+    pub fn server(&self) -> Result<Rc<Server>> {
+        self.server
+            .borrow()
+            .upgrade()
+            .ok_or_else(|| kj::disconnected!("this loop thread has no server"))
+    }
+
+    /// Whether the namespaces' alarm schedulers run.
+    #[must_use]
+    pub fn alarms_started(&self) -> bool {
+        self.alarms_started.get()
+    }
+
     /// Has this thread answer what the other threads send over their sessions with it, and
-    /// take what is in its inbox, from now on: its server is registered and its graph built.
-    pub fn serve_links(self: &Rc<Self>) {
+    /// take what is in its inbox, from now on: `server` is registered and its graph built.
+    pub fn serve_links(self: &Rc<Self>, server: &Rc<Server>) {
+        *self.server.borrow_mut() = Rc::downgrade(server);
         if !self.serving_links.replace(true) {
             ffi::factory_serve_links(&self.inner);
             self.take_mail();
         }
+    }
+
+    /// Ends this thread's part in its sessions with the other loop threads: what it serves over
+    /// them is released, and what it still holds of theirs fails as disconnected. A session ends
+    /// once the stubs this thread has over it are gone too.
+    pub fn close_links(&self) {
+        let links = std::mem::take(&mut *self.links.borrow_mut());
+        drop(links);
     }
 
     /// Starts the task that takes this thread's mail, if it has a seat and no such task yet.
@@ -802,22 +880,20 @@ impl Server {
         }
     }
 
-    /// Aborts every evictable actor, for a Worker that asked (`abortAllDurableObjects()`). Fails
-    /// on a replica (threads.rs) that has an evictable namespace: its actors are the first
-    /// thread's.
-    pub fn abort_all_actors_on_request(&self, reason: Option<&crate::Error>) -> Result<()> {
+    /// Starts the alarm scheduler of every namespace, and of those linked from now on as they
+    /// are linked. Once how many loop threads the process has is settled, since each thread
+    /// schedules the alarms of the actors whose home it is.
+    pub fn start_alarms(&self) -> Result<()> {
+        self.factory.alarms_started.set(true);
         for (_, worker) in self.workers() {
             for (_, namespace) in worker.namespaces() {
-                if namespace.is_evictable() {
-                    namespace.require_actors_here("abort Durable Objects")?;
-                }
+                namespace.start_alarms()?;
             }
         }
-        self.abort_all_actors(reason);
         Ok(())
     }
 
-    /// Aborts every evictable actor and deletes its storage.
+    /// Aborts every evictable actor of this thread and deletes its storage.
     pub fn delete_all_actors(&self, reason: Option<&crate::Error>) -> Result<()> {
         for (_, worker) in self.workers() {
             for (_, namespace) in worker.namespaces() {
@@ -839,6 +915,11 @@ impl Drop for Server {
         // tasks (tasks.rs) go too: one may hold an actor, and so its class's worker.
         self.abort_all_actors(Some(&kj::disconnected!("Server shutting down.")));
         ffi::factory_clear_tasks(self.factory.raw());
+        // A session with another loop thread holds what this thread serves over it: the channels
+        // of the actors that thread has stubs to, and with them this server's namespaces. The
+        // other thread lets go of those only when its own isolates do, which is not for this
+        // thread to wait for.
+        self.factory.close_links();
         // The dynamic workers go before `services` unlinks the config's.
         let loaders = std::mem::take(&mut *self.worker_loaders.borrow_mut());
         for loader in loaders.by_id.values().chain(&loaders.anonymous) {
@@ -2230,8 +2311,18 @@ impl ServerHandle {
     }
 
     fn actor_namespace(&self, service_name: &str, class_name: &str) -> Result<Rc<ActorNamespace>> {
-        let server = self.server()?;
-        let service = server.debug_service(service_name)?;
+        self.server()?.actor_namespace(service_name, class_name)
+    }
+}
+
+impl Server {
+    /// The namespace of service `service_name`'s Durable Object class `class_name`.
+    pub(crate) fn actor_namespace(
+        &self,
+        service_name: &str,
+        class_name: &str,
+    ) -> Result<Rc<ActorNamespace>> {
+        let service = self.debug_service(service_name)?;
         let worker = service
             .as_worker()
             .ok_or_else(|| kj::failed!("jsg.Error: Worker does not support Durable Objects"))?;
