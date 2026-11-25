@@ -4,6 +4,7 @@
 
 #include "r2-bucket.h"
 
+#include "r2-json.h"
 #include "r2-multipart.h"
 #include "r2-rpc.h"
 #include "util.h"
@@ -132,9 +133,21 @@ enum class OptionalMetadata : uint16_t {
 template <typename T>
 concept HeadResultT = std::is_base_of_v<R2Bucket::HeadResult, T>;
 
+// The Cap'n Proto reader already exposes the bytes as a KJ view.
+static kj::Array<kj::byte> copyChecksum(capnp::Data::Reader checksum) {
+  return kj::heapArray(checksum);
+}
+
+// The Rust slice borrows from the parsed response, which is freed after the callback.
+static kj::Array<kj::byte> copyChecksum(::rust::Slice<const uint8_t> checksum) {
+  return kj::heapArray(kj::from<kj_rs::Rust>(checksum));
+}
+
+// Both decoders expose the same metadata getters. Copy the selected metadata into JS-owned
+// objects while the response reader's backing storage is alive.
 template <HeadResultT T, typename... Args>
 static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
-    R2HeadResponse::Reader responseReader,
+    const auto& responseReader,
     kj::ArrayPtr<const OptionalMetadata> expectedOptionalFields,
     Args&&... args) {
   // optionalFieldsExpected is initialized by default to HTTP + CUSTOM if the user doesn't specify
@@ -146,7 +159,7 @@ static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
   if (responseReader.hasHttpFields()) {
     R2Bucket::HttpMetadata m;
 
-    auto httpFields = responseReader.getHttpFields();
+    const auto& httpFields = responseReader.getHttpFields();
     if (httpFields.hasContentType()) {
       m.contentType = kj::str(httpFields.getContentType());
     }
@@ -191,10 +204,10 @@ static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
   jsg::Optional<R2Bucket::Range> range;
 
   if (responseReader.hasRange()) {
-    auto rangeBuilder = responseReader.getRange();
+    const auto& rangeReader = responseReader.getRange();
     range = R2Bucket::Range{
-      .offset = static_cast<double>(rangeBuilder.getOffset()),
-      .length = static_cast<double>(rangeBuilder.getLength()),
+      .offset = static_cast<double>(rangeReader.getOffset()),
+      .length = static_cast<double>(rangeReader.getLength()),
     };
   }
 
@@ -202,33 +215,32 @@ static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
       js.alloc<R2Bucket::Checksums>(kj::none, kj::none, kj::none, kj::none, kj::none);
 
   if (responseReader.hasChecksums()) {
-    R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
-    if (checksumsBuilder.hasMd5()) {
+    const auto& checksumsReader = responseReader.getChecksums();
+    if (checksumsReader.hasMd5()) {
       // Note that we don't check the length of checksums in here. We know
       // that some artifact were stored with truncated checksums (e.g. 8 bytes
       // instead of 16 for some). We're not validating the checksum lengths
       // here and instead we're just passing them through.
-      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
+      checksums->md5 = copyChecksum(checksumsReader.getMd5());
     }
-    if (checksumsBuilder.hasSha1()) {
-      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
+    if (checksumsReader.hasSha1()) {
+      checksums->sha1 = copyChecksum(checksumsReader.getSha1());
     }
-    if (checksumsBuilder.hasSha256()) {
-      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
+    if (checksumsReader.hasSha256()) {
+      checksums->sha256 = copyChecksum(checksumsReader.getSha256());
     }
-    if (checksumsBuilder.hasSha384()) {
-      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
+    if (checksumsReader.hasSha384()) {
+      checksums->sha384 = copyChecksum(checksumsReader.getSha384());
     }
-    if (checksumsBuilder.hasSha512()) {
-      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
+    if (checksumsReader.hasSha512()) {
+      checksums->sha512 = copyChecksum(checksumsReader.getSha512());
     }
   }
 
   jsg::Optional<kj::String> ssecKeyMd5;
 
   if (responseReader.hasSsec()) {
-    auto ssecBuilder = responseReader.getSsec();
-    ssecKeyMd5 = kj::str(ssecBuilder.getKeyMd5());
+    ssecKeyMd5 = kj::str(responseReader.getSsec().getKeyMd5());
   }
 
   return js.alloc<T>(kj::str(responseReader.getName()), kj::str(responseReader.getVersion()),
@@ -237,6 +249,7 @@ static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
       kj::str(responseReader.getStorageClass()), kj::mv(ssecKeyMd5), kj::fwd<Args>(args)...);
 }
 
+// A precondition failure can still carry object metadata for the caller.
 template <HeadResultT T, typename... Args>
 static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
     kj::StringPtr action,
@@ -255,14 +268,10 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
   kj::ArrayPtr<OptionalMetadata> expectedFields = {
     expectedFieldsOwned.data(), expectedFieldsOwned.size()};
 
-  capnp::MallocMessageBuilder responseMessage;
-  capnp::JsonCodec json;
-  // Annoyingly our R2GetResponse alias isn't emitted.
-  json.handleByAnnotation<R2HeadResponse>();
-  auto responseBuilder = responseMessage.initRoot<R2HeadResponse>();
-  json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
-
-  return parseObjectMetadata<T>(js, responseBuilder, expectedFields, kj::fwd<Args>(args)...);
+  return withR2JsonResponse<R2HeadResponse>(KJ_ASSERT_NONNULL(r2Result.metadataPayload),
+      serde::parseR2HeadResponse, [&](const auto& response) {
+    return parseObjectMetadata<T>(js, response, expectedFields, kj::fwd<Args>(args)...);
+  });
 }
 
 namespace {
@@ -1255,17 +1264,15 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("createMultipartUpload", errorType);
 
-      capnp::MallocMessageBuilder responseMessage;
-      capnp::JsonCodec json;
-      json.handleByAnnotation<R2CreateMultipartUploadResponse>();
-      auto responseBuilder = responseMessage.initRoot<R2CreateMultipartUploadResponse>();
-
-      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
-      kj::StringPtr uploadId = responseBuilder.getUploadId();
-      traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId);
-      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::str(uploadId),
-          KJ_REQUIRE_NONNULL(
-              weakThis.tryAddRef(js), "R2Bucket destroyed before createMultipartUpload returned"));
+      return withR2JsonResponse<R2CreateMultipartUploadResponse>(
+          KJ_ASSERT_NONNULL(r2Result.metadataPayload), serde::parseR2CreateMultipartUploadResponse,
+          [&](const auto& response) {
+        auto uploadId = kj::str(response.getUploadId());
+        traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId.asPtr());
+        return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId),
+            KJ_REQUIRE_NONNULL(weakThis.tryAddRef(js),
+                "R2Bucket destroyed before createMultipartUpload returned"));
+      });
     });
   });
 }
@@ -1482,28 +1489,24 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("list", errorType);
 
-      R2Bucket::ListResult result;
-      capnp::MallocMessageBuilder responseMessage;
-      capnp::JsonCodec json;
-      json.handleByAnnotation<R2ListResponse>();
-      auto responseBuilder = responseMessage.initRoot<R2ListResponse>();
+      return withR2JsonResponse<R2ListResponse>(KJ_ASSERT_NONNULL(r2Result.metadataPayload),
+          serde::parseR2ListResponse, [&](const auto& response) {
+        R2Bucket::ListResult result;
+        result.objects = KJ_MAP(o, response.getObjects()) {
+          return parseObjectMetadata<HeadResult>(js, o, expectedOptionalFields);
+        };
+        result.truncated = response.getTruncated();
+        if (response.hasCursor()) {
+          result.cursor = kj::str(response.getCursor());
+        }
+        if (response.hasDelimitedPrefixes()) {
+          result.delimitedPrefixes =
+            KJ_MAP(e, response.getDelimitedPrefixes()) { return kj::str(e); };
+        }
 
-      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
-
-      result.objects = KJ_MAP(o, responseBuilder.getObjects()) {
-        return parseObjectMetadata<HeadResult>(js, o, expectedOptionalFields);
-      };
-      result.truncated = responseBuilder.getTruncated();
-      if (responseBuilder.hasCursor()) {
-        result.cursor = kj::str(responseBuilder.getCursor());
-      }
-      if (responseBuilder.hasDelimitedPrefixes()) {
-        result.delimitedPrefixes =
-          KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
-      }
-
-      addListResultSpanTags(traceContext, result);
-      return kj::mv(result);
+        addListResultSpanTags(traceContext, result);
+        return result;
+      });
     });
   });
 }

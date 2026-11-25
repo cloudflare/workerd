@@ -381,15 +381,44 @@ wd_cc_library(
 
 wd_cc_library(
     name = "r2",
-    srcs = glob(["r2*.c++"]),
-    hdrs = glob(["r2*.h"]),
+    srcs = glob(
+        ["r2*.c++"],
+        exclude = [
+            "r2-json.c++",
+            "r2-json-test.c++",
+        ],
+    ),
+    hdrs = glob(
+        ["r2*.h"],
+        exclude = ["r2-json.h"],
+    ),
     implementation_deps = [
         ":r2-api_capnp",
+        ":r2-json",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
     ],
+)
+
+wd_cc_library(
+    name = "r2-json",
+    srcs = ["r2-json.c++"],
+    hdrs = ["r2-json.h"],
+    deps = [
+        ":r2-api-serde-json",
+        ":r2-api_capnp",
+        "//src/rust/cxx/kj-rs",
+        "//src/workerd/util:autogate",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
+)
+
+kj_test(
+    src = "r2-json-test.c++",
+    generate_all_autogates_variant = False,
+    deps = [":r2-json"],
 )
 
 wd_cc_library(

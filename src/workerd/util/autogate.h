@@ -160,7 +160,10 @@ namespace workerd::util {
   V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
   /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
      than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
-  V(RUST_COMPAT_DATE)
+  V(RUST_COMPAT_DATE)                                                                               \
+  /* Uses capnp-serde-json's decoded R2 responses for the binding result. Both decoders run       \
+     and compare their results in either gate state. */                                             \
+  V(R2_SERDE_JSON)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
