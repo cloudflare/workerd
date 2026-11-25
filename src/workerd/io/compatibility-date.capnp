@@ -1879,4 +1879,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  udpIngress @210 :Bool
+      $compatEnableFlag("udp_ingress")
+      $compatDisableFlag("no_udp_ingress")
+      $compatEnableDate("2026-12-16");
+  # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
+  # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
 }

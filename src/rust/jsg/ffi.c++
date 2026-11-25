@@ -669,6 +669,9 @@ static_assert(static_cast<int>(ConstructorBehavior::Allow) ==
 MaybeLocal function_new(
     Isolate* isolate, size_t callback, const Local& data, ConstructorBehavior behavior) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  // The callback ends up in the heap as the function's C++ callback; a startup snapshot can only
+  // serialize it if it is in the isolate's external-reference table.
+  workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
       local_as_ref_from_ffi<v8::Value>(data), 0, static_cast<v8::ConstructorBehavior>(behavior)));

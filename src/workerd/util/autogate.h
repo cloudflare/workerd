@@ -127,6 +127,19 @@ namespace workerd::util {
   /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
      (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
   V(RUST_MEMORY_CACHE)                                                                             \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default a new isolate is created in V8's loading mode (v8::Isolate::SetIsLoading()),       \
+     which defers full GCs for up to 7 seconds, and V8 is told that loading has ended the first    \
+     time the isolate is left with no request in flight and its thread is idle. That               \
+     notification is V8's cue to collect garbage if the heap is due for it. Enabling this gate     \
+     leaves isolates out of loading mode. See Worker::Isolate::completedRequest(). */              \
+  V(NO_LOADING_MODE)                                                                               \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default the notification that ends loading mode is repeated each later time the            \
+     isolate is left with no request in flight and its thread is idle, and is sent each such       \
+     time, the first included, to an isolate that was never in loading mode. Enabling this gate    \
+     stops all but the one that ends loading mode. */                                              \
+  V(NO_IDLE_GC)                                                                                    \
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
@@ -134,10 +147,6 @@ namespace workerd::util {
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
   V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
-  /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
-     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
-     group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
   /* An actor's outgoing calls use the I/O channels of its newest request that is still running,   \
      rather than its newest request, which may have returned and be waiting only for background    \
      work. See IoContext::getIncomingRequestForIoChannels(). */                                    \
@@ -148,7 +157,10 @@ namespace workerd::util {
   /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
      string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
      isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
-  V(BODY_BUFFER_EXTERNAL_MEMORY)
+  V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
+  /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
+     than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
+  V(RUST_COMPAT_DATE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

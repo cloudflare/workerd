@@ -1,5 +1,7 @@
 exports_files([
     "helloworld/config.capnp",
     "helloworld/worker.js",
+    "kubernetes/app/src/index.js",
+    "kubernetes/app/wrangler.json",
     "wrangler/wrangler.jsonc",
 ])

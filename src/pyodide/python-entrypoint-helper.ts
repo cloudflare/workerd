@@ -35,7 +35,6 @@ import {
 } from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { createImportProxy } from 'pyodide-internal:serializeJsModule';
-export { createImportProxy };
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
@@ -122,10 +121,16 @@ async function getCloudflareWorkersModule(
   });
 }
 
-export async function setDoAnImport(
-  doAnImport: (mod: string) => Promise<any>,
+async function setUpEntrypointHelper(
+  importModule: (mod: string) => Promise<any>,
   workerEntrypoint: any
 ): Promise<void> {
+  async function doAnImport(mod: string): Promise<any> {
+    // If we are creating a snapshot, `createImportProxy` wraps imports in a proxy so
+    // that snapshots can record and restore the references. Otherwise it returns module
+    // unchanged.
+    return createImportProxy(mod, await importModule(mod));
+  }
   const cloudflareWorkersModule = await getCloudflareWorkersModule(doAnImport);
   _pyodide_entrypoint_helper = {
     doAnImport,
@@ -583,14 +588,29 @@ type PythonEntrypointClasses = {
   workflowEntrypoints: ExporterClassInfo[];
 };
 
+type Handlers = { [handlerName: string]: Handler };
+
+type EntrypointBaseClasses = {
+  [K in keyof PythonEntrypointClasses]: AnyClass;
+};
+
+type PythonInitOptions = {
+  // Imports a module with the visibility of the worker bundle. It has to be defined in
+  // python-entrypoint.js: an import() in this BUILTIN module could only see internal modules.
+  importModule: (mod: string) => Promise<any>;
+  // The cloudflare:workers base classes, which a BUILTIN module can't import.
+  baseClasses: EntrypointBaseClasses;
+};
+
 type PythonInitResult = {
-  handlers: { [handlerName: string]: Handler };
-  pythonEntrypointClasses: PythonEntrypointClasses;
-  makeEntrypointClass: typeof makeEntrypointClass;
+  // The worker's default export: the handlers object, or the `Default` WorkerEntrypoint class.
+  defaultExport: any;
+  // The JS classes for the entrypoint classes the Python main module defines, by class name.
+  pythonEntrypoints: { [className: string]: AnyClass };
 };
 
 function handleDefaultClass(
-  handlers: PythonInitResult['handlers'],
+  handlers: Handlers,
   workerEntrypoints: ExporterClassInfo[]
 ): void {
   const index = workerEntrypoints.findIndex(
@@ -615,10 +635,15 @@ function handleDefaultClass(
   workerEntrypoints.splice(index, 1);
 }
 
-export async function initPython(): Promise<PythonInitResult> {
-  const handlers: {
-    [handlerName: string]: Handler;
-  } = {};
+async function initPythonOnce(
+  options: PythonInitOptions
+): Promise<PythonInitResult> {
+  await setUpEntrypointHelper(
+    options.importModule,
+    options.baseClasses.workerEntrypoints
+  );
+
+  const handlers: Handlers = {};
 
   let pythonEntrypointClasses: PythonEntrypointClasses = {
     durableObjects: [],
@@ -669,5 +694,31 @@ export async function initPython(): Promise<PythonInitResult> {
   };
   maybeCollectDedicatedSnapshot(pyodide._module, customSerializedObjects);
 
-  return { handlers, pythonEntrypointClasses, makeEntrypointClass };
+  const pythonEntrypoints = Object.fromEntries(
+    (
+      Object.keys(options.baseClasses) as (keyof EntrypointBaseClasses)[]
+    ).flatMap((kind) =>
+      pythonEntrypointClasses[kind].map(({ className, methodNames }) => [
+        className,
+        makeEntrypointClass(className, options.baseClasses[kind], methodNames),
+      ])
+    )
+  );
+  const defaultExport = 'default' in handlers ? handlers['default'] : handlers;
+  return { defaultExport, pythonEntrypoints };
+}
+
+let initialized = false;
+/**
+ * Initializes Python and returns the worker's exports. python-entrypoint.js calls this once, at
+ * the top level; a second call would replace the state that the first one set up.
+ */
+export async function initPython(
+  options: PythonInitOptions
+): Promise<PythonInitResult> {
+  if (initialized) {
+    throw new Error('initPython() can only be called once');
+  }
+  initialized = true;
+  return await initPythonOnce(options);
 }
