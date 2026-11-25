@@ -77,7 +77,7 @@ class DOMException: public Object {
     // Declare static JS constants for every INDEX_SIZE_ERR, DOMSTRING_SIZE_ERR, etc.
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(JSG_DOM_EXCEPTION_CONSTANT_JS)
 
-    // Declared in types/defines/dom-exception.d.ts, for both implementations.
+    // Declared in src/per_isolate/dom-exception.public.d.ts, for both implementations.
     JSG_TS_OVERRIDE(type DOMException = never);
   }
   JSG_REFLECTION(stack);
