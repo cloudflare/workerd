@@ -550,6 +550,29 @@ KJ_TEST("deserialization diagnostics preserve successful reads and other errors"
   });
 }
 
+KJ_TEST("serialization versions are bounded by V8's latest") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  e.run([&](jsg::Lock& js) {
+    auto latest = v8::CurrentValueSerializerFormatVersion();
+
+    KJ_EXPECT_THROW_MESSAGE("The serialization version is newer than V8 supports.",
+        Serializer(js, {.version = latest + 1}));
+
+    Serializer ser(js, {.version = latest, .omitHeader = true});
+    ser.write(js, js.str("payload"_kj));
+    auto data = ser.release();
+
+    KJ_EXPECT_THROW_MESSAGE("The deserialization version is newer than V8 supports.",
+        Deserializer(js, data.data, kj::none, kj::none,
+            Deserializer::Options{.version = latest + 1, .readHeader = false}));
+
+    Deserializer deser(js, data.data, kj::none, kj::none,
+        Deserializer::Options{.version = latest, .readHeader = false});
+    KJ_EXPECT(deser.getVersion() == latest);
+    KJ_EXPECT(kj::str(deser.readValue(js)) == "payload");
+  });
+}
+
 // Define a whole second JSG isolate type that contains "updated" code where Bar no longer wraps
 // a string, it wraps an arbitrary value.
 struct SerTestContextV2: public ContextGlobalObject {
