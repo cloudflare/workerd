@@ -7,6 +7,11 @@
 //! `IoContext` (`src/workerd/io/io-context.h`) holds the state of the request that JavaScript is
 //! running on behalf of. This crate is a package of its own because `//src/workerd/io` depends on
 //! `jsg`.
+//!
+//! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]) for the host that opened one
+//! and holds it, outside any `IoContext`: [`incoming_request_delivered`],
+//! [`incoming_request_run`], [`incoming_request_register_pending_event`] and
+//! [`incoming_request_drain`].
 
 mod ffi;
 mod trace;
@@ -29,8 +34,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::DeliveredLocation;
 use ffi::bridge;
 pub use ffi::bridge::EvictWebSocketMode;
+pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::PendingEvent;
+pub use ffi::incoming_request_delivered;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
@@ -1760,6 +1769,88 @@ impl<T: 'static> ReentryCallback<T> {
             _output: PhantomData,
         }
     }
+}
+
+/// Runs `function` in the request's `IoContext`, through C++ `IoContext::run()`.
+///
+/// Returns a future for the output of the future that `function` returns. The host that opened
+/// the request uses it to run JavaScript there, from outside any `IoContext`.
+///
+/// `function` runs as the function of a [`ReentryCallback`] does, with the `IoContext` current,
+/// and its future is polled as that function's is, on the `IoContext`'s thread and without the
+/// isolate lock. The run starts now, as C++ `run()` does: it schedules the function to run once
+/// the isolate lock is free. Dropping the returned future cancels it, as dropping the C++ promise
+/// does.
+///
+/// The future fails with a [`cxx::KjException`] as a [`ReentryCallFuture`] does: with the error
+/// `run()` fails with at once, with the exception the `IoContext` is destroyed or aborted with
+/// while the run waits, or as [`IoContext::make_reentry_callback_weak`] says if `function` fails.
+#[must_use = "the run is cancelled if its future is dropped"]
+pub fn incoming_request_run<T, Fut, F>(
+    request: Pin<&mut IncomingRequest>,
+    function: F,
+) -> ReentryCallFuture<T>
+where
+    T: 'static,
+    Fut: Future<Output = Result<T, cxx::KjException>> + 'static,
+    F: for<'t> FnOnce(&mut jsg::Lock<'t>, &IoContext<'t>) -> jsg::Result<Fut> + 'static,
+{
+    let mut function = Some(function);
+    let function = ffi::ReentryFn(Box::new(move |lock| {
+        let Some(function) = function.take() else {
+            unreachable!("C++ runs the function of incoming_request_run() once")
+        };
+        let context = IoContext::current(lock)?;
+        let future = function(lock, &context)?;
+        let future: ffi::ReentryFuture = Box::pin(async move {
+            let output: Box<dyn Any> = Box::new(future.await?);
+            Ok(output)
+        });
+        Ok(future)
+    }));
+    let output = Rc::new(Cell::new(None));
+    let call = ffi::ReentryCall {
+        future: None,
+        output: Rc::clone(&output),
+    };
+    let wait: ReentryWait =
+        match bridge::incoming_request_run(request, Box::new(function), Box::new(call)) {
+            Ok(promise) => Box::pin(bridge::reentry_promise_wait(promise)),
+            Err(err) => Box::pin(std::future::ready(Err(err))),
+        };
+    ReentryCallFuture {
+        wait,
+        output,
+        _output: PhantomData,
+    }
+}
+
+/// `IoContext::registerPendingEvent()` of the request's `IoContext`.
+///
+/// Until the returned event is dropped, the `IoContext` counts it as waiting for something, so
+/// that it is not taken for hung when its thread has nothing else to do, as when a host waits for
+/// input to run in it.
+///
+/// # Errors
+/// Fails with what C++ throws.
+pub fn incoming_request_register_pending_event(
+    request: Pin<&mut IncomingRequest>,
+) -> Result<KjOwn<PendingEvent>, cxx::KjException> {
+    bridge::incoming_request_register_pending_event(request)
+}
+
+/// Ends the request: `IoContext::IncomingRequest::drain()`.
+///
+/// Then waits for the `waitUntil()` tasks it leaves, logging those that fail. Resolves to whether
+/// the `IoContext`'s `waitUntilStatus()` is `OK` afterwards, which it is not if a `waitUntil()`
+/// task rejected or a timer callback threw.
+///
+/// # Errors
+/// Fails with what C++ throws.
+pub async fn incoming_request_drain(
+    request: KjOwn<IncomingRequest>,
+) -> Result<bool, cxx::KjException> {
+    bridge::incoming_request_drain(request).await
 }
 
 /// What a [`ReentryCallFuture`] waits for: the C++ promise of the call.

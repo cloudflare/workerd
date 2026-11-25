@@ -130,6 +130,39 @@ pub mod bridge {
         ) -> Result<KjOwn<ReentryPromise>>;
         async fn reentry_promise_wait(promise: KjOwn<ReentryPromise>) -> Result<()>;
 
+        /// `IoContext::IncomingRequest` (`io/io-context.h`). The host that opened it holds it.
+        type IncomingRequest;
+        /// What `IoContext::registerPendingEvent()` returns.
+        type PendingEvent;
+
+        /// `IncomingRequest::delivered(eventType, NO, location)`, for the location in `file`,
+        /// `function`, `line` and `column`. C++ copies `event_type`.
+        ///
+        /// # Safety
+        /// `file` and `function` are static NUL-terminated strings with their NUL, which C++
+        /// keeps as the request's `kj::SourceLocation`.
+        unsafe fn incoming_request_delivered(
+            request: Pin<&mut IncomingRequest>,
+            event_type: &[u8],
+            file: &[u8],
+            function: &[u8],
+            line: u32,
+            column: u32,
+        ) -> Result<()>;
+        /// `IoContext::run()` of the request's `IoContext`, for `function`, as a
+        /// `ReentryCallback` calls it.
+        fn incoming_request_run(
+            request: Pin<&mut IncomingRequest>,
+            function: Box<ReentryFn>,
+            call: Box<ReentryCall>,
+        ) -> Result<KjOwn<ReentryPromise>>;
+        fn incoming_request_register_pending_event(
+            request: Pin<&mut IncomingRequest>,
+        ) -> Result<KjOwn<PendingEvent>>;
+        /// `IncomingRequest::drain()`, then the `waitUntil()` tasks it leaves: whether the
+        /// `IoContext`'s `waitUntilStatus()` is `OK` afterwards.
+        async fn incoming_request_drain(request: KjOwn<IncomingRequest>) -> Result<bool>;
+
         fn io_context_check_current(id: u64) -> Result<()>;
         fn io_context_abort(id: u64, reason: KjException) -> Result<()>;
         fn io_context_abort_without_reason(id: u64) -> Result<()>;
@@ -201,6 +234,10 @@ pub mod bridge {
             exception: Local,
         ) -> Result<bool>;
     }
+
+    // Dropping a `KjOwn` of each is generated here, where they are declared.
+    impl KjOwn<IncomingRequest> {}
+    impl KjOwn<PendingEvent> {}
 
     /// How `io_callback_run()` ended.
     enum IoCallbackOutcome {
@@ -481,4 +518,67 @@ unsafe fn io_callback_run(
         }
     })
     .unwrap_or(bridge::IoCallbackOutcome::Panicked)
+}
+
+/// Where Rust code delivered a request.
+///
+/// It is the `kj::SourceLocation` that `IoContext::IncomingRequest::delivered()` records, which
+/// the "no current `IncomingRequest`" warnings report. Made by
+/// [`delivered_location!`](crate::delivered_location).
+pub struct DeliveredLocation {
+    pub file: &'static std::ffi::CStr,
+    pub function: &'static std::ffi::CStr,
+    pub line: u32,
+    pub column: u32,
+}
+
+/// The [`DeliveredLocation`] of the macro's caller, as a `&'static DeliveredLocation`.
+///
+/// Its function is the caller's module path, since Rust has no name for the enclosing function.
+#[macro_export]
+macro_rules! delivered_location {
+    () => {
+        const {
+            &$crate::DeliveredLocation {
+                file: match ::std::ffi::CStr::from_bytes_with_nul(concat!(file!(), "\0").as_bytes())
+                {
+                    Ok(file) => file,
+                    Err(_) => panic!("a file name contains a NUL"),
+                },
+                function: match ::std::ffi::CStr::from_bytes_with_nul(
+                    concat!(module_path!(), "\0").as_bytes(),
+                ) {
+                    Ok(function) => function,
+                    Err(_) => panic!("a module path contains a NUL"),
+                },
+                line: line!(),
+                column: column!(),
+            }
+        }
+    };
+}
+
+/// `IoContext::IncomingRequest::delivered(eventType)`, for `event_type`, such as `"scheduled"`.
+///
+/// The event type names the request's async trace resource, and `location` is recorded as where
+/// the request was delivered.
+///
+/// # Errors
+/// Fails with the exception that `delivered()` throws.
+pub fn incoming_request_delivered(
+    request: Pin<&mut bridge::IncomingRequest>,
+    event_type: &str,
+    location: &'static DeliveredLocation,
+) -> Result<(), cxx::KjException> {
+    // SAFETY: a `DeliveredLocation`'s strings are static `CStr`s, passed with their NUL.
+    unsafe {
+        bridge::incoming_request_delivered(
+            request,
+            event_type.as_bytes(),
+            location.file.to_bytes_with_nul(),
+            location.function.to_bytes_with_nul(),
+            location.line,
+            location.column,
+        )
+    }
 }

@@ -19,6 +19,26 @@
 
 namespace workerd::io_context {
 
+void incoming_request_delivered(IncomingRequest& request,
+    ::rust::Slice<const kj::byte> eventType,
+    ::rust::Slice<const kj::byte> file,
+    ::rust::Slice<const kj::byte> function,
+    uint32_t line,
+    uint32_t column) {
+  // kj::SourceLocation can only be constructed for its caller, so this one is the shim's location
+  // with the Rust caller's fields assigned. Rust passes static CStrs, with their NUL.
+  KJ_REQUIRE(file.size() > 0 && file.back() == '\0', "the file name is not NUL-terminated");
+  KJ_REQUIRE(
+      function.size() > 0 && function.back() == '\0', "the function name is not NUL-terminated");
+  kj::SourceLocation location;
+  location.fileName = reinterpret_cast<const char*>(file.data());
+  location.function = reinterpret_cast<const char*>(function.data());
+  location.lineNumber = line;
+  location.columnNumber = column;
+  request.delivered(kj::str(kj::from<kj_rs::Rust>(eventType).asChars()),
+      DropQueuedCrossContextActions::NO, location);
+}
+
 namespace {
 
 // IoContext::Id holds only the process-unique uint64_t that Rust stores.
@@ -206,28 +226,50 @@ void io_context_await_io_and_run(
   });
 }
 
+namespace {
+
+// Runs `function` for `call` in IoContext::run(), which has made the IoContext current, and
+// returns the promise of the future it starts. `panicked` describes a panic in the function.
+kj::Promise<void> runReentryFn(Worker::Lock& lock,
+    ReentryFn& function,
+    ::rust::Box<ReentryCall> call,
+    kj::StringPtr panicked) {
+  switch (reentry_fn_run(reinterpret_cast<uintptr_t>(lock.getIsolate()), function, *call)) {
+    case ReentryOutcome::Started:
+      return reentry_call_wait(kj::mv(call));
+    case ReentryOutcome::Terminated:
+      // The termination is pending in V8. run() then handles it as for C++ code it runs: it
+      // leaves the scope of the limit enforcer, fails with the exceeded limit or the exception
+      // the request was aborted with, and has its microtask checkpoint cancel the microtasks
+      // queued meanwhile.
+      throwPendingToRun();
+    case ReentryOutcome::Panicked:
+      // jsg::catch_panic() threw an internal error and requested a termination, which run()'s
+      // microtask checkpoint delivers. run() would convert a JsExceptionThrown, running
+      // JavaScript first, so the call fails with a KJ exception instead.
+      kj::throwFatalException(
+          kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(panicked)));
+  }
+  KJ_UNREACHABLE;
+}
+
+class WaitUntilErrorHandler final: public kj::TaskSet::ErrorHandler {
+ public:
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_LOG(ERROR, "waitUntil() task failed", exception);
+  }
+};
+
+}  // namespace
+
 ReentryCallback::ReentryCallback(IoContext& context, ::rust::Box<ReentryFn> function)
-    : callback(context.makeReentryCallbackWeak([function = kj::mv(function)](Worker::Lock& lock,
-                                                   IoContext&,
-                                                   ::rust::Box<ReentryCall> call) mutable
-          -> kj::Promise<void> {
-        switch (reentry_fn_run(reinterpret_cast<uintptr_t>(lock.getIsolate()), *function, *call)) {
-          case ReentryOutcome::Started:
-            return reentry_call_wait(kj::mv(call));
-          case ReentryOutcome::Terminated:
-            // The termination is pending in V8. run() then handles it as for C++ code it runs: it
-            // leaves the scope of the limit enforcer, fails with the exceeded limit or the
-            // exception the request was aborted with, and has its microtask checkpoint cancel the
-            // microtasks queued meanwhile.
-            throwPendingToRun();
-          case ReentryOutcome::Panicked:
-            // jsg::catch_panic() threw an internal error and requested a termination, which run()'s
-            // microtask checkpoint delivers. run() would convert a JsExceptionThrown, running
-            // JavaScript first, so the call fails with a KJ exception instead.
-            KJ_FAIL_ASSERT("the function of IoContext::make_reentry_callback_weak() panicked");
-        }
-        KJ_UNREACHABLE;
-      })) {}
+    : callback(context.makeReentryCallbackWeak(
+          [function = kj::mv(function)](Worker::Lock& lock,
+              IoContext&,
+              ::rust::Box<ReentryCall> call) mutable -> kj::Promise<void> {
+            return runReentryFn(lock, *function, kj::mv(call),
+                "the function of IoContext::make_reentry_callback_weak() panicked"_kj);
+          })) {}
 
 kj::Promise<void> ReentryCallback::call(::rust::Box<ReentryCall> call) const {
   return callback(kj::mv(call));
@@ -245,6 +287,32 @@ kj::Own<ReentryPromise> reentry_callback_call(
 
 kj::Promise<void> reentry_promise_wait(kj::Own<ReentryPromise> promise) {
   return kj::mv(promise->promise);
+}
+
+kj::Own<ReentryPromise> incoming_request_run(
+    IncomingRequest& request, ::rust::Box<ReentryFn> function, ::rust::Box<ReentryCall> call) {
+  return kj::heap<ReentryPromise>(kj::evalNow([&]() {
+    return request.getContext().run([function = kj::mv(function), call = kj::mv(call)](
+                                        Worker::Lock& lock) mutable -> kj::Promise<void> {
+      return runReentryFn(lock, *function, kj::mv(call),
+          "the function of IoContext::IncomingRequest::run() panicked"_kj);
+    });
+  }));
+}
+
+kj::Own<PendingEvent> incoming_request_register_pending_event(IncomingRequest& request) {
+  return kj::heap<PendingEvent>(PendingEvent{request.getContext().registerPendingEvent()});
+}
+
+kj::Promise<bool> incoming_request_drain(kj::Own<IncomingRequest> request) {
+  // Kept past the request, for what its waitUntil() tasks did.
+  auto context = kj::addRef(request->getContext());
+  WaitUntilErrorHandler errorHandler;
+  kj::TaskSet waitUntilTasks(errorHandler);
+  auto& draining = *request;
+  draining.drain(waitUntilTasks, kj::mv(request));
+  co_await waitUntilTasks.onEmpty();
+  co_return context->waitUntilStatus() == EventOutcome::OK;
 }
 
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {

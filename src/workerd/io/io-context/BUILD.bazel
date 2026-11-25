@@ -76,6 +76,7 @@ wd_rust_crate(
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
     cxx_bridge_deps = [
+        ":ffi",
         "//src/rust/jsg",
         "//src/workerd/api/channel-interop:ffi.rs@cxx",
     ],

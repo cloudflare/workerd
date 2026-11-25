@@ -19,6 +19,26 @@ namespace workerd::io_context {
 
 using EvictWebSocketMode = IoChannelFactory::EvictWebSocketMode;
 
+// IoContext::IncomingRequest, and the calls on it that Rust makes, as C++ has them.
+using IncomingRequest = ::workerd::IoContext_IncomingRequest;
+
+// IoContext::IncomingRequest::delivered(eventType), recording the location in `file`,
+// `function`, `line` and `column` as where the request was delivered. `eventType` is copied;
+// `file` and `function` are the bytes of static NUL-terminated strings, with their NUL, which the
+// request keeps.
+void incoming_request_delivered(IncomingRequest& request,
+    ::rust::Slice<const kj::byte> eventType,
+    ::rust::Slice<const kj::byte> file,
+    ::rust::Slice<const kj::byte> function,
+    uint32_t line,
+    uint32_t column);
+
+// What IoContext::registerPendingEvent() returns: the IoContext counts the event as pending until
+// it is destroyed.
+struct PendingEvent {
+  kj::Own<void> event;
+};
+
 // The message of the error IoContext::current() throws outside a request.
 ::rust::Str io_context_no_request_message();
 
@@ -227,6 +247,20 @@ kj::Own<ReentryPromise> reentry_callback_call(
 
 // The promise of `promise`.
 kj::Promise<void> reentry_promise_wait(kj::Own<ReentryPromise> promise);
+
+// IoContext::run() of the request's IoContext, for `function`, which receives `call`, as a
+// ReentryCallback's function does. For the host that holds the request, outside any IoContext.
+// What run() throws at once rejects the promise.
+kj::Own<ReentryPromise> incoming_request_run(
+    IncomingRequest& request, ::rust::Box<ReentryFn> function, ::rust::Box<ReentryCall> call);
+
+// IoContext::registerPendingEvent() of the request's IoContext.
+kj::Own<PendingEvent> incoming_request_register_pending_event(IncomingRequest& request);
+
+// IoContext::IncomingRequest::drain(), then waits for the waitUntil() tasks it leaves, logging
+// those that fail. Resolves to whether the IoContext's waitUntilStatus() is OK afterwards: false
+// if a waitUntil() task rejected or a timer callback threw.
+kj::Promise<bool> incoming_request_drain(kj::Own<IncomingRequest> request);
 
 // Logs `message` as an error, as KJ_LOG(ERROR) does.
 void io_context_log_error(::rust::Str message);
