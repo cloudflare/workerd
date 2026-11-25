@@ -821,6 +821,16 @@ class WebSocketClient {
   destroy() {
     this.#socket.destroy();
   }
+
+  // Ends a WebSocket nothing was sent on, as a client that is done with it does: a Close frame,
+  // then the connection once the server answered, or after a while if it does not. A connection
+  // that only ends leaves the call of a WebSocket its object hibernates with in flight for as
+  // long as the object does not close it, on one thread as on several.
+  async dispose() {
+    this.close(1000, '');
+    await Promise.race([this.next().catch(() => {}), scheduler.wait(2000)]);
+    this.destroy();
+  }
 }
 
 // A WebSocket opened with a request for `path` over a connection `open()` makes, served by the
@@ -852,7 +862,7 @@ function webSocket(open, path, thread, threads) {
         throw error;
       }
     },
-    { threads, discard: (extra) => extra.destroy() }
+    { threads, discard: (extra) => extra.dispose() }
   );
 }
 
