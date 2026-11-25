@@ -1514,6 +1514,11 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-send-before-open-test.wd-test",
+    data = ["websocket-send-before-open-test.js"],
+)
+
+wd_test(
     src = "websocket-standard-url-test.wd-test",
     data = [
         "websocket-standard-url-server.js",
