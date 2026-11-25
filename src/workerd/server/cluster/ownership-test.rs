@@ -5,15 +5,23 @@
 #![allow(clippy::unwrap_used)]
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use futures::executor::block_on;
 
 use crate::Bucket;
 use crate::Claim;
+use crate::Entry;
 use crate::Error;
+use crate::Guard;
 use crate::Ownership;
+use crate::Payload;
 use crate::Registry;
+use crate::Store;
+use crate::Version;
+use crate::bucket::SETTLE_WRITES;
 use crate::bucket::memory::Memory;
 use crate::ownership::Owned;
 use crate::ownership::OwnerRecord;
@@ -680,5 +688,225 @@ fn a_release_of_unknown_outcome_is_settled_by_reading_the_record() {
         unknown.borrow_mut().push(key_of("y"));
         assert!(!a_own.release("ns", "y", 1).await.unwrap());
         assert_eq!(record_of(&store, "y").await, record("b", 2, 1));
+    });
+}
+
+/// How `Held` holds guarded writes of its key.
+#[derive(Default)]
+struct Hold {
+    /// Guarded writes still to answer `Error::OutcomeUnknown` unapplied.
+    writes: usize,
+    /// Guarded writes after those still to fail unapplied, as a resend that
+    /// times out does (`Error::Http`).
+    fails: usize,
+    /// Reads of the key until the first held copy lands; never if `None`.
+    reads: Option<usize>,
+    /// Another node's record, which lands just before the held copy.
+    taken: Option<Vec<u8>>,
+    /// The first held copy: its body and guard.
+    copy: Option<(Vec<u8>, Guard)>,
+}
+
+/// A memory store that holds guarded writes of `key` as `hold` says: as
+/// the client answers a write whose earlier copy the bucket is still
+/// applying (R2's 409 to its resend). The copies after the first never
+/// land; at most one copy of a write does.
+struct Held {
+    inner: Memory,
+    key: String,
+    hold: Rc<RefCell<Hold>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl Store for Held {
+    async fn get(&self, key: &str, to: Option<&Path>) -> crate::Result<Option<(Vec<u8>, Version)>> {
+        let landing = if key == self.key {
+            let mut hold = self.hold.borrow_mut();
+            match hold.reads {
+                Some(0) if hold.copy.is_some() => Some((hold.taken.take(), hold.copy.take())),
+                Some(n) if hold.copy.is_some() => {
+                    hold.reads = Some(n - 1);
+                    None
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some((taken, Some((body, guard)))) = landing {
+            if let Some(taken) = taken {
+                self.inner.put(key, bytes(&taken), None, &[]).await?;
+            }
+            self.inner.put(key, bytes(&body), Some(guard), &[]).await?;
+        }
+        self.inner.get(key, to).await
+    }
+
+    async fn put(
+        &self,
+        key: &str,
+        body: Payload,
+        guard: Option<Guard>,
+        metadata: &[(&str, String)],
+    ) -> crate::Result<Option<Version>> {
+        if key == self.key
+            && let Some(guard) = &guard
+        {
+            let mut hold = self.hold.borrow_mut();
+            if hold.writes > 0 {
+                hold.writes -= 1;
+                if hold.copy.is_none() {
+                    let Payload::Bytes(body) = body else {
+                        panic!("an owner record from a file");
+                    };
+                    hold.copy = Some((body.to_vec(), guard.clone()));
+                }
+                return Err(Error::OutcomeUnknown(format!("PUT {key}: 409 (simulated)")));
+            }
+            if hold.fails > 0 {
+                hold.fails -= 1;
+                return Err(Error::Http(format!("PUT {key}: timed out (simulated)")));
+            }
+        }
+        self.inner.put(key, body, guard, metadata).await
+    }
+
+    async fn list(&self, prefix: &str) -> crate::Result<Vec<Entry>> {
+        self.inner.list(prefix).await
+    }
+
+    async fn delete(&self, key: &str) -> crate::Result<()> {
+        self.inner.delete(key).await
+    }
+}
+
+fn bytes(body: &[u8]) -> Payload {
+    Payload::Bytes(bytes::Bytes::copy_from_slice(body))
+}
+
+/// A store that holds owner record `x`'s guarded writes, and a handle on
+/// how.
+fn held() -> (Bucket, Rc<RefCell<Hold>>) {
+    let hold = Rc::new(RefCell::new(Hold::default()));
+    let store = Held {
+        inner: Memory::default(),
+        key: key_of("x"),
+        hold: hold.clone(),
+    };
+    (Bucket::new(store, ""), hold)
+}
+
+/// `node`, waiting little to write again (`Registry::pause_when_contended`).
+fn hasty_node(store: &Bucket, name: &str) -> (Rc<Registry>, Ownership) {
+    let bucket = store.at("cluster");
+    let registry = Registry::new(bucket.clone(), name, &format!("{name}:1"), TTL)
+        .contended_pause(Duration::from_millis(1));
+    let registry = Rc::new(registry);
+    (registry.clone(), Ownership::new(bucket, registry))
+}
+
+fn tokio_block_on<F: std::future::Future>(future: F) -> F::Output {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime.block_on(future)
+}
+
+/// A takeover whose write stays unsettled through every write of it, or
+/// whose write sent again fails, reads the record again: the copy that
+/// landed meanwhile is the claim; with none, the claim writes again; with
+/// another node's claim there first, it routes there.
+#[test]
+fn a_claim_held_past_its_settling_writes_reads_the_record_again() {
+    let theirs = serde_json::to_vec(&record("c", 2, 1)).unwrap();
+    let ours = || {
+        Claim::Owned(Owned {
+            epoch: 2,
+            recover: Some(1),
+        })
+    };
+    let settle = SETTLE_WRITES as usize;
+    // Writes held, writes failed after them, reads until the held copy
+    // lands, another node's claim before it, and the outcome.
+    let cases = [
+        (settle, 0, Some(settle), None, ours(), record("b", 2, 1)),
+        (settle, 0, None, None, ours(), record("b", 2, 1)),
+        (
+            settle,
+            0,
+            Some(settle),
+            Some(theirs),
+            route_to("c"),
+            record("c", 2, 1),
+        ),
+        (1, 1, Some(1), None, ours(), record("b", 2, 1)),
+        (1, 1, None, None, ours(), record("b", 2, 1)),
+    ];
+    for (writes, fails, reads, taken, claim, holds) in cases {
+        tokio_block_on(async {
+            let (store, hold) = held();
+            let (a, a_own) = hasty_node(&store, "a");
+            let (b, b_own) = hasty_node(&store, "b");
+            let (c, _) = hasty_node(&store, "c");
+            a.renew(0).await.unwrap();
+            open_x(&a_own).await;
+            // a's lease ran out at 10s.
+            b.renew(11_000).await.unwrap();
+            c.renew(11_000).await.unwrap();
+            let case = format!("writes {writes}, fails {fails}, reads {reads:?}");
+            *hold.borrow_mut() = Hold {
+                writes,
+                fails,
+                reads,
+                taken,
+                copy: None,
+            };
+            let claimed = b_own.acquire_or_route("ns", "x", 11_000).await;
+            assert_eq!(claimed.unwrap(), claim, "{case}");
+            assert_eq!(record_of(&store, "x").await, holds, "{case}");
+        });
+    }
+}
+
+/// An open, advance or release whose write stays unsettled answers as
+/// refused, and the next claim reads the copy that landed meanwhile.
+#[test]
+fn a_record_write_held_past_its_settling_writes_answers_as_refused() {
+    tokio_block_on(async {
+        let (store, hold) = held();
+        let (a, a_own) = hasty_node(&store, "a");
+        a.renew(0).await.unwrap();
+        let arm = || {
+            *hold.borrow_mut() = Hold {
+                writes: SETTLE_WRITES as usize,
+                reads: Some(SETTLE_WRITES as usize),
+                ..Hold::default()
+            };
+        };
+        let claim = a_own.acquire_or_route("ns", "x", 0).await;
+        assert_eq!(claim.unwrap(), owned(1));
+        arm();
+        assert!(!a_own.open("ns", "x", 1).await.unwrap());
+        let claim = a_own.acquire_or_route("ns", "x", 0).await.unwrap();
+        let opened = Owned {
+            epoch: 1,
+            recover: None,
+        };
+        assert_eq!(claim, Claim::Owned(opened));
+
+        arm();
+        assert_eq!(a_own.advance("ns", "x", 1).await.unwrap(), None);
+        let claim = a_own.acquire_or_route("ns", "x", 0).await.unwrap();
+        let advanced = Owned {
+            epoch: 2,
+            recover: Some(1),
+        };
+        assert_eq!(claim, Claim::Owned(advanced));
+        assert!(a_own.open("ns", "x", 2).await.unwrap());
+
+        arm();
+        assert!(!a_own.release("ns", "x", 2).await.unwrap());
+        assert_eq!(record_of(&store, "x").await, record("", 2, 2));
     });
 }

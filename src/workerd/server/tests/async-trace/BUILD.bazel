@@ -1,7 +1,7 @@
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 
 # Runs a worker with --async-trace, then checks the trace with a second worker.
-sh_test(
+wd_sh_test(
     name = "async-trace-test",
     size = "medium",
     srcs = ["async-trace-test.sh"],
@@ -21,7 +21,7 @@ sh_test(
 
 # Checks how the trace ends when a context is still open at shutdown, with and without
 # KJ_CLEAN_SHUTDOWN.
-sh_test(
+wd_sh_test(
     name = "async-trace-shutdown-test",
     size = "medium",
     srcs = ["async-trace-shutdown-test.sh"],
@@ -37,7 +37,7 @@ sh_test(
 )
 
 # Runs the same worker under --perfetto-trace, with and without the workerd.async category.
-sh_test(
+wd_sh_test(
     name = "async-trace-perfetto-test",
     size = "medium",
     srcs = ["async-trace-perfetto-test.sh"],

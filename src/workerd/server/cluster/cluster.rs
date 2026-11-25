@@ -28,6 +28,7 @@ use crate::Guard;
 use crate::Ownership;
 use crate::Registry;
 use crate::Result;
+use crate::Version;
 use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::gcs::Gcs;
@@ -522,7 +523,7 @@ impl Cluster {
     /// meanwhile, whatever turns linking takes.
     pub async fn join(&self) -> Result<()> {
         let probe = format!("nodes/{}.probe", self.node());
-        check_conditional_writes(&self.bucket, &probe).await?;
+        check_conditional_writes(&self.bucket, &probe, ms(self.timing.contended_pause_ms)).await?;
         self.lessee.take_lease().await?;
         self.registered.set(Some(now_ms()));
         self.keep_lease();
@@ -606,15 +607,25 @@ pub fn now_ms() -> u64 {
 /// `If-Match` on a PUT. `key` is an object only this check writes. Each
 /// write's body differs, so that no two writes could share an S3 `ETag`,
 /// and so that what the object holds says which write an unknown outcome
-/// was (`Bucket::put_if_settled`).
-pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
-    let put = |body: &[u8], guard| bucket.put_if_settled(key, body.to_vec(), guard);
-    let created = put(b"1", Guard::Absent).await?;
-    let again = put(b"2", Guard::Absent).await?;
+/// was (`Bucket::put_if_settled`, which waits `pause` to write again).
+pub(crate) async fn check_conditional_writes(
+    bucket: &Bucket,
+    key: &str,
+    pause: Duration,
+) -> Result<()> {
+    let put = |body: &[u8], guard| bucket.put_if_settled(key, body.to_vec(), guard, pause);
+    // A write refused each time while its condition held, as far as the
+    // reads after them tell, is refused.
+    let held = |written: Result<Option<Version>>| match written {
+        Err(Error::OutcomeUnknown(_)) => Ok(None),
+        written => written,
+    };
+    let created = held(put(b"1", Guard::Absent).await)?;
+    let again = held(put(b"2", Guard::Absent).await)?;
     let (replaced, stale) = match &created {
         Some(first) => {
-            let replaced = put(b"3", Guard::Match(first.clone())).await?;
-            let stale = put(b"4", Guard::Match(first.clone())).await?;
+            let replaced = held(put(b"3", Guard::Match(first.clone())).await)?;
+            let stale = held(put(b"4", Guard::Match(first.clone())).await)?;
             (replaced, stale)
         }
         None => (None, None),

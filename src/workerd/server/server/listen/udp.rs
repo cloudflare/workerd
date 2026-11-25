@@ -227,7 +227,10 @@ pub async fn listen_udp(
                     flows: Rc::clone(&flows),
                 });
                 return Ok(async move {
-                    let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+                    let metadata = ffi::new_request_metadata(
+                        KjMaybe::None,
+                        Some(peer.to_string().as_str()).into(),
+                    );
                     let mut worker = CxxWorkerInterface::new(channel.start_request(metadata)?);
                     let event = ffi::new_udp_connect_event(&address, flow);
                     worker.custom_event(event).await?;

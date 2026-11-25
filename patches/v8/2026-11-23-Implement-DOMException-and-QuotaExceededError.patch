@@ -1,0 +1,1278 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James M Snell <jsnell@cloudflare.com>
+Date: Mon, 23 Nov 2026 20:50:40 +0000
+Subject: Implement DOMException and QuotaExceededError
+
+Adds the WebIDL DOMException and QuotaExceededError interfaces as
+globals of every context, and an API to create and read them without
+running JavaScript: Exception::DOMException(),
+Exception::QuotaExceededError(), Value::IsDOMException(),
+Value::IsQuotaExceededError(), and the v8::DOMException and
+v8::QuotaExceededError classes.
+
+Instances are JS_ERROR_TYPE objects, so they capture a stack trace as
+Error instances do and are native errors to Error.isError(). An API
+caller that already has the stack, such as a deserializer, passes it
+instead, and none is captured. Their attributes, the name's legacy
+code included, are kept under private symbols at construction and
+read by brand-checked prototype getters, which are CSA builtins.
+NoSideEffectsErrorToString() reads the private slots, so the stack
+header and the inspector show "name: message".
+
+The globals are installed in InitializeGlobal(), not behind a flag in
+InitializeExperimentalGlobal(), which is skipped in an isolate that
+creates a snapshot: an embedder's snapshot would otherwise lack them.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 0106a2c4fd04183a185ebccdb296beac86258798..ddf771201d0a2b436f2d28fb59f8ac13b74e060d 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4090,6 +4090,7 @@ filegroup(
+         "src/builtins/builtins-microtask-queue-gen.cc",
+         "src/builtins/builtins-number-gen.cc",
+         "src/builtins/builtins-number-tsa.cc",
++        "src/builtins/builtins-dom-exception-gen.cc",
+         "src/builtins/builtins-object-gen.cc",
+         "src/builtins/builtins-object-gen.h",
+         "src/builtins/builtins-promise-gen.cc",
+diff --git a/BUILD.gn b/BUILD.gn
+index d3915ff91a09da61f88cfca949e0f66652fe687e..597da828dddd2c7795a4043b70c65a169f27c25c 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -3811,6 +3811,7 @@ v8_cluster_source_set("v8_initializers") {
+     "src/builtins/builtins-conversion-gen.cc",
+     "src/builtins/builtins-data-view-gen.h",
+     "src/builtins/builtins-date-gen.cc",
++    "src/builtins/builtins-dom-exception-gen.cc",
+     "src/builtins/builtins-generator-gen.cc",
+     "src/builtins/builtins-global-gen.cc",
+     "src/builtins/builtins-handler-gen.cc",
+diff --git a/include/v8-exception.h b/include/v8-exception.h
+index 88ba0737664800d8bcc1e091d9648ca75c1a63bc..115d72ce409f337d14caeb59b4793f00c5561d17 100644
+--- a/include/v8-exception.h
++++ b/include/v8-exception.h
+@@ -6,6 +6,9 @@
+ #define INCLUDE_V8_EXCEPTION_H_
+ 
+ #include <stddef.h>
++#include <stdint.h>
++
++#include <optional>
+ 
+ #include "v8-local-handle.h"  // NOLINT(build/include_directory)
+ #include "v8-object.h"        // NOLINT(build/include_directory)
+@@ -57,6 +60,26 @@ class V8_EXPORT Exception {
+   static Local<Value> SuppressedError(Local<String> message,
+                                       Local<Value> options = {});
+ 
++  /**
++   * Creates a DOMException (WebIDL) in the current context, as
++   * `new DOMException(message, name)` does, without running JavaScript. Its
++   * `stack` is `stack`, as a non-enumerable own data property, if given, and
++   * otherwise captured from the current stack.
++   */
++  static Local<Value> DOMException(Local<String> message, Local<String> name,
++                                   Local<String> stack = {});
++
++  /**
++   * Creates a QuotaExceededError (WebIDL) in the current context, as
++   * `new QuotaExceededError(message, {quota, requested})` does, without
++   * running JavaScript. Each amount, if given, must be finite and not
++   * negative, and `requested` must not be less than `quota`. Its `stack` is
++   * as DOMException() says.
++   */
++  static Local<Value> QuotaExceededError(
++      Local<String> message, std::optional<double> quota = std::nullopt,
++      std::optional<double> requested = std::nullopt, Local<String> stack = {});
++
+   /**
+    * Creates an error message for the given exception.
+    * Will try to reconstruct the original stack trace from the exception value,
+@@ -78,6 +101,51 @@ class V8_EXPORT Exception {
+                                        Local<Object> object);
+ };
+ 
++/**
++ * A DOMException (WebIDL), or an instance of an interface that inherits from
++ * it, such as QuotaExceededError. Its attributes are read here without running
++ * JavaScript, as it was created, whatever own properties may shadow them.
++ */
++class V8_EXPORT DOMException : public Object {
++ public:
++  Local<String> Name() const;
++  Local<String> Message() const;
++  /**
++   * The legacy code of its name, which its code attribute returns.
++   */
++  uint16_t Code() const;
++
++  V8_INLINE static DOMException* Cast(Value* value) {
++#ifdef V8_ENABLE_CHECKS
++    CheckCast(value);
++#endif
++    return static_cast<DOMException*>(value);
++  }
++
++ private:
++  static void CheckCast(Value* obj);
++};
++
++/**
++ * A QuotaExceededError (WebIDL), or an instance of an interface that inherits
++ * from it.
++ */
++class V8_EXPORT QuotaExceededError : public DOMException {
++ public:
++  std::optional<double> Quota() const;
++  std::optional<double> Requested() const;
++
++  V8_INLINE static QuotaExceededError* Cast(Value* value) {
++#ifdef V8_ENABLE_CHECKS
++    CheckCast(value);
++#endif
++    return static_cast<QuotaExceededError*>(value);
++  }
++
++ private:
++  static void CheckCast(Value* obj);
++};
++
+ /**
+  * This is a part of experimental Api and might be changed without further
+  * notice.
+diff --git a/include/v8-value.h b/include/v8-value.h
+index 4d6a0b0d41889d50474df54545991d13e89a5e32..c74a3ad8399d44b4999e1d6abf290d07b301649d 100644
+--- a/include/v8-value.h
++++ b/include/v8-value.h
+@@ -191,6 +191,18 @@ class V8_EXPORT Value : public Data {
+    */
+   bool IsNativeError() const;
+ 
++  /**
++   * Returns true if this value is a DOMException (WebIDL), or an instance of
++   * an interface that inherits from it. Runs no JavaScript.
++   */
++  bool IsDOMException() const;
++
++  /**
++   * Returns true if this value is a QuotaExceededError (WebIDL), or an
++   * instance of an interface that inherits from it. Runs no JavaScript.
++   */
++  bool IsQuotaExceededError() const;
++
+   /**
+    * Returns true if this value is a RegExp.
+    */
+diff --git a/src/api/api.cc b/src/api/api.cc
+index b65302af06294fb1e45baea617f4f0df0c1c08a0..5c5c319c8a062ed41dc7fe928c55bee1ae29890a 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -4151,6 +4151,20 @@ bool Value::IsNativeError() const {
+   return IsJSError(*Utils::OpenDirectHandle(this));
+ }
+ 
++bool Value::IsDOMException() const {
++  i::Isolate* i_isolate = i::Isolate::Current();
++  i::HandleScope scope(i_isolate);
++  return i::ErrorUtils::IsDOMException(i_isolate,
++                                       Utils::OpenDirectHandle(this));
++}
++
++bool Value::IsQuotaExceededError() const {
++  i::Isolate* i_isolate = i::Isolate::Current();
++  i::HandleScope scope(i_isolate);
++  return i::ErrorUtils::IsQuotaExceededError(i_isolate,
++                                             Utils::OpenDirectHandle(this));
++}
++
+ bool Value::IsRegExp() const {
+   return IsJSRegExp(*Utils::OpenDirectHandle(this));
+ }
+@@ -4635,6 +4649,17 @@ void v8::BooleanObject::CheckCast(v8::Value* that) {
+                   "Value is not a BooleanObject");
+ }
+ 
++void v8::DOMException::CheckCast(v8::Value* that) {
++  Utils::ApiCheck(that->IsDOMException(), "v8::DOMException::Cast()",
++                  "Value is not a DOMException");
++}
++
++void v8::QuotaExceededError::CheckCast(v8::Value* that) {
++  Utils::ApiCheck(that->IsQuotaExceededError(),
++                  "v8::QuotaExceededError::Cast()",
++                  "Value is not a QuotaExceededError");
++}
++
+ void v8::RegExp::CheckCast(v8::Value* that) {
+   auto obj = *Utils::OpenDirectHandle(that);
+   Utils::ApiCheck(i::IsJSRegExp(obj), "v8::RegExp::Cast()",
+@@ -11606,6 +11631,128 @@ DEFINE_ERROR(Error, error)
+ 
+ #undef DEFINE_ERROR
+ 
++namespace {
++
++// The stack an API caller gave a DOMException, if any.
++i::MaybeDirectHandle<i::String> ToDOMExceptionStack(Local<String> raw_stack) {
++  if (raw_stack.IsEmpty()) return {};
++  return Utils::OpenDirectHandle(*raw_stack);
++}
++
++}  // namespace
++
++Local<Value> Exception::DOMException(Local<String> raw_message,
++                                     Local<String> raw_name,
++                                     Local<String> raw_stack) {
++  i::Isolate* i_isolate = i::Isolate::Current();
++  ApiRuntimeCallStatsScope rcs_scope(i_isolate, RCCId::kAPI_DOMException_New);
++  EnterV8NoScriptNoExceptionScope api_scope(i_isolate);
++  i::Tagged<i::Object> error;
++  {
++    i::HandleScope scope(i_isolate);
++    i::DirectHandle<i::JSFunction> constructor =
++        i_isolate->dom_exception_function();
++    i::DirectHandle<i::Object> no_caller;
++    error = *i::ErrorUtils::ConstructDOMException(
++                 i_isolate, constructor, constructor,
++                 Utils::OpenDirectHandle(*raw_message),
++                 Utils::OpenDirectHandle(*raw_name), i::SKIP_NONE, no_caller,
++                 ToDOMExceptionStack(raw_stack))
++                 .ToHandleChecked();
++  }
++  return Utils::ToLocal(i::direct_handle(error, i_isolate));
++}
++
++Local<Value> Exception::QuotaExceededError(Local<String> raw_message,
++                                           std::optional<double> quota,
++                                           std::optional<double> requested,
++                                           Local<String> raw_stack) {
++  auto is_valid_amount = [](std::optional<double> amount) {
++    return !amount || (std::isfinite(*amount) && *amount >= 0);
++  };
++  Utils::ApiCheck(is_valid_amount(quota) && is_valid_amount(requested) &&
++                      !(quota && requested && *requested < *quota),
++                  "v8::Exception::QuotaExceededError()",
++                  "Invalid quota or requested amount");
++  i::Isolate* i_isolate = i::Isolate::Current();
++  ApiRuntimeCallStatsScope rcs_scope(i_isolate,
++                                     RCCId::kAPI_QuotaExceededError_New);
++  EnterV8NoScriptNoExceptionScope api_scope(i_isolate);
++  i::Tagged<i::Object> error;
++  {
++    i::HandleScope scope(i_isolate);
++    i::Factory* factory = i_isolate->factory();
++    auto to_amount =
++        [&](std::optional<double> amount) -> i::DirectHandle<i::Object> {
++      if (amount) return factory->NewNumber(*amount);
++      return factory->null_value();
++    };
++    i::DirectHandle<i::JSFunction> constructor =
++        i_isolate->quota_exceeded_error_function();
++    i::DirectHandle<i::Object> no_caller;
++    error = *i::ErrorUtils::ConstructQuotaExceededError(
++                 i_isolate, constructor, constructor,
++                 Utils::OpenDirectHandle(*raw_message), to_amount(quota),
++                 to_amount(requested), i::SKIP_NONE, no_caller,
++                 ToDOMExceptionStack(raw_stack))
++                 .ToHandleChecked();
++  }
++  return Utils::ToLocal(i::direct_handle(error, i_isolate));
++}
++
++namespace {
++
++// What a DOMException holds under one of the private symbols ErrorUtils
++// describes, chosen by `slot`.
++template <typename SlotGetter>
++i::DirectHandle<i::Object> GetDOMExceptionSlot(
++    i::DirectHandle<i::JSObject> self, SlotGetter slot) {
++  i::Isolate* i_isolate = i::Isolate::Current();
++  return i::ErrorUtils::GetDOMExceptionSlot(i_isolate, self,
++                                            slot(i_isolate->factory()));
++}
++
++std::optional<double> ToAmount(i::DirectHandle<i::Object> value) {
++  if (i::IsNull(*value)) return std::nullopt;
++  return i::Object::NumberValue(*value);
++}
++
++}  // namespace
++
++Local<String> v8::DOMException::Name() const {
++  return Utils::ToLocal(i::Cast<i::String>(GetDOMExceptionSlot(
++      Utils::OpenDirectHandle(this),
++      [](i::Factory* f) { return f->dom_exception_name_symbol(); })));
++}
++
++Local<String> v8::DOMException::Message() const {
++  return Utils::ToLocal(i::Cast<i::String>(GetDOMExceptionSlot(
++      Utils::OpenDirectHandle(this),
++      [](i::Factory* f) { return f->dom_exception_message_symbol(); })));
++}
++
++uint16_t v8::DOMException::Code() const {
++  i::HandleScope scope(i::Isolate::Current());
++  return i::Smi::ToInt(*GetDOMExceptionSlot(
++      Utils::OpenDirectHandle(this),
++      [](i::Factory* f) { return f->dom_exception_code_symbol(); }));
++}
++
++std::optional<double> v8::QuotaExceededError::Quota() const {
++  i::HandleScope scope(i::Isolate::Current());
++  return ToAmount(GetDOMExceptionSlot(
++      Utils::OpenDirectHandle(this),
++      [](i::Factory* f) { return f->quota_exceeded_error_quota_symbol(); }));
++}
++
++std::optional<double> v8::QuotaExceededError::Requested() const {
++  i::HandleScope scope(i::Isolate::Current());
++  return ToAmount(
++      GetDOMExceptionSlot(Utils::OpenDirectHandle(this), [](i::Factory* f) {
++        return f->quota_exceeded_error_requested_symbol();
++      }));
++}
++
+ Local<Message> Exception::CreateMessage(Isolate* v8_isolate,
+                                         Local<Value> exception) {
+   auto obj = Utils::OpenHandle(*exception);
+diff --git a/src/api/api.h b/src/api/api.h
+index 843d757ff4b8431da12660301ef9e07310671a2f..adf64bbbec3ba1a644b05a2331cea295b6ec605d 100644
+--- a/src/api/api.h
++++ b/src/api/api.h
+@@ -9,6 +9,7 @@
+ 
+ #include "include/v8-container.h"
+ #include "include/v8-cpp-heap-external.h"
++#include "include/v8-exception.h"
+ #include "include/v8-external.h"
+ #include "include/v8-function-callback.h"
+ #include "include/v8-proxy.h"
+@@ -163,6 +164,8 @@ class RegisteredExtension {
+   V(Number, Number)                             \
+   V(RegExp, JSRegExp)                           \
+   V(Object, JSReceiver)                         \
++  V(DOMException, JSObject)                     \
++  V(QuotaExceededError, JSObject)               \
+   V(Array, JSArray)                             \
+   V(Map, JSMap)                                 \
+   V(Set, JSSet)                                 \
+diff --git a/src/builtins/builtins-definitions.h b/src/builtins/builtins-definitions.h
+index b1d82f663ff88ec94de4719a9f2e597e30221c8f..467e819a1f70897a2a7af9d240a5ce21aecbca28 100644
+--- a/src/builtins/builtins-definitions.h
++++ b/src/builtins/builtins-definitions.h
+@@ -811,6 +811,16 @@ constexpr int kGearboxGenericBuiltinIdOffset = -2;
+   CPP(ErrorPrototypeToString, JSParameterCount(0))                             \
+   CPP(ErrorIsError, JSParameterCount(1))                                       \
+                                                                                \
++  /* DOMException and QuotaExceededError (WebIDL) */                           \
++  CPP(DOMExceptionConstructor, kDontAdaptArgumentsSentinel)                    \
++  TFJ(DOMExceptionPrototypeGetName, kJSArgcReceiverSlots, kReceiver)           \
++  TFJ(DOMExceptionPrototypeGetMessage, kJSArgcReceiverSlots, kReceiver)        \
++  TFJ(DOMExceptionPrototypeGetCode, kJSArgcReceiverSlots, kReceiver)           \
++  CPP(QuotaExceededErrorConstructor, kDontAdaptArgumentsSentinel)              \
++  TFJ(QuotaExceededErrorPrototypeGetQuota, kJSArgcReceiverSlots, kReceiver)    \
++  TFJ(QuotaExceededErrorPrototypeGetRequested, kJSArgcReceiverSlots,           \
++      kReceiver)                                                               \
++                                                                               \
+   /* Function */                                                               \
+   CPP(FunctionConstructor, kDontAdaptArgumentsSentinel)                        \
+   ASM(FunctionPrototypeApply, JSTrampoline)                                    \
+diff --git a/src/builtins/builtins-dom-exception-gen.cc b/src/builtins/builtins-dom-exception-gen.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..07352b39cf8df77c302b3f39fd460d8dc04fa969
+--- /dev/null
++++ b/src/builtins/builtins-dom-exception-gen.cc
+@@ -0,0 +1,95 @@
++// Copyright 2026 the V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "src/builtins/builtins-utils-gen.h"
++#include "src/builtins/builtins.h"
++#include "src/codegen/code-stub-assembler-inl.h"
++
++namespace v8 {
++namespace internal {
++
++#include "src/codegen/define-code-stub-assembler-macros.inc"
++
++// The attributes of DOMException and QuotaExceededError (WebIDL), which read
++// what an instance holds under one of the private symbols ErrorUtils
++// describes.
++class DOMExceptionBuiltinsAssembler : public CodeStubAssembler {
++ public:
++  explicit DOMExceptionBuiltinsAssembler(compiler::CodeAssemblerState* state)
++      : CodeStubAssembler(state) {}
++
++  // Returns what `receiver` holds under the root `slot`, or throws the
++  // TypeError for a receiver that is not an instance of the interface.
++  void ReturnSlotOrThrow(TNode<Context> context, TNode<Object> receiver,
++                         RootIndex slot) {
++    Label if_found(this), if_not_found(this, Label::kDeferred),
++        if_bailout(this, Label::kDeferred);
++    TVARIABLE(Object, var_value);
++    TVARIABLE(Uint32T, var_details);
++    // A mutable root, so loaded rather than embedded as a constant.
++    TNode<Symbol> name = CAST(CodeAssembler::LoadRoot(slot));
++
++    GotoIf(TaggedIsSmi(receiver), &if_not_found);
++    TNode<Map> map = LoadMap(CAST(receiver));
++    TNode<Uint16T> instance_type = LoadMapInstanceType(map);
++    GotoIfNot(IsJSReceiverInstanceType(instance_type), &if_not_found);
++    // The slots are data properties, so no getter is called, which keeps
++    // these builtins free of side effects for the debugger.
++    TryGetOwnProperty(context, CAST(receiver), CAST(receiver), map,
++                      instance_type, name, &if_found, &var_value, &var_details,
++                      nullptr, &if_not_found, &if_bailout, kReturnAccessorPair);
++
++    BIND(&if_found);
++    GotoIf(IsUndefined(var_value.value()), &if_not_found);
++    Return(var_value.value());
++
++    // A receiver the fast lookup does not handle, such as a proxy.
++    BIND(&if_bailout);
++    {
++      TNode<Object> value =
++          CallRuntime(Runtime::kGetProperty, context, receiver, name);
++      GotoIf(IsUndefined(value), &if_not_found);
++      Return(value);
++    }
++
++    BIND(&if_not_found);
++    ThrowTypeError(context, MessageTemplate::kIllegalInvocation);
++  }
++};
++
++TF_BUILTIN(DOMExceptionPrototypeGetName, DOMExceptionBuiltinsAssembler) {
++  ReturnSlotOrThrow(Parameter<Context>(Descriptor::kContext),
++                    Parameter<Object>(Descriptor::kReceiver),
++                    RootIndex::kDOMExceptionNameSymbol);
++}
++
++TF_BUILTIN(DOMExceptionPrototypeGetMessage, DOMExceptionBuiltinsAssembler) {
++  ReturnSlotOrThrow(Parameter<Context>(Descriptor::kContext),
++                    Parameter<Object>(Descriptor::kReceiver),
++                    RootIndex::kDOMExceptionMessageSymbol);
++}
++
++TF_BUILTIN(DOMExceptionPrototypeGetCode, DOMExceptionBuiltinsAssembler) {
++  ReturnSlotOrThrow(Parameter<Context>(Descriptor::kContext),
++                    Parameter<Object>(Descriptor::kReceiver),
++                    RootIndex::kDOMExceptionCodeSymbol);
++}
++
++TF_BUILTIN(QuotaExceededErrorPrototypeGetQuota, DOMExceptionBuiltinsAssembler) {
++  ReturnSlotOrThrow(Parameter<Context>(Descriptor::kContext),
++                    Parameter<Object>(Descriptor::kReceiver),
++                    RootIndex::kQuotaExceededErrorQuotaSymbol);
++}
++
++TF_BUILTIN(QuotaExceededErrorPrototypeGetRequested,
++           DOMExceptionBuiltinsAssembler) {
++  ReturnSlotOrThrow(Parameter<Context>(Descriptor::kContext),
++                    Parameter<Object>(Descriptor::kReceiver),
++                    RootIndex::kQuotaExceededErrorRequestedSymbol);
++}
++
++#include "src/codegen/undef-code-stub-assembler-macros.inc"
++
++}  // namespace internal
++}  // namespace v8
+diff --git a/src/builtins/builtins-error.cc b/src/builtins/builtins-error.cc
+index 951802913d7c4d48504cc63f6e756e3f480fb3ec..2ad896629dae86dd5306c55ef94a9a60e3a97d53 100644
+--- a/src/builtins/builtins-error.cc
++++ b/src/builtins/builtins-error.cc
+@@ -2,6 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include <cmath>
++
+ #include "src/builtins/accessors.h"
+ #include "src/builtins/builtins-utils-inl.h"
+ #include "src/builtins/builtins.h"
+@@ -77,5 +79,113 @@ BUILTIN(ErrorIsError) {
+   }
+ }
+ 
++namespace {
++
++// How a DOMException constructor's stack skips frames: those up to new.target,
++// so that a subclass's constructor is left out, as for subclasses of Error.
++FrameSkipMode DOMExceptionFrameSkipMode(DirectHandle<Object> new_target) {
++  return IsJSFunction(*new_target) ? SKIP_UNTIL_SEEN : SKIP_FIRST;
++}
++
++// Converts an optional DOMString argument, which is `default_value` if absent.
++MaybeDirectHandle<String> ToDOMString(Isolate* isolate,
++                                      DirectHandle<Object> value,
++                                      DirectHandle<String> default_value) {
++  if (IsUndefined(*value)) return default_value;
++  return Object::ToString(isolate, value);
++}
++
++// The QuotaExceededErrorOptions member `key` of `options`, converted to a
++// WebIDL double, or null if it is not present.
++MaybeDirectHandle<Object> GetQuotaExceededErrorAmount(
++    Isolate* isolate, DirectHandle<JSReceiver> options, const char* key) {
++  DirectHandle<String> key_string =
++      isolate->factory()->InternalizeUtf8String(key);
++  DirectHandle<Object> value;
++  ASSIGN_RETURN_ON_EXCEPTION(
++      isolate, value, JSReceiver::GetProperty(isolate, options, key_string));
++  if (IsUndefined(*value)) return isolate->factory()->null_value();
++  ASSIGN_RETURN_ON_EXCEPTION(isolate, value, Object::ToNumber(isolate, value));
++  if (!std::isfinite(Object::NumberValue(*value))) {
++    THROW_NEW_ERROR(isolate,
++                    NewTypeError(MessageTemplate::kQuotaExceededErrorNonFinite,
++                                 key_string));
++  }
++  return value;
++}
++
++}  // namespace
++
++// https://webidl.spec.whatwg.org/#dom-domexception-domexception
++BUILTIN(DOMExceptionConstructor) {
++  HandleScope scope(isolate);
++  Factory* factory = isolate->factory();
++  DirectHandle<Object> new_target = args.new_target();
++  if (IsUndefined(*new_target)) {
++    THROW_NEW_ERROR_RETURN_FAILURE(
++        isolate,
++        NewTypeError(MessageTemplate::kConstructorNonCallable,
++                     direct_handle(args.target()->shared()->Name(), isolate)));
++  }
++  // The arguments are converted in order, before the object is created.
++  DirectHandle<String> message;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++      isolate, message,
++      ToDOMString(isolate, args.atOrUndefined(isolate, 1),
++                  factory->empty_string()));
++  DirectHandle<String> name;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++      isolate, name,
++      ToDOMString(isolate, args.atOrUndefined(isolate, 2),
++                  factory->Error_string()));
++  RETURN_RESULT_OR_FAILURE(
++      isolate, ErrorUtils::ConstructDOMException(
++                   isolate, args.target(), new_target, message, name,
++                   DOMExceptionFrameSkipMode(new_target), new_target));
++}
++
++// https://webidl.spec.whatwg.org/#dom-quotaexceedederror-quotaexceedederror
++BUILTIN(QuotaExceededErrorConstructor) {
++  HandleScope scope(isolate);
++  Factory* factory = isolate->factory();
++  DirectHandle<Object> new_target = args.new_target();
++  if (IsUndefined(*new_target)) {
++    THROW_NEW_ERROR_RETURN_FAILURE(
++        isolate,
++        NewTypeError(MessageTemplate::kConstructorNonCallable,
++                     direct_handle(args.target()->shared()->Name(), isolate)));
++  }
++  // The arguments are converted in order, the dictionary's members in
++  // lexicographic order, before the object is created.
++  DirectHandle<String> message;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++      isolate, message,
++      ToDOMString(isolate, args.atOrUndefined(isolate, 1),
++                  factory->empty_string()));
++  DirectHandle<Object> options = args.atOrUndefined(isolate, 2);
++  DirectHandle<Object> quota = factory->null_value();
++  DirectHandle<Object> requested = factory->null_value();
++  if (!IsNullOrUndefined(*options)) {
++    if (!IsJSReceiver(*options)) {
++      THROW_NEW_ERROR_RETURN_FAILURE(
++          isolate,
++          NewTypeError(MessageTemplate::kQuotaExceededErrorOptionsNotObject));
++    }
++    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++        isolate, quota,
++        GetQuotaExceededErrorAmount(isolate, Cast<JSReceiver>(options),
++                                    "quota"));
++    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++        isolate, requested,
++        GetQuotaExceededErrorAmount(isolate, Cast<JSReceiver>(options),
++                                    "requested"));
++  }
++  RETURN_RESULT_OR_FAILURE(
++      isolate,
++      ErrorUtils::ConstructQuotaExceededError(
++          isolate, args.target(), new_target, message, quota, requested,
++          DOMExceptionFrameSkipMode(new_target), new_target));
++}
++
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/common/message-template.h b/src/common/message-template.h
+index e3b63554a796bcf261c083922bdc48d3eddd272b..2202566f7f643fb2974a9cc2e048fe9593fccaf3 100644
+--- a/src/common/message-template.h
++++ b/src/common/message-template.h
+@@ -786,7 +786,24 @@ namespace internal {
+   T(SuppressedErrorDuringDisposal, "An error was suppressed during disposal")  \
+   T(ExpectAnObjectWithUsing,                                                   \
+     "An object is expected with `using` "                                      \
+-    "declarations")
++    "declarations")                                                            \
++  /* DOMException and QuotaExceededError. Last, so that adding them changes no \
++     other template's id, which bytecode expectations record. */               \
++  T(QuotaExceededErrorNonFinite,                                               \
++    "Failed to construct 'QuotaExceededError': Failed to read the '%' "        \
++    "property from 'QuotaExceededErrorOptions': The provided double value "    \
++    "is non-finite.")                                                          \
++  T(QuotaExceededErrorOptionsNotObject,                                        \
++    "Failed to construct 'QuotaExceededError': The provided value is not of "  \
++    "type 'QuotaExceededErrorOptions'.")                                       \
++  T(QuotaExceededErrorNegativeQuota,                                           \
++    "Failed to construct 'QuotaExceededError': The quota is negative.")        \
++  T(QuotaExceededErrorNegativeRequested,                                       \
++    "Failed to construct 'QuotaExceededError': The requested amount is "       \
++    "negative.")                                                               \
++  T(QuotaExceededErrorRequestedLessThanQuota,                                  \
++    "Failed to construct 'QuotaExceededError': The requested amount is less "  \
++    "than the quota.")
+ 
+ enum class MessageTemplate {
+ #define TEMPLATE(NAME, STRING) k##NAME,
+diff --git a/src/debug/debug-evaluate.cc b/src/debug/debug-evaluate.cc
+index 0f27ba101f10e132ce8da5c6640559de51b27d29..381b46011f806b520c9d8d6b22d064baadf9d498 100644
+--- a/src/debug/debug-evaluate.cc
++++ b/src/debug/debug-evaluate.cc
+@@ -919,6 +919,13 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtin id) {
+     case Builtin::kFunctionPrototypeLegacyCallerSetter:
+     // Error builtins.
+     case Builtin::kErrorConstructor:
++    case Builtin::kDOMExceptionConstructor:
++    case Builtin::kDOMExceptionPrototypeGetName:
++    case Builtin::kDOMExceptionPrototypeGetMessage:
++    case Builtin::kDOMExceptionPrototypeGetCode:
++    case Builtin::kQuotaExceededErrorConstructor:
++    case Builtin::kQuotaExceededErrorPrototypeGetQuota:
++    case Builtin::kQuotaExceededErrorPrototypeGetRequested:
+     // RegExp builtins.
+     case Builtin::kRegExpConstructor:
+     // Reflect builtins.
+diff --git a/src/execution/messages.cc b/src/execution/messages.cc
+index 1635529959a9fbe59c587934710356dc8d50904c..84705786212cdd535466caf30ae1a4ac4eaaa185 100644
+--- a/src/execution/messages.cc
++++ b/src/execution/messages.cc
+@@ -588,6 +588,199 @@ MaybeHandle<JSObject> ErrorUtils::Construct(
+ 
+ namespace {
+ 
++// An instance of `target`, whose prototype is new_target's, without its slots.
++MaybeHandle<JSObject> NewDOMExceptionObject(Isolate* isolate,
++                                            DirectHandle<JSFunction> target,
++                                            DirectHandle<Object> new_target) {
++  DirectHandle<JSReceiver> new_target_recv = IsJSReceiver(*new_target)
++                                                 ? Cast<JSReceiver>(new_target)
++                                                 : Cast<JSReceiver>(target);
++  return JSObject::New(target, new_target_recv, {});
++}
++
++Maybe<bool> SetDOMExceptionSlot(Isolate* isolate, Handle<JSObject> error,
++                                DirectHandle<Symbol> slot,
++                                DirectHandle<Object> value) {
++  RETURN_ON_EXCEPTION_VALUE(
++      isolate,
++      JSObject::SetOwnPropertyIgnoreAttributes(error, slot, value, DONT_ENUM),
++      Nothing<bool>());
++  return Just(true);
++}
++
++Maybe<bool> SetDOMExceptionNameAndMessage(Isolate* isolate,
++                                          Handle<JSObject> error,
++                                          DirectHandle<String> name,
++                                          DirectHandle<String> message) {
++  Factory* factory = isolate->factory();
++  MAYBE_RETURN(SetDOMExceptionSlot(isolate, error,
++                                   factory->dom_exception_name_symbol(), name),
++               Nothing<bool>());
++  MAYBE_RETURN(
++      SetDOMExceptionSlot(isolate, error,
++                          factory->dom_exception_message_symbol(), message),
++      Nothing<bool>());
++  // The name never changes, so neither does its code, which the code attribute
++  // then reads as it reads the name.
++  MAYBE_RETURN(
++      SetDOMExceptionSlot(
++          isolate, error, factory->dom_exception_code_symbol(),
++          direct_handle(Smi::FromInt(ErrorUtils::DOMExceptionLegacyCode(*name)),
++                        isolate)),
++      Nothing<bool>());
++  // The stack's header, like an Error's, shows the original message.
++  if (v8_flags.use_original_message_for_stack_trace) {
++    MAYBE_RETURN(SetDOMExceptionSlot(isolate, error,
++                                     factory->error_message_symbol(), message),
++                 Nothing<bool>());
++  }
++  return Just(true);
++}
++
++// `stack`, if given, as JSReceiver::DefineOwnProperty() defines a
++// non-enumerable data property, or else a stack captured as `mode` and
++// `caller` say.
++Maybe<bool> SetDOMExceptionStack(Isolate* isolate, Handle<JSObject> error,
++                                 FrameSkipMode mode,
++                                 DirectHandle<Object> caller,
++                                 MaybeDirectHandle<String> stack) {
++  DirectHandle<String> stack_value;
++  if (stack.ToHandle(&stack_value)) {
++    PropertyDescriptor desc;
++    desc.set_value(stack_value);
++    desc.set_writable(true);
++    desc.set_enumerable(false);
++    desc.set_configurable(true);
++    return JSReceiver::DefineOwnProperty(isolate, error,
++                                         isolate->factory()->stack_string(),
++                                         &desc, Just(kThrowOnError));
++  }
++  RETURN_ON_EXCEPTION_VALUE(isolate,
++                            isolate->CaptureAndSetErrorStack(
++                                error, mode, indirect_handle(caller, isolate)),
++                            Nothing<bool>());
++  return Just(true);
++}
++
++}  // namespace
++
++MaybeHandle<JSObject> ErrorUtils::ConstructDOMException(
++    Isolate* isolate, DirectHandle<JSFunction> target,
++    DirectHandle<Object> new_target, DirectHandle<String> message,
++    DirectHandle<String> name, FrameSkipMode mode, DirectHandle<Object> caller,
++    MaybeDirectHandle<String> stack) {
++  Handle<JSObject> error;
++  ASSIGN_RETURN_ON_EXCEPTION(
++      isolate, error, NewDOMExceptionObject(isolate, target, new_target));
++  MAYBE_RETURN_NULL(
++      SetDOMExceptionNameAndMessage(isolate, error, name, message));
++  MAYBE_RETURN_NULL(SetDOMExceptionStack(isolate, error, mode, caller, stack));
++  return error;
++}
++
++MaybeHandle<JSObject> ErrorUtils::ConstructQuotaExceededError(
++    Isolate* isolate, DirectHandle<JSFunction> target,
++    DirectHandle<Object> new_target, DirectHandle<String> message,
++    DirectHandle<Object> quota, DirectHandle<Object> requested,
++    FrameSkipMode mode, DirectHandle<Object> caller,
++    MaybeDirectHandle<String> stack) {
++  DCHECK(IsNull(*quota) || IsNumber(*quota));
++  DCHECK(IsNull(*requested) || IsNumber(*requested));
++  Factory* factory = isolate->factory();
++  // The object is created before the constructor steps check the amounts.
++  Handle<JSObject> error;
++  ASSIGN_RETURN_ON_EXCEPTION(
++      isolate, error, NewDOMExceptionObject(isolate, target, new_target));
++  if (IsNumber(*quota) && Object::NumberValue(*quota) < 0) {
++    THROW_NEW_ERROR(
++        isolate,
++        NewRangeError(MessageTemplate::kQuotaExceededErrorNegativeQuota));
++  }
++  if (IsNumber(*requested) && Object::NumberValue(*requested) < 0) {
++    THROW_NEW_ERROR(
++        isolate,
++        NewRangeError(MessageTemplate::kQuotaExceededErrorNegativeRequested));
++  }
++  if (IsNumber(*quota) && IsNumber(*requested) &&
++      Object::NumberValue(*requested) < Object::NumberValue(*quota)) {
++    THROW_NEW_ERROR(
++        isolate,
++        NewRangeError(
++            MessageTemplate::kQuotaExceededErrorRequestedLessThanQuota));
++  }
++  MAYBE_RETURN_NULL(SetDOMExceptionNameAndMessage(
++      isolate, error, factory->InternalizeUtf8String("QuotaExceededError"),
++      message));
++  MAYBE_RETURN_NULL(SetDOMExceptionSlot(
++      isolate, error, factory->quota_exceeded_error_quota_symbol(), quota));
++  MAYBE_RETURN_NULL(SetDOMExceptionSlot(
++      isolate, error, factory->quota_exceeded_error_requested_symbol(),
++      requested));
++  MAYBE_RETURN_NULL(SetDOMExceptionStack(isolate, error, mode, caller, stack));
++  return error;
++}
++
++DirectHandle<Object> ErrorUtils::GetDOMExceptionSlot(
++    Isolate* isolate, DirectHandle<Object> object, DirectHandle<Symbol> slot) {
++  if (!IsJSReceiver(*object)) return isolate->factory()->undefined_value();
++  return JSReceiver::GetDataProperty(isolate, Cast<JSReceiver>(object), slot);
++}
++
++bool ErrorUtils::IsDOMException(Isolate* isolate, DirectHandle<Object> object) {
++  return IsString(*GetDOMExceptionSlot(
++      isolate, object, isolate->factory()->dom_exception_name_symbol()));
++}
++
++bool ErrorUtils::IsQuotaExceededError(Isolate* isolate,
++                                      DirectHandle<Object> object) {
++  return !IsUndefined(*GetDOMExceptionSlot(
++      isolate, object,
++      isolate->factory()->quota_exceeded_error_quota_symbol()));
++}
++
++uint16_t ErrorUtils::DOMExceptionLegacyCode(Tagged<String> name) {
++  // The names in WebIDL's table of DOMException names that have a legacy code.
++  // DOMStringSizeError, NoDataAllowedError and ValidationError are not in the
++  // table, so their code is 0, although their constants remain.
++  static constexpr struct {
++    std::string_view name;
++    uint16_t code;
++  } kLegacyCodes[] = {
++      {"IndexSizeError", 1},
++      {"HierarchyRequestError", 3},
++      {"WrongDocumentError", 4},
++      {"InvalidCharacterError", 5},
++      {"NoModificationAllowedError", 7},
++      {"NotFoundError", 8},
++      {"NotSupportedError", 9},
++      {"InUseAttributeError", 10},
++      {"InvalidStateError", 11},
++      {"SyntaxError", 12},
++      {"InvalidModificationError", 13},
++      {"NamespaceError", 14},
++      {"InvalidAccessError", 15},
++      {"TypeMismatchError", 17},
++      {"SecurityError", 18},
++      {"NetworkError", 19},
++      {"AbortError", 20},
++      {"URLMismatchError", 21},
++      {"QuotaExceededError", 22},
++      {"TimeoutError", 23},
++      {"InvalidNodeTypeError", 24},
++      {"DataCloneError", 25},
++  };
++  for (const auto& entry : kLegacyCodes) {
++    // IsOneByteEqualTo() isn't inlined, so call it only on a length match.
++    if (name->length() == entry.name.size() &&
++        name->IsOneByteEqualTo(entry.name)) {
++      return entry.code;
++    }
++  }
++  return 0;
++}
++
++namespace {
++
+ MaybeHandle<String> GetStringPropertyOrDefault(Isolate* isolate,
+                                                DirectHandle<JSReceiver> recv,
+                                                DirectHandle<String> key,
+diff --git a/src/execution/messages.h b/src/execution/messages.h
+index 0e63e762dbae2b3135ce92a4eb888ec6923fabec..e07755cb65ae341c72ae7b1fd240422073a07317 100644
+--- a/src/execution/messages.h
++++ b/src/execution/messages.h
+@@ -87,6 +87,44 @@ class ErrorUtils : public AllStatic {
+       DirectHandle<Object> options, FrameSkipMode mode,
+       DirectHandle<Object> caller, StackTraceCollection stack_trace_collection);
+ 
++  // DOMException and QuotaExceededError (WebIDL). An instance is an error
++  // object that holds its name, message and the name's legacy code, and a
++  // QuotaExceededError also its quota and requested amount, under the private
++  // symbols dom_exception_name_symbol, dom_exception_message_symbol,
++  // dom_exception_code_symbol, quota_exceeded_error_quota_symbol and
++  // quota_exceeded_error_requested_symbol, which the prototypes' attributes
++  // read.
++
++  // Creates an instance of `target`, which is DOMException or
++  // QuotaExceededError, whose prototype is new_target's. Its `stack` is
++  // `stack`, as a non-enumerable own data property, if given, and otherwise
++  // captured as `mode` and `caller` say.
++  static MaybeHandle<JSObject> ConstructDOMException(
++      Isolate* isolate, DirectHandle<JSFunction> target,
++      DirectHandle<Object> new_target, DirectHandle<String> message,
++      DirectHandle<String> name, FrameSkipMode mode,
++      DirectHandle<Object> caller, MaybeDirectHandle<String> stack = {});
++  // `quota` and `requested` are each null or a finite Number. Throws the
++  // RangeError the constructor steps throw if either is negative, or if
++  // `requested` is less than `quota`.
++  static MaybeHandle<JSObject> ConstructQuotaExceededError(
++      Isolate* isolate, DirectHandle<JSFunction> target,
++      DirectHandle<Object> new_target, DirectHandle<String> message,
++      DirectHandle<Object> quota, DirectHandle<Object> requested,
++      FrameSkipMode mode, DirectHandle<Object> caller,
++      MaybeDirectHandle<String> stack = {});
++
++  // The value `object` holds under one of the private symbols above, or
++  // undefined if it holds none. Runs no JavaScript.
++  static DirectHandle<Object> GetDOMExceptionSlot(Isolate* isolate,
++                                                  DirectHandle<Object> object,
++                                                  DirectHandle<Symbol> slot);
++  static bool IsDOMException(Isolate* isolate, DirectHandle<Object> object);
++  static bool IsQuotaExceededError(Isolate* isolate,
++                                   DirectHandle<Object> object);
++  // The legacy code of the DOMException name `name`, or 0 if it has none.
++  static uint16_t DOMExceptionLegacyCode(Tagged<String> name);
++
+   enum class ToStringMessageSource {
+     kPreferOriginalMessage,
+     kCurrentMessageProperty
+diff --git a/src/heap/setup-heap-internal.cc b/src/heap/setup-heap-internal.cc
+index 16f43412efc6c3f70bb6f156d2a28679998e083a..b330b9fc2bef86467e4a30f68951ced1be7f7b6f 100644
+--- a/src/heap/setup-heap-internal.cc
++++ b/src/heap/setup-heap-internal.cc
+@@ -1469,6 +1469,26 @@ void Heap::CreateInitialMutableObjects() {
+ 
+   set_detached_contexts(roots.empty_weak_array_list());
+ 
++  // The internal slots of DOMException and QuotaExceededError. They are per
++  // isolate rather than per context, so that an instance is recognized in any
++  // context of its isolate. Their descriptions aren't internalized, since an
++  // internalized string would go in read-only space while it is writable.
++  {
++    auto new_slot_symbol = [&](const char* description) {
++      DirectHandle<Symbol> symbol = factory->NewPrivateSymbol();
++      symbol->set_description(*factory->NewStringFromAsciiChecked(
++          description, AllocationType::kOld));
++      return *symbol;
++    };
++    set_dom_exception_name_symbol(new_slot_symbol("DOMException name"));
++    set_dom_exception_message_symbol(new_slot_symbol("DOMException message"));
++    set_dom_exception_code_symbol(new_slot_symbol("DOMException code"));
++    set_quota_exceeded_error_quota_symbol(
++        new_slot_symbol("QuotaExceededError quota"));
++    set_quota_exceeded_error_requested_symbol(
++        new_slot_symbol("QuotaExceededError requested"));
++  }
++
+   set_feedback_vectors_for_profiling_tools(roots.undefined_value());
+   set_functions_marked_for_manual_optimization(roots.undefined_value());
+   set_functions_marked_for_disabled_eager_inlining(roots.undefined_value());
+diff --git a/src/init/bootstrapper.cc b/src/init/bootstrapper.cc
+index 617c53e20e2391f8c4eb1936be4511052bcf006f..b3c21d00f30b6f242f24c03da932a539f60840da 100644
+--- a/src/init/bootstrapper.cc
++++ b/src/init/bootstrapper.cc
+@@ -1434,6 +1434,54 @@ static void InstallWithIntrinsicDefaultProto(Isolate* isolate,
+                                  kReleaseStore);
+ }
+ 
++// Gives an error constructor's initial map the error object's own properties:
++// error_stack_symbol and error_message_symbol, in its first two in-object
++// properties, `stack`, and the private symbols `slots`, each in the next
++// in-object property.
++void InstallErrorInstanceDescriptors(
++    Isolate* isolate, DirectHandle<Map> initial_map,
++    std::initializer_list<DirectHandle<Symbol>> slots = {}) {
++  Factory* factory = isolate->factory();
++  Map::EnsureDescriptorSlack(isolate, initial_map,
++                             3 + static_cast<int>(slots.size()));
++  const int kJSErrorErrorStackSymbolOffset =
++      initial_map->GetInObjectPropertyOffset(0);
++  const int kJSErrorErrorMessageSymbolOffset =
++      initial_map->GetInObjectPropertyOffset(1);
++
++  {  // error_stack_symbol
++    Descriptor d = Descriptor::DataField(
++        isolate, factory->error_stack_symbol(), kJSErrorErrorStackSymbolOffset,
++        DONT_ENUM, Representation::Tagged(), true);
++    initial_map->AppendDescriptor(isolate, &d);
++  }
++  {
++    // error_message_symbol
++    Descriptor d =
++        Descriptor::DataField(isolate, factory->error_message_symbol(),
++                              kJSErrorErrorMessageSymbolOffset, DONT_ENUM,
++                              Representation::Tagged(), true);
++    initial_map->AppendDescriptor(isolate, &d);
++  }
++  {  // stack
++    DirectHandle<AccessorPair> new_pair = factory->NewAccessorPair();
++    new_pair->set_getter(*factory->error_stack_getter_fun_template());
++    new_pair->set_setter(*factory->error_stack_setter_fun_template());
++
++    Descriptor d = Descriptor::AccessorConstant(factory->stack_string(),
++                                                new_pair, DONT_ENUM);
++    initial_map->AppendDescriptor(isolate, &d);
++  }
++  int in_object_index = 2;
++  for (DirectHandle<Symbol> slot : slots) {
++    Descriptor d = Descriptor::DataField(
++        isolate, slot,
++        initial_map->GetInObjectPropertyOffset(in_object_index++), DONT_ENUM,
++        Representation::Tagged(), true);
++    initial_map->AppendDescriptor(isolate, &d);
++  }
++}
++
+ void InstallError(Isolate* isolate, DirectHandle<JSObject> global,
+                   DirectHandle<String> name, int context_index,
+                   Builtin error_constructor, int error_function_length) {
+@@ -1487,38 +1535,145 @@ void InstallError(Isolate* isolate, DirectHandle<JSObject> global,
+     }
+   }
+ 
+-  DirectHandle<Map> initial_map(error_fun->initial_map(), isolate);
+-  Map::EnsureDescriptorSlack(isolate, initial_map, 3);
+-  const int kJSErrorErrorStackSymbolOffset =
+-      initial_map->GetInObjectPropertyOffset(0);
+-  const int kJSErrorErrorMessageSymbolOffset =
+-      initial_map->GetInObjectPropertyOffset(1);
++  InstallErrorInstanceDescriptors(
++      isolate, direct_handle(error_fun->initial_map(), isolate));
++}
+ 
+-  {  // error_stack_symbol
+-    Descriptor d = Descriptor::DataField(
+-        isolate, factory->error_stack_symbol(), kJSErrorErrorStackSymbolOffset,
+-        DONT_ENUM, Representation::Tagged(), true);
+-    initial_map->AppendDescriptor(isolate, &d);
+-  }
+-  {
+-    // error_message_symbol
+-    Descriptor d =
+-        Descriptor::DataField(isolate, factory->error_message_symbol(),
+-                              kJSErrorErrorMessageSymbolOffset, DONT_ENUM,
+-                              Representation::Tagged(), true);
+-    initial_map->AppendDescriptor(isolate, &d);
+-  }
+-  {  // stack
+-    DirectHandle<AccessorPair> new_pair = factory->NewAccessorPair();
+-    new_pair->set_getter(*factory->error_stack_getter_fun_template());
+-    new_pair->set_setter(*factory->error_stack_setter_fun_template());
++// A WebIDL regular attribute: an enumerable, configurable accessor property
++// without a setter.
++void InstallWebIDLAttribute(Isolate* isolate, DirectHandle<JSObject> prototype,
++                            const char* name, Builtin getter_builtin) {
++  Factory* factory = isolate->factory();
++  DirectHandle<String> property_name = factory->InternalizeUtf8String(name);
++  DirectHandle<String> getter_name =
++      Name::ToFunctionName(isolate, property_name, factory->get_string())
++          .ToHandleChecked();
++  DirectHandle<JSFunction> getter =
++      SimpleCreateFunction(isolate, getter_name, getter_builtin, 0, kAdapt);
++  JSObject::DefineOwnAccessorIgnoreAttributes(prototype, property_name, getter,
++                                              factory->undefined_value(), NONE)
++      .Check();
++}
+ 
+-    Descriptor d = Descriptor::AccessorConstant(factory->stack_string(),
+-                                                new_pair, DONT_ENUM);
+-    initial_map->AppendDescriptor(isolate, &d);
++// DOMException's legacy code constants, which are enumerable, as WebIDL
++// constants are, unlike InstallConstant()'s.
++void InstallDOMExceptionConstants(Isolate* isolate,
++                                  DirectHandle<JSObject> holder) {
++  static constexpr struct {
++    const char* name;
++    int value;
++  } kConstants[] = {
++      {"INDEX_SIZE_ERR", 1},
++      {"DOMSTRING_SIZE_ERR", 2},
++      {"HIERARCHY_REQUEST_ERR", 3},
++      {"WRONG_DOCUMENT_ERR", 4},
++      {"INVALID_CHARACTER_ERR", 5},
++      {"NO_DATA_ALLOWED_ERR", 6},
++      {"NO_MODIFICATION_ALLOWED_ERR", 7},
++      {"NOT_FOUND_ERR", 8},
++      {"NOT_SUPPORTED_ERR", 9},
++      {"INUSE_ATTRIBUTE_ERR", 10},
++      {"INVALID_STATE_ERR", 11},
++      {"SYNTAX_ERR", 12},
++      {"INVALID_MODIFICATION_ERR", 13},
++      {"NAMESPACE_ERR", 14},
++      {"INVALID_ACCESS_ERR", 15},
++      {"VALIDATION_ERR", 16},
++      {"TYPE_MISMATCH_ERR", 17},
++      {"SECURITY_ERR", 18},
++      {"NETWORK_ERR", 19},
++      {"ABORT_ERR", 20},
++      {"URL_MISMATCH_ERR", 21},
++      {"QUOTA_EXCEEDED_ERR", 22},
++      {"TIMEOUT_ERR", 23},
++      {"INVALID_NODE_TYPE_ERR", 24},
++      {"DATA_CLONE_ERR", 25},
++  };
++  for (const auto& constant : kConstants) {
++    JSObject::AddProperty(
++        isolate, holder,
++        isolate->factory()->InternalizeUtf8String(constant.name),
++        direct_handle(Smi::FromInt(constant.value), isolate),
++        static_cast<PropertyAttributes>(DONT_DELETE | READ_ONLY));
+   }
+ }
+ 
++// DOMException (WebIDL section 4.3) and QuotaExceededError (section 2.8.3).
++// An instance is an error object with the private symbols ErrorUtils describes
++// in in-object properties after the error's own.
++void InstallDOMExceptions(Isolate* isolate, DirectHandle<JSObject> global) {
++  Factory* factory = isolate->factory();
++
++  // The error's own two, then name, message and code, and a spare one for
++  // `stack` when an API caller gives it (ErrorUtils::ConstructDOMException()),
++  // which replaces the stack accessor with a data property.
++  constexpr int kDOMExceptionInObjectProperties = 6;
++  DirectHandle<JSFunction> dom_exception_fun = InstallFunction(
++      isolate, global, "DOMException", JS_ERROR_TYPE,
++      JSObject::kHeaderSize + kDOMExceptionInObjectProperties * kTaggedSize,
++      kDOMExceptionInObjectProperties, factory->the_hole_value(),
++      Builtin::kDOMExceptionConstructor, 0, kDontAdapt);
++  InstallWithIntrinsicDefaultProto(isolate, dom_exception_fun,
++                                   Context::DOM_EXCEPTION_FUNCTION_INDEX);
++  DirectHandle<JSObject> dom_exception_prototype(
++      Cast<JSObject>(dom_exception_fun->instance_prototype()), isolate);
++  // DOMException's interface prototype object, alone among interfaces',
++  // inherits from %Error.prototype%; its interface object inherits from
++  // %Function.prototype%, as any interface's that inherits from no interface.
++  CHECK(JSReceiver::SetPrototype(
++            isolate, dom_exception_prototype,
++            direct_handle(isolate->error_function()->prototype(), isolate),
++            false, kThrowOnError)
++            .FromMaybe(false));
++  InstallWebIDLAttribute(isolate, dom_exception_prototype, "name",
++                         Builtin::kDOMExceptionPrototypeGetName);
++  InstallWebIDLAttribute(isolate, dom_exception_prototype, "message",
++                         Builtin::kDOMExceptionPrototypeGetMessage);
++  InstallWebIDLAttribute(isolate, dom_exception_prototype, "code",
++                         Builtin::kDOMExceptionPrototypeGetCode);
++  InstallDOMExceptionConstants(isolate, dom_exception_fun);
++  InstallDOMExceptionConstants(isolate, dom_exception_prototype);
++  InstallToStringTag(isolate, dom_exception_prototype, "DOMException");
++  InstallErrorInstanceDescriptors(
++      isolate, direct_handle(dom_exception_fun->initial_map(), isolate),
++      {factory->dom_exception_name_symbol(),
++       factory->dom_exception_message_symbol(),
++       factory->dom_exception_code_symbol()});
++
++  // DOMException's, then quota and requested.
++  constexpr int kQuotaExceededErrorInObjectProperties = 8;
++  DirectHandle<JSFunction> quota_exceeded_error_fun = InstallFunction(
++      isolate, global, "QuotaExceededError", JS_ERROR_TYPE,
++      JSObject::kHeaderSize +
++          kQuotaExceededErrorInObjectProperties * kTaggedSize,
++      kQuotaExceededErrorInObjectProperties, factory->the_hole_value(),
++      Builtin::kQuotaExceededErrorConstructor, 0, kDontAdapt);
++  InstallWithIntrinsicDefaultProto(
++      isolate, quota_exceeded_error_fun,
++      Context::QUOTA_EXCEEDED_ERROR_FUNCTION_INDEX);
++  DirectHandle<JSObject> quota_exceeded_error_prototype(
++      Cast<JSObject>(quota_exceeded_error_fun->instance_prototype()), isolate);
++  CHECK(JSReceiver::SetPrototype(isolate, quota_exceeded_error_fun,
++                                 dom_exception_fun, false, kThrowOnError)
++            .FromMaybe(false));
++  CHECK(JSReceiver::SetPrototype(isolate, quota_exceeded_error_prototype,
++                                 dom_exception_prototype, false, kThrowOnError)
++            .FromMaybe(false));
++  InstallWebIDLAttribute(isolate, quota_exceeded_error_prototype, "quota",
++                         Builtin::kQuotaExceededErrorPrototypeGetQuota);
++  InstallWebIDLAttribute(isolate, quota_exceeded_error_prototype, "requested",
++                         Builtin::kQuotaExceededErrorPrototypeGetRequested);
++  InstallToStringTag(isolate, quota_exceeded_error_prototype,
++                     "QuotaExceededError");
++  InstallErrorInstanceDescriptors(
++      isolate, direct_handle(quota_exceeded_error_fun->initial_map(), isolate),
++      {factory->dom_exception_name_symbol(),
++       factory->dom_exception_message_symbol(),
++       factory->dom_exception_code_symbol(),
++       factory->quota_exceeded_error_quota_symbol(),
++       factory->quota_exceeded_error_requested_symbol()});
++}
++
+ #ifdef V8_TEMPORAL_SUPPORT
+ 
+ namespace {
+@@ -3377,6 +3532,9 @@ void Genesis::InitializeGlobal(DirectHandle<JSGlobalObject> global_object,
+                Context::SUPPRESSED_ERROR_FUNCTION_INDEX,
+                Builtin::kSuppressedErrorConstructor, 3);
+ 
++  // -- D O M E x c e p t i o n, Q u o t a E x c e e d e d E r r o r
++  InstallDOMExceptions(isolate_, global);
++
+   // Initialize the embedder data slot.
+   // TODO(ishell): microtask queue pointer will be moved from native context
+   // to the embedder data array so we don't need an empty embedder data array.
+diff --git a/src/logging/runtime-call-stats.h b/src/logging/runtime-call-stats.h
+index 6d6d0d4b277fa739fe1c32dcb5df61c1fc6e29a9..24fa8326d5dd794e173793bbfe1504568b8e299d 100644
+--- a/src/logging/runtime-call-stats.h
++++ b/src/logging/runtime-call-stats.h
+@@ -57,6 +57,7 @@ namespace v8::internal {
+   V(Date_New)                                              \
+   V(Date_Parse)                                            \
+   V(Debug_Call)                                            \
++  V(DOMException_New)                                      \
+   V(debug_GetPrivateMembers)                               \
+   V(DictionaryTemplate_New)                                \
+   V(DictionaryTemplate_NewInstance)                        \
+@@ -156,6 +157,7 @@ namespace v8::internal {
+   V(Promise_Status)                                        \
+   V(Promise_Then)                                          \
+   V(Proxy_New)                                             \
++  V(QuotaExceededError_New)                                \
+   V(RangeError_New)                                        \
+   V(ReferenceError_New)                                    \
+   V(RegExp_Exec)                                           \
+diff --git a/src/objects/contexts.h b/src/objects/contexts.h
+index 1859939e43f4a821134f530216f1bd43b62ed30d..956b7dfa0b0a253a79ebe6aa64b9f1a7b221f707 100644
+--- a/src/objects/contexts.h
++++ b/src/objects/contexts.h
+@@ -158,6 +158,7 @@ enum ContextLookupFlags {
+   V(DATA_PROPERTY_DESCRIPTOR_MAP_INDEX, Map, data_property_descriptor_map)     \
+   V(DATA_VIEW_FUN_INDEX, JSFunction, data_view_fun)                            \
+   V(DATE_FUNCTION_INDEX, JSFunction, date_function)                            \
++  V(DOM_EXCEPTION_FUNCTION_INDEX, JSFunction, dom_exception_function)          \
+   V(DEBUG_CONTEXT_ID_INDEX, (UnionOf<Smi, Undefined>), debug_context_id)       \
+   V(EMPTY_FUNCTION_INDEX, JSFunction, empty_function)                          \
+   V(ERROR_MESSAGE_FOR_CODE_GEN_FROM_STRINGS_INDEX, Object,                     \
+@@ -420,6 +421,8 @@ enum ContextLookupFlags {
+   V(SET_HAS_INDEX, JSFunction, set_has)                                        \
+   V(SHADOW_REALM_IMPORT_VALUE_REJECTED_INDEX, JSFunction,                      \
+     shadow_realm_import_value_rejected)                                        \
++  V(QUOTA_EXCEEDED_ERROR_FUNCTION_INDEX, JSFunction,                           \
++    quota_exceeded_error_function)                                             \
+   V(SUPPRESSED_ERROR_FUNCTION_INDEX, JSFunction, suppressed_error_function)    \
+   V(SYNTAX_ERROR_FUNCTION_INDEX, JSFunction, syntax_error_function)            \
+   V(TYPE_ERROR_FUNCTION_INDEX, JSFunction, type_error_function)                \
+diff --git a/src/objects/objects.cc b/src/objects/objects.cc
+index 1bc672bb9cf37f70444e1f70cd2a30fd6d9790b5..d2b7097a7d63f7a0ab19b5bbc8261fbef32c8499 100644
+--- a/src/objects/objects.cc
++++ b/src/objects/objects.cc
+@@ -539,11 +539,21 @@ DirectHandle<String> NoSideEffectsErrorToString(
+   DirectHandle<Name> name_key = isolate->factory()->name_string();
+   DirectHandle<Object> name =
+       JSReceiver::GetDataProperty(isolate, error, name_key);
++  // A DOMException's name and message attributes are accessors, which read
++  // what it holds in private symbols, unless own properties shadow them.
++  if (IsUndefined(*name)) {
++    name = JSReceiver::GetDataProperty(
++        isolate, error, isolate->factory()->dom_exception_name_symbol());
++  }
+   DirectHandle<String> name_str = AsStringOrEmpty(isolate, name);
+ 
+   DirectHandle<Name> msg_key = isolate->factory()->message_string();
+   DirectHandle<Object> msg =
+       JSReceiver::GetDataProperty(isolate, error, msg_key);
++  if (IsUndefined(*msg)) {
++    msg = JSReceiver::GetDataProperty(
++        isolate, error, isolate->factory()->dom_exception_message_symbol());
++  }
+   DirectHandle<String> msg_str = AsStringOrEmpty(isolate, msg);
+ 
+   if (name_str->length() == 0) return msg_str;
+diff --git a/src/roots/roots.h b/src/roots/roots.h
+index 926135995c273e6334b81648c83dadd423fa85e6..f6982db0a3fb34d5f651b0ab9087bdecf94765e4 100644
+--- a/src/roots/roots.h
++++ b/src/roots/roots.h
+@@ -422,6 +422,15 @@ class RootVisitor;
+   BUILTINS_WITH_SFI_ROOTS_LIST(V)                                              \
+   TRUSTED_ROOT_LIST(V)
+ 
++// The internal slots of DOMException and QuotaExceededError (WebIDL).
++#define DOM_EXCEPTION_SLOT_ROOT_LIST(V)                                       \
++  V(Symbol, dom_exception_name_symbol, DOMExceptionNameSymbol)                \
++  V(Symbol, dom_exception_message_symbol, DOMExceptionMessageSymbol)          \
++  V(Symbol, dom_exception_code_symbol, DOMExceptionCodeSymbol)                \
++  V(Symbol, quota_exceeded_error_quota_symbol, QuotaExceededErrorQuotaSymbol) \
++  V(Symbol, quota_exceeded_error_requested_symbol,                            \
++    QuotaExceededErrorRequestedSymbol)
++
+ // These root references can be updated by the mutator.
+ #define STRONG_MUTABLE_MOVABLE_ROOT_LIST(V)                                 \
+   /* Caches */                                                              \
+@@ -467,7 +476,8 @@ class RootVisitor;
+     ErrorStackGetterSharedFun)                                              \
+   V(FunctionTemplateInfo, error_stack_setter_fun_template,                  \
+     ErrorStackSetterSharedFun)                                              \
+-  V(Object, promise_context_tag, PromiseContextTag)
++  V(Object, promise_context_tag, PromiseContextTag)                         \
++  DOM_EXCEPTION_SLOT_ROOT_LIST(V)
+ 
+ // Entries in this list are limited to Smis and are not visited during GC.
+ #define SMI_ROOT_LIST(V)                                                       \

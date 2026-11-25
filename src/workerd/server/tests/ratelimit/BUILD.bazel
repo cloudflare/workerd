@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -9,7 +9,7 @@ wd_test(
 
 # `workerd serve` of a wrangler.jsonc's ratelimits.
 # Large: it may wait up to 5 s for a minute's last seconds to pass.
-js_test(
+wd_js_test(
     name = "ratelimit-wrangler-test",
     size = "large",
     data = [

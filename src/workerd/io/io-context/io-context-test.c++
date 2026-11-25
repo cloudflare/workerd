@@ -541,7 +541,7 @@ KJ_TEST("an await_io_and_run() future that panics fails the task, and its callba
   });
   release_await(1);
   {
-    KJ_EXPECT_LOG(ERROR, "the future that IoContext::await_io_and_run() waited for panicked");
+    KJ_EXPECT_LOG(ERROR, "panic in Rust future: the future panicked");
     fixture.pollEventLoop();
   }
   KJ_EXPECT(await_observation() == AwaitObservation::Dropped);
@@ -769,7 +769,7 @@ KJ_TEST("a panic while dropping a cancelled future is logged") {
   });
   fixture.pollEventLoop();
   {
-    KJ_EXPECT_LOG(ERROR, "dropping a future that the IoContext waited for panicked");
+    KJ_EXPECT_LOG(ERROR, "panic in Rust future destructor: the future panicked when dropped");
     fixture.drainAndDestroy(kj::mv(request));
   }
   KJ_EXPECT(awaited_future_dropped());

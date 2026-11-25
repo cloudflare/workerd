@@ -35,7 +35,6 @@
 // abort() discards them. A stream that is never closed nor aborted leaves the
 // lock held until the context is collected.
 
-import type { DomExceptionModule } from '../dom-exception';
 import type {
   UnderlyingSink,
   WritableStream as WritableStreamType,
@@ -43,6 +42,7 @@ import type {
 } from '../webstreams/types';
 
 const {
+  DOMException,
   ObjectDefineProperties,
   PromiseReject,
   PromiseResolve,
@@ -51,8 +51,6 @@ const {
 } = primordials;
 
 const { createFileSystemWriteContext } = utils;
-
-const { DOMException } = require('dom-exception') as DomExceptionModule;
 
 const { kNullProtoObject, kEnumerable } = require('webstreams/common');
 

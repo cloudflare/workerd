@@ -1,5 +1,5 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
-load("@workerd//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("@workerd//:build/test_attrs.bzl", "test_attrs")
 load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def wd_test(
@@ -16,6 +16,10 @@ def wd_test(
         predictable = True,
         compat_date = "",
         _configurable_data = [],
+        tags = [],
+        size = "medium",
+        target_compatible_with = None,
+        exec_properties = {},
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -33,6 +37,10 @@ def wd_test(
      predictable: If True (default), pass `--predictable` to workerd.
      compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
+     tags: The tests' tags, from which test_attrs() derives their other attributes.
+     size: The tests' size.
+     target_compatible_with: The tests' own target_compatible_with, if any.
+     exec_properties: The tests' own exec_properties, if any.
 
     The following test variants are generated based on the flags:
      - name@ (if generate_default_variant): oldest compat date (2000-01-01)
@@ -43,7 +51,7 @@ def wd_test(
 
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
-    kwargs["exec_properties"] = test_exec_properties(kwargs.get("size", "medium"), kwargs.get("tags", [])) | kwargs.get("exec_properties", {})
+    attrs = test_attrs(tags, size, target_compatible_with, exec_properties)
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -98,7 +106,8 @@ def wd_test(
             data = data,
             args = base_args + default_compat_args,
             python_snapshot_test = python_snapshot_test,
-            **kwargs
+            size = size,
+            **(kwargs | attrs)
         )
 
     # All compat flags variant: newest compat date
@@ -109,7 +118,8 @@ def wd_test(
             data = data,
             args = base_args + newest_compat_args,
             python_snapshot_test = python_snapshot_test,
-            **kwargs
+            size = size,
+            **(kwargs | attrs)
         )
 
     # All autogates variant: all autogates + oldest compat date
@@ -120,7 +130,8 @@ def wd_test(
             data = data,
             args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
-            **kwargs
+            size = size,
+            **(kwargs | attrs)
         )
 
     # GC stress variant: forced full GC at every awaitIo continuation.
@@ -129,16 +140,15 @@ def wd_test(
     # Tagged off-by-default so it only runs when explicitly requested.
     if generate_gc_stress_variant:
         gc_stress_compat = newest_compat_args if generate_all_compat_flags_variant else default_compat_args
-        gc_stress_kwargs = dict(kwargs)
-        gc_stress_tags = gc_stress_kwargs.pop("tags", []) + ["gc-stress", "no-coverage", "off-by-default"]
+        gc_stress_tags = tags + ["gc-stress", "no-coverage", "off-by-default"]
         _wd_test(
             src = src,
             name = name + "@gc-stress",
             data = data,
             args = base_args + gc_stress_compat + ["--gc-stress"],
             python_snapshot_test = python_snapshot_test,
-            tags = gc_stress_tags,
-            **gc_stress_kwargs
+            size = size,
+            **(kwargs | test_attrs(gc_stress_tags, size, target_compatible_with, exec_properties))
         )
 
 WINDOWS_TEMPLATE = """
@@ -425,11 +435,26 @@ _wd_test = rule(
     },
 )
 
-def wd_cli_test(**kwargs):
+def wd_cli_test(
+        tags = [],
+        size = "medium",
+        target_compatible_with = None,
+        exec_properties = {},
+        **kwargs):
     """Defines a test that runs workerd with the given `args`, as wd_test()'s variants do.
 
     The first argument is usually `$(location //src/workerd/server:workerd)`, which must also
     be in `data`. `-dTEST_TMPDIR=<dir>` is appended to the arguments. For macros outside this
     file, such as wd_bench().
+
+    Args:
+     tags: The test's tags, from which test_attrs() derives its other attributes.
+     size: The test's size.
+     target_compatible_with: The test's own target_compatible_with, if any.
+     exec_properties: The test's own exec_properties, if any.
+     **kwargs: The other attributes of the test.
     """
-    _wd_test(**kwargs)
+    _wd_test(
+        size = size,
+        **(kwargs | test_attrs(tags, size, target_compatible_with, exec_properties))
+    )

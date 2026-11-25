@@ -18,7 +18,7 @@ archive_override(
     sha256 = "b301de6e58c730c36cf64781306c1b576be49f8b2197cb533279667e021e2598",
     strip_prefix = "google-boringssl-5e7f779",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261105.0",
+    url = "https://github.com/google/boringssl/tarball/refs/tags/0.20261105.0",
 )
 
 # brotli
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "72d7f413abaa4ee7233063033b5d9afe7f76b7754ab04eedaad65b5e8f31ec2b",
-    strip_prefix = "capnproto-capnproto-7d3db37/c++",
+    sha256 = "d93a0ac5544a676043315a23904a5febd43e29228785855047332eca41e53895",
+    strip_prefix = "capnproto-capnproto-ee05f52/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/7d3db3760068ec6a5214a0c3509da398e71dc668",
+    url = "https://github.com/capnproto/capnproto/tarball/ee05f52b62c319dfba3bfc62bd3094d35b18bc3f",
 )
 use_repo(http, "capnp-cpp")
 
@@ -97,10 +97,10 @@ archive_override(
 http.archive(
     name = "nbytes",
     build_file = "//:build/BUILD.nbytes",
-    sha256 = "9b35ccdbdc092b8ce0b3e5645dbf8456ff4de29080d2bef4ffe21791f770f7e6",
-    strip_prefix = "nodejs-nbytes-3e858fd",
+    sha256 = "4b6e6ab64987211d274d30e742a3c0db0fc386c15f682c9aabe9a0303dd28c5f",
+    strip_prefix = "nodejs-nbytes-6b3ca0b",
     type = "tgz",
-    url = "https://api.github.com/repos/nodejs/nbytes/tarball/v0.1.4",
+    url = "https://github.com/nodejs/nbytes/tarball/refs/tags/v0.1.5",
 )
 use_repo(http, "nbytes")
 
@@ -110,7 +110,7 @@ http.archive(
     sha256 = "e41066de30ccb7610fd177ce59fb78a984d3298238bbf2c2cc62e17af92f8a94",
     strip_prefix = "nodejs-ncrypto-027d1e4",
     type = "tgz",
-    url = "https://api.github.com/repos/nodejs/ncrypto/tarball/v1.1.4",
+    url = "https://github.com/nodejs/ncrypto/tarball/refs/tags/v1.1.4",
 )
 use_repo(http, "ncrypto")
 
@@ -127,17 +127,17 @@ archive_override(
     sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
     strip_prefix = "google-perfetto-9e9bdaf",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
+    url = "https://github.com/google/perfetto/tarball/refs/tags/v58.2",
 )
 
 # simdutf
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "33b0be36ae5ce011d0ed4ec80a74871108b67741061f3551871bbad6a1078f45",
+    sha256 = "d780c2576f3baeb8e2f24c63a117be90cd130e7ce1a487f5855ac38e1b7f6004",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.3.3/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.4.0/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -149,7 +149,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "ec453dc9abac1ddf39ced752e72a7a80dcda1d91",
+    commit = "401d1853956d408bfd327ee5e54c1c7b67086f87",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

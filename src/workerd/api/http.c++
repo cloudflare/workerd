@@ -283,10 +283,9 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](auto&& b) -> kj::String {
-      return kj::mv(b);
-    }).orDefault(nullptr);
+    kj::String contentType =
+        kj::Maybe<kj::String>(self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE))
+            .orDefault(nullptr);
 
     if (FeatureFlags::get(js).getBlobStandardMimeType()) {
       contentType = MimeType::extract(contentType)
@@ -852,7 +851,19 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  // The constructor clones `cf` with JSON.stringify(), which can run JavaScript, and none can run
+  // while V8 reads a value. So the request is made without it, and given the clone once the value
+  // has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto request = Request::constructor(js, kj::mv(url), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([request = request.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      request->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return request;
 }
 
 // =======================================================================================
@@ -1457,7 +1468,17 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     }
   }
 
-  return Response::constructor(js, kj::mv(body), kj::mv(init));
+  // As for a Request (Request::deserialize()), `cf` is cloned once the value has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto response = Response::constructor(js, kj::mv(body), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([response = response.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      response->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return response;
 }
 
 // =======================================================================================
@@ -2794,8 +2815,7 @@ static jsg::Promise<void> throwOnError(
 
 static jsg::Promise<Fetcher::GetResult> parseResponse(
     jsg::Lock& js, jsg::Ref<Response> response, jsg::Optional<kj::String> type) {
-  auto typeName =
-      type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+  auto typeName = kj::Maybe<kj::StringPtr>(type).orDefault("text");
   if (typeName == "stream") {
     KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));

@@ -9,6 +9,9 @@ import { DurableObject } from 'cloudflare:workers';
 // it easier to keep the DO and test functions together in the test file:
 let actorFuncs = {};
 
+// Lets one Durable Object reach a cursor that another one created.
+let stashedCursor;
+
 async function test(state) {
   const storage = state.storage;
   const sql = storage.sql;
@@ -1499,6 +1502,170 @@ export class DurableObjectExample extends DurableObject {
     const rows = cursor.toArray();
     assert.deepEqual(rows, [{ value: 1 }, { value: 2 }, { value: 3 }]);
   }
+
+  async testCursorClose() {
+    const sql = this.state.storage.sql;
+    sql.exec('CREATE TABLE close_big (id INTEGER PRIMARY KEY)');
+    sql.exec(`INSERT INTO close_big (id)
+      WITH RECURSIVE t(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM t LIMIT 10) SELECT x FROM t`);
+    const selectBig = 'SELECT id FROM close_big ORDER BY id';
+
+    const createOther = () => {
+      sql.exec('CREATE TABLE close_other (v INTEGER)');
+      sql.exec('CREATE INDEX close_other_v ON close_other (v)');
+    };
+    const dropOther = () => {
+      sql.exec('DROP INDEX close_other_v');
+      sql.exec('DROP TABLE close_other');
+    };
+
+    // Without close(), the DROP fails.
+    {
+      createOther();
+      const cursor = sql.exec(selectBig);
+      cursor.next();
+      assert.throws(() => dropOther(), /SQLITE_LOCKED/);
+      cursor.close();
+      dropOther();
+    }
+
+    // close() after a partial for...of.
+    {
+      createOther();
+      const cursor = sql.exec(selectBig);
+      for (const row of cursor) {
+        if (row.id === 3) break;
+      }
+      cursor.close();
+      dropOther();
+    }
+
+    // `using` and break.
+    {
+      createOther();
+      {
+        using cursor = sql.exec(selectBig);
+        for (const row of cursor.raw()) {
+          if (row[0] === 3) break;
+        }
+      }
+      dropOther();
+    }
+
+    // `using` and throw.
+    {
+      createOther();
+      assert.throws(() => {
+        using cursor = sql.exec(selectBig);
+        cursor.next();
+        throw new Error('stop');
+      }, /^Error: stop$/);
+      dropOther();
+    }
+
+    // `using` in a generator whose consumer stops early.
+    {
+      createOther();
+      function* ids() {
+        using cursor = sql.exec(selectBig);
+        for (const row of cursor) yield row.id;
+      }
+      for (const id of ids()) {
+        if (id === 3) break;
+      }
+      dropOther();
+    }
+
+    {
+      createOther();
+      const cursor = sql.exec(selectBig);
+      cursor.next();
+      cursor[Symbol.dispose]();
+      dropOther();
+    }
+
+    {
+      const cursor = sql.exec(selectBig);
+      cursor.next();
+      cursor.next();
+      cursor.close();
+      assert.deepEqual(cursor.next(), { done: true });
+      assert.deepEqual(cursor.toArray(), []);
+      assert.deepEqual([...cursor.raw()], []);
+      assert.throws(() => cursor.one(), /got no results/);
+      assert.deepEqual(cursor.columnNames, ['id']);
+      // The second next() stepped to the third row.
+      assert.equal(cursor.rowsRead, 3);
+      assert.equal(cursor.rowsWritten, 0);
+
+      cursor.close();
+      cursor[Symbol.dispose]();
+      assert.equal(cursor.rowsRead, 3);
+    }
+
+    {
+      const cursor = sql.exec(selectBig);
+      assert.equal(cursor.toArray().length, 10);
+      cursor.close();
+      assert.equal(cursor.rowsRead, 10);
+    }
+
+    {
+      const cursor = sql.exec(selectBig);
+      cursor.next();
+      cursor.close();
+      using again = sql.exec(selectBig);
+      assert.equal(again.reusedCachedQueryForTest, true);
+    }
+
+    // close() after a failed step.
+    {
+      createOther();
+      const cursor = sql.exec(
+        `SELECT CASE WHEN id = 3 THEN json('not json') ELSE id END AS v FROM close_big ORDER BY id`
+      );
+      cursor.next();
+      // Reading the second row steps to the third, which fails.
+      assert.throws(() => cursor.next(), /malformed JSON/);
+      cursor.close();
+      assert.deepEqual(cursor.next(), { done: true });
+      dropOther();
+    }
+
+    sql.exec('DROP TABLE close_big');
+  }
+
+  async stashCursor() {
+    const sql = this.state.storage.sql;
+    sql.exec('CREATE TABLE close_stashed (id INTEGER PRIMARY KEY)');
+    sql.exec('INSERT INTO close_stashed VALUES (1), (2), (3)');
+    stashedCursor = sql.exec('SELECT id FROM close_stashed ORDER BY id');
+    stashedCursor.next();
+  }
+
+  // Like the cursor's other methods, close() throws in another Durable Object.
+  async closeOtherCursor() {
+    const differentDo = /different Durable Object/;
+    assert.throws(() => stashedCursor.next(), differentDo);
+    assert.throws(() => stashedCursor.close(), differentDo);
+    assert.throws(() => stashedCursor[Symbol.dispose](), differentDo);
+
+    const original = new Error('original');
+    try {
+      using _cursor = stashedCursor;
+      throw original;
+    } catch (e) {
+      assert.ok(e instanceof SuppressedError);
+      assert.match(e.error.message, differentDo);
+      assert.equal(e.suppressed, original);
+    }
+  }
+
+  async closeStashedCursor() {
+    stashedCursor.close();
+    stashedCursor = undefined;
+    this.state.storage.sql.exec('DROP TABLE close_stashed');
+  }
 }
 
 export default {
@@ -1812,5 +1979,22 @@ export let testCursorUaf = {
   async test(ctrl, env, ctx) {
     let stub = env.ns.get(env.ns.idFromName('cursor-uaf-test'));
     await stub.testCursorUaf();
+  },
+};
+
+export let testCursorClose = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('cursor-close-test'));
+    await stub.testCursorClose();
+  },
+};
+
+export let testCursorCloseInOtherDurableObject = {
+  async test(ctrl, env, ctx) {
+    let owner = env.ns.get(env.ns.idFromName('cursor-close-owner'));
+    let other = env.ns.get(env.ns.idFromName('cursor-close-other'));
+    await owner.stashCursor();
+    await other.closeOtherCursor();
+    await owner.closeStashedCursor();
   },
 };

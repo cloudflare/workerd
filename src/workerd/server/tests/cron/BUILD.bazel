@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 # The cron module's parser and plan.
@@ -9,7 +9,7 @@ wd_test(
 )
 
 # `workerd serve` of the cron module; waits for real minutes to pass.
-js_test(
+wd_js_test(
     name = "cron-test",
     size = "large",
     timeout = "eternal",

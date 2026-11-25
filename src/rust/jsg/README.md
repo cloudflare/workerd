@@ -270,13 +270,12 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
 fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
 `src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
-`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`readApiObject`, `readHostObjectWithoutJs`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
 depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
-which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
-JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
+which Rust describes a value as `kj::str()` of a handle does. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -802,6 +801,10 @@ returns `None` for a resource the snapshot did not carry, such as one the contex
 through Rust, which the instance then rebuilds from its own `Snapshot`; see
 `jsg-test/tests/startup_snapshot.rs`.
 
+A function that `v8::Function::from_callback` creates carries over a snapshot. One that
+`v8::Function::new` creates, and a pending promise reaction, fail the zygote, as a function
+that C++ JSG wraps does: the Wrappable that owns their data has no snapshot form.
+
 ## V8 Handle Types
 
 ### `Lock<'s>` and handle scopes
@@ -1238,14 +1241,17 @@ of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default optio
 the same, and each reads what the other writes, so the two can share stored data. Native errors
 are written as host objects when the `enhanced_error_serialization` flag is on, workerd API
 objects such as `Blob` and `Headers` through their C++ serializers, and a `DOMException`,
-whichever implementation made it, as C++ JSG writes it. Rust resources can't be serialized.
-Instances of the runtime's classes implemented in JavaScript, such as `QuotaExceededError`, are
-written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
+whichever implementation made it, as C++ JSG writes it: V8's, and its `QuotaExceededError`, with
+their other own properties if the `enhanced_error_serialization` flag is on. Rust resources can't
+be serialized. Instances of the runtime's classes implemented in JavaScript are written through
+the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
 that the class's `clone` function returns follows the value. Reading one makes the copy from the
 class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
-with the class's `deserialize` function once the whole value is read. That function is the only
-JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
-such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+with the class's `deserialize` function once the whole value is read. That function, and the work
+that a workerd API object's deserializer leaves until then, are the only JavaScript
+deserialization runs, and where C++ code has disallowed JavaScript execution, reading such an
+instance or API object throws `DataCloneError`. A reader that tries to run JavaScript while the
+value is read fails the read with `DataCloneError`, as in C++ JSG. A `SharedArrayBuffer` is written as a reference to a
 buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
 given only the bytes can resolve, so data containing one can't be read back.
 

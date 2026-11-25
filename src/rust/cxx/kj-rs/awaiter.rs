@@ -3,6 +3,7 @@
     reason = "constructs and polls the C++ promise awaiter in place"
 )]
 
+use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::Context;
@@ -14,9 +15,12 @@ use crate::ffi::GuardedRustPromiseAwaiter;
 use crate::ffi::GuardedRustPromiseAwaiterRepr;
 use crate::waker::try_into_kj_waker_ptr;
 
-pub struct PromiseAwaiter<Data: std::marker::Unpin> {
+pub struct PromiseAwaiter<Data> {
     node: Option<OwnPromiseNode>,
     pub(crate) data: Data,
+    // Once polled, `awaiter` points to `option_waker` and is linked into the event loop, so it
+    // must not move.
+    _pinned: PhantomPinned,
     awaiter: MaybeUninit<GuardedRustPromiseAwaiterRepr>,
     awaiter_initialized: bool,
     // Safety: `option_waker` must be declared after `awaiter`, because `awaiter` contains a reference
@@ -24,11 +28,12 @@ pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     option_waker: OptionWaker,
 }
 
-impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
+impl<Data> PromiseAwaiter<Data> {
     pub fn new(node: OwnPromiseNode, data: Data) -> Self {
         Self {
             node: Some(node),
             data,
+            _pinned: PhantomPinned,
             awaiter: MaybeUninit::uninit(),
             awaiter_initialized: false,
             option_waker: OptionWaker::empty(),
@@ -100,7 +105,7 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
     }
 }
 
-impl<Data: std::marker::Unpin> Drop for PromiseAwaiter<Data> {
+impl<Data> Drop for PromiseAwaiter<Data> {
     fn drop(&mut self) {
         if self.awaiter_initialized {
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.

@@ -7,14 +7,14 @@
 #![deny(warnings)]
 
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
+#[jsg_traced]
 pub struct Binding(pub Vec<u8>);
 
 impl Drop for Binding {
     fn drop(&mut self) {}
 }
-
-jsg::jsg_traced_unchecked!(Binding);
 
 #[jsg_resource]
 pub struct Plain {

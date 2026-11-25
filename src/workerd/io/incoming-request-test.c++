@@ -644,10 +644,11 @@ kj::Promise<void> runOnHibernate(TestFixture& fixture,
     Worker::Actor& actor,
     kj::Own<RequestObserver> observer,
     kj::Maybe<TimerChannel&> timer = kj::none,
-    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none) {
+    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext = kj::none) {
   return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
-      kj::mv(observer), kj::mv(tracer), kj::none /* selfTokenFactory */);
+      kj::mv(observer), kj::mv(tracer), kj::mv(triggerContext), kj::none /* selfTokenFactory */);
 }
 
 // An actor whose onHibernate handler never settles, leaving a timer behind.
@@ -705,12 +706,15 @@ KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it 
   });
 }
 
-// Records, in order, the onset and return events reported to it.
+// Records, in order, the onset and return events reported to it, and the trace of the invocation
+// whose onset it last saw.
 class RecordingTracer final: public BaseTracer {
  public:
   kj::String events;
+  kj::Maybe<tracing::TraceId> traceId;
 
-  void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&& info) override {
+  void setEventInfo(IoContext::IncomingRequest& request, tracing::EventInfo&& info) override {
+    traceId = request.getInvocationSpanContext().getTraceId();
     KJ_IF_SOME(onHibernate, info.tryGet<tracing::OnHibernateEventInfo>()) {
       events = kj::str(events, "onHibernateOnset:", onHibernate.reason, ";");
     } else {
@@ -767,6 +771,28 @@ KJ_TEST("runOnHibernate() reports the handler to the tracer as an onHibernate ev
         .wait(fixture.getWaitScope());
 
     KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;return;", tracer->events);
+  });
+}
+
+KJ_TEST("runOnHibernate() runs the handler in the trace it's given") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    export default class extends DurableObject {
+      async [onHibernate]() {}
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-trigger-context-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    constexpr tracing::TraceId traceId(0x1234, 0x5678);
+    auto tracer = kj::rc<RecordingTracer>();
+    runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()),
+        tracing::InvocationSpanContext(
+            traceId, tracing::TraceId::nullId, tracing::SpanId::nullId, kj::none))
+        .wait(fixture.getWaitScope());
+
+    KJ_EXPECT(KJ_ASSERT_NONNULL(tracer->traceId) == traceId);
   });
 }
 

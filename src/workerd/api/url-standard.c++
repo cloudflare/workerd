@@ -39,7 +39,7 @@ jsg::Url parseImpl(kj::StringPtr url, kj::Maybe<kj::StringPtr> maybeBase) {
 
 jsg::Ref<URL> URL::constructor(
     jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base) {
-  return js.alloc<URL>(kj::mv(url), base.map([](jsg::USVString& base) { return base.asPtr(); }));
+  return js.alloc<URL>(kj::mv(url), base);
 }
 
 URL::URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base): inner(parseImpl(url, base)) {}
@@ -57,7 +57,7 @@ kj::Maybe<kj::Own<jsg::Wrappable>> URL::snapshotClone() const {
 }
 
 bool URL::canParse(jsg::USVString url, jsg::Optional<jsg::USVString> maybeBase) {
-  return jsg::Url::canParse(url, maybeBase.map([](jsg::USVString& str) { return str.asPtr(); }));
+  return jsg::Url::canParse(url, kj::Maybe<kj::StringPtr>(maybeBase));
 }
 
 jsg::JsString URL::createObjectURL(

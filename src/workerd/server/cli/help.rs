@@ -13,7 +13,8 @@
 
 macro_rules! config_arg {
     () => {
-        "<config> is a wrangler.json or wrangler.jsonc; see workerd -h.\n"
+        "<config> is a wrangler.json or wrangler.jsonc, or a directory with\n\
+         one; see workerd -h.\n"
     };
 }
 
@@ -23,6 +24,7 @@ macro_rules! run_options {
   -w, --watch                        Reload when files change
       --experimental                 Allow experimental features
       --verbose                      Log to stderr
+      --data-dir <dir>               Keep state in dir, not in .wrangler/state
   -d, --directory-path <name>=<dir>  Point disk service name at dir
   -e, --external-addr <name>=<addr>  Point external service name at addr
   -h, --help                         Print this help
@@ -42,13 +44,32 @@ macro_rules! cluster_options {
     () => {
         "\
 Cluster (experimental):
-      --cluster-addr <addr>          Override cluster address; keep private
+      --cluster-addr <addr>          Cluster address, joining if config has none
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
-  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
-  SIGTERM an instance hands its objects to its peers and exits within
+  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS.
+  WORKERD_CLUSTER_KEY, or the file that WORKERD_CLUSTER_KEY_FILE names,
+  overrides the config's cluster key, WORKERD_CLUSTER_BUCKET its bucket.
+  On SIGTERM, after any shutdown delay, an instance hands its objects to
+  its peers and exits within WORKERD_CLUSTER_STOP_TIMEOUT_MS, or else
   stopTimeoutMs (8 s by default). GET /ready on the cluster address
-  answers OK once serving.
+  answers OK once serving, until SIGTERM.
+"
+    };
+}
+
+macro_rules! stopping {
+    () => {
+        "\
+Stopping:
+  On SIGTERM the server drains: it stops accepting connections, lets
+  the open ones finish, and exits. WORKERD_SHUTDOWN_DELAY_MS, or else
+  shutdownDelayMs in the config, keeps it serving that many
+  milliseconds first, for load balancers that go on sending connections
+  for a while; a second SIGTERM drains at once. The supervisor's grace
+  period must cover the delay and the drain, in a cluster the delay
+  plus stopTimeoutMs. A cluster instance's GET /ready answers 503 from
+  the first SIGTERM on.
 "
     };
 }
@@ -57,24 +78,24 @@ macro_rules! cluster_setup {
     () => {
         "\
 Cluster setup:
-  Publish the Worker to the bucket, then start each instance; restart
-  them after each deploy.
+  Start each instance with the same key and bucket. A wrangler.json
+  joins with --cluster-addr. --data-dir holds its Durable Objects and
+  those of the bucket's deployments.
+
+    $ export WORKERD_CLUSTER_KEY=<secret>      # openssl rand -hex 32
+    $ export WORKERD_CLUSTER_BUCKET=s3://bucket/prefix
+    $ workerd serve --experimental wrangler.json \\
+        --cluster-addr 10.0.0.1:7000 --data-dir /var/lib/workerd
+
+  key is at least 32 bytes, the same everywhere. --cluster-addr is where
+  this instance listens for peers, on a private network; behind NAT,
+  --cluster-advertise is where they reach it. A .capnp config sets
+  these in cluster = (...) instead.
+
+  To serve more Workers on every instance, publish them to the bucket,
+  then restart the instances:
 
     $ workerd deploy --experimental . --bucket s3://bucket/prefix
-    $ workerd serve --experimental instance.capnp config
-
-    # instance.capnp, for a wrangler.json named app
-    using Workerd = import \"/workerd/workerd.capnp\";
-    const config :Workerd.Config = (
-      cluster = (bucket = \"s3://bucket/prefix\", key = \"<secret>\",
-                 address = \"10.0.0.1:7000\"),
-      services = [(name = \"do-storage\",
-                   disk = (path = \"/var/lib/workerd\", writable = true))],
-      sockets = [(name = \"http\", address = \"*:8787\", service = \"app\")],
-    );
-
-  key is at least 32 bytes, the same everywhere (openssl rand -hex 32).
-  address is where peers reach this instance, on a private network.
 "
     };
 }
@@ -148,6 +169,7 @@ Usage:
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
+  workerd repl [config]              Evaluate JavaScript (experimental)
   workerd <command> -h               Its options, as in workerd serve -h
 
 Quick start:
@@ -163,14 +185,15 @@ Cluster (experimental):
   so keep peers on a private network. Setup: workerd serve --help.
 
 Config:
-  A wrangler.json or wrangler.jsonc, as for wrangler dev, with fields:
+  A wrangler.json or wrangler.jsonc, as for wrangler dev, or a project
+  directory, which uses its wrangler.json, else wrangler.jsonc. Fields:
     $schema, name, main, compatibility_date, compatibility_flags, vars,
     durable_objects, exports, migrations, no_bundle
     with --experimental: kv_namespaces, queues, triggers, workflows,
     d1_databases, assets
   Other fields are errors. esbuild (node_modules or PATH) bundles main
-  unless no_bundle is set. State: .wrangler/state/workerd/. A .capnp
-  config also works.
+  unless no_bundle is set. State: .wrangler/state/workerd/, or
+  --data-dir. A .capnp config also works.
 
 Options:
   -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
@@ -211,6 +234,8 @@ Usage:
     python_options!(),
     "\n",
     capnp_options!(),
+    "\n",
+    stopping!(),
     "\n",
     cluster_setup!(),
 );
@@ -355,6 +380,53 @@ Cap'n Proto configs:
   -I, --import-path <dir>            Search dir for imports that start /
 ";
 
+pub const REPL: &str = "\
+workerd repl: evaluate JavaScript in a Worker (experimental).
+
+Usage:
+  workerd repl --experimental [options] [config] [const]
+
+On a terminal, or with -i, reads an input at a time and prints its
+result. Otherwise stdin is one script, run once stdin ends. Its result
+isn't printed, and a timer it doesn't await may never fire.
+The workerd global loads configs, as serve does, and calls their
+services and sockets; type .help in the REPL for more. [config], a
+wrangler.json, wrangler.jsonc or .capnp config as for serve, is loaded
+into the global s first; the script doesn't run if it fails to load.
+[const] names the constant of a .capnp config.
+
+The exit status is 1 if an input or the script failed: it threw, the
+promise it awaited rejected, it timed out, it is no command, or it was
+left unfinished. It is 1 too if a timer callback threw, a waitUntil()
+task rejected, or a rejection went unhandled.
+
+On a terminal, the lines typed are saved in ~/.workerd_repl_history;
+WORKERD_REPL_HISTORY names another file, or, set to the empty string,
+turns saving off.
+
+This is a tool for developing workerd, and may change or go away in
+any release.
+
+Options:
+      --compat-date <date>           The REPL's compat date; default: today
+      --compat-flag <flag>           Enable a compat flag; repeat for more
+      --autogate <name>              Enable an autogate; repeat for more
+      --v8-flag <flag>               Pass a flag to V8; repeat for more
+      --input-timeout <seconds>      Stop awaiting an input after this long
+  -i, --interactive                  Read stdin an input at a time
+      --experimental                 Required
+      --verbose                      Log to stderr
+  -h, --help                         Print this help
+  nodejs_compat is on unless a --compat-flag turns it or
+  nodejs_compat_v2 on or off, and so is
+  unhandled_rejection_after_microtask_checkpoint unless one turns it on
+  or off. Autogates are named in kebab-case, as in
+  --autogate=compression-rs. Every config the REPL loads runs with these
+  autogates and V8 flags, not its own autogates and v8Flags.
+  --input-timeout stops awaiting as Ctrl+C does, and the input fails;
+  JavaScript that runs without awaiting, such as a loop, runs on.
+";
+
 pub const COMPILED: &str = concat!(
     "\
 This is a workerd binary with an application compiled in, by workerd
@@ -375,6 +447,8 @@ Options:
     trace_options!(),
     "\n",
     python_options!(),
+    "\n",
+    stopping!(),
 );
 
 pub const FUZZILLI: &str = concat!(

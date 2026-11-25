@@ -4,6 +4,9 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::cell::Cell;
+use std::cell::RefCell;
+
 use super::*;
 use crate::hex;
 use crate::md5;
@@ -56,4 +59,132 @@ fn ranges() {
         assert_eq!(range.of(10), of, "{range:?}");
     }
     assert_eq!(Range::Suffix(1).of(0), None);
+}
+
+/// A store that answers its first `held` guarded writes as of unknown
+/// outcome without applying them yet, as the client answers a write whose
+/// earlier copy the bucket is still applying (R2's 409 to its resend). A
+/// held write is applied when the next write arrives if `lands`, and never
+/// otherwise.
+struct InProgress {
+    inner: memory::Memory,
+    held: Cell<usize>,
+    lands: bool,
+    copies: RefCell<Vec<(String, Payload, Option<Guard>)>>,
+    puts: Rc<Cell<usize>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl Store for InProgress {
+    async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
+        self.inner.get(key, to).await
+    }
+
+    async fn put(
+        &self,
+        key: &str,
+        body: Payload,
+        guard: Option<Guard>,
+        metadata: &[(&str, String)],
+    ) -> Result<Option<Version>> {
+        self.puts.set(self.puts.get() + 1);
+        let copy = self.copies.borrow_mut().pop();
+        if let Some((key, body, guard)) = copy.filter(|_| self.lands) {
+            self.inner.put(&key, body, guard, &[]).await?;
+        }
+        if guard.is_some() && self.held.get() > 0 {
+            self.held.set(self.held.get() - 1);
+            self.copies.borrow_mut().push((key.to_owned(), body, guard));
+            return Err(Error::OutcomeUnknown(format!("PUT {key}: 409")));
+        }
+        self.inner.put(key, body, guard, metadata).await
+    }
+
+    async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
+        self.inner.list(prefix).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key).await
+    }
+}
+
+fn bytes(body: &[u8]) -> Payload {
+    Payload::Bytes(Bytes::copy_from_slice(body))
+}
+
+/// A write whose refusal may be of its own copy still in progress is
+/// settled by what the object holds once that copy is done: while the
+/// guarded version is still there, the write goes again, and it lands once,
+/// whichever copy lands. Another writer's version refuses it at once.
+#[test]
+fn a_write_refused_beside_its_own_copy_in_progress_is_sent_again() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let pause = Duration::from_millis(1);
+        // The guard on the object as it is, and the bucket's store, with
+        // the object `k` holding `old` unless `absent`, then `other` if
+        // `replaced`.
+        let setup = |absent: bool, replaced: bool, held: usize, lands: bool| async move {
+            let inner = memory::Memory::default();
+            let guard = if absent {
+                Guard::Absent
+            } else {
+                let version = inner.put("k", bytes(b"old"), None, &[]).await.unwrap();
+                Guard::Match(version.unwrap())
+            };
+            if replaced {
+                inner.put("k", bytes(b"other"), None, &[]).await.unwrap();
+            }
+            let puts = Rc::new(Cell::new(0));
+            let store = InProgress {
+                inner,
+                held: Cell::new(held),
+                lands,
+                copies: RefCell::new(Vec::new()),
+                puts: puts.clone(),
+            };
+            (Bucket::new(store, ""), guard, puts)
+        };
+        for (absent, replaced, held, lands, landed, writes) in [
+            // The held copy lands as the write goes again, and refuses it.
+            (true, false, 1, true, true, 2),
+            (false, false, 1, true, true, 2),
+            // The held copy never lands: the write sent again does.
+            (true, false, 1, false, true, 2),
+            (false, false, 2, false, true, 3),
+            // Another writer's version: refused, nothing sent again.
+            (false, true, 1, false, false, 1),
+        ] {
+            let case = format!("absent {absent}, replaced {replaced}, held {held}, lands {lands}");
+            let (bucket, guard, puts) = setup(absent, replaced, held, lands).await;
+            let written = bucket
+                .put_if_settled("k", b"new".to_vec(), guard, pause)
+                .await;
+            let written = written.unwrap();
+            let current = bucket.get("k").await.unwrap().unwrap();
+            if landed {
+                assert_eq!(current.0, b"new", "{case}");
+                assert_eq!(written, Some(current.1), "{case}");
+            } else {
+                assert_eq!(current.0, b"other", "{case}");
+                assert_eq!(written, None, "{case}");
+            }
+            assert_eq!(puts.get(), writes, "{case}");
+        }
+        // Held every time: the outcome stays unknown, after a bounded
+        // number of writes.
+        let (bucket, guard, puts) = setup(false, false, usize::MAX, false).await;
+        let written = bucket
+            .put_if_settled("k", b"new".to_vec(), guard, pause)
+            .await;
+        assert!(
+            matches!(written, Err(Error::OutcomeUnknown(_))),
+            "{written:?}"
+        );
+        assert_eq!(puts.get(), SETTLE_WRITES as usize);
+    });
 }

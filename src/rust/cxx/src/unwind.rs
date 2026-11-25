@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 #![allow(dead_code)]
 
+use alloc::string::String;
 use core::mem;
 use std::panic;
 
@@ -52,7 +53,7 @@ where
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(foreign_call)) {
         Ok(()) => Result::ok(),
-        Err(err) => panic_result(label, err),
+        Err(err) => panic_result(label, &*err),
     }
 }
 
@@ -63,27 +64,42 @@ where
 {
     match panic::catch_unwind(panic::AssertUnwindSafe(foreign_call)) {
         Ok(r) => r,
-        Err(err) => panic_result(label, err),
+        Err(err) => panic_result(label, &*err),
     }
 }
 
-fn panic_result(label: &'static str, err: alloc::boxed::Box<dyn core::any::Any + Send>) -> Result {
-    if let Some(err) = err.downcast_ref::<alloc::string::String>() {
-        return Result::error(
-            KjError::new(
-                KjExceptionType::Failed,
-                std::format!("panic in {label}: {err}"),
-            ),
-            file!(),
-            line!(),
-        );
-    } else if err.downcast::<CanceledException>().is_ok() {
+fn panic_result(label: &'static str, err: &(dyn core::any::Any + Send)) -> Result {
+    if err.is::<CanceledException>() {
         return Result::canceled();
     }
 
     Result::error(
-        KjError::new(KjExceptionType::Failed, std::format!("panic in {label}")),
+        KjError::new(KjExceptionType::Failed, panic_description(label, err)),
         file!(),
         line!(),
     )
+}
+
+/// Describes a panic with `payload` that happened in `label`, as `panic in {label}`, followed by
+/// the panic's message when it has one.
+#[cold]
+pub fn panic_description(label: &str, payload: &(dyn core::any::Any + Send)) -> String {
+    match panic_message(payload) {
+        Some(message) => std::format!("panic in {label}: {message}"),
+        None => std::format!("panic in {label}"),
+    }
+}
+
+/// The message of a panic with `payload`: the string that `panic!()` and `panic_any()` take, or
+/// the description of a `CanceledException`.
+pub fn panic_message(payload: &(dyn core::any::Any + Send)) -> Option<&str> {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        Some(message)
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        Some(message)
+    } else if payload.is::<CanceledException>() {
+        Some("kj::CanceledException")
+    } else {
+        None
+    }
 }

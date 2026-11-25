@@ -5,7 +5,6 @@
 #include "worker-factory-impl.h"
 
 #include <workerd/api/analytics-engine.capnp.h>
-#include <workerd/api/bench.h>
 #include <workerd/api/trace.h>
 #include <workerd/io/access-info.h>
 #include <workerd/io/bundle-fs.h>
@@ -222,8 +221,7 @@ kj::Own<PendingToken> factory_encode_subrequest_token(const WorkerFactory& facto
   auto service = kj::str(serviceName);
   auto ep = toKj(entrypoint);
   return kj::heap<PendingToken>(factory.getImpl().channelTokenHandler.encodeSubrequestChannelToken(
-      usage, service, ep.map([](kj::String& e) -> kj::StringPtr { return e; }), propsRef(props),
-      Persistent(persistent)));
+      usage, service, ep, propsRef(props), Persistent(persistent)));
 }
 
 kj::Own<PendingToken> factory_encode_actor_class_token(const WorkerFactory& factory,
@@ -275,61 +273,10 @@ Worker::Actor::Id normalizeActorId(Worker::Actor::Id id) {
 }
 
 // =======================================================================================
-// Single-tenant policy: no limits, and tracing that feeds tail workers directly.
+// Single-tenant policy (the limits are in single-tenant-policy.h): observers, and tracing that
+// feeds tail workers directly.
 
 namespace {
-
-class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
- public:
-  v8::Isolate::CreateParams getCreateParams() override {
-    return {};
-  }
-  void customizeIsolate(v8::Isolate* isolate) override {}
-  ActorCacheSharedLruOptions getActorCacheLruOptions() override {
-    return {.softLimit = 16 * (1ull << 20),
-      .hardLimit = 128 * (1ull << 20),
-      .staleTimeout = 30 * kj::SECONDS,
-      .dirtyListByteLimit = 8 * (1ull << 20),
-      .maxKeysPerRpc = 128,
-      // In-memory-only actors: the cache never flushes to its (empty) backing storage.
-      .neverFlush = true};
-  }
-  kj::Own<void> enterStartupJs(jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterStartupPython(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterDynamicImportJs(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterLoggingJs(jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterInspectorJs(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  void completedRequest(kj::StringPtr id) const override {}
-  bool exitJs(jsg::Lock& lock) const override {
-    return false;
-  }
-  void reportMetrics(IsolateObserver& isolateMetrics) const override {}
-  kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
-    return kj::none;
-  }
-  bool hasExcessivelyExceededHeapLimit() const override {
-    return false;
-  }
-  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
-    return trackedWasmInstances;
-  }
-
- private:
-  TrackedWasmInstanceList trackedWasmInstances;
-};
 
 // Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
 // --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
@@ -370,44 +317,6 @@ kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& option
   }
   return kj::atomicRefcounted<IsolateObserver>();
 }
-
-class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
- public:
-  kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
-    return {};
-  }
-  void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
-  void newKvRequest(KvOpType op) override {}
-  void newAnalyticsEngineRequest() override {}
-  kj::Promise<void> limitDrain() override {
-    return kj::NEVER_DONE;
-  }
-  kj::Promise<void> limitScheduled() override {
-    return kj::NEVER_DONE;
-  }
-  kj::Duration getAlarmLimit() override {
-    return 15 * kj::MINUTES;
-  }
-  size_t getBufferingLimit() override {
-    return kj::maxValue;
-  }
-  kj::Maybe<EventOutcome> getLimitsExceeded() override {
-    return kj::none;
-  }
-  kj::Promise<void> onLimitsExceeded() override {
-    return kj::NEVER_DONE;
-  }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
-  void requireLimitsNotExceeded() override {}
-  void reportMetrics(RequestObserver& requestMetrics) override {}
-  kj::Duration consumeTimeElapsedForPeriodicLogging() override {
-    return 0 * kj::SECONDS;
-  }
-  size_t getSqliteMemoryUsage() const override {
-    return 0;
-  }
-};
 
 // Records a request's outcome on its tracer, wrapping the WorkerInterface to observe failures.
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
@@ -984,8 +893,7 @@ class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSel
 
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
       IoChannelFactory::ChannelTokenUsage usage) override {
-    return tokens.encodeSubrequestChannelToken(usage, serviceName,
-        entrypoint.map([](kj::String& e) -> kj::StringPtr { return e; }), props, persistent);
+    return tokens.encodeSubrequestChannelToken(usage, serviceName, entrypoint, props, persistent);
   }
 
  private:
@@ -1131,7 +1039,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     OtlpServiceInfo service{
       .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
       .entrypoint = entrypointName,
-      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
+      .durableObjectId = durableObjectId,
     };
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
@@ -1247,7 +1155,7 @@ kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
   auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
   auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
   return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
-      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer),
+      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer), kj::none /* triggerContext */,
       kj::mv(metadata->restoredSelfTokenFactory));
 }
 
@@ -1417,6 +1325,13 @@ kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex) {
       "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
   return kj::heap<ActorIdHandle>(kj::Own<ActorIdFactory::ActorId>(
       kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none)));
+}
+
+kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromName(kj::str(name)));
+}
+kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromString(kj::str(hex)));
 }
 
 // =======================================================================================
@@ -1594,9 +1509,8 @@ kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags
     auto version = getPythonBundleName(release);
     if (manager.getPyodideBundle(version) != kj::none) co_return;
     auto bytes = co_await pyodide_bundle_fetch(
-        toRust(options.pyodideBundleDiskCacheDir.map(
-            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
-        toRust(version), toRust(release.getIntegrity()));
+        toRust(kj::Maybe<kj::StringPtr>(options.pyodideBundleDiskCacheDir)), toRust(version),
+        toRust(release.getIntegrity()));
     // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
     // this one waited.
     if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;
@@ -1703,11 +1617,12 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   co_await preloadPython(factory, featureFlags);
   auto& timing = impl->startupTiming;
-  auto startTime = api::BenchTiming::now();
+  auto startTime = bench_clock_now();
   // How long it has been since `start`.
-  auto since = [](api::BenchTiming start) {
-    auto elapsed = api::BenchTiming::now() - start;
-    return StartupPhaseTiming{.wall_ns = elapsed.wallNs, .cpu_ns = elapsed.cpuNs};
+  auto since = [](StartupPhaseTiming start) {
+    auto now = bench_clock_now();
+    return StartupPhaseTiming{
+      .wall_ns = now.wall_ns - start.wall_ns, .cpu_ns = now.cpu_ns - start.cpu_ns};
   };
 
   // The file system roots use their defaults; the config does not expose mount points.
@@ -1835,7 +1750,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     }
   }
 
-  auto isolateStart = api::BenchTiming::now();
+  auto isolateStart = bench_clock_now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = since(isolateStart);
   KJ_IF_SOME(r, registrar) {
@@ -1881,7 +1796,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
-  auto scriptStart = api::BenchTiming::now();
+  auto scriptStart = bench_clock_now();
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
@@ -1889,7 +1804,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the
   // Worker constructed first; the handle is held until then.
-  auto workerStart = api::BenchTiming::now();
+  auto workerStart = bench_clock_now();
   auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {

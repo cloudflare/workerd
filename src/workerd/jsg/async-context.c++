@@ -147,14 +147,18 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
           }));
 }
 
-v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
-    Lock& js, v8::Local<v8::Function> fn, kj::Maybe<v8::Local<v8::Value>> thisArg) {
+v8::Local<v8::Function> AsyncContextFrame::wrapRoot(Lock& js,
+    v8::Local<v8::Function> fn,
+    jsg::Function<void()> validate,
+    kj::Maybe<v8::Local<v8::Value>> thisArg) {
   auto context = js.v8Context();
 
   return js.wrapReturningFunction(context,
       JSG_VISITABLE_LAMBDA(
-          (thisArg = js.v8Ref(thisArg.orDefault(context->Global())), fn = js.v8Ref(fn)),
-          (thisArg, fn), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+          (validate = kj::mv(validate), thisArg = js.v8Ref(thisArg.orDefault(context->Global())),
+              fn = js.v8Ref(fn)),
+          (validate, thisArg, fn), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            validate(js);
             auto function = fn.getHandle(js);
 
             v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());

@@ -35,6 +35,8 @@ namespace workerd::server {
 
 using api::pyodide::PythonConfig;
 
+class ReplControl;
+
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
  public:
@@ -67,12 +69,17 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
-  const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
-      jsg::Lock& lock) const override;
+  v8::Local<v8::Promise> runBench(jsg::Lock& lock,
+      v8::Local<v8::Value> handler,
+      v8::Local<v8::Value> env,
+      v8::Local<v8::Value> ctx,
+      kj::ArrayPtr<const capnp::word> params) const override;
   kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&> tryGetEventListenerCallbackTypeHandler(
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
+  // The `workerd` global of `workerd repl` (server/repl/), which only the REPL's isolate has.
+  jsg::JsObject wrapReplControl(jsg::Lock& lock, jsg::Ref<ReplControl> ref) const;
   const jsg::IsolateObserver& getObserver() const override;
   void setIsolateObserver(IsolateObserver&) override;
 
