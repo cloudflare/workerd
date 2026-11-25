@@ -6,13 +6,13 @@
 // serializes errors as objects sees (ledger #1 and #2).
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingV8Impl } from 'which-impl';
 import { kLegacyCodes } from 'helpers';
 
 export const jsonStringify = {
   test() {
     const error = new DOMException('m', 'AbortError');
-    const expected = usingTsImpl
+    const expected = usingV8Impl
       ? {}
       : { code: 20, name: 'AbortError', message: 'm', stack: error.stack };
     deepStrictEqual(JSON.parse(JSON.stringify(error)), expected);
@@ -22,7 +22,7 @@ export const jsonStringify = {
 export const enumerableKeys = {
   test() {
     const error = new DOMException('m', 'AbortError');
-    const expected = usingTsImpl ? [] : ['code', 'name', 'message', 'stack'];
+    const expected = usingV8Impl ? [] : ['code', 'name', 'message', 'stack'];
     deepStrictEqual(Object.keys(error), expected);
     deepStrictEqual(Object.keys({ ...error }), expected);
     deepStrictEqual(Object.keys(Object.assign({}, error)), expected);
@@ -31,7 +31,7 @@ export const enumerableKeys = {
     const forIn = [];
     for (const key in error) forIn.push(key);
     const inherited = kLegacyCodes.map(([constant]) => constant);
-    if (usingTsImpl) inherited.push('code', 'message', 'name');
+    if (usingV8Impl) inherited.push('code', 'message', 'name');
     deepStrictEqual(forIn.sort(), [...expected, ...inherited].sort());
   },
 };

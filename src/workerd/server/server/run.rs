@@ -8,16 +8,20 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::rc::Weak;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use futures::future::Either;
 use futures::future::FusedFuture;
 use futures::future::LocalBoxFuture;
 use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use worker::CxxWorkerInterface;
 use worker::Interface;
@@ -34,6 +38,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::cluster::Ready;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -79,6 +84,12 @@ pub struct RunOptions {
     /// The source deployment of each appended service and of each service left absent because its
     /// deployment was skipped.
     pub deployments: Deployments,
+    /// Sent the server once `run` has started every listener; dropped unsent if the config is
+    /// refused or the start fails. `--control-fd`'s `listen` events, for a server embedded in this
+    /// process. A run given it serves until drained, even with nothing to listen on.
+    pub started: Option<oneshot::Sender<Weak<Server>>>,
+    /// Drain as soon as told to, rather than serving on through `Config.shutdownDelayMs`.
+    pub drain_at_once: bool,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -124,12 +135,14 @@ impl Control {
     }
 }
 
+/// The server's listener futures; each ends when the server has drained, or fails fatally.
+type Listeners = FuturesUnordered<LocalBoxFuture<'static, Result<()>>>;
+
 /// Everything set up before either command diverges: the graph, the listeners, the drain
 /// signal.
 struct Running {
     server: Rc<Server>,
-    /// The listener futures; each ends when the server has drained, or fails fatally.
-    listeners: FuturesUnordered<LocalBoxFuture<'static, Result<()>>>,
+    listeners: Listeners,
     drain: watch::Sender<bool>,
 }
 
@@ -196,34 +209,7 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let mut listeners = FuturesUnordered::new();
-    let mut ports = Vec::new();
-    let sockets = config.get_sockets().map_err(capnp_error)?;
-    for (sock, bound) in sockets.iter().zip(bound.sockets) {
-        // A socket that failed to bind already reported its error.
-        let Some((bound, address)) = bound else {
-            continue;
-        };
-        let name = text(sock.get_name())?;
-        let mut errors = Vec::new();
-        let designator = Designator::from_reader(
-            sock.get_service().map_err(capnp_error)?,
-            format!("Socket \"{name}\""),
-            &mut errors,
-        )
-        .map_err(capnp_error)?;
-        for error in errors {
-            server.report().error(error);
-        }
-        let channel = server.lookup(&designator);
-        let port = listen::bound_port(&bound)?;
-        ports.push((name, port, listen::url(sock, &address, port)));
-        if let Some(listener) =
-            listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
-        {
-            listeners.push(listener);
-        }
-    }
+    let (listening, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
@@ -233,8 +219,8 @@ async fn start(
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener, &mut control)?;
     }
-    for (name, port, url) in ports {
-        control.listen(&name, port, url);
+    for socket in listening {
+        control.listen(&socket.name, socket.port, socket.url);
     }
     listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
@@ -245,6 +231,18 @@ async fn start(
             Rc::clone(&context),
             listener,
         )));
+    }
+    if let Some(started) = options.started.take() {
+        // The host reaches an embedded server through its own channels too, so the server serves
+        // until the drain even if no socket, trigger or port keeps a listener running.
+        let mut draining = context.draining.clone();
+        listeners.push(Box::pin(async move {
+            // The sender is the run's, which outlives its listeners.
+            let _ = draining.wait_for(|draining| *draining).await;
+            Ok(())
+        }));
+        // The receiver may be gone; nothing else depends on the signal.
+        let _ = started.send(Rc::downgrade(&server));
     }
 
     Ok(Some(Running {
@@ -272,6 +270,53 @@ fn start_cluster(
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
     Ok(())
+}
+
+/// A socket that listens, as its `listen` event reports it.
+struct ListeningSocket {
+    name: String,
+    port: u16,
+    url: Option<String>,
+}
+
+/// Starts the listener of every socket of the config that bound; the sockets, for their `listen`
+/// events, and the listeners. A socket whose service does not resolve is a config error.
+fn socket_listeners(
+    context: &Rc<ListenContext>,
+    config: config::Reader<'_>,
+    bound: Vec<Option<(BoundSocket, String)>>,
+    server: &Server,
+) -> Result<(Vec<ListeningSocket>, Listeners)> {
+    let mut listening = Vec::new();
+    let listeners = Listeners::new();
+    let sockets = config.get_sockets().map_err(capnp_error)?;
+    for (sock, bound) in sockets.iter().zip(bound) {
+        // A socket that failed to bind already reported its error.
+        let Some((bound, address)) = bound else {
+            continue;
+        };
+        let name = text(sock.get_name())?;
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            sock.get_service().map_err(capnp_error)?,
+            format!("Socket \"{name}\""),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            server.report().error(error);
+        }
+        let channel = server.lookup(&designator);
+        let port = listen::bound_port(&bound)?;
+        let url = listen::url(sock, &address, port);
+        listening.push(ListeningSocket { name, port, url });
+        if let Some(listener) =
+            listener(Rc::clone(context), sock, bound, &address, channel, server)?
+        {
+            listeners.push(listener);
+        }
+    }
+    Ok((listening, listeners))
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -415,28 +460,35 @@ fn report_unmatched_overrides(
 }
 
 /// Drives the listeners until they all end (the server drained) or one fails.
-async fn serve_listeners(
-    listeners: &mut FuturesUnordered<LocalBoxFuture<'static, Result<()>>>,
-) -> Result<()> {
+async fn serve_listeners(listeners: &mut Listeners) -> Result<()> {
     while let Some(result) = listeners.next().await {
         result?;
     }
     Ok(())
 }
 
-/// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
-/// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
-/// error returned.
+/// `workerd serve`: serves until told to drain, then stops accepting connections, lets the open
+/// ones finish, and stops the actors' containers. A listener failing is fatal and is the error
+/// returned.
+///
+/// Each item of `drain`, which never ends, is a drain signal. After the first, the server serves
+/// on for the config's `shutdownDelayMs`, or until the next signal, then drains (`drain_due`).
 ///
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
-/// `stopTimeoutMs` bounds all of it.
+/// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
+#[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
     report: Reporter,
-    drain: impl Future<Output = ()>,
+    drain: impl Stream<Item = ()>,
 ) -> Result<()> {
+    let delay = if options.drain_at_once {
+        Duration::ZERO
+    } else {
+        shutdown_delay(&factory)?
+    };
     let Some(Running {
         server,
         mut listeners,
@@ -446,10 +498,16 @@ pub async fn run(
         return Ok(());
     };
 
-    // From here on the lease thread watches the event loop. Whatever way this returns, the
-    // cluster port answers that this instance is not ready.
-    let _serving = server.cluster().map(ClusterNode::serving);
-    let drain = std::pin::pin!(drain);
+    // A SIGTERM that arrived while the server started reaches `drain` only once the runtime has
+    // polled its drivers, which a start that never had to wait may not have let it do. tokio wakes
+    // a task that yields only after it has polled them, so the check below sees such a signal.
+    tokio::task::yield_now().await;
+    let mut drain = std::pin::pin!(drain);
+    let pending = drain.next().now_or_never().is_some();
+    // From here on the lease thread watches the event loop. The cluster port answers ready
+    // until the instance is told to drain or this returns.
+    let ready = server.cluster().map(ClusterNode::ready);
+    let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
@@ -554,6 +612,44 @@ pub async fn run(
     }
     tracing::warn!("leaving containers behind at the stop deadline");
     Ok(())
+}
+
+/// The config's `shutdownDelayMs`.
+fn shutdown_delay(factory: &Factory) -> Result<Duration> {
+    let message = factory.config()?;
+    let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
+    Ok(Duration::from_millis(config.get_shutdown_delay_ms().into()))
+}
+
+/// Resolves when `run` is to drain. That is at once if a signal was `pending` as the server
+/// started: it was never ready, so nothing sends it traffic to serve through the delay. Otherwise
+/// it is `delay` (`Config.shutdownDelayMs`) after the next item of `drain`, or on the item after
+/// it, whichever comes first. Load balancers go on sending connections for a while, which are
+/// served as before meanwhile, and a cluster node keeps its Durable Objects and its place in the
+/// cluster. Its readiness probe fails from the signal on (`ready` is dropped), so that what routes
+/// by it sends no more.
+async fn drain_due(
+    factory: &Factory,
+    delay: Duration,
+    pending: bool,
+    ready: Option<Ready>,
+    mut drain: Pin<&mut impl Stream<Item = ()>>,
+) {
+    if pending {
+        return;
+    }
+    drain.next().await;
+    drop(ready);
+    if delay.is_zero() {
+        return;
+    }
+    let seconds = delay.as_secs_f64();
+    tracing::warn!(
+        "drain signal received: serving for {seconds:.1} s more (shutdownDelayMs), then \
+         draining; a second signal drains at once"
+    );
+    let delay = std::pin::pin!(factory.sleep(delay));
+    futures::future::select(delay, drain.next()).await;
 }
 
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.

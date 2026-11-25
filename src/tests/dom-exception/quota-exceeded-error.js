@@ -5,16 +5,17 @@
 /* global QuotaExceededError */
 
 // QuotaExceededError (WebIDL section 2.8.3), the DOMException subclass that
-// only the TypeScript implementation has (ledger #14). It is cloneable as a
-// class implemented in JavaScript; dom-exception-bootstrap-test.c++ pins the
-// bytes, and what reading them does with either implementation.
+// only V8's implementation has (ledger #14). It is cloneable as tag 25, as
+// a DOMException is as tag 24 (serialization.js), with its amounts too;
+// dom-exception-bootstrap-test.c++ pins the bytes, and what reading them does
+// with either implementation.
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { env } from 'cloudflare:workers';
 import {
+  enhancedErrorSerialization,
   setToStringTag,
-  specCompliantPropertyAttributes,
-  usingTsImpl,
+  usingV8Impl,
 } from 'which-impl';
 import { assertDomException, attributesOf } from 'helpers';
 
@@ -41,25 +42,22 @@ function assertQuotaExceededError(
 
 export const quotaExceededErrorPlacement = {
   test() {
-    if (!usingTsImpl) {
+    if (!usingV8Impl) {
       strictEqual('QuotaExceededError' in globalThis, false);
       return;
     }
     // Where DOMException is (api-surface.js's globalPlacement).
     strictEqual(
       attributesOf(Object.getPrototypeOf(globalThis), 'QuotaExceededError'),
-      'datawec'
+      'none'
     );
-    strictEqual(
-      attributesOf(globalThis, 'QuotaExceededError'),
-      specCompliantPropertyAttributes ? 'datawc' : 'none'
-    );
+    strictEqual(attributesOf(globalThis, 'QuotaExceededError'), 'datawc');
   },
 };
 
 export const quotaExceededErrorShape = {
   test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     strictEqual(QuotaExceededError.name, 'QuotaExceededError');
     strictEqual(QuotaExceededError.length, 0);
     strictEqual(Object.getPrototypeOf(QuotaExceededError), DOMException);
@@ -74,7 +72,6 @@ export const quotaExceededErrorShape = {
       'constructor',
       'quota',
       'requested',
-      'Symbol(cloudflare:internal-class)',
       ...(setToStringTag ? ['Symbol(Symbol.toStringTag)'] : []),
     ]);
     strictEqual(attributesOf(proto, 'constructor'), 'datawc');
@@ -94,7 +91,7 @@ export const quotaExceededErrorShape = {
 
 export const quotaExceededErrorInstances = {
   test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     const error = new QuotaExceededError();
     ok(error instanceof DOMException);
     ok(error instanceof Error);
@@ -129,7 +126,7 @@ export const quotaExceededErrorInstances = {
 
 export const quotaExceededErrorConversion = {
   test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     // The message, then the dictionary's members in lexicographic order,
     // each converted as it is read.
     const log = [];
@@ -201,7 +198,7 @@ export const quotaExceededErrorConversion = {
 
 export const quotaExceededErrorRangeErrors = {
   test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     for (const options of [
       { quota: -1 },
       { quota: -0.5 },
@@ -215,7 +212,7 @@ export const quotaExceededErrorRangeErrors = {
 
 export const quotaExceededErrorBrandChecks = {
   test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     const proto = QuotaExceededError.prototype;
     const getters = ['quota', 'requested'].map(
       (attribute) => Object.getOwnPropertyDescriptor(proto, attribute).get
@@ -258,7 +255,7 @@ export const quotaExceededErrorBrandChecks = {
 
 export const quotaExceededErrorCloned = {
   async test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     const error = new QuotaExceededError('m', {
       quota: 0.1,
       requested: Number.MAX_VALUE,
@@ -288,17 +285,35 @@ export const quotaExceededErrorCloned = {
       )
     );
 
-    // Its own name, message and amounts, not properties that shadow them,
-    // and nothing else.
+    // Its own message and amounts, and, with enhanced error serialization,
+    // its other own properties, those that shadow its attributes included.
     const shadowed = new QuotaExceededError('m', { quota: 1 });
     Object.defineProperty(shadowed, 'message', { value: 'other' });
     Object.defineProperty(shadowed, 'quota', { value: 5 });
     shadowed.extra = 1;
-    assertQuotaExceededError(structuredClone(shadowed), {
-      message: 'm',
-      quota: 1,
-      requested: null,
-    });
+    const shadowedClone = structuredClone(shadowed);
+    const attribute = (prototype, name) =>
+      Object.getOwnPropertyDescriptor(prototype, name).get.call(shadowedClone);
+    deepStrictEqual(
+      [
+        attribute(DOMException.prototype, 'message'),
+        attribute(QuotaExceededError.prototype, 'quota'),
+        attribute(QuotaExceededError.prototype, 'requested'),
+      ],
+      ['m', 1, null]
+    );
+    if (enhancedErrorSerialization) {
+      deepStrictEqual(
+        [shadowedClone.message, shadowedClone.quota, shadowedClone.extra],
+        ['other', 5, 1]
+      );
+    } else {
+      assertQuotaExceededError(shadowedClone, {
+        message: 'm',
+        quota: 1,
+        requested: null,
+      });
+    }
 
     // A subclass's instance clones as a QuotaExceededError, and a
     // DOMException named QuotaExceededError as a DOMException.
@@ -337,7 +352,7 @@ export const quotaExceededErrorCloned = {
 
 export const quotaExceededErrorOverRpc = {
   async test() {
-    if (!usingTsImpl) return;
+    if (!usingV8Impl) return;
     // RPC gives the objects it returns a disposer.
     assertQuotaExceededError(
       await env.RPC.returnQuotaExceededError(),

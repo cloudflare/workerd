@@ -1,0 +1,341 @@
+# The sample: three workerd pods that serve the app and share a bucket, and the demo bucket, a
+# single RustFS instance. See README.md. Before applying this, create the cluster key and the
+# bucket's credentials:
+#
+#     kubectl create secret generic workerd-cluster --from-literal=key="$(openssl rand -hex 32)"
+#     kubectl create secret generic bucket-credentials \
+#       --from-literal=access-key="$(openssl rand -hex 16)" \
+#       --from-literal=secret-key="$(openssl rand -hex 32)"
+#
+# The pods meet the "restricted" Pod Security Standard. Each image is named with a tag of its own
+# build: build a new image under a new tag and change it here, because `IfNotPresent` reuses an
+# image that a node already has under the same tag.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workerd
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: workerd
+  # Start one new pod at a time and stop an old one after the new one has been ready for 10 s,
+  # longer than the 8 s a stopping pod takes to hand off its Durable Objects.
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: workerd
+    spec:
+      # Above the time a pod takes to stop after SIGTERM: the 20 s shutdown delay, then the 8 s stop
+      # timeout (WORKERD_SHUTDOWN_DELAY_MS and WORKERD_CLUSTER_STOP_TIMEOUT_MS below).
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        # Makes the data volume writable by that group.
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # Prefer spreading the pods over the nodes, so a node going away stops as few of them as
+      # possible. On a single node, or under scheduling pressure, pods might still share a node.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: workerd
+      containers:
+        - name: workerd
+          image: workerd-sample:v1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --experimental
+            # Join the cluster. The pods reach each other on port 7000 of their pod IPs.
+            - --cluster-addr=$(POD_IP):7000
+            # Keep this pod's state, such as its copy of its Durable Objects, on the `data` volume.
+            - --data-dir=/data
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: cluster
+              containerPort: 7000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: WORKERD_CLUSTER_KEY_FILE
+              value: /etc/workerd-cluster/key
+            - name: WORKERD_CLUSTER_BUCKET
+              value: s3://cluster/sample
+            - name: AWS_ENDPOINT_URL
+              value: http://rustfs:9000
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: secret-key
+            # Keep serving for 20 s after SIGTERM, while a cloud load balancer in front of the
+            # Service might still send requests here, answering not ready meanwhile. Then hand off
+            # this pod's Durable Objects and exit, within the stop timeout.
+            - name: WORKERD_SHUTDOWN_DELAY_MS
+              value: '20000'
+            - name: WORKERD_CLUSTER_STOP_TIMEOUT_MS
+              value: '8000'
+          # 503 while the pod is starting or stopping, so the Service sends it no new requests.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: cluster
+            periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cluster-key
+              mountPath: /etc/workerd-cluster
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: cluster-key
+          secret:
+            secretName: workerd-cluster
+---
+# Voluntary disruptions, such as a node drain, may evict a workerd pod only while every other one
+# is ready. This doesn't wait out minReadySeconds, so a second pod can be evicted while the first
+# is still handing off its Durable Objects.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: workerd
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: workerd
+---
+# Serves the app on port 80 of a load balancer's address, public on a cloud provider.
+apiVersion: v1
+kind: Service
+metadata:
+  name: workerd
+spec:
+  type: LoadBalancer
+  selector:
+    app: workerd
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Anyone who can reach a pod's cluster port with the key can call every service in the pod, and
+# the traffic is not encrypted. Only the cluster's own pods may connect to it. This takes effect
+# only where the network plugin enforces NetworkPolicy, and does not apply to connections from the
+# pod's own node, such as the kubelet's readiness probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workerd-cluster-port
+spec:
+  podSelector:
+    matchLabels:
+      app: workerd
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: workerd
+      ports:
+        - port: 7000
+---
+# The demo bucket: one RustFS instance, which keeps its objects on a persistent volume. It has no
+# redundancy: while its pod is down, requests for Durable Objects fail.
+# Use a replicated store or a cloud bucket for anything else; see README.md.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rustfs
+spec:
+  serviceName: rustfs
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rustfs
+  template:
+    metadata:
+      labels:
+        app: rustfs
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The image's user, `rustfs`.
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rustfs
+          image: docker.io/rustfs/rustfs:1.0.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: s3
+              containerPort: 9000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: access-key
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: secret-key
+            # Log to stdout rather than to files under /logs.
+            - name: RUSTFS_OBS_LOG_DIRECTORY
+              value: ''
+            # Serve only the S3 API, and do not look for updates.
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: 'false'
+            - name: RUSTFS_CHECK_UPDATE
+              value: 'false'
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: s3
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+spec:
+  selector:
+    app: rustfs
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+---
+# Creates the bucket `cluster` after RustFS responds. Creating it again succeeds, so the Job can be
+# run again.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-bucket
+spec:
+  template:
+    metadata:
+      labels:
+        app: rustfs-bucket
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        # The image's user, `curl_user`.
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-bucket
+          image: docker.io/curlimages/curl:8.23.0
+          args:
+            - --fail
+            - --silent
+            - --show-error
+            - --retry=60
+            - --retry-delay=2
+            - --retry-all-errors
+            - --aws-sigv4=aws:amz:us-east-1:s3
+            - --user=$(ACCESS_KEY):$(SECRET_KEY)
+            - --request=PUT
+            - http://rustfs:9000/cluster
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: access-key
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bucket-credentials
+                  key: secret-key
+---
+# Whoever can write to the bucket can publish code that every workerd pod runs, so only the
+# workerd pods and the Job that creates the bucket may connect to RustFS. As above, this takes
+# effect only where the network plugin enforces NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rustfs
+spec:
+  podSelector:
+    matchLabels:
+      app: rustfs
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: workerd
+        - podSelector:
+            matchLabels:
+              app: rustfs-bucket
+      ports:
+        - port: 9000

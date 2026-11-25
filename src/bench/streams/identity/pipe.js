@@ -6,7 +6,13 @@
 // read to the end: the shape of a worker that hands a stream it produces to
 // the runtime as a body.
 
-import { SHAPES, chunkOf, drainBytes, expectEqual, shapeLabel } from 'helpers';
+import {
+  chunkOf,
+  drainBytes,
+  expectEqual,
+  shapeLabel,
+  shapesFor,
+} from 'helpers';
 
 // A value stream of `count` chunks of `size` bytes. Value streams don't
 // transfer their chunks, so one buffer serves as every chunk.
@@ -34,7 +40,8 @@ function byteStream(count, size) {
 
 export const pipe = {
   bench(b) {
-    for (const [count, size] of SHAPES) {
+    const shapes = shapesFor(b);
+    for (const [count, size] of shapes) {
       b.run(
         `pipeTo() from a value stream ${shapeLabel(count, size)}`,
         async () => {
@@ -47,7 +54,7 @@ export const pipe = {
         }
       );
     }
-    for (const [count, size] of SHAPES) {
+    for (const [count, size] of shapes) {
       b.run(
         `pipeThrough() from a byte stream ${shapeLabel(count, size)}`,
         async () => {

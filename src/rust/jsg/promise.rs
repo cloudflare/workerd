@@ -248,6 +248,22 @@ fn pass_rejection<'a, T>(
     Err(Error::pending())
 }
 
+/// The callback of a reaction that [`Local::then_conversion`] registers: calls `F` with the
+/// fulfillment value.
+fn conversion_reaction<'a, F>(lock: &mut Lock<'a>, args: &mut FunctionCallbackInfo<'a>)
+where
+    F: UnitType
+        + 'static
+        + for<'b> Fn(&mut Lock<'b>, Local<'b, Value>) -> Result<Local<'b, Value>, Error>,
+{
+    // SAFETY: `then_conversion` was handed a value of `F`.
+    let f = unsafe { crate::scope::unit_value::<F>() };
+    match f(lock, args.get(0)) {
+        Ok(value) => args.set_return_value(value),
+        Err(err) => lock.throw_exception(&err),
+    }
+}
+
 impl<'s> Local<'s, Promise> {
     /// The promise's state.
     pub fn state(self) -> PromiseState {
@@ -345,6 +361,52 @@ impl<'s> Local<'s, Promise> {
         self.then_or_catch(lock, data, pass_fulfillment::<T>, on_rejected)
     }
 
+    /// Registers `on_fulfilled` to run with the fulfillment value, and returns the promise for
+    /// what it returns, as C++ JSG's `PromiseWrapper` adds the reactions that convert a promise's
+    /// value (`thenWrap()`, `thenUnwrap()`): one function, with `data` as its V8 data, which it
+    /// keeps alive until the promise settles, and no reaction for a rejection, which passes
+    /// through. `on_fulfilled` doesn't see `data`, and must capture nothing.
+    pub(crate) fn then_conversion<F>(
+        self,
+        lock: &Lock<'s>,
+        data: Local<'s, Value>,
+        on_fulfilled: F,
+    ) -> crate::Result<Self>
+    where
+        F: UnitType
+            + 'static
+            + for<'a> Fn(&mut Lock<'a>, Local<'a, Value>) -> Result<Local<'a, Value>, Error>,
+    {
+        self.debug_assert_isolate(lock);
+        let _ = on_fulfilled;
+        let callback = crate::function_callback(conversion_reaction::<F>);
+        // SAFETY: lock guarantees the isolate is locked, with a context entered and a HandleScope
+        // open; `callback` is a V8 function callback, `data` and `self` are handles in the lock's
+        // scope, and a non-empty result is a promise in that scope.
+        unsafe {
+            Local::from_ffi_maybe(ffi::local_promise_then_callback(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                callback as usize,
+                data.raw(),
+            ))
+        }
+        .ok_or_else(Error::pending)
+    }
+
+    /// A promise that follows this one through a reaction that passes on its value, as C++ JSG
+    /// follows a promise that a method returns: it settles one microtask after this one, with
+    /// the same value or reason. Unlike [`Local::then`], it allocates no data and registers no
+    /// rejection reaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving an exception pending, if V8 does; see [`Promise`].
+    pub fn pass_through(self, lock: &mut Lock<'s>) -> crate::Result<Self> {
+        let undefined = lock.undefined();
+        self.then_conversion(lock, undefined, |_, value| Ok(value))
+    }
+
     /// Registers `on_fulfilled` and `on_rejected` to run when the promise settles, like
     /// `promise.then(onFulfilled, onRejected)`, and returns the promise for the result of
     /// whichever runs.
@@ -374,8 +436,12 @@ impl<'s> Local<'s, Promise> {
         self.debug_assert_isolate(lock);
         let _ = (on_fulfilled, on_rejected);
         let data = ReactionData(crate::RefCell::new(Some(data)));
-        let [on_fulfilled, on_rejected] =
-            Function::new_sharing_data(lock, data, [reaction::<T, F>(), reaction::<T, R>()])?;
+        let [on_fulfilled, on_rejected] = Function::new_sharing_data(
+            lock,
+            data,
+            [reaction::<T, F>(), reaction::<T, R>()],
+            ffi::ConstructorBehavior::Throw,
+        )?;
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; all three
         // are valid handles, and a non-empty result is a promise in the lock's scope.
         unsafe {

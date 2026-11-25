@@ -1,0 +1,43 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Services = import "startup-snapshot-globals-services.capnp";
+
+# Top-level code that touches what V8 adds to a context only when it is not building a startup
+# snapshot (RESTORE_TIME_GLOBALS in jsg/setup.h), for the cases whose top level the zygote can run:
+# with the pipeline on, they are started from the snapshot. The runner's test() fetches every case
+# service and asserts its report; see startup-snapshot-globals-test.js. The other cases are in the
+# transferable-runtime and fallback configs, so that each config starts only a few Workers and the
+# configs run in parallel. The @all-autogates variant turns the startup-snapshot autogate on, so
+# every service here goes through the zygote; the @ variant runs them as plain Workers.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = Services.compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "GROUP", json = "\"transferable-v8\""),
+          (name = "control", service = "control"),
+          (name = "stl-set", service = "stl-set"),
+          (name = "stl-save-raise-restore", service = "stl-save-raise-restore"),
+          (name = "stl-delete", service = "stl-delete"),
+          (name = "wasm-delete", service = "wasm-delete"),
+          (name = "temporal-probe", service = "temporal-probe"),
+          (name = "temporal-on-control", service = "temporal-on-control"),
+          (name = "quota-exceeded-error-polyfill", service = "quota-exceeded-error-polyfill"),
+        ],
+      )
+    ),
+    Services.control,
+    Services.stlSet,
+    Services.stlSaveRaiseRestore,
+    Services.stlDelete,
+    Services.wasmDelete,
+    Services.temporalProbe,
+    Services.temporalOnControl,
+    Services.quotaExceededErrorPolyfill,
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

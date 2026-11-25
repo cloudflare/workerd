@@ -8,7 +8,7 @@
 //   Timeout objects instead of numeric IDs
 // - globalThis.setImmediate and globalThis.clearImmediate are available
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
 import timersPromises from 'node:timers/promises';
 import { promisify } from 'node:util';
 
@@ -392,5 +392,18 @@ export const testSetImmediateWithArgs = {
 export const promisifiedGlobalTimers = {
   test() {
     strictEqual(promisify(globalThis.setTimeout), timersPromises.setTimeout);
+  },
+};
+
+export const testGlobalInvalidCallback = {
+  test() {
+    for (const fn of [globalThis.setTimeout, globalThis.setInterval]) {
+      throws(() => fn('x', 1), {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+        message:
+          'The "callback" argument must be of type function. Received type string (\'x\')',
+      });
+    }
   },
 };

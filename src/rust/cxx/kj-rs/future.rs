@@ -30,6 +30,7 @@ impl FuturePollStatus {
 // These types are shared with C++ code.
 pub mod repr {
     use std::ffi::c_void;
+    use std::panic::AssertUnwindSafe;
     use std::pin::Pin;
     use std::task::Context;
     use std::task::Poll;
@@ -89,22 +90,18 @@ pub mod repr {
             let waker = unsafe { &*waker.cast::<KjWaker>() };
             let waker = Waker::from(waker);
             let mut context = Context::from_waker(&waker);
-            match fut.poll(&mut context) {
+            let poll = match std::panic::catch_unwind(AssertUnwindSafe(|| fut.poll(&mut context))) {
+                Ok(poll) => poll,
+                Err(payload) => Poll::Ready(Err(poll_panic_exception(&*payload))),
+            };
+            match poll {
                 Poll::Ready(Ok(value)) => {
                     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Poll::Ready(Err(error)) => {
-                    // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-                    unsafe {
-                        std::ptr::write(
-                            ret.cast::<*mut c_void>(),
-                            error.into_raw().as_ptr().cast(),
-                        );
-                    };
-                    FuturePollStatus::ERROR
-                }
+                // Safety: `ret` has room for a `kj::Exception*`, as for a `T`.
+                Poll::Ready(Err(error)) => unsafe { write_error(ret, error) },
                 Poll::Pending => FuturePollStatus::PENDING,
             }
         }
@@ -116,7 +113,7 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            drop(fut);
+            drop_catching_panic(fut);
         }
     }
 
@@ -134,13 +131,15 @@ pub mod repr {
             let waker = unsafe { &*waker.cast::<KjWaker>() };
             let waker = Waker::from(waker);
             let mut context = Context::from_waker(&waker);
-            match fut.poll(&mut context) {
-                Poll::Ready(value) => {
+            match std::panic::catch_unwind(AssertUnwindSafe(|| fut.poll(&mut context))) {
+                Ok(Poll::Ready(value)) => {
                     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Poll::Pending => FuturePollStatus::PENDING,
+                Ok(Poll::Pending) => FuturePollStatus::PENDING,
+                // Safety: `ret` has room for a `kj::Exception*`, as for a `T`.
+                Err(payload) => unsafe { write_error(ret, poll_panic_exception(&*payload)) },
             }
         }
 
@@ -151,8 +150,52 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            drop(fut);
+            drop_catching_panic(fut);
         }
+    }
+
+    /// Writes `error` to `ret` for `FuturePoller` in future.h, which takes it over.
+    ///
+    /// # Safety
+    /// `ret` must be the output of a poll callback, which has room for a `kj::Exception*`.
+    unsafe fn write_error(ret: *mut c_void, error: cxx::KjException) -> FuturePollStatus {
+        // Safety: forwarded from the caller's contract.
+        unsafe { std::ptr::write(ret.cast::<*mut c_void>(), error.into_raw().as_ptr().cast()) };
+        FuturePollStatus::ERROR
+    }
+
+    /// The exception that fails the promise of a future whose `poll()` panicked with `payload`.
+    ///
+    /// A `CanceledException` payload fails it too, as a `FAILED` exception, since a promise
+    /// rejects only with a `kj::Exception`.
+    #[cold]
+    fn poll_panic_exception(payload: &(dyn std::any::Any + Send)) -> cxx::KjException {
+        cxx::KjError::new(
+            cxx::KjExceptionType::Failed,
+            cxx::private::panic_description("Rust future", payload),
+        )
+        .into()
+    }
+
+    /// Drops `fut`, logging a panic in its destructor rather than unwinding into C++, which drops
+    /// the future when it cancels its promise.
+    fn drop_catching_panic<F: ?Sized>(fut: Pin<Box<F>>) {
+        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(fut))) {
+            log_drop_panic(&*payload);
+        }
+    }
+
+    #[cold]
+    fn log_drop_panic(payload: &(dyn std::any::Any + Send)) {
+        let description = cxx::private::panic_description("Rust future destructor", payload);
+        // Safety: the pointer and length describe `description`, which outlives the call.
+        unsafe { log_error(description.as_ptr(), description.len()) };
+    }
+
+    unsafe extern "C" {
+        /// `KJ_LOG(ERROR, ...)` with the UTF-8 message of `len` bytes at `ptr`.
+        #[link_name = "cxxbridge$kjrs$future$logError"]
+        fn log_error(ptr: *const u8, len: usize);
     }
 
     #[must_use]

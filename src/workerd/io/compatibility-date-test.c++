@@ -79,6 +79,27 @@ KJ_TEST("newest compatibility date") {
   KJ_EXPECT(newest == expected, newest, today, maximum);
 }
 
+KJ_TEST("UDP ingress compatibility flags") {
+  auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
+    capnp::MallocMessageBuilder message;
+    auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
+    for (auto i: kj::indices(flags)) {
+      flagList.set(i, flags[i]);
+    }
+    auto output = message.getOrphanage().newOrphan<CompatibilityFlags>();
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(date, flagList.asReader(), output.get(), errorReporter,
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+    return output.get().getUdpIngress();
+  };
+
+  KJ_EXPECT(!compileFlags("2026-12-15", {}));
+  KJ_EXPECT(compileFlags("2026-12-16", {}));
+  KJ_EXPECT(compileFlags("2026-12-15", {"udp_ingress"_kj}));
+  KJ_EXPECT(!compileFlags("2026-12-16", {"no_udp_ingress"_kj}));
+}
+
 KJ_TEST("compatibility flag parsing") {
   auto expectCompileCompatibilityFlags =
       [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,

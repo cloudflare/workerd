@@ -385,6 +385,21 @@ class SubtleCrypto final: public jsg::Object {
     JSG_STRUCT(name);
   };
 
+  struct CShakeParams {
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> customization;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> functionName;
+    double outputLength;
+
+    JSG_STRUCT(customization, functionName, outputLength);
+  };
+
+  struct TurboShakeParams {
+    jsg::Optional<double> domainSeparation;
+    double outputLength;
+
+    JSG_STRUCT(domainSeparation, outputLength);
+  };
+
   // Type of the `algorithm` parameter passed to `encrypt()` and `decrypt()`. Different
   // algorithms call for different fields.
   struct EncryptAlgorithm {
@@ -583,7 +598,11 @@ class SubtleCrypto final: public jsg::Object {
       jsg::JsBufferSource data);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(
-      jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithm, jsg::JsBufferSource data);
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      kj::OneOf<kj::String, HashAlgorithm> algorithm,
+      jsg::JsBufferSource data,
+      const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+      const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler);
 
   jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> generateKey(jsg::Lock& js,
       kj::OneOf<kj::String, GenerateKeyAlgorithm> algorithm,
@@ -600,11 +619,12 @@ class SubtleCrypto final: public jsg::Object {
       kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithm,
       const CryptoKey& baseKey,
       // The operation needs to be able to take both undefined and null
-      // and handle them equivalently... if we just used jsg::Optional<int>
-      // here, null would be coerced to 0. If we just used kj::Maybe<int>
+      // and handle them equivalently... if we just used jsg::Optional<uint32_t>
+      // here, null would be coerced to 0. If we just used kj::Maybe<uint32_t>
       // here, undefined would be an error. So we need to use an optional
-      // maybe int in order to treat undefined and null as being equivalent.
-      jsg::Optional<kj::Maybe<int>> length);
+      // maybe uint32_t in order to treat undefined and null as being equivalent.
+      // uint32_t unwraps with [EnforceRange], as the spec's unsigned long length requires.
+      jsg::Optional<kj::Maybe<uint32_t>> length);
 
   jsg::Promise<jsg::Ref<CryptoKey>> importKey(jsg::Lock& js,
       kj::String format,
@@ -689,6 +709,8 @@ class SubtleCrypto final: public jsg::Object {
       const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
+      const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+      const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
           generateKeyAlgorithmHandler,
       const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
@@ -721,12 +743,23 @@ class SubtleCrypto final: public jsg::Object {
     JSG_METHOD(timingSafeEqual);
 
     if (flags.getWebCryptoModernAlgorithms()) {
+      JSG_TS_DEFINE(
+        interface SubtleCryptoCShakeParams extends SubtleCryptoHashAlgorithm {
+          outputLength: number;
+          functionName?: ArrayBuffer | ArrayBufferView;
+          customization?: ArrayBuffer | ArrayBufferView;
+        }
+        interface SubtleCryptoTurboShakeParams extends SubtleCryptoHashAlgorithm {
+          outputLength: number;
+          domainSeparation?: number;
+        }
+      );
       JSG_TS_OVERRIDE({
         static supports(operation: string,
-                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoCShakeParams | SubtleCryptoTurboShakeParams | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
                         length?: number | null): boolean;
         static supports(operation: string,
-                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
+                        algorithm: string | SubtleCryptoGenerateKeyAlgorithm | SubtleCryptoImportKeyAlgorithm | SubtleCryptoDeriveKeyAlgorithm | SubtleCryptoHashAlgorithm | SubtleCryptoCShakeParams | SubtleCryptoTurboShakeParams | SubtleCryptoEncryptAlgorithm | SubtleCryptoSignAlgorithm,
                         additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm): boolean;
         wrapKey(format: string,
                 key: CryptoKey,
@@ -737,7 +770,7 @@ class SubtleCrypto final: public jsg::Object {
                    baseKey : CryptoKey,
                    length? : number | null)
                    : Promise<ArrayBuffer>;
-        digest(algorithm: string | SubtleCryptoHashAlgorithm,
+        digest(algorithm: string | SubtleCryptoHashAlgorithm | SubtleCryptoCShakeParams | SubtleCryptoTurboShakeParams,
                data: ArrayBuffer | ArrayBufferView)
             : Promise<ArrayBuffer>;
         sign(algorithm: string | SubtleCryptoSignAlgorithm,
@@ -1276,6 +1309,7 @@ class Crypto final: public jsg::Object {
       api::SubtleCrypto::EncapsulatedBits, api::SubtleCrypto::EncapsulatedKey,                     \
       api::SubtleCrypto::DeriveKeyAlgorithm, api::SubtleCrypto::EncryptAlgorithm,                  \
       api::SubtleCrypto::GenerateKeyAlgorithm, api::SubtleCrypto::HashAlgorithm,                   \
+      api::SubtleCrypto::CShakeParams, api::SubtleCrypto::TurboShakeParams,                        \
       api::SubtleCrypto::ImportKeyAlgorithm, api::SubtleCrypto::SignAlgorithm,                     \
       api::CryptoKey::KeyAlgorithm, api::CryptoKey::AesKeyAlgorithm,                               \
       api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \

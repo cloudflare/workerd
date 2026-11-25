@@ -1,0 +1,41 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_rust_capnp_serde_json_library.bzl", "wd_rust_capnp_serde_json_library")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
+
+wd_rust_capnp_serde_json_library(
+    name = "capnp-serde-json-test-schema",
+    testonly = True,
+    srcs = ["test.capnp"],
+    ffi = True,
+)
+
+# test.capnp in C++, for the JsonCodec that :capnp-serde-json-ffi-test compares the bridge with.
+wd_cc_capnp_library(
+    name = "test_capnp",
+    testonly = True,
+    srcs = ["test.capnp"],
+)
+
+# The generated types decode and encode JSON.
+wd_rust_test(
+    name = "capnp-serde-json-test",
+    srcs = ["capnp-serde-json-test.rs"],
+    deps = [
+        ":capnp-serde-json-test-schema",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
+    ],
+)
+
+# C++ reads the types of test.capnp through their generated cxx bridge, which must decode JSON
+# as the C++ JsonCodec does.
+kj_test(
+    src = "capnp-serde-json-ffi-test.c++",
+    deps = [
+        ":capnp-serde-json-test-schema",
+        ":test_capnp",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
+)

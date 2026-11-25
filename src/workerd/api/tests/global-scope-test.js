@@ -19,6 +19,12 @@ export const navigatorUserAgent = {
   },
 };
 
+export const cacheWithoutEmbedder = {
+  test(_controller, _env, ctx) {
+    strictEqual(ctx.cache, undefined);
+  },
+};
+
 export const timeoutClamping = {
   async test() {
     // p2 should resolve, p1 should never resolve.
@@ -131,9 +137,12 @@ export const mutableGlobals = {
   },
 };
 
-export const datagramRequiresExperimental = {
+export const datagramRequiresUdpIngress = {
   test() {
-    strictEqual(globalThis.Datagram, undefined);
+    strictEqual(
+      typeof globalThis.Datagram,
+      Cloudflare.compatibilityFlags.udp_ingress ? 'function' : 'undefined'
+    );
   },
 };
 

@@ -1360,55 +1360,76 @@ const kPullDone: unique symbol = Symbol('pullDone');
 const kPullParked: unique symbol = Symbol('pullParked');
 type PullResult = Promise<void> | typeof kPullDone | typeof kPullParked;
 
-interface SourceAlgorithms {
-  pull: (() => PullResult) | undefined;
-  cancel: ((reason: unknown) => Promise<void>) | undefined;
+// A queued controller's underlying source and the pull and cancel hooks the
+// ReadableStream constructor read off it: the spec's pull and cancel
+// algorithms (CreateAlgorithmFromUnderlyingMethod) as data, which
+// pullSource() and cancelSource() call. ClearAlgorithms drops the record,
+// and with it the only path from the controller to the source. Closures
+// over the source would not reliably release it: V8 may keep a closure it
+// is optimizing alive, and with it the closure's context, after the
+// stream has dropped it. A source with neither hook has no record (see
+// makeSourceHooks), so a stream does not keep a source that has only
+// start(). Made per stream, so a record class (see nullPrototypeRecord).
+class SourceHooks {
+  // The hooks' receiver.
+  declare underlyingSource: unknown;
+  // What pull() is called with: the owning controller.
+  declare controller: unknown;
+  declare pull: ((controller: never) => unknown) | undefined;
+  declare cancel: ((reason: unknown) => unknown) | undefined;
+  constructor(
+    underlyingSource: unknown,
+    controller: unknown,
+    pull: ((controller: never) => unknown) | undefined,
+    cancel: ((reason: unknown) => unknown) | undefined
+  ) {
+    this.underlyingSource = underlyingSource;
+    this.controller = controller;
+    this.pull = pull;
+    this.cancel = cancel;
+  }
+}
+nullPrototypeRecord(SourceHooks);
+
+function makeSourceHooks(
+  underlyingSource: unknown,
+  controller: unknown,
+  pull: SourceHooks['pull'],
+  cancel: SourceHooks['cancel']
+): SourceHooks | undefined {
+  if (pull === undefined && cancel === undefined) return undefined;
+  return new SourceHooks(underlyingSource, controller, pull, cancel);
 }
 
-// A queued controller's pull and cancel algorithms, calling the hooks
-// through the captured FunctionPrototypeCall with the source object as `this`
-// (spec CreateAlgorithmFromUnderlyingMethod). Built outside the controller
-// constructors so that `underlyingSource` is captured only by these
-// closures, not by the constructor's shared context (which the queue's
-// all-consumers-gone hook keeps alive with the stream): once
-// ClearAlgorithms drops them, the source is collectable.
-function makeSourceAlgorithms<C>(
-  underlyingSource: unknown,
-  controller: C,
-  pullFn: ((controller: C) => void | PromiseLike<void>) | undefined,
-  cancelFn: ((reason?: unknown) => void | PromiseLike<void>) | undefined
-): SourceAlgorithms {
-  // Spec PromiseCall: sync throws become rejections; result is always a
-  // promise.
-  let cancel: SourceAlgorithms['cancel'];
-  if (cancelFn !== undefined) {
-    cancel = (reason: unknown) => {
-      try {
-        return PromiseResolve(
-          FunctionPrototypeCall(cancelFn, underlyingSource, reason)
-        );
-      } catch (e) {
-        return PromiseReject(e);
-      }
-    };
+// Spec PromiseCall on a source hook: a sync throw becomes a rejection, and
+// a missing hook resolves.
+function pullSource(hooks: SourceHooks | undefined): PullResult {
+  if (hooks?.pull === undefined) return PromiseResolve();
+  try {
+    const result: unknown = FunctionPrototypeCall(
+      hooks.pull,
+      hooks.underlyingSource,
+      hooks.controller
+    );
+    if (result === kPullDone || result === kPullParked) return result;
+    return PromiseResolve(result) as Promise<void>;
+  } catch (e) {
+    return PromiseReject(e);
   }
-  let pull: SourceAlgorithms['pull'];
-  if (pullFn !== undefined) {
-    pull = (): PullResult => {
-      try {
-        const result: unknown = FunctionPrototypeCall(
-          pullFn,
-          underlyingSource,
-          controller
-        );
-        if (result === kPullDone || result === kPullParked) return result;
-        return PromiseResolve(result) as Promise<void>;
-      } catch (e) {
-        return PromiseReject(e);
-      }
-    };
+}
+
+function cancelSource(
+  hooks: SourceHooks | undefined,
+  reason: unknown
+): Promise<void> {
+  if (hooks?.cancel === undefined) return PromiseResolve();
+  try {
+    return PromiseResolve(
+      FunctionPrototypeCall(hooks.cancel, hooks.underlyingSource, reason)
+    ) as Promise<void>;
+  } catch (e) {
+    return PromiseReject(e);
   }
-  return { pull, cancel };
 }
 
 // The state both queued controllers keep, and the steps they share: the
@@ -1420,12 +1441,10 @@ function makeSourceAlgorithms<C>(
 class QueuedControllerCore<T, R> {
   #stream: ReadableStream<R>;
   #queue: StreamQueueType<T, R>;
-  // Algorithms are cleared (closures dropped) on close-complete, error, and
-  // cancel, per spec ClearAlgorithms. Only a default controller sizes its
-  // chunks.
+  // Algorithms are cleared on close-complete, error, and cancel, per spec
+  // ClearAlgorithms. Only a default controller sizes its chunks.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
-  #pullAlgorithm: (() => PullResult) | undefined;
-  #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
+  #sourceHooks: SourceHooks | undefined;
   #started: boolean = false;
   #pulling: boolean = false;
   #pullAgain: boolean = false;
@@ -1454,13 +1473,12 @@ class QueuedControllerCore<T, R> {
   constructor(
     stream: ReadableStream<R>,
     highWaterMark: number,
-    algorithms: SourceAlgorithms,
+    sourceHooks: SourceHooks | undefined,
     sizeAlgorithm: ((chunk: R) => number) | undefined,
     onEnd?: () => void
   ) {
     this.#stream = stream;
-    this.#pullAlgorithm = algorithms.pull;
-    this.#cancelAlgorithm = algorithms.cancel;
+    this.#sourceHooks = sourceHooks;
     this.#sizeAlgorithm = sizeAlgorithm;
     this.#onEnd = onEnd;
     this.#queue = new StreamQueue(highWaterMark, () => {
@@ -1470,8 +1488,7 @@ class QueuedControllerCore<T, R> {
       // collected, release the source rather than cancel it: GC timing
       // must not run the user's cancel callback. The size algorithm stays,
       // so enqueue() sizes chunks as before; the queue drops them.
-      this.#pullAlgorithm = undefined;
-      this.#cancelAlgorithm = undefined;
+      this.#sourceHooks = undefined;
       this.#onEnd?.();
     }) as StreamQueueType<T, R>;
   }
@@ -1627,7 +1644,7 @@ class QueuedControllerCore<T, R> {
       // stack trace is costly.
       const composite =
         reasons.length > 1 &&
-        this.#cancelAlgorithm !== undefined &&
+        this.#sourceHooks?.cancel !== undefined &&
         this.#cancelPromise === undefined;
       return this.cancelSteps(
         composite ? makeCompositeCancelReason(reasons) : reason
@@ -1662,9 +1679,7 @@ class QueuedControllerCore<T, R> {
       return;
     }
     this.#pulling = true;
-    const pullAlgorithm = this.#pullAlgorithm;
-    const result =
-      pullAlgorithm === undefined ? PromiseResolve() : pullAlgorithm();
+    const result = pullSource(this.#sourceHooks);
     if (result === kPullParked) return;
     if (result === kPullDone) {
       this.pullSettled();
@@ -1706,12 +1721,9 @@ class QueuedControllerCore<T, R> {
       readableStreamClose(this.#stream);
     }
     this.#onEnd?.();
-    const cancelAlgorithm = this.#cancelAlgorithm;
+    const sourceHooks = this.#sourceHooks;
     this.#clearAlgorithms();
-    this.#cancelPromise =
-      cancelAlgorithm === undefined
-        ? PromiseResolve()
-        : cancelAlgorithm(reason);
+    this.#cancelPromise = cancelSource(sourceHooks, reason);
     // Consumers that left earlier were promised the source's cancel.
     this.#pendingCancel?.resolve(this.#cancelPromise);
     return this.#cancelPromise;
@@ -1742,8 +1754,7 @@ class QueuedControllerCore<T, R> {
   }
 
   #clearAlgorithms(): void {
-    this.#pullAlgorithm = undefined;
-    this.#cancelAlgorithm = undefined;
+    this.#sourceHooks = undefined;
     this.#sizeAlgorithm = undefined;
   }
 }
@@ -1852,7 +1863,7 @@ class ReadableStreamDefaultController<
     const core = new QueuedControllerCore<R, R>(
       stream,
       highWaterMark,
-      makeSourceAlgorithms(underlyingSource, this, pullFn, cancelFn),
+      makeSourceHooks(underlyingSource, this, pullFn, cancelFn),
       sizeAlgorithm
     );
     this.#core = core;
@@ -2226,7 +2237,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     const core = new QueuedControllerCore<ByteQueueEntry, Uint8Array>(
       stream,
       highWaterMark,
-      makeSourceAlgorithms(underlyingSource, this, pullFn, cancelFn),
+      makeSourceHooks(underlyingSource, this, pullFn, cancelFn),
       undefined,
       () => {
         // The source has ended other than drained: the request is retired,

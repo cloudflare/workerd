@@ -10,5 +10,6 @@ declare namespace _default {
   class RpcProperty {}
   class RpcStub {}
   class RpcTarget {}
+  class ServiceStub {}
 }
 export default _default;

@@ -77,19 +77,29 @@ class FallbackServiceClient {
       const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes);
 
  private:
+  // A module resolution request, owning copies of the caller's arguments so that the
+  // background thread never reads the caller's memory.
+  struct Request {
+    Request(Version version,
+        ImportType type,
+        kj::StringPtr specifier,
+        kj::StringPtr rawSpecifier,
+        kj::StringPtr referrer,
+        const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes);
+
+    Version version;
+    ImportType type;
+    kj::String specifier;
+    kj::Maybe<kj::String> rawSpecifier;
+    kj::String referrer;
+    kj::HashMap<kj::String, kj::String> attributes;
+  };
+
   // Shared state between the calling thread and the background thread.
   // Access is serialized through kj::MutexGuarded.
   struct SharedState {
-    // Request fields - valid only when hasRequest is true.
-    // These contain non-owning references into the caller's stack frame,
-    // which is safe because the caller blocks until responseReady is set.
-    Version version = Version::V1;
-    ImportType type = ImportType::IMPORT;
-    kj::StringPtr specifier;
-    kj::StringPtr rawSpecifier;
-    kj::StringPtr referrer;
-    const kj::HashMap<kj::StringPtr, kj::StringPtr>* attributes = nullptr;
-    bool hasRequest = false;
+    // Set by the caller and taken by the background thread.
+    kj::Maybe<Request> request;
 
     // Response field - valid only when responseReady is true.
     ModuleOrRedirect response;

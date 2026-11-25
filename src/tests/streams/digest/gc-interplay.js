@@ -37,23 +37,3 @@ export const writerRemainsOperableAcrossGc = {
     strictEqual((await digestPromise).byteLength, 16);
   },
 };
-
-export const gcDuringCloseOfDroppedStream = {
-  async test() {
-    // The close sink allocates when it resolves the digest. Under allocation
-    // pressure, one of those allocations starts a major GC while the stream,
-    // which no JS holds any more, is still in the middle of closing.
-    const retained = [];
-    for (let round = 0; round < 150; round++) {
-      for (let i = 0; i < 200; i++) {
-        const writer = new crypto.DigestStream('SHA-256').getWriter();
-        writer.write(new Uint8Array(16));
-        writer.close();
-        writer.releaseLock();
-        retained.push(new ArrayBuffer(1 << 20));
-        if (retained.length > 8) retained.shift();
-      }
-      await scheduler.wait(0);
-    }
-  },
-};

@@ -779,6 +779,25 @@ def process_config(deps_file):
         pass
 
 
+def update_lockfile():
+    """Refreshes MODULE.bazel.lock, which digests the generated files (see .bazelrc).
+
+    The same as `just update-lockfile`.
+    """
+    subprocess.run(
+        [
+            "bazel",
+            "build",
+            "--lockfile_mode=update",
+            "--nobuild",
+            "//...",
+            "//build/deps/formatters:rustfmt@rule",
+        ],
+        cwd=SCRIPT_DIR.parent.parent,
+        check=True,
+    )
+
+
 def main():
     global GITHUB_ACCESS_TOKEN
     GITHUB_ACCESS_TOKEN = read_access_token()
@@ -790,6 +809,8 @@ def main():
 
     for deps in ALL_DEPS:
         process_config(deps)
+
+    update_lockfile()
 
 
 if __name__ == "__main__":

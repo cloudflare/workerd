@@ -7,7 +7,9 @@ binary with additional debug info.
 
 On Linux, add `--config=cross-lto`, as the `just` recipes do: Rust then takes part in ThinLTO, so
 calls between crates and between Rust and C++ can be inlined. Without it only C++ is optimized at
-link time, which puts Rust at a disadvantage in a comparison with C++.
+link time, which puts Rust at a disadvantage in a comparison with C++. A `wd_cc_benchmark` links
+with link-time optimization turned off unless it sets `tool = True`, so a benchmark that compares
+Rust with C++ should set it.
 
 To obtain most consistent results it is recommended to disable CPU frequency scaling
 (use "performance" governor https://wiki.debian.org/CpuFrequencyScaling)
@@ -123,7 +125,7 @@ handler it ran, unless given `--no-startup`. It starts copies of the Worker in n
 cold start does, and destroys each one after it starts. One untimed start goes first, then each
 start is a sample. Starts continue until there are 50 samples, or there are at least 5 and their
 `startup:total` times add up to the sampling budget (1s), so a slow Worker doesn't take minutes.
-Under `--quick` there is no untimed start and at most 5 samples.
+Under `--quick` there is no untimed start and at most 2 samples.
 
 The report has a startup group for each service, shown as `<service> (startup)`, whose cases are
 the phases of starting:

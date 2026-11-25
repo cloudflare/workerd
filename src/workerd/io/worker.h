@@ -5,6 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
+#include <workerd/api/cache-context-ref.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/async-lock-scheduler.h>
@@ -29,6 +30,8 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
+#include <atomic>
+
 namespace v8 {
 class BackingStore;
 class Isolate;
@@ -51,7 +54,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-struct BenchExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class CacheContext;
@@ -310,6 +312,9 @@ class Worker::Script: public kj::AtomicRefcounted {
 
   kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
 
+  // Creates a context for this script's code, with its module registry and schema loader.
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const;
+
   friend class Worker;
 
  public:  // pretend this is private (needs to be public because allocated through template)
@@ -494,8 +499,22 @@ class Worker::Isolate: public kj::AtomicRefcounted {
     return featureFlagsForFl;
   }
 
+  // Called when a request is delivered to a Worker in this isolate. Does not require a lock.
+  void startedRequest() const;
+
   // Called after each completed request. Does not require a lock.
-  void completedRequest() const;
+  //
+  // May return a task if the request was the isolate's last one in flight. The caller must run
+  // the task on the current thread, where it may outlive the request's IoContext.
+  //
+  // The task waits for the thread to go idle and then, if the isolate still has no request in
+  // flight and its lock is free, calls v8::Isolate::SetIsLoading(false) under the lock. That
+  // tells V8 that a GC pause now delays no request, and V8 runs a full GC before returning if the
+  // heap is due for one.
+  //
+  // The NO_LOADING_MODE autogate keeps the isolate from being created in V8's loading mode, which
+  // the first notification ends, and NO_IDLE_GC stops the notifications after that one.
+  kj::Maybe<kj::Promise<void>> completedRequest() const;
 
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
@@ -597,6 +616,18 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   AsyncLockQueue<Isolate> asyncLockQueue;
 
   friend class Worker::AsyncLock;
+
+  // Number of requests delivered to this isolate's Workers and not yet completed, on any thread.
+  mutable std::atomic<uint> inFlightRequests = 0;
+
+  // True from when the isolate is created in V8's loading mode until notifyV8WhenIdle() ends it.
+  mutable std::atomic<bool> v8Loading = false;
+
+  // True while some thread has a notifyV8WhenIdle() task waiting for that thread to go idle.
+  mutable std::atomic<bool> idleNotificationPending = false;
+
+  // The task that completedRequest() returns.
+  static kj::Promise<void> notifyV8WhenIdle(kj::Own<const WeakIsolateRef> weakIsolate);
 
   void disconnectInspector();
 
@@ -713,9 +744,16 @@ class Worker::Api {
       jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
-  // Only `workerd bench` delivers the bench event, so the default implementation throws.
-  virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
-      jsg::Lock& lock) const;
+  // Runs the `bench()` handler of `handler`, an exported handler object, with `env` and `ctx`
+  // (undefined if it has none), then the cases it registers: see `bench_run()` in
+  // api/bench-api/ffi.rs. `params` is an encoded `BenchParams` message. Returns a promise for an
+  // ArrayBuffer that holds the group's `BenchReport.Group`, without its name, as an encoded
+  // message. Only `workerd bench` delivers the bench event, so the default implementation throws.
+  virtual v8::Local<v8::Promise> runBench(jsg::Lock& lock,
+      v8::Local<v8::Value> handler,
+      v8::Local<v8::Value> env,
+      v8::Local<v8::Value> ctx,
+      kj::ArrayPtr<const capnp::word> params) const;
 
   // An event listener's callback (api::EventTarget::HandlerFunction).
   using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
@@ -743,6 +781,14 @@ class Worker::Api {
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).
   virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
+
+  // A typed Rust JSG implementation of the same property. The legacy hook is used when this
+  // returns none; both return none in standalone workerd.
+  virtual jsg::Optional<api::RustCacheContext> getCtxCacheRustProperty(jsg::Lock& js) const;
+  // Whether `value` is the wrapper of the resource getCtxCacheRustProperty() returns, or none if
+  // the check left an exception pending.
+  virtual kj::Maybe<bool> isCtxCacheRustInstance(
+      v8::Isolate* isolate, v8::Local<v8::Value> value) const;
 
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;
@@ -1132,11 +1178,14 @@ class Worker::Actor final: public kj::Refcounted {
   // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
   // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
   //
-  // `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's requests.
+  // `triggerContext` is the user trace that the handler runs in. Without one, the handler starts a
+  // trace of its own. `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's
+  // requests.
   kj::Promise<void> runOnHibernate(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<tracing::InvocationSpanContext> triggerContext,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
@@ -1292,6 +1341,7 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<tracing::InvocationSpanContext> triggerContext,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 };
 

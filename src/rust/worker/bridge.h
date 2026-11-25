@@ -153,6 +153,9 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
     return impl->test();
   }
 
+  kj::Promise<void> bench(workerd::bench::BenchParams::Reader params,
+      workerd::bench::BenchReport::Group::Builder report) override;
+
  private:
   ::rust::Box<Impl> impl;
 };

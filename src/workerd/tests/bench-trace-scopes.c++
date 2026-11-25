@@ -45,7 +45,9 @@ void unobservedTraceScopes(benchmark::State& state) {
           return env.context.makeRequestTraceScope(env.lock);
         }
       }();
-      benchmark::DoNotOptimize(&KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js)));
+      // An unobserved request in the root frame builds no frame of its own.
+      auto current = jsg::AsyncContextFrame::current(env.js);
+      benchmark::DoNotOptimize(current);
     };
     for (auto _: state) {
       run();

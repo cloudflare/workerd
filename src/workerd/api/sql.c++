@@ -309,6 +309,13 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
   return result;
 }
 
+void SqlStorage::Cursor::close() {
+  KJ_IF_SOME(s, state) {
+    endQuery(*s);
+  }
+  KJ_DASSERT(state == kj::none);
+}
+
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
   return js.alloc<RowIterator>(IteratorState{.cursor = JSG_THIS});
 }
@@ -408,8 +415,7 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(jsg::Lock
   // GC'ed, which might prevent the cache from being effective in the meantime.
   //
   // Unfortunately, this does not help with the case where the application stops iterating with
-  // results still available from the cursor. There's not much we can do about that case since
-  // there's no way to know if the app might come back and try to use the cursor again later.
+  // results still available from the cursor. Such applications need to call close().
   query.nextRow();
   if (query.isDone()) {
     endQuery(stateRef);
@@ -436,21 +442,9 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
     KJ_IF_SOME(v, value) {
-      KJ_SWITCH_ONEOF(v) {
-        KJ_CASE_ONEOF(data, kj::Array<const byte>) {
-          return data.asPtr();
-        }
-        KJ_CASE_ONEOF(text, kj::String) {
-          return text.asPtr();
-        }
-        KJ_CASE_ONEOF(d, double) {
-          return d;
-        }
-      }
-    } else {
-      return nullptr;
+      return v;
     }
-    KJ_UNREACHABLE;
+    return nullptr;
   };
 }
 

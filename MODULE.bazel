@@ -24,6 +24,15 @@ include("//build/deps:llvm.MODULE.bazel")
 include("//build/deps:oci.MODULE.bazel")
 include("//build/deps/formatters:rustfmt.MODULE.bazel")
 
+# The parent of the sanitizer configs' target platforms (see
+# //build/bazelflare:base_target_platform.bzl).
+base_target_platform = use_repo_rule(
+    "//build/bazelflare:base_target_platform.bzl",
+    "base_target_platform",
+)
+
+base_target_platform(name = "base_target_platform")
+
 # Make local_config_cc available, used for retrieving Windows clang-cl toolchain
 cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")
 use_repo(cc_configure, "local_config_cc")

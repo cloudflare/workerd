@@ -30,6 +30,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `meta.h`          | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                                                                                                                                                                    |
 | `unwrap-args.h`   | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                                                                                                                                                                   |
 | `fast-api.h`      | V8 Fast API call optimizations                                                                                                                                                                                                                                            |
+| `dom-exception.{h,c++}` | The C++ `DOMException` class, the global without the `V8_DOM_EXCEPTION` autogate. With it, the global is V8's, which is workerd's V8 patch (`patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch`), not upstream V8. `Lock::domException()` and `Lock::tryGetDomExceptionInfo()` (`jsg.h`, `jsg.c++`) handle either |
 | `ser.h`           | Structured clone: `Serializer`/`Deserializer`, plus the protocol for classes implemented in JavaScript (`per_isolate/serialization.ts`), found by a `"module:Export"` `deserializeInfo` through `BootstrapModules`                                                        |
 | `web-idl.h`       | Web IDL types: `NonCoercible<T>`, `Sequence`, etc.                                                                                                                                                                                                                        |
 | `observer.h`      | `IsolateObserver`, `CompilationObserver` — hooks for metrics/tracing                                                                                                                                                                                                      |
@@ -92,6 +93,13 @@ The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
   report a resource's memory from `visitForMemoryInfo()`, which `JSG_RESOURCE_TYPE` calls
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs
+- `v8::DOMException`, `v8::QuotaExceededError`, `v8::Exception::DOMException()`,
+  `v8::Exception::QuotaExceededError()` and `v8::Value::IsDOMException()` are not upstream V8:
+  they exist only in workerd's V8 build, from
+  `patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch`, so look for them,
+  and change them, there (see `docs/v8-updates.md`). Outside `jsg`, create and recognize
+  DOMExceptions with `js.domException()` and `js.tryGetDomExceptionInfo()`, which also handle
+  the C++ class
 - Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`. The Rust `Realm` sets `IsolateBase::setDeferredActionHook()`, which `applyDeferredActions()` calls whenever an `IsolateBase::Lock` is taken, to release the handles of Rust `Global`s dropped without the lock, and, when it is dropped, `setDisposeHook()`, which `~IsolateBase()` calls after `Dispose()` to free the handle slots of Rust `Global`s dropped after the Realm, which V8 may write into until then
 
 ## INVARIANTS

@@ -5,7 +5,13 @@
 // tee() of a value stream: both branches read concurrently, one read while
 // the other is cancelled (what a discarded clone does), and both cancelled.
 
-import { drainReader, enqueuedStream, expectEqual, pullStream } from 'helpers';
+import {
+  drainReader,
+  enqueuedStream,
+  expectEqual,
+  pullStream,
+  scaled,
+} from 'helpers';
 
 async function drainBoth([left, right], count) {
   const [a, b] = await Promise.all([
@@ -18,24 +24,25 @@ async function drainBoth([left, right], count) {
 
 export const tee = {
   bench(b) {
-    for (const count of [16, 256]) {
+    for (const count of [16, 256].map((count) => scaled(b, count))) {
       b.run(`read both branches, enqueued x${count}`, () =>
         drainBoth(enqueuedStream(count).tee(), count)
       );
     }
-    b.run('read both branches, pull() x256', () =>
-      drainBoth(pullStream(256).tee(), 256)
+    const many = scaled(b, 256);
+    b.run(`read both branches, pull() x${many}`, () =>
+      drainBoth(pullStream(many).tee(), many)
     );
     // The cancel is awaited alongside the read: under the TypeScript
     // implementation, as in the spec, a branch's cancel() settles only once
     // the source finishes or the other branch cancels too.
-    b.run('read one branch, cancel the other x256', async () => {
-      const [left, right] = enqueuedStream(256).tee();
+    b.run(`read one branch, cancel the other x${many}`, async () => {
+      const [left, right] = enqueuedStream(many).tee();
       const [, count] = await Promise.all([
         right.cancel(),
         drainReader(left.getReader()),
       ]);
-      expectEqual(count, 256, 'chunks read');
+      expectEqual(count, many, 'chunks read');
     });
     b.run('cancel both branches', async () => {
       const [left, right] = enqueuedStream(16).tee();

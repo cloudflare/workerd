@@ -332,9 +332,8 @@ kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj:
   return kj::none;
 }
 
-EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(jsg::Lock& js,
-    kj::StringPtr type,
-    jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler) {
+EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, EventHandlerValue handler) {
   const auto getOrCreateAttribute = [&]() -> EventHandlerAttribute& {
     return eventHandlerAttributes.findOrCreate(
         type, [&] { return decltype(eventHandlerAttributes)::Entry{kj::str(type), {}}; });
@@ -711,8 +710,7 @@ kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return getEventHandlerAttribute(js, kAbortEvent);
 }
 
-void AbortSignal::setOnAbort(
-    jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+void AbortSignal::setOnAbort(jsg::Lock& js, EventHandlerValue handler) {
   // The trampoline's activation registers a regular 'abort' listener, which arms the RPC
   // abort subscription through listenerCountChanged().
   setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler));
@@ -1311,7 +1309,14 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   if (isCanceled) {
     // The signal is already aborted and cannot be triggered again. We don't need to set up RPC.
-    return abort(js, reason);
+    // Its exception is derived from the reason, which can run JavaScript, so that waits until the
+    // value has been read; until then it is the exception of a signal aborted without a reason.
+    auto signal = js.alloc<AbortSignal>(abortException(js, kj::none), reason.addRef(js));
+    deserializer.afterRead(
+        [signal = signal.addRef(), reason = reason.addRef(js)](jsg::Lock& js) mutable {
+      signal->maybeAbortException = abortException(js, reason.getHandle(js));
+    });
+    return signal;
   }
 
   if (flag == Flag::NEVER_ABORTS) {

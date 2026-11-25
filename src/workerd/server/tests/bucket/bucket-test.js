@@ -19,16 +19,32 @@ async function refusal(response, status, code) {
   assert.strictEqual((await response.json()).code, code);
 }
 
-// `n` bytes, the same each time: byte i is (i * 7 + i >> 13) & 0xff.
+// `n` bytes, the same each time: each 8 KiB block is a slice of RUN starting
+// at the block's index modulo 2048. RUN repeats only every 64 KiB, so blocks
+// differ for 16 MiB and the parts of a multipart write differ from each
+// other. Streams are copied together from RUN rather than computed a byte at
+// a time: tens of MiB of per-byte JavaScript take tens of seconds in a debug
+// build whenever V8 leaves the loop unoptimized.
+const BLOCK = 8192;
+const OFFSETS = 2048;
+const RUN = Uint8Array.from(
+  { length: BLOCK + OFFSETS },
+  (_, m) => (m * 7 + (m >> 8)) & 0xff
+);
+
 function pattern(n, chunk = 1 << 20) {
   let sent = 0;
   return new ReadableStream({
     pull(controller) {
       if (sent === n) return controller.close();
       const bytes = new Uint8Array(Math.min(chunk, n - sent));
-      for (let j = 0; j < bytes.length; j++) {
-        const i = sent + j;
-        bytes[j] = (i * 7 + (i >> 13)) & 0xff;
+      for (let at = 0; at < bytes.length;) {
+        const i = sent + at;
+        const inBlock = i % BLOCK;
+        const start = inBlock + (Math.floor(i / BLOCK) % OFFSETS);
+        const length = Math.min(BLOCK - inBlock, bytes.length - at);
+        bytes.set(RUN.subarray(start, start + length), at);
+        at += length;
       }
       sent += bytes.length;
       controller.enqueue(bytes);

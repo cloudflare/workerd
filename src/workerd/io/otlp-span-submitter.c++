@@ -49,6 +49,39 @@ void addTag(rust::otlp::Attributes& attributes, const Span::Tag& tag) {
     KJ_CASE_ONEOF(s, kj::ConstString) {
       rust::otlp::add_string(attributes, key, toRust(s));
     }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      auto array = rust::otlp::new_attribute_array();
+      for (auto& element: arr) {
+        KJ_IF_SOME(s, element) {
+          rust::otlp::push_string_element(*array, toRust(s));
+        } else {
+          rust::otlp::push_null_element(*array);
+        }
+      }
+      rust::otlp::add_array(attributes, key, kj::mv(array));
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      auto array = rust::otlp::new_attribute_array();
+      for (auto& element: arr) {
+        KJ_IF_SOME(b, element) {
+          rust::otlp::push_bool_element(*array, b);
+        } else {
+          rust::otlp::push_null_element(*array);
+        }
+      }
+      rust::otlp::add_array(attributes, key, kj::mv(array));
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      auto array = rust::otlp::new_attribute_array();
+      for (auto& element: arr) {
+        KJ_IF_SOME(d, element) {
+          rust::otlp::push_double_element(*array, d);
+        } else {
+          rust::otlp::push_null_element(*array);
+        }
+      }
+      rust::otlp::add_array(attributes, key, kj::mv(array));
+    }
   }
 }
 

@@ -3,11 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from "node:assert";
+import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { build, type PluginBuild, type OnResolveArgs, type OnLoadArgs } from "esbuild";
 import { CommentsData } from "src/transforms";
 import cloudflareComments from "../src/cloudflare";
+import {
+  PER_ISOLATE_MANIFEST,
+  collectPerIsolateDeclarations,
+} from "../src/per-isolate";
 import { collateStandardComments } from "../src/standards";
 import { getFilePath } from "../src/utils";
 
@@ -25,6 +30,18 @@ async function readPath(rootPath: string): Promise<string> {
     const contents = await Promise.all(contentsPromises);
     return contents.join("\n");
   }
+}
+
+function readPerIsolateDeclarations(): string {
+  // The declarations TypeScript emits for src/per_isolate
+  // (//src/per_isolate:per_isolate@tsproject_types), read relative to the
+  // working directory for the reason given for the defines below.
+  const manifestPath = path.resolve(
+    getFilePath(path.join("src/per_isolate", PER_ISOLATE_MANIFEST))
+  );
+  return collectPerIsolateDeclarations(manifestPath, (fileName) =>
+    existsSync(fileName) ? readFileSync(fileName, "utf8") : undefined
+  );
 }
 
 async function readParamNames(): Promise<Record<string, Record<string, string[]>>> {
@@ -138,6 +155,10 @@ if (require.main === module)
               // also holds copies that earlier builds made of defines this
               // build lacks.
               const contents = await readPath(getFilePath("types/defines"));
+              return { contents, loader: "text" };
+            }
+            if (args.path === "per-isolate") {
+              const contents = readPerIsolateDeclarations();
               return { contents, loader: "text" };
             }
           });
