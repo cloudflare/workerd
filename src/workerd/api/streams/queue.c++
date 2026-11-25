@@ -323,19 +323,21 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     }
 
     // Convert the value to bytes.
-    kj::Vector<kj::Array<kj::byte>> chunks;
     KJ_IF_SOME(val, result.value) {
       KJ_IF_SOME(bytes, valueToBytes(js, val.addRef(js))) {
-        chunks.add(kj::mv(bytes));
+        auto chunks = kj::heapArray<kj::Array<kj::byte>>(1);
+        chunks[0] = kj::mv(bytes);
+        return DrainingReadResult{
+          .chunks = kj::mv(chunks),
+          .done = false,
+        };
       }
-      // If valueToBytes returned kj::none, we just return empty chunks.
-      // The error case should have been caught earlier.
     }
 
-    return DrainingReadResult{
-      .chunks = chunks.releaseAsArray(),
-      .done = false,
-    };
+    auto error =
+        js.typeError("Draining read encountered a value that cannot be converted to bytes"_kj);
+    self.impl.error(js, error);
+    js.throwException(error);
   },
       [weakThis = addWeakToThis()](
           jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {

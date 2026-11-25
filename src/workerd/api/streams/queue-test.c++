@@ -1712,6 +1712,40 @@ KJ_TEST("ValueQueue draining read errors on number value") {
   });
 }
 
+KJ_TEST("ValueQueue pending draining read errors on non-byte value") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      auto message = jsg::JsValue(value.getHandle(js))
+                         .tryCast<jsg::JsObject>()
+                         .map([&](jsg::JsObject obj) {
+        return obj.get(js, "message")
+            .tryCast<jsg::JsString>()
+            .map([&](jsg::JsString str) {
+          return str.toString(js);
+        }).orDefault(kj::str());
+      }).orDefault(kj::str());
+      KJ_ASSERT(message.contains("cannot be converted to bytes"));
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    }, 2);
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    KJ_ASSERT(consumer.hasPendingDrainingRead());
+
+    jsg::JsValue num = jsg::JsValue(js.num(42));
+    queue.push(js, kj::rc<ValueQueue::Entry>(num.addRef(js), 1));
+    js.runMicrotasks();
+
+    KJ_ASSERT(!consumer.hasPendingDrainingRead());
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
 #pragma endregion Draining Read Tests
 
 #pragma region Draining Read maxRead Tests

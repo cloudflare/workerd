@@ -2,19 +2,24 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// What body consumption (text/arrayBuffer/bytes/json) does when it fails
-// on the consumer's side rather than the source's: the stream is cancelled
-// with the failure, so the source's cancel() runs and pulls stop, and the
-// stream stays locked (PARITY). DIVERGENCE (ledger #21): a default source
-// or a TransformStream readable declaring `expectedLength` and delivering
-// more, or closing short of it, is such a failure in TypeScript; C++
-// consumption ignores the declaration.
+// What body consumption (text/arrayBuffer/bytes/json) and sending a served
+// Response body do when a failure happens on the consumer's side rather than
+// the source's: the stream is cancelled with the failure, so the source's
+// cancel() runs and pulls stop, and the stream stays locked (PARITY).
+// DIVERGENCE (ledger #17): when sending a Response body encounters a non-byte
+// chunk, both reject and cancel with a TypeError, each with its own message.
+// DIVERGENCE (ledger #21): a default source or a TransformStream readable
+// declaring `expectedLength` and delivering more, or closing short of it, is
+// such a failure in TypeScript; C++ consumption ignores the declaration.
 
 import { strictEqual, deepStrictEqual, ok, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 const kNotBytes = 'This ReadableStream did not return bytes.';
+const kPumpNotBytes = usingTsImpl
+  ? kNotBytes
+  : 'Draining read encountered a value that cannot be converted to bytes';
 
 // A source whose second pull enqueues a non-byte chunk, recording pulls and
 // the cancel reason.
@@ -123,6 +128,50 @@ export const nonBytesChunkInClosingBatch = {
       message: kNotBytes,
     });
     strictEqual(cancelled, false);
+  },
+};
+
+let servedNonBytesLog;
+
+// Served by main.js at /non-bytes: a stream whose async pulls produce a byte
+// chunk, a non-byte chunk, and a trailing byte chunk that must not be pulled.
+export function nonBytesResponse() {
+  const chunks = [enc.encode('a'), 1, enc.encode('b')];
+  const log = { pulls: 0, cancel: Promise.withResolvers() };
+  servedNonBytesLog = log;
+  return new Response(
+    new ReadableStream(
+      {
+        async pull(c) {
+          log.pulls++;
+          await scheduler.wait(1);
+          if (chunks.length > 0) c.enqueue(chunks.shift());
+          else c.close();
+        },
+        cancel(reason) {
+          log.cancel.resolve(reason);
+        },
+      },
+      { highWaterMark: 0 }
+    )
+  );
+}
+
+// A non-byte chunk produced asynchronously while sending a Response body
+// errors the pump: the response body rejects, the source is cancelled with
+// the TypeError, and later chunks are not pulled.
+export const nonBytesChunkInServedResponse = {
+  async test(_ctrl, env) {
+    const resp = await env.SELF.fetch('http://example.org/non-bytes');
+    await rejects(resp.text(), {
+      name: 'TypeError',
+      message: kPumpNotBytes,
+    });
+    const cancelReason = await servedNonBytesLog.cancel.promise;
+    ok(cancelReason instanceof TypeError);
+    strictEqual(cancelReason.message, kPumpNotBytes);
+    await scheduler.wait(10);
+    strictEqual(servedNonBytesLog.pulls, 2);
   },
 };
 
