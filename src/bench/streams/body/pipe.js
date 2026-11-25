@@ -6,13 +6,12 @@
 // JavaScript transform into a new Response, straight into a new Response,
 // and through TextDecoderStream.
 
-import { bytesOf, drainBytes, expectEqual, sizeLabel } from 'helpers';
-
-const SIZES = [65536, 1048576];
+import { bytesOf, drainBytes, expectEqual, scaled, sizeLabel } from 'helpers';
 
 export const pipe = {
   bench(b) {
-    for (const size of SIZES) {
+    const sizes = [65536, 1048576].map((size) => scaled(b, size));
+    for (const size of sizes) {
       const bytes = bytesOf(size);
       b.run(`pipeTo() a WritableStream, ${sizeLabel(size)}`, async () => {
         let written = 0;
@@ -26,7 +25,7 @@ export const pipe = {
         expectEqual(written, size, 'bytes written');
       });
     }
-    for (const size of SIZES) {
+    for (const size of sizes) {
       const bytes = bytesOf(size);
       b.run(
         `pipeThrough() a TransformStream into a Response, ${sizeLabel(size)}`,
@@ -39,14 +38,14 @@ export const pipe = {
         }
       );
     }
-    for (const size of SIZES) {
+    for (const size of sizes) {
       const bytes = bytesOf(size);
       b.run(`into a new Response, ${sizeLabel(size)}`, async () => {
         const read = await new Response(new Response(bytes).body).arrayBuffer();
         expectEqual(read.byteLength, size, 'bytes read');
       });
     }
-    const size = 65536;
+    const size = sizes[0];
     const bytes = bytesOf(size);
     b.run(`pipeThrough() a TextDecoderStream, ${sizeLabel(size)}`, async () => {
       const reader = new Response(bytes).body

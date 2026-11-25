@@ -14,4 +14,4 @@ enqueuing a last chunk. Each stream gets a new transformer.
 | --- | --- | --- |
 | `construction.js` | `construction` | 16 constructions per call: no transformer; start, transform and flush; both strategies; then `getWriter()` and `getReader()` |
 | `roundtrip.js` | `roundtrip` | 16 `write()` + `read()` round trips per call on long-lived streams, with no transformer, an enqueuing `transform()`, and an async `transform()` |
-| `throughput.js` | `throughput` | Construct, write every chunk, close, while the output is read to the end: awaiting `ready` before each write (no transformer x16, x256; each other transformer x256), and queueing every write at once (no transformer, an enqueuing `transform()`; x256) |
+| `throughput.js` | `throughput` | Construct, write every chunk, close, while the output is read to the end: awaiting `ready` before each write (no transformer x16, x256; each other transformer x256), and queueing every write at once (no transformer, an enqueuing `transform()`; x256). Under `--quick`, a sixteenth as many chunks |
