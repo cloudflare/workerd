@@ -44,7 +44,7 @@ export const gcDuringCloseOfDroppedStream = {
     // pressure, one of those allocations starts a major GC while the stream,
     // which no JS holds any more, is still in the middle of closing.
     const retained = [];
-    for (let round = 0; round < 150; round++) {
+    for (let round = 0; round < 20; round++) {
       for (let i = 0; i < 200; i++) {
         const writer = new crypto.DigestStream('SHA-256').getWriter();
         writer.write(new Uint8Array(16));

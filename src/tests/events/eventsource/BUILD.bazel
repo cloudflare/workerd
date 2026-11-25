@@ -4,21 +4,27 @@ load("//:build/wd_test.bzl", "wd_test")
 # (reading the C++ streams), main reading the TypeScript streams, opt-in (the
 # dateless flags that change the surface) and legacy (the semantic flags
 # turned off).
+#
+# The cells that reconnect wait out the shortest reconnection time, one
+# second, eight times, so they take about 9s and are large.
 
 eventsource_suite_srcs = glob(["*.js"]) + ["eventsource-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "eventsource.wd-test",
     data = eventsource_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "eventsource-ts-streams.wd-test",
     args = ["--experimental"],
     data = eventsource_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "eventsource-opt-in.wd-test",
     args = ["--experimental"],
     data = eventsource_suite_srcs,

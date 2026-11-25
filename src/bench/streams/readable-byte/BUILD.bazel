@@ -7,6 +7,7 @@ load("//:build/wd_bench.bzl", "wd_bench")
 readable_byte_bench_srcs = glob(["*.js"]) + ["readable-byte-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "readable-byte-cpp.wd-bench",
     data = readable_byte_bench_srcs,
 )
