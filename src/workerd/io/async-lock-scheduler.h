@@ -123,6 +123,12 @@ class AsyncLockQueue {
   // keeps alive. `hooks`, if provided, must outlive the returned promise.
   kj::Promise<Lock> lock(kj::Own<const Resource> resource, kj::Maybe<Hooks&> hooks) const;
 
+  // Takes the lock if that needs no waiting: no thread holds or awaits this resource, and this
+  // thread holds or awaits no other. Otherwise returns kj::none without joining the queue. For
+  // work that is only worth doing while the resource is idle, and that must not keep this thread
+  // from other resources while it waits.
+  kj::Maybe<Lock> tryLock(kj::Own<const Resource> resource) const;
+
   // Number of threads currently queued for (or holding) this resource.
   uint getCurrentLoad() const {
     return __atomic_load_n(&loadGauge, __ATOMIC_RELAXED);
@@ -265,6 +271,21 @@ kj::Promise<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::l
       co_await waiter->releaseFlag.whenSignaled();
     }
   }
+}
+
+template <typename Resource>
+kj::Maybe<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::tryLock(
+    kj::Own<const Resource> resource) const {
+  if (*threadCurrentWaiter != nullptr) {
+    return kj::none;
+  }
+  auto waiter = kj::refcounted<Waiter>(*this, kj::mv(resource));
+  if (waiter->readyFulfiller.get() != nullptr) {
+    // The queue was not empty when the waiter joined it. Dropping the waiter leaves the queue
+    // again, and passes the turn on if it became ours in the meantime.
+    return kj::none;
+  }
+  return Lock(kj::mv(waiter));
 }
 
 template <typename Resource>
