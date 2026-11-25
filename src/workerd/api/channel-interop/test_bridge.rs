@@ -20,7 +20,6 @@ use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
-use kj_rs::KjRc;
 
 #[cxx::bridge(namespace = "workerd::api::channel_interop::test")]
 mod ffi {
@@ -52,7 +51,7 @@ mod ffi {
 #[derive(Default)]
 struct Stash {
     fetchers: Vec<jsg_cpp::Ref<Fetcher>>,
-    channels: Vec<KjRc<SubrequestChannel>>,
+    channels: Vec<SubrequestChannel>,
 }
 
 thread_local! {

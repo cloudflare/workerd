@@ -11,7 +11,7 @@
 //! instance of the class or of a subclass, such as `ExtendedFetcher`, and reject anything else,
 //! as C++ JSG's `jsg::Ref` parameters do (see `jsg_cpp::Ref`). It holds a channel for the current
 //! request as a [`ScopedChannel`], and one it keeps past its request, once C++ has allowed its
-//! transfer, as a `kj_rs::KjRc`.
+//! transfer, as the `io_channels` type, which this crate re-exports.
 //!
 //! The C++ side, `ffi.h` and `ffi.c++`, is the per-type and per-method shims of
 //! `src/rust/jsg-cpp`: C++ API code, which lives here with the API rather than in Rust JSG.
@@ -22,7 +22,7 @@ pub use ffi::Channel;
 pub use ffi::InHouse;
 pub use ffi::RequiresHostAndProtocol;
 pub use ffi::ScopedChannel;
-pub use ffi::bridge::ActorClassChannel;
 pub use ffi::bridge::DurableObjectClass;
 pub use ffi::bridge::Fetcher;
-pub use ffi::bridge::SubrequestChannel;
+pub use io_channels::ActorClassChannel;
+pub use io_channels::SubrequestChannel;
