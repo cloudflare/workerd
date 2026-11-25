@@ -3,12 +3,89 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Tests of what a CodeCacheStore decides for the isolates that use it: whether hits are decoded
-// only when a compile uses them, and when the isolate produces its caches.
+// only when a compile uses them, when the isolate produces its caches, and whether builtin
+// modules use the store.
 
 #include "code-cache-test-fixtures.h"
 
 namespace workerd::jsg::test {
 namespace {
+
+KJ_TEST("Builtins do not use a store that does not cache them, in either registry") {
+  auto store = newStore();
+  store->state.lockExclusive()->cachesBuiltins = false;
+  CountingObserver observer;
+  constexpr auto code = "export const value = 'caf\xe9';"_kj;
+  for (auto owned: {false, true}) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto info = owned
+          ? ModuleRegistry::ModuleInfo(js, "builtin", copyToArc(code), nullptr, observer)
+          : ModuleRegistry::ModuleInfo(
+                js, "builtin", StaticExternalStringSource(code.asArray()), nullptr, observer);
+      auto module = info.module.getHandle(js);
+      instantiateModule(js, module);
+      auto ns = JsObject(check(module->GetModuleNamespace()->ToObject(js.v8Context())));
+      KJ_EXPECT(ns.get(js, "value").toString(js) == "café");
+    });
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      const auto base = "file:///"_url;
+      modules::ModuleRegistry::Builder builder(base);
+      modules::ModuleBundle::BuiltinBuilder builtins;
+      constexpr auto defaultCode = "export default 'π🚀';"_kj;
+      if (owned) {
+        builtins.addEsm("test:builtin"_url, copyToArc(defaultCode));
+      } else {
+        builtins.addEsm("test:builtin"_url, defaultCode.asArray());
+      }
+      auto registry = builder.add(builtins.finish()).finish();
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) == "π🚀");
+    }, UseNewModuleRegistry::YES);
+  }
+  {
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 0);
+    KJ_EXPECT(lock->inserts == 0);
+  }
+
+  // The script's own modules still use it.
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 1);
+  KJ_EXPECT(lock->inserts == 1);
+}
+
+// A module whose `later` export V8 compiles lazily when it is first called, after startup.
+constexpr kj::StringPtr REQUEST_MODULE =
+    "export function later() { let s = 0; for (let i = 0; i < 5; ++i) s += i; return s; }\n"
+    "export const value = 'started';"_kj;
+
+kj::Own<FakeStore> newEmbedderProducedStore() {
+  auto store = newStore();
+  store->state.lockExclusive()->productionTime =
+      CodeCacheStore::ProductionTime::ON_EMBEDDER_REQUEST;
+  return store;
+}
+
+// Starts `module` in an isolate whose production window was opened, as Worker::Script does.
+v8::Local<v8::Module> startModule(jsg::Lock& js,
+    kj::StringPtr code,
+    const CompilationObserver& observer,
+    kj::StringPtr name = "main"_kj) {
+  auto module = compileLegacyModule(js, code, observer, name);
+  instantiateModule(js, module);
+  return module;
+}
+
+kj::String callExport(jsg::Lock& js, v8::Local<v8::Module> module, kj::StringPtr name) {
+  auto ns = JsObject(check(module->GetModuleNamespace()->ToObject(js.v8Context())));
+  v8::Local<v8::Value> function = ns.get(js, name);
+  KJ_ASSERT(function->IsFunction());
+  auto result =
+      check(function.As<v8::Function>()->Call(js.v8Context(), js.v8Undefined(), 0, nullptr));
+  return JsValue(result).toString(js);
+}
 
 KJ_TEST("A window the embedder closes captures functions first run after startup") {
   // Returns the size of the cache produced for REQUEST_MODULE, after calling `later` between the

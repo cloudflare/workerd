@@ -66,6 +66,7 @@ class FakeStore final: public CodeCacheStore {
     // How many caches an isolate may produce, if bounded (see mayProduce()).
     kj::Maybe<uint> maxInserts;
     ProductionTime productionTime = ProductionTime::END_OF_STARTUP;
+    bool cachesBuiltins = true;
   };
 
   kj::MutexGuarded<State> state;
@@ -99,6 +100,10 @@ class FakeStore final: public CodeCacheStore {
 
   ProductionTime getProductionTime() const override {
     return state.lockShared()->productionTime;
+  }
+
+  bool cachesBuiltins() const override {
+    return state.lockShared()->cachesBuiltins;
   }
 
   bool mayProduce() const override {
