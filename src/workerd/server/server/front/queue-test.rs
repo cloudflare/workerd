@@ -374,6 +374,57 @@ fn a_queue_without_loops_drops_its_items() {
     assert!(queue.is_empty());
 }
 
+#[test]
+fn items_leave_from_anywhere_and_the_rest_keep_their_order() {
+    let queue = Queue::new();
+    let worker = TestLoop::new(&queue);
+    let mut tickets: Vec<_> = (0..10).map(|item| Some(queue.push(item))).collect();
+    // The newest, the oldest, and some in between, next to each other and apart.
+    for item in [9, 0, 4, 5, 7] {
+        tickets[item] = None;
+    }
+    assert_eq!(queue.len(), 5);
+    // What is pushed now takes the places of those that left, behind every older item.
+    let _late: Vec<_> = (10..13).map(|item| queue.push(item)).collect();
+    let mut taken = Vec::new();
+    for _ in 0..8 {
+        worker.parking.before_park();
+        taken.push(worker.take().0);
+    }
+    assert_eq!(taken, [1, 2, 3, 6, 8, 10, 11, 12]);
+    assert!(queue.is_empty());
+    // A ticket whose item was taken, and whose place another item may have, removes nothing.
+    let _next = queue.push(13);
+    drop(tickets);
+    assert_eq!(queue.len(), 1);
+    worker.parking.before_park();
+    assert_eq!(worker.take().0, 13);
+}
+
+/// Many requests that leave a long queue at once: the cost of one leaving does not grow with
+/// the queue. Were it to (an item taken out of the middle of an array moves the items behind
+/// it), this many would take the better part of a minute.
+#[test]
+fn a_long_queue_is_left_quickly() {
+    const ITEMS: usize = 200_000;
+    // About as large as the work the front queues.
+    type Item = [usize; 32];
+    let queue = Queue::<Item>::new();
+    let _worker = queue.worker();
+    let mut tickets: Vec<_> = (0..ITEMS)
+        .map(|item| Some(queue.push([item; 32])))
+        .collect();
+    let start = std::time::Instant::now();
+    // From the middle outwards, which is as far from both ends as an item can be.
+    for step in 0..ITEMS / 2 {
+        tickets[ITEMS / 2 + step] = None;
+        tickets[ITEMS / 2 - 1 - step] = None;
+    }
+    assert!(queue.is_empty());
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
+}
+
 /// Loop threads that sleep whenever they have taken nothing, and pushers that push as fast as
 /// they can: every item is taken exactly once, which a lost wake-up would prevent (the test
 /// would hang), and a push wakes one loop at most.

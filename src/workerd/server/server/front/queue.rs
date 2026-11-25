@@ -34,9 +34,11 @@
 //! which it wakes. Its [`Ticket`] is dropped while it is queued, which is how the request of a
 //! client that went away leaves. Or the last loop is gone, and the queue drops what it holds and
 //! is given.
+//!
+//! Every one of them is a step whose cost does not depend on how much is queued ([`Items`]),
+//! so many clients that leave a long queue at once hold neither the front nor the loops up.
 
 use std::cmp::Reverse;
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -75,9 +77,121 @@ struct Shared<T> {
     sleeps: AtomicU64,
 }
 
+/// The queued items, in the order they were pushed.
+///
+/// Each is in a slot of a table that only grows, linked to the items before and after it, so
+/// that an item leaves from anywhere in the queue in one step and its slot is used again. A
+/// ticket names its item's slot, and its id tells the item from a later one in the same slot.
+struct Items<T> {
+    slots: Vec<Slot<T>>,
+    /// The slots that hold no item.
+    free: Vec<usize>,
+    /// The oldest and the newest item, if there is any.
+    ends: Option<(usize, usize)>,
+    len: usize,
+}
+
+struct Slot<T> {
+    /// The item and its id; `None` for a free slot.
+    item: Option<(u64, T)>,
+    /// The slots of the items before and after this one.
+    before: Option<usize>,
+    after: Option<usize>,
+}
+
+impl<T> Items<T> {
+    const fn new() -> Self {
+        Self {
+            slots: Vec::new(),
+            free: Vec::new(),
+            ends: None,
+            len: 0,
+        }
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Adds `item` behind the others, and returns its slot.
+    fn push_back(&mut self, id: u64, item: T) -> usize {
+        let newest = self.ends.map(|(_, newest)| newest);
+        let slot = Slot {
+            item: Some((id, item)),
+            before: newest,
+            after: None,
+        };
+        let index = if let Some(index) = self.free.pop() {
+            self.slots[index] = slot;
+            index
+        } else {
+            self.slots.push(slot);
+            self.slots.len() - 1
+        };
+        match self.ends {
+            Some((oldest, newest)) => {
+                self.slots[newest].after = Some(index);
+                self.ends = Some((oldest, index));
+            }
+            None => self.ends = Some((index, index)),
+        }
+        self.len += 1;
+        index
+    }
+
+    /// Takes the oldest item out.
+    fn pop_front(&mut self) -> Option<(u64, T)> {
+        let (oldest, _) = self.ends?;
+        self.unlink(oldest)
+    }
+
+    /// Takes the item `id` out of `slot`, if it is still there.
+    fn remove(&mut self, slot: usize, id: u64) -> Option<T> {
+        match self.slots.get(slot)?.item {
+            Some((held, _)) if held == id => self.unlink(slot).map(|(_, item)| item),
+            _ => None,
+        }
+    }
+
+    /// Takes the item of `index` out of the order and frees its slot.
+    fn unlink(&mut self, index: usize) -> Option<(u64, T)> {
+        let slot = &mut self.slots[index];
+        let item = slot.item.take()?;
+        let (before, after) = (slot.before.take(), slot.after.take());
+        if let Some(before) = before {
+            self.slots[before].after = after;
+        }
+        if let Some(after) = after {
+            self.slots[after].before = before;
+        }
+        self.ends = match (self.ends, before, after) {
+            (Some((oldest, newest)), _, _) if oldest == index && newest == index => None,
+            (Some((_, newest)), None, Some(after)) => Some((after, newest)),
+            (Some((oldest, _)), Some(before), None) => Some((oldest, before)),
+            (ends, _, _) => ends,
+        };
+        self.free.push(index);
+        self.len -= 1;
+        Some(item)
+    }
+
+    /// Takes every item out, oldest first.
+    fn take_all(&mut self) -> Vec<T> {
+        let mut items = Vec::with_capacity(self.len);
+        while let Some((_, item)) = self.pop_front() {
+            items.push(item);
+        }
+        items
+    }
+}
+
 struct State<T> {
-    /// The items with their ids, which ascend.
-    items: VecDeque<(u64, T)>,
+    /// The items, whose ids ascend.
+    items: Items<T>,
     next_id: u64,
     /// No more items will be pushed.
     closed: bool,
@@ -156,7 +270,7 @@ impl<T> Queue<T> {
         Self {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
-                    items: VecDeque::new(),
+                    items: Items::new(),
                     next_id: 0,
                     closed: false,
                     deserted: false,
@@ -179,24 +293,27 @@ impl<T> Queue<T> {
         let mut state = shared.lock();
         let id = state.next_id;
         state.next_id += 1;
-        let ticket = Ticket {
-            shared: Arc::clone(shared),
-            id,
-            removes: true,
-        };
         if state.closed || state.deserted {
             drop(state);
             drop(item);
-            return ticket;
+            return Ticket {
+                shared: Arc::clone(shared),
+                id,
+                slot: None,
+            };
         }
-        state.items.push_back((id, item));
+        let slot = state.items.push_back(id, item);
         shared.changed(&state);
         let sleeper = state.claim_sleeper();
         drop(state);
         if let Some(sleeper) = sleeper {
             sleeper.grant();
         }
-        ticket
+        Ticket {
+            shared: Arc::clone(shared),
+            id,
+            slot: Some(slot),
+        }
     }
 
     /// Says that nothing more will be pushed. The loops take what is queued, and are then done
@@ -242,28 +359,30 @@ impl<T> Default for Queue<T> {
 pub struct Ticket<T> {
     shared: Arc<Shared<T>>,
     id: u64,
-    /// Dropping the ticket removes the item.
-    removes: bool,
+    /// The item's slot in the queue; `None` once the ticket has nothing to remove.
+    slot: Option<usize>,
 }
 
 impl<T> Ticket<T> {
     /// Leaves the item queued until a loop takes it, whatever becomes of who queued it.
     pub fn keep_queued(mut self) {
-        self.removes = false;
+        self.slot = None;
     }
 }
 
 impl<T> Drop for Ticket<T> {
     fn drop(&mut self) {
         let shared = &self.shared;
-        if !self.removes || self.id < shared.taken_through.load(SeqCst) {
+        let Some(slot) = self.slot else {
+            return;
+        };
+        if self.id < shared.taken_through.load(SeqCst) {
             return;
         }
         let mut state = shared.lock();
-        let Ok(index) = state.items.binary_search_by_key(&self.id, |(id, _)| *id) else {
+        let Some(removed) = state.items.remove(slot, self.id) else {
             return;
         };
-        let removed = state.items.remove(index);
         shared.changed(&state);
         drop(state);
         // The item may own a great deal; it is dropped without the lock.
@@ -325,7 +444,7 @@ impl<T> Drop for Worker<T> {
         state.loops.retain(|worker| !Arc::ptr_eq(worker, &self.me));
         if state.loops.is_empty() {
             state.deserted = true;
-            let abandoned = std::mem::take(&mut state.items);
+            let abandoned = state.items.take_all();
             shared.changed(&state);
             drop(state);
             drop(abandoned);
