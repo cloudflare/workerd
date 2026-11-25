@@ -102,6 +102,25 @@ pub fn bench(
     run(verbose, config, options, None, Some(process), command)
 }
 
+/// Runs `command`, a command that serves no config of its own (`workerd repl`).
+///
+/// The process's logging is set up around it as for `serve`: the crash handler, and info logging
+/// if `verbose`. The command's result is the result.
+pub fn without_config(
+    verbose: bool,
+    command: impl FnOnce() -> Result<i32> + 'static,
+) -> Result<i32> {
+    // An empty config, which asks for no structured logging.
+    let mut message = capnp::message::Builder::new_default();
+    message.init_root::<workerd_capnp::config::Builder>();
+    let config = capnp::serialize::write_message_to_words(&message)
+        .chunks_exact(8)
+        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
+        .collect();
+    let command = Box::new(PendingCommand(Box::new(move |_, _| command())));
+    Ok(ffi::with_process_context(verbose, config, command)?)
+}
+
 /// A command's Rust half, for the C++ frame that sets up the process's logging around it
 /// (`with_process_context`), which passes it the config and whether logging is structured.
 pub struct PendingCommand(Box<dyn FnOnce(Vec<u64>, bool) -> Result<i32>>);

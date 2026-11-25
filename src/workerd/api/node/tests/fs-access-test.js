@@ -340,15 +340,20 @@ export const stdioFds = {
 
 export const fsPercentEncodingTest = {
   test() {
-    // The ? and # in the string path will be percent-encoded as part of the
-    // normalization, and the empty // in the path will be replaced as /.
-    // the %FF is left as is.
+    // A string path names the file as written: ?, # and % are part of the
+    // name, and the empty // in the path is replaced with /.
     const path = '/tmp//?#a%FF';
-    ok(!existsSync('/tmp/%3F%23a%FF'));
+    ok(!existsSync('/tmp/?#a%FF'));
     writeFileSync(path, 'test');
+    ok(existsSync('/tmp/?#a%FF'));
 
-    // The casing of the percent-encoded characters is not significant.
-    ok(existsSync('/tmp/%3f%23a%FF'));
-    ok(existsSync('/tmp/%3F%23a%ff'));
+    // Percent-encoded spellings name different files.
+    ok(!existsSync('/tmp/%3F%23a%FF'));
+    ok(!existsSync('/tmp/%3f%23a%ff'));
+
+    // A file: URL is percent-decoded, and the casing of its escapes is not
+    // significant.
+    ok(existsSync(new URL('file:///tmp/%3F%23a%25FF')));
+    ok(existsSync(new URL('file:///tmp/%3f%23a%25FF')));
   },
 };

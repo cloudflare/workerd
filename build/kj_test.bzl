@@ -1,6 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
-load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("//:build/test_attrs.bzl", "test_attrs")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def kj_test(
@@ -10,7 +10,14 @@ def kj_test(
         tags = [],
         size = "medium",
         target_compatible_with = None,
+        generate_all_autogates_variant = True,
         **kwargs):
+    """Defines a KJ test as `name@` and, unless generate_all_autogates_variant is False, as
+    `name@all-autogates`, which runs with every autogate on.
+
+    Pass generate_all_autogates_variant = False for a test that sets the autogates itself, where
+    the second variant would only repeat the first.
+    """
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
     cc_binary(
@@ -36,11 +43,12 @@ def kj_test(
         name = test_name + "@",
         binary = binary_name,
         data = data,
-        tags = tags,
         size = size,
-        exec_properties = test_exec_properties(size, tags),
-        target_compatible_with = target_compatible_with,
+        **test_attrs(tags, size, target_compatible_with)
     )
+
+    if not generate_all_autogates_variant:
+        return
 
     _kj_test(
         name = test_name + "@all-autogates",
@@ -48,10 +56,8 @@ def kj_test(
         data = data,
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         # Tag with no-coverage to reduce coverage CI time
-        tags = tags + ["no-coverage"],
         size = size,
-        exec_properties = test_exec_properties(size, tags),
-        target_compatible_with = target_compatible_with,
+        **test_attrs(tags + ["no-coverage"], size, target_compatible_with)
     )
 
 def _kj_test_impl(ctx):

@@ -1,0 +1,64 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Perfetto trace events from Rust, on the categories of //src/workerd/util:perfetto. A package of
+# its own so that Rust code can depend on it without the C++ utilities around it.
+wd_rust_crate(
+    name = "perfetto",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "lib-test.rs",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    test_deps = [
+        ":perfetto-test-session",
+        "@crates_vendor//futures",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The C++ half of the bridge. With perfetto compiled out (`--config=no-perfetto`, or a platform
+# without it), every function in it does nothing and the category always reads as disabled.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/cxx",
+        "//src/workerd/util:perfetto",
+    ],
+)
+
+# An in-process tracing session for the crate's tests, which returns the events it recorded.
+wd_rust_crate(
+    name = "perfetto-test-session",
+    testonly = True,
+    srcs = ["test_session.rs"],
+    crate_root = "test_session.rs",
+    cxx_bridge_hdrs = ["test-session.h"],
+    cxx_bridge_src = "test_session.rs",
+    link_deps = [":test-session"],
+)
+
+wd_cc_library(
+    name = "test-session",
+    testonly = True,
+    srcs = ["test-session.c++"],
+    hdrs = ["test-session.h"],
+    deps = [
+        ":test_session.rs@cxx",
+        "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj",
+    ] + select({
+        # An embedder may provide perfetto's headers alone and link the implementation as part of
+        # V8, so the test links V8 too.
+        "//src/workerd/util:really_use_perfetto": [
+            "@perfetto//:libperfetto_client_experimental",
+            "@workerd-v8//:v8",
+        ],
+        "//conditions:default": [],
+    }),
+)

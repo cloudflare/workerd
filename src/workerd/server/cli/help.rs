@@ -13,7 +13,8 @@
 
 macro_rules! config_arg {
     () => {
-        "<config> is a wrangler.json or wrangler.jsonc; see workerd -h.\n"
+        "<config> is a wrangler.json or wrangler.jsonc, or a directory with\n\
+         one; see workerd -h.\n"
     };
 }
 
@@ -168,6 +169,7 @@ Usage:
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
+  workerd repl [config]              Evaluate JavaScript (experimental)
   workerd <command> -h               Its options, as in workerd serve -h
 
 Quick start:
@@ -183,7 +185,8 @@ Cluster (experimental):
   so keep peers on a private network. Setup: workerd serve --help.
 
 Config:
-  A wrangler.json or wrangler.jsonc, as for wrangler dev, with fields:
+  A wrangler.json or wrangler.jsonc, as for wrangler dev, or a project
+  directory, which uses its wrangler.json, else wrangler.jsonc. Fields:
     $schema, name, main, compatibility_date, compatibility_flags, vars,
     durable_objects, exports, migrations, no_bundle
     with --experimental: kv_namespaces, queues, triggers, workflows,
@@ -375,6 +378,53 @@ Cap'n Proto configs:
   <const> names its constant.
   -b, --binary                       [project] is an encoded config; - is stdin
   -I, --import-path <dir>            Search dir for imports that start /
+";
+
+pub const REPL: &str = "\
+workerd repl: evaluate JavaScript in a Worker (experimental).
+
+Usage:
+  workerd repl --experimental [options] [config] [const]
+
+On a terminal, or with -i, reads an input at a time and prints its
+result. Otherwise stdin is one script, run once stdin ends. Its result
+isn't printed, and a timer it doesn't await may never fire.
+The workerd global loads configs, as serve does, and calls their
+services and sockets; type .help in the REPL for more. [config], a
+wrangler.json, wrangler.jsonc or .capnp config as for serve, is loaded
+into the global s first; the script doesn't run if it fails to load.
+[const] names the constant of a .capnp config.
+
+The exit status is 1 if an input or the script failed: it threw, the
+promise it awaited rejected, it timed out, it is no command, or it was
+left unfinished. It is 1 too if a timer callback threw, a waitUntil()
+task rejected, or a rejection went unhandled.
+
+On a terminal, the lines typed are saved in ~/.workerd_repl_history;
+WORKERD_REPL_HISTORY names another file, or, set to the empty string,
+turns saving off.
+
+This is a tool for developing workerd, and may change or go away in
+any release.
+
+Options:
+      --compat-date <date>           The REPL's compat date; default: today
+      --compat-flag <flag>           Enable a compat flag; repeat for more
+      --autogate <name>              Enable an autogate; repeat for more
+      --v8-flag <flag>               Pass a flag to V8; repeat for more
+      --input-timeout <seconds>      Stop awaiting an input after this long
+  -i, --interactive                  Read stdin an input at a time
+      --experimental                 Required
+      --verbose                      Log to stderr
+  -h, --help                         Print this help
+  nodejs_compat is on unless a --compat-flag turns it or
+  nodejs_compat_v2 on or off, and so is
+  unhandled_rejection_after_microtask_checkpoint unless one turns it on
+  or off. Autogates are named in kebab-case, as in
+  --autogate=compression-rs. Every config the REPL loads runs with these
+  autogates and V8 flags, not its own autogates and v8Flags.
+  --input-timeout stops awaiting as Ctrl+C does, and the input fails;
+  JavaScript that runs without awaiting, such as a loop, runs on.
 ";
 
 pub const COMPILED: &str = concat!(

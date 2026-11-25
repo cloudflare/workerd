@@ -12,10 +12,10 @@ const usingTsUrl = !Object.hasOwn(
   'URL'
 );
 
-// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) follows WebIDL,
-// and its instances are native errors; the C++ one's are not
+// V8's DOMException (the V8_DOM_EXCEPTION autogate) follows WebIDL, and its
+// instances are native errors; the C++ one's are not
 // (src/tests/dom-exception/).
-const usingTsDomException = Error.isError(new DOMException());
+const usingV8DomException = Error.isError(new DOMException());
 
 export default {
   'ecmascript-binding/builtin-function-properties.any.js': {},
@@ -46,24 +46,24 @@ export default {
   },
   'ecmascript-binding/es-exceptions/DOMException-constants.any.js': {
     comment: 'DOMException constants have wrong configurable descriptor',
-    expectedFailures: usingTsDomException ? [] : true,
+    expectedFailures: usingV8DomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-constructor-and-prototype.any.js':
     {
       comment: 'DOMException property descriptors differ from spec',
-      expectedFailures: usingTsDomException ? [] : true,
+      expectedFailures: usingV8DomException ? [] : true,
     },
   'ecmascript-binding/es-exceptions/DOMException-constructor-behavior.any.js': {
     comment: 'DOMException property inheritance differs from spec',
-    expectedFailures: usingTsDomException ? [] : true,
+    expectedFailures: usingV8DomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-custom-bindings.any.js': {
     comment: 'DOMException property descriptors differ from spec',
-    expectedFailures: usingTsDomException ? [] : true,
+    expectedFailures: usingV8DomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-is-error.any.js': {
     comment: 'DOMException instances are not native errors',
-    expectedFailures: usingTsDomException ? [] : [''],
+    expectedFailures: usingV8DomException ? [] : [''],
   },
   'ecmascript-binding/es-exceptions/DOMException-stack-accessor.any.js': {
     comment:
@@ -126,7 +126,7 @@ export default {
       // The C++ DOMException's attributes (name, message, code) are instance properties
       // instead of prototype accessors, so both the attribute descriptor checks and inherit
       // checks fail
-      ...(usingTsDomException
+      ...(usingV8DomException
         ? []
         : [
             'DOMException interface: attribute name',
@@ -134,8 +134,8 @@ export default {
             'DOMException interface: attribute code',
             /^DOMException interface: new DOMException.*must inherit property/,
           ]),
-      // Only the TypeScript implementation has QuotaExceededError.
-      ...(usingTsDomException ? [] : [/^QuotaExceededError interface/]),
+      // Only V8's implementation has QuotaExceededError.
+      ...(usingV8DomException ? [] : [/^QuotaExceededError interface/]),
     ],
   },
 } satisfies TestRunnerConfig;

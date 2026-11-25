@@ -685,6 +685,11 @@ pub mod ffi {
             object: &Local,
             names: &mut Vec<Local>,
         ) -> bool;
+        pub unsafe fn local_object_set_prototype(
+            isolate: *mut Isolate,
+            object: &Local,
+            prototype: Local,
+        ) -> KjMaybe<bool>;
 
         // Local<Promise>
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
@@ -4484,6 +4489,38 @@ impl Object {
 }
 
 impl<'s> Local<'s, Object> {
+    /// Changes this object's prototype to `prototype`, or to null for `None`, as
+    /// `Object.setPrototypeOf()` does.
+    ///
+    /// # Errors
+    /// A `TypeError` if the object refuses the change: the new prototype chain would contain
+    /// a cycle, the object is not extensible, or it is a Proxy whose `setPrototypeOf` trap
+    /// refused or threw. A pending exception or termination is propagated.
+    pub fn set_prototype(self, lock: &mut Lock<'s>, prototype: Option<Self>) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        let prototype: Local<'s, Value> = match prototype {
+            Some(prototype) => {
+                prototype.debug_assert_isolate(lock);
+                prototype.into()
+            }
+            None => lock.null(),
+        };
+        call_into_js(lock, |lock| {
+            // SAFETY: the isolate is locked, a context is entered and both handles are in scope.
+            match Option::from(unsafe {
+                ffi::local_object_set_prototype(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    prototype.into_ffi(),
+                )
+            }) {
+                Some(true) => Ok(Some(())),
+                Some(false) => Err(Error::new_type_error("Cannot set the object's prototype")),
+                None => Ok(None),
+            }
+        })
+    }
+
     /// Sets `key` to `value`, like JS `obj[key] = value`.
     ///
     /// # Errors

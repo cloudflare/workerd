@@ -12,24 +12,30 @@ the result. Until then, no promise can carry this scope's tag, so
 treating every tagged promise as coming from another context, as
 comparing its tag with undefined does, is correct.
 
-Promises get their tag in Runtime_PromiseContextInit and in
-Factory::NewJSPromiseWithoutHook. The factory may allocate, so the
-latter makes the tag before it allocates the promise.
+The factory may allocate, so every place that tags a new promise
+makes a deferred tag before it allocates the promise:
+InnerNewJSPromise and the Promise constructor's subclass path, through
+Runtime_PromiseContextTagMake, and Factory::NewJSPromiseWithoutHook.
+Optimized code never sees a deferred tag, since it allocates promises
+inline only while the PromiseHook protector holds.
 ---
- include/v8-isolate.h           |   11 +++++++++++
- src/api/api.cc                 |    9 +++++++++
- src/execution/isolate-inl.h    |    9 +++++++++
- src/execution/isolate.cc       |   13 +++++++++++++
- src/execution/isolate.h        |    9 +++++++++
- src/heap/factory.cc            |    9 +++++++--
- src/runtime/runtime-promise.cc |    4 ++--
- 7 files changed, 60 insertions(+), 4 deletions(-)
+ include/v8-isolate.h                | 11 +++++++++++
+ src/api/api.cc                      |  9 +++++++++
+ src/builtins/promise-constructor.tq |  2 ++
+ src/builtins/promise-misc.tq        | 23 +++++++++++++++++++++--
+ src/execution/isolate-inl.h         |  9 +++++++++
+ src/execution/isolate.cc            | 12 ++++++++++++
+ src/execution/isolate.h             | 10 ++++++++++
+ src/heap/factory.cc                 |  4 +++-
+ src/runtime/runtime-promise.cc      |  8 ++++++++
+ src/runtime/runtime.h               |  3 ++-
+ 10 files changed, 87 insertions(+), 4 deletions(-)
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index f7caba3..e2cdab1 100644
+index 30a70b49587be3f9dba70ea87ba5f44b98680ca0..1d0630cfd9102115bb0f94f9715b884a7ef7ad18 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -2008,6 +2008,17 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+@@ -2011,6 +2011,17 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
  class Isolate::PromiseContextScope {
   public:
    PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag);
@@ -48,7 +54,7 @@ index f7caba3..e2cdab1 100644
    PromiseContextScope(const PromiseContextScope&) = delete;
    PromiseContextScope(PromiseContextScope&&) = delete;
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b65302a..b43757e 100644
+index b65302af06294fb1e45baea617f4f0df0c1c08a0..b43757e1848e86647b7ec1517240111f33f95c5a 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -12890,6 +12890,15 @@ Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
@@ -67,8 +73,73 @@ index b65302a..b43757e 100644
  Isolate::PromiseContextScope::~PromiseContextScope() {
    isolate_->clear_promise_context_tag();
  }
+diff --git a/src/builtins/promise-constructor.tq b/src/builtins/promise-constructor.tq
+index 50677631b5399453eebc6b149272431f74b1fce6..1b11e7852b30d582cce5d49fc57ddf51abcecaf3 100644
+--- a/src/builtins/promise-constructor.tq
++++ b/src/builtins/promise-constructor.tq
+@@ -59,6 +59,8 @@ transitioning javascript builtin PromiseConstructor(
+   if (promiseFun == newTarget) {
+     result = NewJSPromise();
+   } else {
++    // PromiseInit() needs a deferred tag made before the promise is.
++    GetOrMakePromiseContextTag();
+     result = UnsafeCast<JSPromise>(
+         FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
+     PromiseInit(result);
+diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
+index b0b4a18e00faffe2efb7ce807e7ab609adc1ff1d..4365be87c224ae21f51c275b8f0e7a3d3765a755 100644
+--- a/src/builtins/promise-misc.tq
++++ b/src/builtins/promise-misc.tq
+@@ -31,6 +31,21 @@ extern macro PromiseBuiltinsAssembler::IsIsolatePromiseHookEnabled(uint32):
+ extern macro PromiseBuiltinsAssembler::PromiseHookFlags(): uint32;
+ extern macro LoadPromiseContextTag(): Object;
+ 
++namespace runtime {
++extern runtime PromiseContextTagMake(implicit context: Context)(): Object;
++}
++
++// The tag a promise made now gets. A PromiseContextScope that defers its tag
++// holds undefined until its first promise, so this makes the tag then. Since
++// that allocates, call this before allocating the promise.
++macro GetOrMakePromiseContextTag(implicit context: Context)(): Object {
++  const tag = LoadPromiseContextTag();
++  if (TaggedEqual(tag, Undefined)) {
++    return runtime::PromiseContextTagMake();
++  }
++  return tag;
++}
++
+ // Whether following or settling {promise} has to go through the embedder.
+ macro NeedsPromiseContextSwitch(promise: JSPromise): bool {
+   const tag = promise.context_tag;
+@@ -62,11 +77,15 @@ macro PromiseInit(promise: JSPromise): void {
+     is_silent: false,
+     async_task_id: kInvalidAsyncTaskId
+   });
+-  promise.context_tag = LoadPromiseContextTag();
++  // A deferred tag was made before the promise was allocated.
++  const tag = LoadPromiseContextTag();
++  dcheck(!TaggedEqual(tag, Undefined));
++  promise.context_tag = tag;
+   promise_internal::ZeroOutEmbedderOffsets(promise);
+ }
+ 
+ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
++  const contextTag = GetOrMakePromiseContextTag();
+   const promiseFun = *NativeContextSlot(ContextSlot::PROMISE_FUNCTION_INDEX);
+   dcheck(Is<JSFunctionWithPrototype>(promiseFun));
+   const promiseMap = UnsafeCast<Map>(promiseFun.prototype_or_initial_map);
+@@ -83,7 +102,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
+     is_silent: false,
+     async_task_id: kInvalidAsyncTaskId
+   });
+-  promise.context_tag = LoadPromiseContextTag();
++  promise.context_tag = contextTag;
+   return promise;
+ }
+ 
 diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
-index 46bb8d6..7846bd6 100644
+index 823b8bfde06eca234e6b96b7a73b1f7a21af4de4..9b0472a8d45e501377525cfe06c7bc10f6e686ba 100644
 --- a/src/execution/isolate-inl.h
 +++ b/src/execution/isolate-inl.h
 @@ -139,6 +139,15 @@ bool Isolate::has_promise_context_tag() {
@@ -88,15 +159,14 @@ index 46bb8d6..7846bd6 100644
  
  void Isolate::set_promise_context_tag(Handle<Object> tag) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 5b8a996..3e2048a 100644
+index 5b8a996907168a7c303d62d10f8733a81c950e46..1106ede0da32cd9c8fe3443538a9c20a7aa64b10 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
-@@ -8752,6 +8752,19 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
+@@ -8752,6 +8752,18 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
    return v8::Utils::OpenHandle(*result);
  }
  
 +Handle<Object> Isolate::GetOrMakePromiseContextTag() {
-+  DCHECK(has_promise_context_tag());
 +  if (IsUndefined(heap()->promise_context_tag())) {
 +    auto factory = promise_context_tag_factory_;
 +    CHECK_NOT_NULL(factory);
@@ -112,10 +182,10 @@ index 5b8a996..3e2048a 100644
      v8::Isolate* isolate, Handle<JSObject> tag, DirectHandle<Object> promise_or_data,
      DirectHandle<Object> argument, PromiseReaction::Type type) {
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index 8a80cac..84ce5d4 100644
+index 8a80cac2db5e4841cc435e7cadb1431b49a31bce..c1aad883c7582c01e25488e549a344251d7559cf 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -2495,6 +2495,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2495,6 +2495,13 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    inline bool has_promise_context_tag();
    inline void clear_promise_context_tag();
    inline void set_promise_context_tag(Handle<Object> tag);
@@ -123,12 +193,13 @@ index 8a80cac..84ce5d4 100644
 +  // GetOrMakePromiseContextTag() first needs it.
 +  inline void set_deferred_promise_context_tag(
 +      v8::Isolate::PromiseContextScope::TagFactory factory, void* data);
-+  // The current tag, which there must be, made first if it was deferred.
++  // The current tag, made first if it was deferred. Outside any
++  // PromiseContextScope, this is the hole.
 +  Handle<Object> GetOrMakePromiseContextTag();
    inline void set_promise_cross_context_callback(
        PromiseCrossContextCallback callback);
    inline void set_promise_cross_context_resolve_callback(
-@@ -3054,6 +3060,9 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -3054,6 +3061,9 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
  
    friend class HandleScopeImplementer;
    PromiseCrossContextCallback promise_cross_context_callback_ = nullptr;
@@ -139,43 +210,55 @@ index 8a80cac..84ce5d4 100644
        nullptr;
    bool in_promise_cross_context_callback_ = false;
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index a8a72cd..8e77d38 100644
+index 055690fc81af503d60661a3fb10c9e85b6abc7a1..4ba5bf5e529fd4047e8f8c8c9da05c9a92605674 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4986,14 +4986,19 @@ DirectHandle<Map> Factory::CreateClassFunctionMap(
+@@ -4986,12 +4986,14 @@ DirectHandle<Map> Factory::CreateClassFunctionMap(
  }
  
  Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
 +  // Made before the promise, since making a deferred tag may allocate.
-+  DirectHandle<Object> context_tag;
-+  if (isolate()->has_promise_context_tag()) {
-+    context_tag = isolate()->GetOrMakePromiseContextTag();
-+  }
++  DirectHandle<Object> context_tag = isolate()->GetOrMakePromiseContextTag();
    Handle<JSPromise> promise =
        Cast<JSPromise>(NewJSObject(isolate()->promise_function()));
    DisallowGarbageCollection no_gc;
-   promise->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
--  if (!isolate()->has_promise_context_tag()) {
-+  if (context_tag.is_null()) {
-     promise->set_context_tag(Smi::zero(), SKIP_WRITE_BARRIER);
-   } else {
--    promise->set_context_tag(*isolate()->promise_context_tag());
-+    promise->set_context_tag(*context_tag);
-   }
- 
-   promise->set_flags(JSPromise::Flags());
+   Tagged<JSPromise> raw = *promise;
+   raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
+-  raw->set_context_tag(isolate()->heap()->promise_context_tag());
++  raw->set_context_tag(*context_tag);
+   raw->set_flags(JSPromise::Flags());
+   // TODO(v8) remove once embedder data slots are always zero-initialized.
+   InitEmbedderFields(*promise, Smi::zero());
 diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
-index 313f842..51ece5a 100644
+index ab80f4c73f80e291de1d7bce161a4c10e20d8662..c7b29186e9524537496fc576f6580612a8bb0680 100644
 --- a/src/runtime/runtime-promise.cc
 +++ b/src/runtime/runtime-promise.cc
-@@ -253,8 +253,8 @@ RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
-   if (!isolate->has_promise_context_tag()) {
-     args.at<JSPromise>(0)->set_context_tag(Smi::zero());
-   } else {
--    CHECK(!IsUndefined(*isolate->promise_context_tag()));
--    args.at<JSPromise>(0)->set_context_tag(*isolate->promise_context_tag());
-+    DirectHandle<Object> tag = isolate->GetOrMakePromiseContextTag();
-+    args.at<JSPromise>(0)->set_context_tag(*tag);
-   }
-   return ReadOnlyRoots(isolate).undefined_value();
+@@ -247,6 +247,14 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
+   return *result;
  }
+ 
++// Makes a PromiseContextScope's deferred tag, for builtins that are about to
++// allocate a promise and found the tag still deferred.
++RUNTIME_FUNCTION(Runtime_PromiseContextTagMake) {
++  HandleScope scope(isolate);
++  DCHECK_EQ(0, args.length());
++  return *isolate->GetOrMakePromiseContextTag();
++}
++
+ RUNTIME_FUNCTION(Runtime_PromiseContextCheck) {
+   HandleScope scope(isolate);
+   DCHECK_EQ(1, args.length());
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index ce24b24abb2a4f706f3fde36ef46945984574fb1..62cce8d7fca0f9b40ee31fd1c62235fc215eb935 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -451,7 +451,8 @@ constexpr bool CanTriggerGC(T... properties) {
+   F(ConstructSuppressedError, 3, 1)                         \
+   F(ConstructAggregateErrorHelper, 4, 1)                    \
+   F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
+-  F(PromiseContextCheck, 1, 1)
++  F(PromiseContextCheck, 1, 1)                                         \
++  F(PromiseContextTagMake, 0, 1)
+ 
+ #define FOR_EACH_INTRINSIC_PROXY(F, I) \
+   F(CheckProxyGetSetTrapResult, 4, 1)  \

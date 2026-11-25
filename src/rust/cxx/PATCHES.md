@@ -6,7 +6,8 @@ The in-tree fork contains these major behavioral changes:
   failure through its return value in both directions. An `extern "Rust"` function that panics
   reports a `kj::Exception` to C++, while an `extern "C++"` function that throws reports the
   exception to Rust. Infallible Rust signatures panic when C++ throws. Return values travel through
-  out parameters so no bridge shim is treated as truly `noexcept`.
+  out parameters so no bridge shim is treated as truly `noexcept`. A Rust future that panics while
+  C++ polls it rejects its `kj::Promise`, and a panic while C++ drops one is logged.
 - **`#[nothrow]` extern C++ functions.** An `extern "C++"` function marked `#[nothrow]` is called
   without catching exceptions: its bridge shim calls the C++ function with no `try`/`catch` and
   returns its value through an out parameter as other shims do, and Rust declares the shim

@@ -584,36 +584,6 @@ void set_allow_eval(Isolate* isolate, bool allow) {
       ::workerd::jsg::check(v8::WasmModuleObject::FromCompiledModule(isolate, *module)));
 }
 
-void set_error_slots(
-    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(object));
-  KJ_REQUIRE(handle->IsObject());
-  auto jsObject = ::workerd::jsg::JsObject(handle.As<v8::Object>());
-  jsObject.setPrivate(js, ::workerd::jsg::ERROR_NAME_KEY,
-      js.str(kj::ArrayPtr<const char>(name.data(), name.size())));
-  jsObject.setPrivate(js, ::workerd::jsg::ERROR_MESSAGE_KEY,
-      js.str(kj::ArrayPtr<const char>(message.data(), message.size())));
-}
-
-::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
-    ::workerd::rust::jsg::Local prototype,
-    ::rust::Str name,
-    ::rust::Str message,
-    ::rust::Str stack) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(prototype));
-  KJ_REQUIRE(handle->IsObject());
-  auto toKj = [](::rust::Str s) { return kj::str(kj::ArrayPtr<const char>(s.data(), s.size())); };
-  auto nameString = toKj(name);
-  auto messageString = toKj(message);
-  auto stackString = toKj(stack);
-  v8::Local<v8::Value> result = ::workerd::jsg::newBootstrapDomException(js,
-      ::workerd::jsg::JsObject(handle.As<v8::Object>()), nameString, messageString,
-      stackString.asPtr());
-  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
-}
-
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }

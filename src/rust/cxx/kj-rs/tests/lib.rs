@@ -16,6 +16,7 @@ use kj_rs::KjOwn;
 use test_futures::clear_retained_waker;
 use test_futures::complete_joined_waker_future;
 use test_futures::join_retained_wake;
+use test_futures::new_awaiting_then_panicking_future_void;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
@@ -24,6 +25,9 @@ use test_futures::new_joined_waker_future_void;
 use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
+use test_futures::new_panicking_future_i32;
+use test_futures::new_panicking_future_void;
+use test_futures::new_panicking_on_drop_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
@@ -318,6 +322,12 @@ pub mod ffi {
         async fn new_kj_errored_future_void() -> Result<()>;
 
         async fn new_error_handling_future_void_infallible();
+
+        // Panic test helpers.
+        async fn new_panicking_future_void() -> Result<()>;
+        async fn new_panicking_future_i32() -> i32;
+        async fn new_awaiting_then_panicking_future_void();
+        async fn new_panicking_on_drop_future_void() -> Result<()>;
 
         async fn new_promise_i32_awaiting_future_void() -> Result<()>;
         async fn new_ready_future_i32(value: i32) -> Result<i32>;

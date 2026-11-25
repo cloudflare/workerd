@@ -37,9 +37,20 @@ just prepare-ubuntu
 Cloudflare employees can build and test on bazelflare, which runs every action on Linux x86_64
 executors and shares its cache with CI. Log in once with
 `cloudflared access login https://bazelflare-workerd.runtime-playground.workers.dev`, then add
-`--config=bazelflare` (or `bazelflare-asan`, `bazelflare-tsan`) to a `bazel build` or `bazel test`
-command, from macOS or Linux. Tests that need the network or a container engine run on executors
-that have them; the container tests are `enormous`, which Bazel skips without `--test_size_filters=`.
+`--config=bazelflare` to a `bazel build`, `bazel test` or `bazel coverage` command, from macOS or
+Linux. It combines, in either order, with the configs that pick a build, such as `asan`, `tsan`,
+`coverage` or `release_linux`. CI gives `--config=bazelflare` first, and a build shares CI's cache
+only with the same flags in the same order, since the order of compiler flags is part of each
+action's key:
+
+```sh
+bazel test --config=bazelflare --config=asan //src/...
+```
+
+Tests that need the network or a container engine run on executors that have them; the container
+tests are `enormous`, which Bazel skips without `--test_size_filters=`. Elsewhere, tests tagged
+`requires-container-engine` are incompatible unless `--//build/config:has_container_engine` says
+the machine has one (see `build/test_attrs.bzl`).
 
 A bazelflare build downloads only the outputs it needs locally, so the generated headers and Rust
 sources that clangd and rust-analyzer read from `bazel-bin` (Cap'n Proto and cxx bridge code, the

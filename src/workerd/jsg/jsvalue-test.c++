@@ -94,12 +94,13 @@ struct JsValueContext: public ContextGlobalObject {
     return obj.getPrototype(js);
   }
 
-  // kj::str() of `object` after giving it `name` and `message` as an error implemented in the
-  // per-isolate bootstrap holds them.
-  kj::String describeWithErrorSlots(Lock& js, JsObject object, JsValue name, JsValue message) {
-    object.setPrivate(js, ERROR_NAME_KEY, name);
-    object.setPrivate(js, ERROR_MESSAGE_KEY, message);
-    return kj::str(object);
+  // V8's DOMException, which the context may not expose as a global.
+  JsObject newDomException(Lock& js, JsString message, JsString name) {
+    return JsObject(v8::Exception::DOMException(message, name).As<v8::Object>());
+  }
+
+  kj::String describe(Lock& js, JsValue value) {
+    return kj::str(value);
   }
 
   // Checks that writeInto(), given a buffer of `size` elements and `flags`, copies as many of the
@@ -156,7 +157,8 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
     JSG_METHOD(functionLength);
-    JSG_METHOD(describeWithErrorSlots);
+    JSG_METHOD(newDomException);
+    JSG_METHOD(describe);
     JSG_METHOD(checkWriteIntoPrefix);
     JSG_NESTED_TYPE(Foo);
   }
@@ -220,22 +222,16 @@ KJ_TEST("JsFunction::length() clamps a redefined length to a size_t") {
   expect("1e300", "18446744073709551615");
 }
 
-KJ_TEST("kj::str() describes an object by the error name and message it holds") {
+KJ_TEST("kj::str() describes a DOMException by the name and message it was created with") {
   Evaluator<JsValueContext, JsValueIsolate> e(v8System);
-  e.expectEval("describeWithErrorSlots({}, 'AbortError', 'boom')", "string", "AbortError: boom");
-  e.expectEval("describeWithErrorSlots({}, 'AbortError', '')", "string", "AbortError");
-  e.expectEval("describeWithErrorSlots({}, '', 'boom')", "string", "boom");
-  // Not by its properties, which V8's ToDetailString() reads, or by a Proxy's traps.
-  e.expectEval("describeWithErrorSlots("
-               "Object.assign(new Error('other'), { name: 'Other' }), 'AbortError', 'boom')",
+  e.expectEval("describe(newDomException('boom', 'AbortError'))", "string", "AbortError: boom");
+  e.expectEval("describe(newDomException('', 'AbortError'))", "string", "AbortError");
+  e.expectEval("describe(newDomException('boom', ''))", "string", "boom");
+  // Without calling accessors that shadow its attributes.
+  e.expectEval("const e = newDomException('boom', 'AbortError');"
+               "Object.defineProperty(e, 'name', { get() { throw new Error('ran'); } });"
+               "describe(e)",
       "string", "AbortError: boom");
-  e.expectEval("describeWithErrorSlots("
-               "new Proxy({}, { get() { throw new Error('ran'); } }), 'AbortError', 'boom')",
-      "string", "AbortError: boom");
-  // Unless both are strings, as V8 describes it.
-  e.expectEval("describeWithErrorSlots(new Error('other'), 'AbortError', undefined)", "string",
-      "Error: other");
-  e.expectEval("describeWithErrorSlots(new Error('other'), 42, 'boom')", "string", "Error: other");
 }
 
 KJ_TEST("JsString::writeInto() writes and reports only the prefix that fits") {

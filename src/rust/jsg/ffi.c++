@@ -669,6 +669,9 @@ static_assert(static_cast<int>(ConstructorBehavior::Allow) ==
 MaybeLocal function_new(
     Isolate* isolate, size_t callback, const Local& data, ConstructorBehavior behavior) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  // The callback ends up in the heap as the function's C++ callback; a startup snapshot can only
+  // serialize it if it is in the isolate's external-reference table.
+  workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
       local_as_ref_from_ffi<v8::Value>(data), 0, static_cast<v8::ConstructorBehavior>(behavior)));
@@ -736,6 +739,19 @@ bool local_object_set_property_by_global_name(
       ->Set(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate),
           local_from_ffi<v8::Value>(kj::mv(value)))
       .IsJust();
+}
+
+kj::Maybe<bool> local_object_set_prototype(Isolate* isolate, const Local& object, Local prototype) {
+  if (exceptionPending(isolate)) return kj::none;
+  if (local_as_ref_from_ffi<v8::Object>(object)
+          ->SetPrototype(isolate->GetCurrentContext(), local_from_ffi<v8::Value>(kj::mv(prototype)))
+          .IsJust()) {
+    return true;
+  }
+  // V8 reports a refused change as Nothing without an exception, and swallows a Proxy trap's
+  // exception, so Nothing with no exception pending means the object refused the change.
+  if (exceptionPending(isolate)) return kj::none;
+  return false;
 }
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
@@ -2221,7 +2237,7 @@ bool dom_exception_try_unwrap(Isolate* isolate,
     bool& isDomException,
     ::rust::String& name,
     ::rust::String& message) {
-  // Recognizing the bootstrap's DOMException reads private symbols, which passes the context.
+  // Recognizing the C++ class's DOMException passes the context to V8.
   if (exceptionPending(isolate)) return false;
   KJ_IF_SOME(exception,
       ::workerd::jsg::tryGetDOMExceptionNameAndMessage(

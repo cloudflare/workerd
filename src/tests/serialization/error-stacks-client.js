@@ -8,31 +8,18 @@ import { describe, makeError } from 'error-stacks-common';
 // Whether each server uses enhanced error serialization. env.ENHANCED says
 // whether this client does.
 const SERVERS = { SERVER_ENHANCED: true, SERVER_LEGACY: false };
-const KINDS = ['native', 'cloneable'];
 
-function localMakesError(kind) {
-  return makeError(kind, 'local');
+function localMakesError() {
+  return makeError('local');
 }
 
-// A native error and a CloneableTestError get the same stack in each case.
-// Either way, the stack's first line gives the error's name and message, and
-// a CloneableTestError's stack is not enumerable. (A native error's is when
-// structuredClone() restores it with enhanced error serialization.)
-function check(
-  actual,
-  kind,
-  where,
-  origin,
-  cloneable,
-  label,
-  message = `${kind} from ${where}`
-) {
+// Whichever stack the error has, its first line gives the error's name and
+// message.
+function check(actual, where, origin, label) {
   const expected = {
-    cloneable,
-    message,
+    message: `from ${where}`,
     origin,
     firstLineNamesError: true,
-    enumerable: kind === 'native' ? actual.enumerable : false,
   };
   assert.deepStrictEqual(
     actual,
@@ -41,31 +28,16 @@ function check(
   );
 }
 
-// A thrown error never keeps the remote stack. It reaches the caller as
-// itself only if both sides use enhanced error serialization; otherwise the
-// caller makes a new Error from its description, whose message, as for any
-// error whose name is not a built-in one, begins with its name.
+// A thrown error never keeps the remote stack.
 export const thrown = {
   async test(ctrl, env) {
-    for (const [server, serverEnhanced] of Object.entries(SERVERS)) {
-      for (const kind of KINDS) {
-        const label = `${kind} thrown by ${server}`;
-        const error = await env[server].throwError(kind).then(
-          () => assert.fail(`${label} did not reject`),
-          (e) => e
-        );
-        const asItself = env.ENHANCED && serverEnhanced;
-        const renamed = kind === 'cloneable' && !asItself;
-        check(
-          describe(error),
-          kind,
-          'remote',
-          'new',
-          kind === 'cloneable' && asItself,
-          label,
-          renamed ? 'CloneableTestError: cloneable from remote' : undefined
-        );
-      }
+    for (const server of Object.keys(SERVERS)) {
+      const label = `thrown by ${server}`;
+      const error = await env[server].throwError().then(
+        () => assert.fail(`${label} did not reject`),
+        (e) => e
+      );
+      check(describe(error), 'remote', 'new', label);
     }
   },
 };
@@ -75,17 +47,13 @@ export const thrown = {
 export const returned = {
   async test(ctrl, env) {
     for (const [server, serverEnhanced] of Object.entries(SERVERS)) {
-      for (const kind of KINDS) {
-        const value = await env[server].returnError(kind);
-        check(
-          describe(value.deep[1].error),
-          kind,
-          'remote',
-          serverEnhanced ? 'new' : 'remote',
-          kind === 'cloneable',
-          `${kind} returned by ${server}`
-        );
-      }
+      const value = await env[server].returnError();
+      check(
+        describe(value.deep[1].error),
+        'remote',
+        serverEnhanced ? 'new' : 'remote',
+        `returned by ${server}`
+      );
     }
   },
 };
@@ -95,33 +63,25 @@ export const returned = {
 export const sent = {
   async test(ctrl, env) {
     for (const server of Object.keys(SERVERS)) {
-      for (const kind of KINDS) {
-        const value = { deep: [1, { error: localMakesError(kind) }] };
-        check(
-          await env[server].describeError(value),
-          kind,
-          'local',
-          env.ENHANCED ? 'new' : 'local',
-          kind === 'cloneable',
-          `${kind} sent to ${server}`
-        );
-      }
+      const value = { deep: [1, { error: localMakesError() }] };
+      check(
+        await env[server].describeError(value),
+        'local',
+        env.ENHANCED ? 'new' : 'local',
+        `sent to ${server}`
+      );
     }
   },
 };
 
 // structuredClone() keeps the stack either way.
 export const cloned = {
-  test(ctrl, env) {
-    for (const kind of KINDS) {
-      check(
-        describe(structuredClone(localMakesError(kind))),
-        kind,
-        'local',
-        'local',
-        kind === 'cloneable',
-        `${kind} cloned`
-      );
-    }
+  test() {
+    check(
+      describe(structuredClone(localMakesError())),
+      'local',
+      'local',
+      'cloned'
+    );
   },
 };

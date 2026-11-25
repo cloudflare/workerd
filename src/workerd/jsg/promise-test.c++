@@ -291,7 +291,7 @@ KJ_TEST("a deferred promise context tag is made by the scope's first promise") {
       eval("globalThis.x = 1 + 1");
       KJ_EXPECT(first.makeCount == 0);
 
-      // JavaScript promises get their tag from Runtime_PromiseContextInit.
+      // JavaScript promises get their tag from the builtins that make them.
       eval("globalThis.p = new Promise(() => {}); Promise.resolve(1); (async () => {})()");
       KJ_EXPECT(first.makeCount == 1);
       eval("p.then(() => {})");
@@ -318,6 +318,17 @@ KJ_TEST("a deferred promise context tag is made by the scope's first promise") {
       check(v8::Promise::Resolver::New(js.v8Context()));
       check(v8::Promise::Resolver::New(js.v8Context()));
       KJ_EXPECT(third.makeCount == 1);
+    }
+
+    DeferredPromiseTag fourth;
+    {
+      // A subclass's promise is allocated by the Promise constructor rather than by
+      // InnerNewJSPromise.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &fourth);
+      eval("globalThis.sub = new (class extends Promise {})(() => {})");
+      KJ_EXPECT(fourth.makeCount == 1);
+      eval("sub.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
     }
 
     {
