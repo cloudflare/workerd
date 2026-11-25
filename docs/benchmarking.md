@@ -92,10 +92,11 @@ behavior; `compat_date` sets another. `name@all-compat-flags` uses 2999-12-31, a
 
 For each compat variant (`name@`, `name@all-compat-flags`, `name@all-autogates`), this defines a
 target for `bazel run` and an `@smoke` test (`name@smoke`, `name@all-compat-flags@smoke`, ...)
-that runs each case briefly, so CI checks that benchmarks keep working. CI doesn't run the
-benchmarks themselves. As for `wd_test()`, the config can declare a writable disk service named
-`TEST_TMPDIR`, for example for Durable Object storage; every run gets a new empty directory for it.
-To run one in an optimized build:
+that runs each case briefly, to check that benchmarks keep working. CI runs neither: the `@smoke`
+tests are tagged `off-by-default`, so select them with `--test_tag_filters=`, for example
+`bazel test --test_tag_filters= //src/bench/...`. As for `wd_test()`, the config can declare a
+writable disk service named `TEST_TMPDIR`, for example for Durable Object storage; every run gets
+a new empty directory for it. To run one in an optimized build:
 
 ```
 just wd-bench //src/workerd/api/tests:text-encoder-bench@
