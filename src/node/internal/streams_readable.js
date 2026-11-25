@@ -2366,6 +2366,11 @@ export function newReadableStreamFromStreamReadable(
     // If there is a strategy available, use it
     if (strategy) return strategy;
 
+    // A byte stream's queue is always measured in bytes, and its strategy
+    // must not have a size() (the ReadableStream constructor throws a
+    // RangeError for one), so it takes only the high-water mark.
+    if (createTypeBytes) return { __proto__: null, highWaterMark };
+
     if (objectMode) {
       // When running in objectMode explicitly but no strategy, we just fall
       // back to CountQueuingStrategy
