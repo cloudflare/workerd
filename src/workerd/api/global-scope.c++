@@ -339,7 +339,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // closes it or returns.
     // The handler is also the server side of any TLS upgrade, so there is no peer name to verify:
     // both starters set up above ignore the hostname they are given. `host` is passed as the
-    // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
+    // domain only because startTls() refuses to upgrade a socket that has none.
     jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(socketConnection), kj::mv(clientAddress),
         kj::str(host), SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
         SocketProtocol::TCP, kj::str(host) /* domain */, false /* isDefaultFetchPort */, kj::none);
@@ -351,10 +351,12 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     KJ_IF_SOME(a, acceptance) {
       jsSocket->setAcceptance(ioContext.addObject(a.addRef()));
     }
+    auto relay = kj::rc<ConnectHandlerRelay>();
+    jsSocket->setHandlerRelay(ioContext.addObject(relay.addRef()));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    auto result = ioContext.awaitJs(js, kj::mv(promise));
+    auto result = ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
     KJ_IF_SOME(a, acceptance) {
       // A handler that returns normally without accepting is an error in the handler: throwing
       // fails the connection and reports it like any other exception the handler throws.
@@ -362,7 +364,10 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
         JSG_REQUIRE(!a->abandon(reason), Error, reason);
       });
     }
-    return result.attach(kj::mv(span), kj::mv(abandonAcceptance), kj::mv(deferredNeuter));
+    // A relay the handler started with proxyTo() keeps using the connection after the handler
+    // has finished, so the connection is neutered only once the relay has ended too.
+    result = result.then([relay = kj::mv(relay)]() mutable { return relay->whenEnded(); });
+    return result.attach(kj::mv(abandonAcceptance), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");

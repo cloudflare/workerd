@@ -3651,7 +3651,7 @@ export interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
-  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  proxyTo(other: Socket, options?: ProxyToOptions): void;
   accept(): void;
 }
 export interface SocketOptions {
@@ -3673,6 +3673,9 @@ export interface SocketInfo {
 export declare class Datagram {
   constructor(data: Uint8Array);
   get data(): Uint8Array;
+}
+export interface ProxyToOptions {
+  signal?: AbortSignal;
 }
 export interface ExecOutput {
   readonly stdout: ArrayBuffer;

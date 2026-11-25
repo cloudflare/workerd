@@ -6,13 +6,14 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { ok, rejects, strictEqual, throws } from 'assert';
 
 export class ConnectProxy extends WorkerEntrypoint {
-  async connect(socket) {
+  connect(socket) {
     // proxy for the ConnectEndpoint instance on the connect-endpoint socket.
     const upstream = connect(
       `${this.env.SIDECAR_HOSTNAME}:${this.env.CONNECT_ENDPOINT_PORT}`
     );
-    // The handler's socket is closed when the handler returns, so wait for the relay to finish.
-    await socket.proxyTo(upstream);
+    // The handler's connection stays open until the relay ends, so the handler can return at
+    // once, without awaiting anything.
+    socket.proxyTo(upstream);
   }
 }
 
@@ -133,7 +134,7 @@ export class ImmediateTlsRelay extends WorkerEntrypoint {
     socket.accept();
     // A second accept() changes nothing.
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 
@@ -182,7 +183,7 @@ export class ImmediateTlsOverCustomProtocol extends WorkerEntrypoint {
     writer.releaseLock();
 
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 
@@ -213,7 +214,7 @@ export class ImmediateTlsFailedHandshake extends WorkerEntrypoint {
     );
     await upstream.opened;
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 

@@ -3645,7 +3645,7 @@ interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
-  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  proxyTo(other: Socket, options?: ProxyToOptions): void;
   accept(): void;
 }
 interface SocketOptions {
@@ -3667,6 +3667,9 @@ interface SocketInfo {
 declare class Datagram {
   constructor(data: Uint8Array);
   get data(): Uint8Array;
+}
+interface ProxyToOptions {
+  signal?: AbortSignal;
 }
 interface ExecOutput {
   readonly stdout: ArrayBuffer;
