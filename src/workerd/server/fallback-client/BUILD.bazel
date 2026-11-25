@@ -1,0 +1,71 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The client of the module fallback service (`Worker.moduleFallback`, local development only).
+# C++ uses it through :fallback-service-client, which runs the crate's worker on a kj::Thread.
+wd_rust_crate(
+    name = "fallback-client",
+    srcs = glob(
+        ["*.rs"],
+        exclude = ["test_bridge.rs"],
+    ),
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    test_deps = [
+        "@crates_vendor//serde_json",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-tokio",
+        "//src/workerd/server:workerd_capnp_rust",
+        "@crates_vendor//bytes",
+        "@crates_vendor//capnp",
+        "@crates_vendor//http",
+        "@crates_vendor//hyper",
+        "@crates_vendor//hyper-util",
+        "@crates_vendor//tokio",
+        "@crates_vendor//tracing",
+    ],
+)
+
+# `FallbackServiceClient`, called by the module registries in //src/workerd/server:workerd-api
+# (new registry, protocol V2) and //src/workerd/server/factory:worker-factory (legacy registry,
+# V1).
+wd_cc_library(
+    name = "fallback-service-client",
+    srcs = ["fallback-client.c++"],
+    hdrs = ["fallback-client.h"],
+    visibility = ["//src/workerd/server:__subpackages__"],
+    deps = [
+        ":fallback-client",
+        ":ffi.rs@cxx",
+        "//src/rust/cxx/kj-rs",
+        "//src/workerd/server:workerd_capnp",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_rust_crate(
+    name = "fallback-client-test-bridge",
+    testonly = True,
+    srcs = ["test_bridge.rs"],
+    crate_root = "test_bridge.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "test_bridge.rs",
+    deps = [":fallback-client"],
+)
+
+# The crate's requests and its reading of responses, against JsonCodec and kj::Url as the C++
+# client used them.
+kj_test(
+    src = "fallback-client-test.c++",
+    deps = [
+        ":fallback-client-test-bridge",
+        "//src/rust/cxx/kj-rs",
+        "//src/workerd/server:workerd_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)

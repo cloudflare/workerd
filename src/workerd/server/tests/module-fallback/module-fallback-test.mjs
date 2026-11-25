@@ -452,3 +452,89 @@ const unitTests :Workerd.Config = (
     });
   }
 });
+
+const MISSING_WORKER = `
+${REJECTS}
+export const missing = {
+  async test() {
+    await rejects(import('./missing.js'), 'missing.js');
+  },
+};
+`;
+
+test('module fallback logs as JSON under structured logging', async () => {
+  const fallback = createServer((request, response) => {
+    request.resume();
+    request.once('end', () => {
+      response.writeHead(404);
+      response.end('not found');
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    fallback.once('error', reject);
+    fallback.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = fallback.address();
+    assert(address && typeof address !== 'string');
+    const directory = await mkdtemp(
+      join(env.TEST_TMPDIR, 'module-fallback-structured-')
+    );
+    const configPath = join(directory, 'config.capnp');
+    await writeFile(join(directory, 'main.js'), MISSING_WORKER);
+    await writeFile(
+      configPath,
+      `using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "nmr",
+      worker = (
+        modules = [(name = "main.js", esModule = embed "main.js")],
+        compatibilityDate = "2026-07-01",
+        compatibilityFlags = ["new_module_registry"],
+        moduleFallback = "127.0.0.1:${address.port}",
+      ),
+    ),
+    ( name = "legacy",
+      worker = (
+        modules = [(name = "main.js", esModule = embed "main.js")],
+        compatibilityDate = "2026-07-01",
+        compatibilityFlags = ["legacy_module_registry"],
+        moduleFallback = "127.0.0.1:${address.port}",
+      ),
+    ),
+  ],
+  structuredLogging = true,
+);
+`
+    );
+
+    const result = await runWorkerd(configPath);
+    assert.equal(
+      result.code,
+      0,
+      `workerd exited with code=${result.code}, signal=${result.signal}:\n${result.output}`
+    );
+
+    // The fallback service is called on a thread of its own, which logs as the main thread does.
+    const failures = result.output
+      .split('\n')
+      .filter((line) =>
+        line.includes('Fallback service failed to fetch module')
+      );
+    assert.equal(failures.length, 2, result.output);
+    for (const line of failures) {
+      const entry = JSON.parse(line);
+      assert.equal(typeof entry.level, 'string', line);
+      assert.equal(typeof entry.timestamp, 'string', line);
+      assert.match(entry.message, /Fallback service failed to fetch module/);
+    }
+  } finally {
+    await new Promise((resolve, reject) => {
+      fallback.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});

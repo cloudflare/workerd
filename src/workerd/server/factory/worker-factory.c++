@@ -20,7 +20,7 @@
 #include <workerd/jsg/snapshot.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/compiled-bindings.capnp.h>
-#include <workerd/server/fallback-service.h>
+#include <workerd/server/fallback-client/fallback-client.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
@@ -1771,8 +1771,8 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         KJ_IF_SOME(moduleOrRedirect,
             client->tryResolve(fallback::Version::V1,
                 method == jsg::ModuleRegistry::ResolveMethod::IMPORT
-                    ? fallback::ImportType::IMPORT
-                    : fallback::ImportType::REQUIRE,
+                    ? fallback::ImportType::Import
+                    : fallback::ImportType::Require,
                 specifier, rawSpecifier.orDefault(nullptr), referrer.orDefault(kj::String()),
                 attributes)) {
           KJ_SWITCH_ONEOF(moduleOrRedirect) {

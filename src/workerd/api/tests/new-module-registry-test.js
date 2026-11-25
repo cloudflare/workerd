@@ -824,6 +824,7 @@ export const processRedirectIgnoresQueryAndFragment = {
 // * [x] CommonJs modules correctly expose named exports
 // * [x] require('module').createRequire API works as expected
 // * [x] Entry point ESM with no default export is correctly reported as error
-// * [x] Fallback service works as expected (server fallback-service tests)
+// * [x] Fallback service works as expected (//src/workerd/server/fallback-client and
+//   //src/workerd/server/tests/module-fallback)
 // * [x] console.log output correctly uses node-internal:inspect for output
 // ...
