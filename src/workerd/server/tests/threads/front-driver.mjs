@@ -216,60 +216,103 @@ function sharedServer(options) {
 // How many requests a test sends before it gives up on what it waits for.
 const TRIES = 200;
 
-// What the `attempts` of a round resolved to, once each has settled. An attempt that failed
-// after another was answered is of no interest (the server may have stopped meanwhile); if none
-// was answered, the first failure is the round's.
-async function settled(attempts) {
-  const results = await Promise.allSettled(attempts);
-  const answers = results.flatMap((r) =>
-    r.status === 'fulfilled' ? [r.value] : []
+// How long an attempt of `steer` may take to settle before it fails.
+const ATTEMPT_MS = 30_000;
+
+// Whether a response with `status` and `headers` to a request that names the isolate `thread`
+// is the refusal the Worker gives it on any other isolate.
+function refusal(thread, status, headers) {
+  return (
+    thread !== undefined &&
+    status === 409 &&
+    headers['x-front'] !== undefined &&
+    headers['x-front'] !== thread
   );
-  const failure = results.find((r) => r.status === 'rejected');
-  if (failure !== undefined && answers.every((a) => a === undefined)) {
-    throw failure.reason;
+}
+
+// What the `attempts` of a round came to, once every one has settled: `{ answers, refused }`,
+// what the attempts that were answered resolved with, and how many were refused (resolved with
+// undefined). If any attempt rejected, the answers are disposed of with `discard`, and it fails
+// with an error that says how many of the round's attempts failed, whose cause is the first
+// failure; a failure of `discard` counts as one.
+async function settled(attempts, discard) {
+  const results = await Promise.allSettled(attempts);
+  const answers = [];
+  const failures = [];
+  let refused = 0;
+  for (const result of results) {
+    if (result.status === 'rejected') failures.push(result.reason);
+    else if (result.value === undefined) refused++;
+    else answers.push(result.value);
   }
-  return answers;
+  if (failures.length > 0) {
+    if (discard !== undefined) {
+      for (const result of await Promise.allSettled(
+        answers.map(async (answer) => discard(answer))
+      )) {
+        if (result.status === 'rejected') failures.push(result.reason);
+      }
+    }
+    const [first] = failures;
+    throw new Error(
+      `${failures.length} of ${attempts.length} attempts failed, the first with: ` +
+        `${first?.message ?? first}`,
+      { cause: first }
+    );
+  }
+  return { answers, refused };
 }
 
 // How many rounds `steer` sends before it gives up.
-const ROUNDS = 8;
+const ROUNDS = 6;
 
 // Sends a request until the isolate whose identity is `thread` serves it, or once to any isolate
 // if `thread` is undefined, on a server of `threads` threads. `attempt(headers)` sends the
-// request once with `headers` and resolves with what it got, or with undefined if another
-// isolate refused it.
+// request once with `headers` and settles in one of three ways: it resolves with what it got
+// from the isolate named, it resolves with undefined if and only if another isolate refused it
+// (the 409 of `refusal`), or it rejects. An attempt that does not settle within `ATTEMPT_MS`
+// rejects.
 //
 // The front wakes the sleeping thread with the fewest requests in flight for each request, and
 // among equals the one that slept last, so one request at a time would keep going to the same warm
 // thread. Steering fans out instead: a round sends several attempts a few milliseconds apart, and
 // an isolate that is not the one named holds its refusal for a while, so that it has a request in
-// flight and the next attempt goes to another thread. Each round sends twice as many, so that a
-// thread with requests of its own in flight is reached too. Only the isolate named acts on the
+// flight and the next attempt goes to another thread. Each round sends twice as many as the last,
+// up to `ROUNDS` rounds, so that a thread with requests of its own in flight is reached too. Every
+// attempt of a round settles before the round ends, and any attempt that rejects fails the
+// request (`settled`), whether or not another was answered. Only the isolate named acts on the
 // request, but it may get more than one attempt of a round: `discard(answer)` disposes of the
-// answers past the first.
+// answers past the first, and a failure of it fails the request too. A request that no round
+// had answered fails with the number of attempts refused in each round.
 async function steer(thread, attempt, { threads = THREADS, discard } = {}) {
+  const attemptOnce = (headers) =>
+    within(attempt(headers), ATTEMPT_MS, 'an attempt of a request');
   if (thread === undefined) {
-    const answer = await attempt({});
+    const answer = await attemptOnce({});
     assert.notStrictEqual(answer, undefined, 'a request was refused');
     return answer;
   }
   const headers = { 'x-thread': thread };
+  const rounds = [];
   for (let round = 1; round <= ROUNDS; round++) {
     const attempts = [];
     for (let i = 0; i < threads * 2 ** (round - 1); i++) {
-      const sent = attempt(headers);
-      // A failure is the round's only if no attempt was answered (`settled`).
+      const sent = attemptOnce(headers);
+      // `settled` inspects every attempt once the round has been sent; this only keeps a
+      // rejection meanwhile from being reported as unhandled.
       sent.catch(() => {});
       attempts.push(sent);
       await scheduler.wait(2);
     }
-    const answers = (await settled(attempts)).filter(
-      (answer) => answer !== undefined
-    );
+    const { answers, refused } = await settled(attempts, discard);
     for (const extra of answers.slice(1)) await discard?.(extra);
     if (answers.length > 0) return answers[0];
+    rounds.push(`${refused} of ${attempts.length}`);
   }
-  assert.fail(`isolate ${thread} served none of ${ROUNDS} rounds of requests`);
+  assert.fail(
+    `isolate ${thread} served none of ${ROUNDS} rounds of requests; refused in each ` +
+      `round: ${rounds.join(', ')}`
+  );
 }
 
 // The options of a request for `path` to `target`: `{ port }`, `{ port, tls: true }` or
@@ -324,7 +367,7 @@ function get(target, path, thread, more = {}) {
         headers: { ...more.headers, ...headers },
       });
       const text = res.body.toString();
-      if (res.status === 409 && thread !== undefined) return undefined;
+      if (refusal(thread, res.status, res.headers)) return undefined;
       assert.strictEqual(res.status, 200, text);
       const answer = JSON.parse(text);
       if (thread !== undefined) assert.strictEqual(answer.front, thread);
@@ -403,12 +446,17 @@ function hold(target, thread, ms = 20_000) {
         );
         req.on('error', reject);
         req.on('response', (res) => {
-          if (res.statusCode === 409) {
+          res.on('error', reject);
+          if (refusal(thread, res.statusCode, res.headers)) {
             res.resume();
             res.on('end', () => resolve(undefined));
             return;
           }
-          assert.strictEqual(res.statusCode, 200);
+          if (res.statusCode !== 200) {
+            res.resume();
+            reject(new Error(`a hold was answered ${res.statusCode}`));
+            return;
+          }
           res.on('error', () => {});
           req.on('error', () => {});
           // A client that only half-closes is not gone while its request is in flight: the
@@ -466,23 +514,32 @@ async function oneConnection(server, target = server.http) {
   return fronts;
 }
 
-// Has a thread run JavaScript for `ms` milliseconds: the isolate `thread` (any if undefined)
-// answers, and once its response head is here the thread spins in the body's first pull.
-// Resolves then with `{ front, headAt, done }`; `done` resolves with the Worker's `start` and
-// `end` of the spin and `endAt`, when the body ended here.
+// Has a thread run JavaScript for `ms` milliseconds, or until the time `ms.until` (epoch
+// milliseconds) if `ms` is `{ until }`: the isolate `thread` (any if undefined) answers, and
+// once its response head is here the thread spins in the body's first pull. Resolves then with
+// `{ front, headAt, done }`; `done` resolves with the Worker's `start` and `end` of the spin and
+// `endAt`, when the body ended here. An isolate that got a second attempt spins for it too; its
+// connection is closed.
 function spin(server, ms, thread) {
+  const query = typeof ms === 'object' ? `until=${ms.until}` : `ms=${ms}`;
   return steer(
     thread,
     (headers) =>
       new Promise((resolve, reject) => {
         const req = http.request(
-          options(server.http, `/spin?ms=${ms}`, { headers })
+          options(server.http, `/spin?${query}`, { headers })
         );
         req.on('error', reject);
         req.on('response', (res) => {
-          if (res.statusCode === 409) {
+          if (refusal(thread, res.statusCode, res.headers)) {
+            res.on('error', reject);
             res.resume();
             res.on('end', () => resolve(undefined));
+            return;
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            reject(new Error(`a spin was answered ${res.statusCode}`));
             return;
           }
           const headAt = Date.now();
@@ -491,16 +548,20 @@ function spin(server, ms, thread) {
           const done = new Promise((resolve, reject) => {
             res.on('data', (chunk) => (body += chunk));
             res.on('error', reject);
-            res.on('end', () =>
-              resolve({ ...JSON.parse(body), endAt: Date.now() })
-            );
+            res.on('end', () => {
+              try {
+                resolve({ ...JSON.parse(body), endAt: Date.now() });
+              } catch (error) {
+                reject(error);
+              }
+            });
           });
           done.catch(() => {});
-          resolve({ front: res.headers['x-front'], headAt, done });
+          resolve({ front: res.headers['x-front'], headAt, done, req });
         });
         req.end();
       }),
-    { threads: server.threads }
+    { threads: server.threads, discard: ({ req }) => req.destroy() }
   );
 }
 
@@ -730,22 +791,27 @@ function webSocket(open, path, thread, threads) {
     thread,
     async (headers) => {
       const socket = await open();
-      const incoming = new Incoming(socket);
-      const extra = Object.entries(headers)
-        .map(([name, value]) => `${name}: ${value}\r\n`)
-        .join('');
-      socket.write(
-        `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\n` +
-          'Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n' +
-          `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n${extra}\r\n`
-      );
-      const head = await incoming.head();
-      if (head.status === 409) {
+      try {
+        const incoming = new Incoming(socket);
+        const extra = Object.entries(headers)
+          .map(([name, value]) => `${name}: ${value}\r\n`)
+          .join('');
+        socket.write(
+          `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\n` +
+            'Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n' +
+            `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n${extra}\r\n`
+        );
+        const head = await incoming.head();
+        if (refusal(thread, head.status, head.headers)) {
+          socket.destroy();
+          return undefined;
+        }
+        assert.strictEqual(head.status, 101);
+        return new WebSocketClient(socket, incoming, head.headers);
+      } catch (error) {
         socket.destroy();
-        return undefined;
+        throw error;
       }
-      assert.strictEqual(head.status, 101);
-      return new WebSocketClient(socket, incoming, head.headers);
     },
     { threads, discard: (extra) => extra.destroy() }
   );
@@ -909,13 +975,19 @@ async function busyUpload(server, thread, { size, work }) {
         );
         req.on('error', reject);
         req.on('response', (res) => {
-          if (res.statusCode === 409) {
+          if (refusal(thread, res.statusCode, res.headers)) {
             // The isolate that refuses reads no body.
+            res.on('error', reject);
             res.resume();
             res.on('end', () => {
-              req.destroy();
               resolve(undefined);
+              req.destroy();
             });
+            return;
+          }
+          if (res.statusCode !== 200) {
+            req.destroy();
+            reject(new Error(`an upload was answered ${res.statusCode}`));
             return;
           }
           resolve({ req, res });
@@ -931,7 +1003,13 @@ async function busyUpload(server, thread, { size, work }) {
   const done = new Promise((resolve, reject) => {
     req.on('error', reject);
     res.on('error', reject);
-    res.on('end', () => resolve(JSON.parse(body)));
+    res.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
   });
   done.catch(() => {});
   const writer = (async () => {
@@ -1008,13 +1086,17 @@ async function download(server, size, steps = 0) {
 }
 
 // A response the server cannot finish: `{ status, headers, received, complete, error }`, once
-// the connection closed; `{ status: null }` if it closed before the head arrived.
+// the connection closed; `{ status: null, bytes }` if it was reset before the head arrived,
+// `bytes` what arrived before the reset.
 function partial(target, path) {
   return new Promise((resolve, reject) => {
     const req = http.request(options(target, path));
     req.on('error', (error) => {
-      if (error.code === 'ECONNRESET') resolve({ status: null });
-      else reject(error);
+      if (error.code === 'ECONNRESET') {
+        resolve({ status: null, bytes: req.socket?.bytesRead ?? 0 });
+      } else {
+        reject(error);
+      }
     });
     req.on('response', (res) => {
       let received = 0;
@@ -1083,8 +1165,9 @@ async function echoMessages(ws) {
   assert.deepStrictEqual(await ws.next(), { text });
 }
 
-// What the server's options made of requests on four sockets, by the number of threads: the
-// cases on one thread run first, and those on four are compared with them.
+// What the cases on one thread observed, by what: the server's options made of requests on four
+// sockets, the bytes ahead of a slow upload. The cases on one thread run first, and those on
+// four are compared with them.
 const observed = new Map();
 
 function observe(threads, what, value) {
@@ -1179,9 +1262,12 @@ for (const threads of [1, THREADS]) {
         { skip: !several && 'one thread accepts only when it is free' },
         async () => {
           const { server } = shared;
+          // Every thread spins until a time chosen here, so that how long steering takes does
+          // not matter: the first spinner until `T`, the others from 1500 ms later on.
+          const T = Date.now() + 4000;
           const spinners = [];
-          for (const ms of [1000, 2000, 2200, 2400]) {
-            spinners.push(await spin(server, ms));
+          for (const after of [0, 1500, 1700, 1900]) {
+            spinners.push(await spin(server, { until: T + after }));
           }
           assert.strictEqual(new Set(spinners.map((s) => s.front)).size, 4);
           const markers = Array.from({ length: 8 }, (_, n) =>
@@ -1203,21 +1289,31 @@ for (const threads of [1, THREADS]) {
                 return res;
               })
             );
-            // The front reads the request and queues it long before the next is sent.
+            // The front reads the request and queues it long before the next is sent, so the
+            // requests are queued in the order they are sent.
             await scheduler.wait(50);
           }
+          assert(
+            lastSent < T - 500,
+            `the last request was sent only ${T - lastSent} ms before the first spin ` +
+              'ended: the test is too slow to show anything'
+          );
           const answers = await within(
             Promise.all(responses),
             20_000,
             'the queued requests'
           );
           const spun = await Promise.all(spinners.map((s) => s.done));
-          // Every request was sent while every thread was busy.
-          assert(lastSent < Math.min(...spun.map((s) => s.end)));
           const firstFree = spinners[0].front;
           for (const res of answers) {
             assert.strictEqual(res.status, 200);
-            assert.strictEqual(JSON.parse(res.body).front, firstFree);
+            const { front, start } = JSON.parse(res.body);
+            assert.strictEqual(front, firstFree);
+            // It was queued until the first spinner was done.
+            assert(
+              start >= spun[0].end,
+              `a request started ${spun[0].end - start} ms before the first spin ended`
+            );
           }
           const { seen } = await get(server.http, '/seen', firstFree);
           assert.deepStrictEqual(
@@ -1255,31 +1351,50 @@ for (const threads of [1, THREADS]) {
       // -------------------------------------------------------------------------------
       // Bodies
 
-      test(
-        `a large upload streams through with backpressure and bounded memory ${on}`,
-        { skip: !several && 'two 512 MiB uploads cost too long to run twice' },
-        async () => {
-          const { server } = shared;
+      test(`a large upload streams through with backpressure and bounded memory ${on}`, async () => {
+        const { server } = shared;
+        if (several) {
+          // A quarter of a gigabyte at full speed, which costs too long to run twice.
           const size = 256 * MiB;
           const fast = await upload(server, { size });
           assert.strictEqual(fast.consumed, size);
           if (RSS)
             assert(fast.rssGrowth < 150 * MiB, `RSS grew ${fast.rssGrowth}`);
-
-          // The Worker reads the first 96 MiB at 48 MiB a second.
-          const slow = await upload(server, {
-            size,
-            slow: 96 * MiB,
-            rate: 48 * MiB,
-          });
-          assert.strictEqual(slow.consumed, size);
-          assert(slow.ahead.length >= 5, `${slow.ahead.length} samples`);
-          const ahead = Math.max(...slow.ahead);
-          assert(ahead < 48 * MiB, `the client wrote ${ahead} bytes ahead`);
-          if (RSS)
-            assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
         }
-      );
+
+        // The Worker reads the first 32 MiB at 8 MiB a second.
+        const slow = await upload(server, {
+          size: 48 * MiB,
+          slow: 32 * MiB,
+          rate: 8 * MiB,
+        });
+        assert.strictEqual(slow.consumed, 48 * MiB);
+        assert(slow.ahead.length >= 20, `${slow.ahead.length} samples`);
+        const ahead = Math.max(...slow.ahead);
+        console.log(`upload ahead ${on}: ${(ahead / MiB).toFixed(2)} MiB`);
+        // What the client can write ahead of what the Worker read is what the kernel's socket
+        // buffers hold plus what the server buffers. On one thread the loop reads the socket
+        // itself; on several the front reads it and hands the body to the loop a chunk at a
+        // time, so neither may hold more than a few chunks: the bytes ahead are those of one
+        // thread plus 4 MiB. Of that allowance the measurement takes up to 1.4 MiB (the ledger
+        // hears of the Worker's reads per MiB, and a sample 50 ms late is 0.4 MiB behind at
+        // 8 MiB a second), which leaves a few of the front's chunks. A side that buffered
+        // tens of MiB would also break the absolute bound, about three times the 6 MiB that
+        // the kernel's buffers of a connection over loopback take up on one thread on Linux.
+        assert(ahead < 20 * MiB, `the client wrote ${ahead} bytes ahead`);
+        const what = 'the bytes the client wrote ahead of a slow upload';
+        if (!several) {
+          observed.set(what, ahead);
+        } else if (observed.has(what)) {
+          const one = observed.get(what);
+          assert(
+            ahead <= one + 4 * MiB,
+            `the client wrote ${ahead} bytes ahead, ${one} on one thread`
+          );
+        }
+        if (RSS)
+          assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
+      });
 
       test(
         `a thread that reads a body without a pause serves what other threads ask of it ${on}`,
@@ -1490,22 +1605,25 @@ for (const threads of [1, THREADS]) {
           'the first chunk\n'
         );
         socket.resetAndDestroy();
-        // The Worker learns at once: its response body is cancelled (one thread), or its
-        // request body fails, whichever the loop sees first (several threads, where the front
-        // sees the reset).
-        const notes = await notesOf(
-          server,
-          front,
-          marker,
-          (notes) =>
-            notes.some(
-              (note) =>
-                note.startsWith('response cancelled') ||
-                note.startsWith('request body failed')
-            ),
-          5000
-        );
-        console.log(`mid-body notes ${on}: ${JSON.stringify(notes)}`);
+        // The Worker learns at once, in one of two ways. Its call is dropped: its response body
+        // is cancelled, and then `request.signal` aborts. That is what one thread always does,
+        // which sees the hang-up before anything else. Or the read of the request body that it
+        // waits for fails, and the call ends by that failure, so nothing is left to abort:
+        // on several threads the connection's end reaches the loop both as the end of the
+        // body it reads and as the drop of the call, and now and then the body comes first.
+        const cancelled = ['response cancelled: undefined', 'signal aborted'];
+        const failed = ['request body failed: Network connection lost.'];
+        const ended = (notes) =>
+          notes.includes('signal aborted') || notes.includes(failed[0]);
+        await notesOf(server, front, marker, ended, 5000);
+        // Nothing more follows either.
+        await scheduler.wait(300);
+        const notes = await notesOf(server, front, marker, ended);
+        if (several && notes[0] === failed[0]) {
+          assert.deepStrictEqual(notes, failed);
+        } else {
+          assert.deepStrictEqual(notes, cancelled);
+        }
       });
 
       test(`a Worker that throws before the head gets a bare 500 ${on}`, async () => {
@@ -1529,13 +1647,28 @@ for (const threads of [1, THREADS]) {
 
       for (const framing of ['length', 'chunked']) {
         test(`a Worker that fails after the head leaves a truncated ${framing} response ${on}`, async () => {
+          const { server } = shared;
+          const marker = unique(framing);
           const failed = await partial(
-            shared.server.http,
-            `/fail-after-head?framing=${framing}&marker=${unique(framing)}`
+            server.http,
+            `/fail-after-head?framing=${framing}&marker=${marker}`
           );
-          // The head may not have reached the connection before the body failed, on
-          // several threads; then the connection closes without a response.
-          if (failed.status === null && several) return;
+          await until(
+            () =>
+              server.log.includes(
+                `front-test: ${marker} failed after the head`
+              ),
+            5000,
+            'the log line of the failure'
+          );
+          if (failed.status === null) {
+            // On several threads the head now and then (about one request in a thousand)
+            // does not reach the client before the body fails: the connection is then reset
+            // before any byte of the response.
+            assert(several, 'the connection was reset before the head');
+            assert.strictEqual(failed.bytes, 0, 'bytes before the reset');
+            return;
+          }
           assert.strictEqual(failed.status, 200);
           if (framing === 'length') {
             assert.strictEqual(failed.headers['content-length'], '8192');
@@ -1883,6 +2016,8 @@ for (const threads of [THREADS, 1]) {
     async () => {
       const server = await serve({ threads });
       try {
+        // The first thread's isolate: that thread handles SIGTERM.
+        const first = several ? (await threadsOf(server)).first : undefined;
         // An idle keep-alive connection.
         const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
         const idle = await send(server.http, '/', { agent });
@@ -1893,35 +2028,64 @@ for (const threads of [THREADS, 1]) {
         const answers = [
           send(
             server.http,
-            // On several threads it outlasts the spins below.
-            `/sleep?marker=${inFlight}&announce&ms=${several ? 3000 : 1500}`
+            // On several threads it is still in flight when the first thread's spin below ends.
+            `/sleep?marker=${inFlight}&announce&ms=${several ? 5000 : 1500}`
           ),
         ];
         await ledgerValue(server, `arrived:${inFlight}`);
-        // On several threads every thread is then kept busy (a busy thread takes nothing, so
-        // each spin goes to another), and requests wait in the queue. The first thread handles
-        // SIGTERM once its spin ends.
+        // On several threads every thread is then kept busy, each until a time chosen here, so
+        // that how long steering takes does not matter: the first thread until `firstUntil`,
+        // and every other (a busy thread takes nothing, so each spin goes to another) 3000 ms
+        // longer. The first thread handles SIGTERM only once its spin ends.
         const spinners = [];
+        let firstUntil;
         if (several) {
-          for (let i = 0; i < threads; i++)
-            spinners.push(await spin(server, 2000));
+          firstUntil = Date.now() + 3000;
+          spinners.push(await spin(server, { until: firstUntil }, first));
+          for (let i = 1; i < threads; i++) {
+            spinners.push(await spin(server, { until: firstUntil + 3000 }));
+          }
+          assert.strictEqual(spinners[0].front, first);
           assert.strictEqual(
             new Set(spinners.map((s) => s.front)).size,
             threads
           );
-          for (let i = 0; i < 3; i++) {
-            answers.push(
-              send(server.http, `/sleep?marker=${unique('queued')}&ms=500`)
+          // Requests that keep the thread that takes them in JavaScript for 300 ms each, on
+          // connections of their own, sent 50 ms apart so that they are queued in the order
+          // sent. Once its spin has ended the first thread serves them one after another, and
+          // handles SIGTERM between two of them, while every other thread still spins: all but
+          // the first few start after the drain began.
+          for (let i = 0; i < 6; i++) {
+            const socket = await connect(server.http.port);
+            const incoming = new Incoming(socket);
+            await write(
+              socket,
+              `GET /spin?ms=300&marker=${unique('queued')} HTTP/1.1\r\n` +
+                'Host: localhost\r\n\r\n'
             );
+            // With what arrived after the response, once the connection closed.
+            const response = (async () => {
+              const res = await incoming.response();
+              return { ...res, rest: await incoming.rest() };
+            })();
+            response.finally(() => socket.destroy()).catch(() => {});
+            answers.push(response);
+            await scheduler.wait(50);
           }
-          // The front reads the requests and queues them.
-          await scheduler.wait(100);
         }
         const signaledAt = Date.now();
         server.child.kill('SIGTERM');
+        // When the drain was seen to have begun, on several threads: a connection was refused.
+        let refusedAt;
         if (several) {
+          assert(
+            signaledAt < firstUntil,
+            `SIGTERM was sent ${signaledAt - firstUntil} ms after the first thread's spin ` +
+              'ended: the test is too slow to show anything'
+          );
           // One thread stops accepting but keeps its listening socket until it exits.
           await refused(server.http.port);
+          refusedAt = Date.now();
         }
         const responses = await within(
           Promise.all(answers),
@@ -1929,13 +2093,43 @@ for (const threads of [THREADS, 1]) {
           'the answers'
         );
         const answeredAt = Date.now();
-        for (const res of responses) {
-          assert.strictEqual(res.status, 200);
-          assert.strictEqual(res.headers.connection, 'close');
-        }
+        for (const res of responses) assert.strictEqual(res.status, 200);
+        assert.strictEqual(responses[0].headers.connection, 'close');
         const spun = await Promise.all(spinners.map((s) => s.done));
         for (const { end } of spun) {
           assert(signaledAt < end, 'a thread was free when SIGTERM came');
+        }
+        if (several) {
+          const queued = responses.slice(1).map((res) => ({
+            start: JSON.parse(res.body).start,
+            connection: res.headers.connection,
+            rest: res.rest.length,
+          }));
+          const starts = queued.map(({ start }) => start);
+          for (const { start, rest } of queued) {
+            assert(
+              start >= spun[0].end,
+              'a queued request started before the first thread was free'
+            );
+            // The drain closes the connection after the response.
+            assert.strictEqual(rest, 0, 'bytes after the response');
+          }
+          // The requests that started after a connection was refused were still queued when
+          // the drain began, and their responses say that the connection closes after them.
+          // The first thread may take a queued request before it handles the signal; the
+          // head of such a request goes out before the drain.
+          const late = queued.filter(({ start }) => start > refusedAt);
+          for (const { connection } of late) {
+            assert.strictEqual(connection, 'close');
+          }
+          assert(
+            late.length >= 2,
+            `${late.length} queued requests started after a connection was refused at ` +
+              `${refusedAt}: they started at ${starts.join(', ')}`
+          );
+          for (const { end } of spun.slice(1)) {
+            assert(end > refusedAt, 'a thread was free when the drain began');
+          }
         }
         assert(idleClosedAt < answeredAt, 'the idle connection stayed open');
         agent.destroy();

@@ -117,7 +117,8 @@ export default {
 
     switch (url.pathname) {
       case '/':
-        return Response.json({ front }, { headers });
+        // `start`: when this isolate began to handle the request.
+        return Response.json({ front, start: Date.now() }, { headers });
 
       case '/where':
         // Answers after `ms` milliseconds, if given, so that requests sent together are in
@@ -165,13 +166,16 @@ export default {
 
       case '/spin': {
         // The head goes out first; then the body's first pull keeps this thread in JavaScript
-        // for `ms` milliseconds, during which it serves nothing else.
+        // for `ms` milliseconds, or until the time `until` (epoch milliseconds) if given, during
+        // which it serves nothing else.
         const ms = Number(query.get('ms'));
+        const until = query.has('until') ? Number(query.get('until')) : null;
         const body = new ReadableStream(
           {
             pull(controller) {
               const start = Date.now();
-              while (Date.now() < start + ms) {}
+              const stop = until ?? start + ms;
+              while (Date.now() < stop) {}
               const end = Date.now();
               controller.enqueue(
                 encoder.encode(JSON.stringify({ front, marker, start, end }))
