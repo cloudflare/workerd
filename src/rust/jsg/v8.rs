@@ -390,6 +390,8 @@ pub mod ffi {
         pub unsafe fn local_wasm_module_object_get_compiled_module(
             module: &Local,
         ) -> KjOwn<CompiledWasmModule>;
+        pub unsafe fn wasm_module_object_compile(isolate: *mut Isolate, bytes: &[u8])
+        -> MaybeLocal;
 
         // CompiledWasmModule
         #[nothrow]
@@ -475,6 +477,8 @@ pub mod ffi {
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        #[nothrow]
+        pub unsafe fn local_is_async_function(value: &Local) -> bool;
         #[nothrow]
         pub unsafe fn local_is_promise(value: &Local) -> bool;
         #[nothrow]
@@ -623,6 +627,22 @@ pub mod ffi {
             data: &Local,
             behavior: ConstructorBehavior,
         ) -> MaybeLocal;
+        pub unsafe fn function_compile(
+            isolate: *mut Isolate,
+            source: &Local,
+            resource_name: &Local,
+            params: &[Local],
+        ) -> MaybeLocal;
+        #[nothrow]
+        pub unsafe fn local_function_set_name(function: &Local, name: &Local);
+
+        // Local<Script>
+        pub unsafe fn script_compile(
+            isolate: *mut Isolate,
+            source: &Local,
+            resource_name: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_script_run(isolate: *mut Isolate, script: &Local) -> MaybeLocal;
 
         // Struct shapes; see `structs.rs`.
         pub unsafe fn dictionary_template_new(isolate: *mut Isolate, keys: &[&str]) -> Global;
@@ -1089,6 +1109,12 @@ pub mod ffi {
         #[nothrow]
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
+        #[nothrow]
+        pub unsafe fn isolate_is_eval_allowed(isolate: *mut Isolate) -> bool;
+        #[nothrow]
+        pub unsafe fn isolate_set_allow_eval(isolate: *mut Isolate, allow: bool);
+        #[nothrow]
+        pub unsafe fn isolate_is_starting_from_snapshot(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
             isolate: *mut Isolate,
         ) -> Local;
@@ -1713,6 +1739,8 @@ pub struct ArrayBuffer;
 pub struct ArrayBufferView;
 /// Marker for `v8::WasmModuleObject` handles: a `WebAssembly.Module`.
 pub struct WasmModuleObject;
+/// Marker for `v8::Script` handles: a classic script, compiled and bound to a context.
+pub struct Script;
 
 // =============================================================================
 // `BackingStore` — owned handle to a heap-allocated `std::shared_ptr<v8::BackingStore>`
@@ -2247,6 +2275,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_function(self.raw()) }
     }
 
+    /// Returns true if the value is an async function (`v8::Value::IsAsyncFunction`).
+    pub fn is_async_function(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_async_function(self.raw()) }
+    }
+
     /// Returns true if the value is a JavaScript Promise.
     pub fn is_promise(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -2600,7 +2634,52 @@ where
     }
 }
 
+impl Function {
+    /// Compiles `source` as the body of a function whose parameters are named `params`, with
+    /// `resource_name` as the script origin that stack traces show. The function captures
+    /// nothing but the global scope.
+    ///
+    /// Corresponds to `v8::ScriptCompiler::CompileFunction()`, without the code cache.
+    ///
+    /// # Errors
+    ///
+    /// If `source` does not compile, or an exception or a termination is already pending (then
+    /// without compiling), the exception stays pending and this returns an error for which
+    /// [`Error::is_pending`] is true.
+    pub fn compile<'s>(
+        lock: &mut Lock<'s>,
+        source: Local<'s, String>,
+        resource_name: Local<'s, String>,
+        params: &[Local<'s, String>],
+    ) -> Result<Local<'s, Self>, Error> {
+        source.debug_assert_isolate(lock);
+        resource_name.debug_assert_isolate(lock);
+        for param in params {
+            param.debug_assert_isolate(lock);
+        }
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; the
+            // handles are valid strings in its scope, and a non-empty result is a function in it.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::function_compile(
+                    lock.isolate().as_ffi(),
+                    source.raw(),
+                    resource_name.raw(),
+                    Local::raw_slice(params),
+                ))
+            })
+        })
+    }
+}
+
 impl<'s> Local<'s, Function> {
+    /// Sets the function's `name`, as `v8::Function::SetName()` does.
+    pub fn set_name(&self, name: Local<'s, String>) {
+        // SAFETY: both handles are valid within the current HandleScope; `self` is a function
+        // and `name` a string.
+        unsafe { ffi::local_function_set_name(self.raw(), name.raw()) }
+    }
+
     /// Calls this function and returns what it returns, as a handle.
     ///
     /// `receiver` is the `this` value; pass `None` for `undefined`.
@@ -3176,6 +3255,85 @@ impl<'s> Local<'s, ArrayBuffer> {
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
         // SAFETY: the FFI guarantees a non-null pointer on success.
         unsafe { BackingStore::from_raw(ptr) }
+    }
+}
+
+impl WasmModuleObject {
+    /// Compiles `bytes`, a WebAssembly binary, into a `WebAssembly.Module`.
+    ///
+    /// Corresponds to `v8::WasmModuleObject::Compile()`, which compiles whether or not the
+    /// isolate allows code generation from strings: unlike `WebAssembly.compile()` called from
+    /// JavaScript, it doesn't check.
+    ///
+    /// # Errors
+    ///
+    /// If `bytes` do not compile, or an exception or a termination is already pending (then
+    /// without compiling), the exception stays pending and this returns an error for which
+    /// [`Error::is_pending`] is true.
+    pub fn compile<'s>(lock: &mut Lock<'s>, bytes: &[u8]) -> Result<Local<'s, Self>, Error> {
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; a
+            // non-empty result is a `WasmModuleObject` in the lock's scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::wasm_module_object_compile(
+                    lock.isolate().as_ffi(),
+                    bytes,
+                ))
+            })
+        })
+    }
+}
+
+impl Script {
+    /// Compiles `source` as a classic script bound to the current context, with
+    /// `resource_name` as the script origin that stack traces show.
+    ///
+    /// Corresponds to `v8::ScriptCompiler::Compile()`, without the code cache, as C++ JSG's
+    /// `NonModuleScript::compile()` compiles.
+    ///
+    /// # Errors
+    ///
+    /// If `source` does not compile, or an exception or a termination is already pending (then
+    /// without compiling), the exception stays pending and this returns an error for which
+    /// [`Error::is_pending`] is true.
+    pub fn compile<'s>(
+        lock: &mut Lock<'s>,
+        source: Local<'s, String>,
+        resource_name: Local<'s, String>,
+    ) -> Result<Local<'s, Self>, Error> {
+        source.debug_assert_isolate(lock);
+        resource_name.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; the
+            // handles are valid strings in its scope, and a non-empty result is a script in it.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::script_compile(
+                    lock.isolate().as_ffi(),
+                    source.raw(),
+                    resource_name.raw(),
+                ))
+            })
+        })
+    }
+}
+
+impl<'s> Local<'s, Script> {
+    /// Runs the script and returns its completion value, as `v8::Script::Run()` does.
+    ///
+    /// # Errors
+    ///
+    /// If the script throws, or an exception or a termination is already pending (then without
+    /// running it), the exception stays pending and this returns an error for which
+    /// [`Error::is_pending`] is true.
+    pub fn run(&self, lock: &mut Lock<'s>) -> Result<Local<'s, Value>, Error> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; `self`
+            // is a script in its scope, and a non-empty result is a value in it.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_script_run(lock.isolate().as_ffi(), self.raw()))
+            })
+        })
     }
 }
 
