@@ -6,12 +6,11 @@
 //!
 //! Runs on the server's loop thread, inside its tokio `current_thread`
 //! runtime, but for the lease, which a thread of its own keeps
-//! (`keeper.rs`).
+//! (`keeper.rs`). A `Cluster` is the instance's control plane, `Core`, and a
+//! data plane of that thread's (`control.rs`); the server's other threads
+//! have a `Member` each, which reaches the `Core` through `Cluster::control`.
 
 use std::cell::Cell;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -23,16 +22,19 @@ use tokio::time::timeout;
 
 use crate::Bucket;
 use crate::Claim;
+use crate::Control;
 use crate::Error;
 use crate::Guard;
+use crate::Member;
+use crate::Open;
 use crate::Ownership;
 use crate::Registry;
 use crate::Result;
+use crate::Shared;
 use crate::Version;
 use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::gcs::Gcs;
-use crate::hmac_sha256;
 use crate::http::Repeat;
 use crate::http::prompt;
 use crate::keeper;
@@ -44,15 +46,11 @@ use crate::keeper::Progress;
 use crate::keeper::Within;
 use crate::namespace_hash;
 use crate::owner::Layout;
-use crate::owner::Owners;
 use crate::ownership::Owned;
 use crate::s3::S3;
 
 /// The bucket layout's version, the last element of every key's prefix.
 const FORMAT: &str = "v1";
-
-/// Claims a new object retries when another node opened it first.
-const FRESH_ATTEMPTS: usize = 3;
 
 /// How often each node looks for orphaned alarms (`alarms::Index::round`).
 const ORPHANS_EVERY_MS: u64 = 60 * 60 * 1000;
@@ -88,19 +86,33 @@ pub enum Route {
     Releasing(u64),
 }
 
+/// An instance: its control plane, and the data plane of the thread it is
+/// on.
 pub struct Cluster {
+    core: Rc<Core>,
+    member: Member,
+}
+
+/// An instance's control plane: its record and lease, the one table of what
+/// it claimed and where the rest is, and its alarm index.
+pub struct Core {
     registry: Rc<Registry>,
     ownership: Ownership,
-    owners: Owners,
-    /// Claims won but not yet taken over, for `restore_actor`.
-    claims: RefCell<HashMap<String, Owned>>,
     bucket: Bucket,
-    key: Vec<u8>,
     lessee: Lessee,
     timing: Timing,
     /// When the registration, `join`'s renewal, answered.
     registered: Cell<Option<u64>>,
     alarms: Index,
+    shared: Shared,
+}
+
+impl std::ops::Deref for Cluster {
+    type Target = Core;
+
+    fn deref(&self) -> &Core {
+        &self.core
+    }
 }
 
 impl Cluster {
@@ -159,30 +171,57 @@ impl Cluster {
             setup.timing.lease_ms,
         );
         let registry = Rc::new(registry.contended_pause(ms(setup.timing.contended_pause_ms)));
-        Rc::new(Self {
-            alarms: Index::new(
-                bucket.clone(),
-                &setup.node,
-                2 * setup.timing.lease_ms,
-                ORPHANS_EVERY_MS,
-            ),
-            owners: Owners::new(bucket.clone()),
+        let lessee = lessee(&registry);
+        let held = lessee.held().clone();
+        let alarms = Index::new(
+            bucket.clone(),
+            &setup.node,
+            2 * setup.timing.lease_ms,
+            ORPHANS_EVERY_MS,
+        );
+        let timing = setup.timing;
+        let shared = Shared::new(setup.node, setup.key, held, setup.url, setup.options);
+        let core = Rc::new(Core {
+            alarms,
             ownership: Ownership::new(bucket.clone(), registry.clone()),
-            lessee: lessee(&registry),
-            bucket,
+            lessee,
+            bucket: bucket.clone(),
             registry,
-            claims: RefCell::new(HashMap::new()),
-            key: setup.key,
-            timing: setup.timing,
+            timing,
             registered: Cell::new(None),
+            shared: shared.clone(),
+        });
+        let control: Rc<dyn Control> = Rc::clone(&core) as Rc<dyn Control>;
+        // A test may put what a thread boundary would between the two planes.
+        #[cfg(test)]
+        let control = crate::control::tests::wrap(control);
+        Rc::new(Self {
+            member: Member::new(bucket, shared, control),
+            core,
         })
+    }
+
+    /// The control plane, for the data plane of another thread (`Member`).
+    pub fn control(&self) -> Rc<dyn Control> {
+        Rc::clone(&self.core) as Rc<dyn Control>
+    }
+
+    /// This thread's data plane.
+    pub fn member(&self) -> &Member {
+        &self.member
     }
 
     /// The bucket below `<prefix>services/<path>/`, apart from the cluster's
     /// own state (`ClusterBucket` in workerd.capnp).
     pub fn services(&self, path: &str) -> Bucket {
-        self.bucket
-            .at(&format!("{}services/{path}", self.bucket.prefix()))
+        self.member.services(path)
+    }
+}
+
+impl Core {
+    /// What every thread of the instance may read of its membership.
+    pub fn shared(&self) -> &Shared {
+        &self.shared
     }
 
     pub fn node(&self) -> &str {
@@ -214,177 +253,57 @@ impl Cluster {
             .then(|| self.registry.address(node))?
     }
 
-    pub async fn acquire_or_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<Route> {
-        let mut claim = self.ownership.acquire_or_route(ns, actor, now_ms).await?;
-        // Named open here, but not open here. Evicted here with the bucket
-        // holding the epoch: resume it (`take_over`); a stale owner that
-        // writes on cannot acknowledge, since every acknowledgement rereads
-        // own.json. Otherwise, dropped after a failure or evicted before its
-        // upload completed: recover it at the next epoch.
-        if let Claim::Owned(owned) = &claim
-            && owned.recover.is_none()
-            && !self.owners.holds(ns, actor)
-            && self.owners.dormant(ns, actor) != Some(owned.epoch)
-        {
-            let next = self.ownership.advance(ns, actor, owned.epoch).await?;
-            // Changed meanwhile, by another claim here: claim what it left.
-            claim = match next {
-                Some(next) => Claim::Owned(next),
-                None => self.ownership.acquire_or_route(ns, actor, now_ms).await?,
-            };
-        }
-        // A new object opens here, where losing the race still routes.
-        for _ in 0..FRESH_ATTEMPTS {
-            let Claim::Owned(owned) = &claim else { break };
-            if owned.recover.is_none_or(|from| from != 0)
-                || self
-                    .owners
-                    .open_fresh(&self.ownership, ns, actor, owned)
-                    .await?
-            {
-                break;
-            }
-            claim = self.ownership.acquire_or_route(ns, actor, now_ms).await?;
-        }
-        if matches!(claim, Claim::Owned(_)) && self.is_draining() {
-            return Err(crate::Error::NotHere(format!(
-                "{ns}/{actor}: this node is draining"
-            )));
-        }
-        Ok(match claim {
-            Claim::Owned(owned) => {
-                let epoch = owned.epoch;
-                let key = format!("{ns}/{actor}");
-                self.claims.borrow_mut().insert(key, owned);
-                Route::Owned(epoch)
-            }
-            Claim::Route {
-                node,
-                address,
-                stale,
-            } => Route::Remote {
-                node,
-                address,
-                stale,
-            },
-            Claim::Releasing(epoch) => Route::Releasing(epoch),
-        })
+    /// One round of the alarms loop (`alarms::Index::round`).
+    pub async fn alarms_round(&self, now_ms: u64, adopted: impl FnMut(Adopted)) {
+        self.alarms.round(&self.registry, now_ms, adopted).await;
     }
 
-    /// Hand off an object this draining instance stopped, whose capture
-    /// `close_actor` closed: upload what the bucket lacks, then write the
-    /// owner record as unowned (`Ownership::release`). Nothing writes the
-    /// object here any more, so no write can follow the release; the next
-    /// owner's epoch fences anything else. Answers whether it was released.
-    pub async fn hand_off_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
-        self.owners.retire(ns, actor);
-        self.owners.evict(ns, actor, epoch).await;
-        self.release_actor(ns, actor, epoch).await
+    /// The MAC a peer call carries. The cluster key is used only through
+    /// labelled derivations, so no two uses share a key: this, with each
+    /// message labelled, and the channel token key.
+    pub fn mac(&self, data: &[u8]) -> Vec<u8> {
+        self.shared.mac(data)
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Open for Core {
+    async fn open(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.ownership.open(ns, actor, epoch).await
     }
 
-    /// Hand off an object this draining instance owns but does not serve,
-    /// once no capture, eviction or compaction of it is in flight here: the
-    /// next owner reads the files a compaction deletes. The caller bounds
-    /// the wait.
-    pub async fn release_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
-        while self.owners.busy(ns, actor) {
-            tokio::time::sleep(BUSY_POLL).await;
-        }
-        let released = self.ownership.release(ns, actor, epoch).await?;
-        if released {
-            self.owners.forget(ns, actor);
-            tracing::info!("cluster: {ns}/{actor} epoch {epoch} handed off");
-        }
-        Ok(released)
+    async fn current_epoch(&self, ns: &str, actor: &str) -> Result<Option<u64>> {
+        self.ownership.current_epoch(ns, actor).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Control for Core {
+    async fn claim(&self, ns: &str, actor: &str, now_ms: u64) -> Result<Claim> {
+        self.ownership.acquire_or_route(ns, actor, now_ms).await
     }
 
-    /// Gives up on handing off an object this draining instance failed to
-    /// release (`Ownership::abandon`).
-    pub fn abandon_actor(&self, ns: &str, actor: &str) {
+    async fn advance(&self, ns: &str, actor: &str, epoch: u64) -> Result<Option<Owned>> {
+        self.ownership.advance(ns, actor, epoch).await
+    }
+
+    async fn release(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.ownership.release(ns, actor, epoch).await
+    }
+
+    fn abandon(&self, ns: &str, actor: &str) {
         self.ownership.abandon(ns, actor);
     }
 
-    /// Take a claimed object over: recover what earlier epochs committed
-    /// into the databases `layout` places, and open the claimed epoch.
-    pub async fn restore_actor(
-        &self,
-        ns: &str,
-        actor: &str,
-        epoch: u64,
-        layout: &dyn Layout,
-    ) -> Result<()> {
-        let claim = self.claims.borrow_mut().remove(&format!("{ns}/{actor}"));
-        let owned = claim.filter(|owned| owned.epoch == epoch).ok_or_else(|| {
-            crate::Error::Replica(format!("{ns}/{actor}: no claim at epoch {epoch}"))
-        })?;
-        self.owners
-            .take_over(&self.ownership, ns, actor, &owned, layout)
-            .await
+    fn forget_route(&self, ns: &str, actor: &str, node: &str) {
+        self.ownership.forget_route(ns, actor, node);
     }
 
-    /// Make an object's captured commits durable in the bucket.
-    pub async fn sync_actor(&self, ns: &str, actor: &str) -> Result<()> {
-        self.owners.commit(&self.ownership, ns, actor).await
+    async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<()> {
+        self.ownership.refresh_route(ns, actor, now_ms).await
     }
 
-    /// Stop capturing an object that left this node.
-    pub fn close_actor(&self, ns: &str, actor: &str) {
-        self.owners.retire(ns, actor);
-    }
-
-    /// Capture the database at `path` of an owned object's facet, lane
-    /// `lane`, before it opens.
-    pub fn open_lane(&self, ns: &str, actor: &str, path: &str, lane: &str) -> Result<()> {
-        self.owners.open_lane(ns, actor, Path::new(path), lane)
-    }
-
-    /// An owned object's facet with lane prefix `prefix` and its
-    /// descendants were deleted.
-    pub fn delete_lanes(&self, ns: &str, actor: &str, prefix: &str) -> Result<()> {
-        self.owners.delete_lanes(ns, actor, prefix)
-    }
-
-    /// An owned object's facet with lane prefix `dst` and its descendants
-    /// were replaced by copies of the facet with prefix `src`'s.
-    pub fn clone_lanes(
-        &self,
-        ns: &str,
-        actor: &str,
-        src: &str,
-        dst: &str,
-        layout: &dyn Layout,
-    ) -> Result<()> {
-        self.owners.clone_lanes(ns, actor, src, dst, layout)
-    }
-
-    /// One of namespace `ns`'s databases was deleted, before anything
-    /// writes a new one.
-    pub fn database_reset(&self, ns: &str, file: &str) {
-        let (actor, file) = object_file(file);
-        self.owners.database_reset(ns, actor, file);
-    }
-
-    /// A write SQLite made to a WAL file in namespace `ns`'s storage.
-    pub fn wal_write(&self, ns: &str, file: &str, offset: u64, data: &[u8]) {
-        if let Some(db) = file.strip_suffix("-wal") {
-            let (actor, db) = object_file(db);
-            self.owners.wal_write(ns, actor, db, offset, data);
-        }
-    }
-
-    /// Compact owned objects' logs in the bucket.
-    pub async fn tier(&self) {
-        self.owners.tier().await;
-    }
-
-    /// Keep an object workerd evicted, uploading what the bucket lacks.
-    pub async fn evict_actor(&self, ns: &str, actor: &str, epoch: u64) {
-        self.owners.evict(ns, actor, epoch).await;
-    }
-
-    /// Index an owned object's alarm, `None` once cleared, so that peers
-    /// wake the object if this node dies (`alarms::Index::arm`).
-    pub async fn arm_alarm(
+    async fn arm_alarm(
         &self,
         ns: &str,
         actor: &str,
@@ -396,9 +315,7 @@ impl Cluster {
             .await
     }
 
-    /// Index the alarm an owned object came with as it opened here
-    /// (`alarms::Index::opened`).
-    pub async fn opened_alarm(
+    async fn opened_alarm(
         &self,
         ns: &str,
         actor: &str,
@@ -410,9 +327,7 @@ impl Cluster {
             .await
     }
 
-    /// An indexed alarm fired here for an object `owner` owns:
-    /// whether to fire it again later (`alarms::Index::elsewhere`).
-    pub async fn alarm_elsewhere(
+    async fn alarm_elsewhere(
         &self,
         ns: &str,
         actor: &str,
@@ -423,30 +338,124 @@ impl Cluster {
             .elsewhere(&namespace_hash(ns), actor, owner, now_ms)
             .await
     }
+}
 
-    /// One round of the alarms loop (`alarms::Index::round`).
-    pub async fn alarms_round(&self, now_ms: u64, adopted: impl FnMut(Adopted)) {
-        self.alarms.round(&self.registry, now_ms, adopted).await;
+/// This thread's data plane (`Member`), by the names the server calls.
+impl Cluster {
+    pub async fn acquire_or_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<Route> {
+        self.member.acquire_or_route(ns, actor, now_ms).await
+    }
+
+    pub async fn hand_off_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.member.hand_off_actor(ns, actor, epoch).await
+    }
+
+    pub async fn release_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.member.release_actor(ns, actor, epoch).await
+    }
+
+    pub fn abandon_actor(&self, ns: &str, actor: &str) {
+        self.member.abandon_actor(ns, actor);
+    }
+
+    pub async fn restore_actor(
+        &self,
+        ns: &str,
+        actor: &str,
+        epoch: u64,
+        layout: &dyn Layout,
+    ) -> Result<()> {
+        self.member.restore_actor(ns, actor, epoch, layout).await
+    }
+
+    pub async fn sync_actor(&self, ns: &str, actor: &str) -> Result<()> {
+        self.member.sync_actor(ns, actor).await
+    }
+
+    pub fn close_actor(&self, ns: &str, actor: &str) {
+        self.member.close_actor(ns, actor);
+    }
+
+    pub fn open_lane(&self, ns: &str, actor: &str, path: &str, lane: &str) -> Result<()> {
+        self.member.open_lane(ns, actor, path, lane)
+    }
+
+    pub fn delete_lanes(&self, ns: &str, actor: &str, prefix: &str) -> Result<()> {
+        self.member.delete_lanes(ns, actor, prefix)
+    }
+
+    pub fn clone_lanes(
+        &self,
+        ns: &str,
+        actor: &str,
+        src: &str,
+        dst: &str,
+        layout: &dyn Layout,
+    ) -> Result<()> {
+        self.member.clone_lanes(ns, actor, src, dst, layout)
+    }
+
+    pub fn database_reset(&self, ns: &str, file: &str) {
+        self.member.database_reset(ns, file);
+    }
+
+    pub fn wal_write(&self, ns: &str, file: &str, offset: u64, data: &[u8]) {
+        self.member.wal_write(ns, file, offset, data);
+    }
+
+    pub async fn tier(&self) {
+        self.member.tier().await;
+    }
+
+    /// Compacts owned objects' logs. Never returns.
+    pub async fn tier_loop(&self) {
+        self.member.tier_loop().await;
+    }
+
+    pub async fn evict_actor(&self, ns: &str, actor: &str, epoch: u64) {
+        self.member.evict_actor(ns, actor, epoch).await;
+    }
+
+    pub async fn arm_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: Option<u64>,
+    ) -> Result<()> {
+        self.member.arm_alarm(ns, actor, name, at_ms).await
+    }
+
+    pub async fn opened_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: u64,
+    ) -> Result<()> {
+        self.member.opened_alarm(ns, actor, name, at_ms).await
+    }
+
+    pub async fn alarm_elsewhere(
+        &self,
+        ns: &str,
+        actor: &str,
+        owner: &str,
+        now_ms: u64,
+    ) -> Result<bool> {
+        self.member.alarm_elsewhere(ns, actor, owner, now_ms).await
     }
 
     pub async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<()> {
-        self.ownership.refresh_route(ns, actor, now_ms).await
+        self.member.refresh_route(ns, actor, now_ms).await
     }
 
-    /// `node` answered that it does not serve the object (`Ownership::forget_route`).
     pub fn forget_route(&self, ns: &str, actor: &str, node: &str) {
-        self.ownership.forget_route(ns, actor, node);
-    }
-
-    /// The MAC a peer call carries. The cluster key is used only through
-    /// labelled derivations, so no two uses share a key: this, with each
-    /// message labelled, and the channel token key.
-    pub fn mac(&self, data: &[u8]) -> Vec<u8> {
-        hmac_sha256(&self.key, data)
+        self.member.forget_route(ns, actor, node);
     }
 }
 
-impl Cluster {
+impl Core {
     /// Starts keeping this node's lease, for the life of the process: the
     /// lease thread renews it from here on, and ends the process once it
     /// cannot (`keeper::Fence`).
@@ -477,18 +486,12 @@ impl Cluster {
         }
     }
 
-    /// Compacts owned objects' logs. Never returns.
-    pub async fn tier_loop(&self) {
-        loop {
-            tokio::time::sleep(TIER_INTERVAL).await;
-            self.tier().await;
-        }
-    }
-
     /// Stops claiming before the claim reaches the bucket. The lease is
     /// still renewed, so that the objects this instance owns stay where
     /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
+        // Every thread sees that the instance drains before it stops claiming.
+        self.shared.start_draining();
         self.ownership.may_claim.set(false);
         self.lessee.start_draining();
     }
@@ -555,11 +558,6 @@ impl Cluster {
     }
 }
 
-/// How often owned objects' logs are checked for compaction.
-const TIER_INTERVAL: Duration = Duration::from_secs(2);
-/// How often a release checks whether an object's eviction ended.
-const BUSY_POLL: Duration = Duration::from_millis(10);
-
 /// The cluster's part of the bucket `url` names, under the layout's version.
 ///
 /// `url` is `s3://<bucket>/<prefix>` (`s3.rs`) or `gs://<bucket>/<prefix>`
@@ -586,13 +584,6 @@ pub fn open_bucket(url: &str, options: &[String]) -> Result<Bucket> {
 
 const fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)
-}
-
-/// The object and file name of a database file, `<actor>.sqlite` or a
-/// facet's `<actor>.<n>.sqlite`, under whatever directory SQLite was given.
-fn object_file(path: &str) -> (&str, &str) {
-    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-    (name.split('.').next().unwrap_or(name), name)
 }
 
 pub fn now_ms() -> u64 {

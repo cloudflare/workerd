@@ -298,7 +298,9 @@ struct Sim {
 impl Sim {
     fn new(seed: u64) -> Self {
         let tmp = std::env::var_os("TEST_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
-        let root = tmp.join(format!("owners-{seed}-{}", std::process::id()));
+        // Two tests run the same seeds at once, each on its thread.
+        let thread = std::thread::current().id();
+        let root = tmp.join(format!("owners-{seed}-{}-{thread:?}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let mut sim = Self {
             dst: Harness::new(seed),
@@ -762,5 +764,13 @@ fn run(seed: u64, steps: usize) -> Result<(), String> {
 
 #[test]
 fn every_takeover_inherits_what_was_acknowledged() {
+    crate::dst::seeds(6, |seed| run(seed, 1500));
+}
+
+/// The same, with each node's data plane a turn of the loop away from its control plane in
+/// each direction, as a thread other than the control plane's is.
+#[test]
+fn every_takeover_inherits_what_was_acknowledged_when_the_control_plane_is_a_turn_away() {
+    let _yielding = crate::control::tests::yielding();
     crate::dst::seeds(6, |seed| run(seed, 1500));
 }

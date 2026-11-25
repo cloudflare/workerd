@@ -45,6 +45,7 @@ mod capture;
 mod client;
 pub mod cluster;
 pub mod compose;
+mod control;
 pub mod deploy;
 #[cfg(test)]
 mod dst;
@@ -81,6 +82,10 @@ pub use cluster::Route;
 pub use cluster::Setup;
 pub use cluster::now_ms;
 pub use cluster::open_bucket;
+pub use control::Control;
+pub use control::Member;
+pub use control::Open;
+pub use control::Shared;
 pub use keeper::Fence;
 pub use keeper::Progress;
 pub use keeper::Within;
@@ -90,7 +95,9 @@ pub use log::facet_prefix;
 pub use owner::Layout;
 pub use owner::Owners;
 pub use ownership::Claim;
+pub use ownership::Owned;
 pub use ownership::Ownership;
+pub use ownership::current_epoch;
 pub use registry::NodeRecord;
 pub use registry::Registry;
 
