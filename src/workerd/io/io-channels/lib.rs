@@ -52,6 +52,11 @@ macro_rules! kj_conversions {
                 &self.0
             }
         }
+
+        // A `KjRc` is a pointer to the C++ object, which moving the reference doesn't move. A
+        // bridge requires a Rust type that holds a channel and that C++ borrows mutably to be
+        // `Unpin`.
+        impl Unpin for $name {}
     };
 }
 
