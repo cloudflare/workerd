@@ -54,10 +54,22 @@ jsg::JsObject getPerformancePrototypeForBootstrap(jsg::Lock& js) {
   return js.getPrototypeFor<Performance>();
 }
 
+namespace {
+// The value a mark or measure keeps as its `detail`: a structured clone of the caller's value.
+// Throws a DataCloneError when the value can't be cloned.
+jsg::Optional<jsg::JsRef<jsg::JsValue>> entryDetail(
+    jsg::Lock& js, jsg::Optional<jsg::JsRef<jsg::JsValue>> detail) {
+  KJ_IF_SOME(d, detail) {
+    return jsg::JsRef(js, d.getHandle(js).structuredClone(js));
+  }
+  return kj::none;
+}
+}  // namespace
+
 jsg::Ref<PerformanceMark> PerformanceMark::constructor(
     jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
-  return js.alloc<PerformanceMark>(kj::mv(name), kj::mv(options.detail),
+  return js.alloc<PerformanceMark>(kj::mv(name), entryDetail(js, kj::mv(options.detail)),
       options.startTime.orDefault([]() { return dateNow(); }));
 }
 
@@ -227,21 +239,7 @@ jsg::Ref<PerformanceMark> Performance::mark(
     jsg::Lock& js, kj::String name, jsg::Optional<PerformanceMark::Options> options) {
   // TODO(someday): Include `name` in the perf event name?
   isolateLimitEnforcer.markPerfEvent("performance_mark"_kjc);
-  double startTime = dateNow();
-  KJ_IF_SOME(opts, options) {
-    KJ_IF_SOME(time, opts.startTime) {
-      startTime = time;
-    }
-  }
-
-  auto mark = js.alloc<PerformanceMark>(kj::mv(name), kj::none, startTime);
-
-  KJ_IF_SOME(opts, options) {
-    KJ_IF_SOME(d, opts.detail) {
-      mark->detail = kj::mv(d);
-    }
-  }
-
+  auto mark = PerformanceMark::constructor(js, kj::mv(name), kj::mv(options));
   entries.add(mark.addRef());
   return mark;
 }
@@ -263,6 +261,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
   // Default: measure from timeOrigin (0) to now, per the Web Performance API spec.
   double startTime = 0;
   double endTime = dateNow();
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 
   // A mark that does not exist leaves the default time in place.
   auto useEndMark = [&]() {
@@ -282,6 +281,8 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
         useEndMark();
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+        detail = entryDetail(js, kj::mv(options.detail));
+
         if (options.start == kj::none && options.end == kj::none && options.duration == kj::none) {
           useEndMark();
         }
@@ -302,22 +303,8 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
   }
 
   double duration = endTime >= startTime ? endTime - startTime : 0;
-  auto measure = js.alloc<PerformanceMeasure>(kj::mv(measureName), startTime, duration);
-
-  // Per the spec, detail defaults to null. Only set it if explicitly provided in options.
-  KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
-    KJ_SWITCH_ONEOF(startOrOptions) {
-      KJ_CASE_ONEOF(startMark, kj::String) {
-        // detail remains null when using string marks
-      }
-      KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
-        KJ_IF_SOME(d, options.detail) {
-          measure->detail = kj::mv(d);
-        }
-        // If options.detail is not provided, detail remains null
-      }
-    }
-  }
+  auto measure =
+      js.alloc<PerformanceMeasure>(kj::mv(measureName), kj::mv(detail), startTime, duration);
 
   entries.add(measure.addRef());
   return measure;

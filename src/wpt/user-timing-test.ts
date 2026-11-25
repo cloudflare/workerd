@@ -106,16 +106,6 @@ export default {
   },
   'structured-serialize-detail.any.js': {
     before: clearEntries,
-    comment:
-      'mark() and measure() store detail by reference instead of structured-cloning it, so the entry shares the caller object and a Symbol is not rejected',
-    expectedFailures: [
-      'The detail property in the mark constructor should be structured-clone.',
-      'The detail property in the mark method should be structured-clone.',
-      'Mark: Throw an exception when the detail property cannot be structured-serialized.',
-      'The detail property in the measure method should be structured-clone.',
-      'Measure: Throw an exception when the detail property cannot be structured-serialized.',
-      'The detail object is cloned when passed to mark API.',
-    ],
   },
   'supported-usertiming-types.any.js': {
     before: clearEntries,
