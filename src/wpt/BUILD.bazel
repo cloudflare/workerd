@@ -179,6 +179,7 @@ wpt_test(
         # .json files, which cannot be bound as JSON modules
         "orb",
     ],
+    include_tentative = True,
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.

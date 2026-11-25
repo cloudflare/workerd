@@ -7,6 +7,12 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default {
   'compression-dictionary/resources/static/dictionary-hashes.js': {},
   'compression-dictionary/resources/static/script-001.js': {},
+  'content-disposition/multiple-content-disposition.tentative.any.js': {},
+  'content-disposition/multiple-content-disposition.tentative.h2.window.js': {
+    comment:
+      'Needs a window, and HTTP/2, which the wptserve sidecar runs without (--no-h2)',
+    omittedTests: true,
+  },
   'content-encoding/br/bad-br-body.https.any.js': {},
   'content-encoding/br/big-br-body.https.any.js': {},
   'content-encoding/br/br-body.https.any.js': {},
@@ -30,6 +36,13 @@ export default {
       'Consuming the body of a resource with bad zstd content with bytes() should reject',
       'Consuming the body of a resource with bad zstd content with json() should reject',
       'Consuming the body of a resource with bad zstd content with text() should reject',
+    ],
+  },
+  'content-encoding/zstd/big-window-zstd-body.tentative.https.any.js': {
+    comment:
+      'fetch() does not decode zstd Content-Encoding (system-streams.c++ handles gzip and br only)',
+    expectedFailures: [
+      'Consuming the body of a resource with too large of a zstd window size should reject',
     ],
   },
   'content-encoding/zstd/big-zstd-body.https.any.js': {
@@ -326,6 +339,13 @@ export default {
       'HTTP cache generates 504 status code when nothing is in cache and request contains Cache-Control: only-if-cached',
     ],
   },
+  'http-cache/credentials.tentative.any.js': {
+    comment: 'fetch() has no HTTP cache',
+    expectedFailures: [
+      'same-origin: 2xAnonymous, 2xCredentialled, 1xAnonymous',
+      'same-origin: 2xCredentialled, 2xAnonymous, 1xCredentialled',
+    ],
+  },
   'http-cache/freshness.any.js': {
     comment: 'fetch() has no HTTP cache',
     expectedFailures: [
@@ -362,6 +382,17 @@ export default {
       'HTTP cache invalidates Location URL after a successful response from an unknown method',
       'HTTP cache does not invalidate Content-Location URL after a failed response from an unsafe request',
       'HTTP cache invalidates Content-Location URL after a successful response from an unknown method',
+    ],
+  },
+  'http-cache/no-vary-search.tentative.any.js': {
+    comment: 'fetch() has no HTTP cache',
+    expectedFailures: [
+      'When params is set to true, URL differs only by their parameters (other than `dispatch` and `uuid`) should not be cached as different entries.',
+      'When key-order is set , URLs should be compared in an order-insensitive way. Matched cases:',
+      'When params names a specific parameter, URLs differing only in that parameter should be cached as the same entry.',
+      'When params names multiple parameters, URLs differing only in those parameters should be cached as the same entry.',
+      'When params=?1 is set explicitly (equivalent to bare params), URLs differing only in their parameters (other than `dispatch` and `uuid`) should be cached as the same entry.',
+      'When params names a parameter and key-order is set, URLs differing only in that parameter and parameter order should be cached as the same entry.',
     ],
   },
   'http-cache/partial.any.js': {
@@ -413,6 +444,18 @@ export default {
       'HTTP cache reuses three-way Vary response when request matches',
       'HTTP cache uses three-way Vary response when both request and the original request omited a variant header',
     ],
+  },
+  'local-network-access/iframe.tentative.https.window.js': {
+    comment: 'Needs a window or worker global',
+    omittedTests: true,
+  },
+  'local-network-access/navigate.tentative.https.window.js': {
+    comment: 'Needs a window or worker global',
+    omittedTests: true,
+  },
+  'local-network-access/navigate.tentative.window.js': {
+    comment: 'Needs a window or worker global',
+    omittedTests: true,
   },
   'metadata/fetch-preflight.https.sub.any.js': {
     comment:
