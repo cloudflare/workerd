@@ -2,14 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Under the RUST_COMPAT_DATE autogate the compiler is Rust (`compat-date/`), and this file
-// adapts its bridge to KJ types; otherwise it is the C++ one in compatibility-date-legacy.c++.
+// The compiler is Rust (`compat-date/`); this file adapts its bridge to KJ types.
 
 #include "compatibility-date.h"
 
 #include <workerd/io/compat-date/bridge.rs.h>
-#include <workerd/io/compatibility-date-legacy.h>
-#include <workerd/util/autogate.h>
 
 #include <kj-rs/convert.h>
 
@@ -103,19 +100,13 @@ kj::Array<kj::StringPtr> decompileFlags(CompatibilityFlags::Reader input, ffi::D
   return names.finish();
 }
 
-bool useRust() {
-  return util::Autogate::isEnabled(util::AutogateKey::RUST_COMPAT_DATE);
-}
-
 }  // namespace
 
 kj::String currentDateStr() {
-  if (!useRust()) return compat_date_legacy::currentDateStr();
   return kj::str(ffi::current_date_str());
 }
 
 kj::String newestCompatDateStr() {
-  if (!useRust()) return compat_date_legacy::newestCompatDateStr();
   return kj::str(ffi::newest_compat_date_str());
 }
 
@@ -127,11 +118,6 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
     MainModuleIsPython mainModuleIsPython) {
-  if (!useRust()) {
-    return compat_date_legacy::compileCompatibilityFlags(compatDate, compatFlags, output,
-        errorReporter, allowExperimentalFeatures, dateValidation, allowedExperimentalFlags,
-        mainModuleIsPython);
-  }
   compileFlags(compatDate, bytesOfEach(compatFlags), output, errorReporter,
       allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
@@ -144,27 +130,19 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityDateValidation dateValidation,
     kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags,
     MainModuleIsPython mainModuleIsPython) {
-  if (!useRust()) {
-    return compat_date_legacy::compileCompatibilityFlags(compatDate, compatFlags, output,
-        errorReporter, allowExperimentalFeatures, dateValidation, allowedExperimentalFlags,
-        mainModuleIsPython);
-  }
   compileFlags(compatDate, bytesOfEach(compatFlags), output, errorReporter,
       allowExperimentalFeatures, dateValidation, allowedExperimentalFlags, mainModuleIsPython);
 }
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
-  if (!useRust()) return compat_date_legacy::decompileCompatibilityFlagsForFl(input);
   return decompileFlags(input, ffi::Decompile::NeededByFl);
 }
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlags(CompatibilityFlags::Reader input) {
-  if (!useRust()) return compat_date_legacy::decompileCompatibilityFlags(input);
   return decompileFlags(input, ffi::Decompile::All);
 }
 
 kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date) {
-  if (!useRust()) return compat_date_legacy::normalizeCompatDate(date);
   auto normalized = ffi::normalize_compat_date(bytesOf(date));
   if (normalized.empty()) return kj::none;
   return kj::str(normalized);

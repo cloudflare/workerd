@@ -94,8 +94,9 @@ impl Compiled {
 
 /// The flags a configuration names that the compiler has not yet matched to a field.
 ///
-/// Diagnostics name the flags left at the end in the order they are left, which is the order
-/// C++'s `kj::HashSet` left them in: matching a flag moves the last one into its place. The
+/// Diagnostics name the flags left at the end in the order they are left: matching a flag moves
+/// the last one into its place. Historically the compiler kept them in a `kj::HashSet`, whose
+/// erase does that, and the order of the messages Workers see must not change. The
 /// list is the Worker's, of any length, so each of its flags is looked up once, in
 /// `FlagTable::slots`, and matching a field's flag is then O(1).
 struct PendingFlags<'a> {
@@ -306,7 +307,7 @@ pub(crate) fn compile_with_today<'a>(
         diagnostics.push(Diagnostic::Error(
             [b"Invalid compatibility date: ".as_slice(), compat_date].concat(),
         ));
-        // The C++ compiler went on with this date, so the flags compile the same.
+        // Historically the compiler went on with this date, and compiled flags must not change.
         CompatDate::new(2021, 5, 1).unwrap_or_else(|| unreachable!())
     });
 

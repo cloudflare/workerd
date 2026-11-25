@@ -210,20 +210,14 @@ wd_cc_library(
 
 wd_cc_library(
     name = "compatibility-date",
-    srcs = [
-        "compatibility-date.c++",
-        # The C++ compiler, used unless the RUST_COMPAT_DATE autogate is on.
-        "compatibility-date-legacy.c++",
-    ],
+    srcs = ["compatibility-date.c++"],
     hdrs = [
         "compatibility-date.h",
-        "compatibility-date-legacy.h",
         "validation.h",
     ],
     implementation_deps = [
         ":compat-date",
         ":compat-date/bridge.rs@cxx",
-        "//src/workerd/util:autogate",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -236,7 +230,7 @@ wd_cc_library(
     ],
 )
 
-# The Rust compiler behind compatibility-date.h, under the RUST_COMPAT_DATE autogate.
+# The compiler of compatibility dates and flags behind compatibility-date.h.
 wd_rust_crate(
     name = "compat-date",
     srcs = glob(["compat-date/**/*.rs"]) + [":compat-date/maximum_date.rs"],
@@ -761,21 +755,6 @@ kj_test(
         ":compatibility-date",
         ":io",
         "@capnp-cpp//src/capnp:capnpc",
-    ],
-)
-
-# Checks that the Rust compiler agrees with the C++ one in compatibility-date-legacy.c++.
-# It compiles about 5,400 configurations twice, which takes 10-25 s in a fastbuild and longer in
-# some debug builds, more than the 15 s .bazelrc gives a medium test.
-kj_test(
-    size = "large",
-    src = "compatibility-date-legacy-test.c++",
-    # The test turns RUST_COMPAT_DATE on itself.
-    generate_all_autogates_variant = False,
-    deps = [
-        ":compatibility-date",
-        ":maximum-compatibility-date",
-        "//src/workerd/util:autogate",
     ],
 )
 
