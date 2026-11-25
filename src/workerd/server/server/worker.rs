@@ -297,7 +297,9 @@ impl WorkerService {
             globals: Vec::new(),
             access_blob_header: KjMaybe::None,
         };
+        // The source's global outbound, if it gives one, replaces the null one.
         let mut table = ChannelTable::default();
+        table.set_global_outbound(SubrequestChannel::new(Rc::new(NullGlobalOutbound)));
         let compiled = ffi::factory_new_worker(
             factory.raw(),
             &spec,
@@ -1049,6 +1051,35 @@ impl ActorClass for ActorClassImpl {
             props: Some(props),
             persistent,
         }))
+    }
+}
+
+/// The global outbound of a dynamic worker whose source gave it none: every request fails.
+///
+/// Nothing normally refers to it, but a `Fetcher` for the `next` outbound pulled off an incoming
+/// `Request` points at it. Transfer is refused because nothing needs it; were it allowed, the
+/// error of `start_request` would mislead once transferred.
+struct NullGlobalOutbound;
+
+fn null_global_outbound_transfer_error() -> crate::Error {
+    kj::failed!("jsg.DOMException(DataCloneError): The null global outbound is not transferrable.")
+}
+
+impl Channel for NullGlobalOutbound {
+    fn start_request(&self, _metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        Err(kj::failed!(
+            "jsg.Error: This worker is not permitted to access the internet via global functions \
+             like fetch(). It must use capabilities (such as bindings in 'env') to talk to the \
+             outside world."
+        ))
+    }
+
+    fn require_allows_transfer(&self) -> Result<()> {
+        Err(null_global_outbound_transfer_error())
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(null_global_outbound_transfer_error())
     }
 }
 

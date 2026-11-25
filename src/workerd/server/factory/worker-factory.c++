@@ -1535,27 +1535,6 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
   return flags.asReader();
 }
 
-// The global outbound of a dynamic worker whose source gave it none: every request fails.
-class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChannel {
- public:
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    JSG_FAIL_REQUIRE(Error,
-        "This worker is not permitted to access the internet via global functions like fetch(). "
-        "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
-  }
-
-  // The null outbound is hard to reach: nothing normally refers to it, but a `Fetcher` for the
-  // `next` outbound pulled off an incoming `Request` points at it. Transfer is refused because
-  // nothing needs it; were it allowed, `startRequest()`'s error would mislead once transferred.
-  void requireAllowsTransfer() override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
-  }
-  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-      IoChannelFactory::ChannelTokenUsage usage) override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
-  }
-};
-
 // `channel` as the server stores it: the Rust object of a channel the server made, unwrapped, or
 // else the C++ channel itself, which `subrequest_channel_into_kj()` hands back unchanged.
 ::rust::Box<SubrequestChannel> subrequestChannelFromKj(
@@ -1570,15 +1549,13 @@ class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChanne
 }
 
 // Hands a dynamic worker's channels from its fetched source to the server's table for it: the
-// global outbound (a null one when the source gave none), then the capabilities in `env`, each
-// rewritten into the channel number the server gave it.
+// global outbound, if the source gave one, then the capabilities in `env`, each rewritten into
+// the channel number the server gave it.
 void indexDynamicChannels(DynamicWorkerSource& source, ChannelTable& channels) {
-  kj::Rc<IoChannelFactory::SubrequestChannel> globalOutbound =
-      kj::mv(source.globalOutbound).orDefault([]() -> kj::Rc<IoChannelFactory::SubrequestChannel> {
-    return kj::rc<NullGlobalOutboundChannel>();
-  });
+  KJ_IF_SOME(globalOutbound, source.globalOutbound) {
+    channels.set_global_outbound(subrequestChannelFromKj(kj::mv(globalOutbound)));
+  }
   source.globalOutbound = kj::none;
-  channels.set_global_outbound(subrequestChannelFromKj(kj::mv(globalOutbound)));
 
   source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
     KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*entry)) {
