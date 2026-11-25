@@ -1154,9 +1154,10 @@ kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
   auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails), kj::none);
   auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
   auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
-  return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+  co_await actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer), kj::none /* triggerContext */,
       kj::mv(metadata->restoredSelfTokenFactory));
+  co_await actorRef.flushAfterOnHibernate();
 }
 
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(

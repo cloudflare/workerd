@@ -985,9 +985,9 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<Loopback> addRef() = 0;
 
     // Runs `actor`'s onHibernate handler by calling Worker::Actor::runOnHibernate() with the
-    // embedder's per-request objects. It lives here because, like hibernatable WebSocket events,
-    // the hook runs without an inbound request. `actor` is explicit because a Loopback can outlive
-    // its actor.
+    // embedder's per-request objects. The caller then calls flushAfterOnHibernate(). It lives here
+    // because, like hibernatable WebSocket events, the hook runs without an inbound request.
+    // `actor` is explicit because a Loopback can outlive its actor.
     //
     // Returns kj::none if the actor has no handler, or if the embedder doesn't deliver the hook
     // through the Loopback.
@@ -1136,9 +1136,9 @@ class Worker::Actor final: public kj::Refcounted {
   // actor is idle.
   bool hasOnHibernateHandler();
 
-  // Runs the actor's onHibernate handler, then waits for the storage writes it made to be flushed.
-  // Call it before a planned shutdown(), and only if hasOnHibernateHandler() returns
-  // true; skipping the call keeps the shutdown timing of actors without a handler unchanged.
+  // Runs the actor's onHibernate handler. Call it before a planned shutdown(), and only if
+  // hasOnHibernateHandler() returns true; skipping the call keeps the shutdown timing of actors
+  // without a handler unchanged.
   //
   // The handler runs on a lightweight IncomingRequest built from the given objects. This doesn't
   // call addRef(), whose request tracking would cancel the shutdown that called it. When the
@@ -1147,18 +1147,23 @@ class Worker::Actor final: public kj::Refcounted {
   //
   // abort() cancels this call. The outcome is reported to `observer` and to the ActorObserver,
   // unless this call is canceled before the handler finishes. Failures of the handler itself don't
-  // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
-  // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
+  // reject the promise. It rejects only if the actor was already shut down.
   //
   // `triggerContext` is the user trace that the handler runs in. Without one, the handler starts a
   // trace of its own. `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's
   // requests.
+  //
+  // Once this call completes, call flushAfterOnHibernate().
   kj::Promise<void> runOnHibernate(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> triggerContext,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+
+  // Waits for the storage writes that the onHibernate handler made to be flushed. Rejects if the
+  // actor is broken: its IoContext was aborted, its output gate is broken, or the flush failed.
+  kj::Promise<void> flushAfterOnHibernate();
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because

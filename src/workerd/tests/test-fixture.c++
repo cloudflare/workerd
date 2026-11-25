@@ -453,6 +453,7 @@ TestFixture::TestFixture(SetupParams&& params)
     }
     savedHibernationManager = kj::mv(params.hibernationManager);
     savedHolderToken = params.holderToken;
+    blockActorStoragePuts = params.blockActorStoragePuts;
     savedActorClassName =
         params.actorClassName.map([](kj::StringPtr name) { return kj::str(name); });
     actor = makeActor(kj::mv(id));
@@ -461,15 +462,23 @@ TestFixture::TestFixture(SetupParams&& params)
 
 namespace {
 
-// Factory functions used by TestFixture's actor construction; passed by name (decay to
-// function pointers) into kj::Function-typed parameters.
-kj::Maybe<kj::Own<ActorCacheInterface>> actorCacheFactory(const ActorCache::SharedLru& sharedLru,
-    OutputGate& outputGate,
-    ActorCache::Hooks& hooks,
-    SqliteObserver& sqliteObserver) {
-  return kj::heap<ActorCache>(server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
+class BlockedPutActorStorage final: public rpc::ActorStorage::Stage::Server {
+ public:
+  kj::Promise<void> put(PutContext context) override {
+    return kj::NEVER_DONE;
+  }
+};
+
+Worker::Actor::MakeActorCacheFunc actorCacheFactory(bool blockPuts) {
+  return [blockPuts](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+             ActorCache::Hooks& hooks, SqliteObserver&) -> kj::Maybe<kj::Own<ActorCacheInterface>> {
+    kj::Own<rpc::ActorStorage::Stage::Server> storage =
+        blockPuts ? kj::heap<BlockedPutActorStorage>() : server::newEmptyReadOnlyActorStorage();
+    return kj::heap<ActorCache>(kj::mv(storage), sharedLru, outputGate, hooks);
+  };
 }
 
+// Passed by name (decays to a function pointer) into a kj::Function-typed parameter.
 jsg::Ref<api::DurableObjectStorage> storageFactory(
     jsg::Lock& js, const Worker::Api& api, ActorCacheInterface& actorCache) {
   return js.alloc<api::DurableObjectStorage>(
@@ -481,7 +490,7 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-      /*hasTransient=*/false, actorCacheFactory, savedActorClassName,
+      /*hasTransient=*/false, actorCacheFactory(blockActorStoragePuts), savedActorClassName,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(

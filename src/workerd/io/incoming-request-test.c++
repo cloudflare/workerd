@@ -703,6 +703,7 @@ KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it 
 
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
     KJ_EXPECT(readEvents(fixture) == "onHibernate:inactive:true;");
+    actor.flushAfterOnHibernate().wait(fixture.getWaitScope());
   });
 }
 
@@ -861,7 +862,7 @@ KJ_TEST("runOnHibernate() resolves when the handler exceeds its budget") {
   });
 }
 
-KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
+KJ_TEST("flushAfterOnHibernate() rejects when the handler's writes can't be flushed") {
   // The fixture's actor storage is read-only, so the flush of the write fails.
   constexpr kj::StringPtr source = R"SCRIPT(
     import { DurableObject } from "cloudflare:workers";
@@ -876,13 +877,41 @@ KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
   withOnHibernateActor(source, "on-hibernate-flush-test"_kj,
       [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
     auto observer = kj::refcounted<OnHibernateObserver>();
-    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
-
-    KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
-    KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
     KJ_EXPECT(observer->reportCount == 1, observer->reportCount);
+
+    KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
+    KJ_EXPECT_THROW_MESSAGE(
+        "broken.outputGateBroken", actor.flushAfterOnHibernate().wait(fixture.getWaitScope()));
   }, {.flushActorStorage = true});
+}
+
+KJ_TEST("flushAfterOnHibernate() rejects if the actor was aborted while a flush was in flight") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        this.ctx.storage.put("key", "value", { allowUnconfirmed: true });
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-flush-abort-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    // Polling runs the event loop until the flush's put is in flight.
+    KJ_ASSERT(!actor.flushAfterOnHibernate().poll(fixture.getWaitScope()));
+
+    actor.abort(KJ_EXCEPTION(FAILED, "test abort"));
+
+    auto promise = actor.flushAfterOnHibernate();
+    KJ_ASSERT(promise.poll(fixture.getWaitScope()));
+    KJ_EXPECT_THROW_MESSAGE("actor was shut down", promise.wait(fixture.getWaitScope()));
+  }, {.flushActorStorage = true, .blockActorStoragePuts = true});
 }
 
 KJ_TEST("canceling runOnHibernate() cancels pending work but keeps abort watchers armed") {
