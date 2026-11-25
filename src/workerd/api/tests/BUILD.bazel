@@ -1861,19 +1861,26 @@ wd_test(
 )
 
 # Each case starts Pyodide from scratch in a new isolate, which takes several seconds in debug and
-# sanitizer builds, so each runs in a shard of its own. Tagged `python` like the tests under
-# //src/pyodide/tests.
-wd_test(
+# sanitizer builds, so each case runs as a test of its own, selected by `workerd test`'s filter.
+# Tagged `python` like the tests under //src/pyodide/tests.
+[wd_test(
+    name = "worker-loader-python-test-" + case,
     size = "enormous",
     src = "worker-loader-python-test.wd-test",
-    args = ["--experimental"] + PYODIDE_BUNDLE_ARGS,
+    args = ["--experimental"] + PYODIDE_BUNDLE_ARGS + ["worker-loader-python-test:" + case],
     data = ["worker-loader-python-test.js"] + PYODIDE_BUNDLE_DATA,
-    shard_count = 4,
+    # The cases share one source file, which needs linting once.
+    lint = case == "pythonBasics",
     tags = [
         "no-coverage",
         "python",
     ],
-)
+) for case in [
+    "pythonBasics",
+    "pythonArbitraryModuleExtensions",
+    "pythonImplicitFlagsRespectCompatDate",
+    "minimalPythonPackage",
+]]
 
 wd_test(
     src = "worker-loader-wasm-test.wd-test",
