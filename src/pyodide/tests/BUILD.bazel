@@ -17,15 +17,7 @@ vendored_py_wd_test(
     test_template = "pytest/pytest.wd-test",
 )
 
-# The one test whose 0.26.0a2 variant creates its snapshot from scratch and then restores it, so
-# that both stay covered for that version. It is the smallest Python worker whose top level runs
-# checks (of `js` and of a disallowed top-level fetch) while the snapshot is collected and whose
-# handler runs after the restore. The other 0.26.0a2 variants load the baseline snapshot, to keep
-# them fast.
-py_wd_test(
-    "hello",
-    create_0_26_snapshot_from_scratch = True,
-)
+py_wd_test("hello")
 
 py_wd_test("top-level-tests")
 
@@ -43,6 +35,15 @@ py_wd_test(
     "top-level-entropy",
     name = "top-level-entropy-baseline",
     make_snapshot = False,
+)
+
+# The one test that creates a baseline snapshot from scratch and then restores it, in every Pyodide
+# version; the other tests load the released baseline snapshots. As in `top-level-entropy-baseline`,
+# the top level runs after the restore.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-create-baseline",
+    create_baseline_snapshot = True,
 )
 
 py_wd_test("subdirectory")

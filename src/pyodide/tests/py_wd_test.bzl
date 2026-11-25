@@ -36,7 +36,7 @@ def _py_wd_test_helper(
         *,
         make_snapshot,
         use_snapshot,
-        create_0_26_snapshot_from_scratch,
+        create_baseline_snapshot,
         args,
         feature_flags,
         data = [],
@@ -52,15 +52,15 @@ def _py_wd_test_helper(
     snapshot_args = []
     snapshot_feature_flags = []
     if use_snapshot == "stacked":
-        if pyodide_version == "0.26.0a2":
-            # 0.26.0a2 can't stack a snapshot on the baseline one. Creating its snapshot from
-            # scratch instead takes over 10 CPU-seconds in debug builds, so its variants just load
-            # the baseline snapshot, apart from the one test that covers creation from scratch.
-            if create_0_26_snapshot_from_scratch:
-                use_snapshot = None
-            else:
-                use_snapshot = "baseline"
-                make_snapshot = False
+        if create_baseline_snapshot:
+            # Start Pyodide from scratch, and save a baseline snapshot rather than a dedicated one.
+            use_snapshot = None
+        elif pyodide_version == "0.26.0a2":
+            # 0.26.0a2 can't stack a snapshot on the baseline one. Creating a snapshot from scratch
+            # instead takes over 10 CPU-seconds in debug builds, so its variants just load the
+            # baseline snapshot.
+            use_snapshot = "baseline"
+            make_snapshot = False
         else:
             use_snapshot = "baseline"
             if make_snapshot:
@@ -76,7 +76,7 @@ def _py_wd_test_helper(
         snapshot = version_info[use_snapshot + "_snapshot"]
         snapshot_data = [":python_snapshots"]
         load_snapshot = snapshot or None
-    if make_snapshot and pyodide_version != "0.26.0a2":
+    if make_snapshot and pyodide_version != "0.26.0a2" and not create_baseline_snapshot:
         snapshot_feature_flags.append("python_dedicated_snapshot")
 
     if load_snapshot and not make_snapshot:
@@ -215,15 +215,15 @@ def py_wd_test(
         tags = [],
         make_snapshot = True,
         use_snapshot = "stacked",
-        create_0_26_snapshot_from_scratch = False,
+        create_baseline_snapshot = False,
         skip_default_data = False,
         **kwargs):
     """A wd_test of a Python worker for each Pyodide version in `python_flags`.
 
     Args:
-      create_0_26_snapshot_from_scratch: with the default `use_snapshot` and `make_snapshot`, the
-        0.26.0a2 variant creates its snapshot from scratch and then loads it, rather than only
-        loading the baseline snapshot.
+      create_baseline_snapshot: with the default `use_snapshot` and `make_snapshot`, each variant
+        starts Pyodide from scratch, creates a baseline snapshot and then restores it, rather than
+        stacking a dedicated snapshot on the released baseline snapshot.
     """
     python_flags = compute_python_flags(python_flags, skip_python_flags)
     if data == None:
@@ -258,7 +258,7 @@ def py_wd_test(
             python_flag,
             make_snapshot = make_snapshot,
             use_snapshot = use_snapshot,
-            create_0_26_snapshot_from_scratch = create_0_26_snapshot_from_scratch,
+            create_baseline_snapshot = create_baseline_snapshot,
             feature_flags = feature_flags,
             data = data,
             args = args,
