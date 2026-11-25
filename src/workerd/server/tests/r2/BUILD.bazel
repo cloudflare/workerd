@@ -2,6 +2,7 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    size = "large",
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = ["r2-test.js"],
