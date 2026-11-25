@@ -86,9 +86,9 @@ wd_cc_library(
         "//src/workerd/server:compiled-bindings_capnp",
         "//src/workerd/server:container-client",
         "//src/workerd/server:facet-tree-index",
-        "//src/workerd/server:fallback-service",
         "//src/workerd/server:workerd-api",
         "//src/workerd/server:workerd_capnp",
+        "//src/workerd/server/fallback-client:fallback-service-client",
         "//src/workerd/server/server:bridge.rs@cxx",
         "//src/workerd/util",
         "//src/workerd/util:autogate",
@@ -143,7 +143,7 @@ wd_cc_library(
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         # :bootstrap exists only for the workerd binary, so it links the binary's kj::setupAsyncIo()
-        # (the inspector and fallback-service threads' loops).
+        # (the inspector thread's loop).
         "//src/workerd/util:setup-async-io",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj-async-core",

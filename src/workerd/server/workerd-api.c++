@@ -22,7 +22,7 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/d1/d1_js.embed.h>
-#include <workerd/server/fallback-service.h>
+#include <workerd/server/fallback-client/fallback-client.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/server/queues/queues_js.embed.h>
 #include <workerd/server/r2/r2_js.embed.h>
@@ -968,11 +968,11 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
         switch (source) {
           case jsg::modules::ResolveContext::Source::STATIC_IMPORT:
           case jsg::modules::ResolveContext::Source::DYNAMIC_IMPORT:
-            return workerd::fallback::ImportType::IMPORT;
+            return workerd::fallback::ImportType::Import;
           case jsg::modules::ResolveContext::Source::REQUIRE:
-            return workerd::fallback::ImportType::REQUIRE;
+            return workerd::fallback::ImportType::Require;
           case jsg::modules::ResolveContext::Source::INTERNAL:
-            return workerd::fallback::ImportType::INTERNAL;
+            return workerd::fallback::ImportType::Internal;
         }
         KJ_UNREACHABLE;
       };
