@@ -66,10 +66,29 @@ WD_STRONG_BOOL(MayElect);
 // thread-safe: every method may be called concurrently from any isolate's thread.
 //
 // The store elects one compiler of each key to produce its cache, so that concurrent isolates do
-// not all serialize the same code.
+// not all serialize the same code. An embedder can limit which caches an isolate shares by giving
+// it its own CodeCacheStore, a view of a store that other isolates also use.
 class CodeCacheStore: public kj::AtomicRefcounted {
  public:
   using Bytes = kj::Array<const kj::byte>;
+
+  struct LookupResult;
+
+  // A cache that the store leaves with the isolate that produced or consumed it, instead of
+  // keeping it itself. The isolate gives it back through release(); dropping it otherwise
+  // discards the cache. It identifies its key to the store that made it, and may be destroyed on
+  // any thread, without the isolate lock.
+  class Held {
+   public:
+    virtual ~Held() noexcept(false) = default;
+
+    // Decodes the bytes for V8 of a hit that lookup() handed over undecoded, with `held` set and
+    // `hit` unset. Called under the isolate lock, at most once, when a compile first uses the
+    // hit. Returns them as `hit`. If it cannot or will not decode them, the store counts why and
+    // returns no hit and, if `mayElect` is set, may elect the caller to produce a replacement; the
+    // caller then drops this cache and compiles as after a miss, without reporting a reject.
+    virtual LookupResult decode(MayElect mayElect);
+  };
 
   // The right to produce the cache for one key, held by the isolate that compiled it. Dropping a
   // Producer without calling either method ends the election, so that a later compile of the key
@@ -78,8 +97,9 @@ class CodeCacheStore: public kj::AtomicRefcounted {
    public:
     virtual ~Producer() noexcept(false) = default;
 
-    // Stores `bytes`, which V8 serialized from code compiled for this producer's key.
-    virtual void insert(Bytes bytes) = 0;
+    // Stores `bytes`, which V8 serialized from code compiled for this producer's key, or returns
+    // the cache for the producing isolate to hold.
+    virtual kj::Maybe<kj::Own<Held>> insert(Bytes bytes) = 0;
     // V8 could not serialize the compiled code.
     virtual void generationFailed() = 0;
   };
@@ -88,9 +108,14 @@ class CodeCacheStore: public kj::AtomicRefcounted {
     kj::Maybe<kj::Arc<Bytes>> hit;
     // Set on a miss if the caller may be elected and was elected to produce the entry.
     kj::Maybe<kj::Own<Producer>> producer;
+    // Set on a hit that the store handed over to the caller rather than sharing it: the cache
+    // that `hit` was decoded from, for the caller to hold. If `hit` is unset, the caller decodes
+    // it only if a compile uses it (Held::decode()), so that hits for code that is never compiled
+    // cost no decoding.
+    kj::Maybe<kj::Own<Held>> held;
   };
-  // A hit must be bytes that a Producer for an equal key inserted, under the same V8 build and
-  // flags. They are handed to V8, which does not check that they belong to the source.
+  // A hit must be bytes that V8 serialized for a Producer of an equal key, under the same V8
+  // build and flags. They are handed to V8, which does not check that they belong to the source.
   virtual LookupResult lookup(const CodeCacheKey& key, MayElect mayElect) const = 0;
 
   // V8 refused `rejected`, which lookup() returned for `key`. `reason` is the result of
@@ -101,6 +126,31 @@ class CodeCacheStore: public kj::AtomicRefcounted {
       const Bytes& rejected,
       kj::Maybe<v8::ScriptCompiler::CachedData::CompatibilityCheckResult> reason,
       MayElect mayElect) const = 0;
+
+  // Takes back the caches an isolate held: when its production window closes, those of keys it
+  // looked up but did not compile, and when it is destroyed, all others. The second call runs on
+  // whichever thread destroys the isolate, after V8 disposed it, so it must not call into V8. The
+  // default does nothing, since a store that never returns a Held is never given one back.
+  virtual void release(kj::Array<kj::Own<Held>> held) const {}
+
+  // When an isolate produces the caches it was elected for.
+  enum class ProductionTime {
+    // When its startup ends (IsolateCodeCache::finishStartup()).
+    END_OF_STARTUP,
+    // When the embedder calls IsolateCodeCache::produceDeferred(). The production window stays
+    // open after startup, so that code compiled later joins it.
+    ON_EMBEDDER_REQUEST,
+  };
+  virtual ProductionTime getProductionTime() const {
+    return ProductionTime::END_OF_STARTUP;
+  }
+
+  // Whether the isolate may serialize another of the caches it was elected for. produceDeferred()
+  // asks before each one. A store that bounds what one isolate produces returns false once the
+  // isolate has produced its share; the elections left then end without producing.
+  virtual bool mayProduce() const {
+    return true;
+  }
 };
 
 // One isolate's use of a CodeCacheStore. Owned by IsolateBase; every method must be called with
@@ -112,28 +162,39 @@ class CodeCacheStore: public kj::AtomicRefcounted {
 // after compilation lacks. An isolate has one window, shared by all code compiled while it is
 // open, so an isolate with a store must host one script at a time.
 //
-// Code compiled outside the window, such as a module first imported during a request, consumes
-// the store's cache if it has one, but is otherwise left uncached: a miss does not elect the
+// The store decides when the window closes (CodeCacheStore::getProductionTime()). At the end of
+// startup, code compiled later, such as a module first imported during a request, consumes the
+// store's cache if it has one, but is otherwise left uncached: a miss does not elect the
 // isolate, so that the request does not pay for producing the cache. Modules that should populate
-// the store must be imported during startup.
+// the store must then be imported during startup. If the embedder closes the window instead, code
+// compiled until then, including during requests, is produced with the code compiled at startup,
+// and serializing it also captures the functions those requests ran. The embedder must then close
+// the window under a lock that no request is charged for.
 //
 // Inside a window, prepare() hashes a source and looks it up ahead of its compile. The embedder
 // calls it before entering the startup CPU limit to exclude hashing and store lookups. Consuming
 // a hit replaces compilation with V8 deserialization, which remains inside the limit.
+//
+// The isolate keeps, for each key it compiled, the cache the store left it to hold, if any, and
+// gives them back to the store when it is destroyed (see CodeCacheStore::release()).
 class IsolateCodeCache {
  public:
   explicit IsolateCodeCache(kj::Own<const CodeCacheStore> store);
+  ~IsolateCodeCache() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateCodeCache);
 
   // Computes the key of `utf8Source` compiled as `unit` and looks it up, for a compile of the same
   // bytes, at the same address, later in the window (see keyFor()). Since the address stands in
   // for the content, the bytes must stay alive and unchanged until forgetPreparedSources() is
-  // called or the window closes.
+  // called or the window closes. Does nothing after endProduction().
   void prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source);
 
-  // Looks up `key`, for a compile of it later in the window. Until the window closes, the result
-  // serves every such compile without another store lookup. Only the first compile takes its
-  // producer election, if any. A key that no compile uses is released when the window closes.
+  // Looks up `key`, for compiles of it later in the window, which make no other store lookup.
+  // Only the first takes the producer election. A hit that the store shares serves every such
+  // compile. One that the store handed over, as a Held, serves only the first, which frees its
+  // decoded bytes once it is done; later ones compile from source. A key that no compile uses is
+  // released when the window closes. Does nothing after endProduction(): compiles then look their
+  // key up as they would outside a window.
   void prepare(const CodeCacheKey& key);
 
   // Returns the key of `utf8Source` compiled as `unit`. If prepare() was given the same bytes, at
@@ -161,22 +222,47 @@ class IsolateCodeCache {
       CompileCallback<T> compileWithOptions);
 
   // Opens a production window: until it is closed, a miss may elect this isolate to produce the
-  // cache, which produceDeferred() then does. The window must not be open already.
+  // cache, which produceDeferred() then does. The window must not be open already, unless the
+  // embedder closes it, in which case the code compiled next joins the open window. Does nothing
+  // after endProduction().
   void deferProduction();
 
+  // Ends the startup that deferProduction() began: produces the window's caches if the store
+  // produces at the end of startup, and otherwise leaves the window open. An open window then
+  // keeps the elections, held caches and compiled code that production needs.
+  void finishStartup(v8::Isolate* isolate, const CompilationObserver& observer);
+
+  // Ends a startup that failed: discards the window, unless an earlier startup finished in it and
+  // left it open for the embedder to close. Code compiled by the startups that succeeded, and by
+  // their requests, then stays in the window.
+  void failStartup();
+
   // Closes the production window and produces caches for the code compiled from source in it,
-  // except for modules whose evaluation failed.
+  // except for modules whose evaluation failed. Does nothing if the window is closed.
   void produceDeferred(v8::Isolate* isolate, const CompilationObserver& observer);
+
+  bool isWindowOpen() const {
+    return deferring;
+  }
 
   // Closes the production window without producing anything, releasing the elections held for
   // it. Must run before the isolate is disposed.
   void discardDeferred();
 
+  // Discards the production window, if one is open, and keeps any other from opening, so that code
+  // compiled later neither elects the isolate nor is kept alive for production; the isolate still
+  // loads scripts and consumes caches as outside a window. For an embedder that closes the window,
+  // once it will close no other.
+  void endProduction();
+
  private:
   using Compiled =
       kj::OneOf<v8::Global<v8::Module>, v8::Global<v8::UnboundScript>, v8::Global<v8::Function>>;
 
+  using MaybeHeld = kj::Maybe<kj::Own<CodeCacheStore::Held>>;
+
   struct Pending {
+    CodeCacheKey key;
     kj::Own<CodeCacheStore::Producer> producer;
     Compiled compiled;
   };
@@ -187,22 +273,36 @@ class IsolateCodeCache {
     CodeCacheKey key;
   };
 
-  static void produce(v8::Isolate* isolate,
+  static MaybeHeld produce(v8::Isolate* isolate,
       CodeCacheStore::Producer& producer,
       const Compiled& compiled,
       const CompilationObserver& observer);
 
-  // The lookup prepared for `key`, or a new one.
+  // The lookup prepared for `key`, or a new one, with its hit decoded.
   CodeCacheStore::LookupResult takeLookup(const CodeCacheKey& key);
+
+  // Decodes the hit that `lookup` was handed over undecoded, if any. If the store does not decode
+  // it, turns `lookup` into a miss, keeping any producer it elected.
+  void decodeHit(CodeCacheStore::LookupResult& lookup);
+
+  // Keeps `held` for `key` until the isolate is destroyed, replacing any cache held for it.
+  void retain(const CodeCacheKey& key, kj::Own<CodeCacheStore::Held> held);
 
   // Ends the window's state except for `pending`.
   void closeWindow();
 
   kj::Own<const CodeCacheStore> store;
   bool deferring = false;
+  // Set by endProduction().
+  bool ended = false;
+  // Whether a startup finished in the open window and left it open.
+  bool startupFinished = false;
   kj::Vector<Pending> pending;
   kj::HashMap<const void*, PreparedSource> preparedSources;
+  // The lookups that prepare() made, for the compiles of their keys in the window.
   kj::HashMap<CodeCacheKey, CodeCacheStore::LookupResult> preparedLookups;
+  // The caches this isolate holds, by the key it compiled with them or produced them for.
+  kj::HashMap<CodeCacheKey, kj::Own<CodeCacheStore::Held>> retained;
 };
 
 }  // namespace workerd::jsg
