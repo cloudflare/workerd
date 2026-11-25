@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 
+#include <v8-exception.h>
 #include <v8-value-serializer.h>
 
 #include <kj/vector.h>
@@ -16,12 +17,19 @@ namespace workerd::jsg {
 // Keep in sync with jsSerializable in worker-interface.capnp.
 constexpr uint32_t SERIALIZATION_TAG_JS_SERIALIZABLE = 23;
 
-// The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see Serializer).
-constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
-constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
-constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
-constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
-    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
+// The serialization tags of V8's DOMException and of its QuotaExceededError. Keep in sync with
+// domExceptionV3 and quotaExceededError in worker-interface.capnp.
+//
+// Both are written as the name and the message, length-delimited, then a uint32 that is 1 if the
+// instance has an own `stack`, followed by its value, or else 0. A QuotaExceededError's flags
+// follow, saying which of its quota and requested amounts follow, each as the bits of a double.
+// Last come a uint32 count and that many pairs of a string key and a value: the instance's other
+// own string-keyed properties if the writer uses enhanced error serialization, and else none.
+constexpr uint32_t SERIALIZATION_TAG_DOM_EXCEPTION_V3 = 24;
+constexpr uint32_t SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR = 25;
+constexpr uint32_t DOM_EXCEPTION_HAS_STACK = 1;
+constexpr uint32_t QUOTA_EXCEEDED_ERROR_HAS_QUOTA = 1;
+constexpr uint32_t QUOTA_EXCEEDED_ERROR_HAS_REQUESTED = 2;
 
 // The names of the V8 private properties of the protocol by which classes implemented in
 // JavaScript are serialized (see Serializer). src/per_isolate/serialization.ts uses the same names.
@@ -45,6 +53,9 @@ class BootstrapModules {
 
 // Returns the BootstrapModules of the current context, if any.
 kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
+
+// Whether the writer uses enhanced error serialization, as writeApiObject() takes it.
+WD_STRONG_BOOL(EnhancedErrorSerialization);
 
 // Wraps the v8::ValueSerializer and v8::ValueSerializer::Delegate implementation.
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
@@ -130,29 +141,16 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   prototype is Object.prototype or null is not checked for the property, which keeps plain
 //   objects cheap, so it is never an instance. Nor is an instance of a built-in that V8
 //   serializes itself, such as a Map, even of a subclass: V8 never offers it to the Serializer.
+//   Nor is an error: makeCloneable() rejects a class that inherits from Error.
 //
-// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
-// of flags, followed, if it is an error as Error.isError() reports (a native error, or an instance
-// of the bootstrap's DOMException), by its `message` (flag 4) and its own `stack` (flag 1), each if
-// it is a string. Flag 2 says that the writer was not using enhanced error
-// serialization. A reader rejects flags it doesn't know, so that later versions can add fields.
-// The instance's `data` follows the top-level value (as in Node.js), so that it can refer back to
-// the instance.
+// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE and its `deserializeInfo`. The
+// instance's `data` follows the top-level value (as in Node.js), so that it can refer back to the
+// instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
 // constructor's `prototype` without calling the constructor, marks it with the descriptor, and
 // calls `deserialize`, in the order the instances were read, once the top-level value and every
-// instance's `data` have been read. If the prototype inherits from the bootstrap's DOMException's,
-// the instance is one made as newUninitializedBootstrapDomException() makes it (dom-exception.h),
-// and otherwise, if it inherits from Error.prototype, a native error. The data may come from an
-// untrusted source, so `deserialize` validates it.
-//
-// The deserializer, not the class, decides whether an error made this way keeps the writer's
-// stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
-// whenever the writer was not using enhanced error serialization (flag 2), as a native error that
-// such a writer writes in V8's own format does. Otherwise it keeps the stack captured when it was
-// made, whose first line gives the error's name and the writer's message, as a native error's
-// does. Either way, `stack` is not enumerable. The message is only for the stack: `deserialize`
-// sets the instance's `message`. A class does not serialize `stack` itself.
+// instance's `data` have been read. The data may come from an untrusted source, so `deserialize`
+// validates it.
 //
 // A `deserializeInfo` is part of the format, which persisted data depends on.
 class Serializer final: v8::ValueSerializer::Delegate {
@@ -298,14 +296,23 @@ class Serializer final: v8::ValueSerializer::Delegate {
  private:
   // A Serializer that writes to `ser`, which another delegate drives; see writeApiObject().
   struct Borrowed {};
-  Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed);
-  friend v8::Maybe<bool> writeApiObject(
-      v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
+  Serializer(Lock& js,
+      v8::ValueSerializer& ser,
+      Borrowed,
+      EnhancedErrorSerialization enhancedErrorSerialization);
+  friend v8::Maybe<bool> writeApiObject(v8::Isolate* isolate,
+      v8::ValueSerializer& ser,
+      v8::Local<v8::Object> object,
+      EnhancedErrorSerialization enhancedErrorSerialization);
 
-  // Writes `object`, which is not a native error: as DOMException's serialization tag if it is an
-  // instance of the bootstrap's DOMException, through its type's serializer if it is a
+  // Writes `object`, which is not a native error other than V8's DOMException: with
+  // writeDomException() if it is V8's DOMException, through its type's serializer if it is a
   // serializable workerd API object, or else throws a DataCloneError.
   void writeApiObject(Lock& js, v8::Local<v8::Object> object);
+
+  // Writes V8's DOMException or QuotaExceededError as SERIALIZATION_TAG_DOM_EXCEPTION_V3 or
+  // SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR.
+  void writeDomException(Lock& js, v8::Local<v8::DOMException> domException);
 
   // Returns the JS_SERIALIZE_MODE_KEY mark of `object`, if it is an instance of a class
   // implemented in JavaScript.
@@ -373,10 +380,6 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // Empty for a Serializer that writes to another delegate's serializer.
   v8::Local<v8::Private> jsSerializeModeKey;
 
-  // The DOM_EXCEPTION_BRAND_KEY private symbol, the brand of the bootstrap's DOMException, which
-  // IsHostObject() also checks class instances for. Empty as jsSerializeModeKey is.
-  v8::Local<v8::Private> domExceptionBrandKey;
-
   // The actual ValueSerializer. Note that it's important to define this last because its
   // constructor will call back to the Delegate, which is this object, so we hope that this object
   // is fully initialized before that point! Empty for a Serializer that writes to another
@@ -389,6 +392,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
 // the workerd API objects it reads give Deserializer::afterRead(). Each returns false if its
 // callback throws, leaving the exception pending.
 using AfterReadCallbacks = kj::Vector<kj::Function<bool(v8::Isolate*)>>;
+
+// Deserializer::Options::preserveStackInErrors, as readApiObject() takes it.
+WD_STRONG_BOOL(PreserveStackInErrors);
 
 // Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
@@ -405,14 +411,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     kj::Maybe<uint32_t> version;
     bool readHeader = true;
 
-    // When the enahnced error serialization feature is enabled, and we are deserializing
-    // a serialized error, this option controls whether to include the serialized stack
-    // property in the deserialized error, including an instance of a class implemented in
-    // JavaScript that inherits from Error. If false, the stack property is not restored
-    // and will instead be set to the captured stack at the time of deserialization.
-    // This flag has no effect on errors that were serialized with the enhanced error
-    // serialization feature disabled, which keep their stacks, or if the values being
-    // deserialized are not errors (or do not contain any error objects).
+    // If true, a deserialized error keeps the received stack. If false, the received stack is
+    // dropped and the local stack is used. This applies to every DOMException, and to other
+    // errors serialized with enhanced error serialization; other errors serialized without it
+    // always keep the received stack.
     bool preserveStackInErrors = true;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
@@ -481,15 +483,24 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     return deser.GetWireFormatVersion();
   }
 
+  // Options::preserveStackInErrors, for a type's `deserialize()` that reads an error.
+  inline bool getPreserveStackInErrors() const {
+    return preserveStackInErrors;
+  }
+
  private:
   // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
   struct Borrowed {};
-  Deserializer(
-      Lock& js, v8::ValueDeserializer& deser, AfterReadCallbacks& afterReadCallbacks, Borrowed);
+  Deserializer(Lock& js,
+      v8::ValueDeserializer& deser,
+      AfterReadCallbacks& afterReadCallbacks,
+      Borrowed,
+      PreserveStackInErrors preserveStackInErrors);
   friend v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
       v8::ValueDeserializer& deser,
       uint32_t tag,
-      AfterReadCallbacks& afterReadCallbacks);
+      AfterReadCallbacks& afterReadCallbacks,
+      PreserveStackInErrors preserveStackInErrors);
 
   // Reads the workerd API object that `tag` names through its type's deserializer.
   v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
@@ -498,21 +509,16 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // initialized by finishRead().
   v8::Local<v8::Object> readJsSerializable(Lock& js);
 
+  // Reads the rest of a SERIALIZATION_TAG_DOM_EXCEPTION_V3 or a
+  // SERIALIZATION_TAG_QUOTA_EXCEEDED_ERROR, as `tag` says.
+  v8::Local<v8::Object> readDomException(Lock& js, uint32_t tag);
+
   // A class implemented in JavaScript that readJsSerializable() found.
   struct JsSerializableClass {
     kj::String deserializeInfo;
     V8Ref<v8::Object> prototype;
     V8Ref<v8::Object> descriptor;
     V8Ref<v8::Function> deserialize;
-    // What readJsSerializable() makes the class's instances as, which the prototype decides.
-    enum class Kind : uint8_t {
-      OBJECT,
-      // The prototype inherits from Error.prototype.
-      NATIVE_ERROR,
-      // The prototype inherits from the bootstrap's DOMException's.
-      DOM_EXCEPTION,
-    };
-    Kind kind;
   };
 
   // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or
@@ -563,8 +569,6 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   uint readDepth = 0;
   // Whether finishRead() is calling the callbacks that afterRead() was given, which must give none.
   bool callingAfterReadCallbacks = false;
-  // Error.prototype of the current context, once findJsSerializableClass() needs it.
-  kj::Maybe<V8Ref<v8::Value>> errorPrototype;
   // The classes that findJsSerializableClass() has found during the current top-level
   // readValue(). No JavaScript runs while it reads, so none of them can change before it ends.
   kj::Vector<JsSerializableClass> jsSerializableClasses;
@@ -576,25 +580,30 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 // pending, if what it runs throws.
 
 // Writes `object` as Serializer's WriteHostObject() writes an object that is neither a native
-// error nor an instance of a class implemented in JavaScript, which the caller writes itself
-// (SERIALIZATION_TAG_JS_SERIALIZABLE): a DOMException, whichever implementation made it, as
-// DOMException's serialization tag, and a serializable workerd API object through its type's
-// serializer. Values the type's serializer writes go through `ser`, and so through its delegate.
-// Throws a DataCloneError for anything else.
-v8::Maybe<bool> writeApiObject(
-    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
+// error, other than V8's DOMException, nor an instance of a class implemented in JavaScript, which
+// the caller writes itself (SERIALIZATION_TAG_JS_SERIALIZABLE): a DOMException, whichever
+// implementation made it, and a serializable workerd API object through its type's serializer.
+// `enhancedErrorSerialization` says whether the caller uses enhanced error serialization, which
+// decides whether V8's DOMException is written with its other own properties. Values written
+// within `object` go through `ser`, and so through its delegate. Throws a DataCloneError for
+// anything else.
+v8::Maybe<bool> writeApiObject(v8::Isolate* isolate,
+    v8::ValueSerializer& ser,
+    v8::Local<v8::Object> object,
+    EnhancedErrorSerialization enhancedErrorSerialization);
 
 // Reads the workerd API object that `tag` names, as Deserializer's ReadHostObject() does once it
 // has read a tag other than a native error's or SERIALIZATION_TAG_JS_SERIALIZABLE, which the
-// caller reads itself. JavaScript execution is disallowed meanwhile: an attempt to run it throws
-// DataCloneError, as it does under Deserializer. Adds to `afterReadCallbacks` the callbacks
-// that the type's deserializer gives Deserializer::afterRead(), which the caller calls, in order,
-// once it has read the whole value and initialized its own instances of classes implemented in
-// JavaScript.
+// caller reads itself, with the caller's Deserializer::Options::preserveStackInErrors.
+// JavaScript execution is disallowed meanwhile: an attempt to run it throws DataCloneError, as it
+// does under Deserializer. Adds to `afterReadCallbacks` the callbacks that the type's deserializer
+// gives Deserializer::afterRead(), which the caller calls, in order, once it has read the whole
+// value and initialized its own instances of classes implemented in JavaScript.
 v8::MaybeLocal<v8::Object> readApiObject(v8::Isolate* isolate,
     v8::ValueDeserializer& deser,
     uint32_t tag,
-    AfterReadCallbacks& afterReadCallbacks);
+    AfterReadCallbacks& afterReadCallbacks,
+    PreserveStackInErrors preserveStackInErrors);
 
 // Calls `read`, which reads the host object that `tag` names for a v8::ValueDeserializer delegate,
 // so that an attempt to run JavaScript fails the read with DataCloneError, as it does under

@@ -107,10 +107,10 @@ namespace workerd::util {
      they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
      down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
-  /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
-     (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
-     class in jsg/dom-exception.h. */                                                              \
-  V(TS_DOM_EXCEPTION)                                                                              \
+  /* DOMException and QuotaExceededError are V8's, whose instances are native errors, rather       \
+     than the C++ DOMException class in jsg/dom-exception.h and no QuotaExceededError. V8's come   \
+     from patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch. */            \
+  V(V8_DOM_EXCEPTION)                                                                              \
   /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
      bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
      serializer, rather than the C++ method in api/global-scope.h. */                              \

@@ -378,8 +378,8 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
                      "fallback_success=bool:false key=str:c"_kj),
       describe());
   // Rust's to_detail_string() describes a DOMException as kj::str() does: the C++ one as empty,
-  // until JavaScript reads its name or message, and the TypeScript one by its name and message.
-  auto dataCloneError = util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)
+  // until JavaScript reads its name or message, and V8's by its name and message.
+  auto dataCloneError = util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION)
       ? "DataCloneError: failed to serialize symbol"_kj
       : ""_kj;
   KJ_EXPECT(contains(kj::str("memory_cache_fallback <- memory_cache_read: fallback_error=str:",

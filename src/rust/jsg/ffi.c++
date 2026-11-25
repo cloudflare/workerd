@@ -2234,7 +2234,7 @@ bool dom_exception_try_unwrap(Isolate* isolate,
     bool& isDomException,
     ::rust::String& name,
     ::rust::String& message) {
-  // Recognizing the bootstrap's DOMException reads private symbols, which passes the context.
+  // Recognizing the C++ class's DOMException passes the context to V8.
   if (exceptionPending(isolate)) return false;
   KJ_IF_SOME(exception,
       ::workerd::jsg::tryGetDOMExceptionNameAndMessage(

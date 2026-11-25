@@ -275,8 +275,7 @@ their serializers are written against C++ JSG, and the deserializer finds classe
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
 depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
-which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
-JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
+which Rust describes a value as `kj::str()` of a handle does. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -1238,9 +1237,10 @@ of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default optio
 the same, and each reads what the other writes, so the two can share stored data. Native errors
 are written as host objects when the `enhanced_error_serialization` flag is on, workerd API
 objects such as `Blob` and `Headers` through their C++ serializers, and a `DOMException`,
-whichever implementation made it, as C++ JSG writes it. Rust resources can't be serialized.
-Instances of the runtime's classes implemented in JavaScript, such as `QuotaExceededError`, are
-written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
+whichever implementation made it, as C++ JSG writes it: V8's, and its `QuotaExceededError`, with
+their other own properties if the `enhanced_error_serialization` flag is on. Rust resources can't
+be serialized. Instances of the runtime's classes implemented in JavaScript are written through
+the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
 that the class's `clone` function returns follows the value. Reading one makes the copy from the
 class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
 with the class's `deserialize` function once the whole value is read. That function, and the work

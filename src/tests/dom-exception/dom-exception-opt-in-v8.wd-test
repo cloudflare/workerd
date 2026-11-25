@@ -1,10 +1,9 @@
 using Workerd = import "/workerd/workerd.capnp";
 using DomExceptionModules = import "dom-exception-modules.capnp";
 
-# Runs the DOMException suite against the TypeScript implementation
-# (src/per_isolate/dom-exception.ts, under TS_DOM_EXCEPTION) with the
-# dated flags it branches on off: set_tostring_tag (2024-09-26) and
-# enhanced_error_serialization (2026-04-21).
+# Runs the DOMException suite against V8's implementation, under
+# V8_DOM_EXCEPTION, with the dateless WebIDL opt-ins,
+# spec_compliant_property_attributes and immutable_api_prototypes.
 #
 # No compatibilityDate: the wd_test variants supply the date axis and the
 # tests must hold at both extremes, so every flag the suite branches on is
@@ -17,7 +16,7 @@ using DomExceptionModules = import "dom-exception-modules.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "dom-exception-legacy-flags-ts",
+    ( name = "dom-exception-opt-in-v8",
       worker = (
         modules = DomExceptionModules.modules,
         compatibilityFlags = [
@@ -29,16 +28,18 @@ const unitTests :Workerd.Config = (
           "enable_abortsignal_rpc",
           "streams_enable_constructors",
           "global_navigator",
-          "do_not_set_tostring_tag",
-          "legacy_error_serialization",
+          "set_tostring_tag",
+          "enhanced_error_serialization",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
         ],
         bindings = [
-          (name = "USING_TS_IMPL", json = "true"),
-          (name = "SELF", service = "dom-exception-legacy-flags-ts"),
-          (name = "RPC", service = (name = "dom-exception-legacy-flags-ts", entrypoint = "DomExceptionRpc")),
+          (name = "USING_V8_IMPL", json = "true"),
+          (name = "SELF", service = "dom-exception-opt-in-v8"),
+          (name = "RPC", service = (name = "dom-exception-opt-in-v8", entrypoint = "DomExceptionRpc")),
         ],
       )
     ),
   ],
-  autogates = ["workerd-autogate-ts-dom-exception"],
+  autogates = ["workerd-autogate-v8-dom-exception"],
 );

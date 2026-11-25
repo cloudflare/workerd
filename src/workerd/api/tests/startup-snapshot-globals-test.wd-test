@@ -70,6 +70,7 @@ const unitTests :Workerd.Config = (
           (name = "date-frozen", service = "date-frozen"),
           (name = "temporal-on-control", service = "temporal-on-control"),
           (name = "temporal-on-probe", service = "temporal-on-probe"),
+          (name = "quota-exceeded-error-polyfill", service = "quota-exceeded-error-polyfill"),
           (name = "process-assign", service = "process-assign"),
           (name = "buffer-assign", service = "buffer-assign"),
           (name = "process-env", service = "process-env"),
@@ -266,6 +267,15 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .temporalCompatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"temporal-on-probe\""),
+        ],
+      )
+    ),
+    ( name = "quota-exceeded-error-polyfill",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"quota-exceeded-error-polyfill\""),
         ],
       )
     ),

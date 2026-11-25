@@ -602,10 +602,10 @@ export const domExceptionValues = {
 
 export const quotaExceededErrorValues = {
   async test(ctrl, env) {
-    // QuotaExceededError is defined only under the TS_DOM_EXCEPTION autogate.
+    // QuotaExceededError is defined only under the V8_DOM_EXCEPTION autogate.
     const { QuotaExceededError } = globalThis;
     if (QuotaExceededError === undefined) return;
-    // An instance of a class implemented in JavaScript is cached as one, with its data.
+    // It is cached as one, with its amounts.
     const error = new QuotaExceededError('m', { quota: 1, requested: 2 });
     await env.CACHE.read('quotaExceededError', () => ({ value: { error } }));
     const { error: cached } = await env.CACHE.read('quotaExceededError', () => {

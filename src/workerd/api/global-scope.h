@@ -930,9 +930,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript DOMException instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+    // Under the V8_DOM_EXCEPTION autogate, the global is V8's own DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION)) {
       JSG_NESTED_TYPE(DOMException);
     }
     JSG_NESTED_TYPE(WorkerGlobalScope);
