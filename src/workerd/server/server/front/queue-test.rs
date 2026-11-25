@@ -459,8 +459,8 @@ fn a_loop_that_does_not_take_is_not_woken_for_more() {
     assert_eq!(stuck.take().0, 3);
 }
 
-/// A push that is still waiting for room, or the ticket of one that is not.
-fn poll_push<'a>(queue: &'a Queue<u32>, item: u32) -> futures::future::BoxFuture<'a, Ticket<u32>> {
+/// A push that is still waiting for room; panics if `item` was queued.
+fn poll_push(queue: &Queue<u32>, item: u32) -> futures::future::BoxFuture<'_, Ticket<u32>> {
     let mut push = queue.push(item).boxed();
     assert!((&mut push).now_or_never().is_none(), "{item} was queued");
     push
@@ -482,7 +482,7 @@ fn a_full_queue_holds_pushes_back_until_it_has_room() {
     // that one only.
     worker.parking.before_park();
     assert_eq!(worker.take().0, 1);
-    let _third = (&mut third).now_or_never().expect("the third is queued");
+    let third = (&mut third).now_or_never().expect("the third is queued");
     assert!((&mut fourth).now_or_never().is_none());
     assert!((&mut room).now_or_never().is_none());
     assert_eq!(queue.len(), 2);
@@ -490,7 +490,7 @@ fn a_full_queue_holds_pushes_back_until_it_has_room() {
     // nothing.
     drop(first);
     assert!((&mut fourth).now_or_never().is_none());
-    drop(_third);
+    drop(third);
     let _fourth = (&mut fourth).now_or_never().expect("the fourth is queued");
     assert!((&mut room).now_or_never().is_none());
     // What the loops have taken does not count: with one item taken and not finished, the
@@ -705,13 +705,13 @@ impl Dice {
 }
 
 /// Plays a loop thread until the queue ends, or until it has taken `leaves_after` items, when
-/// it drops its worker as a loop that stops does.
+/// its caller drops its worker as a loop that stops does.
 ///
 /// It sleeps without a timeout, so it sleeps for good if a wake-up it needs does not come.
 /// Now and then its thread goes on to other work between waking and running its taker, and
 /// now and then its taker does not run for a few sleeps of the thread, which wakes by itself
 /// then, as a thread with other work does.
-fn stress_loop(worker: Worker<Item>, mut dice: Dice, leaves_after: Option<usize>) {
+fn stress_loop(worker: &Worker<Item>, mut dice: Dice, leaves_after: Option<usize>) {
     let parking = worker.parking();
     let waker = Waker::from(Arc::new(Unparker(thread::current())));
     let mut cx = Context::from_waker(&waker);
@@ -751,6 +751,49 @@ fn stress_loop(worker: Worker<Item>, mut dice: Dice, leaves_after: Option<usize>
     }
 }
 
+/// One burst of a pusher of [`stress`]: up to [`BURST`] items, each with an id from `pushed`.
+/// The tickets of the items whose clients stay are added to `kept`.
+fn stress_burst(
+    queue: &Queue<Item>,
+    fates: &Arc<Fates>,
+    pushed: &AtomicUsize,
+    dice: &mut Dice,
+    kept: &mut Vec<(usize, Ticket<Item>)>,
+) {
+    // The tickets of requests that are in flight for a while.
+    let mut held = Vec::new();
+    for _ in 0..dice.roll(BURST as u64 + 1) {
+        let id = pushed.fetch_add(1, SeqCst);
+        // The queue is short, so a push often waits for a loop to make room.
+        let ticket = futures::executor::block_on(queue.push(Item {
+            id,
+            fates: Arc::clone(fates),
+        }));
+        match dice.roll(4) {
+            // A client that goes away at once, or a little later, while loops take.
+            0 => drop(ticket),
+            1 => held.push(ticket),
+            // A client that stays until its request is served.
+            _ => kept.push((id, ticket)),
+        }
+        // The next push comes as the loops go back to sleep, which they do when they find
+        // the queue empty: a push at that moment is the one a loop could miss.
+        for _ in 0..10_000 {
+            if queue.is_empty() {
+                break;
+            }
+            std::hint::spin_loop();
+        }
+        for _ in 0..dice.roll(200) {
+            std::hint::spin_loop();
+        }
+    }
+    drop(held);
+}
+
+/// The most items a pusher of [`stress`] pushes in one burst.
+const BURST: usize = 6;
+
 /// One run of loops and pushers at once. Every item is either taken by exactly one loop or
 /// taken out by its ticket, never both and never neither, though tickets are dropped while
 /// loops take, loops leave while others are woken, and takers run late or not at all for a
@@ -766,7 +809,6 @@ fn stress(round: u64) -> (usize, usize) {
     const LEAVING: usize = 2;
     const PUSHERS: usize = 4;
     const BURSTS: usize = 150;
-    const BURST: usize = 6;
     let most = PUSHERS * BURSTS * BURST;
     let counters = || (0..most).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let fates = Arc::new(Fates {
@@ -786,7 +828,8 @@ fn stress(round: u64) -> (usize, usize) {
         let dice = Dice(round * 64 + index as u64 + 1);
         let leaves_after = (index < LEAVING).then_some(40 * (index + 1));
         thread::spawn(move || {
-            stress_loop(worker, dice, leaves_after);
+            stress_loop(&worker, dice, leaves_after);
+            drop(worker);
             done.send(()).unwrap();
         });
     }
@@ -804,37 +847,7 @@ fn stress(round: u64) -> (usize, usize) {
             let mut kept = Vec::new();
             for _ in 0..BURSTS {
                 start.wait();
-                // The tickets of requests that are in flight for a while.
-                let mut held = Vec::new();
-                for _ in 0..dice.roll(BURST as u64 + 1) {
-                    let id = pushed.fetch_add(1, SeqCst);
-                    // The queue is short, so a push often waits for a loop to make room.
-                    let ticket = futures::executor::block_on(queue.push(Item {
-                        id,
-                        fates: Arc::clone(&fates),
-                    }));
-                    match dice.roll(4) {
-                        // A client that goes away at once, or a little later, while loops
-                        // take.
-                        0 => drop(ticket),
-                        1 => held.push(ticket),
-                        // A client that stays until its request is served.
-                        _ => kept.push((id, ticket)),
-                    }
-                    // The next push comes as the loops go back to sleep, which they do when
-                    // they find the queue empty: a push at that moment is the one a loop
-                    // could miss.
-                    for _ in 0..10_000 {
-                        if queue.is_empty() {
-                            break;
-                        }
-                        std::hint::spin_loop();
-                    }
-                    for _ in 0..dice.roll(200) {
-                        std::hint::spin_loop();
-                    }
-                }
-                drop(held);
+                stress_burst(&queue, &fates, &pushed, &mut dice, &mut kept);
                 finish.wait();
             }
             kept

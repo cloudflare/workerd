@@ -272,6 +272,8 @@ fn a_full_queue_holds_requests_and_connections_back() {
         assert_eq!(paths[..2], ["/0", "/1"]);
         paths.sort_unstable();
         assert_eq!(paths, ["/0", "/1", "/2", "/3", "/4", "/5"]);
+        // The clients stayed until here.
+        drop(clients);
     });
 }
 
@@ -323,9 +325,9 @@ async fn ping_pong(work: &mut TcpWork, client: &mut TcpStream) {
     assert_eq!(&ping, b"ping");
     work.io.write_all(b"pong").await.unwrap();
     work.io.flush().await.unwrap();
-    let mut pong = [0; 4];
-    client.read_exact(&mut pong).unwrap();
-    assert_eq!(&pong, b"pong");
+    let mut answer = [0; 4];
+    client.read_exact(&mut answer).unwrap();
+    assert_eq!(&answer, b"pong");
 }
 
 #[test]
