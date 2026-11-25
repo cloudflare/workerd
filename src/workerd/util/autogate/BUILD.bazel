@@ -1,0 +1,28 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The process's autogates (//src/workerd/util:autogate), read from Rust. A package of its own so
+# that Rust code can depend on it without the C++ utilities around it.
+wd_rust_crate(
+    name = "autogate",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "lib-test.rs",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/cxx",
+        "//src/workerd/util:autogate",
+    ],
+)

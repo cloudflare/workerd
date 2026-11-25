@@ -37,6 +37,8 @@ namespace workerd::util {
 //    `my-new-feature`. At runtime, the full autogate name will expand to
 //    `workerd-autogate-my-new-feature`.
 // 2. Guard your code with Autogate::isEnabled(AutogateKey::YOUR_GATE_KEY).
+//    Rust code lists the enabled gates by name with `autogate::enabled()`
+//    (//src/workerd/util/autogate).
 //
 // Testing autogated code paths:
 //
