@@ -15,6 +15,15 @@ const unsupported = (alg: string) =>
     omittedTests: true,
   }) as const;
 
+// Builds against a BoringSSL without SHAKE256 and TurboSHAKE256 report cSHAKE256 and TurboSHAKE256
+// as unsupported (see //src/workerd/api:boringssl_xof_digests). crypto-xof-test covers them in
+// builds that include them.
+const xofDigestsSupported = (
+  crypto.subtle.constructor as unknown as {
+    supports(operation: string, algorithm: object): boolean;
+  }
+).supports('digest', { name: 'TurboSHAKE256', outputLength: 256 });
+
 export default {
   'algorithm-discards-context.https.window.js': supportFile,
   'crypto_key_cached_slots.https.any.js': {},
@@ -234,18 +243,22 @@ export default {
     comment: 'Argon2 is not supported',
     omittedTests: true,
   },
-  'modern-algos/digest/cshake.https.any.js': {
-    comment: 'cSHAKE128 is not supported',
-    expectedFailures: [/^cSHAKE128 /],
-  },
+  'modern-algos/digest/cshake.https.any.js': xofDigestsSupported
+    ? {
+        comment: 'cSHAKE128 is not supported',
+        expectedFailures: [/^cSHAKE128 /],
+      }
+    : unsupported('cSHAKE'),
   'modern-algos/digest/kangarootwelve.https.any.js':
     unsupported('KangarooTwelve'),
   'modern-algos/digest/sha3.https.any.js': {},
-  'modern-algos/digest/turboshake.https.any.js': {
-    comment:
-      'TurboSHAKE128 and non-default domain separation are not supported',
-    expectedFailures: [/^TurboSHAKE128 /, /^TurboSHAKE256.*D=0x/],
-  },
+  'modern-algos/digest/turboshake.https.any.js': xofDigestsSupported
+    ? {
+        comment:
+          'TurboSHAKE128 and non-default domain separation are not supported',
+        expectedFailures: [/^TurboSHAKE128 /, /^TurboSHAKE256.*D=0x/],
+      }
+    : unsupported('TurboSHAKE'),
   'modern-algos/digest/xof_digest.js': {},
   'modern-algos/encap_decap/encap_decap_bits.https.any.js': {
     comment: 'ML-KEM-512 and the P-256/P-384 hybrid KEMs are not supported',

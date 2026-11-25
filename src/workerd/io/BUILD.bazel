@@ -147,6 +147,10 @@ wd_cc_library(
         "@nbytes",
         "@simdutf",
     ],
+    local_defines = select({
+        "//src/workerd/api:no_boringssl_xof_digests": ["WORKERD_NO_BORINGSSL_XOF_DIGESTS"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":access-info",

@@ -134,12 +134,14 @@ struct XofDigestAlgorithm {
   uint32_t outputBytes;
 };
 
+#ifndef WORKERD_NO_BORINGSSL_XOF_DIGESTS
 uint32_t normalizeXofInteger(double value, uint32_t maximum, kj::StringPtr field) {
   auto integer = std::trunc(value);
   JSG_REQUIRE(std::isfinite(integer) && integer >= 0 && integer <= maximum, TypeError, field,
       " is outside the supported integer range.");
   return static_cast<uint32_t>(integer);
 }
+#endif
 
 kj::Maybe<XofDigestAlgorithm> lookupXofDigestAlgorithm(jsg::Lock& js,
     kj::StringPtr name,
@@ -148,6 +150,11 @@ kj::Maybe<XofDigestAlgorithm> lookupXofDigestAlgorithm(jsg::Lock& js,
     const jsg::TypeHandler<SubtleCrypto::TurboShakeParams>& turboShakeParamsHandler) {
   if (!Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) return kj::none;
 
+#ifdef WORKERD_NO_BORINGSSL_XOF_DIGESTS
+  // The BoringSSL this was built against lacks EVP_shake256() and EVP_turboshake256(), so treat
+  // cSHAKE256 and TurboSHAKE256 as unrecognized algorithms.
+  return kj::none;
+#else
   if (strcasecmp(name.cStr(), "cSHAKE256") == 0) {
     auto algorithm = JSG_REQUIRE_NONNULL(cshakeParamsHandler.tryUnwrap(js, parameters), TypeError,
         "cSHAKE256 requires an algorithm dictionary with outputLength.");
@@ -183,6 +190,7 @@ kj::Maybe<XofDigestAlgorithm> lookupXofDigestAlgorithm(jsg::Lock& js,
   }
 
   return kj::none;
+#endif
 }
 
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {

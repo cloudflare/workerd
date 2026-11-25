@@ -889,6 +889,10 @@ wd_test(
 wd_test(
     src = "crypto-xof-test.wd-test",
     data = ["crypto-xof-test.js"],
+    target_compatible_with = select({
+        "//src/workerd/api:no_boringssl_xof_digests": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_test(

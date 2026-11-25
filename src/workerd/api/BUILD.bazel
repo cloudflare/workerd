@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
@@ -226,6 +227,22 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+    ],
+)
+
+# Set to False when building against a BoringSSL that lacks EVP_shake256() and EVP_turboshake256(),
+# such as an older release. WebCrypto then reports cSHAKE256 and TurboSHAKE256 as unsupported.
+bool_flag(
+    name = "boringssl_xof_digests",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "no_boringssl_xof_digests",
+    flag_values = {":boringssl_xof_digests": "False"},
+    visibility = [
+        "//src/workerd/api/tests:__pkg__",
+        "//src/workerd/io:__pkg__",
     ],
 )
 
