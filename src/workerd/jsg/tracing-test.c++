@@ -482,11 +482,19 @@ int64_t reportedWrappableBytes(Evaluator<TraceTestContext, TraceTestIsolate>& e)
 
 constexpr int kKeptBoxes = 10000;
 
-// Keeps kKeptBoxes NumberBoxes alive in `globalThis.keep`.
-void keepBoxes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
-  e.expectEval(kj::str("globalThis.keep = []; for (let i = 0; i < ", kKeptBoxes,
-                   "; ++i) keep.push(new NumberBox(i));"),
-      "number", kj::str(kKeptBoxes));
+// Keeps kKeptBoxes NumberBoxes alive in the returned context's `globalThis.keep`.
+V8Ref<v8::Context> keepBoxes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
+  return e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    auto context = lock.newContext<TraceTestContext>();
+    JSG_WITHIN_CONTEXT_SCOPE(lock, context.getHandle(lock), [&](jsg::Lock& js) {
+      auto source = kj::str("globalThis.keep = []; for (let i = 0; i < ", kKeptBoxes,
+          "; ++i) keep.push(new NumberBox(i));");
+      auto script = check(v8::Script::Compile(js.v8Context(), v8Str(js.v8Isolate, source)));
+      auto result = check(script->Run(js.v8Context()));
+      KJ_EXPECT(check(result->Int32Value(js.v8Context())) == kKeptBoxes);
+    });
+    return V8Ref<v8::Context>(lock.v8Isolate, context.getHandle(lock));
+  });
 }
 
 KJ_TEST("wrappables are charged as external memory while they live") {
@@ -498,7 +506,7 @@ KJ_TEST("wrappables are charged as external memory while they live") {
   int64_t before = wrappableBytes(e);
 
   // Kept alive, so each is charged and none is released yet.
-  keepBoxes(e);
+  auto keptContext = keepBoxes(e);
   int64_t live = wrappableBytes(e) - before;
   KJ_EXPECT(live >= int64_t(kKeptBoxes * sizeof(NumberBox)), live);
 
@@ -508,19 +516,20 @@ KJ_TEST("wrappables are charged as external memory while they live") {
     KJ_EXPECT(pending < HeapTracer::kExternalMemoryFlushBytes, pending);
   });
 
-  // Collected, so the charges are released again, with slack for a few boxes the GCs leave alive.
-  // The GC is requested from C++ without stack scanning, as a stale stack slot that points at
-  // `keep` would keep every box alive. The loop in keepBoxes() may still have an optimizing
-  // compile job pending on a background thread, and that job keeps every box alive too, so it is
-  // first aborted and waited for.
-  e.expectEval("keep = null", "object", "null");
+  // Release the array in the context that created it; expectEval() creates a fresh context.
+  // Request GC from C++ without stack scanning so stale stack slots cannot retain the array.
+  // Clear pending optimizing compile jobs first, since they can also keep the boxes alive.
   e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    auto context = keptContext.getHandle(lock);
+    KJ_ASSERT(check(context->Global()->Set(
+        context, v8StrIntern(lock.v8Isolate, "keep"_kj), v8::Null(lock.v8Isolate))));
     lock.v8Isolate->ClearCachesForTesting();
     for (int i = 0; i < 2; ++i) {
       lock.v8Isolate->RequestGarbageCollectionForTesting(
           v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
     }
   });
+  // Allow slack for a few boxes the GCs leave alive.
   int64_t remaining = wrappableBytes(e) - before;
   KJ_EXPECT(remaining < int64_t(sizeof(NumberBox)) * 16, remaining);
 }
@@ -531,7 +540,7 @@ KJ_TEST("wrappables are counted but not reported to V8 when the autogate is off"
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
   int64_t before = wrappableBytes(e);
   int64_t reportedBefore = reportedWrappableBytes(e);
-  keepBoxes(e);
+  auto keptContext = keepBoxes(e);
   int64_t live = wrappableBytes(e) - before;
   KJ_EXPECT(live >= int64_t(kKeptBoxes * sizeof(NumberBox)), live);
   KJ_EXPECT(reportedWrappableBytes(e) == reportedBefore);

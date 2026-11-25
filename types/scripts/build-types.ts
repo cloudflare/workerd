@@ -93,13 +93,20 @@ function checkDiagnostics(sources: SourcesMap): void {
 function spawnWorkerd(
   configPath: string
 ): Promise<{ url: URL; kill: () => Promise<void> }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const workerdProcess = childProcess.spawn(
       getFilePath("src/workerd/server/workerd"),
       ["serve", "--verbose", "--experimental", "--control-fd=3", configPath],
       { stdio: ["inherit", "inherit", "inherit", "pipe"] }
     );
     const exitPromise = events.once(workerdProcess, "exit");
+    void exitPromise.then(([code, signal]) => {
+      reject(
+        new Error(
+          `workerd exited before listening (code ${code}, signal ${signal})`
+        )
+      );
+    }, reject);
     workerdProcess.stdio[3]?.on("data", (chunk: Buffer): void => {
       const message = JSON.parse(chunk.toString().trim()) as {
         event: string

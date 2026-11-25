@@ -196,6 +196,13 @@ export default {
       'Fetch with POST with ReadableStream containing Blob',
     ],
     expectedFailures: ["Streaming upload shouldn't work on Http/1.1."],
+    // wptserve only reads Content-Length bodies. Have the empty chunked upload's response
+    // close the connection so a chunk-parsing error cannot reach a later pooled request.
+    replace: (code: string): string =>
+      code.replace(
+        "fetch('/', {method: 'POST', body})",
+        "fetch(RESOURCES_DIR + 'echo-content.py?pipe=header(Connection,close)', {method: 'POST', body})"
+      ),
   },
   'basic/request-upload.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',

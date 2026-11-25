@@ -6,10 +6,12 @@ load("//:build/wd_test.bzl", "wd_test")
 
 digest_suite_srcs = glob(["*.js"]) + ["digest-modules.capnp"]
 
+# Isolate the allocation-pressure case from other tests' compiler and GC threads.
 wd_test(
     size = "large",
     src = "digest-cpp.wd-test",
     data = digest_suite_srcs,
+    tags = ["cpu:4"],
 )
 
 wd_test(
@@ -17,6 +19,7 @@ wd_test(
     src = "digest-ts.wd-test",
     args = ["--experimental"],
     data = digest_suite_srcs,
+    tags = ["cpu:4"],
 )
 
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
@@ -25,6 +28,7 @@ wd_test(
     size = "large",
     src = "digest-cpp-pedantic.wd-test",
     data = digest_suite_srcs,
+    tags = ["cpu:4"],
 )
 
 # Legacy (pre-flag) regression guard, C++ implementation only. The

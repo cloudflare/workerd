@@ -61,13 +61,14 @@ export const writableStreamDesiredSize = {
 export const backpressureWritableDesiredSize = {
   async test() {
     const written = [];
+    let releaseWrites;
+    const writeGate = new Promise((resolve) => (releaseWrites = resolve));
 
     const ws = new WritableStream(
       {
         write(chunk) {
           written.push(chunk);
-          // Simulate slow write
-          return new Promise((resolve) => setTimeout(resolve, 10));
+          return writeGate;
         },
       },
       { highWaterMark: 3 }
@@ -77,27 +78,32 @@ export const backpressureWritableDesiredSize = {
 
     strictEqual(writer.desiredSize, 3, 'initial desiredSize');
 
-    writer.write(1);
+    const write1 = writer.write(1);
     strictEqual(writer.desiredSize, 2, 'desiredSize after first write');
 
-    writer.write(2);
+    const write2 = writer.write(2);
     strictEqual(writer.desiredSize, 1, 'desiredSize after second write');
 
-    writer.write(3);
+    const write3 = writer.write(3);
     strictEqual(writer.desiredSize, 0, 'desiredSize at capacity');
 
     const readyBefore = writer.ready;
     ok(readyBefore instanceof Promise, 'ready should be a Promise');
 
-    writer.write(4);
+    const write4 = writer.write(4);
     strictEqual(writer.desiredSize, -1, 'desiredSize over capacity');
 
     const readyAfter = writer.ready;
     ok(readyAfter instanceof Promise, 'ready should still be a Promise');
 
-    await scheduler.wait(50);
+    releaseWrites();
+    await Promise.all([write1, write2, write3, write4]);
 
-    ok(writer.desiredSize > -1, 'desiredSize recovered after writes complete');
+    strictEqual(
+      writer.desiredSize,
+      3,
+      'desiredSize recovered after writes complete'
+    );
 
     const readyResolved = writer.ready;
     await readyResolved;

@@ -21,16 +21,16 @@ export default {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      const bytes = value.data;
+      const bytes = value;
       const text = decoder.decode(bytes);
       if (text === 'remoteAddress') {
         const { remoteAddress } = await socket.opened;
-        await writer.write(new Datagram(encoder.encode(remoteAddress)));
+        await writer.write(encoder.encode(remoteAddress));
         continue;
       }
       if (text === 'status') {
         const status = lingeringFlowTimedOut ? 'timed-out' : 'waiting';
-        await writer.write(new Datagram(encoder.encode(status)));
+        await writer.write(encoder.encode(status));
         continue;
       }
       if (first) {
@@ -40,13 +40,13 @@ export default {
         const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
         combined.set(bytes, prefix.length);
-        await writer.write(new Datagram(combined));
+        await writer.write(combined);
       } else {
         const prefix = encoder.encode('echo:');
         const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
         combined.set(bytes, prefix.length);
-        await writer.write(new Datagram(combined));
+        await writer.write(combined);
       }
     }
     if (lingerAfterEof) {

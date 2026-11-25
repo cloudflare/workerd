@@ -6,13 +6,16 @@ load("//:build/wd_bench.bzl", "wd_bench")
 # itself.
 
 wd_bench(
+    size = "large",
     src = "memory-cache-cpp.wd-bench",
     args = ["--experimental"],
     data = ["memory-cache.js"],
     generate_all_autogates_variant = False,
+    tags = ["cpu:2"],
 )
 
 wd_bench(
+    size = "large",
     src = "memory-cache-rust.wd-bench",
     args = ["--experimental"],
     data = [
@@ -20,4 +23,5 @@ wd_bench(
         "memory-cache-cpp.wd-bench",
     ],
     lint = False,
+    tags = ["cpu:2"],
 )

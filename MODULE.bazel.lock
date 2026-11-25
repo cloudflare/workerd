@@ -405,7 +405,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "IvlqG5Ftgvhd6RctBNd8UGGGkBwjzmx0ppaalc9yYR8=",
+        "usagesDigest": "xyHubWctDI/i8rjI7uOEBZaAnsfIIZZx//Eu2C+Ky1I=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -921,7 +921,8 @@
               "patch_strip": 1,
               "patch_tool": "",
               "patches": [
-                "@@//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch"
+                "@@//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
+                "@@//:patches/wpt/0002-announce-raw-fixture-connection-close.patch"
               ],
               "remote_file_integrity": {},
               "remote_file_urls": {},

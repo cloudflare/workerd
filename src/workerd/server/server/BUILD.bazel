@@ -31,6 +31,8 @@ wd_rust_crate(
     test_deps = [
         "//src/workerd/util:setup-async-io",
     ],
+    # The serial server suite includes disk-cache fsyncs and loopback network tests.
+    test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/assets-router",

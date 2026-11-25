@@ -8,6 +8,7 @@ exports_files(
 )
 
 wd_test(
+    size = "large",
     src = "d1-api-test-jsrpc-contract.wd-test",
     args = ["--experimental"],
     data = [

@@ -5,6 +5,8 @@ wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = ["r2-test.js"],
+    # The runtime and filesystem work can consume more than one CPU.
+    tags = ["cpu:2"],
 )
 
 # `workerd serve` of a wrangler.jsonc's r2_buckets.
