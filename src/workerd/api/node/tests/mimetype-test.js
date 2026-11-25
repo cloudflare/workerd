@@ -412,6 +412,24 @@ export const test_params = {
   },
 };
 
+// Many parameters, with each name repeated in another case after all of them: every name is
+// kept once, lowercased, with its first value, in order.
+export const test_many_params = {
+  test() {
+    const count = 20000;
+    const parts = ['text/plain'];
+    for (let i = 0; i < count; i++) parts.push(`Name${i}=v${i}`);
+    for (let i = 0; i < count; i++) parts.push(`nAME${i}=other`);
+    const mt = new MIMEType(parts.join(';'));
+    const entries = [...mt.params];
+    strictEqual(entries.length, count);
+    deepStrictEqual(entries[0], ['name0', 'v0']);
+    deepStrictEqual(entries[count - 1], [`name${count - 1}`, `v${count - 1}`]);
+    strictEqual(mt.params.get('name12345'), 'v12345');
+    ok(mt.toString().startsWith('text/plain;name0=v0;name1=v1;'));
+  },
+};
+
 export const test_params_delete = {
   test() {
     const order = (src, fn) => {

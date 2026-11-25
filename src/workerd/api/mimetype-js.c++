@@ -7,6 +7,8 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/mimetype/ffi.rs.h>
 
+#include <kj/map.h>
+
 #include <cstring>
 
 namespace workerd::api {
@@ -35,26 +37,40 @@ jsg::JsString readString(jsg::Lock& js, jsg::JsObject list, uint32_t index) {
       value.tryCast<jsg::JsString>(), TypeError, "a MIME parameter list must hold only strings");
 }
 
+char asciiLower(char c) {
+  return 'A' <= c && c <= 'Z' ? c + ('a' - 'A') : c;
+}
+
 // The ASCII-lowercased `s` as a JS string. `s` is a token, which is ASCII.
 jsg::JsString lowercaseStr(jsg::Lock& js, kj::ArrayPtr<const char> s) {
   kj::SmallArray<char, 64> lower(s.size());
   for (size_t i = 0; i < s.size(); i++) {
-    char c = s[i];
-    lower[i] = 'A' <= c && c <= 'Z' ? c + ('a' - 'A') : c;
+    lower[i] = asciiLower(s[i]);
   }
   return js.str(lower.asPtr());
 }
 
-bool equalsIgnoringAsciiCase(kj::ArrayPtr<const char> a, kj::ArrayPtr<const char> b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); i++) {
-    char x = a[i], y = b[i];
-    if ('A' <= x && x <= 'Z') x += 'a' - 'A';
-    if ('A' <= y && y <= 'Z') y += 'a' - 'A';
-    if (x != y) return false;
+// A parameter name as written, which hashes and compares ignoring ASCII case, as names do.
+struct CaselessName {
+  kj::ArrayPtr<const char> chars;
+
+  bool operator==(const CaselessName& other) const {
+    if (chars.size() != other.chars.size()) return false;
+    for (size_t i = 0; i < chars.size(); i++) {
+      if (asciiLower(chars[i]) != asciiLower(other.chars[i])) return false;
+    }
+    return true;
   }
-  return true;
-}
+
+  // FNV-1a over the lowercased bytes.
+  kj::uint hashCode() const {
+    kj::uint hash = 2166136261u;
+    for (char c: chars) {
+      hash = (hash ^ static_cast<unsigned char>(asciiLower(c))) * 16777619u;
+    }
+    return hash;
+  }
+};
 
 // Adds the parameters the Rust parser finds to `parts` as MimeType keeps them: the name
 // lowercased, and the first value of a name kept.
@@ -63,20 +79,18 @@ class JsParamSink final: public ffi::ParamSink {
   JsParamSink(jsg::Lock& js, kj::Vector<jsg::JsValue>& parts): js(js), parts(parts) {}
 
   void add(::rust::Slice<const uint8_t> name, ::rust::Slice<const uint8_t> value) override {
-    auto nameChars = chars(name);
-    for (auto seen: names) {
-      if (equalsIgnoringAsciiCase(seen, nameChars)) return;
-    }
     // A name is a slice of the input, which outlives the parse.
-    names.add(nameChars);
-    parts.add(lowercaseStr(js, nameChars));
+    CaselessName key{chars(name)};
+    if (names.contains(key)) return;
+    names.insert(key);
+    parts.add(lowercaseStr(js, key.chars));
     parts.add(js.str(chars(value)));
   }
 
  private:
   jsg::Lock& js;
   kj::Vector<jsg::JsValue>& parts;
-  kj::Vector<kj::ArrayPtr<const char>> names;
+  kj::HashSet<CaselessName> names;
 };
 
 // JS strings as UTF-8, written into one buffer, for the Rust serializer.
