@@ -134,23 +134,21 @@ bool socketHasProtocolProperty(CompatibilityFlags::Reader flags) {
   return result;
 }
 
-KJ_TEST("Socket protocol property requires experimental flag") {
-  capnp::MallocMessageBuilder disabledFlagsMessage;
-  auto disabledFlags = disabledFlagsMessage.initRoot<CompatibilityFlags>();
-  disabledFlags.setStreamsJavaScriptControllers(true);
-  KJ_EXPECT(!socketHasProtocolProperty(disabledFlags.asReader()));
+KJ_TEST("udp_ingress exposes Socket.protocol") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  KJ_EXPECT(!socketHasProtocolProperty(flags.asReader()));
 
-  capnp::MallocMessageBuilder enabledFlagsMessage;
-  auto enabledFlags = enabledFlagsMessage.initRoot<CompatibilityFlags>();
-  enabledFlags.setStreamsJavaScriptControllers(true);
-  enabledFlags.setWorkerdExperimental(true);
-  KJ_EXPECT(socketHasProtocolProperty(enabledFlags.asReader()));
+  flags.setUdpIngress(true);
+  KJ_EXPECT(socketHasProtocolProperty(flags.asReader()));
 }
 
 KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
+  flags.setUdpIngress(true);
   TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
   kj::Pin<AsyncSendState> state;
 
@@ -182,6 +180,7 @@ void runSocketWriteOutputGateTest(bool useTsStreams) {
 
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setUdpIngress(true);
   flags.setTypeScriptImplementedStreams(useTsStreams);
 
   Worker::Actor::Id actorId = kj::str("test-actor-write");
@@ -206,6 +205,13 @@ void runSocketWriteOutputGateTest(bool useTsStreams) {
 
     // Step 1: Connect before locking the gate so the pipe is established.
     auto socket = connectImpl(env.js, kj::none, kj::str("localhost:1234"), kj::none);
+    {
+      auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<Socket>>());
+      auto object = KJ_ASSERT_NONNULL(
+          jsg::JsValue(handler.wrap(env.js, socket.addRef())).tryCast<jsg::JsObject>());
+      KJ_EXPECT(object.get(env.js, "protocol"_kj).toString(env.js) == "tcp"_kj);
+      KJ_EXPECT(!object.has(env.js, "proxyTo"_kj));
+    }
     env.js.runMicrotasks();
 
     // Prepare write data and lock gate BEFORE any co_await (Worker lock still held).
