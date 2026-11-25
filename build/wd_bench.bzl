@@ -40,7 +40,8 @@ def wd_bench(
        Arguments after `--` are passed to `workerd bench`, e.g. a filter or `--format=json`. It is
        tagged `workerd-benchmark`.
      - <variant>@smoke: a test that runs the benchmarks once each with `--quick`, to check that they
-       work. This isn't tagged `workerd-benchmark`, so CI runs it.
+       work. It's tagged `off-by-default`, so CI doesn't run it; select it with
+       `--test_tag_filters=`, e.g. `bazel test --test_tag_filters= //src/bench/...`.
     It also generates `name@benchmark.json`, the default variant's report as a build output, which
     is off by default.
 
@@ -95,7 +96,9 @@ def wd_bench(
             data = data + [_WORKERD],
             args = workerd_args + variant_args + ["--quick"],
             size = size,
-            tags = tags,
+            # Benchmarks don't need to run in CI, even briefly: a benchmark's setup can take seconds
+            # in a debug or sanitizer build.
+            tags = ["off-by-default"] + tags,
             **kwargs
         )
 

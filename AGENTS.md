@@ -63,7 +63,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - **Rust unit tests**: `<module>-test.rs` beside the module under test, never inline; run by the crate's test target (`<name>_test` for a crate defined with a `wd_rust_*` macro; otherwise see the package's `BUILD.bazel`). See `src/rust/AGENTS.md` §UNIT TEST FILES.
 - **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
-- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`) for C++ (`wd_cc_benchmark()`); `wd_bench()` for JavaScript via `workerd bench`, whose `@smoke` tests run in CI. See `docs/benchmarking.md`.
+- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`) for C++ (`wd_cc_benchmark()`); `wd_bench()` for JavaScript via `workerd bench`, whose `@smoke` tests are `off-by-default`, so CI doesn't run them. See `docs/benchmarking.md`.
 
 ### Running a Single Test
 

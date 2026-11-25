@@ -102,9 +102,10 @@ reports from the same build on the same machine. A cell's groups run in
 `main.js` order in one isolate, so a filtered run gives the JIT different
 feedback from a full one: compare runs made with the same filter.
 
-`bazel test //src/bench/...` runs each cell's `@smoke` variants, which run
-every case briefly (`--quick`) to check that it works, and the lint. CI runs
-them; it doesn't run the benchmarks themselves.
+`bazel test --test_tag_filters= //src/bench/...` runs each cell's `@smoke`
+variants, which run every case briefly (`--quick`) to check that it works, and
+the lint. The `@smoke` variants are tagged `off-by-default`, so CI runs only the
+lint.
 
 ## Suites
 
