@@ -70,9 +70,21 @@ pub mod bridge {
         fn settle(self: &AsyncResource, outcome: AsyncOutcome);
     }
 
+    /// C++ `IoChannelFactory::EvictWebSocketMode`, by its alias in `ffi.h`: what evicting a
+    /// Durable Object for a test does with its hibernatable WebSockets.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(i32)]
+    enum EvictWebSocketMode {
+        /// Hibernates them, so that they outlive the eviction.
+        HIBERNATE,
+        /// Closes them.
+        CLOSE,
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/ffi.h");
 
+        type EvictWebSocketMode;
         type IoOwnedObject;
         type IsolateWeakRef;
         type AbortWatcher;

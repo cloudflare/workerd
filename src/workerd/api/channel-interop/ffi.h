@@ -72,6 +72,11 @@ bool fetcher_map_virtual_host(
 bool subrequest_channel_require_allows_transfer(
     v8::Isolate* isolate, const SubrequestChannel& channel);
 
+// channel->evictForTest(webSocketMode), which holds the channel until it settles. What it
+// throws rejects the promise.
+kj::Promise<void> subrequest_channel_evict_for_test(
+    kj::Rc<SubrequestChannel> channel, IoChannelFactory::EvictWebSocketMode webSocketMode);
+
 // durableObjectClass.getChannel(ioctx).
 bool durable_object_class_channel(v8::Isolate* isolate,
     const DurableObjectClass& durableObjectClass,

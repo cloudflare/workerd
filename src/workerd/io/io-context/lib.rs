@@ -30,6 +30,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
+pub use ffi::bridge::EvictWebSocketMode;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;

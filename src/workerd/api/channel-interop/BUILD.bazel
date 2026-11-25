@@ -16,6 +16,8 @@ wd_rust_crate(
         "//src/rust/jsg",
         "//src/rust/jsg-cpp:ffi",
         "//src/workerd/io",
+        # io_context::EvictWebSocketMode, which the bridge takes by its alias.
+        "//src/workerd/io/io-context:ffi",
     ],
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
