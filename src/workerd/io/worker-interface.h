@@ -345,6 +345,12 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
     kj::Own<WorkerInterface> worker, kj::Function<kj::Promise<void>()> makeRevokeProm);
 
+// Returns the WebSocket underneath any revocable WebSockets that the interfaces above opened
+// around `webSocket`, or `webSocket` itself if there are none. A revoked WebSocket is returned as
+// is. Lets the receiver of a WebSocket find out how it arrived, for example over Cap'n Proto,
+// without changing how it uses the WebSocket.
+kj::WebSocket& unwrapRevocableWebSocket(kj::WebSocket& webSocket);
+
 // Implementation of WorkerInterface on top of rpc::EventDispatcher. Since an EventDispatcher
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
 // can be delivered).

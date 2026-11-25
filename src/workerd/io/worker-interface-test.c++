@@ -74,8 +74,12 @@ class TestResponse final: public kj::HttpService::Response {
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
     auto pipe = kj::newWebSocketPipe();
     peers.add(kj::mv(pipe.ends[1]));
+    accepted.add(pipe.ends[0].get());
     return kj::mv(pipe.ends[0]);
   }
+
+  // The WebSockets this response handed out, before anything wrapped them.
+  kj::Vector<kj::WebSocket*> accepted;
 
  private:
   kj::Vector<kj::Own<kj::WebSocket>> peers;
@@ -198,6 +202,21 @@ KJ_TEST("eager revocation revokes an accepted WebSocket") {
 
   fixture.killed.fulfill();
   fixture.expectRevoked(*fixture.worker->webSockets[0]);
+}
+
+KJ_TEST("unwrapping a revocable WebSocket finds the accepted WebSocket until it is revoked") {
+  RevocableFixture fixture;
+  auto revocable = fixture.makeEager();
+  fixture.sendRequest(*revocable, TestWorker::Mode::ACCEPT_WEBSOCKET);
+  auto& webSocket = *fixture.worker->webSockets[0];
+  auto& accepted = *fixture.response.accepted[0];
+
+  KJ_EXPECT(&unwrapRevocableWebSocket(webSocket) == &accepted);
+  KJ_EXPECT(&unwrapRevocableWebSocket(accepted) == &accepted);
+
+  fixture.killed.fulfill();
+  fixture.waitScope.poll();
+  KJ_EXPECT(&unwrapRevocableWebSocket(webSocket) == &webSocket);
 }
 
 }  // namespace

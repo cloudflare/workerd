@@ -30,6 +30,15 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
       ws(kj::none),
       manager(manager) {}
 
+LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
+    api::WebSocket::HibernationPackage package,
+    size_t tagCount,
+    LegacyHibernationManagerImpl& manager)
+    : tagItems(kj::heapArray<TagListItem>(tagCount)),
+      activeOrPackage(kj::mv(package)),
+      ws(kj::none),
+      manager(manager) {}
+
 LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
   // We expect this dtor to be called when we're removing a HibernatableWebSocket
   // from our `allWs` collection in the HibernationManager.
@@ -98,6 +107,66 @@ kj::Promise<void> LegacyHibernationManagerImpl::HibernatableWebSocket::branchWri
     return promise.addBranch();
   }
   return kj::READY_NOW;
+}
+
+void LegacyHibernationManagerImpl::HibernatableWebSocket::wakeReceiver() {
+  KJ_IF_SOME(fulfiller, receiverWaiter) {
+    auto owned = kj::mv(fulfiller);
+    receiverWaiter = kj::none;
+    owned->fulfill();
+  }
+}
+
+void LegacyHibernationManagerImpl::HibernatableWebSocket::wakeDelivery() {
+  KJ_IF_SOME(fulfiller, deliveryWaiter) {
+    auto owned = kj::mv(fulfiller);
+    deliveryWaiter = kj::none;
+    owned->fulfill();
+  }
+}
+
+void LegacyHibernationManagerImpl::HibernatableWebSocket::updateCountWaiters() {
+  kj::Vector<CountWaiter> remaining;
+  for (auto& waiter: countWaiters) {
+    if (receivedCount >= waiter.count) {
+      waiter.fulfiller->fulfill();
+    } else KJ_IF_SOME(error, receiveError) {
+      waiter.fulfiller->reject(error.clone());
+    } else {
+      remaining.add(kj::mv(waiter));
+    }
+  }
+  countWaiters = kj::mv(remaining);
+}
+
+kj::Promise<void> LegacyHibernationManagerImpl::HibernatableWebSocket::receiveLoop() {
+  auto& socket = *KJ_REQUIRE_NONNULL(ws);
+  try {
+    while (true) {
+      // Stay one message ahead of delivery, which keeps the client's flow control as tight as
+      // receiving on demand would. While events are held, take everything, so that a migration
+      // can carry every message the client has sent.
+      while (manager.holdCount == 0 && !pendingMessages.empty()) {
+        auto paf = kj::newPromiseAndFulfiller<void>();
+        receiverWaiter = kj::mv(paf.fulfiller);
+        co_await paf.promise;
+      }
+      auto message = co_await socket.receive();
+      bool isClose = message.is<kj::WebSocket::Close>();
+      ++receivedCount;
+      pendingMessages.push_back(kj::mv(message));
+      updateCountWaiters();
+      wakeDelivery();
+      if (isClose) {
+        // Delivering the Close ends the connection, so there is nothing more to receive.
+        co_return;
+      }
+    }
+  } catch (...) {
+    receiveError = kj::getCaughtExceptionAsKj();
+  }
+  updateCountWaiters();
+  wakeDelivery();
 }
 
 jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
@@ -172,8 +241,21 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   allWs.push_front(kj::mv(hib));
   refToHibernatable.node = allWs.begin();
 
+  insertTags(refToHibernatable, tags);
+
+  // Before starting the readLoop, share ownership of the kj::WebSocket with the
+  // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
+  refToHibernatable.ws =
+      refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
+          refToHibernatable.getTags());
+
+  startReadLoop(refToHibernatable);
+}
+
+void LegacyHibernationManagerImpl::insertTags(
+    HibernatableWebSocket& hib, kj::ArrayPtr<kj::String> tags) {
   // If the `tags` array is empty (i.e. user did not provide a tag), we skip the population of the
-  // `tagToWs` HashMap below and go straight to initiating the readLoop.
+  // `tagToWs` HashMap.
 
   // It is the caller's responsibility to ensure all elements of `tags` are unique.
   // TODO(cleanup): Maybe we could enforce uniqueness by using an immutable type that
@@ -182,6 +264,7 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   // We need to add the HibernatableWebSocket to each bucket in `tagToWs` corresponding to its tags.
   //  1. Create the entry if it doesn't exist
   //  2. Fill the TagListItem in the HibernatableWebSocket's tagItems array
+  KJ_ASSERT(tags.size() == hib.tagItems.size());
   size_t position = 0;
   for (auto tag = tags.begin(); tag < tags.end(); tag++, position++) {
     auto& tagCollection = tagToWs.findOrCreate(*tag, [&tag]() {
@@ -190,8 +273,8 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
       return decltype(tagToWs)::Entry{kj::str(item->tag), kj::mv(item)};
     });
     // This TagListItem sits in the HibernatableWebSocket's tagItems array.
-    auto& tagListItem = refToHibernatable.tagItems[position];
-    tagListItem.hibWS = refToHibernatable;
+    auto& tagListItem = hib.tagItems[position];
+    tagListItem.hibWS = hib;
     tagListItem.tag = tagCollection->tag.asPtr();
 
     auto& list = tagCollection->list;
@@ -201,16 +284,15 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
     // in `tagToWs`.
     tagListItem.list = *list.get();
   }
+}
 
-  // Before starting the readLoop, share ownership of the kj::WebSocket with the
-  // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
-  refToHibernatable.ws =
-      refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
-          refToHibernatable.getTags());
+void LegacyHibernationManagerImpl::startReadLoop(HibernatableWebSocket& hib) {
+  // The receiver reads from the WebSocket and the read loop delivers what it read. The task lives
+  // in the HibernatableWebSocket, so it ends when the WebSocket is removed.
+  hib.receiverTask = hib.receiveLoop().eagerlyEvaluate(nullptr);
 
-  // Finally, we initiate the readloop for this HibernatableWebSocket and
-  // give the task to the HibernationManager so it lives long.
-  readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
+  // Give the read loop to the HibernationManager so it lives long.
+  readLoopTasks.add(handleReadLoop(hib).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
       LOG_EXCEPTION_IF_INTERNAL("LegacyHibernationManagerImpl::handleReadLoop", e);
     }
@@ -236,12 +318,15 @@ kj::Vector<jsg::Ref<api::WebSocket>> LegacyHibernationManagerImpl::getWebSockets
       auto& list = *((item)->list);
       for (auto& entry: list) {
         auto& hibWS = KJ_REQUIRE_NONNULL(entry.hibWS);
+        // A WebSocket moved to another process lingers until its read loop ends.
+        if (hibWS.exported) continue;
         matches.add(hibWS.getActiveOrUnhibernate(js));
       }
     }
   } else {
     // Add all websockets!
     for (auto& hibWS: allWs) {
+      if (hibWS->exported) continue;
       matches.add(hibWS->getActiveOrUnhibernate(js));
     }
   }
@@ -249,7 +334,8 @@ kj::Vector<jsg::Ref<api::WebSocket>> LegacyHibernationManagerImpl::getWebSockets
 }
 
 uint64_t LegacyHibernationManagerImpl::getWebSocketCount() const {
-  return allWs.size();
+  // A WebSocket moved to another process lingers until its read loop ends, but is no longer ours.
+  return allWs.size() - exportedCount;
 }
 
 void LegacyHibernationManagerImpl::setWebSocketAutoResponse(
@@ -454,6 +540,9 @@ void LegacyHibernationManagerImpl::cancelEvent(kj::StringPtr websocketId) {
 }
 
 void LegacyHibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {
+  if (hib.exported) {
+    --exportedCount;
+  }
   removeFromAllWs(hib);
 }
 
@@ -543,10 +632,15 @@ kj::Own<WorkerInterface> LegacyHibernationManagerImpl::getWorkerForEvent(
 
 kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
-  auto& ws = *KJ_REQUIRE_NONNULL(hib.ws);
   while (true) {
-    kj::WebSocket::Message message = co_await ws.receive();
-    // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
+    auto maybeMessage = co_await nextMessage(hib);
+    if (maybeMessage == kj::none) {
+      // A migration moved this WebSocket to another process.
+      co_return;
+    }
+    kj::WebSocket::Message message = kj::mv(KJ_ASSERT_NONNULL(maybeMessage));
+    // Note that errors are handled by the callee of `readLoop`, since nextMessage() rethrows the
+    // error that ended receiving.
 
     auto skip = false;
 
@@ -559,13 +653,17 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
             // If the received message matches the one set for auto-response, we must
             // short-circuit readLoop, store the current timestamp and and automatically respond
             // with the expected response.
-            TimerChannel& timerChannel = KJ_REQUIRE_NONNULL(timer);
-            // This should count as a new IO event, hence we should call syncTime
-            // otherwise the autoResponseTimestamp wouldn't be accurate.
-            timerChannel.syncTime();
-            // We should have set the timerChannel previously in the hibernation manager.
-            // If we haven't, we aren't able to get the current time.
-            hib.autoResponseTimestamp = timerChannel.now();
+            KJ_IF_SOME(timerChannel, timer) {
+              // This should count as a new IO event, hence we should call syncTime
+              // otherwise the autoResponseTimestamp wouldn't be accurate.
+              timerChannel.syncTime();
+              hib.autoResponseTimestamp = timerChannel.now();
+            } else {
+              // Only a manager that adopted WebSockets from another process lacks a timer, until
+              // its actor first runs. No JavaScript is running to observe the clock, so a coarse
+              // reading reveals nothing it could time.
+              hib.autoResponseTimestamp = kj::systemCoarseCalendarClock().now();
+            }
             // We'll store the current timestamp in the HibernatableWebSocket to assure it gets
             // stored even if the WebSocket is currently hibernating. In that scenario, the timestamp
             // value will be loaded into the WebSocket during unhibernation.
@@ -657,6 +755,245 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
       co_return;
     }
   }
+}
+
+kj::Promise<kj::Maybe<kj::WebSocket::Message>> LegacyHibernationManagerImpl::nextMessage(
+    HibernatableWebSocket& hib) {
+  while (true) {
+    if (hib.exported) {
+      co_return kj::none;
+    }
+    if (holdCount == 0) {
+      if (!hib.pendingMessages.empty()) {
+        auto message = kj::mv(hib.pendingMessages.front());
+        hib.pendingMessages.pop_front();
+        hib.wakeReceiver();
+        co_return kj::mv(message);
+      }
+      KJ_IF_SOME(error, hib.receiveError) {
+        kj::throwFatalException(error.clone());
+      }
+    }
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    hib.deliveryWaiter = kj::mv(paf.fulfiller);
+    co_await paf.promise;
+  }
+}
+
+// Holds a manager's events for as long as it exists. Holds a reference to the manager, so that
+// the hold ends wherever the manager is by then.
+class LegacyHibernationManagerImpl::EventHold {
+ public:
+  explicit EventHold(kj::Rc<LegacyHibernationManagerImpl> manager): manager(kj::mv(manager)) {
+    if (this->manager->holdCount++ == 0) {
+      // Receivers take everything while events are held.
+      for (auto& hib: this->manager->allWs) {
+        hib->wakeReceiver();
+      }
+    }
+  }
+  ~EventHold() noexcept(false) {
+    manager->releaseHold();
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(EventHold);
+
+ private:
+  kj::Rc<LegacyHibernationManagerImpl> manager;
+};
+
+kj::Own<void> LegacyHibernationManagerImpl::holdEvents() {
+  return kj::heap<EventHold>(addRefToThis());
+}
+
+void LegacyHibernationManagerImpl::releaseHold() {
+  KJ_ASSERT(holdCount > 0);
+  if (--holdCount == 0) {
+    for (auto& hib: allWs) {
+      hib->wakeDelivery();
+    }
+  }
+}
+
+void LegacyHibernationManagerImpl::attachMigrationLink(
+    api::WebSocket& ws, kj::Own<WebSocketMigrationLink> link) {
+  // The WebSocket was accepted moments ago, and acceptWebSocket() adds to the front.
+  for (auto& hib: allWs) {
+    KJ_IF_SOME(active, hib->activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
+      if (active.get() == &ws) {
+        hib->migrationLink = kj::mv(link);
+        return;
+      }
+    }
+  }
+}
+
+class LegacyHibernationManagerImpl::MigrationImpl final: public Migration {
+ public:
+  MigrationImpl(
+      kj::Rc<LegacyHibernationManagerImpl> managerParam, kj::Array<HibernatableWebSocket*> sockets)
+      : manager(kj::mv(managerParam)),
+        sockets(kj::mv(sockets)),
+        hold(kj::heap<EventHold>(manager.addRef())) {
+    manager->migrating = true;
+  }
+  ~MigrationImpl() noexcept(false) {
+    manager->migrating = false;
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(MigrationImpl);
+
+  // While events are held, no WebSocket's read loop can end, so none of `sockets` is removed until
+  // finish() exports them.
+
+  size_t size() override {
+    return sockets.size();
+  }
+
+  WebSocketMigrationLink& getLink(size_t index) override {
+    KJ_REQUIRE(!finished, "the migration already finished");
+    return *KJ_ASSERT_NONNULL(sockets[index]->migrationLink);
+  }
+
+  kj::Promise<void> whenReceived(size_t index, uint64_t count) override {
+    KJ_REQUIRE(!finished, "the migration already finished");
+    auto& hib = *sockets[index];
+    if (hib.receivedCount >= count) {
+      return kj::READY_NOW;
+    }
+    KJ_IF_SOME(error, hib.receiveError) {
+      return error.clone();
+    }
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    hib.countWaiters.add(HibernatableWebSocket::CountWaiter{
+      .count = count,
+      .fulfiller = kj::mv(paf.fulfiller),
+    });
+    return kj::mv(paf.promise);
+  }
+
+  kj::Promise<void> whenSendsSettled() override {
+    KJ_REQUIRE(!finished, "the migration already finished");
+    auto barriers = kj::heapArrayBuilder<kj::Promise<void>>(sockets.size());
+    for (auto hib: sockets) {
+      barriers.add(hib->branchWriteBarrier());
+    }
+    return kj::joinPromisesFailFast(barriers.finish());
+  }
+
+  Finished finish() override {
+    KJ_REQUIRE(!finished, "the migration already finished");
+    KJ_REQUIRE(manager->allWs.size() == sockets.size(),
+        "a WebSocket was accepted while its actor's WebSockets were moving");
+    for (auto hib: sockets) {
+      KJ_REQUIRE(hib->receiveError == kj::none, "a WebSocket ended while it was moving");
+      KJ_REQUIRE(hib->activeOrPackage.is<api::WebSocket::HibernationPackage>(),
+          "a WebSocket woke up while it was moving");
+    }
+
+    finished = true;
+    auto result = kj::heapArrayBuilder<MigratedWebSocket>(sockets.size());
+    auto connections = kj::heapArrayBuilder<kj::Rc<kj::WebSocket>>(sockets.size());
+    for (auto hib: sockets) {
+      auto& package = hib->activeOrPackage.get<api::WebSocket::HibernationPackage>();
+      auto pending = kj::heapArrayBuilder<kj::WebSocket::Message>(hib->pendingMessages.size());
+      for (auto& message: hib->pendingMessages) {
+        pending.add(kj::mv(message));
+      }
+      hib->pendingMessages.clear();
+      result.add(MigratedWebSocket{
+        .url = kj::mv(package.url),
+        .protocol = kj::mv(package.protocol),
+        .extensions = kj::mv(package.extensions),
+        .serializedAttachment = kj::mv(package.serializedAttachment),
+        .tags = hib->getTags(),
+        .closedOutgoingConnection = package.closedOutgoingConnection,
+        .allowHalfOpen = package.allowHalfOpen == api::AllowHalfOpen::YES,
+        .autoResponseTimestamp = hib->autoResponseTimestamp,
+        .pendingMessages = pending.finish(),
+      });
+
+      // The caller keeps the connection open until its request has completed. Stop receiving
+      // first, since the receiver borrows the connection.
+      hib->receiverTask = kj::none;
+      connections.add(KJ_ASSERT_NONNULL(kj::mv(hib->ws)));
+      hib->ws = kj::none;
+
+      // Ends the read loop, which removes the WebSocket without delivering anything.
+      hib->exported = true;
+      ++manager->exportedCount;
+      hib->wakeDelivery();
+    }
+    return Finished{
+      .webSockets = result.finish(),
+      .connections = kj::heap(connections.finish()),
+    };
+  }
+
+ private:
+  kj::Rc<LegacyHibernationManagerImpl> manager;
+  kj::Array<HibernatableWebSocket*> sockets;
+  kj::Own<EventHold> hold;
+  bool finished = false;
+};
+
+kj::Maybe<kj::Own<Worker::Actor::HibernationManager::Migration>> LegacyHibernationManagerImpl::
+    tryBeginMigration() {
+  if (migrating || allWs.empty()) {
+    return kj::none;
+  }
+  auto sockets = kj::heapArrayBuilder<HibernatableWebSocket*>(allWs.size());
+  for (auto& hib: allWs) {
+    if (hib->migrationLink == kj::none || hib->receiveError != kj::none || hib->exported ||
+        hib->hasDispatchedClose || !hib->activeOrPackage.is<api::WebSocket::HibernationPackage>()) {
+      return kj::none;
+    }
+    sockets.add(hib.get());
+  }
+  return kj::Own<Migration>(kj::heap<MigrationImpl>(addRefToThis(), sockets.finish()));
+}
+
+Worker::Actor::HibernationManager::MigratedSettings LegacyHibernationManagerImpl::exportSettings() {
+  return MigratedSettings{
+    .autoResponseRequest = autoResponsePair->request.map([](auto& s) { return kj::str(s); }),
+    .autoResponseResponse = autoResponsePair->response.map([](auto& s) { return kj::str(s); }),
+    .eventTimeoutMs = eventTimeoutMs,
+  };
+}
+
+void LegacyHibernationManagerImpl::importSettings(MigratedSettings settings) {
+  autoResponsePair->request = kj::mv(settings.autoResponseRequest);
+  autoResponsePair->response = kj::mv(settings.autoResponseResponse);
+  eventTimeoutMs = settings.eventTimeoutMs;
+}
+
+void LegacyHibernationManagerImpl::adoptWebSocket(MigratedWebSocket socket,
+    kj::Own<kj::WebSocket> ws,
+    kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink) {
+  JSG_REQUIRE(allWs.size() < ACTIVE_CONNECTION_LIMIT, Error, "only ", ACTIVE_CONNECTION_LIMIT,
+      " websockets can be accepted on a single Durable Object instance");
+
+  auto hib = kj::heap<HibernatableWebSocket>(
+      api::WebSocket::HibernationPackage{
+        .url = kj::mv(socket.url),
+        .protocol = kj::mv(socket.protocol),
+        .extensions = kj::mv(socket.extensions),
+        .serializedAttachment = kj::mv(socket.serializedAttachment),
+        .maybeTags = kj::none,
+        .closedOutgoingConnection = socket.closedOutgoingConnection,
+        .allowHalfOpen = api::AllowHalfOpen(socket.allowHalfOpen),
+      },
+      socket.tags.size(), *this);
+  HibernatableWebSocket& refToHibernatable = *hib;
+  allWs.push_front(kj::mv(hib));
+  refToHibernatable.node = allWs.begin();
+  insertTags(refToHibernatable, socket.tags);
+
+  refToHibernatable.autoResponseTimestamp = socket.autoResponseTimestamp;
+  for (auto& message: socket.pendingMessages) {
+    refToHibernatable.pendingMessages.push_back(kj::mv(message));
+  }
+  refToHibernatable.migrationLink = kj::mv(migrationLink);
+  refToHibernatable.ws = kj::Rc<kj::WebSocket>(kj::mv(ws));
+  startReadLoop(refToHibernatable);
 }
 
 };  // namespace workerd

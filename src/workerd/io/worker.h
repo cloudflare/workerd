@@ -1071,6 +1071,112 @@ class Worker::Actor final: public kj::Refcounted {
 
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
+
+    // -------------------------------------------------------------------------------------------
+    // Moving hibernated WebSockets to another process
+    //
+    // An embedder that replaces its process, for example during a reload, can move an actor's
+    // hibernated WebSockets to the new process instead of closing them. The old process holds
+    // events and waits until it has received every message its clients sent it (see Migration),
+    // then exports each WebSocket. The new process adopts each one with the messages that were
+    // still undelivered, which are delivered before anything the adopted socket receives.
+    //
+    // The default implementations support none of this.
+
+    // A hibernatable WebSocket's state, as moved to another process.
+    struct MigratedWebSocket {
+      kj::Maybe<kj::String> url;
+      kj::Maybe<kj::String> protocol;
+      kj::Maybe<kj::String> extensions;
+      kj::Maybe<kj::Array<kj::byte>> serializedAttachment;
+      kj::Array<kj::String> tags;
+      bool closedOutgoingConnection = false;
+      bool allowHalfOpen = true;
+      kj::Maybe<kj::Date> autoResponseTimestamp;
+
+      // Messages received but not yet delivered to the actor, oldest first.
+      kj::Array<kj::WebSocket::Message> pendingMessages;
+    };
+
+    // Settings that apply to all of a manager's WebSockets.
+    struct MigratedSettings {
+      kj::Maybe<kj::String> autoResponseRequest;
+      kj::Maybe<kj::String> autoResponseResponse;
+      kj::Maybe<uint32_t> eventTimeoutMs;
+    };
+
+    // Keeps `link` with `ws`, a WebSocket this manager accepted as hibernatable, so that a later
+    // Migration can reach it. Does nothing if this manager doesn't hold `ws`.
+    virtual void attachMigrationLink(api::WebSocket& ws, kj::Own<WebSocketMigrationLink> link) {}
+
+    // Moving all of a manager's WebSockets out, begun by tryBeginMigration(). While it exists, the
+    // manager holds events: its WebSockets keep receiving, and keep what they receive for the new
+    // process. Dropping it before finish() delivers what was held, in order, and the actor carries
+    // on as before.
+    class Migration {
+     public:
+      virtual ~Migration() noexcept(false) = default;
+
+      // How many WebSockets are being moved: all of the manager's WebSockets. Each is named by an
+      // index below this.
+      virtual size_t size() = 0;
+
+      // The link the embedder attached to WebSocket `index`.
+      virtual WebSocketMigrationLink& getLink(size_t index) = 0;
+
+      // Resolves once WebSocket `index` has received `count` messages since it was accepted or
+      // adopted. Use it to wait for messages the client already sent. Rejects if the WebSocket
+      // ends first.
+      virtual kj::Promise<void> whenReceived(size_t index, uint64_t count) = 0;
+
+      // Resolves once every message sent on the WebSockets before now has been written.
+      virtual kj::Promise<void> whenSendsSettled() = 0;
+
+      struct Finished {
+        // Each WebSocket's state, indexed like getLink().
+        kj::Array<MigratedWebSocket> webSockets;
+
+        // Keeps the WebSockets' connections in this process open. Report each WebSocket migrated
+        // (see WebSocketMigrationLink::whenMigrated()) before dropping this, so that the request
+        // that carried it completes successfully rather than failing as its connection ends.
+        kj::Own<void> connections;
+      };
+
+      // Exports every WebSocket and removes them all from the manager without delivering any
+      // event. Fails if a WebSocket ended or woke up since the migration began. No method may be
+      // called afterwards.
+      virtual Finished finish() = 0;
+    };
+
+    // Begins moving every WebSocket out, or returns kj::none if any WebSocket can't move: it is
+    // awake, has no migration link, or has ended. Also returns kj::none when there are no
+    // WebSockets, or a migration is already in progress.
+    virtual kj::Maybe<kj::Own<Migration>> tryBeginMigration() {
+      return kj::none;
+    }
+
+    virtual MigratedSettings exportSettings() {
+      return {};
+    }
+
+    // Applies settings exported by another process's manager.
+    virtual void importSettings(MigratedSettings settings) {}
+
+    // Holds events until the returned handle is dropped. WebSockets keep receiving meanwhile, and
+    // what they received is delivered in order once nothing holds events. Use it so that an
+    // adopting manager delivers nothing until all of a migration's WebSockets have arrived.
+    virtual kj::Own<void> holdEvents() KJ_WARN_UNUSED_RESULT {
+      return kj::Own<void>();
+    }
+
+    // Adopts a WebSocket that another process's manager exported. `ws` carries the connection in
+    // this process. The socket's pending messages are delivered before anything `ws` receives.
+    // With a `migrationLink`, the WebSocket can move again later.
+    virtual void adoptWebSocket(MigratedWebSocket socket,
+        kj::Own<kj::WebSocket> ws,
+        kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink) {
+      KJ_UNIMPLEMENTED("this hibernation manager can't adopt WebSockets");
+    }
   };
 
   class FacetManager {

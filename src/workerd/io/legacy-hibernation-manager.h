@@ -13,6 +13,7 @@
 #include <kj/exception.h>
 #include <kj/list.h>
 
+#include <deque>
 #include <list>
 
 namespace workerd {
@@ -65,6 +66,15 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // Gets the event timeout if set.
   kj::Maybe<uint32_t> getEventTimeout() override;
 
+  void attachMigrationLink(api::WebSocket& ws, kj::Own<WebSocketMigrationLink> link) override;
+  kj::Maybe<kj::Own<Migration>> tryBeginMigration() override;
+  MigratedSettings exportSettings() override;
+  void importSettings(MigratedSettings settings) override;
+  kj::Own<void> holdEvents() override KJ_WARN_UNUSED_RESULT;
+  void adoptWebSocket(MigratedWebSocket socket,
+      kj::Own<kj::WebSocket> ws,
+      kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink) override;
+
   // Returns the manager that registered `websocketId`, or kj::none if no manager on this event loop
   // registered that ID.
   //
@@ -75,6 +85,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
  private:
   class HibernatableWebSocket;
+  class EventHold;
+  class MigrationImpl;
+  friend class EventHold;
+  friend class MigrationImpl;
 
   // Ends the handoff identified by `generation`, putting the parked loopback back if no replacement
   // supplied one. Does nothing if that handoff already ended, so a handle dropped afterwards cannot
@@ -83,6 +97,16 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   friend class LoopbackHandoff;
 
   kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
+
+  // Adds `hib` to the collection for each of `tags`, moving the strings out. The tags must be
+  // unique.
+  void insertTags(HibernatableWebSocket& hib, kj::ArrayPtr<kj::String> tags);
+
+  // Starts receiving on `hib` and delivering what it receives.
+  void startReadLoop(HibernatableWebSocket& hib);
+
+  // Ends a hold begun by holdEvents(), delivering held messages once no hold remains.
+  void releaseHold();
 
   // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
   // in our kj::List.
@@ -106,6 +130,11 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
    public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
         kj::ArrayPtr<kj::String> tags,
+        LegacyHibernationManagerImpl& manager);
+
+    // Creates a hibernating WebSocket adopted from another process.
+    HibernatableWebSocket(api::WebSocket::HibernationPackage package,
+        size_t tagCount,
         LegacyHibernationManagerImpl& manager);
     ~HibernatableWebSocket() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
@@ -166,6 +195,49 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Cancels promises that borrow `ws`. Declared after `ws` so it is destroyed first.
     kj::Canceler writeCanceler;
 
+    // Messages received but not yet delivered, oldest first. Normally at most one: the receiver
+    // reads one message ahead of delivery. While the manager holds events it keeps everything it
+    // receives here, and an adopted WebSocket starts with the messages its old process held.
+    std::deque<kj::WebSocket::Message> pendingMessages;
+
+    // How many messages `ws` has delivered to the receiver since this object was created.
+    uint64_t receivedCount = 0;
+
+    // Why the receiver stopped, once it has. Delivered after `pendingMessages`.
+    kj::Maybe<kj::Exception> receiveError;
+
+    // The embedder's handle for moving this WebSocket out, if it supplied one.
+    kj::Maybe<kj::Own<WebSocketMigrationLink>> migrationLink;
+
+    // True once a migration exported this WebSocket. Its delivery loop then ends without
+    // delivering anything more, which removes it.
+    bool exported = false;
+
+    // Wakes the receiver, waiting for room in `pendingMessages`, and the delivery loop, waiting
+    // for a message or for a hold to end.
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> receiverWaiter;
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> deliveryWaiter;
+
+    struct CountWaiter {
+      uint64_t count;
+      kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+    };
+    // Migration::whenReceived() callers, satisfied as `receivedCount` grows.
+    kj::Vector<CountWaiter> countWaiters;
+
+    void wakeReceiver();
+    void wakeDelivery();
+
+    // Fulfills the count waiters that `receivedCount` has reached, or rejects them all once the
+    // receiver has stopped.
+    void updateCountWaiters();
+
+    // Reads from `ws` into `pendingMessages` for as long as `ws` delivers messages.
+    kj::Promise<void> receiveLoop();
+
+    // Runs receiveLoop(). Declared last so that it is destroyed before everything it uses.
+    kj::Maybe<kj::Promise<void>> receiverTask;
+
     friend LegacyHibernationManagerImpl;
   };
 
@@ -221,6 +293,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
   kj::Promise<void> readLoop(HibernatableWebSocket& hib);
+
+  // Returns the next message to deliver for `hib`, waiting while events are held. Returns kj::none
+  // once a migration exported `hib`. Throws the receiver's error once its messages are delivered.
+  kj::Promise<kj::Maybe<kj::WebSocket::Message>> nextMessage(HibernatableWebSocket& hib);
 
   // This struct is held by the `tagToWs` hashmap. The key is a StringPtr to tag, and the value
   // is this struct itself.
@@ -317,5 +393,13 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   kj::Own<AutoRequestResponsePair> autoResponsePair = kj::heap<AutoRequestResponsePair>();
   kj::Maybe<TimerChannel&> timer;
   kj::Maybe<uint32_t> eventTimeoutMs;
+
+  // How many holds (see holdEvents()) are in effect. Messages are delivered only when it is zero.
+  uint holdCount = 0;
+
+  // Whether a Migration exists. Only one may exist at a time.
+  bool migrating = false;
+  // How many of `allWs` were moved to another process and wait for their read loops to end.
+  size_t exportedCount = 0;
 };
 };  // namespace workerd

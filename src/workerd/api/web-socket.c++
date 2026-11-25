@@ -698,6 +698,7 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
 
     auto upstream = other->pumpTo(*self);
     auto downstream = self->pumpTo(*other);
+    kj::Maybe<kj::Promise<void>> whenMigrated;
 
     KJ_IF_SOME(peerRef, maybePeerRef) {
       // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
@@ -773,6 +774,18 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
         }
         co_return;
       }
+      // An embedder may be able to move a hibernatable WebSocket to another process without
+      // closing the client connection. Once it has, this connection is no longer needed, and the
+      // request completes successfully.
+      KJ_IF_SOME(link, request.tryCreateWebSocketMigrationLink()) {
+        KJ_IF_SOME(actor, context.getActor()) {
+          KJ_IF_SOME(manager, actor.getHibernationManager()) {
+            whenMigrated = link->whenMigrated();
+            manager->attachMigrationLink(*peerRef, kj::mv(link));
+          }
+        }
+      }
+
       // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.
       maybePeerRef = kj::none;
     }
@@ -786,6 +799,9 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
     auto promise = kj::joinPromises(
         kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
                        .attach(kj::mv(self), kj::mv(other));
+    KJ_IF_SOME(migrated, whenMigrated) {
+      promise = promise.exclusiveJoin(kj::mv(migrated));
+    }
 
     // Either:
     // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
