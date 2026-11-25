@@ -12,7 +12,7 @@ ReplServer::ReplServer(kj::Own<ReplServerHost> host)
     : host(IoContext::current().addObject(kj::mv(host))) {}
 
 kj::Array<kj::String> ReplServer::getWarnings() {
-  return KJ_MAP(warning, host->getWarnings()) { return kj::str(warning); };
+  return host->getWarnings();
 }
 
 jsg::Ref<api::Fetcher> ReplServer::service(

@@ -11,7 +11,7 @@
 namespace workerd::server {
 namespace {
 
-// Holds a KJ async object, as the REPL's hosts do (repl-server.h, repl-environment.c++), and says
+// Holds a KJ async object, as the REPL's hosts do (repl-environment.c++), and says
 // when it is destroyed.
 class AsyncState {
  public:
@@ -42,7 +42,7 @@ class TestServerHost final: public ReplServerHost, public kj::Refcounted {
   bool isWatching() const override {
     return false;
   }
-  kj::ArrayPtr<const kj::String> getWarnings() const override {
+  kj::Array<kj::String> getWarnings() const override {
     return nullptr;
   }
   kj::Rc<IoChannelFactory::SubrequestChannel> service(

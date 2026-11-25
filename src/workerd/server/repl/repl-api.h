@@ -39,7 +39,7 @@ struct ReplActorAddress {
   kj::Maybe<kj::StringPtr> id;
 };
 
-// A config the REPL loaded and serves in-process (repl-server.h). Shared between the REPL and the
+// A config the REPL loaded and serves in-process (cli/repl/server.rs). Shared between the REPL and the
 // JavaScript handles to it; closing the server, not the last handle's garbage collection, ends it.
 class ReplServerHost {
  public:
@@ -53,7 +53,7 @@ class ReplServerHost {
   // Whether a change to a file the config was loaded from reloads it.
   virtual bool isWatching() const = 0;
   // The warnings the server reported as it loaded the config, or last reloaded it.
-  virtual kj::ArrayPtr<const kj::String> getWarnings() const = 0;
+  virtual kj::Array<kj::String> getWarnings() const = 0;
 
   // A channel to the config's service `name`: its `entrypoint` (the default if none), with `props`
   // if given. Requests through the channel fail once the server is closed. Throws a JSG error if

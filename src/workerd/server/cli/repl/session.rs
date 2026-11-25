@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The REPL's session loop, which runs on the event loop's thread and serves the console's
-//! requests one at a time, and the config loading the session calls back into.
+//! requests one at a time, and the config loading its servers use (server.rs).
 
 use std::path::Path;
 use std::pin::Pin;
@@ -11,17 +11,19 @@ use std::pin::pin;
 use std::task::Poll;
 use std::time::Duration;
 
+use futures::FutureExt;
+use futures::future::LocalBoxFuture;
 use kj_rs::KjOwn;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use workerd_server::run::RunOptions;
 
 use super::bridge;
-use super::bridge::ffi::Features;
 use super::bridge::ffi::ReplCandidate;
 use super::bridge::ffi::ReplSession;
 use super::editor::Completion;
 use super::input;
+use super::server;
 use crate::bridge::ffi;
 use crate::config::Config;
 use crate::process::Process;
@@ -158,76 +160,88 @@ async fn complete(session: Pin<&mut ReplSession>, line: &str, cursor: usize) -> 
     }
 }
 
-/// See the bridge's declaration. A config's problems are returned, never printed, since the REPL
-/// goes on after a config fails to load.
-pub fn repl_load_config(
-    path: &str,
-    const_name: &str,
-    features: Features,
-) -> Result<Vec<u64>, cxx::KjError> {
-    load_config(path, const_name, features, None)
+/// Whether a loaded config may use experimental features: `--experimental`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Features {
+    Stable,
+    Experimental,
 }
 
-/// See the bridge's declaration.
-pub fn repl_watch_new() -> Result<Box<ReplWatch>, cxx::KjError> {
-    let watcher = Watcher::new()
-        .map_err(|error| cxx::KjError::new(cxx::KjExceptionType::Failed, error.to_string()))?;
-    Ok(Box::new(ReplWatch { watcher }))
+/// Loads configs as `workerd serve` does. A config's problems are returned, never printed, since
+/// the REPL goes on after a config fails to load.
+pub struct CliLoader {
+    pub features: Features,
 }
 
-/// The files configs were loaded from, watched.
-pub struct ReplWatch {
+impl server::Loader for CliLoader {
+    fn load(&self, path: &str, const_name: Option<&str>) -> Result<Vec<u64>, String> {
+        load_config(path, const_name, self.features, None)
+    }
+
+    fn watch(&self) -> Result<Box<dyn server::Watch>, String> {
+        let watcher = Watcher::new().map_err(|error| error.to_string())?;
+        Ok(Box::new(CliWatch {
+            watcher,
+            features: self.features,
+        }))
+    }
+}
+
+/// The files configs were loaded from, watched by the CLI's watcher (watch.rs).
+struct CliWatch {
     watcher: Watcher,
+    features: Features,
 }
 
-impl ReplWatch {
-    /// See the bridge's declaration.
-    pub fn load_config(
-        &self,
-        path: &str,
-        const_name: &str,
-        features: Features,
-    ) -> Result<Vec<u64>, cxx::KjError> {
-        load_config(path, const_name, features, Some(self.watcher.clone()))
+impl server::Watch for CliWatch {
+    fn load(&self, path: &str, const_name: Option<&str>) -> Result<Vec<u64>, String> {
+        load_config(path, const_name, self.features, Some(self.watcher.clone()))
     }
 
-    /// See the bridge's declaration.
-    pub async fn changed(&self) -> Result<(), cxx::KjError> {
-        self.watcher.wait_quietly_for_changes().await
+    fn changed(&self) -> LocalBoxFuture<'static, Result<(), String>> {
+        let changed = self.watcher.wait_quietly_for_changes();
+        async move {
+            changed
+                .await
+                .map_err(|error| error.description().to_owned())
+        }
+        .boxed_local()
     }
 }
 
-/// Loads the config at `path`, adding each file it reads to `watcher`'s, if any.
+/// Loads the config at `path`, a Cap'n Proto config (with the constant `const_name`, if any) or a
+/// `wrangler.json(c)`, as an encoded `Config` message, adding each file it reads to `watcher`'s, if
+/// any. The error lists every problem.
 fn load_config(
     path: &str,
-    const_name: &str,
+    const_name: Option<&str>,
     features: Features,
     watcher: Option<Watcher>,
-) -> Result<Vec<u64>, cxx::KjError> {
-    let failed = |message: String| cxx::KjError::new(cxx::KjExceptionType::Failed, message);
+) -> Result<Vec<u64>, String> {
     if !Path::new(path).is_file() {
-        return Err(failed(format!("{path}: No such file.")));
+        return Err(format!("{path}: No such file."));
     }
     let process = Process::new(None, watcher, Vec::new());
     if wrangler::is_wrangler_config(path) {
-        if !const_name.is_empty() {
-            return Err(failed(format!(
-                "{path}: A wrangler config has no named constants."
-            )));
+        if const_name.is_some() {
+            return Err(format!("{path}: A wrangler config has no named constants."));
         }
         let experimental = features == Features::Experimental;
         return wrangler::load(path, &process, &RunOptions::default(), None, experimental)
             .map(Config::into_words)
-            .map_err(|error| failed(format!("{path}: {error}")));
+            .map_err(|error| format!("{path}: {error}"));
     }
-    let const_name = (!const_name.is_empty()).then_some(const_name);
     let compiled = ffi::compile_config(path, &[], const_name.into(), &process)
-        .map_err(|error| failed(format!("{path}: {}", error.what())))?;
+        .map_err(|error| format!("{path}: {}", error.what()))?;
     if !compiled.errors.is_empty() {
         let errors: Vec<String> = compiled.errors.iter().map(ToString::to_string).collect();
-        return Err(failed(errors.join("\n")));
+        return Err(errors.join("\n"));
     }
     Config::from_words(&compiled.message)
         .map(Config::into_words)
-        .map_err(|error| failed(format!("{path}: {error}")))
+        .map_err(|error| format!("{path}: {error}"))
 }
+
+#[cfg(test)]
+#[path = "session-test.rs"]
+mod tests;

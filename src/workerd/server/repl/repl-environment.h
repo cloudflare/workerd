@@ -10,12 +10,11 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/script.h>
 #include <workerd/server/repl/repl-api.h>
-#include <workerd/server/repl/repl-server.h>
+#include <workerd/server/repl/repl.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/message.h>
-#include <kj/function.h>
 #include <kj/sticky-flag.h>
 
 namespace workerd::api {
@@ -39,10 +38,6 @@ struct ReplEnvironmentOptions {
 
   // Render results with ANSI colors.
   bool colors = false;
-
-  // For tests: awaited as the close of each server that this environment, or one it starts,
-  // loaded begins, so that a test can hold a close open.
-  kj::Maybe<kj::Function<kj::Promise<void>()>&> beforeServerClose;
 };
 
 // The JavaScript environment `workerd repl` evaluates input in: a worker that never receives an
@@ -82,9 +77,10 @@ class ReplEnvironment final: public ReplHost {
     ~CandidateSource() noexcept(false) = default;
   };
 
-  // `candidateSource` makes the candidates of what environments this one starts evaluate.
+  // `registry` loads the configs, here and in the environments this one starts;
+  // `candidateSource` makes the candidates of what those environments evaluate.
   ReplEnvironment(const ReplServerResources& resources,
-      ReplConfigLoader& configLoader,
+      repl::ServerRegistry& registry,
       CandidateSource& candidateSource,
       ReplEnvironmentOptions options);
   ~ReplEnvironment() noexcept(false);
@@ -125,6 +121,7 @@ class ReplEnvironment final: public ReplHost {
 
  private:
   class ChannelFactory;
+  class LoadedServer;
   class Nested;
 
   struct ErrorReporter final: public Worker::ValidationErrorReporter {
@@ -147,7 +144,7 @@ class ReplEnvironment final: public ReplHost {
   };
 
   ReplServerResources resources;
-  ReplConfigLoader& configLoader;
+  repl::ServerRegistry& registry;
   CandidateSource& candidateSource;
   ReplEnvironmentOptions options;
 
@@ -184,6 +181,9 @@ class ReplEnvironment final: public ReplHost {
   kj::Own<kj::TaskSet::ErrorHandler> waitUntilErrorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
+  // What the servers of the configs loaded here are built from. None only while the environment
+  // is constructed.
+  kj::Maybe<kj::Rc<repl::ReplFactorySource>> factorySource;
 
   // The loads and environment starts under way, which add to `servers` and `environments` when
   // they finish. drain() waits for them, and none starts once it has begun. Declared before
@@ -202,7 +202,7 @@ class ReplEnvironment final: public ReplHost {
   kj::Own<void> waitingForInput;
 
   // The servers of the configs loaded and not yet closed.
-  kj::Vector<kj::Own<ReplConfigServer>> servers;
+  kj::Vector<kj::Own<LoadedServer>> servers;
   // The environments started and not yet closed.
   kj::Vector<kj::Own<Nested>> environments;
 

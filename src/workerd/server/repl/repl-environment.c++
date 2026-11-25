@@ -11,8 +11,12 @@
 #include <workerd/io/release-version.embed.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/script.h>
+#include <workerd/server/cli/repl/bridge.rs.h>
 #include <workerd/server/factory/single-tenant-policy.h>
+#include <workerd/server/factory/worker-factory.h>
 #include <workerd/server/workerd-api.h>
+
+#include <kj-rs/kj-rs.h>
 
 #include <cstdio>
 
@@ -149,7 +153,88 @@ kj::Array<kj::String> replCompatibilityFlags(const ReplEnvironmentOptions& optio
   return flags.releaseAsArray();
 }
 
+::rust::Str toRust(kj::StringPtr str) {
+  return ::rust::Str(str.begin(), str.size());
+}
+
+kj::Maybe<::rust::Str> toRust(kj::Maybe<kj::StringPtr> str) {
+  return str.map([](kj::StringPtr s) { return toRust(s); });
+}
+
 }  // namespace
+
+namespace repl {
+
+kj::Own<WorkerFactory> repl_new_factory(
+    const ReplFactorySource& source, ::rust::Slice<const uint64_t> config) {
+  auto& resources = source.resources;
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
+  options->experimental = source.experimental;
+  options->hostHeaderTable = source.headerTable;
+  return kj::heap<WorkerFactory>(resources.v8System, resources.timer, resources.monotonicClock,
+      resources.network, resources.entropySource, resources.fs, kj::mv(options),
+      kj::from<kj_rs::Rust>(config).as<kj_rs::RustCopy>());
+}
+
+}  // namespace repl
+
+// A config this environment loaded, as the JavaScript API holds it: the Rust server
+// (cli/repl/server.rs).
+class ReplEnvironment::LoadedServer final: public ReplServerHost, public kj::Refcounted {
+ public:
+  explicit LoadedServer(::rust::Box<repl::ReplConfigServer> serverParam)
+      : server(kj::mv(serverParam)),
+        path(kj::str(kj::from<kj_rs::Rust>(server->path()))) {}
+
+  kj::Own<ReplServerHost> addRef() override {
+    return kj::addRef(*this);
+  }
+  kj::StringPtr getPath() const override {
+    return path;
+  }
+  bool isClosed() const override {
+    return server->is_closed();
+  }
+  // Whether the close has finished, or failed; isClosed() is true from when it begins.
+  bool isCloseDone() const {
+    return server->is_close_done();
+  }
+  bool isWatching() const override {
+    return server->is_watching();
+  }
+  kj::Array<kj::String> getWarnings() const override {
+    return KJ_MAP(warning, server->warnings()) { return kj::str(kj::from<kj_rs::Rust>(warning)); };
+  }
+  kj::Rc<IoChannelFactory::SubrequestChannel> service(kj::StringPtr name,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      kj::Maybe<Frankenvalue> props) override {
+    auto ownProps = props.map([](Frankenvalue& p) { return kj::heap<Frankenvalue>(kj::mv(p)); });
+    return subrequest_channel_into_kj(
+        server->service(toRust(name), toRust(entrypoint), kj::mv(ownProps)));
+  }
+  kj::Rc<IoChannelFactory::SubrequestChannel> socket(kj::StringPtr name) override {
+    return subrequest_channel_into_kj(server->socket(toRust(name)));
+  }
+  kj::Rc<IoChannelFactory::SubrequestChannel> durableObject(
+      const ReplActorAddress& address) override {
+    return subrequest_channel_into_kj(server->durable_object(toRust(address.service),
+        toRust(address.className), toRust(address.name), toRust(address.id)));
+  }
+  kj::Promise<void> reload() override {
+    return repl::repl_reload_wait(server->queue_reload());
+  }
+  kj::Promise<void> close() override {
+    server->begin_close();
+    // The handle the wait holds keeps the server until the close is done: the REPL lets go of a
+    // server once closing begins, and the JavaScript handles may be collected.
+    return repl::repl_server_wait_closed(server->clone_handle());
+  }
+
+ private:
+  ::rust::Box<repl::ReplConfigServer> server;
+  kj::String path;
+};
 
 // The channels of the REPL's own context. Its JavaScript has no bindings and the REPL no network
 // of its own, so there is nothing to reach but the clock; the loaded configs are reached through
@@ -222,11 +307,11 @@ void ReplEnvironment::ErrorReporter::check(kj::StringPtr what) {
 }
 
 ReplEnvironment::ReplEnvironment(const ReplServerResources& resources,
-    ReplConfigLoader& configLoader,
+    repl::ServerRegistry& registry,
     CandidateSource& candidateSource,
     ReplEnvironmentOptions optionsParam)
     : resources(resources),
-      configLoader(configLoader),
+      registry(registry),
       candidateSource(candidateSource),
       options(kj::mv(optionsParam)),
       threadContextHeaderBundle(headerTableBuilder),
@@ -257,6 +342,7 @@ ReplEnvironment::ReplEnvironment(const ReplServerResources& resources,
 
   compileWorker();
   headerTable = headerTableBuilder.build();
+  factorySource = kj::rc<repl::ReplFactorySource>(resources, *headerTable, options.experimental);
   startSession();
 }
 
@@ -528,7 +614,8 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
   kj::Maybe<kj::Own<ReplEnvironment>> environment;
   kj::String compatibilityDate;
   kj::Array<kj::String> compatibilityFlags;
-  // Set as ReplConfigServer's is.
+  // Set by the close as it ends, even if it is destroyed unfinished: declared before `closing`,
+  // which holds it.
   bool closeDone = false;
   kj::Maybe<kj::ForkedPromise<void>> closing;
   // Declared after `environment`, so that what it wraps is canceled before that is destroyed.
@@ -630,18 +717,15 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
   // JavaScript asked for the load under the REPL's isolate lock; the server's workers lock
   // isolates of their own, so the load runs on the event loop.
   co_await kj::yield();
-  auto server = co_await ReplConfigServer::load(
-      ReplServerContext{
-        .resources = resources,
-        .replHeaderTable = *headerTable,
-        .loader = configLoader,
-        .experimental = options.experimental,
-        .beforeClose = options.beforeServerClose,
-      },
-      kj::mv(source));
+  auto constName = kj::mv(source.constName).orDefault([]() { return kj::str(); });
+  // From JavaScript strings, which convert to valid UTF-8.
+  auto server = kj::refcounted<LoadedServer>(co_await repl::repl_server_load(
+      registry.clone_handle(), KJ_ASSERT_NONNULL(factorySource).addRef(),
+      source.path.as<kj_rs::RustUncheckedUtf8>(), constName.as<kj_rs::RustUncheckedUtf8>(),
+      source.watch ? repl::Watch::Watched : repl::Watch::Unwatched));
   // Drop the servers that finished closing since the last load. One still closing stays, so that
   // drain() waits for it.
-  kj::Vector<kj::Own<ReplConfigServer>> open(servers.size() + 1);
+  kj::Vector<kj::Own<LoadedServer>> open(servers.size() + 1);
   for (auto& s: servers) {
     if (!s->isCloseDone()) open.add(kj::mv(s));
   }
@@ -653,14 +737,13 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
 kj::Own<ReplEnvironment> ReplEnvironment::startEnvironment(
     kj::StringPtr compatibilityDate, kj::ArrayPtr<const kj::String> compatibilityFlags) {
   KJ_TRY {
-    return kj::heap<ReplEnvironment>(resources, configLoader, candidateSource,
+    return kj::heap<ReplEnvironment>(resources, registry, candidateSource,
         ReplEnvironmentOptions{
           .compatibilityDate = kj::str(compatibilityDate),
           .compatibilityFlags = KJ_MAP(flag, compatibilityFlags) { return kj::str(flag); },
           .experimental = options.experimental,
           // The rendering is a string in the REPL that started it, where escapes would show.
           .colors = false,
-          .beforeServerClose = options.beforeServerClose,
         });
   }
   KJ_CATCH(exception) {

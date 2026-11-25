@@ -33,6 +33,7 @@ mod history;
 mod input;
 #[cfg(unix)]
 mod interrupt;
+mod server;
 mod session;
 #[cfg(unix)]
 mod terminal;
@@ -40,7 +41,7 @@ mod terminal;
 use std::io::IsTerminal;
 
 use tokio::sync::mpsc;
-use workerd_server::bridge::ffi as server;
+use workerd_server::bridge::ffi as server_ffi;
 use workerd_server::entry;
 
 use crate::args::ReplArgs;
@@ -72,7 +73,17 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         #[cfg(unix)]
         interrupt::keep_ignoring();
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let session = match bridge::ffi::repl_session_new(runtime.context(), &options) {
+        let registry = server::ServerRegistry::new(
+            Box::new(session::CliLoader {
+                features: if options.experimental {
+                    session::Features::Experimental
+                } else {
+                    session::Features::Stable
+                },
+            }),
+            None,
+        );
+        let session = match bridge::ffi::repl_session_new(runtime.context(), &options, registry) {
             Ok(session) => session,
             Err(error) => {
                 eprintln!("{}", error.what());
@@ -125,7 +136,7 @@ fn load_config_input(path: &str, const_name: Option<&str>) -> String {
 /// for everything to be destroyed first; then `code`.
 fn exit(code: i32) -> i32 {
     if std::env::var_os("KJ_CLEAN_SHUTDOWN").is_none() {
-        server::cli_exit(code);
+        server_ffi::cli_exit(code);
     }
     code
 }

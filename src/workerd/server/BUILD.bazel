@@ -93,7 +93,9 @@ wd_rust_crate(
         "cli/bridge.rs": ["//src/workerd/server/factory:bootstrap-hdrs"],
         "cli/repl/bridge.rs": [
             "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+            "//src/workerd/io/frankenvalue:ffi.rs@cxx",
             "//src/workerd/server/repl:repl-hdrs",
+            "//src/workerd/server/server:bridge.rs@cxx",
         ],
     },
     cxx_bridge_hdrs = ["config-compiler.h"],
@@ -123,6 +125,7 @@ wd_rust_crate(
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//capnp",
         "@crates_vendor//clap",
+        "@crates_vendor//futures",
         "@crates_vendor//serde",
         "@crates_vendor//serde_json",
         "@crates_vendor//socket2",

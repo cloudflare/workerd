@@ -601,18 +601,20 @@ isolate but not part of the Workers API's types. A handle holds its server or en
 the `IoContext` (`IoOwn`), so that collecting it, though it may be the last to hold it, destroys
 no KJ I/O objects.
 
-**Loaded configs.** `workerd.loadConfig()` reads the config as `workerd serve` does
-(`repl_load_config`, `cli/repl/session.rs`), then builds a `WorkerFactory` for it over the REPL's
-V8 and event loop and hands it to the Rust server's `InProcessServer` (`server/in_process.rs`).
-`InProcessServer::start()` serves the config in the background, its stream sockets on `loopback:`
-names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds. A reload
-reads the config and builds the new `InProcessServer`, closes the old one, then starts the new.
-Before a load or a reload builds anything, it claims the Durable Object directories the config
-names in `ReplServerClaims`, which the REPL keeps for the whole session, so that a config another
-server's directories are in is refused before anything of it runs. The
-config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
-text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
-`repl_load_config` registers each file it reads with.
+**Loaded configs.** A loaded config's server is Rust: `ReplConfigServer` (`cli/repl/server.rs`),
+which the JavaScript API holds through a C++ `ReplServerHost` (`repl/repl-environment.c++`).
+`workerd.loadConfig()` reads the config as `workerd serve` does (`CliLoader`,
+`cli/repl/session.rs`), has C++ build a `WorkerFactory` for it over the REPL's V8 and event loop
+(`repl_new_factory`), and hands that to the Rust server's `InProcessServer`
+(`server/in_process.rs`). `InProcessServer::start()` serves the config in the background, its
+stream sockets on `loopback:` names. A reload reads the config and builds the new
+`InProcessServer`, closes the old one, then starts the new; reloads and closes run as tasks of the
+event loop, so they go on whether or not anything awaits them. Before a load or a reload builds
+anything, it claims the Durable Object directories and the UDP addresses the config names, in the
+claims that `ServerRegistry` keeps for the whole session, so that a config another server holds part
+of is refused before anything of it runs. The config loader (`Loader`) is a trait so that the tests
+can serve configs given as text. Its watches are the CLI's file watcher (`cli/watch.rs`, as
+`serve --watch` uses it), with which a watch's load registers each file it reads.
 
 **Other environments.** `workerd.environment()` constructs another `ReplEnvironment`, held by the
 one whose JavaScript asked for it and closed when that one drains. The candidates of what its
@@ -628,8 +630,8 @@ socket's channel is an HTTP client of the socket's `loopback:` name. Every chann
 request started on one is held through a revoker: closing the server revokes them all before the
 server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
 
-**Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text,
-with watches the test fires; `repl/repl-api-test.c++` drops handles where JavaScript objects are
+**Tests.** `cli/repl/session-test.rs` drives a session as the console does, evaluating inputs and
+loading configs given as text, with watches the test fires and closes it can hold; `repl/repl-api-test.c++` drops handles where JavaScript objects are
 destroyed; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
 the command line, the console and the file watcher do;
 `cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line

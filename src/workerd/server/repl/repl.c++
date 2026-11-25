@@ -19,8 +19,6 @@
 
 #include <capnp/message.h>
 
-#include <cstring>
-
 namespace workerd::server::repl {
 
 namespace {
@@ -72,23 +70,6 @@ void initAutogates(kj::ArrayPtr<const kj::String> names) {
   util::Autogate::initAutogate(gates.getReader());
 }
 
-// The files a config was loaded from, watched by the CLI's watcher (cli/watch.rs).
-class ConfigWatch final: public ReplConfigWatch {
- public:
-  explicit ConfigWatch(::rust::Box<ReplWatch> watch): watch(kj::mv(watch)) {}
-
-  kj::Promise<void> whenChanged() override {
-    return watch->changed();
-  }
-
-  ReplWatch& getRust() {
-    return *watch;
-  }
-
- private:
-  ::rust::Box<ReplWatch> watch;
-};
-
 kj::Array<ReplEnvironment::Candidate> toCandidates(::rust::Vec<ReplCandidate> candidates) {
   return KJ_MAP(candidate, candidates) {
     return ReplEnvironment::Candidate{
@@ -107,68 +88,77 @@ class CandidateSource final: public ReplEnvironment::CandidateSource {
   }
 };
 
-// Loads configs as `workerd serve` does (cli/repl/session.rs), with the session's `features`.
-class ConfigLoader final: public ReplConfigLoader {
- public:
-  explicit ConfigLoader(Features features): features(features) {}
-
-  kj::Array<capnp::word> load(kj::StringPtr path,
-      kj::Maybe<kj::StringPtr> constName,
-      kj::Maybe<ReplConfigWatch&> watch) override {
-    auto rustPath = path.as<kj_rs::RustUncheckedUtf8>();
-    auto rustConstName = constName.orDefault(""_kj).as<kj_rs::RustUncheckedUtf8>();
-    ::rust::Vec<uint64_t> words;
-    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
-      KJ_IF_SOME(w, watch) {
-        // Every watch this loader is given came from its newWatch().
-        words =
-            kj::downcast<ConfigWatch>(w).getRust().load_config(rustPath, rustConstName, features);
-      } else {
-        words = repl_load_config(rustPath, rustConstName, features);
-      }
-    })) {
-      JSG_FAIL_REQUIRE(Error, e.getDescription());
-    }
-    auto config = kj::heapArray<capnp::word>(words.size());
-    memcpy(config.begin(), words.data(), words.size() * sizeof(uint64_t));
-    return config;
+bool sameStrings(kj::ArrayPtr<const kj::String> strings, const ::rust::Vec<::rust::String>& rust) {
+  if (strings.size() != rust.size()) return false;
+  for (auto i: kj::indices(strings)) {
+    if (strings[i] != kj::str(kj::from<kj_rs::Rust>(rust[i]))) return false;
   }
+  return true;
+}
 
-  kj::Own<ReplConfigWatch> newWatch() override {
-    return kj::heap<ConfigWatch>(repl_watch_new());
+// V8 and the autogates, which are the process's. V8 cannot start again once torn down, so the
+// first session sets both up for the rest of the process, and a later one, as in a test that
+// opens many, must ask for the same. The process exits with them.
+class ProcessV8 {
+ public:
+  ProcessV8(kj::Array<kj::String> autogatesParam, kj::Array<kj::String> v8FlagsParam)
+      : autogates(kj::mv(autogatesParam)),
+        v8Flags(kj::mv(v8FlagsParam)),
+        platform(initPlatform(autogates)),
+        v8Platform(*platform),
+        v8System(
+            v8Platform, KJ_MAP(flag, v8Flags) -> kj::StringPtr { return flag; }, platform.get()) {}
+
+  jsg::V8System& get(const ReplOptions& options) {
+    KJ_REQUIRE(sameStrings(autogates, options.autogates) && sameStrings(v8Flags, options.v8_flags),
+        "the autogates and V8 flags are the process's, which its first REPL session set");
+    return v8System;
   }
 
  private:
-  Features features;
+  kj::Array<kj::String> autogates;
+  kj::Array<kj::String> v8Flags;
+  kj::Own<v8::Platform> platform;
+  WorkerdPlatform v8Platform;
+  jsg::V8System v8System;
+
+  // Autogates are set before V8 starts.
+  static kj::Own<v8::Platform> initPlatform(kj::ArrayPtr<const kj::String> autogates) {
+    initAutogates(autogates);
+    return jsg::defaultPlatform(0);
+  }
 };
+
+jsg::V8System& processV8(const ReplOptions& options) {
+  // Never destroyed. A failure to set up, such as an unknown autogate, leaves it to the next
+  // session to try again.
+  static ProcessV8* v8 = new ProcessV8(toStrings(options.autogates), toStrings(options.v8_flags));
+  return v8->get(options);
+}
 
 }  // namespace
 
-// The process-wide state a session sets up, in construction order: V8 is torn down after the
-// environment and before the I/O it was given.
+// What a session sets up, in construction order: the environment is torn down before the I/O it
+// was given.
 class ReplSession::Impl {
  public:
-  Impl(kj_rs_tokio::TokioAsyncIoContext& loop, const ReplOptions& options)
+  Impl(kj_rs_tokio::TokioAsyncIoContext& loop,
+      const ReplOptions& options,
+      ::rust::Box<ServerRegistry> registryParam)
       : timer(loop.getTimer()),
         monotonicClock(kj::systemPreciseMonotonicClock()),
         provider(loop.getTimer()),
-        v8Flags(toStrings(options.v8_flags)),
-        platform(initPlatform(toStrings(options.autogates))),
-        v8Platform(*platform),
-        v8System(v8Platform,
-            KJ_MAP(flag, v8Flags) -> kj::StringPtr { return flag; }, platform.get()),
-        configLoader(options.experimental ? Features::Experimental : Features::Stable),
+        registry(kj::mv(registryParam)),
         environment(
             ReplServerResources{
-              .v8System = v8System,
+              .v8System = processV8(options),
               .timer = timer,
               .monotonicClock = monotonicClock,
               .network = provider.getNetwork(),
               .entropySource = entropySource,
               .fs = *fs,
-              .claims = serverClaims,
             },
-            configLoader,
+            *registry,
             candidateSource,
             toEnvironmentOptions(options)) {}
 
@@ -182,28 +172,18 @@ class ReplSession::Impl {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj_rs_io::TokioAsyncIoProvider provider;
-  kj::Array<kj::String> v8Flags;
-  kj::Own<v8::Platform> platform;
-  WorkerdPlatform v8Platform;
-  jsg::V8System v8System;
-  ConfigLoader configLoader;
+  ::rust::Box<ServerRegistry> registry;
   CandidateSource candidateSource;
-  ReplServerClaims serverClaims;
   ReplEnvironment environment;
-
-  // Autogates are process-wide and set before V8 starts.
-  static kj::Own<v8::Platform> initPlatform(kj::Array<kj::String> autogates) {
-    initAutogates(autogates);
-    return jsg::defaultPlatform(0);
-  }
 };
 
 ReplSession::ReplSession(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
 ReplSession::~ReplSession() noexcept(false) {}
 
-kj::Own<ReplSession> repl_session_new(
-    kj_rs_tokio::TokioAsyncIoContext& loop, const ReplOptions& options) {
-  return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options));
+kj::Own<ReplSession> repl_session_new(kj_rs_tokio::TokioAsyncIoContext& loop,
+    const ReplOptions& options,
+    ::rust::Box<ServerRegistry> registry) {
+  return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options, kj::mv(registry)));
 }
 
 kj::Promise<ReplEvaluation> repl_evaluate(
