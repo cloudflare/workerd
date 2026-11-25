@@ -342,8 +342,8 @@ pub mod ffi {
         // Woken from a spawned foreign thread (no KJ event loop): exercises the cross-thread
         // `Waker` contract end to end.
         async fn new_cross_thread_wake_future_void();
-        // Foreign-thread wakes across multiple polls: exercises the cross-thread fulfiller's
-        // per-poll renewal.
+        // Foreign-thread wakes across multiple polls: exercises the wake sink's re-arm after
+        // each drain.
         async fn new_multi_round_cross_thread_wake_future_void();
         // Takes the waker stashed by `new_threaded_delay_future_void` and wakes it from a joined
         // foreign thread — used both while the future is alive and after it has been destroyed

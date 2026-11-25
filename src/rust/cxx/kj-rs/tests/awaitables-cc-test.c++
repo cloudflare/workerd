@@ -240,8 +240,8 @@ KJ_TEST("Waker woken from another thread") {
 
   // The future clones its waker into a spawned std::thread (one with no KJ event loop), which
   // wakes it from there ~10ms later. `std::task::Waker` is Send + Sync, so this is plain safe
-  // Rust; the bridge must deliver the foreign-thread wake to this loop (waker.h's cross-thread
-  // fulfiller path) rather than losing it -- this wait() hangs if it does.
+  // Rust; the bridge must deliver the foreign-thread wake to this loop (through the loop's
+  // CrossThreadWakeSink, waker.h) rather than losing it -- this wait() hangs if it does.
   new_cross_thread_wake_future_void().wait(waitScope);
 
   // Again, but with the loop parked in wait() the whole time (no poll()-first warmup), so the
@@ -253,9 +253,10 @@ KJ_TEST("Waker woken from another thread across multiple polls") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  // Four rounds of pending -> foreign-thread wake -> re-poll. Each round consumes the cell's
-  // cross-thread fulfiller, which the next poll must renew (waker.h); if renewal ever fails,
-  // a later round's wake is lost and this wait() hangs.
+  // Four rounds of pending -> foreign-thread wake -> re-poll. Each round's wake queues the cell
+  // on the loop's CrossThreadWakeSink and fires the sink's fulfiller, which the drain re-arms
+  // once it has replayed the wake (waker.c++); if the re-arm ever fails, a later round's wake
+  // is lost and this wait() hangs.
   new_multi_round_cross_thread_wake_future_void().wait(waitScope);
 }
 
@@ -590,8 +591,8 @@ KJ_TEST("a stored waker woken by another KJ event re-polls the bridged future be
   // A bridged future's stored waker (what a tokio oneshot or channel holds) woken from another KJ
   // event on the loop thread arms the future's poll event immediately, in KJ event order: the
   // future is re-polled before a KJ event queued after the wake runs -- the same order a
-  // kj::PromiseFulfiller gives a waiting coroutine. A wake routed through a cross-thread
-  // fulfiller instead would be dispatched only once the loop ran out of runnable events, i.e.
+  // kj::PromiseFulfiller gives a waiting coroutine. A wake routed through the cross-thread wake
+  // sink instead would be dispatched only once the loop ran out of runnable events, i.e.
   // after B here. Consumers hand values between bridged futures through
   // stored wakers and rely on the receiver resuming before anything queued later (a teardown
   // continuation, say) can observe the handoff.
@@ -639,9 +640,9 @@ KJ_TEST("Wake storm: many threads waking one waker concurrently across many poll
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  // 4 foreign threads x 250 wakes each, racing one another, the owner's per-poll cross-thread
-  // fulfiller renewal, and same-turn re-polls. The future completes only after every wake has
-  // been observed; a lost wake hangs this wait().
+  // 4 foreign threads x 250 wakes each, racing one another, the wake sink's drain and its
+  // re-arm of the sink's fulfiller, and same-turn re-polls. The future completes only after
+  // every wake has been observed; a lost wake hangs this wait().
   new_wake_storm_future_void(4, 250).wait(waitScope);
 }
 
@@ -699,7 +700,7 @@ KJ_TEST("Repeated foreign wakes queue one replay per waker cell") {
   join_wake_storm();
 
   // All those wakes target the same cell, so coalescing must collapse them to a single pending
-  // slot -- not one Arc per wake. (Before coalescing this observed tens of thousands.)
+  // slot -- not one Arc per wake.
   auto sink = ::kj_rs::CrossThreadWakeSink::forCurrentLoop();
   KJ_EXPECT(sink->getPendingCountForTest() == 1, sink->getPendingCountForTest(),
       "duplicate cross-thread wakes must coalesce to one replay per cell");
@@ -797,9 +798,9 @@ KJ_TEST("Retained waker wakes and drops quietly after the event loop itself is d
   }
 
   // No KJ event loop exists on this thread anymore, but a waker clone is still stashed. Waking
-  // it must be a quiet no-op — the cell's owned Executor reports not-current, and fulfilling the
-  // long-dead cross-thread fulfiller is a no-op — and consuming it drops the last cell reference
-  // with no loop anywhere in sight. Under ASAN this is the canonical
+  // it must be a quiet no-op — the cell's owned Executor reports not-current, and the cell was
+  // neutralized with its event, so the wake never reaches a sink — and consuming it drops the
+  // last cell reference with no loop anywhere in sight. Under ASAN this is the canonical
   // wake-after-everything-died regression test.
   wake_shared_stashed_waker();
 }

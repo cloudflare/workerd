@@ -231,9 +231,8 @@ pub fn wake_stashed_waker_from_background_thread() {
 
 /// A future woken from a foreign thread across MULTIPLE polls: each round hands a fresh waker
 /// clone to a spawned thread, which wakes it from there; the round only completes once that wake
-/// has actually been delivered (spurious polls stay Pending). Exercises the cross-thread
-/// fulfiller's per-poll renewal (waker.h): every round's wake must be delivered, not just the
-/// first.
+/// has actually been delivered (spurious polls stay Pending). Exercises the wake sink's re-arm
+/// after each drain (waker.c++): every round's wake must be delivered, not just the first.
 struct MultiRoundCrossThreadWakeFuture {
     rounds_left: u32,
     /// `Some(flag)` while a round's foreign wake is in flight; the thread sets the flag (then
@@ -424,17 +423,17 @@ pub async fn new_cross_thread_wake_future_void() {
 // Multithreaded stress helpers (TSAN targets)
 //
 // These exist to be run under ThreadSanitizer (`bazel test --config=tsan`): they put the
-// bridge's cross-thread machinery — the atomic cell refcount, the mutex-guarded cross-thread
-// fulfiller, and the owner-side neutralize path — under real concurrency, so TSAN can observe
-// every pair of racing accesses. workerd's tsan config instruments BOTH sides of the bridge:
-// the C++ (kj mutexes and atomics) and, via `-Zsanitizer=thread` plus a TSan-built standard
-// library, this Rust code and the `std::task::Waker` machinery it drives.
+// bridge's cross-thread machinery — the atomic cell refcount, the mutex-guarded wake sink and
+// its queue claim, and the owner-side neutralize path — under real concurrency, so TSAN can
+// observe every pair of racing accesses. workerd's tsan config instruments BOTH sides of the
+// bridge: the C++ (kj mutexes and atomics) and, via `-Zsanitizer=thread` plus a TSan-built
+// standard library, this Rust code and the `std::task::Waker` machinery it drives.
 
 /// A future whose waker is woken CONCURRENTLY by `threads` foreign threads, `wakes` times each,
 /// while the owning loop keeps re-polling. Each thread holds its own waker clone and calls
-/// `wake_by_ref()` in a tight loop (every wake racing the owner's per-poll fulfiller renewal and
-/// every other thread's wakes), then delivers one final `wake()` (consuming its clone on the
-/// foreign thread). Completes once every thread's wakes have all been observed and joined.
+/// `wake_by_ref()` in a tight loop (every wake racing the wake sink's drain and every other
+/// thread's wakes), then delivers one final `wake()` (consuming its clone on the foreign
+/// thread). Completes once every thread's wakes have all been observed and joined.
 struct WakeStormFuture {
     threads: u32,
     wakes_per_thread: u32,
