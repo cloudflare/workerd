@@ -112,7 +112,7 @@ void setCfTags(SpanBuilder& span, kj::StringPtr cfJson) {
   };
   // Without a blob, as in standalone workerd, skip the decode: its failure throws, a stack capture
   // and an unwind on every invocation.
-  if (!cfJson.startsWith("{"_kj)) return;
+  if (cfJson.size() == 0) return;
   capnp::MallocMessageBuilder message;
   auto cf = message.initRoot<capnp::JsonValue>();
   // A `cf` blob that is not a JSON object yields no tags, like the Onset event's consumer.
