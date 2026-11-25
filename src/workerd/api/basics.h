@@ -463,10 +463,10 @@ class EventTarget: public jsg::Object {
   // values are ever invoked: the trampoline invokes whatever callable the attribute holds at
   // dispatch time. Dispatch does not additionally consult the legacy on<type> property
   // reflection for a managed type. The getter returns the exact value assigned.
+  using EventHandlerValue = jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>>;
   kj::Maybe<jsg::JsValue> getEventHandlerAttribute(jsg::Lock& js, kj::StringPtr type);
-  EventHandlerAssignment setEventHandlerAttribute(jsg::Lock& js,
-      kj::StringPtr type,
-      jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler);
+  EventHandlerAssignment setEventHandlerAttribute(
+      jsg::Lock& js, kj::StringPtr type, EventHandlerValue handler);
 
   // Registers an internal listener occupying a normal position in the listener list. The
   // identity may later be passed to removeEventListener() to deactivate it.
@@ -644,8 +644,7 @@ class AbortSignal final: public EventTarget {
 
   // The onabort event handler IDL attribute (see EventTarget::setEventHandlerAttribute).
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
-  void setOnAbort(
-      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler);
+  void setOnAbort(jsg::Lock& js, EventHandlerValue handler);
 
   // Arms the RPC abort subscription whenever an 'abort' listener is registered — via
   // addEventListener() or the onabort trampoline's activation. Registrations for other

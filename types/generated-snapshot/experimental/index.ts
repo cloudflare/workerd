@@ -3579,6 +3579,14 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/binaryType)
    */
   binaryType: "blob" | "arraybuffer";
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/open_event) */
+  onopen: ((ev: Event) => any) | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/message_event) */
+  onmessage: ((ev: MessageEvent) => any) | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close_event) */
+  onclose: ((ev: CloseEvent) => any) | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/error_event) */
+  onerror: ((ev: ErrorEvent) => any) | null;
 }
 export interface WebSocketAcceptOptions {
   /**

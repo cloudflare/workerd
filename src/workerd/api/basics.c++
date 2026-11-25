@@ -332,9 +332,8 @@ kj::Maybe<jsg::JsValue> EventTarget::getEventHandlerAttribute(jsg::Lock& js, kj:
   return kj::none;
 }
 
-EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(jsg::Lock& js,
-    kj::StringPtr type,
-    jsg::Optional<kj::OneOf<HandlerFunction, jsg::JsValue>> handler) {
+EventTarget::EventHandlerAssignment EventTarget::setEventHandlerAttribute(
+    jsg::Lock& js, kj::StringPtr type, EventHandlerValue handler) {
   const auto getOrCreateAttribute = [&]() -> EventHandlerAttribute& {
     return eventHandlerAttributes.findOrCreate(
         type, [&] { return decltype(eventHandlerAttributes)::Entry{kj::str(type), {}}; });
@@ -711,8 +710,7 @@ kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return getEventHandlerAttribute(js, kAbortEvent);
 }
 
-void AbortSignal::setOnAbort(
-    jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+void AbortSignal::setOnAbort(jsg::Lock& js, EventHandlerValue handler) {
   // The trampoline's activation registers a regular 'abort' listener, which arms the RPC
   // abort subscription through listenerCountChanged().
   setEventHandlerAttribute(js, kAbortEvent, kj::mv(handler));
