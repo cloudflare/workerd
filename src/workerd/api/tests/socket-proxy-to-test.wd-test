@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
           (name = "ECHO", service = (name = "socket-proxy-to-test", entrypoint = "Echo")),
           (name = "GREETER", service = (name = "socket-proxy-to-test", entrypoint = "Greeter")),
           (name = "SILENT", service = (name = "socket-proxy-to-test", entrypoint = "Silent")),
+          (name = "RELAY", service = (name = "socket-proxy-to-test", entrypoint = "Relay")),
+          (name = "ABORTED_RELAY",
+            service = (name = "socket-proxy-to-test", entrypoint = "AbortedRelay")),
         ],
       )
     ),

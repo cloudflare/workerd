@@ -1156,23 +1156,116 @@ void Socket::accept() {
   a->accept();
 }
 
-jsg::Promise<void> Socket::proxyTo(
-    jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
-  jsg::Optional<PipeToOptions> optionsCopy = kj::none;
+void ConnectHandlerRelay::start(kj::Promise<void> promise) {
+  KJ_REQUIRE(!handlerFinished, "connect() handler already finished");
+  KJ_REQUIRE(relay == kj::none, "connect() handler's socket is already relayed");
+  relay = kj::mv(promise);
+}
+
+kj::Promise<void> ConnectHandlerRelay::whenEnded() {
+  handlerFinished = true;
+  KJ_IF_SOME(r, relay) {
+    auto result = kj::mv(r);
+    relay = kj::none;
+    return result;
+  }
+  return kj::READY_NOW;
+}
+
+void Socket::setHandlerRelay(IoOwn<ConnectHandlerRelay> relay) {
+  handlerRelay = kj::mv(relay);
+}
+
+void Socket::requireRelayable(jsg::Lock& js) {
+  JSG_REQUIRE(protocol == SocketProtocol::TCP, TypeError,
+      "proxyTo() is not supported for datagram sockets.");
+  // Checked before isRelayed, so that the sockets of a relay that has ended report being closed.
+  JSG_REQUIRE(connectionData != kj::none && !isClosing, TypeError,
+      "proxyTo() cannot relay a socket that is closed or closing.");
+  JSG_REQUIRE(!isRelayed, TypeError, "The socket is already being relayed by proxyTo().");
+  KJ_IF_SOME(h, handlerRelay) {
+    JSG_REQUIRE(!h->isHandlerFinished(), TypeError,
+        "proxyTo() cannot relay the socket passed to a connect() handler once the handler has "
+        "finished, since its connection closes then.");
+  }
+  JSG_REQUIRE(!readable.isLocked(js) && !writable.isLocked(js), TypeError,
+      "proxyTo() cannot relay a socket whose readable or writable is locked.");
+}
+
+void Socket::endRelay(jsg::Lock& js, kj::Maybe<jsg::Value> error) {
+  // close() settles `closed` itself, once it has finished tearing the connection down.
+  if (isClosing) return;
+  isClosing = true;
+
+  KJ_IF_SOME(e, error) {
+    KJ_IF_SOME(a, acceptance) {
+      a->fail("The connect() handler's socket closed before it accepted the connection."_kj);
+    }
+    // The other direction may still be running, so stop it.
+    auto reason = jsg::JsValue(e.getHandle(js));
+    readable.forceCancel(js, reason).markAsHandled(js);
+    writable.forceAbort(js, reason).markAsHandled(js);
+    closedResolver.reject(js, e.getHandle(js));
+  } else {
+    // Both directions have ended, so the streams are already closed.
+    closedResolver.resolve(js);
+  }
+  connectionData = kj::none;
+}
+
+void Socket::proxyTo(jsg::Lock& js, jsg::Ref<Socket> other, jsg::Optional<ProxyToOptions> options) {
+  JSG_REQUIRE(other.get() != this, TypeError, "A socket cannot be proxied to itself.");
+  // Check both before starting either direction, so that a socket that can't be relayed is
+  // reported before anything has been taken from the other.
+  requireRelayable(js);
+  other->requireRelayable(js);
+
+  kj::Maybe<jsg::Ref<AbortSignal>> signal;
   KJ_IF_SOME(o, options) {
-    optionsCopy = PipeToOptions{
-      .preventAbort = o.preventAbort,
-      .preventCancel = o.preventCancel,
-      .preventClose = o.preventClose,
-      .signal = kj::none,
+    signal = kj::mv(o.signal);
+  }
+  // A single signal aborts both directions.
+  auto pipeOptions = [&signal]() {
+    return PipeToOptions{
+      .signal = signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); }),
     };
-    KJ_IF_SOME(s, o.signal) {
-      KJ_ASSERT_NONNULL(optionsCopy).signal = s.addRef();
+  };
+
+  // Set before either pipe starts, so that reaching EOF doesn't close the socket's write side
+  // under the opposite direction. See maybeCloseWriteSide().
+  isRelayed = true;
+  other->isRelayed = true;
+  auto fromThem = other->readable.pipeTo(js, writable, pipeOptions());
+  auto toThem = readable.pipeTo(js, other->writable, pipeOptions());
+
+  auto otherOnFailure = other.addRef();
+  auto relay =
+      whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem))
+          .then(js,
+              JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef()), (self, other),
+                  (jsg::Lock& js) {
+                    self->endRelay(js, kj::none);
+                    other->endRelay(js, kj::none);
+                    return js.resolvedPromise();
+                  }),
+              JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = kj::mv(otherOnFailure)), (self, other),
+                  (jsg::Lock& js, jsg::Value error) {
+                    self->endRelay(js, error.addRef(js));
+                    other->endRelay(js, error.addRef(js));
+                    return js.rejectedPromise<void>(kj::mv(error));
+                  }));
+
+  // A connect() handler's connection stays open until the relay ends, however soon the handler
+  // finishes, and the handler's request fails if the relay does.
+  auto& context = IoContext::current();
+  for (Socket* socket: {this, other.get()}) {
+    KJ_IF_SOME(h, socket->handlerRelay) {
+      h->start(context.awaitJs(js, relay.whenResolved(js)));
     }
   }
-  auto fromThem = sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
-  auto toThem = readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
-  return whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem));
+  // Nothing in JavaScript can observe the relay other than through `closed`, which settles with
+  // it.
+  relay.markAsHandled(js);
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
@@ -1188,6 +1281,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
   JSG_REQUIRE(domain != kj::none, TypeError,
       "startTls has already been called on this socket, or the socket was transferred over RPC.");
+  JSG_REQUIRE(
+      !isRelayed, TypeError, "startTls() cannot be called on a socket relayed by proxyTo().");
 
   KJ_IF_SOME(opts, tlsOptions) {
     if (opts.expectedServerHostname != kj::none) {
@@ -1597,10 +1692,13 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
     // anything.
     if (canceled) return;
     KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      // A relay settles `closed` itself once it ends, with its outcome. See proxyTo().
+      if (socket->isRelayed) return;
       socket->closedResolver.resolve(js);
     }
   }, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, jsg::Value exception) mutable {
     KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      if (socket->isRelayed) return;
       socket->closedResolver.reject(js, exception.getHandle(js));
     }
   }).markAsHandled(js);
@@ -1622,6 +1720,12 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // This code shouldn't even run since we don't set up a callback which calls it unless
   // `allowHalfOpen` is false.
   KJ_ASSERT(!getAllowHalfOpen(options));
+
+  // A relay ends each direction on its own, closing this socket's write side once the opposite
+  // direction has ended, and settles `closed` once both have. See proxyTo().
+  if (isRelayed) {
+    return js.resolvedPromise();
+  }
 
   // Do not call `close` on a stream that has already been closed or is in the process
   // of closing. Both sides are done at this point, so `closed` settles here as it does below.

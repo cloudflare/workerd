@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/api/basics.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/io/features.h>
@@ -110,6 +111,12 @@ struct TlsOptions {
   JSG_STRUCT(expectedServerHostname);
 };
 
+struct ProxyToOptions {
+  // Aborting the signal fails the relay and tears down both connections.
+  jsg::Optional<jsg::Ref<AbortSignal>> signal;
+  JSG_STRUCT(signal);
+};
+
 // A non-standard extension: not part of the proposed sockets spec
 // (https://sockets-api.proposal.wintertc.org/), which only covers TCP.
 //
@@ -196,6 +203,31 @@ class ConnectAcceptance final {
   kj::StickyFlag accepted;
 
   void setFailed(kj::StringPtr reason);
+};
+
+// The relay that proxyTo() runs on the socket passed to a connect() handler. The handler's
+// connection stays open until the relay ends, not just until the handler finishes, so a handler can
+// hand its socket to proxyTo() and return without waiting for anything.
+//
+// ServiceWorkerGlobalScope::connect() creates one for each handler and waits on whenEnded() once
+// the handler has finished.
+class ConnectHandlerRelay final {
+ public:
+  // Whether the handler has finished, after which its connection closes and can't be relayed.
+  bool isHandlerFinished() const {
+    return handlerFinished;
+  }
+
+  // Records the relay that proxyTo() started on the handler's socket. Settles as the relay does.
+  void start(kj::Promise<void> relay);
+
+  // Records that the handler has finished. Resolves once the relay ends, at once if the handler
+  // never started one, and rejects if the relay fails.
+  kj::Promise<void> whenEnded();
+
+ private:
+  kj::Maybe<kj::Promise<void>> relay;
+  bool handlerFinished = false;
 };
 
 class Socket: public jsg::Object {
@@ -314,13 +346,23 @@ class Socket: public jsg::Object {
   // closing.
   jsg::Promise<void> close(jsg::Lock& js);
 
-  // Relays this socket to the other one in both directions. Equivalent to:
-  //   Promise.all([a.readable.pipeTo(b.writable), b.readable.pipeTo(a.writable)])
-  // The result resolves once both directions have finished and rejects as soon as either fails.
-  // A connect() handler that relays its socket should await it: the handler's socket is closed
-  // when the handler returns.
-  jsg::Promise<void> proxyTo(
-      jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options);
+  // Marks this socket as the one passed to a connect() handler, whose connection stays open for a
+  // relay that proxyTo() runs on it.
+  void setHandlerRelay(IoOwn<ConnectHandlerRelay> relay);
+
+  // Relays this socket to the other one in both directions, until both directions have ended.
+  // The relay is the runtime's from then on: proxyTo() returns nothing to wait for, and both
+  // sockets' readable and writable are locked to it. When it ends, both sockets close and their
+  // `closed` resolves, or rejects with the reason if the relay fails. A failure in either direction,
+  // or aborting `options.signal`, tears down both connections.
+  //
+  // Each direction ends on its own, whatever either socket's allowHalfOpen says: when one
+  // connection reaches EOF, the relay closes the other's write side and keeps relaying the
+  // opposite direction until it ends too.
+  //
+  // A connect() handler can relay its socket and return at once: its connection stays open until
+  // the relay ends. See ConnectHandlerRelay.
+  void proxyTo(jsg::Lock& js, jsg::Ref<Socket> other, jsg::Optional<ProxyToOptions> options);
 
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
@@ -448,6 +490,11 @@ class Socket: public jsg::Object {
   // Set on the socket passed to a connect() handler whose peer asked for TLS from the start: the
   // pending answer to the peer, which the handler gives with accept().
   kj::Maybe<IoOwn<ConnectAcceptance>> acceptance;
+  // Set on the socket passed to a connect() handler: where proxyTo() hands the handler the relay
+  // that its connection stays open for.
+  kj::Maybe<IoOwn<ConnectHandlerRelay>> handlerRelay;
+  // Set once proxyTo() has handed this socket to a relay, which settles `closed` when it ends.
+  bool isRelayed = false;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   kj::Maybe<kj::StringPtr> connectErrno;
@@ -480,6 +527,12 @@ class Socket: public jsg::Object {
 
   // Helper method for handleProxyStatus implementations.
   void handleProxyError(jsg::Lock& js, kj::Exception e);
+
+  // Throws if proxyTo() can't hand this socket to a relay.
+  void requireRelayable(jsg::Lock& js);
+
+  // Closes the socket once its relay has ended, settling `closed` with `error` if it failed.
+  void endRelay(jsg::Lock& js, kj::Maybe<jsg::Value> error);
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_SOME(err, maybeErr) {
@@ -692,7 +745,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFl
 
 #define EW_SOCKETS_ISOLATE_TYPES                                                                   \
   api::Socket, api::SocketOptions, api::SocketAddress, api::TlsOptions, api::SocketsModule,        \
-      api::SocketInfo, api::SocketsModule::InboundListener, api::Datagram
+      api::SocketInfo, api::SocketsModule::InboundListener, api::Datagram, api::ProxyToOptions
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

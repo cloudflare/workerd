@@ -6,13 +6,14 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { ok, rejects, strictEqual, throws } from 'assert';
 
 export class ConnectProxy extends WorkerEntrypoint {
-  async connect(socket) {
+  connect(socket) {
     // proxy for the ConnectEndpoint instance on the connect-endpoint socket.
     const upstream = connect(
       `${this.env.SIDECAR_HOSTNAME}:${this.env.CONNECT_ENDPOINT_PORT}`
     );
-    // The handler's socket is closed when the handler returns, so wait for the relay to finish.
-    await socket.proxyTo(upstream);
+    // The handler's connection stays open until the relay ends, so the handler can return at
+    // once, without awaiting anything.
+    socket.proxyTo(upstream);
   }
 }
 
@@ -38,36 +39,61 @@ async function readLine(reader) {
   return line;
 }
 
-// Reached via a service binding from connect-handler-test.js. Serves a miniature line-based
-// protocol that negotiates TLS in-band, the way SMTP and Postgres do: it greets the client,
-// acknowledges the client's upgrade request, and then upgrades its own end of the socket. Neither
-// end of a service-binding tunnel can run a handshake, so startTls() here resolves once the client
-// has called startTls() too.
+// Serves the plaintext half of a miniature line-based protocol that negotiates TLS in-band, the
+// way SMTP and Postgres do: greets the client and acknowledges its upgrade request. After this,
+// the client upgrades its end, and the socket's streams are left unlocked for the handler to do
+// the same.
+async function serveUpToUpgrade(socket) {
+  // The tunnel came from another Socket, so it can carry an upgrade.
+  strictEqual(socket.secureTransport, 'starttls');
+
+  const enc = new TextEncoder();
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+  await writer.write(enc.encode('220 ready\r\n'));
+  strictEqual(await readLine(reader), 'STARTTLS\r\n');
+  await writer.write(enc.encode('220 go ahead\r\n'));
+
+  reader.releaseLock();
+  writer.releaseLock();
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Serves the protocol
+// serveUpToUpgrade() begins, and then upgrades its own end of the socket. Neither end of a
+// service-binding tunnel can run a handshake, so startTls() here resolves once the client has
+// called startTls() too.
 export class StartTlsEndpoint extends WorkerEntrypoint {
   async connect(socket) {
-    // The tunnel came from another Socket, so it can carry an upgrade.
-    strictEqual(socket.secureTransport, 'starttls');
+    await serveUpToUpgrade(socket);
 
     const enc = new TextEncoder();
-    let reader = socket.readable.getReader();
-    let writer = socket.writable.getWriter();
-    await writer.write(enc.encode('220 ready\r\n'));
-    strictEqual(await readLine(reader), 'STARTTLS\r\n');
-    await writer.write(enc.encode('220 go ahead\r\n'));
-
-    reader.releaseLock();
-    writer.releaseLock();
-
     const secure = socket.startTls();
     await secure.opened;
 
-    reader = secure.readable.getReader();
-    writer = secure.writable.getWriter();
+    const reader = secure.readable.getReader();
+    const writer = secure.writable.getWriter();
     strictEqual(await readLine(reader), 'EHLO client\r\n');
     await writer.write(enc.encode('250 secure\r\n'));
 
     reader.releaseLock();
     await writer.close();
+  }
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Acknowledges the client's
+// upgrade request, and then returns without upgrading its own end.
+export class FinishesWithoutStartTls extends WorkerEntrypoint {
+  async connect(socket) {
+    await serveUpToUpgrade(socket);
+  }
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Acknowledges the client's
+// upgrade request, and then closes its socket instead of upgrading it.
+export class ClosesWithoutStartTls extends WorkerEntrypoint {
+  async connect(socket) {
+    await serveUpToUpgrade(socket);
+    await socket.close();
   }
 }
 
@@ -133,7 +159,7 @@ export class ImmediateTlsRelay extends WorkerEntrypoint {
     socket.accept();
     // A second accept() changes nothing.
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 
@@ -182,7 +208,7 @@ export class ImmediateTlsOverCustomProtocol extends WorkerEntrypoint {
     writer.releaseLock();
 
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 
@@ -213,7 +239,7 @@ export class ImmediateTlsFailedHandshake extends WorkerEntrypoint {
     );
     await upstream.opened;
     socket.accept();
-    await socket.proxyTo(upstream);
+    socket.proxyTo(upstream);
   }
 }
 
