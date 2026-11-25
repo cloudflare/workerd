@@ -18,8 +18,9 @@ at context creation, before any user code. C++ entry point:
   `view-extent`).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
-- `main.ts` installs the real stream globals (ReadableStream et al.) when
-  the `typescript_implemented_streams` compat flag is enabled, plus the
+- `main-post.ts` installs the real stream globals (ReadableStream et al.)
+  when the `typescript_implemented_streams` compat flag is enabled (`main.ts`
+  does under the `TS_WEB_STREAMS` autogate), plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`, and the internal-testing cloneable
   `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
@@ -35,7 +36,7 @@ at context creation, before any user code. C++ entry point:
   the native `utils.structuredClone()`), which replaces the C++ method; its
   parity suite and divergence ledger are in `src/tests/structured-clone/`, and
   its types in `types/defines/structured-clone.d.ts`.
-- `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
+- `main-post.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
   under `expose_global_message_channel`, as lazy data properties
   (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads
   on first use, through them or through `cloudflare-internal:messagechannel`

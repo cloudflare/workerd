@@ -19,6 +19,11 @@ module.exports = {
   helper: require('test-embedder/helper'),
   // workerd's main has already run, so this is its cached exports object.
   workerdMain: require('main'),
+  // So has main-post, which installs CloneableTestBox under
+  // expose_serialization_test_class.
+  sawPostSnapshotInstall:
+    typeof (globalThis as { CloneableTestBox?: unknown }).CloneableTestBox ===
+    'function',
   ringBufferLength: new RingBuffer().length,
   // The WeakRef globals are removed only after the embedder's scripts run.
   weakRefType: typeof WeakRef,

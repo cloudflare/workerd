@@ -31,8 +31,8 @@
 //   whatever the flags if every reader must read the class, as when it
 //   replaces a C++ class under a flag, so that data written either way can
 //   be read either way. Load the module of a class that only some flags
-//   expose, such as an experimental one, only under those flags, as main.ts
-//   does CloneableTestBox's.
+//   expose, such as an experimental one, only under those flags, as
+//   main-post.ts does CloneableTestBox's.
 // - clone(instance) returns the instance's data: any serializable value,
 //   which may refer to the instance itself.
 // - deserialize(instance, data) initializes an instance from the data.

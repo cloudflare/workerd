@@ -58,8 +58,9 @@
 // The peer is held weakly, so dropping one port of a pair lets it be
 // collected; the MessageChannel holds both strongly.
 //
-// main.ts loads this module on first use, so its top level runs after user
-// code and reads nothing that code can change (see EventTargetHeritage).
+// main-post.ts loads this module on first use, so its top level runs after
+// user code and reads nothing that code can change (see
+// EventTargetHeritage).
 
 import type {
   EventTargetInternals,
@@ -97,7 +98,7 @@ const {
   setEventHandlerAttribute,
   setListenerCountHook,
 } = require('events/event-target-internals') as EventTargetInternals;
-const { markAsRuntimeClass, setNameAndLength } =
+const { markAsRuntimeClass, removeToStringTagUnlessFlagged, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
 // JSG's messages, so that misuse reads as it does with the runtime's C++
@@ -414,6 +415,10 @@ markAsRuntimeClass(
   (MessageChannel satisfies new () => PublishedMessageChannel).prototype,
   'MessageChannel'
 );
+// The classes load on first use, after the post-snapshot phase, so the tags
+// come off here rather than in main-post.ts.
+removeToStringTagUnlessFlagged(MessagePort.prototype);
+removeToStringTagUnlessFlagged(MessageChannel.prototype);
 
 export type MessageChannelExports = {
   MessageChannel: typeof MessageChannel;

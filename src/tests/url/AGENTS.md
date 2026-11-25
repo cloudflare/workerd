@@ -21,7 +21,9 @@ implementation it means to run. `enable_fast_jsg_struct` is not pinned: the
 
 The TypeScript implementation honors the dated flags above and is otherwise
 WebIDL-conformant, so it differs from the C++ only toward the spec, in the
-rows of the ledger below. Each row is pinned on both sides with a
+rows of the ledger below. The exception is `Symbol.toStringTag`, which is
+writable on `URL.prototype` and `URLSearchParams.prototype`, as JSG's is,
+where WebIDL makes it non-writable. Each row is pinned on both sides with a
 `usingTsImpl` branch. The C++ cells disable the `@all-autogates` variant,
 which would run the TypeScript implementation under them.
 
@@ -70,7 +72,6 @@ which would run the TypeScript implementation under them.
 | 16 | Legacy initializer | arrays and dicts: a `Map` or other iterable is a dict of its own properties | WebIDL union | `search-params.js` |
 | 17 | Legacy lone surrogates | WTF-8 | U+FFFD | `conversions.js` |
 | 18 | `forEach(cb, null)` receiver | `undefined` | `null` | `iteration.js` |
-| 20 | `Symbol.toStringTag` | writable | non-writable | `api-surface.js` |
 | 21 | Initializer with a non-callable `@@iterator` | a record | TypeError | `search-params.js` |
 | 22 | Legacy-instance `URL.prototype` | `toString`, `toJSON` only | the accessors too | `api-surface.js` |
 | 23 | Legacy `delete`/`has` value under `urlsearchparams_delete_has_value_arg` | ignored | honored | `search-params.js` |
@@ -79,5 +80,6 @@ which would run the TypeScript implementation under them.
 | 26 | Record initializer with an enumerable Symbol key | skipped | TypeError, as WPT's `headers-record.any.js` requires of records | `search-params.js` |
 | 27 | Standard sequence initializer's final iterator result | its `value` is appended, a generator's return value included | ignored | `search-params.js` |
 
-Rows the plan keeps but no test here covers: #7 and #11 (now matches), #8
-and #19 (WPT), #10 (RPC; with the TS cells) and #12 (heap snapshots).
+Rows the plan keeps but no test here covers: #7, #11 and #20 (now
+matches), #8 and #19 (WPT), #10 (RPC; with the TS cells) and #12 (heap
+snapshots).

@@ -1024,9 +1024,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
-    // declares them.
+    // Under expose_global_message_channel, the per-isolate bootstrap
+    // (src/per_isolate/main-post.ts) defines MessageChannel and MessagePort, loaded on first use;
+    // the TypeScript override below declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);
@@ -1082,8 +1082,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(Navigator);
     }
 
-    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
-    // TypeScript URL and URLSearchParams instead.
+    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main-post.ts)
+    // installs the TypeScript URL and URLSearchParams instead.
     if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL)) {
       if (flags.getSpecCompliantUrl()) {
         JSG_NESTED_TYPE_NAMED(url::URL, URL);

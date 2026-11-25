@@ -247,8 +247,7 @@ export const toStringTagBranding = {
     ]) {
       const d = Object.getOwnPropertyDescriptor(proto, Symbol.toStringTag);
       strictEqual(d.value, name);
-      // Ledger #20.
-      strictEqual(attributes(d), usingTsImpl ? 'datac' : 'datawc');
+      strictEqual(attributes(d), 'datawc');
     }
     // Ledger #6.
     if (usingTsImpl) {

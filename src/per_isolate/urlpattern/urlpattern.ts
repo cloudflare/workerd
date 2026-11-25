@@ -7,7 +7,8 @@
 // parser the urlpattern_standard flag selects, which utils compiles with
 // (api/urlpattern-bootstrap.h). Everything else, matching included, is
 // here, and follows the URLPattern standard and WebIDL for both parsers,
-// honoring set_tostring_tag. Where that departs from the C++ is listed in
+// honoring set_tostring_tag, whose tag main-post.ts removes without it.
+// Where that departs from the C++ is listed in
 // src/tests/urlpattern/AGENTS.md, whose suite runs against both
 // implementations.
 //
@@ -25,7 +26,6 @@ const {
   RegExpPrototypeExec,
   StringPrototypeSlice,
   StringPrototypeToWellFormed,
-  SymbolToStringTag,
   TypeError,
 } = primordials;
 
@@ -652,13 +652,6 @@ setNameAndLength(proto.test, 'test', 0);
 setNameAndLength(proto.exec, 'exec', 0);
 
 markAsRuntimeClass(proto, 'URLPattern');
-// WebIDL makes the tag non-writable; JSG's is writable.
-if (compatFlags['set_tostring_tag'] === true) {
-  ObjectDefineProperty(proto, SymbolToStringTag, {
-    __proto__: null,
-    writable: false,
-  } as PropertyDescriptor);
-}
 
 export type {
   URLPattern,
