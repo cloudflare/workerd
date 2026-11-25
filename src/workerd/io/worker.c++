@@ -5119,62 +5119,36 @@ EventOutcome onHibernateFailureOutcome(
 }  // namespace
 
 bool Worker::Actor::hasOnHibernateHandler() {
-  return impl->onHibernateHandler != kj::none;
-}
-
-kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
-    kj::Rc<IoChannelFactory> ioChannelFactory,
-    kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
-  // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
-  return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
-      kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext), kj::mv(selfTokenFactory)));
-}
-
-kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
-    kj::Rc<IoChannelFactory> ioChannelFactory,
-    kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
-    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
-  // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
-  // without the request tracking that addRef() adds.
-  auto self = kj::addRef(*this);
-
   // A handler implies the instance was constructed in an IoContext, so if there is none, the
   // actor has already been shut down, e.g. by an abort.
-  IoContext& context = KJ_UNWRAP_OR(getIoContext(), {
-    observer->reportOnHibernateOutcome(EventOutcome::CANCELED);
-    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
-    kj::throwFatalException(
-        KJ_EXCEPTION(DISCONNECTED, "actor was shut down before its onHibernate handler could run"));
-  });
+  return impl->onHibernateHandler != kj::none && impl->ioContext != kj::none;
+}
 
-  RequestObserver& observerRef = *observer;
-  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
-      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext),
-      kj::none /* accessInfo */, kj::mv(selfTokenFactory));
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
-  }
+kj::Promise<EventOutcome> Worker::Actor::runOnHibernate(
+    kj::Own<IoContext::IncomingRequest> incomingRequest, HibernationReason reason) {
+  IoContext& context = incomingRequest->getContext();
   // Cross-context actions queued while the actor was idle are dropped rather than run with the
   // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
   // start. Those queued once its request is current still run, since the handler may await them.
   incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
 
-  // A call canceled before the handler settles, e.g. by abort(), never reaches the reports below.
+  // An event canceled before the handler settles, e.g. by abort(), never reaches the report below.
   bool reported = false;
   KJ_DEFER(if (!reported) {
-    observerRef.reportOnHibernateOutcome(EventOutcome::CANCELED);
+    incomingRequest->getMetrics().reportCanceled();
     impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
   });
 
-  // Nothing may run in the actor after its handler. The cleanup also runs if the caller cancels
-  // this call while the handler is pending.
+  // Nothing may run in the actor after its handler. The cleanup also runs if the event is canceled
+  // while the handler is pending.
   KJ_DEFER(incomingRequest->cancelPendingWorkForHibernation());
+
+  // An abort between the event's dispatch and here cancels it too. One the handler causes, e.g.
+  // with ctx.abort(), is a failure of the handler.
+  KJ_IF_SOME(e, context.getAbortReason()) {
+    kj::throwFatalException(kj::mv(e));
+  }
 
   EventOutcome outcome;
   KJ_TRY {
@@ -5192,12 +5166,12 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   KJ_CATCH(e) {
     outcome = onHibernateFailureOutcome(context, *incomingRequest, kj::mv(e));
   }
-  observerRef.reportOnHibernateOutcome(outcome);
   impl->metrics->onHibernateFinished(outcome);
   reported = true;
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setReturn(context.now());
   }
+  co_return outcome;
 }
 
 kj::Promise<void> Worker::Actor::flushAfterOnHibernate() {

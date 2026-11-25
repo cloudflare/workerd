@@ -161,9 +161,9 @@ class RequestObserver: public kj::Refcounted {
   // occurred asynchronously.
   virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
 
-  // Reports the outcome of a Durable Object onHibernate handler run under this observer. The hook
-  // isn't delivered through a WorkerInterface, so no wrapper sees its result.
-  virtual void reportOnHibernateOutcome(EventOutcome outcome) {}
+  // Report that the request was canceled before settling, e.g. by Worker::Actor::abort(). A
+  // subsequent reportFailure() from the cancellation's rejection must not overwrite this outcome.
+  virtual void reportCanceled() {}
 
   static EventOutcome outcomeFromException(
       const kj::Exception& e, FailureSource source = FailureSource::OTHER);

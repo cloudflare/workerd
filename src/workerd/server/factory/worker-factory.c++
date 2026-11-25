@@ -12,6 +12,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/on-hibernate-event.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/tracked-wasm-instance.h>
@@ -348,8 +349,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     }
   }
 
-  void reportOnHibernateOutcome(EventOutcome hookOutcome) override {
-    if (outcome == EventOutcome::OK) outcome = hookOutcome;
+  void reportCanceled() override {
+    if (outcome == EventOutcome::OK) {
+      outcome = EventOutcome::CANCELED;
+    }
   }
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -1074,9 +1077,9 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   auto& threadContext = worker.factory.getImpl().threadContext;
 
-  // The test event is not traced.
+  // The test event is not traced. An actor can still be named "test".
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
-  if (entrypointName.orDefault("") != "test"_kj) {
+  if (actor != kj::none || entrypointName.orDefault("") != "test"_kj) {
     workerTracer =
         makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails), worker.otlpExporter.clone());
   }
@@ -1147,16 +1150,21 @@ kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     ::rust::Box<WorkerInterfaceList> tails,
     kj::Own<RequestMetadata> metadata) {
-  auto& impl = worker.getImpl();
   auto& actorRef = actor.getActor();
+  if (!actorRef.hasOnHibernateHandler()) {
+    kj::throwFatalException(
+        KJ_EXCEPTION(DISCONNECTED, "actor was shut down before its onHibernate handler could run"));
+  }
   auto entrypointName = kj::str(className);
-  // The handler's user spans are not exported over OTLP.
-  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails), kj::none);
-  auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
-  auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
-  co_await actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
-      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer), kj::none /* triggerContext */,
-      kj::mv(metadata->restoredSelfTokenFactory));
+  {
+    // kj::addRef() rather than ActorHandle::addRef(), whose request tracking would cancel the
+    // retirement that runs the hook. Dropping it reports the event's outcome, which mustn't wait
+    // for the flush.
+    auto entrypoint = createEntrypoint(worker.getImpl(), kj::mv(*metadata), entrypointName.asPtr(),
+        {}, kj::addRef(actorRef), kj::mv(channels), kj::mv(tails), kj::none);
+    co_await entrypoint->customEvent(
+        kj::heap<OnHibernateCustomEvent>(Worker::Actor::HibernationReason::INACTIVE));
+  }
   co_await actorRef.flushAfterOnHibernate();
 }
 

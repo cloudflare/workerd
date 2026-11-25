@@ -4052,6 +4052,73 @@ KJ_TEST("Server: a tail worker gets the outcome of an onHibernate handler that r
   tail.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
 }
 
+KJ_TEST("Server: a tail worker gets canceled when an onHibernate handler is aborted") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental", "unsafe_module"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `import unsafe from "workerd:unsafe";
+          `// Named "test" to also verify that a Durable Object class of that name is still traced.
+          `export class test extends DurableObject {
+          `  fetch() { return new Response("OK"); }
+          `  async [onHibernate]() {
+          `    await this.env.GATE.fetch("http://hook/");
+          `  }
+          `}
+          `export default {
+          `  async fetch(request, env) {
+          `    if (new URL(request.url).pathname === "/abort") {
+          `      await unsafe.abortAllDurableObjects();
+          `      return new Response("aborted");
+          `    }
+          `    return env.NS.getByName("actor").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "test"),
+          (name = "GATE", service = "gate"),
+        ],
+        durableObjectNamespaces = [(className = "test", uniqueKey = "on-hibernate-abort-tail")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["tail"],
+      )),
+      (name = "tail", worker = (
+        compatibilityDate = "2026-01-01",
+        modules = [(name = "main.js", esModule =
+          `export default {
+          `  async tail(traces, env) {
+          `    for (const trace of traces.filter((trace) => trace.event.reason)) {
+          `      await env.OUT.fetch(`http://tail/${trace.event.reason}/${trace.outcome}`);
+          `    }
+          `  }
+          `};
+        )],
+        bindings = [(name = "OUT", service = "tail-out")],
+      )),
+      (name = "gate", external = (address = "hook-addr")),
+      (name = "tail-out", external = (address = "tail-addr")),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET / HTTP/1.1\n[\\s\\S]*\n\n");
+  test.connect("test-addr").httpGet200("/abort", "aborted");
+
+  auto tail = test.receiveSubrequest("tail-addr");
+  tail.recvRegex("GET /inactive/canceled HTTP/1.1\n[\\s\\S]*\n\n");
+  tail.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+}
+
 KJ_TEST("Server: a stub that onHibernate restores reaches the actor's next instance") {
   TestServer test(R"((
     services = [

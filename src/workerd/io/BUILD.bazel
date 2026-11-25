@@ -497,6 +497,14 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "on-hibernate-event",
+    srcs = ["on-hibernate-event.c++"],
+    hdrs = ["on-hibernate-event.h"],
+    visibility = ["//visibility:public"],
+    deps = [":io"],
+)
+
+wd_cc_library(
     name = "otlp-span-submitter",
     srcs = ["otlp-span-submitter.c++"],
     hdrs = ["otlp-span-submitter.h"],
@@ -886,6 +894,7 @@ kj_test(
     src = "incoming-request-test.c++",
     deps = [
         ":io",
+        ":on-hibernate-event",
         "//src/workerd/tests:test-fixture",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
