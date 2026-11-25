@@ -671,8 +671,7 @@ class CacheHttpClientImpl final: public kj::HttpClient {
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    // `headers` and `headersCopy` need only last until request() returns.
-    auto headersCopy = headers.derive();
+    auto headersCopy = headers.cloneShallow();
     KJ_IF_SOME(name, cacheName) {
       headersCopy.setPtr(cacheNamespaceHeader, name);
     }
