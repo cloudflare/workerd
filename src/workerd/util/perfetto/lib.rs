@@ -33,9 +33,11 @@
 //!
 //! [`trace_event_async!`] opens a slice on a track of its own, a child of the process track, so
 //! other work running on the thread in between does not disturb it, and it may end on another
-//! thread. Each slice is a separate track in the trace, as with C++
-//! `TRACE_EVENT_BEGIN(..., PERFETTO_TRACK_FROM_POINTER(p))`, so while tracing, every async slice
-//! adds a track descriptor to the trace and a track row to the UI.
+//! thread, as with C++ `TRACE_EVENT_BEGIN(..., PERFETTO_TRACK_FROM_POINTER(p))`. A track is
+//! taken back when its slice ends and given to the next async slice that begins, so the trace
+//! has as many async tracks as the most slices that were open at once, rather than one per slice.
+//! Perfetto remembers every track a thread has written for the rest of the session, in a sorted
+//! set, so with a track per slice each slice would cost more than the one before it.
 //!
 //! # Cost when not tracing
 //!
@@ -55,6 +57,9 @@ mod ffi;
 
 use std::ffi::CStr;
 use std::marker::PhantomData;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -107,11 +112,12 @@ pub struct AsyncSlice {
 }
 
 impl AsyncSlice {
-    /// Begins a slice named `name` on a new track, if the category is enabled.
+    /// Begins a slice named `name` on a track that no open slice is on, if the category is
+    /// enabled.
     #[inline]
     pub fn begin(name: &'static CStr) -> Self {
         let track = category_enabled().then(|| {
-            let track = next_track();
+            let track = free_tracks().pop().unwrap_or_else(next_track);
             ffi::begin_on_track(name, track);
             track
         });
@@ -124,11 +130,20 @@ impl Drop for AsyncSlice {
     fn drop(&mut self) {
         if let Some(track) = self.track {
             ffi::end_on_track(track);
+            free_tracks().push(track);
         }
     }
 }
 
-/// A track id that no other slice of this process uses. Ids are hashes rather than small
+/// The tracks of the async slices that have ended, which the next async slices begin on. Only
+/// touched while the category is enabled, or by a slice that began while it was.
+fn free_tracks() -> MutexGuard<'static, Vec<u64>> {
+    static FREE: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+    // Nothing panics while the lock is held, and a list of ids is valid whatever happened.
+    FREE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A track id that no track of this process has had before. Ids are hashes rather than small
 /// integers, so that they don't collide with the ids of other tracks in the trace, as in
 /// `workerd/io/async-trace-perfetto.c++`.
 fn next_track() -> u64 {

@@ -124,6 +124,25 @@ fn interleaved_async_slices_keep_their_own_tracks() {
 }
 
 #[test]
+fn async_slices_reuse_the_tracks_of_ended_slices() {
+    let Some(events) = record(|| {
+        let a = AsyncSlice::begin(c"a");
+        drop(a);
+        let b = AsyncSlice::begin(c"b");
+        let c = AsyncSlice::begin(c"c");
+        drop(b);
+        drop(c);
+    }) else {
+        return;
+    };
+    // `b` begins on the track `a` ended on; `c` begins while `b` is open, so it gets another.
+    assert_eq!(
+        events,
+        ["B t1 a", "E t1", "B t1 b", "B t2 c", "E t1", "E t2"]
+    );
+}
+
+#[test]
 fn async_slices_span_awaits() {
     async fn task(yields: usize) {
         trace_event_async!("task");
