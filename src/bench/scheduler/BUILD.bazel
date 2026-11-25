@@ -1,0 +1,17 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The scheduler benchmarks, against the C++ implementation and the TypeScript
+# one (TS_SCHEDULER). Enabling every autogate enables TS_SCHEDULER, so the C++
+# config has no @all-autogates variant; the TypeScript config enables it
+# itself.
+
+wd_bench(
+    src = "scheduler-cpp.wd-bench",
+    data = ["scheduler.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "scheduler-ts.wd-bench",
+    data = ["scheduler.js"],
+)

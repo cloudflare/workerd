@@ -118,6 +118,10 @@ namespace workerd::util {
   /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
      performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
   V(TS_PERFORMANCE_NOW)                                                                            \
+  /* The `scheduler` global is the TypeScript implementation from the per-isolate bootstrap        \
+     (src/per_isolate/scheduler.ts), a WebIDL layer over the same native timer and abort           \
+     handling, rather than the C++ Scheduler class in api/basics.h. */                             \
+  V(TS_SCHEDULER)                                                                                  \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

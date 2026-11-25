@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using SchedulerModules = import "scheduler-modules.capnp";
+
+# Runs the scheduler suite against the TypeScript implementation
+# (src/per_isolate/scheduler.ts, under TS_SCHEDULER), with the flags
+# the wd_test variants' dates give.
+#
+# No compatibilityDate: the wd_test variants supply the date axis, and with
+# it which of the dated flags are set. nodejs_compat is for node:assert and
+# node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "scheduler-ts",
+      worker = (
+        modules = SchedulerModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+    ( name = "scheduler-ts-first-read",
+      worker = (
+        modules = SchedulerModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-scheduler"],
+);

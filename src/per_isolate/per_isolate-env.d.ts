@@ -137,6 +137,12 @@ declare const utils: {
     signal: AbortSignal,
     algorithm: () => void
   ): AbortAlgorithmHandle;
+  // scheduler.wait() once its arguments are converted (api/
+  // scheduler-bootstrap.h): the promise the C++ Scheduler::wait() returns for
+  // `milliseconds` and `signal`. Throws a TypeError if `signal` is neither
+  // undefined nor an AbortSignal, and outside of a request. Consumed by
+  // scheduler.
+  schedulerWait(milliseconds: number, signal: unknown): Promise<void>;
   // The exact UTF-8 byte length of a string as TextEncoder encodes it (a lone
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.

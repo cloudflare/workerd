@@ -984,7 +984,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(self, getSelf);
     JSG_LAZY_INSTANCE_PROPERTY(crypto, getCrypto);
     JSG_LAZY_INSTANCE_PROPERTY(caches, getCaches);
-    JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
+    // Under the TS_SCHEDULER autogate, the per-isolate bootstrap installs the TypeScript
+    // scheduler instead (src/per_isolate/scheduler.ts).
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_SCHEDULER)) {
+      JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);

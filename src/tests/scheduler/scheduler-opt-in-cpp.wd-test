@@ -1,0 +1,45 @@
+using Workerd = import "/workerd/workerd.capnp";
+using SchedulerModules = import "scheduler-modules.capnp";
+
+# Runs the scheduler suite against the C++ implementation
+# (api/basics.h), with
+# set_tostring_tag at either date and the dateless opt-ins
+# spec_compliant_property_attributes and immutable_api_prototypes; the first
+# of the two is experimental, hence --experimental in BUILD.bazel.
+#
+# No compatibilityDate: the wd_test variants supply the date axis, and with
+# it which of the dated flags are set. nodejs_compat is for node:assert and
+# node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "scheduler-opt-in-cpp",
+      worker = (
+        modules = SchedulerModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "set_tostring_tag",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+      )
+    ),
+    ( name = "scheduler-opt-in-cpp-first-read",
+      worker = (
+        modules = SchedulerModules.firstReadModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "set_tostring_tag",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+      )
+    ),
+  ],
+);

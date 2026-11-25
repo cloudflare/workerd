@@ -1,0 +1,36 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The scheduler suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. The opt-in cells need
+# --experimental for spec_compliant_property_attributes.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_SCHEDULER, which swaps in the TypeScript implementation under a
+# cell whose USING_TS_IMPL binding says C++. The TypeScript cells enable
+# TS_SCHEDULER themselves.
+
+scheduler_suite_srcs = glob(["*.js"]) + ["scheduler-modules.capnp"]
+
+wd_test(
+    src = "scheduler-cpp.wd-test",
+    data = scheduler_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "scheduler-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = scheduler_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "scheduler-ts.wd-test",
+    data = scheduler_suite_srcs,
+)
+
+wd_test(
+    src = "scheduler-opt-in-ts.wd-test",
+    args = ["--experimental"],
+    data = scheduler_suite_srcs,
+)

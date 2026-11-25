@@ -101,6 +101,7 @@ filegroup(
         "request-io.h",
         "restore.h",
         "scheduled.h",
+        "scheduler-bootstrap.h",
         "snapshot.h",
         "sockets.h",
         "sql.h",

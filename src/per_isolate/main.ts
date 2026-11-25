@@ -441,6 +441,14 @@ if (autogates['ts-structured-clone']) {
   });
 }
 
+// The TypeScript scheduler replaces the C++ one, which global-scope.h then
+// leaves out. Defined as JSG_LAZY_INSTANCE_PROPERTY defines it: an own lazy
+// data property of the global with all three attributes true, an ordinary
+// data property once read. The module loads on that first read.
+if (autogates['ts-scheduler']) {
+  utils.defineLazyDataProperty(globalThis, 'scheduler', 'scheduler', true);
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

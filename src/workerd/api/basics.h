@@ -1056,6 +1056,11 @@ class Scheduler final: public jsg::Object {
   // can be canceled using an AbortSignal.
   kj::Promise<void> wait(jsg::Lock& js, double delay, jsg::Optional<WaitOptions> maybeOptions);
 
+  // wait() for a signal already taken out of the options. Also what the TypeScript
+  // scheduler.wait() calls (scheduler-bootstrap.h).
+  static kj::Promise<void> waitImpl(
+      jsg::Lock& js, double delay, kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal);
+
   JSG_RESOURCE_TYPE(Scheduler) {
     JSG_METHOD(wait);
   }

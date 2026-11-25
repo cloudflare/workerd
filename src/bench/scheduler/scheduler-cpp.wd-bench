@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the scheduler benchmarks against the C++ implementation
+# (api/basics.h). No compatibilityDate, so that
+# the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "scheduler-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "scheduler.js")],
+      )
+    ),
+  ],
+);

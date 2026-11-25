@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the scheduler benchmarks against the TypeScript implementation
+# (src/per_isolate/scheduler.ts, under TS_SCHEDULER). No compatibilityDate, so that
+# the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "scheduler-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "scheduler.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-scheduler"],
+);

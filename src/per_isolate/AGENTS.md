@@ -35,6 +35,12 @@ at context creation, before any user code. C++ entry point:
   the native `utils.structuredClone()`), which replaces the C++ method; its
   parity suite and divergence ledger are in `src/tests/structured-clone/`, and
   its types in `types/defines/structured-clone.d.ts`.
+- Under the `TS_SCHEDULER` autogate, the `scheduler` global is the object
+  `scheduler.ts` makes, which replaces the C++ class's. `main.ts` defines it
+  as a lazy data property (`utils.defineLazyDataProperty()`), so the module
+  loads when the global is first read. Its `wait()` is the WebIDL layer over
+  the native `utils.schedulerWait()`. `src/tests/scheduler/AGENTS.md`
+  describes the behavior and keeps the ledger of differences.
 - `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
   under `expose_global_message_channel`, as lazy data properties
   (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads

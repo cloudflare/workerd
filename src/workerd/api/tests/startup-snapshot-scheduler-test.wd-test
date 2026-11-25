@@ -1,0 +1,54 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The `scheduler` global across a startup snapshot; see startup-snapshot-scheduler-test.js. The
+# runner's test() fetches the case services and asserts their reports. The @all-autogates variant
+# turns the startup-snapshot autogate on, so every service goes through the zygote, and the
+# TS_SCHEDULER autogate, so the object is the TypeScript one; the @ variant runs plain Workers
+# with the C++ one.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "experimental",
+  "unsafe_module",
+];
+
+const caseModules :List(Workerd.Worker.Module) = [
+  (name = "worker.js", esModule = embed "startup-snapshot-scheduler-case-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-scheduler-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "kept", service = "kept"),
+          (name = "unread", service = "unread"),
+        ],
+      )
+    ),
+    # The top level keeps the object, its wait() and a promise wait() rejected.
+    ( name = "kept",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"kept\""),
+        ],
+      )
+    ),
+    # The top level leaves `scheduler` unread: a request reads it first.
+    ( name = "unread",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"unread\""),
+        ],
+      )
+    ),
+  ],
+);

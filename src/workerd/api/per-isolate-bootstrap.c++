@@ -13,6 +13,7 @@
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/api/performance-bootstrap.h>
 #include <workerd/api/request-io.h>
+#include <workerd/api/scheduler-bootstrap.h>
 #include <workerd/api/url-bootstrap.h>
 #include <workerd/api/urlpattern-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
@@ -246,6 +247,17 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
       args.GetReturnValue().Set(v8::Local<v8::Value>(
           api::addAbortAlgorithmForBootstrap(js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
     });
+  });
+}
+
+// scheduler.wait() once the TypeScript layer has converted its arguments (see
+// scheduler-bootstrap.h). Plain method: it allocates and can throw.
+static void SchedulerWait(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    JSG_REQUIRE(args[0]->IsNumber(), TypeError, "schedulerWait() expects a number");
+    return v8::Local<v8::Value>(api::schedulerWaitForBootstrap(
+        js, args[0].As<v8::Number>()->Value(), jsg::JsValue(args[1])));
   });
 }
 
@@ -706,6 +718,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createDigestContext",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
+    "schedulerWait",
     "utf8Length",
     "encodeUtf8",
     "getPrivateSymbol",
@@ -770,6 +783,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateDigestContext),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
+    getMethod(js, SchedulerWait),
     getMethod(js, Utf8Length),
     getMethod(js, EncodeUtf8),
     getMethod(js, GetPrivateSymbol),
@@ -933,10 +947,13 @@ void requireImpl(const v8::FunctionCallbackInfo<v8::Value>& info, RequireScope s
       state.loading.insert(kj::str(normalized));
       KJ_DEFER(state.loading.eraseMatch(normalized));
 
-      // Create the module and exports objects for this script.
+      // Create the module and exports objects for this script. `exports` is an own data
+      // property of the module object: a script can load after user code has run, and neither
+      // creating the property, a script's assignment to it, nor the read below may reach an
+      // accessor that user code put on Object.prototype.
       auto moduleObj = js.obj();
       auto exportsObj = js.obj();
-      moduleObj.set(js, "exports"_kj, exportsObj);
+      moduleObj.createDataProperty(js, js.strIntern("exports"_kj), exportsObj);
 
       auto args = pseudoGlobalValues(js, state, moduleObj, exportsObj, scriptRequire);
 
@@ -1044,9 +1061,10 @@ jsg::JsRef<jsg::JsFunction> newRequireFunction(jsg::Lock& js, v8::FunctionCallba
 
 // Build a JS object with { flagName: true } entries for enabled compat flags.
 // Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
-// which yields false for unset flags.
+// which yields false for unset flags. The object has no prototype: scripts read flags after
+// user code has run, and an unset flag must not read as what user code put on Object.prototype.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
   auto dynamicFlags = capnp::toDynamic(flags);
 
   for (auto& entry: getCompatFlagFields()) {
@@ -1059,9 +1077,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 }
 
 // Build a JS object with { gateName: true } entries for enabled autogates.
-// Disabled autogates are omitted.
+// Disabled autogates are omitted. The object has no prototype, as the compat flags object.
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
-  auto obj = js.obj();
+  auto obj = js.objNoProto();
 
   for (util::AutogateKey key: util::getAutogateKeys()) {
     if (util::Autogate::isEnabled(key)) {

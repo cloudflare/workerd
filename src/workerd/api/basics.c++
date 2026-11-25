@@ -6,6 +6,7 @@
 
 #include "abort-bootstrap.h"
 #include "global-scope.h"
+#include "scheduler-bootstrap.h"
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -1484,11 +1485,18 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
 
 kj::Promise<void> Scheduler::wait(
     jsg::Lock& js, double delay, jsg::Optional<WaitOptions> maybeOptions) {
+  kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
   KJ_IF_SOME(options, maybeOptions) {
-    KJ_IF_SOME(s, options.signal) {
-      if (s->getAborted(js)) {
-        return js.exceptionToKj(s->getReason(js));
-      }
+    maybeSignal = kj::mv(options.signal);
+  }
+  return waitImpl(js, delay, kj::mv(maybeSignal));
+}
+
+kj::Promise<void> Scheduler::waitImpl(
+    jsg::Lock& js, double delay, kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal) {
+  KJ_IF_SOME(s, maybeSignal) {
+    if (s->getAborted(js)) {
+      return js.exceptionToKj(s->getReason(js));
     }
   }
 
@@ -1507,19 +1515,32 @@ kj::Promise<void> Scheduler::wait(
 
   auto promise = kj::mv(paf.promise);
 
-  KJ_IF_SOME(options, maybeOptions) {
-    KJ_IF_SOME(s, options.signal) {
-      promise = s->wrap(js, kj::mv(promise));
-      // When the signal aborts and the canceler drops the promise, clear the underlying
-      // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
-      // already fired, so this is safe on the normal completion path as well.
-      promise = promise.attach(kj::defer([timeoutId, &ioContext = IoContext::current()]() {
-        ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
-      }));
-    }
+  KJ_IF_SOME(s, maybeSignal) {
+    promise = s->wrap(js, kj::mv(promise));
+    // When the signal aborts and the canceler drops the promise, clear the underlying
+    // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
+    // already fired, so this is safe on the normal completion path as well.
+    promise = promise.attach(kj::defer([timeoutId, &ioContext = IoContext::current()]() {
+      ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
+    }));
   }
 
   return kj::mv(promise);
+}
+
+jsg::JsValue schedulerWaitForBootstrap(jsg::Lock& js, double delay, jsg::JsValue signal) {
+  kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+  if (!signal.isUndefined()) {
+    // AbortSignal is registered in EW_BASICS_ISOLATE_TYPES.
+    auto& signalHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<AbortSignal>>(),
+        "AbortSignal is missing from the isolate type list");
+    maybeSignal = JSG_REQUIRE_NONNULL(signalHandler.tryUnwrap(js, signal), TypeError,
+        "Incorrect type for the 'signal' field on 'WaitOptions': the provided value is not of "
+        "type 'AbortSignal'.");
+  }
+  // As the type wrapper returns a method's kj::Promise (io/promise-wrapper.h).
+  auto promise = Scheduler::waitImpl(js, delay, kj::mv(maybeSignal));
+  return jsg::JsValue(IoContext::current().awaitIoLegacy(js, kj::mv(promise)).consumeHandle(js));
 }
 
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
