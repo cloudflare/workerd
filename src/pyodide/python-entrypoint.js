@@ -11,53 +11,20 @@ import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
 } from 'cloudflare:workers';
+import { initPython } from 'pyodide:python-entrypoint-helper';
 
-// The creation of `pythonDurableObjects` et al. has to be done here because
-// python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
-// (which are also builtins). As a workaround we call `makeEntrypointClass` here and pass it the
-// appropriate class.
-import {
-  setDoAnImport,
-  initPython,
-  createImportProxy,
-} from 'pyodide:python-entrypoint-helper';
-
-// Function to dynamically import JavaScript modules from Python
-// We need the import "call" to occur in this file since it is the only file that is part of the
-// user bundle and can see BUILTIN modules and not INTERNAL modules. If we put the import in any
-// other file, it would be possible to import INTERNAL modules (not good) and not possible to import
-// USER or BUILTIN modules.
-async function doAnImport(name) {
-  const mod = await import(name);
-  return createImportProxy(name, mod);
-}
-
-// Pass the import function to the helper
-await setDoAnImport(doAnImport, WorkerEntrypoint);
-
-// Initialise Python only after the import function has been set above.
-const { handlers, pythonEntrypointClasses, makeEntrypointClass } =
-  await initPython();
-
-function makeEntrypointClassFromNames(classes, baseClass) {
-  return classes.map(({ className, methodNames }) => [
-    className,
-    makeEntrypointClass(className, baseClass, methodNames),
-  ]);
-}
-
-const entrypoints = {
-  durableObjects: DurableObject,
-  workerEntrypoints: WorkerEntrypoint,
-  workflowEntrypoints: WorkflowEntrypoint,
-};
-
-const pythonEntrypoints = Object.fromEntries(
-  Object.entries(entrypoints).flatMap(([key, baseClass]) => {
-    const classes = pythonEntrypointClasses[key];
-    return makeEntrypointClassFromNames(classes, baseClass);
-  })
-);
+const { defaultExport, pythonEntrypoints } = await initPython({
+  // Python imports JavaScript modules through this function. The import() has to happen in this
+  // file: it is the only one in the user bundle, so it is the only one that can import USER and
+  // BUILTIN modules and not INTERNAL ones.
+  importModule: (name) => import(name),
+  // python-entrypoint-helper is a BUILTIN, so it cannot import these (also BUILTIN) classes.
+  baseClasses: {
+    durableObjects: DurableObject,
+    workerEntrypoints: WorkerEntrypoint,
+    workflowEntrypoints: WorkflowEntrypoint,
+  },
+});
 
 export { pythonEntrypoints };
-export default 'default' in handlers ? handlers['default'] : handlers;
+export default defaultExport;
