@@ -104,12 +104,24 @@ class _ListHandler(logging.Handler):
     def __init__(self):
         super().__init__()
         self.records: list[logging.LogRecord] = []
+        self.error_logged = asyncio.Event()
 
     def emit(self, record):
         self.records.append(record)
+        if record.levelno >= logging.ERROR:
+            self.error_logged.set()
 
     def clear(self):
         self.records.clear()
+        self.error_logged.clear()
+
+    async def wait_for_error(self):
+        """Wait until an ERROR record has been emitted. On timeout, the caller's assertions
+        report what was logged instead."""
+        try:
+            await asyncio.wait_for(self.error_logged.wait(), timeout=10)
+        except TimeoutError:
+            pass
 
 
 def _install_handler():
@@ -163,10 +175,8 @@ async def test_error_after_response_is_logged(env):
         response = await asgi.fetch(_ErrorAfterResponseApp(), req, env)
         assert response.status == 200, f"Expected 200, got {response.status}"
 
-        # Let the event loop run
-        await asyncio.sleep(20)
-
         # The error should have been logged, not swallowed.
+        await handler.wait_for_error()
         error_records = [r for r in handler.records if r.levelno >= logging.ERROR]
         assert len(error_records) > 0, (
             "Expected at least one ERROR log record for post-response exception, "
@@ -195,8 +205,8 @@ async def test_background_task_error_is_logged():
 
         asgi.run_in_background(failing_task())
 
-        # Let the event loop run
-        await asyncio.sleep(20)
+        # The task's done callback logs the failure once the event loop runs it.
+        await handler.wait_for_error()
 
         error_records = [r for r in handler.records if r.levelno >= logging.ERROR]
         assert len(error_records) > 0, (

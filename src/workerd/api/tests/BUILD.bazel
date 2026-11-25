@@ -5,6 +5,7 @@ load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "PYODIDE_BUNDLE_ARGS", "PYODIDE_BUNDLE_DATA")
 
 wasm_tools_parse(
     name = "compact-imports.wasm",
@@ -1884,21 +1885,27 @@ wd_test(
     data = ["worker-loader-test.js"],
 )
 
-# Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/pyodide/tests.
-wd_test(
+# Each case starts Pyodide from scratch in a new isolate, which takes several seconds in debug and
+# sanitizer builds, so each case runs as a test of its own, selected by `workerd test`'s filter.
+# Tagged `python` like the tests under //src/pyodide/tests.
+[wd_test(
+    name = "worker-loader-python-test-" + case,
     size = "enormous",
     src = "worker-loader-python-test.wd-test",
-    args = ["--experimental"],
-    data = ["worker-loader-python-test.js"],
+    args = ["--experimental"] + PYODIDE_BUNDLE_ARGS + ["worker-loader-python-test:" + case],
+    data = ["worker-loader-python-test.js"] + PYODIDE_BUNDLE_DATA,
+    # The cases share one source file, which needs linting once.
+    lint = case == "pythonBasics",
     tags = [
-        "cpu:2",
         "no-coverage",
         "python",
-        # Fetches Pyodide.
-        "requires-network",
     ],
-)
+) for case in [
+    "pythonBasics",
+    "pythonArbitraryModuleExtensions",
+    "pythonImplicitFlagsRespectCompatDate",
+    "minimalPythonPackage",
+]]
 
 wd_test(
     src = "worker-loader-wasm-test.wd-test",
