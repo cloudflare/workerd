@@ -1,7 +1,8 @@
 // Ambient type declarations for per-isolate bootstrap scripts.
 //
-// These pseudo-globals are injected via V8 context extras at runtime.
-// They are NOT on globalThis and are NOT accessible to user code.
+// These pseudo-globals are the parameters of each script's function, listed
+// in jsg::BOOTSTRAP_FUNCTION_PARAMS (src/workerd/jsg/modules.capnp). They are
+// NOT on globalThis and are NOT accessible to user code.
 
 /**
  * Synchronously load a per-isolate script by specifier.

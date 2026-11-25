@@ -814,49 +814,39 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
 }
 
-// The pseudo-global variables that scripts access directly (e.g. `require`, `compatFlags`,
-// `primordials`). Each script is compiled as a function taking them as parameters, in this
-// order. gen-compile-cache (src/rust/gen-compile-cache/cxx-bridge.c++) compiles the scripts
-// with the same parameter list, which must match for V8 to accept the cache.
-//
-// They are parameters rather than the properties of a context extension object because an
-// extension object makes V8 resolve every free variable in the script (`undefined` included)
-// with a dynamic lookup slot: a runtime call that walks the context chain on every access,
-// even in optimized code.
-constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
-  "require"_kj,
-  "compatFlags"_kj,
-  "autogates"_kj,
-  "module"_kj,
-  "exports"_kj,
-  "primordials"_kj,
-  "utils"_kj,
-};
-constexpr size_t PSEUDO_GLOBAL_COUNT = kj::size(PSEUDO_GLOBAL_NAMES);
-
-// The values of PSEUDO_GLOBAL_NAMES for a script, in the same order.
+// The values of the pseudo-globals (jsg::BOOTSTRAP_FUNCTION_PARAMS) for a script, in order.
 v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
     BootstrapState& state,
     const jsg::JsObject& moduleObj,
     const jsg::JsObject& exportsObj,
     kj::Maybe<jsg::JsFunction> require) {
-  v8::LocalVector<v8::Value> values(js.v8Isolate,
-      {
-        js.v8Undefined(),  // require
-        v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
-        v8::Local<v8::Value>(moduleObj),
-        v8::Local<v8::Value>(exportsObj),
-        js.v8Undefined(),  // primordials
-        v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
-      });
-  KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
-
-  KJ_IF_SOME(fn, require) {
-    values[0] = v8::Local<v8::Value>(fn);
-  }
-  KJ_IF_SOME(primordials, state.primordials) {
-    values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+  auto names = *jsg::BOOTSTRAP_FUNCTION_PARAMS;
+  v8::LocalVector<v8::Value> values(js.v8Isolate);
+  values.reserve(names.size());
+  for (const auto& name: names) {
+    v8::Local<v8::Value> value = js.v8Undefined();
+    if (name == "require"_kj) {
+      KJ_IF_SOME(fn, require) {
+        value = fn;
+      }
+    } else if (name == "compatFlags"_kj) {
+      value = state.compatFlagsObj.getHandle(js);
+    } else if (name == "autogates"_kj) {
+      value = state.autogatesObj.getHandle(js);
+    } else if (name == "module"_kj) {
+      value = moduleObj;
+    } else if (name == "exports"_kj) {
+      value = exportsObj;
+    } else if (name == "primordials"_kj) {
+      KJ_IF_SOME(primordials, state.primordials) {
+        value = primordials.getHandle(js);
+      }
+    } else if (name == "utils"_kj) {
+      value = state.utilsObj.getHandle(js);
+    } else {
+      KJ_FAIL_ASSERT("unknown per-isolate bootstrap pseudo-global", name);
+    }
+    values.push_back(value);
   }
   return values;
 }
@@ -996,12 +986,14 @@ void requireImpl(const v8::FunctionCallbackInfo<v8::Value>& info, RequireScope s
         options = v8::ScriptCompiler::kConsumeCodeCache;
       }
 
-      v8::Local<v8::String> params[PSEUDO_GLOBAL_COUNT];
-      for (auto i: kj::indices(params)) {
-        params[i] = js.strIntern(PSEUDO_GLOBAL_NAMES[i]);
+      auto paramNames = *jsg::BOOTSTRAP_FUNCTION_PARAMS;
+      v8::LocalVector<v8::String> params(js.v8Isolate);
+      params.reserve(paramNames.size());
+      for (const auto& name: paramNames) {
+        params.push_back(js.strIntern(name));
       }
       auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
-          js.v8Context(), &compilerSource, PSEUDO_GLOBAL_COUNT, params, 0, nullptr, options)));
+          js.v8Context(), &compilerSource, params.size(), params.data(), 0, nullptr, options)));
 
       if (options == v8::ScriptCompiler::kConsumeCodeCache) {
         if (compilerSource.GetCachedData()->rejected) {
