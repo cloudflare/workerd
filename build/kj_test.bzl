@@ -11,12 +11,16 @@ def kj_test(
         size = "medium",
         target_compatible_with = None,
         generate_all_autogates_variant = True,
+        shard_count = None,
         **kwargs):
     """Defines a KJ test as `name@` and, unless generate_all_autogates_variant is False, as
     `name@all-autogates`, which runs with every autogate on.
 
     Pass generate_all_autogates_variant = False for a test that sets the autogates itself, where
     the second variant would only repeat the first.
+
+    `shard_count` is Bazel's, for each variant. The KJ test runner doesn't shard, so a test with
+    shards splits its own work by TEST_SHARD_INDEX and TEST_TOTAL_SHARDS.
     """
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -44,6 +48,7 @@ def kj_test(
         binary = binary_name,
         data = data,
         size = size,
+        shard_count = shard_count,
         **test_attrs(tags, size, target_compatible_with)
     )
 
@@ -57,6 +62,7 @@ def kj_test(
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         # Tag with no-coverage to reduce coverage CI time
         size = size,
+        shard_count = shard_count,
         **test_attrs(tags + ["no-coverage"], size, target_compatible_with)
     )
 

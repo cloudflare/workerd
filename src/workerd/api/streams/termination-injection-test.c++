@@ -26,6 +26,8 @@
 #include <kj/thread.h>
 
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 
 namespace workerd::api {
 namespace {
@@ -491,6 +493,41 @@ RunResult runScenario(TestFixture& fixture, uint index, uint64_t terminateAt) {
   return result;
 }
 
+// The part of the terminated runs this process makes. Bazel runs the test in TEST_TOTAL_SHARDS
+// processes (shard_count in BUILD.bazel), and the KJ test runner doesn't shard, so each process
+// makes every TEST_TOTAL_SHARDS-th terminated run, counted across scenarios, from
+// TEST_SHARD_INDEX. Every shard makes the baseline runs, which count the injection points.
+struct Shard {
+  uint64_t index = 0;
+  uint64_t count = 1;
+
+  static Shard fromEnv() {
+    Shard shard;
+    auto parse = [](const char* name) -> kj::Maybe<uint64_t> {
+      if (const char* value = getenv(name)) {
+        return KJ_REQUIRE_NONNULL(kj::StringPtr(value).tryParseAs<uint64_t>(), name, value);
+      }
+      return kj::none;
+    };
+    KJ_IF_SOME(count, parse("TEST_TOTAL_SHARDS")) {
+      shard.count = count;
+      shard.index = KJ_REQUIRE_NONNULL(parse("TEST_SHARD_INDEX"));
+      KJ_REQUIRE(shard.count > 0 && shard.index < shard.count, shard.index, shard.count);
+    }
+    // Tells Bazel that the test shards.
+    if (const char* status = getenv("TEST_SHARD_STATUS_FILE")) {
+      FILE* file = fopen(status, "w");
+      KJ_REQUIRE(file != nullptr, "can't write TEST_SHARD_STATUS_FILE", status);
+      fclose(file);
+    }
+    return shard;
+  }
+
+  bool owns(uint64_t run) const {
+    return run % count == index;
+  }
+};
+
 KJ_TEST("streams survive termination at every call into JavaScript") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
@@ -499,6 +536,8 @@ KJ_TEST("streams survive termination at every call into JavaScript") {
       false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
 
   kj::Vector<kj::String> failures;
+  auto shard = Shard::fromEnv();
+  uint64_t terminatedRuns = 0;
   uint scenarioCount = 0;
   // Set TIJ_FILTER to a scenario name to run only that scenario.
   kj::Maybe<kj::StringPtr> filterName;
@@ -535,6 +574,7 @@ KJ_TEST("streams survive termination at every call into JavaScript") {
     KJ_LOG(INFO, "scenario", name, baseline.calls, points);
 
     for (uint64_t at = 1; at <= points; ++at) {
+      if (!shard.owns(terminatedRuns++)) continue;
       KJ_LOG(INFO, "terminating", name, at);
       auto run = runScenario(fixture, index, at);
       for (auto& f: run.failures) {

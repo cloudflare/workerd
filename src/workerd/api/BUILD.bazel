@@ -716,6 +716,7 @@ kj_test(
     # Each injection point drains microtasks and forces a full GC, including under ASan.
     size = "large",
     src = "streams/termination-injection-test.c++",
+    shard_count = 4,
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:promise-wrapper",
