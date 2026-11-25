@@ -24,6 +24,9 @@ const seen = [];
 // What this isolate observed of the request with a marker, by marker.
 const notes = new Map();
 
+// The holds of this isolate that a `/release` can end, by their ids: what ends each.
+const holds = new Map();
+
 function note(marker, what) {
   if (!notes.has(marker)) notes.set(marker, []);
   notes.get(marker).push(what);
@@ -145,19 +148,33 @@ export default {
         );
 
       case '/hold': {
-        // The head goes out at once and the body ends after `ms` milliseconds: until then the
-        // request is in flight on this thread.
+        // The head goes out at once and the body ends after `ms` milliseconds, or when this
+        // isolate gets a `/release` of the hold's `id`: until then the request is in flight
+        // on this thread.
         const ms = Number(query.get('ms'));
+        const id = query.get('id');
         const body = new ReadableStream(
           {
             async pull(controller) {
-              await scheduler.wait(ms);
+              const released = new Promise((resolve) => holds.set(id, resolve));
+              await Promise.race([scheduler.wait(ms), released]);
+              holds.delete(id);
               controller.close();
             },
           },
           { highWaterMark: 0 }
         );
         return new Response(body, { headers });
+      }
+
+      case '/release': {
+        // Ends the hold `id` of this isolate, if it has it.
+        const release = holds.get(query.get('id'));
+        release?.();
+        return Response.json(
+          { front, released: release !== undefined },
+          { headers }
+        );
       }
 
       case '/read':

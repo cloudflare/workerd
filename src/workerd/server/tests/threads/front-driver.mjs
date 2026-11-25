@@ -56,9 +56,6 @@ const SIGTERM_DRAINS = process.platform !== 'win32';
 // How the server ends on SIGTERM, as `[code, signal]`.
 const SIGTERM_EXIT =
   process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
-// The cases on several threads reset connections and read the server's memory use in ways that
-// have not been tried on Windows.
-const SEVERAL_THREADS = process.platform !== 'win32';
 // The resident memory of a process can be read on Linux. Under a sanitizer it says little of
 // what the server holds: freed memory stays in quarantine, and every byte touched has a shadow.
 const RSS =
@@ -433,16 +430,18 @@ function away({ first, replicas }) {
   return replicas[0] ?? first;
 }
 
-// A request to `target`, a TCP socket without TLS, that the isolate `thread` holds in flight for `ms` milliseconds (any
-// isolate if undefined), once its head is here: `{ front, release }`, where `release()` ends it
-// by hanging up.
+// A request to `target`, a TCP socket without TLS, that the isolate `thread` holds in flight
+// for `ms` milliseconds (any isolate if undefined), once its head is here: `{ front, release }`,
+// where `release()` ends it, by hanging up where the server notices that, and elsewhere by
+// asking the isolate to end it.
 function hold(target, thread, ms = 20_000) {
   return steer(
     thread,
     (headers) =>
       new Promise((resolve, reject) => {
+        const id = unique('hold');
         const req = http.request(
-          options(target, `/hold?ms=${ms}`, { headers })
+          options(target, `/hold?ms=${ms}&id=${id}`, { headers })
         );
         req.on('error', reject);
         req.on('response', (res) => {
@@ -459,12 +458,17 @@ function hold(target, thread, ms = 20_000) {
           }
           res.on('error', () => {});
           req.on('error', () => {});
+          const front = res.headers['x-front'];
           // A client that only half-closes is not gone while its request is in flight: the
-          // release resets the connection.
-          resolve({
-            front: res.headers['x-front'],
-            release: () => res.socket.resetAndDestroy(),
-          });
+          // release resets the connection. On Windows the server does not notice that while
+          // it neither reads from nor writes to the connection, so the isolate is told.
+          const release = async () => {
+            if (!SEES_RESETS) {
+              await get(target, `/release?id=${id}`, front);
+            }
+            res.socket.resetAndDestroy();
+          };
+          resolve({ front, release });
         });
         req.end();
       }),
@@ -503,7 +507,7 @@ async function oneConnection(server, target = server.http) {
     }
   } finally {
     agent.destroy();
-    for (const { release } of holds) release();
+    await Promise.all(holds.map(({ release }) => release()));
   }
   assert.strictEqual(sockets.size, 1, 'connections the requests went over');
   assert.strictEqual(
@@ -1192,699 +1196,682 @@ function observe(threads, what, value) {
 for (const threads of [1, THREADS]) {
   const on = `on ${threads} thread${threads > 1 ? 's' : ''}`;
   const several = threads > 1;
-  describe(
-    on,
-    {
-      skip:
-        several &&
-        !SEVERAL_THREADS &&
-        'the cases on several threads have not been tried on Windows',
-    },
-    () => {
-      const shared = sharedServer({ threads });
+  describe(on, () => {
+    const shared = sharedServer({ threads });
 
-      // -------------------------------------------------------------------------------
-      // Dispatch
+    // -------------------------------------------------------------------------------
+    // Dispatch
 
-      test(`requests on one keep-alive connection are served by different threads ${on}`, async () => {
-        const fronts = await oneConnection(shared.server);
-        assert.strictEqual(fronts.length, threads);
-      });
+    test(`requests on one keep-alive connection are served by different threads ${on}`, async () => {
+      const fronts = await oneConnection(shared.server);
+      assert.strictEqual(fronts.length, threads);
+    });
 
-      test(
-        `a busy thread does not delay requests other threads could take ${on}`,
-        { skip: !several && 'one thread has no other' },
-        async () => {
-          const { server } = shared;
-          // Requests sent while `spinners` spin are served by the other threads, each promptly,
-          // all before the first spinner ends.
-          const meanwhile = async (spinners) => {
-            const busy = new Set(spinners.map((s) => s.front));
-            const answers = [];
-            for (let i = 0; i < 8; i++) answers.push(await timedGet(server));
-            answers.push(
-              ...(await Promise.all(
-                Array.from({ length: 16 }, () => timedGet(server))
-              ))
-            );
-            const spun = await Promise.all(spinners.map((s) => s.done));
-            for (const [i, { start, end, endAt }] of spun.entries()) {
-              // The head came while the thread had the spin ahead of it.
-              assert(
-                endAt - spinners[i].headAt >= end - start - 500,
-                'a spinner answered late'
-              );
-            }
-            const firstEnd = Math.min(...spun.map((s) => s.endAt));
-            for (const { front, took, at } of answers) {
-              assert(!busy.has(front), 'a busy thread served a request');
-              assert(took < 1000, `a request took ${took} ms`);
-              assert(at < firstEnd, 'a request was answered after a spin');
-            }
-            return new Set(answers.map((a) => a.front));
-          };
-
-          const one = await spin(server, 2000);
-          await meanwhile([one]);
-
-          // With three threads busy, the fourth serves everything.
-          const three = [];
-          for (let i = 0; i < threads - 1; i++) {
-            three.push(await spin(server, 2500));
-          }
-          assert.strictEqual(new Set(three.map((s) => s.front)).size, 3);
-          assert.strictEqual((await meanwhile(three)).size, 1);
-        }
-      );
-
-      test(
-        `with every thread busy, queued requests are served in arrival order by the first thread to free up ${on}`,
-        { skip: !several && 'one thread accepts only when it is free' },
-        async () => {
-          const { server } = shared;
-          // Every thread spins until a time chosen here, so that how long steering takes does
-          // not matter: the first spinner until `T`, the others from 1500 ms later on.
-          const T = Date.now() + 4000;
-          const spinners = [];
-          for (const after of [0, 1500, 1700, 1900]) {
-            spinners.push(await spin(server, { until: T + after }));
-          }
-          assert.strictEqual(new Set(spinners.map((s) => s.front)).size, 4);
-          const markers = Array.from({ length: 8 }, (_, n) =>
-            unique(`queued-${n}`)
-          );
-          const responses = [];
-          let lastSent;
-          for (const marker of markers) {
-            const socket = await connect(server.http.port);
-            const incoming = new Incoming(socket);
-            await write(
-              socket,
-              `GET /?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
-            );
-            lastSent = Date.now();
-            responses.push(
-              incoming.response().then((res) => {
-                socket.destroy();
-                return res;
-              })
-            );
-            // The front reads the request and queues it long before the next is sent, so the
-            // requests are queued in the order they are sent.
-            await scheduler.wait(50);
-          }
-          assert(
-            lastSent < T - 500,
-            `the last request was sent only ${T - lastSent} ms before the first spin ` +
-              'ended: the test is too slow to show anything'
-          );
-          const answers = await within(
-            Promise.all(responses),
-            20_000,
-            'the queued requests'
+    test(
+      `a busy thread does not delay requests other threads could take ${on}`,
+      { skip: !several && 'one thread has no other' },
+      async () => {
+        const { server } = shared;
+        // Requests sent while `spinners` spin are served by the other threads, each promptly,
+        // all before the first spinner ends.
+        const meanwhile = async (spinners) => {
+          const busy = new Set(spinners.map((s) => s.front));
+          const answers = [];
+          for (let i = 0; i < 8; i++) answers.push(await timedGet(server));
+          answers.push(
+            ...(await Promise.all(
+              Array.from({ length: 16 }, () => timedGet(server))
+            ))
           );
           const spun = await Promise.all(spinners.map((s) => s.done));
-          const firstFree = spinners[0].front;
-          for (const res of answers) {
-            assert.strictEqual(res.status, 200);
-            const { front, start } = JSON.parse(res.body);
-            assert.strictEqual(front, firstFree);
-            // It was queued until the first spinner was done.
+          for (const [i, { start, end, endAt }] of spun.entries()) {
+            // The head came while the thread had the spin ahead of it.
             assert(
-              start >= spun[0].end,
-              `a request started ${spun[0].end - start} ms before the first spin ended`
+              endAt - spinners[i].headAt >= end - start - 500,
+              'a spinner answered late'
             );
           }
-          const { seen } = await get(server.http, '/seen', firstFree);
-          assert.deepStrictEqual(
-            seen.filter((m) => markers.includes(m)),
-            markers
-          );
-        }
-      );
-
-      test(`pipelined requests on one connection are answered in order ${on}`, async () => {
-        const socket = await connect(shared.server.http.port);
-        try {
-          const incoming = new Incoming(socket);
-          const markers = [0, 1, 2].map((n) => unique(`pipelined-${n}`));
-          await write(
-            socket,
-            markers
-              .map(
-                (marker, n) =>
-                  `GET /sleep?ms=${n === 0 ? 500 : 0}&marker=${marker} HTTP/1.1\r\n` +
-                  'Host: localhost\r\n\r\n'
-              )
-              .join('')
-          );
-          for (const marker of markers) {
-            const res = await incoming.response();
-            assert.strictEqual(res.status, 200);
-            assert.strictEqual(JSON.parse(res.body).marker, marker);
+          const firstEnd = Math.min(...spun.map((s) => s.endAt));
+          for (const { front, took, at } of answers) {
+            assert(!busy.has(front), 'a busy thread served a request');
+            assert(took < 1000, `a request took ${took} ms`);
+            assert(at < firstEnd, 'a request was answered after a spin');
           }
-        } finally {
-          socket.destroy();
+          return new Set(answers.map((a) => a.front));
+        };
+
+        const one = await spin(server, 2000);
+        await meanwhile([one]);
+
+        // With three threads busy, the fourth serves everything.
+        const three = [];
+        for (let i = 0; i < threads - 1; i++) {
+          three.push(await spin(server, 2500));
         }
-      });
+        assert.strictEqual(new Set(three.map((s) => s.front)).size, 3);
+        assert.strictEqual((await meanwhile(three)).size, 1);
+      }
+    );
 
-      // -------------------------------------------------------------------------------
-      // Bodies
-
-      test(`a large upload streams through with backpressure and bounded memory ${on}`, async () => {
+    test(
+      `with every thread busy, queued requests are served in arrival order by the first thread to free up ${on}`,
+      { skip: !several && 'one thread accepts only when it is free' },
+      async () => {
         const { server } = shared;
-        if (several) {
-          // A quarter of a gigabyte at full speed, which costs too long to run twice.
-          const size = 256 * MiB;
-          const fast = await upload(server, { size });
-          assert.strictEqual(fast.consumed, size);
-          if (RSS)
-            assert(fast.rssGrowth < 150 * MiB, `RSS grew ${fast.rssGrowth}`);
+        // Every thread spins until a time chosen here, so that how long steering takes does
+        // not matter: the first spinner until `T`, the others from 1500 ms later on.
+        const T = Date.now() + 4000;
+        const spinners = [];
+        for (const after of [0, 1500, 1700, 1900]) {
+          spinners.push(await spin(server, { until: T + after }));
         }
-
-        // The Worker reads the first 32 MiB at 8 MiB a second.
-        const slow = await upload(server, {
-          size: 48 * MiB,
-          slow: 32 * MiB,
-          rate: 8 * MiB,
-        });
-        assert.strictEqual(slow.consumed, 48 * MiB);
-        assert(slow.ahead.length >= 20, `${slow.ahead.length} samples`);
-        const ahead = Math.max(...slow.ahead);
-        console.log(`upload ahead ${on}: ${(ahead / MiB).toFixed(2)} MiB`);
-        // What the client can write ahead of what the Worker read is what the kernel's socket
-        // buffers hold plus what the server buffers. On one thread the loop reads the socket
-        // itself; on several the front reads it and hands the body to the loop a chunk at a
-        // time, so neither may hold more than a few chunks: the bytes ahead are those of one
-        // thread plus 4 MiB. Of that allowance the measurement takes up to 1.4 MiB (the ledger
-        // hears of the Worker's reads per MiB, and a sample 50 ms late is 0.4 MiB behind at
-        // 8 MiB a second), which leaves a few of the front's chunks. A side that buffered
-        // tens of MiB would also break the absolute bound, about three times the 6 MiB that
-        // the kernel's buffers of a connection over loopback take up on one thread on Linux.
-        assert(ahead < 20 * MiB, `the client wrote ${ahead} bytes ahead`);
-        const what = 'the bytes the client wrote ahead of a slow upload';
-        if (!several) {
-          observed.set(what, ahead);
-        } else if (observed.has(what)) {
-          const one = observed.get(what);
-          assert(
-            ahead <= one + 4 * MiB,
-            `the client wrote ${ahead} bytes ahead, ${one} on one thread`
-          );
-        }
-        if (RSS)
-          assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
-      });
-
-      test(
-        `a thread that reads a body without a pause serves what other threads ask of it ${on}`,
-        { skip: !several && 'one thread has no other' },
-        async () => {
-          const { server } = shared;
-          const threads = await threadsOf(server);
-          // The first thread reads 40 MiB in five seconds and runs JavaScript whenever it does
-          // not read. The front has the next chunk ready before the thread asks for it, so the
-          // thread always has something to do that it need not wait for.
-          const size = 40 * MiB;
-          const busy = await busyUpload(server, threads.first, {
-            size,
-            work: 125,
-          });
-          assert.strictEqual(busy.front, threads.first);
-          await scheduler.wait(500);
-          // Another thread asks the first for a value of the ledger, which lives there, and is
-          // answered long before the upload ends.
-          const asked = Date.now();
-          await get(server.http, '/ledger?key=nothing', away(threads));
-          const took = Date.now() - asked;
-          assert(took < 2500, `the ledger answered after ${took} ms`);
-          const { consumed } = await within(busy.done, 30_000, 'the upload');
-          assert.strictEqual(consumed, size);
-        }
-      );
-
-      test(`a large download streams to a slow client with bounded production and memory ${on}`, async () => {
-        const { server } = shared;
-        const slow = await download(server, 128 * MiB, 12);
-        const ahead = Math.max(...slow.ahead);
-        assert(ahead < 48 * MiB, `the Worker made ${ahead} bytes ahead`);
-        if (RSS)
-          assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
-        // A fast client gets every byte.
-        await download(server, 128 * MiB);
-      });
-
-      test(`the response head comes before the request body ends and both bodies flow at once ${on}`, async () => {
-        const req = http.request(
-          options(shared.server.http, '/echo', { method: 'POST' })
+        assert.strictEqual(new Set(spinners.map((s) => s.front)).size, 4);
+        const markers = Array.from({ length: 8 }, (_, n) =>
+          unique(`queued-${n}`)
         );
-        const res = await new Promise((resolve, reject) => {
-          req.on('error', reject);
-          req.on('response', resolve);
-          req.flushHeaders();
-        });
-        assert.strictEqual(res.statusCode, 200);
-        const received = [];
-        let size = 0;
-        let arrived;
-        res.on('data', (chunk) => {
-          received.push(chunk);
-          size += chunk.length;
-          arrived?.();
-        });
-        const ended = once(res, 'end');
-        const sent = [];
-        let total = 0;
-        for (let i = 0; i < 100; i++) {
-          const chunk = Buffer.from(`${i}:${'x'.repeat(1000)}\n`);
-          sent.push(chunk);
-          total += chunk.length;
-          req.write(chunk);
-          // The echo of this chunk arrives before the next is written.
-          while (size < total) {
-            await within(
-              new Promise((resolve) => (arrived = resolve)),
-              10_000,
-              `the echo of chunk ${i}`
-            );
-          }
-        }
-        req.end();
-        await within(ended, 10_000, 'the end of the echo');
-        assert(Buffer.concat(received).equals(Buffer.concat(sent)));
-      });
-
-      test(`Expect: 100-continue is answered when the Worker reads the body ${on}`, async () => {
-        const { server } = shared;
-        const head = (path) =>
-          `POST ${path} HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\n` +
-          'Content-Length: 11\r\n\r\n';
-
-        // The Worker reads the body before it answers: the client is told to send it.
-        const reading = await connect(server.http.port);
-        try {
-          const incoming = new Incoming(reading);
-          reading.write(head('/read'));
-          assert.strictEqual((await incoming.head()).status, 100);
-          reading.write('hello world');
-          const res = await incoming.response();
-          assert.strictEqual(res.status, 200);
-          assert.strictEqual(res.body.toString(), 'hello world');
-        } finally {
-          reading.destroy();
-        }
-
-        // The Worker answers without reading it: no 100, and the connection closes after the
-        // response, the body never sent.
-        const ignoring = await connect(server.http.port);
-        try {
-          const incoming = new Incoming(ignoring);
-          ignoring.write(head('/ignore'));
-          const res = await incoming.response();
-          assert.strictEqual(res.status, 200);
-          assert.match(JSON.parse(res.body).front, UUID);
-          assert.strictEqual((await incoming.rest()).length, 0);
-        } finally {
-          ignoring.destroy();
-        }
-      });
-
-      // -------------------------------------------------------------------------------
-      // Cancellation and failure
-
-      test(
-        `a client that resets before the head aborts request.signal ${on}`,
-        {
-          skip: !SEES_RESETS && 'Windows does not notice the reset',
-        },
-        async () => {
-          const { server } = shared;
-          const marker = unique('abort');
+        const responses = [];
+        let lastSent;
+        for (const marker of markers) {
           const socket = await connect(server.http.port);
+          const incoming = new Incoming(socket);
           await write(
             socket,
-            `GET /wait?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
+            `GET /?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
           );
-          const front = await ledgerValue(server, `arrived:${marker}`);
-          socket.resetAndDestroy();
-          await notesOf(server, front, marker, (notes) =>
-            notes.includes('aborted')
+          lastSent = Date.now();
+          responses.push(
+            incoming.response().then((res) => {
+              socket.destroy();
+              return res;
+            })
           );
-          await until(
-            () => server.log.includes(`front-test: ${marker} aborted`),
-            5000,
-            'the log line of the abort'
-          );
+          // The front reads the request and queues it long before the next is sent, so the
+          // requests are queued in the order they are sent.
+          await scheduler.wait(50);
         }
-      );
-
-      test(
-        `a queued request whose client resets never reaches a Worker ${on}`,
-        { skip: !several && 'one thread has no queue' },
-        async () => {
-          const { server } = shared;
-          const { all } = await threadsOf(server);
-          const spinners = [];
-          for (let i = 0; i < threads; i++) {
-            spinners.push(await spin(server, 1500));
-          }
-          assert.strictEqual(
-            new Set(spinners.map((s) => s.front)).size,
-            threads
-          );
-          const reset = unique('reset');
-          const kept = unique('kept');
-          const sockets = [];
-          for (const marker of [reset, kept]) {
-            const socket = await connect(server.http.port);
-            sockets.push(socket);
-            await write(
-              socket,
-              `GET /?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
-            );
-          }
-          const incoming = new Incoming(sockets[1]);
-          // The front reads both requests and queues them.
-          await scheduler.wait(100);
-          sockets[0].resetAndDestroy();
-          const resetAt = Date.now();
-          const res = await within(
-            incoming.response(),
-            20_000,
-            'the kept request'
-          );
-          sockets[1].destroy();
+        assert(
+          lastSent < T - 500,
+          `the last request was sent only ${T - lastSent} ms before the first spin ` +
+            'ended: the test is too slow to show anything'
+        );
+        const answers = await within(
+          Promise.all(responses),
+          20_000,
+          'the queued requests'
+        );
+        const spun = await Promise.all(spinners.map((s) => s.done));
+        const firstFree = spinners[0].front;
+        for (const res of answers) {
           assert.strictEqual(res.status, 200);
-          const spun = await Promise.all(spinners.map((s) => s.done));
-          assert(resetAt < Math.min(...spun.map((s) => s.end)));
-          const seen = [];
-          for (const front of all) {
-            seen.push(...(await get(server.http, '/seen', front)).seen);
-          }
-          assert(seen.includes(kept), 'the kept request was not served');
-          assert(!seen.includes(reset), 'the reset request was served');
+          const { front, start } = JSON.parse(res.body);
+          assert.strictEqual(front, firstFree);
+          // It was queued until the first spinner was done.
+          assert(
+            start >= spun[0].end,
+            `a request started ${spun[0].end - start} ms before the first spin ended`
+          );
         }
-      );
+        const { seen } = await get(server.http, '/seen', firstFree);
+        assert.deepStrictEqual(
+          seen.filter((m) => markers.includes(m)),
+          markers
+        );
+      }
+    );
 
-      test(`a client that resets in the middle of the bodies cancels the Worker's streams ${on}`, async () => {
-        const { server } = shared;
-        const marker = unique('mid-body');
-        const socket = await connect(server.http.port);
+    test(`pipelined requests on one connection are answered in order ${on}`, async () => {
+      const socket = await connect(shared.server.http.port);
+      try {
         const incoming = new Incoming(socket);
+        const markers = [0, 1, 2].map((n) => unique(`pipelined-${n}`));
         await write(
           socket,
-          `POST /stream-echo?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n` +
-            'Transfer-Encoding: chunked\r\n\r\n10\r\nthe first chunk\n\r\n'
+          markers
+            .map(
+              (marker, n) =>
+                `GET /sleep?ms=${n === 0 ? 500 : 0}&marker=${marker} HTTP/1.1\r\n` +
+                'Host: localhost\r\n\r\n'
+            )
+            .join('')
+        );
+        for (const marker of markers) {
+          const res = await incoming.response();
+          assert.strictEqual(res.status, 200);
+          assert.strictEqual(JSON.parse(res.body).marker, marker);
+        }
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    // -------------------------------------------------------------------------------
+    // Bodies
+
+    test(`a large upload streams through with backpressure and bounded memory ${on}`, async () => {
+      const { server } = shared;
+      if (several) {
+        // A quarter of a gigabyte at full speed, which costs too long to run twice.
+        const size = 256 * MiB;
+        const fast = await upload(server, { size });
+        assert.strictEqual(fast.consumed, size);
+        if (RSS)
+          assert(fast.rssGrowth < 150 * MiB, `RSS grew ${fast.rssGrowth}`);
+      }
+
+      // The Worker reads the first 32 MiB at 8 MiB a second.
+      const slow = await upload(server, {
+        size: 48 * MiB,
+        slow: 32 * MiB,
+        rate: 8 * MiB,
+      });
+      assert.strictEqual(slow.consumed, 48 * MiB);
+      assert(slow.ahead.length >= 20, `${slow.ahead.length} samples`);
+      const ahead = Math.max(...slow.ahead);
+      console.log(`upload ahead ${on}: ${(ahead / MiB).toFixed(2)} MiB`);
+      // What the client can write ahead of what the Worker read is what the kernel's socket
+      // buffers hold plus what the server buffers. On one thread the loop reads the socket
+      // itself; on several the front reads it and hands the body to the loop a chunk at a
+      // time, so neither may hold more than a few chunks: the bytes ahead are those of one
+      // thread plus 4 MiB. Of that allowance the measurement takes up to 1.4 MiB (the ledger
+      // hears of the Worker's reads per MiB, and a sample 50 ms late is 0.4 MiB behind at
+      // 8 MiB a second), which leaves a few of the front's chunks. A side that buffered
+      // tens of MiB would also break the absolute bound, about three times the 6 MiB that
+      // the kernel's buffers of a connection over loopback take up on one thread on Linux.
+      assert(ahead < 20 * MiB, `the client wrote ${ahead} bytes ahead`);
+      const what = 'the bytes the client wrote ahead of a slow upload';
+      if (!several) {
+        observed.set(what, ahead);
+      } else if (observed.has(what)) {
+        const one = observed.get(what);
+        assert(
+          ahead <= one + 4 * MiB,
+          `the client wrote ${ahead} bytes ahead, ${one} on one thread`
+        );
+      }
+      if (RSS) assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
+    });
+
+    test(
+      `a thread that reads a body without a pause serves what other threads ask of it ${on}`,
+      { skip: !several && 'one thread has no other' },
+      async () => {
+        const { server } = shared;
+        const threads = await threadsOf(server);
+        // The first thread reads 40 MiB in five seconds and runs JavaScript whenever it does
+        // not read. The front has the next chunk ready before the thread asks for it, so the
+        // thread always has something to do that it need not wait for.
+        const size = 40 * MiB;
+        const busy = await busyUpload(server, threads.first, {
+          size,
+          work: 125,
+        });
+        assert.strictEqual(busy.front, threads.first);
+        await scheduler.wait(500);
+        // Another thread asks the first for a value of the ledger, which lives there, and is
+        // answered long before the upload ends.
+        const asked = Date.now();
+        await get(server.http, '/ledger?key=nothing', away(threads));
+        const took = Date.now() - asked;
+        assert(took < 2500, `the ledger answered after ${took} ms`);
+        const { consumed } = await within(busy.done, 30_000, 'the upload');
+        assert.strictEqual(consumed, size);
+      }
+    );
+
+    test(`a large download streams to a slow client with bounded production and memory ${on}`, async () => {
+      const { server } = shared;
+      const slow = await download(server, 128 * MiB, 12);
+      const ahead = Math.max(...slow.ahead);
+      assert(ahead < 48 * MiB, `the Worker made ${ahead} bytes ahead`);
+      if (RSS) assert(slow.rssGrowth < 150 * MiB, `RSS grew ${slow.rssGrowth}`);
+      // A fast client gets every byte.
+      await download(server, 128 * MiB);
+    });
+
+    test(`the response head comes before the request body ends and both bodies flow at once ${on}`, async () => {
+      const req = http.request(
+        options(shared.server.http, '/echo', { method: 'POST' })
+      );
+      const res = await new Promise((resolve, reject) => {
+        req.on('error', reject);
+        req.on('response', resolve);
+        req.flushHeaders();
+      });
+      assert.strictEqual(res.statusCode, 200);
+      const received = [];
+      let size = 0;
+      let arrived;
+      res.on('data', (chunk) => {
+        received.push(chunk);
+        size += chunk.length;
+        arrived?.();
+      });
+      const ended = once(res, 'end');
+      const sent = [];
+      let total = 0;
+      for (let i = 0; i < 100; i++) {
+        const chunk = Buffer.from(`${i}:${'x'.repeat(1000)}\n`);
+        sent.push(chunk);
+        total += chunk.length;
+        req.write(chunk);
+        // The echo of this chunk arrives before the next is written.
+        while (size < total) {
+          await within(
+            new Promise((resolve) => (arrived = resolve)),
+            10_000,
+            `the echo of chunk ${i}`
+          );
+        }
+      }
+      req.end();
+      await within(ended, 10_000, 'the end of the echo');
+      assert(Buffer.concat(received).equals(Buffer.concat(sent)));
+    });
+
+    test(`Expect: 100-continue is answered when the Worker reads the body ${on}`, async () => {
+      const { server } = shared;
+      const head = (path) =>
+        `POST ${path} HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\n` +
+        'Content-Length: 11\r\n\r\n';
+
+      // The Worker reads the body before it answers: the client is told to send it.
+      const reading = await connect(server.http.port);
+      try {
+        const incoming = new Incoming(reading);
+        reading.write(head('/read'));
+        assert.strictEqual((await incoming.head()).status, 100);
+        reading.write('hello world');
+        const res = await incoming.response();
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(res.body.toString(), 'hello world');
+      } finally {
+        reading.destroy();
+      }
+
+      // The Worker answers without reading it: no 100, and the connection closes after the
+      // response, the body never sent.
+      const ignoring = await connect(server.http.port);
+      try {
+        const incoming = new Incoming(ignoring);
+        ignoring.write(head('/ignore'));
+        const res = await incoming.response();
+        assert.strictEqual(res.status, 200);
+        assert.match(JSON.parse(res.body).front, UUID);
+        assert.strictEqual((await incoming.rest()).length, 0);
+      } finally {
+        ignoring.destroy();
+      }
+    });
+
+    // -------------------------------------------------------------------------------
+    // Cancellation and failure
+
+    test(
+      `a client that resets before the head aborts request.signal ${on}`,
+      {
+        skip: !SEES_RESETS && 'Windows does not notice the reset',
+      },
+      async () => {
+        const { server } = shared;
+        const marker = unique('abort');
+        const socket = await connect(server.http.port);
+        await write(
+          socket,
+          `GET /wait?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
+        );
+        const front = await ledgerValue(server, `arrived:${marker}`);
+        socket.resetAndDestroy();
+        await notesOf(server, front, marker, (notes) =>
+          notes.includes('aborted')
+        );
+        await until(
+          () => server.log.includes(`front-test: ${marker} aborted`),
+          5000,
+          'the log line of the abort'
+        );
+      }
+    );
+
+    test(
+      `a queued request whose client resets never reaches a Worker ${on}`,
+      {
+        skip:
+          (!several && 'one thread has no queue') ||
+          (!SEES_RESETS && 'Windows does not notice the reset'),
+      },
+      async () => {
+        const { server } = shared;
+        const { all } = await threadsOf(server);
+        const spinners = [];
+        for (let i = 0; i < threads; i++) {
+          spinners.push(await spin(server, 1500));
+        }
+        assert.strictEqual(new Set(spinners.map((s) => s.front)).size, threads);
+        const reset = unique('reset');
+        const kept = unique('kept');
+        const sockets = [];
+        for (const marker of [reset, kept]) {
+          const socket = await connect(server.http.port);
+          sockets.push(socket);
+          await write(
+            socket,
+            `GET /?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n\r\n`
+          );
+        }
+        const incoming = new Incoming(sockets[1]);
+        // The front reads both requests and queues them.
+        await scheduler.wait(100);
+        sockets[0].resetAndDestroy();
+        const resetAt = Date.now();
+        const res = await within(
+          incoming.response(),
+          20_000,
+          'the kept request'
+        );
+        sockets[1].destroy();
+        assert.strictEqual(res.status, 200);
+        const spun = await Promise.all(spinners.map((s) => s.done));
+        assert(resetAt < Math.min(...spun.map((s) => s.end)));
+        const seen = [];
+        for (const front of all) {
+          seen.push(...(await get(server.http, '/seen', front)).seen);
+        }
+        assert(seen.includes(kept), 'the kept request was not served');
+        assert(!seen.includes(reset), 'the reset request was served');
+      }
+    );
+
+    test(`a client that resets in the middle of the bodies cancels the Worker's streams ${on}`, async () => {
+      const { server } = shared;
+      const marker = unique('mid-body');
+      const socket = await connect(server.http.port);
+      const incoming = new Incoming(socket);
+      await write(
+        socket,
+        `POST /stream-echo?marker=${marker} HTTP/1.1\r\nHost: localhost\r\n` +
+          'Transfer-Encoding: chunked\r\n\r\n10\r\nthe first chunk\n\r\n'
+      );
+      const head = await incoming.head();
+      assert.strictEqual(head.status, 200);
+      const front = head.headers['x-front'];
+      assert.strictEqual(await incoming.until('\r\n'), '10\r\n');
+      assert.strictEqual(
+        (await incoming.bytes(16)).toString(),
+        'the first chunk\n'
+      );
+      socket.resetAndDestroy();
+      // The Worker learns at once, in one of two ways. Its call is dropped: its response body
+      // is cancelled, and then `request.signal` aborts. That is what one thread always does,
+      // which sees the hang-up before anything else. Or the read of the request body that it
+      // waits for fails, and the call ends by that failure, so nothing is left to abort:
+      // on several threads the connection's end reaches the loop both as the end of the
+      // body it reads and as the drop of the call, and now and then the body comes first.
+      const cancelled = ['response cancelled: undefined', 'signal aborted'];
+      const failed = ['request body failed: Network connection lost.'];
+      const ended = (notes) =>
+        notes.includes('signal aborted') || notes.includes(failed[0]);
+      await notesOf(server, front, marker, ended, 5000);
+      // Nothing more follows either.
+      await scheduler.wait(300);
+      const notes = await notesOf(server, front, marker, ended);
+      if (several && notes[0] === failed[0]) {
+        assert.deepStrictEqual(notes, failed);
+      } else {
+        assert.deepStrictEqual(notes, cancelled);
+      }
+    });
+
+    test(`a Worker that throws before the head gets a bare 500 ${on}`, async () => {
+      const { server } = shared;
+      const marker = unique('throw');
+      const res = await send(server.http, `/throw?marker=${marker}`);
+      assert.strictEqual(res.status, 500);
+      assert.strictEqual(res.body.toString(), 'Internal Server Error');
+      assert.strictEqual(res.headers.connection, 'close');
+      await until(
+        () =>
+          server.log.includes(`front-test: ${marker} threw before the head`),
+        5000,
+        'the log line of the exception'
+      );
+      const line = server.log
+        .split('\n')
+        .find((line) => line.includes(`${marker} threw`));
+      assert.match(line, /Uncaught exception/);
+    });
+
+    for (const framing of ['length', 'chunked']) {
+      test(`a Worker that fails after the head leaves a truncated ${framing} response ${on}`, async () => {
+        const { server } = shared;
+        const marker = unique(framing);
+        const failed = await partial(
+          server.http,
+          `/fail-after-head?framing=${framing}&marker=${marker}`
+        );
+        await until(
+          () =>
+            server.log.includes(`front-test: ${marker} failed after the head`),
+          5000,
+          'the log line of the failure'
+        );
+        if (failed.status === null) {
+          // On several threads the head now and then (about one request in a thousand)
+          // does not reach the client before the body fails: the connection is then reset
+          // before any byte of the response.
+          assert(several, 'the connection was reset before the head');
+          assert.strictEqual(failed.bytes, 0, 'bytes before the reset');
+          return;
+        }
+        assert.strictEqual(failed.status, 200);
+        if (framing === 'length') {
+          assert.strictEqual(failed.headers['content-length'], '8192');
+        } else {
+          assert.strictEqual(failed.headers['transfer-encoding'], 'chunked');
+        }
+        assert(failed.received <= 4096, `${failed.received} bytes`);
+        assert.strictEqual(failed.complete, false, 'the response completed');
+      });
+    }
+
+    // -------------------------------------------------------------------------------
+    // Upgrades and other protocols
+
+    test(`a WebSocket echoes and closes from either end ${on}`, async () => {
+      const { server } = shared;
+      const thread = away(await threadsOf(server));
+      const open = () => connect(server.http.port);
+
+      const marker = unique('ws');
+      const ws = await webSocket(open, `/ws?marker=${marker}`, thread, threads);
+      assert.strictEqual(ws.headers['x-front'], thread);
+      await echoMessages(ws);
+      ws.close(4000, 'bye from the client');
+      assert.deepStrictEqual(await ws.next(), {
+        code: 4000,
+        reason: 'bye from the client',
+      });
+      await within(ws.closed, 5000, 'the end of the connection');
+      // A thread that got more than one attempt of the upgrade closed the others' at once.
+      const clientClose = (note) => note.code !== 1006;
+      const notes = await notesOf(server, thread, marker, (notes) =>
+        notes.some(clientClose)
+      );
+      assert.deepStrictEqual(notes.filter(clientClose), [
+        { code: 4000, reason: 'bye from the client' },
+      ]);
+
+      const closing = await webSocket(
+        open,
+        `/ws?marker=${unique('ws')}`,
+        thread,
+        threads
+      );
+      closing.sendText('close-me');
+      assert.deepStrictEqual(await closing.next(), {
+        code: 4001,
+        reason: 'bye from the worker',
+      });
+      closing.close(4001, '');
+      await within(closing.closed, 5000, 'the end of the connection');
+    });
+
+    test(`a hibernatable WebSocket reaches its object from any thread ${on}`, async () => {
+      // `threads-durable-test` has the object evicted while such a WebSocket stays open,
+      // and woken by its next message; this case has two threads hold one each.
+      const { server } = shared;
+      const { first, replicas } = await threadsOf(server);
+      const open = () => connect(server.http.port);
+      const name = unique('room');
+      const a = await webSocket(
+        open,
+        `/room?name=${name}`,
+        replicas[0] ?? first,
+        threads
+      );
+      a.sendText('one');
+      assert.deepStrictEqual(JSON.parse((await a.next()).text), {
+        echo: 'one',
+        isolate: first,
+        sockets: 1,
+      });
+      const b = await webSocket(
+        open,
+        `/room?name=${name}`,
+        replicas[1] ?? first,
+        threads
+      );
+      b.sendText('two');
+      assert.deepStrictEqual(JSON.parse((await b.next()).text), {
+        echo: 'two',
+        isolate: first,
+        sockets: 2,
+      });
+      a.sendText('three');
+      assert.deepStrictEqual(JSON.parse((await a.next()).text), {
+        echo: 'three',
+        isolate: first,
+        sockets: 2,
+      });
+      for (const ws of [a, b]) {
+        ws.close(1000, 'done');
+        assert.deepStrictEqual(await ws.next(), {
+          code: 1000,
+          reason: 'done',
+        });
+        ws.destroy();
+      }
+    });
+
+    test(`the connections of a tcp socket are connect() events on different threads ${on}`, async () => {
+      const { server } = shared;
+      const open = async () => {
+        const socket = await connect(server.ports.tcp);
+        return { socket, incoming: new Incoming(socket) };
+      };
+      // A connection whose handler runs keeps its thread from being the one the next
+      // connection goes to, unless that thread is still awake from it and takes the next
+      // itself: connections stay open until every thread serves one.
+      const sessions = [];
+      const fronts = new Set();
+      try {
+        for (let i = 0; i < TRIES && fronts.size < threads; i++) {
+          const session = await tcpSession(open);
+          sessions.push(session);
+          fronts.add(session.front);
+        }
+      } finally {
+        for (const session of sessions) await session.finish();
+      }
+      assert.strictEqual(fronts.size, threads, 'isolates that served');
+    });
+
+    test(`an HTTP CONNECT is tunneled to the connect() handler ${on}`, async () => {
+      const { server } = shared;
+      const open = async () => {
+        const socket = await connect(server.http.port);
+        const incoming = new Incoming(socket);
+        socket.write(
+          'CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n'
         );
         const head = await incoming.head();
         assert.strictEqual(head.status, 200);
-        const front = head.headers['x-front'];
-        assert.strictEqual(await incoming.until('\r\n'), '10\r\n');
-        assert.strictEqual(
-          (await incoming.bytes(16)).toString(),
-          'the first chunk\n'
-        );
-        socket.resetAndDestroy();
-        // The Worker learns at once, in one of two ways. Its call is dropped: its response body
-        // is cancelled, and then `request.signal` aborts. That is what one thread always does,
-        // which sees the hang-up before anything else. Or the read of the request body that it
-        // waits for fails, and the call ends by that failure, so nothing is left to abort:
-        // on several threads the connection's end reaches the loop both as the end of the
-        // body it reads and as the drop of the call, and now and then the body comes first.
-        const cancelled = ['response cancelled: undefined', 'signal aborted'];
-        const failed = ['request body failed: Network connection lost.'];
-        const ended = (notes) =>
-          notes.includes('signal aborted') || notes.includes(failed[0]);
-        await notesOf(server, front, marker, ended, 5000);
-        // Nothing more follows either.
-        await scheduler.wait(300);
-        const notes = await notesOf(server, front, marker, ended);
-        if (several && notes[0] === failed[0]) {
-          assert.deepStrictEqual(notes, failed);
-        } else {
-          assert.deepStrictEqual(notes, cancelled);
-        }
-      });
+        // What arrives past the head is the tunnel's.
+        return { socket, incoming };
+      };
+      await (await tcpSession(open)).finish();
+    });
 
-      test(`a Worker that throws before the head gets a bare 500 ${on}`, async () => {
-        const { server } = shared;
-        const marker = unique('throw');
-        const res = await send(server.http, `/throw?marker=${marker}`);
-        assert.strictEqual(res.status, 500);
-        assert.strictEqual(res.body.toString(), 'Internal Server Error');
-        assert.strictEqual(res.headers.connection, 'close');
-        await until(
-          () =>
-            server.log.includes(`front-test: ${marker} threw before the head`),
-          5000,
-          'the log line of the exception'
-        );
-        const line = server.log
-          .split('\n')
-          .find((line) => line.includes(`${marker} threw`));
-        assert.match(line, /Uncaught exception/);
-      });
+    test(`an https socket serves requests and WebSockets ${on}`, async () => {
+      const { server } = shared;
+      const target = { port: server.ports.https, tls: true };
+      await oneConnection(server, target);
+      const thread = away(await threadsOf(server));
+      const open = () => connect(server.ports.https, { tls: true });
+      const ws = await webSocket(
+        open,
+        `/ws?marker=${unique('tls')}`,
+        thread,
+        threads
+      );
+      await echoMessages(ws);
+      ws.close(1000, 'done');
+      assert.deepStrictEqual(await ws.next(), { code: 1000, reason: 'done' });
+      await within(ws.closed, 5000, 'the end of the connection');
+    });
 
-      for (const framing of ['length', 'chunked']) {
-        test(`a Worker that fails after the head leaves a truncated ${framing} response ${on}`, async () => {
-          const { server } = shared;
-          const marker = unique(framing);
-          const failed = await partial(
-            server.http,
-            `/fail-after-head?framing=${framing}&marker=${marker}`
-          );
-          await until(
-            () =>
-              server.log.includes(
-                `front-test: ${marker} failed after the head`
-              ),
-            5000,
-            'the log line of the failure'
-          );
-          if (failed.status === null) {
-            // On several threads the head now and then (about one request in a thousand)
-            // does not reach the client before the body fails: the connection is then reset
-            // before any byte of the response.
-            assert(several, 'the connection was reset before the head');
-            assert.strictEqual(failed.bytes, 0, 'bytes before the reset');
-            return;
-          }
-          assert.strictEqual(failed.status, 200);
-          if (framing === 'length') {
-            assert.strictEqual(failed.headers['content-length'], '8192');
-          } else {
-            assert.strictEqual(failed.headers['transfer-encoding'], 'chunked');
-          }
-          assert(failed.received <= 4096, `${failed.received} bytes`);
-          assert.strictEqual(failed.complete, false, 'the response completed');
-        });
+    test(`the http options of a socket apply as on one thread ${on}`, async () => {
+      const { server } = shared;
+
+      // Proxy headers, a cf blob and injected headers.
+      const rewritten = await send({ port: server.ports.rewrite }, '/meta', {
+        headers: {
+          Host: 'example.com',
+          'X-Forwarded-Proto': 'https',
+          'X-Injected': 'by the client',
+          'CF-Blob': JSON.stringify({ colo: 'TST' }),
+        },
+      });
+      assert.strictEqual(rewritten.status, 200);
+      assert.strictEqual(
+        rewritten.headers['x-injected-response'],
+        'by the socket'
+      );
+      const meta = JSON.parse(rewritten.body);
+      assert.strictEqual(meta.url, 'https://example.com/meta');
+      assert.strictEqual(meta.headers['x-injected'], 'by the socket');
+      assert.deepStrictEqual(meta.cf, { colo: 'TST' });
+      delete meta.front;
+      observe(threads, 'a request on the rewriting socket', meta);
+
+      // Without a cf blob header, the cf blob names the peer.
+      const plain = await send(server.http, '/meta', {
+        headers: { Host: 'example.com' },
+      });
+      const peer = JSON.parse(plain.body);
+      assert.deepStrictEqual(peer.cf, {
+        clientIp: `127.0.0.1:${plain.socket.localPort}`,
+      });
+      delete peer.front;
+      observe(threads, 'a request on a plain socket', peer);
+
+      // A proxy socket takes absolute URLs.
+      const socket = await connect(server.ports.proxy);
+      try {
+        const incoming = new Incoming(socket);
+        socket.write(
+          'GET http://example.com/meta?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n'
+        );
+        const res = await incoming.response();
+        assert.strictEqual(res.status, 200);
+        const proxied = JSON.parse(res.body);
+        assert.strictEqual(proxied.url, 'http://example.com/meta?x=1');
+        delete proxied.front;
+        observe(threads, 'a request on a proxy socket', proxied);
+      } finally {
+        socket.destroy();
       }
-
-      // -------------------------------------------------------------------------------
-      // Upgrades and other protocols
-
-      test(`a WebSocket echoes and closes from either end ${on}`, async () => {
-        const { server } = shared;
-        const thread = away(await threadsOf(server));
-        const open = () => connect(server.http.port);
-
-        const marker = unique('ws');
-        const ws = await webSocket(
-          open,
-          `/ws?marker=${marker}`,
-          thread,
-          threads
-        );
-        assert.strictEqual(ws.headers['x-front'], thread);
-        await echoMessages(ws);
-        ws.close(4000, 'bye from the client');
-        assert.deepStrictEqual(await ws.next(), {
-          code: 4000,
-          reason: 'bye from the client',
-        });
-        await within(ws.closed, 5000, 'the end of the connection');
-        // A thread that got more than one attempt of the upgrade closed the others' at once.
-        const clientClose = (note) => note.code !== 1006;
-        const notes = await notesOf(server, thread, marker, (notes) =>
-          notes.some(clientClose)
-        );
-        assert.deepStrictEqual(notes.filter(clientClose), [
-          { code: 4000, reason: 'bye from the client' },
-        ]);
-
-        const closing = await webSocket(
-          open,
-          `/ws?marker=${unique('ws')}`,
-          thread,
-          threads
-        );
-        closing.sendText('close-me');
-        assert.deepStrictEqual(await closing.next(), {
-          code: 4001,
-          reason: 'bye from the worker',
-        });
-        closing.close(4001, '');
-        await within(closing.closed, 5000, 'the end of the connection');
-      });
-
-      test(`a hibernatable WebSocket reaches its object from any thread ${on}`, async () => {
-        // `threads-durable-test` has the object evicted while such a WebSocket stays open,
-        // and woken by its next message; this case has two threads hold one each.
-        const { server } = shared;
-        const { first, replicas } = await threadsOf(server);
-        const open = () => connect(server.http.port);
-        const name = unique('room');
-        const a = await webSocket(
-          open,
-          `/room?name=${name}`,
-          replicas[0] ?? first,
-          threads
-        );
-        a.sendText('one');
-        assert.deepStrictEqual(JSON.parse((await a.next()).text), {
-          echo: 'one',
-          isolate: first,
-          sockets: 1,
-        });
-        const b = await webSocket(
-          open,
-          `/room?name=${name}`,
-          replicas[1] ?? first,
-          threads
-        );
-        b.sendText('two');
-        assert.deepStrictEqual(JSON.parse((await b.next()).text), {
-          echo: 'two',
-          isolate: first,
-          sockets: 2,
-        });
-        a.sendText('three');
-        assert.deepStrictEqual(JSON.parse((await a.next()).text), {
-          echo: 'three',
-          isolate: first,
-          sockets: 2,
-        });
-        for (const ws of [a, b]) {
-          ws.close(1000, 'done');
-          assert.deepStrictEqual(await ws.next(), {
-            code: 1000,
-            reason: 'done',
-          });
-          ws.destroy();
-        }
-      });
-
-      test(`the connections of a tcp socket are connect() events on different threads ${on}`, async () => {
-        const { server } = shared;
-        const open = async () => {
-          const socket = await connect(server.ports.tcp);
-          return { socket, incoming: new Incoming(socket) };
-        };
-        // A connection whose handler runs keeps its thread from being the one the next
-        // connection goes to, unless that thread is still awake from it and takes the next
-        // itself: connections stay open until every thread serves one.
-        const sessions = [];
-        const fronts = new Set();
-        try {
-          for (let i = 0; i < TRIES && fronts.size < threads; i++) {
-            const session = await tcpSession(open);
-            sessions.push(session);
-            fronts.add(session.front);
-          }
-        } finally {
-          for (const session of sessions) await session.finish();
-        }
-        assert.strictEqual(fronts.size, threads, 'isolates that served');
-      });
-
-      test(`an HTTP CONNECT is tunneled to the connect() handler ${on}`, async () => {
-        const { server } = shared;
-        const open = async () => {
-          const socket = await connect(server.http.port);
-          const incoming = new Incoming(socket);
-          socket.write(
-            'CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n'
-          );
-          const head = await incoming.head();
-          assert.strictEqual(head.status, 200);
-          // What arrives past the head is the tunnel's.
-          return { socket, incoming };
-        };
-        await (await tcpSession(open)).finish();
-      });
-
-      test(`an https socket serves requests and WebSockets ${on}`, async () => {
-        const { server } = shared;
-        const target = { port: server.ports.https, tls: true };
-        await oneConnection(server, target);
-        const thread = away(await threadsOf(server));
-        const open = () => connect(server.ports.https, { tls: true });
-        const ws = await webSocket(
-          open,
-          `/ws?marker=${unique('tls')}`,
-          thread,
-          threads
-        );
-        await echoMessages(ws);
-        ws.close(1000, 'done');
-        assert.deepStrictEqual(await ws.next(), { code: 1000, reason: 'done' });
-        await within(ws.closed, 5000, 'the end of the connection');
-      });
-
-      test(`the http options of a socket apply as on one thread ${on}`, async () => {
-        const { server } = shared;
-
-        // Proxy headers, a cf blob and injected headers.
-        const rewritten = await send({ port: server.ports.rewrite }, '/meta', {
-          headers: {
-            Host: 'example.com',
-            'X-Forwarded-Proto': 'https',
-            'X-Injected': 'by the client',
-            'CF-Blob': JSON.stringify({ colo: 'TST' }),
-          },
-        });
-        assert.strictEqual(rewritten.status, 200);
-        assert.strictEqual(
-          rewritten.headers['x-injected-response'],
-          'by the socket'
-        );
-        const meta = JSON.parse(rewritten.body);
-        assert.strictEqual(meta.url, 'https://example.com/meta');
-        assert.strictEqual(meta.headers['x-injected'], 'by the socket');
-        assert.deepStrictEqual(meta.cf, { colo: 'TST' });
-        delete meta.front;
-        observe(threads, 'a request on the rewriting socket', meta);
-
-        // Without a cf blob header, the cf blob names the peer.
-        const plain = await send(server.http, '/meta', {
-          headers: { Host: 'example.com' },
-        });
-        const peer = JSON.parse(plain.body);
-        assert.deepStrictEqual(peer.cf, {
-          clientIp: `127.0.0.1:${plain.socket.localPort}`,
-        });
-        delete peer.front;
-        observe(threads, 'a request on a plain socket', peer);
-
-        // A proxy socket takes absolute URLs.
-        const socket = await connect(server.ports.proxy);
-        try {
-          const incoming = new Incoming(socket);
-          socket.write(
-            'GET http://example.com/meta?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n'
-          );
-          const res = await incoming.response();
-          assert.strictEqual(res.status, 200);
-          const proxied = JSON.parse(res.body);
-          assert.strictEqual(proxied.url, 'http://example.com/meta?x=1');
-          delete proxied.front;
-          observe(threads, 'a request on a proxy socket', proxied);
-        } finally {
-          socket.destroy();
-        }
-      });
-    }
-  );
+    });
+  });
 }
 
 // =====================================================================================
@@ -1947,68 +1934,51 @@ test(
   }
 );
 
-test(
-  'every socket gets one listen event, and a burst of requests sent as one is read is served by every thread',
-  {
-    skip:
-      !SEVERAL_THREADS &&
-      'the cases on several threads have not been tried on Windows',
-  },
-  async () => {
-    const burst = (port) =>
-      Promise.all(
-        Array.from({ length: 32 }, () =>
-          get({ port, threads: THREADS }, '/sleep?ms=200')
-        )
-      );
-    let first;
-    const server = await serve({
-      onListen: (event) => {
-        if (event.socket === 'http') {
-          first = burst(event.port);
-          first.catch(() => {});
-        }
-      },
-    });
-    const listens = () => server.events.filter((e) => e.event === 'listen');
-    try {
-      assert.deepStrictEqual(
-        listens()
-          .map((e) => e.socket)
-          .sort(),
-        [...SOCKETS].sort()
-      );
-      for (const { port } of listens()) {
-        assert(Number.isInteger(port) && port > 0, `port ${port}`);
-        (await connect(port)).destroy();
+test('every socket gets one listen event, and a burst of requests sent as one is read is served by every thread', async () => {
+  const burst = (port) =>
+    Promise.all(
+      Array.from({ length: 32 }, () =>
+        get({ port, threads: THREADS }, '/sleep?ms=200')
+      )
+    );
+  let first;
+  const server = await serve({
+    onListen: (event) => {
+      if (event.socket === 'http') {
+        first = burst(event.port);
+        first.catch(() => {});
       }
-      const fronts = new Set((await first).map((answer) => answer.front));
-      for (let i = 0; i < ROUNDS && fronts.size < THREADS; i++) {
-        for (const { front } of await burst(server.ports.http))
-          fronts.add(front);
-      }
-      assert.strictEqual(
-        fronts.size,
-        THREADS,
-        'isolates that served the bursts'
-      );
-    } catch (error) {
-      await server.kill();
-      throw error;
+    },
+  });
+  const listens = () => server.events.filter((e) => e.event === 'listen');
+  try {
+    assert.deepStrictEqual(
+      listens()
+        .map((e) => e.socket)
+        .sort(),
+      [...SOCKETS].sort()
+    );
+    for (const { port } of listens()) {
+      assert(Number.isInteger(port) && port > 0, `port ${port}`);
+      (await connect(port)).destroy();
     }
-    assert.deepStrictEqual(await server.stop(), SIGTERM_EXIT);
-    assert.strictEqual(listens().length, SOCKETS.length, 'listen events');
+    const fronts = new Set((await first).map((answer) => answer.front));
+    for (let i = 0; i < ROUNDS && fronts.size < THREADS; i++) {
+      for (const { front } of await burst(server.ports.http)) fronts.add(front);
+    }
+    assert.strictEqual(fronts.size, THREADS, 'isolates that served the bursts');
+  } catch (error) {
+    await server.kill();
+    throw error;
   }
-);
+  assert.deepStrictEqual(await server.stop(), SIGTERM_EXIT);
+  assert.strictEqual(listens().length, SOCKETS.length, 'listen events');
+});
 
 for (const threads of [THREADS, 1]) {
   const on = `on ${threads} thread${threads > 1 ? 's' : ''}`;
   const several = threads > 1;
-  const skip =
-    (!SIGTERM_DRAINS && 'SIGTERM does not drain on Windows') ||
-    (several &&
-      !SEVERAL_THREADS &&
-      'the cases on several threads have not been tried on Windows');
+  const skip = !SIGTERM_DRAINS && 'SIGTERM does not drain on Windows';
 
   test(
     `SIGTERM finishes the requests in flight${several ? ' and queued' : ''}, closes idle connections and exits ${on}`,
@@ -2179,22 +2149,14 @@ for (const threads of [THREADS, 1]) {
 }
 
 for (const front of [1, 4]) {
-  test(
-    `--front-threads=${front} serves on every thread`,
-    {
-      skip:
-        !SEVERAL_THREADS &&
-        'the cases on several threads have not been tried on Windows',
-    },
-    () =>
-      withServer({ args: [`--front-threads=${front}`] }, async (server) => {
-        await oneConnection(server);
-        const body = pattern(0, 32 * MiB);
-        const res = await send(server.http, '/echo', { method: 'POST', body });
-        assert.strictEqual(res.status, 200);
-        assert(res.body.equals(body), 'the echo differs');
-      })
-  );
+  test(`--front-threads=${front} serves on every thread`, () =>
+    withServer({ args: [`--front-threads=${front}`] }, async (server) => {
+      await oneConnection(server);
+      const body = pattern(0, 32 * MiB);
+      const res = await send(server.http, '/echo', { method: 'POST', body });
+      assert.strictEqual(res.status, 200);
+      assert(res.body.equals(body), 'the echo differs');
+    }));
 }
 
 // Runs `workerd serve` with `args` to its end; its exit code and what it wrote to stderr.
