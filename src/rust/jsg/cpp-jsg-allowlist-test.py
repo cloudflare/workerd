@@ -38,7 +38,10 @@ CONSTRUCTS = {
     "JsExceptionThrown": r"\bJsExceptionThrown\b",
     "createTunneledException": r"\bcreateTunneledException\b",
     "makeInternalError": r"\bmakeInternalError\b",
-    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|JsObject|JsString)\b",
+    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|JsString)\b",
+    # A construct of its own so that the allowlist can admit the one `jsg::JsObject` the interop
+    # tier needs (cpp-jsg-allowlist.txt) without admitting other JS value handles.
+    "jsg::JsObject": r"\bjsg::JsObject\b",
     "jsg::V8Ref": r"\bjsg::V8Ref\b",
     "jsg::Ref": r"\bjsg::(?:Ref|Optional|Object)\b",
     "jsg::Promise": r"\bjsg::(?:Promise|Function|Sequence)\b",
@@ -55,7 +58,9 @@ CONSTRUCTS = {
 # exception into a pending JavaScript one (jsg::throwInternalError). Not allowed, even there:
 # JSG_TRY/tryCatch, createTunneledException, makeInternalError, jsg::check, liftKj, JSG_REQUIRE,
 # the other jsg::throw* functions (throwTunneledException included), JS value handles (jsg::Data,
-# jsg::JsValue, ...) and jsg::Promise/jsg::Function/jsg::Sequence.
+# jsg::JsValue, jsg::JsObject, ...) and jsg::Promise/jsg::Function/jsg::Sequence. The allowlist
+# counts the one exception: the jsg::JsObject that resolve_internal_module() in ffi.c++ gets from
+# jsg::Lock::resolveInternalModule() and turns into a V8 handle.
 INTEROP_CONSTRUCTS = {
     "jsg::Lock",
     "JsExceptionThrown",

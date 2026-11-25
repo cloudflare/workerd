@@ -14,6 +14,7 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/rust/jsg/jsg.h>
+#include <workerd/server/workerd-api.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <v8-inspector.h>
@@ -3384,6 +3385,157 @@ KJ_TEST("the legacy registry keeps the termination of a terminating Rust module 
 KJ_TEST("the new registry keeps the termination of a terminating Rust module callback") {
   withNewRustRegistry(register_terminating_module, [](const auto& env) {
     KJ_EXPECT(terminates(env, [&] { env.js.resolveInternalModule(TERMINATING_SPECIFIER); }));
+  });
+}
+
+// What resolved_export_type() describes for `specifier`'s export `exportName`.
+kj::String resolvedExportType(
+    const TestFixture::Environment& env, kj::StringPtr specifier, kj::StringPtr exportName) {
+  return kj::str(
+      resolved_export_type(isolateOf(env), ::rust::Str(specifier.begin(), specifier.size()),
+          ::rust::Str(exportName.begin(), exportName.size())));
+}
+
+// Makes `registry` the module registry of the context `js` is in, as the legacy registry's
+// install() does, until the returned guard is destroyed, which restores the context's own.
+auto useLegacyRegistry(jsg::Lock& js, jsg::ModuleRegistry& registry) {
+  auto context = js.v8Context();
+  auto& own = KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<jsg::ModuleRegistry>(
+      context, jsg::ContextPointerSlot::MODULE_REGISTRY));
+  jsg::setAlignedPointerInEmbedderData(
+      context, jsg::ContextPointerSlot::MODULE_REGISTRY, &registry);
+  return kj::defer([context, &own]() {
+    jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::MODULE_REGISTRY, &own);
+  });
+}
+
+// Calls `body` inside a request of a worker that uses the new registry with workerd's own built-in
+// modules, as a worker with the new_module_registry flag does, and nodejs_compat, for the
+// public `node:` modules.
+void withNewWorkerdRegistry(auto&& body) {
+  constexpr auto mainModule = "export default {};"_kjc;
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+  flags.setNodeJsCompat(true);
+  auto modules = kj::heapArrayBuilder<Worker::Script::Module>(1);
+  modules.add(Worker::Script::Module{
+    .name = "main"_kj,
+    .content = Worker::Script::EsModule{.body = mainModule},
+  });
+  Worker::Script::ModulesSource source{
+    .mainModule = "main"_kj,
+    .modules = modules.finish(),
+    .capnpSchemas = {},
+    .isPython = false,
+  };
+  const server::PythonConfig pythonConfig{.createSnapshot = false, .createBaselineSnapshot = false};
+  auto registry = server::WorkerdApi::newWorkerdModuleRegistry(source, flags.asReader(),
+      pythonConfig, "file:///"_url, capnp::List<server::config::Extension>::Reader{});
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = mainModule,
+    .useRealTimers = false,
+    .newModuleRegistry = kj::mv(registry),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { body(env); });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() resolves an internal module of the legacy registry") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto type = resolvedExportType(env, "node-internal:internal_inspect"_kj, "inspect"_kj);
+    KJ_EXPECT(type == "function", type);
+  });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() resolves an internal module of the new registry") {
+  withNewWorkerdRegistry([](const auto& env) {
+    auto type = resolvedExportType(env, "node-internal:internal_inspect"_kj, "inspect"_kj);
+    KJ_EXPECT(type == "function", type);
+  });
+}
+
+// Neither registry finds a public built-in module, though the worker has it (nodejs_compat).
+KJ_TEST("jsg_cpp::resolve_internal_module() finds no public built-in module") {
+  withNewWorkerdRegistry([](const auto& env) {
+    auto type = resolvedExportType(env, "node:buffer"_kj, "Buffer"_kj);
+    KJ_EXPECT(type == "none", type);
+  });
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNodeJsCompat(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    KJ_EXPECT_LOG(ERROR, "No such module");
+    auto type = resolvedExportType(env, "node:buffer"_kj, "Buffer"_kj);
+    KJ_EXPECT(type.startsWith("threw: Error: internal error"), type);
+  });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() fails for a module the legacy registry lacks") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    KJ_EXPECT_LOG(ERROR, "No such module");
+    auto type = resolvedExportType(env, "node-internal:no-such-module"_kj, "default"_kj);
+    KJ_EXPECT(type.startsWith("threw: Error: internal error"), type);
+  });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() resolves a built-in module of the new registry") {
+  withNewRustRegistry(register_probe_module, [](const auto& env) {
+    auto type = resolvedExportType(env, PROBE_SPECIFIER, "default"_kj);
+    KJ_EXPECT(type == "object", type);
+  });
+  KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() is none for a module the new registry lacks") {
+  withNewRustRegistry(register_probe_module, [](const auto& env) {
+    auto missing = resolvedExportType(env, "test:no-such-module"_kj, "default"_kj);
+    KJ_EXPECT(missing == "none", missing);
+    // The worker's main module is not built in.
+    auto main = resolvedExportType(env, "file:///main"_kj, "default"_kj);
+    KJ_EXPECT(main == "none", main);
+  });
+  KJ_EXPECT(take_probe_observation() == ProbeObservation::NotRun);
+}
+
+KJ_TEST(
+    "jsg_cpp::resolve_internal_module() throws the error of a failing module of the new registry") {
+  withNewRustRegistry(register_failing_module, [](const auto& env) {
+    auto type = resolvedExportType(env, FAILING_SPECIFIER, "default"_kj);
+    KJ_EXPECT(type == "threw: TypeError: the module failed", type);
+  });
+}
+
+KJ_TEST(
+    "jsg_cpp::resolve_internal_module() throws the error of a failing module of the legacy registry") {
+  withLegacyRustRegistry(register_failing_module, [](const auto& env, auto& registry) {
+    auto restore = useLegacyRegistry(env.js, registry);
+    auto type = resolvedExportType(env, FAILING_SPECIFIER, "default"_kj);
+    KJ_EXPECT(type == "threw: TypeError: the module failed", type);
+  });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() keeps the termination of a terminating module of the "
+        "new registry") {
+  withNewRustRegistry(register_terminating_module, [](const auto& env) {
+    KJ_EXPECT(resolve_leaves_termination(
+        isolateOf(env), ::rust::Str(TERMINATING_SPECIFIER.begin(), TERMINATING_SPECIFIER.size())));
+    KJ_EXPECT(env.isolate->IsExecutionTerminating());
+    env.isolate->CancelTerminateExecution();
+  });
+}
+
+KJ_TEST("jsg_cpp::resolve_internal_module() keeps the termination of a terminating module of the "
+        "legacy registry") {
+  withLegacyRustRegistry(register_terminating_module, [](const auto& env, auto& registry) {
+    auto restore = useLegacyRegistry(env.js, registry);
+    KJ_EXPECT(resolve_leaves_termination(
+        isolateOf(env), ::rust::Str(TERMINATING_SPECIFIER.begin(), TERMINATING_SPECIFIER.size())));
+    KJ_EXPECT(env.isolate->IsExecutionTerminating());
+    env.isolate->CancelTerminateExecution();
   });
 }
 

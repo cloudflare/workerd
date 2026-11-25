@@ -28,4 +28,18 @@ void cpp_ref_detach(const CppRef& ref) {
   ref.detach();
 }
 
+bool resolve_internal_module(Isolate* isolate, ::rust::Str specifier, MaybeLocal& module) {
+  return callCpp(isolate, [&](::workerd::jsg::Lock& js) {
+    // The registries return the namespace as a jsg::JsObject, the tier's one JS value handle
+    // (cpp-jsg-allowlist.txt), which leaves C++ JSG here as a V8 handle. The type is written out,
+    // not `auto`, so that the allowlist check counts the use.
+    kj::Maybe<::workerd::jsg::JsObject> found =
+        js.resolveInternalModule(kj::str(kj::from<kj_rs::Rust>(specifier)));
+    KJ_IF_SOME(namespaceObject, found) {
+      v8::Local<v8::Object> handle = namespaceObject;
+      module = ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(handle));
+    }
+  });
+}
+
 }  // namespace workerd::rust::jsg_cpp

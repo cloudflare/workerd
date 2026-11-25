@@ -16,10 +16,13 @@
 // - C++ holds a Rust JSG resource as a `RustRef<Tag>`, and `RustResourceWrapper` lets C++ JSG
 //   signatures (methods, `jsg::Function`, `jsg::Constructor`, `kj::OneOf`, `jsg::Optional`)
 //   take and return one.
+// - Rust resolves a built-in module with `jsg::Lock::resolveInternalModule()`, which handles
+//   both module registries and needs a `jsg::Lock` (resolve_internal_module()).
 //
 // This file and ffi.c++ are the only Rust JSG shims allowed to use C++ JSG, and only the
-// constructs in INTEROP_CONSTRUCTS of src/rust/jsg/cpp-jsg-allowlist-test.py. See
-// src/rust/jsg/README.md, "Safety rules", rule 3.
+// constructs in INTEROP_CONSTRUCTS of src/rust/jsg/cpp-jsg-allowlist-test.py, plus the one
+// `jsg::JsObject` in ffi.c++ that cpp-jsg-allowlist.txt counts. See src/rust/jsg/README.md,
+// "Safety rules", rule 3.
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -103,6 +106,9 @@ void cpp_ref_visit(GcVisitor* visitor, const CppRef& ref);
 void cpp_ref_track(
     ::workerd::rust::jsg::MemoryTracker& tracker, const char* edge_name, const CppRef& ref);
 void cpp_ref_detach(const CppRef& ref);
+
+// FFI for `jsg_cpp::resolve_internal_module()` (ffi.rs).
+bool resolve_internal_module(Isolate* isolate, ::rust::Str specifier, MaybeLocal& module);
 
 // Runs `func(jsg::Lock&)` the way a JSG method callback runs C++ API code (jsg::liftKj()), and
 // returns whether it completed. A `jsg::JsExceptionThrown` leaves its exception pending. A

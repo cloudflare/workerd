@@ -2,7 +2,8 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # Interop between Rust JSG and C++ JSG resources: Rust holding, receiving and returning C++ JSG
-# resources (`jsg_cpp::Ref<T>`), and C++ holding Rust ones (`RustRef<Tag>`). This is the one place
+# resources (`jsg_cpp::Ref<T>`), and C++ holding Rust ones (`RustRef<Tag>`), plus resolving
+# built-in modules through C++ JSG (`jsg_cpp::resolve_internal_module`). This is the one place
 # where Rust JSG's C++ shims may use C++ JSG. INTEROP_SHIMS are in the allowlist's interop tier,
 # which //src/rust/jsg:cpp-jsg-allowlist-test checks for the constructs it permits (see
 # src/rust/jsg/README.md, "Safety rules", rule 3).

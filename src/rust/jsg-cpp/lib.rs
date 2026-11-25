@@ -10,6 +10,8 @@
 //! - Rust calls the methods of a C++ resource through per-method shims that take `&T` and run in
 //!   `callCpp()` (`jsg-cpp.h`).
 //! - C++ refers to a Rust resource with a `RustRef<Tag>` (`jsg-cpp.h`).
+//! - [`resolve_internal_module`] resolves a built-in module as C++
+//!   `jsg::Lock::resolveInternalModule()` does, under either module registry.
 //!
 //! The C++ side, `jsg-cpp.h` and `ffi.c++`, is the one part of Rust JSG that may use C++ JSG;
 //! see `src/rust/jsg/README.md` §Safety rules, rule 3.
@@ -21,3 +23,4 @@ pub use ffi::CppResource;
 pub use ffi::Ref;
 pub use ffi::call_cpp;
 pub use ffi::call_cpp_for_ref;
+pub use ffi::resolve_internal_module;
