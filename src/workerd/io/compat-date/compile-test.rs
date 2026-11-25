@@ -81,7 +81,7 @@ fn enable_and_disable_flags_override_the_date() {
 }
 
 #[test]
-fn reports_errors_in_cxx_order() {
+fn reports_errors_in_a_stable_order() {
     let c = compile_at(
         "abcd",
         &[
@@ -306,8 +306,7 @@ fn maximum_date_is_valid() {
     assert!(newest_compat_date() <= maximum_compat_date());
 }
 
-// Diagnostics quote the configuration byte for byte, as the C++ compiler did, even where it is
-// not UTF-8.
+// Diagnostics quote the configuration byte for byte, even where it is not UTF-8.
 #[test]
 fn quotes_text_that_is_not_utf8() {
     let flag: &[u8] = b"bad_\xff_flag";
@@ -329,4 +328,73 @@ fn quotes_text_that_is_not_utf8() {
             b"No such compatibility flag: bad_\xff_flag".as_slice(),
         ]
     );
+}
+
+// A `kj::String` may hold a NUL, which is part of the text: it neither ends a flag's name nor
+// the date.
+#[test]
+fn quotes_text_that_holds_a_nul() {
+    let flag: &[u8] = b"nodejs_compat\0x";
+    let date: &[u8] = b"2021-05-17\0x";
+    let c = compile_with_today(
+        date,
+        [flag],
+        &TEST,
+        date_of("2026-11-18"),
+        date_of("2026-11-20"),
+    )
+    .unwrap();
+    let errors: Vec<&[u8]> = c.errors().collect();
+    assert_eq!(
+        errors,
+        [
+            b"Invalid compatibility date: 2021-05-17\0x".as_slice(),
+            b"No such compatibility flag: nodejs_compat\0x".as_slice(),
+        ]
+    );
+    assert!(!is_on(&c, "nodeJsCompat"));
+}
+
+// Each flag the schema names sets its own field, at a date where the date alone would not.
+#[test]
+fn every_flag_sets_its_field() {
+    let table = FlagTable::get().unwrap();
+    let options = CompileOptions {
+        allow_experimental: true,
+        ..TEST
+    };
+    for (index, info) in table.fields.iter().enumerate() {
+        if let Some(flag) = info.enable_flag {
+            let c = compile_at("2000-01-01", &[flag], &options);
+            assert!(errors(&c).is_empty(), "{flag}: {:?}", errors(&c));
+            assert!(c.enabled[index], "{flag}");
+        }
+        if let Some(flag) = info.disable_flag {
+            let c = compile_at("2999-12-31", &[flag], &options);
+            assert!(errors(&c).is_empty(), "{flag}: {:?}", errors(&c));
+            assert!(!c.enabled[index], "{flag}");
+        }
+    }
+}
+
+// The list is the Worker's, of any length; a compile that is not linear in it would time out
+// here.
+#[test]
+fn compiles_a_long_list() {
+    let mut flags: Vec<Vec<u8>> = vec![b"nodejs_compat".to_vec()];
+    flags.extend((0..100_000).map(|i| format!("unknown_flag_{i}").into_bytes()));
+    let c = compile_with_today(
+        b"2024-09-23",
+        flags.iter().map(Vec::as_slice),
+        &TEST,
+        date_of("2026-11-18"),
+        date_of("2026-11-20"),
+    )
+    .unwrap();
+    assert!(is_on(&c, "nodeJsCompat"));
+    let errors = errors(&c);
+    assert_eq!(errors.len(), 100_000);
+    // Matching nodejs_compat moved the last flag into its place.
+    assert_eq!(errors[0], "No such compatibility flag: unknown_flag_99999");
+    assert_eq!(errors[1], "No such compatibility flag: unknown_flag_0");
 }

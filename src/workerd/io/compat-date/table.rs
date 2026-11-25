@@ -116,8 +116,9 @@ impl FlagInfo {
         })
     }
 
-    /// Whether the compatibility date alone turns the field on. The last rule decides, as each
-    /// annotation the C++ compiler read overwrote the previous one's answer.
+    /// Whether the compatibility date alone turns the field on. The last rule decides:
+    /// historically each annotation overwrote the previous one's answer, and compiled flags
+    /// must not change.
     pub fn enabled_by_date(&self, date: CompatDate) -> bool {
         self.date_rules.last().is_some_and(|rule| match rule {
             DateRule::OnOrAfter(on) => date >= *on,

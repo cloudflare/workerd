@@ -157,10 +157,7 @@ namespace workerd::util {
   /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
      string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
      isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
-  V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
-  /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
-     than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
-  V(RUST_COMPAT_DATE)
+  V(BODY_BUFFER_EXTERNAL_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

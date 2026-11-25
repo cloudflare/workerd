@@ -1,7 +1,7 @@
 //! The bridge that `workerd/io/compatibility-date.c++` wraps.
 //!
 //! Strings cross as bytes, since a `kj::String` need not be UTF-8, and diagnostics quote them
-//! byte for byte, as the C++ compiler did.
+//! byte for byte.
 
 #![allow(
     unsafe_code,
