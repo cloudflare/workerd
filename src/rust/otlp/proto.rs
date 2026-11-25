@@ -44,6 +44,10 @@ pub struct InstrumentationScope {
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "the fields are named as in the OTLP message"
+)]
 pub struct Span {
     #[prost(bytes = "vec", tag = "1")]
     pub trace_id: Vec<u8>,

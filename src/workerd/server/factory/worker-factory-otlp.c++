@@ -5,42 +5,60 @@
 #include "otlp-export-queue.h"
 #include "worker-factory-impl.h"
 
+#include <workerd/io/otlp-span-submitter.h>
+
 namespace workerd::server {
 
 namespace {
 
 class CollectorTransport final: public OtlpExportQueue::Transport {
  public:
-  // `url` is `/v1/traces` or `/v1/logs` under the collector's path.
+  // `url` is `/v1/traces` or `/v1/logs` under the collector's path. With `json`, each batch is
+  // re-encoded as OTLP/JSON.
   CollectorTransport(::rust::Box<SubrequestChannel> collector,
       const kj::HttpHeaderTable& headerTable,
-      kj::String url)
+      kj::String url,
+      bool logs,
+      bool json)
       : collector(kj::mv(collector)),
         headerTable(headerTable),
-        url(kj::mv(url)) {}
+        url(kj::mv(url)),
+        logs(logs),
+        json(json) {}
 
   kj::Promise<void> post(kj::Array<const kj::byte> request) override {
+    auto contentType = "application/x-protobuf"_kj;
+    if (json) {
+      auto body = rust::otlp::encode_json(
+          logs, ::rust::Slice<const kj::byte>(request.begin(), request.size()));
+      request = kj::heapArray<const kj::byte>(body.data(), body.size());
+      contentType = "application/json"_kj;
+    }
     auto worker = collector->start_request(kj::heap<RequestMetadata>());
     auto client = kj::newHttpClient(*worker);
     // A service takes an absolute URL; an external server sends its path and sets Host.
-    co_await postOtlpTraces(*client, url, kj::HttpHeaders(headerTable), kj::mv(request));
+    co_await postOtlpTraces(
+        *client, url, kj::HttpHeaders(headerTable), kj::mv(request), contentType);
   }
 
  private:
   ::rust::Box<SubrequestChannel> collector;
   const kj::HttpHeaderTable& headerTable;
   kj::String url;
+  bool logs;
+  bool json;
 };
 
 kj::Own<OtlpExportQueue> collectorQueue(::rust::Box<SubrequestChannel> collector,
     const kj::HttpHeaderTable& headerTable,
     kj::Timer& timer,
     ::rust::Str path,
-    kj::StringPtr signal) {
-  auto url = kj::str(
-      "http://localhost", kj::ArrayPtr<const char>(path.data(), path.size()), "/v1/", signal);
+    bool logs,
+    bool json) {
+  auto url = kj::str("http://localhost", kj::ArrayPtr<const char>(path.data(), path.size()),
+      logs ? "/v1/logs"_kj : "/v1/traces"_kj);
   return kj::heap<OtlpExportQueue>(
-      kj::heap<CollectorTransport>(kj::mv(collector), headerTable, kj::mv(url)), timer);
+      kj::heap<CollectorTransport>(kj::mv(collector), headerTable, kj::mv(url), logs, json), timer);
 }
 
 }  // namespace
@@ -51,50 +69,40 @@ class OtlpExporter::Impl final: public OtlpSpanExporter {
  public:
   // Each signal has its own queue: a queue joins requests by concatenating them, which only
   // works for requests of one message type.
-  Impl(kj::Own<OtlpExportQueue> queue, kj::Maybe<kj::Own<OtlpExportQueue>> logsQueue)
+  Impl(kj::Own<OtlpExportQueue> queue,
+      kj::Maybe<kj::Own<OtlpExportQueue>> logsQueue,
+      double sampleRatio)
       : queue(kj::mv(queue)),
-        logsQueue(kj::mv(logsQueue)) {}
-  explicit Impl(::rust::Box<TelemetrySink> sink): sink(kj::mv(sink)) {}
+        logsQueue(kj::mv(logsQueue)),
+        sampleRatio(sampleRatio) {}
 
   void unlink() {
-    KJ_IF_SOME(q, queue) {
-      q->unlink();
-    }
+    queue->unlink();
     KJ_IF_SOME(q, logsQueue) {
       q->unlink();
     }
-    unlinked = true;
   }
 
   bool exportsLogs() const {
-    return sink != kj::none || logsQueue != kj::none;
+    return logsQueue != kj::none;
   }
 
   void exportSpans(kj::Array<const kj::byte> request, uint spanCount) override {
-    KJ_IF_SOME(s, sink) {
-      if (!unlinked)
-        telemetry_spans(*s, ::rust::Slice<const kj::byte>(request.begin(), request.size()));
-    }
-    KJ_IF_SOME(q, queue) {
-      q->exportSpans(kj::mv(request), spanCount);
-    }
+    queue->exportSpans(kj::mv(request), spanCount);
   }
 
   void exportLogs(kj::Array<const kj::byte> request, uint recordCount) override {
-    KJ_IF_SOME(s, sink) {
-      if (!unlinked)
-        telemetry_logs(*s, ::rust::Slice<const kj::byte>(request.begin(), request.size()));
-    }
     KJ_IF_SOME(q, logsQueue) {
       q->exportSpans(kj::mv(request), recordCount);
     }
   }
 
  private:
-  kj::Maybe<kj::Own<OtlpExportQueue>> queue;
+  kj::Own<OtlpExportQueue> queue;
   kj::Maybe<kj::Own<OtlpExportQueue>> logsQueue;
-  kj::Maybe<::rust::Box<TelemetrySink>> sink;
-  bool unlinked = false;
+
+ public:
+  const double sampleRatio;
 };
 
 OtlpExporter::OtlpExporter(kj::Rc<Impl> impl): impl(kj::mv(impl)) {}
@@ -115,24 +123,26 @@ kj::Own<OtlpExporter> factory_new_otlp_exporter(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> traces,
     ::rust::Box<SubrequestChannel> logs,
     ::rust::Str path,
-    bool exportLogs) {
+    bool exportLogs,
+    bool json,
+    double sampleRatio) {
   auto& impl = factory.getImpl();
+  auto& headerTable = *impl.headerTable;
   kj::Maybe<kj::Own<OtlpExportQueue>> logsQueue;
   if (exportLogs) {
-    logsQueue = collectorQueue(kj::mv(logs), *impl.headerTable, impl.timer, path, "logs"_kj);
+    logsQueue = collectorQueue(kj::mv(logs), headerTable, impl.timer, path, true, json);
   }
   return kj::heap<OtlpExporter>(kj::rc<OtlpExporter::Impl>(
-      collectorQueue(kj::mv(traces), *impl.headerTable, impl.timer, path, "traces"_kj),
-      kj::mv(logsQueue)));
-}
-
-kj::Own<OtlpExporter> factory_new_bucket_exporter(
-    const WorkerFactory& factory, ::rust::Box<TelemetrySink> sink) {
-  return kj::heap<OtlpExporter>(kj::rc<OtlpExporter::Impl>(kj::mv(sink)));
+      collectorQueue(kj::mv(traces), headerTable, impl.timer, path, false, json), kj::mv(logsQueue),
+      sampleRatio));
 }
 
 bool otlp_exporter_exports_logs(const OtlpExporter& exporter) {
   return exporter.getImpl().exportsLogs();
+}
+
+double otlp_exporter_sample_ratio(const OtlpExporter& exporter) {
+  return exporter.getImpl().sampleRatio;
 }
 
 kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter) {

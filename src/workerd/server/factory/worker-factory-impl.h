@@ -153,6 +153,7 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   WorkerTimerChannel timerChannel;
   kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter;
   bool otlpExportsLogs = false;
+  double otlpSampleRatio = 1;
   kj::TaskSet waitUntilTasks;
 
   // The compiled compatibility flags of a config worker; a dynamic worker's live in its source.

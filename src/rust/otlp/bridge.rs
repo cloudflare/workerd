@@ -18,6 +18,7 @@ use kj_rs::KjMaybe;
 use crate::attributes::Attributes;
 use crate::buffer;
 use crate::buffer::SpanBuffer;
+use crate::json;
 use crate::logs;
 use crate::logs::LogBuffer;
 use crate::proto;
@@ -171,6 +172,10 @@ mod ffi {
         /// Hands out every buffered record, and from then on each record as it is added. Called
         /// when the invocation's span closes.
         fn flush_logs(buffer: &mut LogBuffer) -> LogBatch;
+
+        /// `request`, an encoded `ExportTraceServiceRequest`, or with `logs` an
+        /// `ExportLogsServiceRequest`, as OTLP/JSON for `application/json`.
+        fn encode_json(logs: bool, request: &[u8]) -> Result<Vec<u8>>;
     }
 }
 
@@ -357,4 +362,8 @@ fn add_invocation_log(buffer: &mut LogBuffer, spans: &mut SpanBuffer) -> ffi::Lo
 
 fn flush_logs(buffer: &mut LogBuffer) -> ffi::LogBatch {
     log_batch(buffer.flush())
+}
+
+fn encode_json(logs: bool, request: &[u8]) -> Result<Vec<u8>, prost::DecodeError> {
+    json::encode(logs, request)
 }

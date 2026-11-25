@@ -28,6 +28,7 @@ use kj_rs::KjOwn;
 use workerd_capnp::config;
 use workerd_capnp::service;
 use workerd_capnp::service_designator;
+use workerd_capnp::tracing_options;
 use workerd_capnp::worker;
 use workerd_capnp::workflows_engine;
 
@@ -64,7 +65,6 @@ use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::bucket::Home;
 use crate::telemetry;
-use crate::telemetry::TelemetrySink;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -577,75 +577,35 @@ impl OtlpTracing {
         factory: &Rc<Factory>,
         config: config::Reader<'_>,
         services: &Services,
-        cluster: Option<&Rc<ClusterNode>>,
         report: &Reporter,
     ) -> Result<Option<Self>> {
         let tracing = config.get_tracing().map_err(capnp_error)?;
-        let env = match telemetry::Env::read() {
+        let env = match telemetry::Collector::read() {
             Ok(env) => env,
             Err(e) => {
                 report.error(e);
                 return Ok(None);
             }
         };
-        let bucket = |flush, flush_bytes, retention| -> Result<Option<Self>> {
-            let Some(node) = cluster else {
-                report.error("Writing telemetry to the bucket requires Config.cluster.");
-                return Ok(None);
-            };
-            let sink = TelemetrySink::new(
-                factory,
-                node.cluster.telemetry(),
-                node.cluster.node(),
-                flush,
-                flush_bytes,
-                retention,
-            );
-            Ok(Some(Self {
-                collector: None,
-                exporter: ffi::factory_new_bucket_exporter(factory.raw(), Box::new(sink))?,
-            }))
-        };
-        if (tracing.has_bucket() || tracing.has_otlp()) && env.is_some() {
-            report.warning("WORKERD_OTEL is ignored: the config sets `tracing`.");
+        if config.has_tracing() && env.is_some() {
+            report.warning(format!(
+                "{} is ignored: the config sets `tracing`.",
+                telemetry::ENDPOINT
+            ));
         } else if let Some(env) = env {
-            return match env {
-                telemetry::Env::Bucket {
-                    flush,
-                    flush_bytes,
-                    retention,
-                } => bucket(flush, flush_bytes, retention),
-                telemetry::Env::Collector { url, headers } => {
-                    let (service, path) = telemetry::collector(factory, &url, &headers)?;
-                    Ok(Some(Self {
-                        collector: None,
-                        exporter: ffi::factory_new_otlp_exporter(
-                            factory.raw(),
-                            SubrequestChannel::new(Rc::clone(&service)),
-                            SubrequestChannel::new(service),
-                            &path,
-                            true,
-                        )?,
-                    }))
-                }
-            };
-        }
-        if tracing.has_bucket() {
-            if tracing.has_otlp() {
-                report.error("tracing.bucket and tracing.otlp cannot both be set.");
-                return Ok(None);
-            }
-            let conf = tracing.get_bucket().map_err(capnp_error)?;
-            if conf.get_flush_ms() == 0 || conf.get_flush_bytes() == 0 {
-                report.error("tracing.bucket: flushMs and flushBytes must be positive.");
-                return Ok(None);
-            }
-            return bucket(
-                Duration::from_millis(conf.get_flush_ms().into()),
-                conf.get_flush_bytes() as usize,
-                (conf.get_retention_days() > 0)
-                    .then(|| Duration::from_secs(u64::from(conf.get_retention_days()) * 86_400)),
-            );
+            let (service, path) = telemetry::collector(factory, &env.url, &env.headers)?;
+            return Ok(Some(Self {
+                collector: None,
+                exporter: ffi::factory_new_otlp_exporter(
+                    factory.raw(),
+                    SubrequestChannel::new(Rc::clone(&service)),
+                    SubrequestChannel::new(service),
+                    &path,
+                    true,
+                    env.json,
+                    env.sample_ratio,
+                )?,
+            }));
         }
         if !tracing.has_otlp() {
             return Ok(None);
@@ -668,7 +628,12 @@ impl OtlpTracing {
                 SubrequestChannel::new(Rc::clone(&collector)),
                 SubrequestChannel::new(collector),
                 "",
-                false,
+                tracing.get_export_logs(),
+                matches!(
+                    tracing.get_protocol(),
+                    Ok(tracing_options::Protocol::HttpJson)
+                ),
+                tracing.get_sample_ratio(),
             )?,
         }))
     }
@@ -1632,8 +1597,7 @@ impl Server {
         let node = cluster.as_ref();
         cluster_services(config, &mut services, node, overrides, &factory, &report)?;
 
-        let otlp =
-            OtlpTracing::from_config(&factory, config, &services, cluster.as_ref(), &report)?;
+        let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
 
         let server = Rc::new(Self {
             report,

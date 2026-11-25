@@ -537,6 +537,7 @@ fn load_config<T: CommandFactory>(
 fn with_environment(config: Config) -> Config {
     config
         .with_shutdown_delay_environment(|name: &str| std::env::var_os(name))
+        .and_then(|config| config.with_telemetry_environment(&cluster_var))
         .unwrap_or_else(|error| {
             eprintln!("{error}");
             std::process::exit(1);

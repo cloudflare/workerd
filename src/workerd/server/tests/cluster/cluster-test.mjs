@@ -88,6 +88,7 @@ import {
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
+import { gunzipSync } from 'node:zlib';
 import {
   createHash,
   createHmac,
@@ -491,6 +492,14 @@ class FakeS3 {
       { headers: this.#headers }
     );
     return res.status === 404 ? null : await res.text();
+  }
+
+  async bytes(key) {
+    const res = await fetch(
+      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
+      { headers: this.#headers }
+    );
+    return Buffer.from(await res.arrayBuffer());
   }
 
   async delete(key) {
@@ -1714,47 +1723,49 @@ test('cluster: Durable Objects from before cluster mode are refused', async () =
   });
 });
 
-// Logs a line in a Durable Object, then waits for node0's trace and log files
-// in the bucket.
-async function expectParquet({ nodes, bucket, nodeKeys }) {
-  const { status, body } = await fetchJson(
-    nodes[0].httpPort,
-    '/log?name=telemetry'
-  );
-  assert.strictEqual(status, 200, JSON.stringify(body));
-  const node = nodeKeys.get('node0');
-  const deadline = Date.now() + 10_000;
-  let traces = [];
-  let logs = [];
-  while (Date.now() < deadline) {
-    traces = await bucket.list(`telemetry/traces/${node}/`);
-    logs = await bucket.list(`telemetry/logs/${node}/`);
-    if (traces.length > 0 && logs.length > 0) break;
-    await sleep(100);
-  }
-  assert(traces.length > 0, 'no trace file');
-  assert(logs.length > 0, 'no log file');
-  for (const key of [...traces, ...logs]) {
-    assert.match(
-      key,
-      /^telemetry\/(traces|logs)\/[^/]+\/\d{4}\/\d\d\/\d\d\/\d\d\/\d+-[0-9a-f]{8}\.parquet$/
-    );
-    const file = await bucket.get(key);
-    assert(file.startsWith('PAR1') && file.endsWith('PAR1'), key);
-  }
-}
-
-test('cluster: spans and logs are written to the bucket as Parquet', async () => {
-  await withCluster(1, expectParquet, { configName: 'telemetry' });
-});
-
 test('cluster: WORKERD_OTEL=1 writes spans and logs to the bucket', async () => {
-  await withCluster(1, expectParquet, {
-    nodeEnv: () => ({ WORKERD_OTEL: '1', WORKERD_OTEL_FLUSH_MS: '500' }),
-  });
+  await withCluster(
+    1,
+    async ({ nodes, bucket }) => {
+      const { status, body } = await fetchJson(
+        nodes[0].httpPort,
+        '/log?name=telemetry'
+      );
+      assert.strictEqual(status, 200, JSON.stringify(body));
+      const prefix = 'services/telemetry/';
+      const deadline = Date.now() + 10_000;
+      let keys = [];
+      while (Date.now() < deadline) {
+        keys = await bucket.list(prefix);
+        const signals = new Set(keys.map((k) => k.split('/')[2]));
+        if (signals.has('traces') && signals.has('logs')) break;
+        await sleep(100);
+      }
+      const rows = { traces: [], logs: [] };
+      for (const key of keys) {
+        assert.match(
+          key,
+          /^services\/telemetry\/(traces|logs)\/\d{4}\/\d\d\/\d\d\/\d\d\/\d+-[0-9a-f]{8}\.ndjson\.gz$/
+        );
+        const text = gunzipSync(await bucket.bytes(key)).toString();
+        for (const line of text.trimEnd().split('\n')) {
+          rows[key.split('/')[2]].push(JSON.parse(line));
+        }
+      }
+      const log = rows.logs.find((l) => l.body === `log from ${body.id}`);
+      assert(log, JSON.stringify(rows.logs));
+      assert.strictEqual(log.severity_text, 'INFO');
+      assert.strictEqual(log.cell, body.id);
+      assert(
+        rows.traces.some((s) => s.trace_id === log.trace_id && s.ok),
+        "no span in the log line's trace"
+      );
+    },
+    { nodeEnv: () => ({ WORKERD_OTEL: '1' }) }
+  );
 });
 
-test('cluster: WORKERD_OTEL=<url> posts spans and logs to the collector', async () => {
+test('cluster: OTEL_EXPORTER_OTLP_ENDPOINT posts spans and logs to the collector', async () => {
   const posts = [];
   const collector = createServer((req, res) => {
     const chunks = [];
@@ -1787,20 +1798,22 @@ test('cluster: WORKERD_OTEL=<url> posts spans and logs to the collector', async 
           await sleep(100);
         }
         for (const post of posts) {
-          assert.strictEqual(post.type, 'application/x-protobuf', post.path);
+          assert.strictEqual(post.type, 'application/json', post.path);
           assert.strictEqual(post.auth, 'Bearer t', post.path);
         }
-        const logs = posts.filter((p) => p.path === '/base/v1/logs');
         assert(seen('/base/v1/traces'), 'no traces posted');
-        assert(
-          logs.some((p) => p.body.includes(`log from ${body.id}`)),
-          'no log line posted'
-        );
+        const bodies = posts
+          .filter((p) => p.path === '/base/v1/logs')
+          .flatMap((p) => JSON.parse(p.body).resourceLogs)
+          .flatMap((r) => r.scopeLogs.flatMap((s) => s.logRecords))
+          .map((r) => r.body.arrayValue?.values[0].stringValue);
+        assert(bodies.includes(`log from ${body.id}`), JSON.stringify(bodies));
       },
       {
         nodeEnv: () => ({
-          WORKERD_OTEL: `http://127.0.0.1:${port}/base/`,
+          OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${port}/base/`,
           OTEL_EXPORTER_OTLP_HEADERS: 'authorization=Bearer%20t',
+          OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
         }),
       }
     );

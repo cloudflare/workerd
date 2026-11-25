@@ -243,8 +243,9 @@ StartedInvocationSpan startExportedInvocationSpan(kj::EntropySource& entropySour
 kj::Promise<void> postOtlpTraces(kj::HttpClient& client,
     kj::StringPtr url,
     kj::HttpHeaders headers,
-    kj::Array<const kj::byte> body) {
-  headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/x-protobuf");
+    kj::Array<const kj::byte> body,
+    kj::StringPtr contentType) {
+  headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, contentType);
   auto request = client.request(kj::HttpMethod::POST, url, headers, body.size());
   co_await request.body->write(body);
   request.body = nullptr;

@@ -57,12 +57,13 @@ class OtlpSpanExporter {
   }
 };
 
-// POSTs one request to `url`, a collector's `/v1/traces`, as `application/x-protobuf` along with
-// `headers`. Throws unless the collector answers 2xx. `client` and `url` must outlive the promise.
+// POSTs one request to `url`, a collector's `/v1/traces`, as `contentType` along with `headers`.
+// Throws unless the collector answers 2xx. `client` and `url` must outlive the promise.
 kj::Promise<void> postOtlpTraces(kj::HttpClient& client,
     kj::StringPtr url,
     kj::HttpHeaders headers,
-    kj::Array<const kj::byte> request);
+    kj::Array<const kj::byte> request,
+    kj::StringPtr contentType = "application/x-protobuf"_kj);
 
 // What exported spans belong to: `service.name`, followed in the OTLP resource by the rest under
 // the names the streaming tail worker's OTel conversion gives them. The entrypoint and Durable

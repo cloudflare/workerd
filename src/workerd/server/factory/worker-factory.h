@@ -46,7 +46,6 @@ namespace workerd::server {
 struct ServerHandle;
 struct ChannelFactory;
 struct SubrequestChannel;
-struct TelemetrySink;
 struct SpawnedTask;
 struct ActorClassChannel;
 struct ActorNamespaceHandle;
@@ -213,12 +212,15 @@ kj::Own<OtlpExporter> factory_new_otlp_exporter(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> traces,
     ::rust::Box<SubrequestChannel> logs,
     ::rust::Str path,
-    bool exportLogs);
-kj::Own<OtlpExporter> factory_new_bucket_exporter(
-    const WorkerFactory& factory, ::rust::Box<TelemetrySink> sink);
+    bool exportLogs,
+    bool json,
+    double sampleRatio);
 kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
 // Whether invocations exporting through `exporter` export their logs too.
 bool otlp_exporter_exports_logs(const OtlpExporter& exporter);
+// The share of traces without an upstream decision that invocations exporting through `exporter`
+// export.
+double otlp_exporter_sample_ratio(const OtlpExporter& exporter);
 void otlp_exporter_unlink(const OtlpExporter& exporter);
 
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,

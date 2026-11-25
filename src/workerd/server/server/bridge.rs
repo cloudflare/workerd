@@ -42,9 +42,6 @@ pub use crate::log::thread_body_run;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
-pub use crate::telemetry::TelemetrySink;
-pub use crate::telemetry::telemetry_logs;
-pub use crate::telemetry::telemetry_spans;
 pub use crate::worker::bench_clock_now;
 
 #[cxx::bridge(namespace = "workerd::server")]
@@ -407,18 +404,16 @@ pub mod ffi {
         /// exports and releases the collector, even if spans still hold exporter references.
         type OtlpExporter;
         /// Spans go to `traces`, at `<path>/v1/traces`; with `export_logs`, invocations' logs go
-        /// to `logs`, at `<path>/v1/logs`.
+        /// to `logs`, at `<path>/v1/logs`. With `json`, as OTLP/JSON rather than protobuf.
+        /// Traces without an upstream sampling decision are exported at `sample_ratio`.
         fn factory_new_otlp_exporter(
             factory: &WorkerFactory,
             traces: Box<SubrequestChannel>,
             logs: Box<SubrequestChannel>,
             path: &str,
             export_logs: bool,
-        ) -> Result<KjOwn<OtlpExporter>>;
-        /// An exporter that hands every encoded request, logs included, to `sink`.
-        fn factory_new_bucket_exporter(
-            factory: &WorkerFactory,
-            sink: Box<TelemetrySink>,
+            json: bool,
+            sample_ratio: f64,
         ) -> Result<KjOwn<OtlpExporter>>;
         /// Disables export before the server starts tearing down its workers.
         fn otlp_exporter_unlink(exporter: &OtlpExporter);
@@ -1132,12 +1127,6 @@ pub mod ffi {
 
         /// Something that can start a request: a worker entrypoint, an actor, an external
         /// server, the network, a directory.
-        /// Telemetry bound for the cluster bucket (telemetry.rs): each takes one encoded
-        /// `ExportTraceServiceRequest` or `ExportLogsServiceRequest`.
-        type TelemetrySink;
-        fn telemetry_spans(sink: &TelemetrySink, request: &[u8]);
-        fn telemetry_logs(sink: &TelemetrySink, request: &[u8]);
-
         type SubrequestChannel;
         fn start_request(
             self: &SubrequestChannel,
