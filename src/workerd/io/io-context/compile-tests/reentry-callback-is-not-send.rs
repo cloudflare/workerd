@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // A reentry callback is the C++ callback of `IoContext::makeReentryCallbackWeak()`, which belongs
-// to its IoContext's thread: it holds the IoContext's weak reference and a pending event, whose
-// counts are not atomic. So it can't leave that thread. Since `Traced` requires `Send`, it also
+// to its IoContext's event loop: it holds the IoContext's weak reference and a pending event, whose
+// counts are not atomic. So it can't leave that event loop. Since `Traced` requires `Send`, it also
 // can't be kept where the garbage collector, which can run on any thread that locks the isolate,
 // would drop it.
 use io_context::ReentryCallback;

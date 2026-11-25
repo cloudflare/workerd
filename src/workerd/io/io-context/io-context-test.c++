@@ -3270,7 +3270,7 @@ kj::Function<kj::Promise<void>()> makeChannelReentryCallback(TestFixture& fixtur
   };
 }
 
-KJ_TEST("a reentry callback converts with await_js_local(), in its IoContext") {
+KJ_TEST("a reentry callback converts with await_js_with_context(), in its IoContext") {
   TestFixture fixture;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -3296,7 +3296,7 @@ KJ_TEST("a reentry callback converts with await_js_local(), in its IoContext") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("await_js_local() fails without converting what another request resolves") {
+KJ_TEST("await_js_with_context() fails without converting what another request resolves") {
   TestFixture fixture;
   auto owner = fixture.newIncomingRequest();
   auto other = fixture.newIncomingRequest();

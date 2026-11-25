@@ -38,6 +38,7 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use kj_rs::KjRc;
+use kj_rs::LoopChecked;
 
 /// C++ receives an error as an exception whose description is the `jsg::Error`'s name and
 /// message.
@@ -1407,7 +1408,7 @@ fn reentry_function_dropped() -> bool {
 /// A `ReentryCallback` whose output is the channel of the `Fetcher` its function resolves, as
 /// `WorkerLoader.get()`'s takes a dynamic Worker's outbound channels from the code it resolves,
 /// held as `HeldReentryCallback` holds its callback.
-struct HeldChannelReentryCallback(ReentryCallback<KjRc<SubrequestChannel>>);
+struct HeldChannelReentryCallback(ReentryCallback<LoopChecked<KjRc<SubrequestChannel>>>);
 
 /// How many times the conversion of a `make_channel_reentry_callback()` callback has run.
 static CHANNEL_CONVERSION_RUNS: AtomicU32 = AtomicU32::new(0);
@@ -1417,7 +1418,7 @@ static CHANNEL_CONVERSION_CONTEXT: AtomicU64 = AtomicU64::new(0);
 
 /// In a request, makes a reentry callback whose function calls `function`, a JavaScript function
 /// in the caller's scope, and converts the value of the promise it returns with
-/// `IoContext::await_js_local()`, from a `Fetcher` into its channel, taken to keep past the
+/// `IoContext::await_js_with_context()`, from a `Fetcher` into its channel, taken to keep past the
 /// request, recording the `IoContext` the conversion runs in.
 unsafe fn make_channel_reentry_callback(
     isolate: usize,
@@ -1434,14 +1435,18 @@ unsafe fn make_channel_reentry_callback(
             context.make_reentry_callback_weak(move |lock, context| {
                 let result = function.as_local(lock).call(lock, None, &[])?;
                 let promise = v8::Promise::resolved(lock, result)?;
-                context.await_js_local(lock, promise, |lock, context, value| {
+                context.await_js_with_context(lock, promise, |lock, context, value| {
                     ffi::record_await_context();
                     CHANNEL_CONVERSION_CONTEXT.store(context.as_ffi(), Ordering::SeqCst);
                     CHANNEL_CONVERSION_RUNS.fetch_add(1, Ordering::SeqCst);
                     let fetcher = jsg_cpp::Ref::<Fetcher>::from_js(lock, value)?;
                     let channel = fetcher.get(lock).subrequest_channel(lock, context)?;
                     // Kept past the request, as Worker Loader keeps a dynamic Worker's outbound.
-                    channel.require_allows_transfer(lock)
+                    let channel = channel.require_allows_transfer(lock)?;
+                    // SAFETY: a `SubrequestChannel` is `kj::Refcounted`, so it and every reference
+                    // to it belong to this IoContext's event loop, and it ties nothing to the OS
+                    // thread.
+                    Ok(unsafe { LoopChecked::new(channel) })
                 })
             })
         })
@@ -1453,7 +1458,10 @@ unsafe fn make_channel_reentry_callback(
 async unsafe fn call_channel_reentry_callback(
     callback: &HeldChannelReentryCallback,
 ) -> std::result::Result<(), cxx::KjException> {
-    ffi::keep_channel(callback.0.call().await?);
+    let Ok(channel) = callback.0.call().await?.into_inner() else {
+        unreachable!("the call completes on its IoContext's event loop")
+    };
+    ffi::keep_channel(channel);
     Ok(())
 }
 
