@@ -30,6 +30,7 @@ use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use worker::CxxWorkerInterface;
 use worker::Interface;
 use workerd_capnp::config;
@@ -232,6 +233,11 @@ impl Threads {
     fn drain(&self) {
         self.replicas.drain();
         self.front.drain();
+    }
+
+    /// Tells the replicas to stop their containers, until `stop_by` if that is a time, and end.
+    fn quiesce(&self, stop_by: Option<Instant>) {
+        self.replicas.quiesce(stop_by);
     }
 }
 
@@ -849,7 +855,26 @@ pub async fn run(
     // until the instance is told to drain or this returns.
     let ready = server.cluster().map(ClusterNode::ready);
     let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
-    let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
+    // A session with one of the run's other loop threads ends only with that thread, which
+    // serves until this one quiesces the threads: one that ends while the listeners serve has
+    // failed, and the Durable Object calls between the two threads with it. (The threads of an
+    // embedding program end when it ends them.)
+    let watches_links = threads.is_some();
+    let serving = async {
+        let listening = std::pin::pin!(serve_listeners(&mut listeners));
+        let lost = std::pin::pin!(async {
+            if watches_links {
+                server.factory().link_lost().await
+            } else {
+                std::future::pending().await
+            }
+        });
+        match futures::future::select(listening, lost).await {
+            Either::Left((result, _)) => result,
+            Either::Right((thread, _)) => Err(lost_link(thread)),
+        }
+    };
+    let mut serving = std::pin::pin!(serving.fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
     match futures::future::select(serving.as_mut(), drain).await {
@@ -938,24 +963,40 @@ pub async fn run(
         }
     }
 
-    // All incoming requests have drained. Stop container-enabled actors so they cannot race
-    // their terminal Docker cleanup, then wait for it while their namespaces remain available.
+    // All incoming requests have drained, on every thread, or are waited for no longer: no
+    // thread needs another from here on. Each stops its container-enabled actors, this one
+    // below and the others at the same time; the run's drop joins them.
+    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
+    if let Some(threads) = &threads {
+        threads.quiesce(until);
+    }
+    stop_containers(&server, until).await
+}
+
+/// Stops the container-enabled actors of this thread so they cannot race their terminal Docker
+/// cleanup, then waits for it while their namespaces remain available: until `until`, if that
+/// is a time.
+async fn stop_containers(server: &Server, until: Option<Instant>) -> Result<()> {
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
-    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
         namespace.begin_container_cleanup(until).await;
     }
     let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
-    let Some((_, deadlines)) = stop else {
+    let Some(until) = until else {
         return Ok(cleanup.await?);
     };
-    if let Ok(result) = tokio::time::timeout_at(deadlines.stop, cleanup).await {
+    if let Ok(result) = tokio::time::timeout_at(until, cleanup).await {
         return Ok(result?);
     }
     tracing::warn!("leaving containers behind at the stop deadline");
     Ok(())
+}
+
+/// The failure of a thread whose session with loop thread `thread` ended while both served.
+fn lost_link(thread: usize) -> crate::Error {
+    kj::disconnected!("the session with loop thread {thread} ended")
 }
 
 /// The config's `shutdownDelayMs`.
@@ -1030,7 +1071,7 @@ pub async fn run_replica(
     };
     let role = Role::Replica(sockets, queue);
     let Some(Running {
-        server: _server,
+        server,
         mut listeners,
         drain: draining,
         ..
@@ -1042,36 +1083,66 @@ pub async fn run_replica(
         ));
     };
 
+    // Resolves with the phase that ended the serving: `Quiesced` once the process has no
+    // connection left or waits for them no longer, `Stopping` if it ends without waiting.
     let serve = async {
         signals.ready();
         if signals.reached(Phase::Serving).await == Phase::Stopping {
-            return Ok(());
+            return Ok(Phase::Stopping);
         }
         let mut serving = std::pin::pin!(serve_listeners(&mut listeners));
         let drain = std::pin::pin!(signals.reached(Phase::Draining));
         match futures::future::select(serving.as_mut(), drain).await {
             // The listeners end only once they drain: this is a failure, or a thread that
             // stopped serving, which the first thread takes for one.
-            Either::Left((result, _)) => return result,
-            Either::Right((Phase::Stopping, _)) => return Ok(()),
+            Either::Left((result, _)) => {
+                result?;
+                // The front closes its queue as the process drains, which this thread may see
+                // before it sees the phase.
+                if signals.phase() < Phase::Draining {
+                    return Err(kj::failed!("stopped serving before the server drained"));
+                }
+                if signals.phase() < Phase::Quiesced {
+                    signals.drained();
+                }
+                return Ok(signals.reached(Phase::Quiesced).await);
+            }
+            Either::Right((phase, _)) if phase >= Phase::Quiesced => return Ok(phase),
             Either::Right(_) => {}
         }
         draining.send_replace(true);
-        let stop = std::pin::pin!(signals.reached(Phase::Stopping));
-        match futures::future::select(serving, stop).await {
-            Either::Left((result, _)) => result,
-            Either::Right(_) => Ok(()),
+        let quiesced = std::pin::pin!(signals.reached(Phase::Quiesced));
+        match futures::future::select(serving, quiesced).await {
+            Either::Left((result, _)) => result?,
+            Either::Right((phase, _)) => return Ok(phase),
+        }
+        // This thread has no connection left. Its actors stay, and it serves what the other
+        // threads send them, until none of the threads has one.
+        signals.drained();
+        Ok(signals.reached(Phase::Quiesced).await)
+    };
+    // The other end of a session is a thread that serves until the process quiesces, so a
+    // session that ends before is one that failed, and the Durable Object calls between the two
+    // threads with it. The phase is read as it is now: a thread that has ended saw it before
+    // this one may have.
+    let lost = async {
+        loop {
+            let thread = factory.link_lost().await;
+            if signals.phase() < Phase::Quiesced {
+                return thread;
+            }
+            // Its sessions end one by one from here on, as the threads do.
+            std::future::pending::<()>().await;
         }
     };
-    // The first thread serves this thread's session until this thread has ended, so a session
-    // that ends is one that failed, and this thread's Durable Object calls with it.
-    let lost = factory.link_lost();
-    match futures::future::select(std::pin::pin!(serve), std::pin::pin!(lost)).await {
-        Either::Left((result, _)) => result,
-        Either::Right((thread, _)) => Err(kj::disconnected!(
-            "the session with loop thread {thread} ended"
-        )),
+    let phase = match futures::future::select(std::pin::pin!(serve), std::pin::pin!(lost)).await {
+        Either::Left((result, _)) => result?,
+        Either::Right((thread, _)) => return Err(lost_link(thread)),
+    };
+    if phase == Phase::Quiesced {
+        stop_containers(&server, signals.stop_by()).await?;
     }
+    Ok(())
 }
 
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.

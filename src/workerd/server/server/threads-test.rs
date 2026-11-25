@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::future::Future;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
@@ -74,13 +75,38 @@ fn watched(
 }
 
 #[test]
-fn the_watch_ends_once_every_thread_ended_after_the_drain() {
+fn the_watch_ends_once_every_thread_has_drained() {
     let (mut watching, events, phase) = watched(2);
     assert!(poll(&mut watching).is_pending());
     phase.send_replace(Phase::Draining);
-    events.send(Event::Exited(2, Ok(()))).unwrap();
+    events.send(Event::Drained(2)).unwrap();
+    // A thread counts once, however often it says so.
+    events.send(Event::Drained(2)).unwrap();
     assert!(poll(&mut watching).is_pending());
+    events.send(Event::Drained(1)).unwrap();
+    assert!(matches!(poll(&mut watching), Poll::Ready(Ok(()))));
+}
+
+#[test]
+fn a_thread_that_ends_while_others_drain_fails_the_watch() {
+    let (mut watching, events, phase) = watched(2);
+    phase.send_replace(Phase::Draining);
+    events.send(Event::Drained(1)).unwrap();
+    // The other threads may still send it calls.
     events.send(Event::Exited(1, Ok(()))).unwrap();
+    let Poll::Ready(Err(error)) = poll(&mut watching) else {
+        panic!("expected a failure");
+    };
+    assert_eq!(error.description(), "loop thread 1 stopped serving");
+}
+
+#[test]
+fn a_thread_that_ends_once_the_process_quiesced_counts_as_drained() {
+    let (mut watching, events, phase) = watched(2);
+    phase.send_replace(Phase::Quiesced);
+    events.send(Event::Exited(1, Ok(()))).unwrap();
+    assert!(poll(&mut watching).is_pending());
+    events.send(Event::Exited(2, Ok(()))).unwrap();
     assert!(matches!(poll(&mut watching), Poll::Ready(Ok(()))));
 }
 
@@ -133,15 +159,29 @@ fn a_thread_that_ends_without_a_report_fails_the_watch() {
 fn signals_follow_the_phase_and_take_a_lost_first_thread_for_a_stop() {
     let phase = watch::Sender::new(Phase::Starting);
     let (events, _received) = mpsc::unbounded_channel();
+    let stop_by = Arc::new(Mutex::new(None));
     let signals = Signals {
+        index: 3,
         phase: phase.subscribe(),
         events,
+        stop_by: Arc::clone(&stop_by),
     };
+    assert_eq!(signals.phase(), Phase::Starting);
+    assert_eq!(signals.stop_by(), None);
     let mut serving = Box::pin(signals.reached(Phase::Serving));
     assert!(poll(&mut serving).is_pending());
     // A phase that was skipped is reached too.
     phase.send_replace(Phase::Draining);
     assert_eq!(poll(&mut serving), Poll::Ready(Phase::Draining));
+    // The phase as it is, which a waiter that was not polled has not seen.
+    let mut quiesced = Box::pin(signals.reached(Phase::Quiesced));
+    assert!(poll(&mut quiesced).is_pending());
+    let until = Instant::now();
+    *stop_by.lock().unwrap() = Some(until);
+    phase.send_replace(Phase::Quiesced);
+    assert_eq!(signals.phase(), Phase::Quiesced);
+    assert_eq!(signals.stop_by(), Some(until));
+    assert_eq!(poll(&mut quiesced), Poll::Ready(Phase::Quiesced));
 
     let mut stopping = Box::pin(signals.reached(Phase::Stopping));
     assert!(poll(&mut stopping).is_pending());

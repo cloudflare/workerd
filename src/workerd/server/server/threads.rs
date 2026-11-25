@@ -86,6 +86,8 @@ use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::thread::JoinHandle;
 
 use futures::future::LocalBoxFuture;
@@ -95,6 +97,7 @@ use kj_rs_tokio::PortPaced;
 use tokio::io::DuplexStream;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::time::Instant;
 
 use crate::Result;
 use crate::bridge::ffi;
@@ -115,9 +118,14 @@ pub enum Phase {
     Starting,
     /// The front accepts connections, and every thread serves what it takes from its queue.
     Serving,
-    /// No connection is accepted; what is queued and in flight is finished.
+    /// No connection is accepted; what is queued and in flight is finished. Every thread still
+    /// serves what the others send it.
     Draining,
-    /// The process is ending without waiting for connections.
+    /// No thread has a connection left, or the process waits for them no longer: each thread
+    /// stops its actors' containers and ends. A session between two threads may end from here
+    /// on.
+    Quiesced,
+    /// The process is ending without waiting for anything.
     Stopping,
 }
 
@@ -125,6 +133,9 @@ pub enum Phase {
 enum Event {
     /// The thread built its graph and waits for [`Phase::Serving`].
     Ready,
+    /// The thread, the one with this index, has finished what it took from the front's queue:
+    /// it waits for [`Phase::Quiesced`], serving the other threads meanwhile.
+    Drained(usize),
     /// The thread ended, its loop gone: the index of the thread and how its run ended.
     Exited(usize, Result<()>),
 }
@@ -137,8 +148,12 @@ const REPLICA_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 /// A replica's end of what the threads share.
 pub struct Signals {
+    index: usize,
     phase: watch::Receiver<Phase>,
     events: mpsc::UnboundedSender<Event>,
+    /// When a thread that stops its containers gives up on them, if the process has such a
+    /// time; set before [`Phase::Quiesced`].
+    stop_by: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Signals {
@@ -146,6 +161,25 @@ impl Signals {
     pub fn ready(&self) {
         // The first thread stopped listening only if it is ending, which the phase says.
         let _ = self.events.send(Event::Ready);
+    }
+
+    /// Tells the first thread that this one has no connection left.
+    pub fn drained(&self) {
+        // As for `ready`.
+        let _ = self.events.send(Event::Drained(self.index));
+    }
+
+    /// The phase the process is in now, whatever this thread has seen of it.
+    #[must_use]
+    pub fn phase(&self) -> Phase {
+        *self.phase.borrow()
+    }
+
+    /// Until when this thread may wait for its containers to stop, if not for as long as it
+    /// takes. As of [`Phase::Quiesced`].
+    #[must_use]
+    pub fn stop_by(&self) -> Option<Instant> {
+        *self.stop_by.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Resolves once the process is in `phase` or a later one, with the one it is in. A first
@@ -167,6 +201,7 @@ pub struct Replicas {
     threads: RefCell<Vec<JoinHandle<()>>>,
     /// The hub of the run's loop threads, once they are started.
     hub: OnceCell<Arc<Hub>>,
+    stop_by: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Replicas {
@@ -179,6 +214,7 @@ impl Replicas {
             phase: watch::Sender::new(Phase::Starting),
             threads: RefCell::new(Vec::new()),
             hub: OnceCell::new(),
+            stop_by: Arc::default(),
         }
     }
 
@@ -223,8 +259,10 @@ impl Replicas {
                 overrides: overrides.clone(),
                 deployments: deployments.clone(),
                 signals: Signals {
+                    index,
                     phase: self.phase.subscribe(),
                     events: events.clone(),
+                    stop_by: Arc::clone(&self.stop_by),
                 },
                 seat,
             };
@@ -255,6 +293,14 @@ impl Replicas {
     /// Has the replicas stop accepting connections and finish the ones they have.
     pub fn drain(&self) {
         self.advance(Phase::Draining);
+    }
+
+    /// Has the replicas stop their actors' containers and end, giving up on the containers at
+    /// `stop_by` if that is a time. For once no thread has a connection left, or when the
+    /// process stops waiting for them.
+    pub fn quiesce(&self, stop_by: Option<Instant>) {
+        *self.stop_by.lock().unwrap_or_else(PoisonError::into_inner) = stop_by;
+        self.advance(Phase::Quiesced);
     }
 
     fn advance(&self, phase: Phase) {
@@ -314,7 +360,7 @@ impl Started {
     pub fn check(&mut self) -> Result<()> {
         loop {
             match self.events.try_recv() {
-                Ok(Event::Ready) => {}
+                Ok(Event::Ready | Event::Drained(_)) => {}
                 Ok(Event::Exited(index, result)) => {
                     return Err(exit_error(index, result, "ended while starting"));
                 }
@@ -324,9 +370,9 @@ impl Started {
         }
     }
 
-    /// Watches the threads for the rest of the run: fails when one fails or stops serving before
-    /// the server drains, and resolves once every one has ended. The first thread serves it as one
-    /// of its listeners.
+    /// Watches the threads until none has a connection left: fails when one fails, or ends
+    /// before the first thread quiesces them, and resolves once every one has drained. The first
+    /// thread serves it as one of its listeners.
     #[must_use]
     pub fn watch(self) -> LocalBoxFuture<'static, Result<()>> {
         Box::pin(watch_threads(self.events, self.phase, self.count))
@@ -344,6 +390,7 @@ async fn await_ready(
     while ready < count {
         match events.recv().await {
             Some(Event::Ready) => ready += 1,
+            Some(Event::Drained(_)) => {}
             Some(Event::Exited(index, result)) => {
                 return Err(exit_error(index, result, "ended while starting"));
             }
@@ -359,20 +406,30 @@ async fn await_ready(
     Ok(started)
 }
 
-/// Watches `running` threads through their events: see [`Started::watch`].
+/// Watches `serving` threads through their events: see [`Started::watch`].
 async fn watch_threads(
     mut events: mpsc::UnboundedReceiver<Event>,
     phase: watch::Receiver<Phase>,
-    mut running: usize,
+    mut serving: usize,
 ) -> Result<()> {
-    while running > 0 {
+    let mut drained = std::collections::HashSet::new();
+    while serving > 0 {
         match events.recv().await {
             Some(Event::Ready) => {}
+            Some(Event::Drained(index)) => {
+                if drained.insert(index) {
+                    serving -= 1;
+                }
+            }
             Some(Event::Exited(index, result)) => {
-                if result.is_err() || *phase.borrow() < Phase::Draining {
+                // A thread ends only once the process quiesced: until then the others may
+                // still send it calls.
+                if result.is_err() || *phase.borrow() < Phase::Quiesced {
                     return Err(exit_error(index, result, "stopped serving"));
                 }
-                running -= 1;
+                if drained.insert(index) {
+                    serving -= 1;
+                }
             }
             None => return Err(lost_thread()),
         }
