@@ -46,6 +46,11 @@ impl Handler for Echo<'_> {
         if url == b"/fail" {
             return Err(failed("the handler failed"));
         }
+        if url == b"/gone" {
+            // What a call fails with when something it depended on went away.
+            let gone = KjExceptionType::Disconnected;
+            return Err(KjError::new(gone, "the handler's peer is gone".to_owned()));
+        }
         if url == b"/end-then-fail" || url == b"/end-then-return" {
             // A body of unknown length whose sink is dropped well before the call ends.
             drop(response.send(200, "OK", &Headers::new(self.0), None)?);
@@ -284,6 +289,71 @@ fn shutdown_closes_an_idle_connection() {
         let (served, ()) = futures::join!(served, client);
         served.unwrap();
     });
+}
+
+/// A call that fails as disconnected is not answered, as under kj, and the serve says that
+/// the connection ended that way.
+#[test]
+fn a_call_that_ends_unanswered_fails_the_serve() {
+    let table = table();
+    runtime().block_on(async {
+        let (ours, mut peer) = duplex(1 << 16);
+        let shutdown = Shutdown::new();
+        let served = serve_connection(
+            ours,
+            Box::pin(pending()),
+            &table,
+            Rc::new(ServerSettings::default()),
+            Rc::new(Echo(&table)),
+            &shutdown,
+        );
+        let client = async {
+            peer.write_all(b"GET /gone HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                .await
+                .unwrap();
+            let mut response = Vec::new();
+            let _ = peer.read_to_end(&mut response).await;
+            assert!(response.is_empty());
+        };
+        let (served, ()) = futures::join!(served, client);
+        assert_eq!(
+            served.unwrap_err().description(),
+            "the handler sent no response"
+        );
+    });
+}
+
+/// The answer to a CONNECT that cannot be sent leaves the connection as it was: not upgraded,
+/// so that it still ends when its peer hangs up.
+#[test]
+fn an_upgrade_whose_head_cannot_be_sent_does_not_upgrade_the_connection() {
+    let table = table();
+    let (head, _sent) = oneshot::channel();
+    let hangup: Hangup = Box::pin(pending());
+    let link = Link {
+        upgraded: Arc::default(),
+        hangup: hangup.shared(),
+        draining: None,
+        body_chunks: 1,
+        remote: false,
+    };
+    let responder = Responder {
+        head,
+        upgrade: None,
+        link: link.clone(),
+    };
+    let request = http::Request::connect("example.com:443").body(()).unwrap();
+    let sender = ResponseSender::new(responder, &request.into_parts().0);
+    let headers = Headers::new(&table);
+    let refused = sender.accept_connect(1000, b"Not A Status", HeadersRef::from(&headers).as_ffi());
+    assert_eq!(refused.unwrap_err().description(), "invalid status 1000");
+    assert!(!link.upgraded.load(Ordering::Acquire));
+    // The response is still to be sent, and one that upgrades says so before its head goes.
+    assert!(!sender.sent());
+    sender
+        .accept_connect(200, b"OK", HeadersRef::from(&headers).as_ffi())
+        .unwrap();
+    assert!(link.upgraded.load(Ordering::Acquire));
 }
 
 #[test]

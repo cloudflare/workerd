@@ -472,7 +472,8 @@ where
             // The call starts alongside the connection; hyper waits for the response head it
             // sends. A call that ends without one closes the connection.
             lock(&calls).push(start(parts, body, responder));
-            async move { sent.await.map_err(|_| Unanswered) }
+            let remote = link.remote;
+            async move { sent.await.map_err(|_| Unanswered::new(remote)) }
         })
     };
     let mut serving = pin!(
@@ -556,15 +557,43 @@ where
 /// The failure of a request whose handler call ended, or was dropped, without a response:
 /// hyper closes the connection.
 #[derive(Debug)]
-struct Unanswered;
+enum Unanswered {
+    /// By a call on the connection's own thread, whose handler failed as disconnected before it
+    /// sent a head: the serve's failure, an I/O error as far as [`transport_error`] is
+    /// concerned.
+    Local(io::Error),
+    /// By a call on another thread, which also ends unanswered when that thread drops the
+    /// request it was handed, as it does when it stops: that closes the connection and is
+    /// nobody's failure.
+    Remote,
+}
 
-impl fmt::Display for Unanswered {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the handler sent no response")
+impl Unanswered {
+    const WHAT: &str = "the handler sent no response";
+
+    fn new(remote: bool) -> Self {
+        if remote {
+            Self::Remote
+        } else {
+            Self::Local(io::Error::other(Self::WHAT))
+        }
     }
 }
 
-impl Error for Unanswered {}
+impl fmt::Display for Unanswered {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(Self::WHAT)
+    }
+}
+
+impl Error for Unanswered {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Local(error) => Some(error),
+            Self::Remote => None,
+        }
+    }
+}
 
 /// The I/O error behind a hyper error, if that is what it is.
 fn transport_error(error: &hyper::Error) -> Option<KjError> {
@@ -708,7 +737,13 @@ impl ResponseSender {
             return Err(failed("response already sent"));
         }
         self.link.upgraded.store(true, Ordering::Release);
-        self.send_head(status, status_text, head, ChannelBody::empty())
+        let sent = self.send_head(status, status_text, head, ChannelBody::empty());
+        if sent.is_err() {
+            // No head went out, so nobody acted on the flag: the connection is hyper's still,
+            // and ends with its peer.
+            self.link.upgraded.store(false, Ordering::Release);
+        }
+        sent
     }
 
     /// The head went out.
