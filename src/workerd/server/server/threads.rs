@@ -29,8 +29,10 @@
 //! one name, threads can run different code under it.
 //!
 //! What a replica lacks it reaches on the first thread, over its session with it
-//! ([`FirstThread`]): a capnp `WorkerdDebugPort` session, as a cluster instance keeps with a
-//! peer, over an in-process pipe made when the replica starts. A replica's Durable Object
+//! ([`ThreadLink`]): a two-way capnp `WorkerdDebugPort` session, as a cluster instance keeps
+//! with a peer, over an in-process pipe. The threads' hub (`hub.rs`) says which thread an actor
+//! lives on and makes the pipe of two threads' session the first time either needs it; the two
+//! then talk directly. A replica's Durable Object
 //! namespaces have no storage and no actors: the channel of a stub is a capability of the session
 //! for the channel the first thread gives a stub of its own, so the first thread treats the
 //! request of a replica as it treats a request it accepted itself, in a cluster too
@@ -80,8 +82,10 @@
 //!   other loop. A loop that stops drops the calls it had taken, whose connections close, and
 //!   leaves what is queued to the others.
 
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use futures::future::LocalBoxFuture;
@@ -98,7 +102,11 @@ use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
 use crate::front;
+use crate::hub::Hub;
+use crate::hub::Mail;
+use crate::hub::Seat;
 use crate::listen::FrontSockets;
+use crate::placement::Placement;
 
 /// Where the process is in its life, for the replicas to follow. It only advances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -157,6 +165,8 @@ pub struct Replicas {
     shared: KjArc<ffi::SharedFactory>,
     phase: watch::Sender<Phase>,
     threads: RefCell<Vec<JoinHandle<()>>>,
+    /// The hub of the run's loop threads, once they are started.
+    hub: OnceCell<Arc<Hub>>,
 }
 
 impl Replicas {
@@ -168,6 +178,7 @@ impl Replicas {
             shared: factory.shared(),
             phase: watch::Sender::new(Phase::Starting),
             threads: RefCell::new(Vec::new()),
+            hub: OnceCell::new(),
         }
     }
 
@@ -191,9 +202,20 @@ impl Replicas {
     ) -> Result<Started> {
         let (events, received) = mpsc::unbounded_channel();
         let count = self.count;
-        for index in 1..=count {
-            let (ours, theirs) = session_pipe();
-            factory.spawn_detached(serve_session(Rc::clone(factory), index, ours));
+        // Every actor's home is the first thread.
+        let placement = Placement {
+            count: count + 1,
+            spread: false,
+        };
+        let (hub, seats) = Hub::new(placement);
+        let _ = self.hub.set(hub);
+        let mut seats = seats.into_iter();
+        let first = seats
+            .next()
+            .ok_or_else(|| kj::failed!("the hub made no seat for the first loop thread"))?;
+        factory.join(first)?;
+        for seat in seats {
+            let index = seat.index;
             let replica = Replica {
                 shared: self.shared.clone(),
                 sockets: sockets.clone(),
@@ -204,7 +226,7 @@ impl Replicas {
                     phase: self.phase.subscribe(),
                     events: events.clone(),
                 },
-                session: theirs,
+                seat,
             };
             let exit = ExitReport {
                 index,
@@ -388,8 +410,8 @@ struct Replica {
     /// The services of the config that came from cluster deployments.
     deployments: Deployments,
     signals: Signals,
-    /// Its end of its session with the first thread.
-    session: SessionEnd,
+    /// Which loop thread it is, with the hub and its inbox.
+    seat: Seat,
 }
 
 impl Replica {
@@ -416,11 +438,11 @@ impl Replica {
             overrides,
             deployments,
             signals,
-            session,
+            seat,
             ..
         } = self;
         let factory = Rc::new(Factory::new(factory));
-        factory.forward_to_first_thread(session);
+        factory.join(seat)?;
         let serving = Rc::clone(&factory);
         let replica =
             crate::run::run_replica(serving, overrides, deployments, sockets, queue, &signals);
@@ -437,11 +459,11 @@ impl Replica {
 /// Each direction of a session's pipe buffers this much before the writer waits.
 const SESSION_BUFFER_SIZE: usize = 256 * 1024;
 
-/// One end of the in-process pipe that a replica's session with the first loop thread runs over.
+/// One end of the in-process pipe that the session of two loop threads runs over.
 ///
 /// It is made on the first thread and goes to the thread that uses it, which makes a KJ stream
 /// of it on its own loop.
-pub struct SessionEnd(DuplexStream);
+pub struct SessionEnd(pub(crate) DuplexStream);
 
 impl SessionEnd {
     /// The pipe for the thread that uses this end. The other thread fills it whenever it is
@@ -460,46 +482,47 @@ pub fn session_pipe() -> (SessionEnd, SessionEnd) {
     (SessionEnd(a), SessionEnd(b))
 }
 
-/// Serves, on the first loop thread, the session of replica `index` over `end`, until the
-/// replica drops its end.
-pub async fn serve_session(factory: Rc<Factory>, index: usize, end: SessionEnd) {
-    let stream = kj_hyper::into_kj_stream(end.paced());
-    if let Err(error) = ffi::factory_accept_loop_session(factory.raw(), stream).await {
-        let error = crate::Error::from(error);
-        // The replica is told by its own end; this is for whoever reads the log.
-        if error.exception_type() != cxx::KjExceptionType::Disconnected {
-            tracing::error!(
-                "the session of loop thread {index} failed: {}",
-                error.description()
-            );
-        }
-    }
-}
-
-/// A replica's session with the first loop thread, for the replica: a capnp `WorkerdDebugPort`
-/// session, the one a cluster node keeps with a peer, over an in-process pipe.
+/// A loop thread's session with another loop thread of the process: a two-way capnp
+/// `WorkerdDebugPort` session, the one a cluster node keeps with a peer, over an in-process pipe
+/// the hub made for the two (`Hub::link`). Everything that crosses between two loop threads as
+/// capabilities crosses one of these, and nothing outside this type knows how.
 ///
-/// A replica has no actors: each stub it makes is a capability of this session for the actor's
-/// channel on the first thread, and each request on it an event started there
-/// (`actor::ForwardedChannel`). Calls made over one stub arrive in the order they were made.
-/// Unlike a session with another instance, it carries `restore()` events
-/// (`new_loop_session_client`).
-pub struct FirstThread {
+/// Each end names an actor or a service of the other end's graph and starts events on it: a
+/// stub to an actor of another thread is a capability of the session for the actor's channel
+/// there (`actor::ForwardedChannel`). Calls made over one stub arrive in the order they were
+/// made. Unlike a session with another instance, it carries `restore()` events
+/// (`new_thread_link`). An end answers once its thread's graph is built
+/// (`Factory::serve_links`); what the other sent before waits in the pipe.
+pub struct ThreadLink {
+    peer: usize,
     client: KjOwn<ffi::RpcClient>,
 }
 
-impl FirstThread {
-    /// The session over `end`, on the loop of `factory`, this replica's.
-    pub fn connect(factory: &ffi::WorkerFactory, end: SessionEnd) -> Self {
-        Self {
-            client: ffi::new_loop_session_client(factory, kj_hyper::into_kj_stream(end.paced())),
-        }
+impl ThreadLink {
+    /// The session with thread `peer` over `end`, on the loop of `factory`, this thread's.
+    pub(crate) fn connect(
+        factory: &ffi::WorkerFactory,
+        peer: usize,
+        end: SessionEnd,
+    ) -> Result<Self> {
+        let index = u32::try_from(peer).map_err(|_| kj::failed!("too many loop threads"))?;
+        let stream = kj_hyper::into_kj_stream(end.paced());
+        Ok(Self {
+            peer,
+            client: ffi::new_thread_link(factory, stream, index),
+        })
+    }
+
+    /// The thread at the other end.
+    #[must_use]
+    pub fn peer(&self) -> usize {
+        self.peer
     }
 
     /// The actor `key` (the hex id of a durable actor, derived from `name` if that is known;
-    /// the name of an ephemeral one) of `class`'s namespace in worker `service`, on the first
-    /// thread. The first thread holds the actor's channel, as a stub there would, until this is
-    /// dropped.
+    /// the name of an ephemeral one) of `class`'s namespace in worker `service`, as the other
+    /// thread resolves it. That thread holds the actor's channel, as a stub there would, until
+    /// this is dropped.
     pub fn actor(
         &self,
         service: &str,
@@ -511,16 +534,33 @@ impl FirstThread {
         Ok(actor?)
     }
 
-    /// The service `name` of the first thread's graph.
+    /// The service `name` of the other thread's graph.
     pub fn service(&self, name: &str) -> Result<KjOwn<ffi::RpcClient>> {
         Ok(ffi::rpc_client_debug_entrypoint(&self.client, name)?)
     }
 
-    /// Resolves once the session ended, which it does only when the first thread's server is
-    /// gone or the session failed.
+    /// Resolves once the session ended, which it does only when the other thread's loop is gone
+    /// or the session failed.
     pub async fn disconnected(&self) {
         // However it ended.
         let _ = ffi::rpc_client_on_disconnect(&self.client).await;
+    }
+}
+
+/// Takes what loop thread `factory`'s is sent through `inbox`, until the hub and every other
+/// thread are gone.
+pub async fn take_mail(factory: Rc<Factory>, mut inbox: mpsc::UnboundedReceiver<Mail>) {
+    while let Some(mail) = inbox.recv().await {
+        match mail {
+            Mail::Link(peer) => {
+                if let Err(error) = factory.link(peer) {
+                    tracing::error!(
+                        "taking the session with loop thread {peer}: {}",
+                        error.description()
+                    );
+                }
+            }
+        }
     }
 }
 

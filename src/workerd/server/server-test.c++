@@ -10952,18 +10952,19 @@ class SharedEntropySource final: public kj::EntropySource {
 // `SharedFactory`: the thread's tokio-backed loop, its worker factory, and the Rust server on it,
 // which compiles this thread's copy of every worker. Constructed, used and destroyed on its thread.
 //
-// With `session`, the other end of a session the primary loop's server serves (`newSession()`),
-// the server is a replica's: its actors are the primary loop's.
+// With `seat`, the seat the primary loop's server made for another loop thread
+// (`addLoopThread()`), the server is that thread's: an actor whose home is the primary loop is
+// reached there.
 class LoopThreadServer {
  public:
   LoopThreadServer(kj::Arc<SharedFactory> shared,
       PrimaryLoop primary,
-      kj::Maybe<::rust::Box<SessionEnd>> session = kj::none) {
+      kj::Maybe<::rust::Box<Seat>> seat = kj::none) {
     auto ownFactory = kj::heap<WorkerFactory>(kj::mv(shared), io.getTimer(),
         kj::systemPreciseMonotonicClock(), provider.getNetwork(), primary);
     factory = *ownFactory;
     auto& started = *server.emplace(new_in_process_server(kj::mv(ownFactory)));
-    KJ_IF_SOME(end, session) started.forward_to_first_thread(kj::mv(end));
+    KJ_IF_SOME(s, seat) started.join_loop_threads(kj::mv(s));
     reportsTask = collectReports(started).eagerlyEvaluate(nullptr);
     auto task = started.run(""_kj.as<kj_rs::RustUncheckedUtf8>());
     KJ_ASSERT(!task.poll(ws), "the server stopped");
@@ -10989,10 +10990,10 @@ class LoopThreadServer {
     return KJ_ASSERT_NONNULL(factory);
   }
 
-  // A session with this thread's server for the server of another loop thread, which reaches
-  // this one's actors over it.
-  ::rust::Box<SessionEnd> newSession() {
-    return KJ_ASSERT_NONNULL(server)->accept_loop_session();
+  // Makes this thread the first of two loop threads; the seat is the other's, whose server
+  // reaches this one's actors.
+  ::rust::Box<Seat> addLoopThread() {
+    return KJ_ASSERT_NONNULL(server)->add_loop_thread();
   }
 
   // The body of the response to a GET of `url` on a new connection to the socket at `addr`.
@@ -11219,12 +11220,12 @@ KJ_TEST("Server: a loop thread without the actors reaches them on the primary lo
   KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == "1");
 
   // The other thread serves while this one's loop runs, which has the actor.
-  auto session = primary.newSession();
+  auto seat = primary.addLoopThread();
   auto done = kj::newPromiseAndCrossThreadFulfiller<void>();
   {
     kj::Thread thread([&]() {
       KJ_DEFER(done.fulfiller->fulfill());
-      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(session));
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(seat));
       // Its own factory cannot open the namespace's storage, and did not have to.
       for (uint round = 0; round < ROUNDS; round++) {
         auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);

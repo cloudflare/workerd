@@ -252,7 +252,7 @@ enum Role {
 ///
 /// A replica (see `threads.rs`) gets no `options` but the overrides, so it has no control
 /// channel, inspector or debug port, it arms no cron trigger, and it does not join the cluster:
-/// its factory forwards to the first loop thread what needs one (`Factory::first_thread`).
+/// its factory forwards to the first loop thread what needs one (`Factory::hub`).
 #[expect(clippy::too_many_lines, reason = "a server's start, in order")]
 async fn start(
     factory: Rc<Factory>,
@@ -319,6 +319,8 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
+    // The graph is built: what the other loop threads send this one is answered from here on.
+    factory.serve_links();
     // The replicas build their graphs once this thread accepted the config, and are ready
     // before the process says it listens. Without a stream socket they would have nothing to
     // serve.
@@ -1063,16 +1065,11 @@ pub async fn run_replica(
     };
     // The first thread serves this thread's session until this thread has ended, so a session
     // that ends is one that failed, and this thread's Durable Object calls with it.
-    let lost = async {
-        match factory.first_thread() {
-            Some(first) => first.disconnected().await,
-            None => std::future::pending().await,
-        }
-    };
+    let lost = factory.link_lost();
     match futures::future::select(std::pin::pin!(serve), std::pin::pin!(lost)).await {
         Either::Left((result, _)) => result,
-        Either::Right(((), _)) => Err(kj::disconnected!(
-            "the session with the first loop thread ended"
+        Either::Right((thread, _)) => Err(kj::disconnected!(
+            "the session with loop thread {thread} ended"
         )),
     }
 }

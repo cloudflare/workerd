@@ -82,6 +82,7 @@ use crate::cluster::moved;
 use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
+use crate::placement::Scope;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -435,7 +436,18 @@ impl ActorNamespace {
     /// The channel of the actor with `id`, started on first use. `persistent` is recorded on the
     /// channel: whether stubs to it may be stored.
     pub fn channel(&self, id: KjOwn<ActorIdHandle>, persistent: Persistent) -> Rc<dyn Channel> {
-        self.channel_for(id, persistent, false, None)
+        self.channel_for(id, persistent, false, None, None)
+    }
+
+    /// The channel of the actor with `id` for a stub on loop thread `thread` of the process,
+    /// which sent for it over its session with this thread: the channel a stub on this thread
+    /// gets. Whether the stub is persistent arrives with each of its requests.
+    pub fn channel_from_thread(
+        &self,
+        id: KjOwn<ActorIdHandle>,
+        thread: usize,
+    ) -> Rc<dyn Channel> {
+        self.channel_for(id, false, false, None, Some(thread))
     }
 
     /// The channel of the actor with `id` for the debug port's request, or with `session` a
@@ -445,7 +457,7 @@ impl ActorNamespace {
         id: KjOwn<ActorIdHandle>,
         session: Option<Rc<Count>>,
     ) -> Rc<dyn Channel> {
-        self.channel_for(id, false, true, session)
+        self.channel_for(id, false, true, session, None)
     }
 
     fn channel_for(
@@ -454,11 +466,13 @@ impl ActorNamespace {
         persistent: Persistent,
         remote: bool,
         session: Option<Rc<Count>>,
+        caller_thread: Option<usize>,
     ) -> Rc<dyn Channel> {
-        if let Some(first) = self.factory.first_thread() {
-            let key = ffi::actor_id_key(&id);
+        let key = ffi::actor_id_key(&id);
+        let home = self.home(&key);
+        if home != self.factory.thread() {
             let name: Option<String> = ffi::actor_id_name(&id).into();
-            let actor = first.actor(&self.service, &self.class_name, &key, name.as_deref());
+            let actor = self.forward(&key, name.as_deref(), home, caller_thread);
             return Rc::new(ForwardedChannel {
                 namespace: Weak::clone(&self.this),
                 id,
@@ -480,6 +494,34 @@ impl ActorNamespace {
             container: Client(self.container_for(id)),
             persistent,
         })
+    }
+
+    /// The actor `key`, whose home is the thread `home` and not this one, as a capability of
+    /// this thread's session with that one. `caller_thread` is the thread that sent for the
+    /// actor, if another did.
+    ///
+    /// A thread sends for an actor only to its home, as the hub places it, so a thread that is
+    /// sent for one the hub places elsewhere refuses: it hosts no actor of another thread, and
+    /// it passes no call on.
+    fn forward(
+        &self,
+        key: &str,
+        name: Option<&str>,
+        home: usize,
+        caller_thread: Option<usize>,
+    ) -> Result<KjOwn<ffi::RpcClient>> {
+        if let Some(caller) = caller_thread {
+            let here = self.factory.thread();
+            tracing::error!(
+                "loop thread {caller} sent thread {here} a call for a Durable Object whose home \
+                 is thread {home}"
+            );
+            return Err(kj::failed!(
+                "a Durable Object call was sent to a loop thread that is not the object's home"
+            ));
+        }
+        let link = self.factory.link(home)?;
+        link.actor(&self.service, &self.class_name, key, name)
     }
 
     /// The channel of the ephemeral actor named `name`.
@@ -594,10 +636,19 @@ impl ActorNamespace {
         self.storage.get().is_some() || self.forwards()
     }
 
+    /// The loop thread the root actor `key` lives on, with its facets.
+    pub fn home(&self, key: &str) -> usize {
+        let scope = match self.unique_key() {
+            Some(unique_key) => Scope::Durable(unique_key),
+            None => Scope::Ephemeral(&self.service, &self.class_name),
+        };
+        self.factory.home(&scope, key)
+    }
+
     /// Whether the namespace's actors are on another loop thread, the first: this is a
     /// replica's namespace (threads.rs), which has no storage and no containers.
     pub fn forwards(&self) -> bool {
-        self.factory.first_thread().is_some()
+        self.factory.thread() != 0
     }
 
     /// Fails on a replica, for what only the thread that has the actors can do.

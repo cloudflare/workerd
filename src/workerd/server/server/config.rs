@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use capnp::message::ReaderOptions;
@@ -27,6 +28,8 @@ use hashlink::LinkedHashMap;
 use kj_rs::KjArc;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
 use workerd_capnp::config;
 use workerd_capnp::service;
 use workerd_capnp::service_designator;
@@ -62,46 +65,139 @@ use crate::cluster::PeerSession;
 use crate::cluster::SessionService;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
+use crate::hub::Hub;
+use crate::hub::Mail;
+use crate::hub::Seat;
+use crate::placement::Scope;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::bucket::Home;
-use crate::threads::FirstThread;
-use crate::threads::SessionEnd;
+use crate::threads::ThreadLink;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
 /// The C++ worker factory: everything the workers of one loop thread share, owned for the run.
 pub struct Factory {
-    /// On a replica (threads.rs), the session with the first loop thread. Declared before the
-    /// factory, which the session's client refers to, so that it is dropped first.
-    first_thread: OnceCell<FirstThread>,
+    /// The sessions with the process's other loop threads made so far (threads.rs), by the
+    /// other thread's index. Declared before the factory, which the sessions' clients refer to,
+    /// so that they are dropped first.
+    links: RefCell<HashMap<usize, Rc<ThreadLink>>>,
     inner: KjOwn<ffi::WorkerFactory>,
     loopback: Loopback,
+    /// With several loop threads, which of them this is, and their hub (hub.rs).
+    seat: OnceCell<(usize, Arc<Hub>)>,
+    /// This thread's inbox, from when it has its seat until its task takes it.
+    inbox: RefCell<Option<mpsc::UnboundedReceiver<Mail>>>,
+    /// Whether the sessions with other threads are answered and the inbox is read
+    /// (`serve_links`).
+    serving_links: Cell<bool>,
+    /// The thread at the other end of a session that ended, once one has.
+    lost_link: watch::Sender<Option<usize>>,
 }
 
 impl Factory {
     #[must_use]
     pub fn new(inner: KjOwn<ffi::WorkerFactory>) -> Self {
         Self {
-            first_thread: OnceCell::new(),
+            links: RefCell::default(),
             inner,
             loopback: Loopback::default(),
+            seat: OnceCell::new(),
+            inbox: RefCell::new(None),
+            serving_links: Cell::new(false),
+            lost_link: watch::Sender::new(None),
         }
     }
 
-    /// Makes this the factory of a replica: what only the first loop thread has, the actors
-    /// and the cluster's bucket, is reached over `end` from now on. Before the server is built.
-    pub fn forward_to_first_thread(&self, end: SessionEnd) {
-        // A factory is a replica's from the start, so this is the only call.
-        let _ = self
-            .first_thread
-            .set(FirstThread::connect(&self.inner, end));
+    /// Seats this factory's loop thread among the process's: from now on an actor whose home
+    /// is another thread is reached over a session with that thread. Once; on a thread other
+    /// than the first, before its server is built.
+    pub fn join(self: &Rc<Self>, seat: Seat) -> Result<()> {
+        let Seat { index, hub, inbox } = seat;
+        if self.seat.set((index, hub)).is_err() {
+            return Err(kj::failed!(
+                "this loop thread already has its seat among the process's"
+            ));
+        }
+        *self.inbox.borrow_mut() = Some(inbox);
+        if self.serving_links.get() {
+            self.take_mail();
+        }
+        Ok(())
     }
 
-    /// The session with the first loop thread, on a replica.
+    /// Which of the process's loop threads this is: 0, the first, if it is the only one.
     #[must_use]
-    pub fn first_thread(&self) -> Option<&FirstThread> {
-        self.first_thread.get()
+    pub fn thread(&self) -> usize {
+        self.seat.get().map_or(0, |(index, _)| *index)
+    }
+
+    /// The home thread of the root actor `key` of the namespace `scope` names, as the hub
+    /// places it: this thread, if it is the only one.
+    #[must_use]
+    pub fn home(&self, scope: &Scope<'_>, key: &str) -> usize {
+        self.seat.get().map_or(0, |(_, hub)| hub.home(scope, key))
+    }
+
+    /// The session with loop thread `peer` of the process, made if this thread has none yet:
+    /// over the pipe the hub has for the two, which tells `peer` if this thread is the first to
+    /// ask.
+    pub fn link(self: &Rc<Self>, peer: usize) -> Result<Rc<ThreadLink>> {
+        if let Some(link) = self.links.borrow().get(&peer) {
+            return Ok(Rc::clone(link));
+        }
+        let (index, hub) = self
+            .seat
+            .get()
+            .ok_or_else(|| kj::failed!("this is the process's only loop thread"))?;
+        let end = hub.link(*index, peer).ok_or_else(|| {
+            kj::failed!("the hub has no session for loop threads {index} and {peer}")
+        })?;
+        let link = Rc::new(ThreadLink::connect(&self.inner, peer, end)?);
+        self.links.borrow_mut().insert(peer, Rc::clone(&link));
+        // The first session to end is the one reported: a session ends only with the other
+        // thread's loop, or by failing.
+        let this = Rc::downgrade(self);
+        let watched = Rc::clone(&link);
+        self.spawn_detached(async move {
+            watched.disconnected().await;
+            if let Some(this) = this.upgrade() {
+                this.lost_link.send_if_modified(|lost| {
+                    let first = lost.is_none();
+                    if first {
+                        *lost = Some(peer);
+                    }
+                    first
+                });
+            }
+        });
+        Ok(link)
+    }
+
+    /// Has this thread answer what the other threads send over their sessions with it, and
+    /// take what is in its inbox, from now on: its server is registered and its graph built.
+    pub fn serve_links(self: &Rc<Self>) {
+        if !self.serving_links.replace(true) {
+            ffi::factory_serve_links(&self.inner);
+            self.take_mail();
+        }
+    }
+
+    /// Starts the task that takes this thread's mail, if it has a seat and no such task yet.
+    fn take_mail(self: &Rc<Self>) {
+        if let Some(inbox) = self.inbox.borrow_mut().take() {
+            self.spawn_detached(crate::threads::take_mail(Rc::clone(self), inbox));
+        }
+    }
+
+    /// Resolves once a session with another loop thread ended, with that thread's index.
+    pub async fn link_lost(&self) -> usize {
+        let mut lost = self.lost_link.subscribe();
+        match lost.wait_for(Option::is_some).await {
+            Ok(peer) => peer.unwrap_or_default(),
+            // The sender is this factory's.
+            Err(_) => std::future::pending().await,
+        }
     }
 
     /// The `loopback:` namespace of this server's sockets and external services.
@@ -2079,8 +2175,9 @@ impl ServerHandle {
         class_name: &str,
         actor_id: &str,
         actor_name: KjMaybe<&str>,
-        local_caller: bool,
+        caller_thread: KjMaybe<u32>,
     ) -> Result<Box<SubrequestChannel>> {
+        let caller_thread: Option<u32> = caller_thread.into();
         let namespace = self.actor_namespace(service_name, class_name)?;
         if namespace.unique_key().is_none() {
             return Ok(SubrequestChannel::new(
@@ -2090,7 +2187,7 @@ impl ServerHandle {
         // Only another loop thread of this process derived the id from the name it sends; from
         // anyone else, a name would be the actor's `ctx.id.name` whether or not it hashes to the
         // id.
-        let actor_name = if local_caller {
+        let actor_name = if caller_thread.is_some() {
             actor_name
         } else {
             KjMaybe::None
@@ -2099,10 +2196,9 @@ impl ServerHandle {
         // Another loop thread's stub is a stub of this process: its channel is the one a stub on
         // this thread gets, which a draining cluster node routes for as for its own. Whether
         // the stub is persistent arrives with each of its requests.
-        Ok(SubrequestChannel::new(if local_caller {
-            namespace.channel(id, false)
-        } else {
-            namespace.peer_channel(id, None)
+        Ok(SubrequestChannel::new(match caller_thread {
+            Some(thread) => namespace.channel_from_thread(id, thread as usize),
+            None => namespace.peer_channel(id, None),
         }))
     }
 
@@ -2241,11 +2337,12 @@ fn cluster_services(
         let name = text(conf.get_name())?;
         // A replica has no cluster, and these services keep state a process has once: each is
         // the first loop thread's, which checked it.
-        if let Some(first) = factory.first_thread() {
+        if factory.thread() != 0 {
             if matches!(
                 conf.which(),
                 Ok(service::Which::Bucket(_) | service::Which::Cache(_))
             ) {
+                let first = factory.link(0)?;
                 let forwarded = crate::services::ForwardedService::new(first.service(&name)?);
                 services.0.insert(name, Service::Leaf(Rc::new(forwarded)));
             }

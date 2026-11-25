@@ -54,8 +54,9 @@ use crate::config::text;
 use crate::listen::loopback::LoopbackListener;
 use crate::run::RunOptions;
 use crate::services::make_external_service;
-use crate::threads;
-use crate::threads::SessionEnd;
+use crate::hub::Hub;
+use crate::hub::Seat;
+use crate::placement::Placement;
 
 pub struct InProcessServer {
     factory: Rc<Factory>,
@@ -406,24 +407,31 @@ impl InProcessServer {
         self.drain.notify_one();
     }
 
-    /// Serves, on this server's loop thread, the session of another, and returns that thread's
-    /// end of it. For a running server on the first loop thread's factory.
-    pub fn accept_loop_session(&self) -> Box<SessionEnd> {
-        let (ours, theirs) = threads::session_pipe();
-        let factory = Rc::clone(&self.factory);
-        self.factory
-            .spawn_detached(threads::serve_session(factory, 1, ours));
-        Box::new(theirs)
+    /// Makes this server, which runs, the first of two loop threads (threads.rs), and returns
+    /// the seat of the other. Once.
+    pub fn add_loop_thread(&self) -> Result<Box<Seat>> {
+        // Every actor's home is the first thread.
+        let placement = Placement {
+            count: 2,
+            spread: false,
+        };
+        let (_, seats) = Hub::new(placement);
+        let mut seats = seats.into_iter();
+        let (Some(first), Some(second)) = (seats.next(), seats.next()) else {
+            return Err(kj::failed!("the hub made no seat for a loop thread"));
+        };
+        self.factory.join(first)?;
+        Ok(Box::new(second))
     }
 
-    /// Makes this server a replica's (threads.rs): its Durable Objects are those of the server
-    /// that serves the other end of `end`. Before the server runs.
+    /// Seats this server among the loop threads of the server that made `seat`. Before the
+    /// server runs.
     #[expect(
         clippy::boxed_local,
         reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
     )]
-    pub fn forward_to_first_thread(&self, end: Box<SessionEnd>) {
-        self.factory.forward_to_first_thread(*end);
+    pub fn join_loop_threads(&self, seat: Box<Seat>) -> Result<()> {
+        self.factory.join(*seat)
     }
 
     /// A connection to the loopback name `name`, queued for whoever listens on it.

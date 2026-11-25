@@ -201,11 +201,11 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
 
 WorkerdDebugPortImpl::WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-    LocalCaller localCaller,
+    kj::Maybe<uint32_t> callerThread,
     kj::Maybe<ChannelTokenHandler&> restoreTokens)
     : server(kj::mv(server)),
       httpOverCapnpFactory(httpOverCapnpFactory),
-      localCaller(localCaller),
+      callerThread(callerThread),
       restoreTokens(restoreTokens) {}
 
 kj::Promise<void> WorkerdDebugPortImpl::getEntrypoint(GetEntrypointContext context) {
@@ -228,7 +228,7 @@ kj::Promise<void> WorkerdDebugPortImpl::getActor(GetActorContext context) {
   if (params.hasActorName()) name = params.getActorName();
   auto target = subrequest_channel_into_kj(
       server->resolve_debug_actor(toRust(params.getService()), toRust(params.getEntrypoint()),
-          toRust(params.getActorId()), toRust(name), localCaller.toBool()));
+          toRust(params.getActorId()), toRust(name), callerThread));
   context.initResults(capnp::MessageSize{4, 1})
       .setActor(
           kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory, restoreTokens));
@@ -239,18 +239,7 @@ kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
   auto& impl = factory.getImpl();
   capnp::TwoPartyServer rpcServer(rpc::WorkerdDebugPort::Client(kj::heap<WorkerdDebugPortImpl>(
-      impl.getServer().server_clone(), impl.httpOverCapnpFactory, LocalCaller::NO)));
-  co_await rpcServer.accept(*stream);
-}
-
-kj::Promise<void> factory_accept_loop_session(
-    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
-  auto& impl = factory.getImpl();
-  // The other loop threads send here what only this thread has: the actors.
-  impl.requirePrimary("serve another loop thread's session"_kj);
-  capnp::TwoPartyServer rpcServer(
-      rpc::WorkerdDebugPort::Client(kj::heap<WorkerdDebugPortImpl>(impl.getServer().server_clone(),
-          impl.httpOverCapnpFactory, LocalCaller::YES, impl.channelTokenHandler)));
+      impl.getServer().server_clone(), impl.httpOverCapnpFactory)));
   co_await rpcServer.accept(*stream);
 }
 
@@ -436,9 +425,23 @@ kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::Asyn
   return newRpcClient(factory, kj::mv(stream), getInstanceFrankenvalueHandler());
 }
 
-kj::Own<RpcClient> new_loop_session_client(
-    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
-  return newRpcClient(factory, kj::mv(stream), factory.getImpl().loopFrankenvalueHandler);
+kj::Own<RpcClient> new_thread_link(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream, uint32_t peer) {
+  auto& impl = factory.getImpl();
+  // The factory outlives its sessions, and with them what they serve.
+  // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+  auto served = impl.linksServing.addBranch().then([&impl, peer]() -> rpc::WorkerdDebugPort::Client {
+    return kj::heap<WorkerdDebugPortImpl>(impl.getServer().server_clone(),
+        impl.httpOverCapnpFactory, peer, impl.channelTokenHandler);
+  });
+  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream),
+      impl.loopFrankenvalueHandler, rpc::WorkerdDebugPort::Client(kj::mv(served)));
+  auto target = session->bootstrap.castAs<rpc::WorkerdBootstrap>();
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
+}
+
+void factory_serve_links(const WorkerFactory& factory) {
+  factory.getImpl().linksServingFulfiller->fulfill();
 }
 
 kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,

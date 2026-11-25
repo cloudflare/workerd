@@ -160,6 +160,11 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   LoopFrankenvalueHandler loopFrankenvalueHandler;
   kj::Maybe<::rust::Box<ServerHandle>> server;
 
+  // Resolves once this loop's links with the process's other loop threads may answer
+  // (`factory_serve_links`); what a link serves waits for it.
+  kj::Own<kj::PromiseFulfiller<void>> linksServingFulfiller;
+  kj::ForkedPromise<void> linksServing = nullptr;
+
   // The Docker client of an actor's container. Actors and `setInactivityTimeout()` timers own the
   // client; while one lives, the actor's next incarnation takes the same one.
   struct Container {
@@ -279,6 +284,14 @@ class RpcClient::Impl final {
           rpcSystem(*this->connection),
           bootstrap(rpcSystem.bootstrap()),
           frankenvalueHandler(frankenvalueHandler) {}
+    // A two-way session: the peer's bootstrap is `served`.
+    Session(kj::Own<kj::AsyncIoStream> connection,
+        FrankenvalueHandler& frankenvalueHandler,
+        capnp::Capability::Client served)
+        : connection(kj::mv(connection)),
+          rpcSystem(*this->connection, kj::mv(served)),
+          bootstrap(rpcSystem.bootstrap()),
+          frankenvalueHandler(frankenvalueHandler) {}
     kj::Own<kj::AsyncIoStream> connection;
     capnp::TwoPartyClient rpcSystem;
     // The peer's bootstrap, obtained once. A bootstrap after the connection failed with calls out
@@ -321,13 +334,14 @@ class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
 };
 
 // The debug port: every service's entrypoints and actors, looked up through the server. It is
-// also what a cluster peer and another loop thread of the process (`localCaller`) see; the
-// latter has `restoreTokens`, so the actors and entrypoints it gets take its `restore()` events.
+// also what another loop thread of the process sees (`callerThread`, its index), whose requests
+// are those of a caller in this process; that one has `restoreTokens`, so the actors and
+// entrypoints it gets take its `restore()` events.
 class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
   WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      LocalCaller localCaller,
+      kj::Maybe<uint32_t> callerThread = kj::none,
       kj::Maybe<ChannelTokenHandler&> restoreTokens = kj::none);
   kj::Promise<void> getEntrypoint(GetEntrypointContext context) override;
   kj::Promise<void> getActor(GetActorContext context) override;
@@ -335,7 +349,7 @@ class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  private:
   ::rust::Box<ServerHandle> server;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  LocalCaller localCaller;
+  kj::Maybe<uint32_t> callerThread;
   kj::Maybe<ChannelTokenHandler&> restoreTokens;
 };
 

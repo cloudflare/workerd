@@ -160,7 +160,11 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           byteStreamFactory),
       channelTokenHandler(factory, shared.channelTokenKey),
       loopFrankenvalueHandler(channelTokenHandler),
-      tasks(*this) {}
+      tasks(*this) {
+  auto serving = kj::newPromiseAndFulfiller<void>();
+  linksServingFulfiller = kj::mv(serving.fulfiller);
+  linksServing = serving.promise.fork();
+}
 
 const ServerHandle& WorkerFactory::Impl::getServer() const {
   return *KJ_REQUIRE_NONNULL(server, "the server has not registered with the worker factory");
@@ -895,7 +899,7 @@ class RustIoChannelFactory final: public IoChannelFactory {
     requireDebugPort();
     auto& factory = worker->factory.getImpl();
     return kj::heap<WorkerdDebugPortImpl>(
-        factory.getServer().server_clone(), factory.httpOverCapnpFactory, LocalCaller::NO);
+        factory.getServer().server_clone(), factory.httpOverCapnpFactory);
   }
 
   kj::Rc<SubrequestChannel> subrequestChannelFromToken(

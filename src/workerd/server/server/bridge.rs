@@ -53,7 +53,7 @@ pub use crate::log::thread_body_run;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
-pub use crate::threads::SessionEnd;
+pub use crate::hub::Seat;
 pub use crate::worker::bench_clock_now;
 
 #[cxx::bridge(namespace = "workerd::server")]
@@ -764,30 +764,28 @@ pub mod ffi {
             session: Box<PeerSession>,
             closing: Box<ResultTask>,
         ) -> Result<()>;
-        /// Serves, on the first loop thread, the session another loop thread keeps with it
-        /// (threads.rs): the debug port's interface, whose actors are resolved as for a caller
-        /// on this thread.
-        async fn factory_accept_loop_session(
-            factory: &WorkerFactory,
-            stream: KjOwn<AsyncIoStream>,
-        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
-        /// The client side of a replica's session with the first loop thread
-        /// (`factory_accept_loop_session`), on the replica's factory. Unlike a session with
-        /// another instance, it carries the `restore()` of a stub: the capabilities of the
-        /// parameters cross as channel tokens.
-        fn new_loop_session_client(
+        /// This loop thread's end of its session with the loop thread `peer` of the process
+        /// (threads.rs), on this thread's factory: a two-way session, on which this end serves
+        /// the debug port's interface for its own graph, resolving actors as for a caller in
+        /// this process, once `factory_serve_links` was called. Unlike a session with another
+        /// instance, it carries the `restore()` of a stub: the capabilities of the parameters
+        /// cross as channel tokens.
+        fn new_thread_link(
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
+            peer: u32,
         ) -> KjOwn<RpcClient>;
-        /// An actor on a cluster peer or on the first loop thread, by
+        /// Has the factory's thread links answer what their peers send.
+        fn factory_serve_links(factory: &WorkerFactory);
+        /// An actor on a cluster peer or on another loop thread, by
         /// `WorkerdDebugPort.getActor` over `session`, a session from `new_rpc_client` or
-        /// `new_loop_session_client`.
+        /// `new_thread_link`.
         /// Pipelined: no round trip until its first event. It keeps the session alive, and the
         /// other side holds the actor's channel for as long as it lives.
         fn rpc_client_debug_actor(
@@ -1032,14 +1030,13 @@ pub mod ffi {
         /// Revokes, with `reason` (what failed requests say), every channel `service`, `actor`
         /// and `socket` handed out. The first reason stands.
         fn revoke(self: &InProcessServer, reason: &str);
-        /// One end of the pipe of a session between a loop thread and the first (threads.rs),
-        /// which may go to the thread that uses it. `accept_loop_session` serves one on a
-        /// running server of the first loop thread and returns the other end, with which
-        /// `forward_to_first_thread` makes a server of another thread, before it runs, a
-        /// replica's: its actors are the first thread's.
-        type SessionEnd;
-        fn accept_loop_session(self: &InProcessServer) -> Box<SessionEnd>;
-        fn forward_to_first_thread(self: &InProcessServer, end: Box<SessionEnd>);
+        /// A loop thread's seat among a process's loop threads (threads.rs), which may go to the
+        /// thread that takes it. `add_loop_thread` makes a running server the first of two loop
+        /// threads and returns the other's seat, with which `join_loop_threads` makes a server
+        /// of another thread, before it runs, the second.
+        type Seat;
+        fn add_loop_thread(self: &InProcessServer) -> Result<Box<Seat>>;
+        fn join_loop_threads(self: &InProcessServer, seat: Box<Seat>) -> Result<()>;
         /// Drains and awaits the run `start` started, then ends the server's tasks and drops the
         /// factory, logging an error if a service still holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
@@ -1101,15 +1098,15 @@ pub mod ffi {
         ) -> Result<Box<SubrequestChannel>>;
         /// The debug port's `getActor`: an actor of `class_name` in the service, by its id (hex
         /// for a durable namespace, with the name it was derived from if known; the name for an
-        /// ephemeral one). `local_caller` is set for another loop thread's session, whose
-        /// requests are routed as this thread's own.
+        /// ephemeral one). `caller_thread` is set for the session of another loop thread, that
+        /// one's index, whose requests are routed as this thread's own.
         fn resolve_debug_actor(
             self: &ServerHandle,
             service_name: &str,
             class_name: &str,
             actor_id: &str,
             actor_name: KjMaybe<&str>,
-            local_caller: bool,
+            caller_thread: KjMaybe<u32>,
         ) -> Result<Box<SubrequestChannel>>;
         /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
         /// requests `session` counts.

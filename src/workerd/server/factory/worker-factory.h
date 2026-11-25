@@ -114,10 +114,6 @@ inline kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> word
 // it every actor, which the other loops reach over their sessions with this one.
 WD_STRONG_BOOL(PrimaryLoop);
 
-// Whether a capnp session's requests are those of a caller in this process (another loop thread)
-// rather than a peer's or the debug port's.
-WD_STRONG_BOOL(LocalCaller);
-
 // What the loop threads of one run share, which outlives every loop: the config and the options,
 // V8, the HTTP header table, the memory caches, the channel token key and the inspector's
 // registrar. Every loop thread has a `WorkerFactory` of its own over it.
@@ -489,10 +485,6 @@ kj::Promise<void> factory_accept_cluster_peer(const WorkerFactory& factory,
     kj::Own<kj::AsyncIoStream> stream,
     ::rust::Box<PeerSession> session,
     ::rust::Box<ResultTask> closing);
-// Serves the session another loop thread of the process keeps with this one, the first: the
-// debug port's interface, whose actors are resolved as for a caller on this thread.
-kj::Promise<void> factory_accept_loop_session(
-    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {
@@ -511,8 +503,16 @@ class RpcClient final {
 void actor_close_storage(const ActorHandle& actor);
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
-kj::Own<RpcClient> new_loop_session_client(
-    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+// This loop thread's end of its session with the loop thread `peer` of the process, over
+// `stream`: a two-way capnp session. Each end serves the other the debug port's interface for its
+// own graph, whose actors are resolved as for a caller in this process, and calls the other's
+// through the client returned. This end answers only once `factory_serve_links` was called; what
+// the peer sends before waits. Unlike a session with another instance, it carries the `restore()`
+// of a stub: the capabilities of the parameters cross as channel tokens.
+kj::Own<RpcClient> new_thread_link(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream, uint32_t peer);
+// Has this loop thread's links answer: its server is registered and its graph built.
+void factory_serve_links(const WorkerFactory& factory);
 kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
     ::rust::Str service,
     ::rust::Str className,
