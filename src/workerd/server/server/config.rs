@@ -246,8 +246,14 @@ impl Factory {
     }
 
     /// In a cluster, has every other loop thread hand its objects off by `deadlines`: whether
-    /// each stopped every one. A thread that has ended, or does not answer, counts as one with
-    /// objects left.
+    /// each answered, by the release deadline, that it stopped every one (`actor::hand_off_all`).
+    /// Resolves no later than that deadline.
+    ///
+    /// A thread that has ended counts as one with objects left, and so does one that has not
+    /// answered by then, whatever it answers later: its loop is held up, as by JavaScript that
+    /// does not return to it, so nothing has stopped its objects, and nothing says when
+    /// anything will. A thread that stops them right at the deadline may be counted so too,
+    /// which only keeps the instance a member for longer than it had to be.
     pub fn hand_off_elsewhere(
         &self,
         deadlines: crate::cluster::Deadlines,
@@ -257,15 +263,22 @@ impl Factory {
             .map(|thread| {
                 let (stopped, answer) = oneshot::channel();
                 self.post(thread, Mail::HandOff { deadlines, stopped });
-                answer
+                (thread, answer)
             })
             .collect();
         Box::pin(async move {
-            let mut all = true;
-            for answer in asked {
-                all &= answer.await.unwrap_or(false);
-            }
-            all
+            let answers = asked.into_iter().map(|(thread, answer)| async move {
+                if let Ok(stopped) = tokio::time::timeout_at(deadlines.release, answer).await {
+                    return stopped.unwrap_or(false);
+                }
+                tracing::warn!(
+                    "loop thread {thread} has not stopped its Durable Objects at the release \
+                     deadline"
+                );
+                false
+            });
+            let stopped = futures::future::join_all(answers).await;
+            stopped.into_iter().all(|stopped| stopped)
         })
     }
 

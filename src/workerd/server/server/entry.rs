@@ -182,6 +182,13 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     Ok(ffi::with_process_context(verbose, config, command)?)
 }
 
+/// The exit status of a run that ends now without a failure of its own: 1 if an error was
+/// reported.
+#[must_use]
+pub fn exit_code() -> i32 {
+    i32::from(HAD_ERRORS.load(Ordering::Relaxed))
+}
+
 /// Ends the process with `code` at once, from any thread.
 ///
 /// Other loop threads may still be running: this runs none of the atexit handlers and static

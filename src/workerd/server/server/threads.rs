@@ -99,7 +99,12 @@
 //!   deadline), it quiesces them ([`Replicas::quiesce`]): each thread then stops its actors'
 //!   containers and ends. Work an actor starts after that (an alarm, a timer) fails its calls
 //!   to other threads as disconnected. In a cluster the front accepts for as long as the first
-//!   thread serves on, through its handoff and the grace period after it.
+//!   thread serves on, through its handoff and the grace period after it, and the deadlines of
+//!   the instance's stop are every thread's: a thread that has not answered that it stopped
+//!   its objects by the release deadline keeps the instance a member of the cluster
+//!   (`Factory::hand_off_elsewhere`), and one that has not ended by the stop deadline, its
+//!   loop held up by JavaScript, is left running as the process exits
+//!   ([`Replicas::ended_by`]).
 //! - **Teardown.** A replica drops its server, then its factory, then its loop, on its own
 //!   thread, and waits for nothing of another thread to do so: what it has in flight there are
 //!   futures it drops, and the pipes' wake-ups cross threads without waiting. The first thread
@@ -119,6 +124,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::LocalBoxFuture;
@@ -179,6 +185,10 @@ enum Event {
 /// on a replica too. V8 keeps JavaScript within its own limit, below either; the rest of the stack
 /// is for native code that recurses, such as parsers and SQLite.
 const REPLICA_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// How often the first thread looks whether the replicas' threads have ended, while it waits
+/// for that until a deadline.
+const ENDED_POLL: Duration = Duration::from_millis(5);
 
 /// A replica's end of what the threads share.
 pub struct Signals {
@@ -350,6 +360,20 @@ impl Replicas {
     pub fn quiesce(&self, stop_by: Option<Instant>) {
         *self.stop_by.lock().unwrap_or_else(PoisonError::into_inner) = stop_by;
         self.advance(Phase::Quiesced);
+    }
+
+    /// Whether every replica's thread has ended, once it has or at `until`. After
+    /// [`Self::quiesce`], which is what ends them.
+    pub async fn ended_by(&self, until: Instant) -> bool {
+        loop {
+            if (self.threads.borrow().iter()).all(JoinHandle::is_finished) {
+                return true;
+            }
+            if Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(ENDED_POLL).await;
+        }
     }
 
     fn advance(&self, phase: Phase) {

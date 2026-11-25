@@ -2700,6 +2700,15 @@ impl Channel for ForwardedChannel {
 /// to take over once this instance left the cluster, until the release deadline. Objects still
 /// running then must keep this instance a member: a peer that took one over would run it
 /// alongside them.
+///
+/// The answer is about what runs here, not about the bucket. An object that stopped, whose
+/// release the handoff deadline cut short, still has an owner record that names this
+/// instance; the instance may leave the cluster with it. No acknowledged write is lost: a
+/// commit is acknowledged only once it is uploaded and the owner record still names its
+/// epoch (`Owners::commit`), so the next owner recovers it from the bucket. And the object
+/// runs in one place: its database is closed here, its container is out of the namespace's
+/// map, and whatever asks for it is answered `moved`. A peer takes it over with the next
+/// epoch, as it does a dead owner's.
 pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadlines) -> bool {
     let slots = Rc::new(tokio::sync::Semaphore::new(HANDOFFS_AT_ONCE));
     let mut handoffs: Vec<_> = namespaces

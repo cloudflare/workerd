@@ -244,6 +244,11 @@ impl Threads {
     fn quiesce(&self, stop_by: Option<Instant>) {
         self.replicas.quiesce(stop_by);
     }
+
+    /// Whether every replica's thread has ended, once it has or at `until`.
+    async fn ended_by(&self, until: Instant) -> bool {
+        self.replicas.ended_by(until).await
+    }
 }
 
 /// The loop thread a server is started on.
@@ -909,7 +914,8 @@ pub async fn run(
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining()?;
                 // Every loop thread hands off the objects whose home it is, at the same time;
-                // the instance stays a member unless each stopped all of its own.
+                // the instance stays a member unless each stopped all of its own, the others
+                // by what they answer until the release deadline (`hand_off_elsewhere`).
                 let namespaces = server.clustered_namespaces();
                 let elsewhere = server.factory().hand_off_elsewhere(deadlines);
                 let handoff = Box::pin(async {
@@ -928,9 +934,11 @@ pub async fn run(
                 // sooner than `leave`, so no cache copy outlives it either. Until the
                 // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
                 // a peer that reads this node's record still finds it live and routes here again.
-                // With objects still running, which stopping very many can leave, it stays a
-                // member: peers take over every object it did not hand off once its lease
-                // expires, after this process exited.
+                // With objects still running, which stopping very many can leave, and a thread
+                // whose JavaScript does not return to its loop, it stays a member: peers take
+                // over every object it did not hand off once its lease expires, after this
+                // process exited. An object that stopped but was not released does not keep it
+                // one (`actor::hand_off_all`).
                 if stopped {
                     let deregister = async {
                         tokio::time::sleep_until(deadlines.leave).await;
@@ -991,7 +999,20 @@ pub async fn run(
     if let Some(threads) = &threads {
         threads.quiesce(until);
     }
-    stop_containers(&server, until).await
+    let stopped = stop_containers(&server, until).await;
+    // The stop deadline is every thread's. One whose loop does not come round to ending by
+    // then is left running as the process exits, as a container is left behind: the run's drop
+    // would wait for it.
+    if let (Some(threads), Some(until)) = (&threads, until)
+        && !threads.ended_by(until).await
+    {
+        tracing::warn!("a loop thread still runs at the stop deadline: exiting without it");
+        if let Err(e) = &stopped {
+            tracing::error!("stopping containers: {}", e.description());
+        }
+        crate::entry::exit_now(crate::entry::exit_code().max(i32::from(stopped.is_err())));
+    }
+    stopped
 }
 
 /// Stops the container-enabled actors of this thread so they cannot race their terminal Docker
