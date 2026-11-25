@@ -439,3 +439,78 @@ fn a_stopped_front_keeps_its_runtime_for_the_streams_the_loops_hold() {
         drop(front);
     });
 }
+
+/// A connection of a TCP socket as the front queues it, and the front's end of its call.
+fn tcp_work() -> (Work, oneshot::Receiver<()>) {
+    let (call, finished) = oneshot::channel();
+    let work = TcpWork {
+        socket: 0,
+        io: Box::pin(tokio::io::duplex(1).0),
+        hangup: std::future::pending().boxed(),
+        peer: None,
+        starttls: None,
+        call,
+    };
+    (Work::Tcp(work), finished)
+}
+
+#[test]
+fn a_panic_in_a_connections_task_ends_that_connection_and_is_logged() {
+    run(async {
+        let queue = Queue::new(2);
+        let worker = queue.worker();
+        let (log, mut lines) = mpsc::channel(4);
+        let (_phase, phase) = watch::channel(Phase::Serving);
+        let shared = Shared {
+            queue: queue.clone(),
+            phase,
+            log,
+            shutdown: Shutdown::new(),
+        };
+        // A connection with one call that a loop took and one still queued, whose task then
+        // panics.
+        let (first, first_finished) = tcp_work();
+        let (second, second_finished) = tcp_work();
+        let taken = std::cell::RefCell::new(None);
+        let connection = async {
+            let _first = shared.queue.push(first).await;
+            *taken.borrow_mut() = take(&worker).await;
+            let _second = shared.queue.push(second).await;
+            assert_eq!(queue.len(), 1);
+            let _calls = (first_finished, second_finished);
+            panic!("the connection's task went wrong");
+        };
+        guarded(&shared, "TCP connection failed", connection).await;
+
+        // The panic took nothing else down, and what the task held went with it: the queued
+        // call left the queue, which has its room back, and the loop is told to drop the other.
+        assert!(queue.is_empty());
+        let (third, _third_finished) = tcp_work();
+        let (fourth, _fourth_finished) = tcp_work();
+        let _tickets = (
+            queue
+                .push(third)
+                .now_or_never()
+                .expect("the queue has room"),
+            queue
+                .push(fourth)
+                .now_or_never()
+                .expect("the queue has room"),
+        );
+        let Some(Work::Tcp(mut taken)) = taken.into_inner() else {
+            panic!("the loop took the first call");
+        };
+        tokio::time::timeout(Duration::from_secs(30), taken.call.closed())
+            .await
+            .unwrap();
+        // It is logged as the connection's failure.
+        let (what, error) = lines.recv().await.unwrap();
+        assert_eq!(what, "TCP connection failed");
+        let description = error.description();
+        assert!(description.contains("panicked"), "{description}");
+        assert!(
+            description.contains("the connection's task went wrong"),
+            "{description}"
+        );
+    });
+}

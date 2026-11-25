@@ -77,13 +77,18 @@
 //!
 //! The front logs nothing itself (its threads are not set up for the process's logger): what a
 //! connection failed with goes to the first loop thread ([`Front::watch`]), which logs it. A
-//! failed accept loop, or a front task that panicked, fails that future, and with it the server,
-//! as a listener that fails does.
+//! panic in a connection's task is such a failure ([`guarded`]): it ends that connection, whose
+//! requests leave the queue or are dropped by the loops that took them, and the server serves
+//! on, since nothing but the connection's own state was in the task's hands. A failed accept
+//! loop, or one that panicked, fails the future of [`Front::watch`], and with it the server, as
+//! a listener that fails does.
 
 pub mod queue;
 
+use std::future::Future;
 use std::future::poll_fn;
 use std::net::SocketAddr;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::task::Poll;
 use std::thread::JoinHandle;
@@ -539,15 +544,38 @@ async fn accept_loop(
             let accepted = Accepted::Socket(socket, peer);
             let (shared, protocol) = (Arc::clone(&shared), Arc::clone(&protocol));
             connections.spawn(async move {
-                if let Err(error) = connection(&shared, index, &protocol, accepted).await {
-                    shared.log(what, error);
-                }
+                let serving = connection(&shared, index, &protocol, accepted);
+                guarded(&shared, what, serving).await;
             });
         }
     }
     drop(listener);
     while connections.join_next().await.is_some() {}
     Ok(())
+}
+
+/// Runs a connection's task: `serving`, whose failure is logged as `what`.
+///
+/// So is a panic, which ends this connection and nothing else: the future is dropped here, and
+/// with it everything the connection held, so its requests leave the queue or are dropped by
+/// the loops that took them, as when its client goes away.
+async fn guarded(shared: &Shared, what: &'static str, serving: impl Future<Output = Result<()>>) {
+    // Nothing of the future is used after a panic but its destructors, which run as they do
+    // for a connection that is dropped.
+    let outcome = AssertUnwindSafe(serving).catch_unwind().await;
+    let error = match outcome {
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => error,
+        Err(panic) => {
+            let message = panic
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("with a payload that is no message");
+            kj::failed!("its task panicked: {message}")
+        }
+    };
+    shared.log(what, error);
 }
 
 /// One accepted connection, until it has ended.
