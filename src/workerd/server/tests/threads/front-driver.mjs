@@ -1746,8 +1746,9 @@ for (const threads of [1, THREADS]) {
         reason: 'bye from the client',
       });
       await within(ws.closed, 5000, 'the end of the connection');
-      // A thread that got more than one attempt of the upgrade closed the others' at once.
-      const clientClose = (note) => note.code !== 1006;
+      // The client closed the other attempts of the upgrade that this thread got, if any, with
+      // 1000 (`dispose`), or dropped one whose close was not answered in time.
+      const clientClose = (note) => note.code !== 1000 && note.code !== 1006;
       const notes = await notesOf(server, thread, marker, (notes) =>
         notes.some(clientClose)
       );

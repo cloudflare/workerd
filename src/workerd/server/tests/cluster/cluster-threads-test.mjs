@@ -94,6 +94,13 @@ const UNIQUE_KEY = 'cluster-threads-counter';
 function cluster(counts, configName = 'config') {
   return {
     configName,
+    // An instance that fences, or that exits at its stop deadline while a
+    // thread still runs, ends without joining its threads. Under TSan those
+    // that had ended count as leaked, which would be its exit status.
+    nodeEnv: () =>
+      env.TSAN_OPTIONS === undefined
+        ? {}
+        : { TSAN_OPTIONS: `${env.TSAN_OPTIONS}:report_thread_leaks=0` },
     extraArgs: async (i, root) => {
       const cache = join(root, `cache${i}`);
       await mkdir(cache);

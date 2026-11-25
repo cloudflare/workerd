@@ -34,15 +34,20 @@ for (const threads of [THREADS, 1]) {
     withServer(threads, async (server) => {
       const all = await threadsOf(server);
       const PER_THREAD = 40;
-      const answers = await Promise.all(
-        all.flatMap((front) =>
-          Array.from({ length: PER_THREAD }, async () => {
+      // A few at a time: a request for one thread is sent in several attempts, each over a
+      // connection of its own, and a Windows client runs out of buffers for many at once.
+      const AT_ONCE = 8;
+      const answers = [];
+      for (const front of all) {
+        for (let sent = 0; sent < PER_THREAD; sent += AT_ONCE) {
+          const batch = Array.from({ length: AT_ONCE }, async () => {
             const answer = await get(server, '/count?name=shared', front);
             assert.strictEqual(answer.front, front);
             return answer;
-          })
-        )
-      );
+          });
+          answers.push(...(await Promise.all(batch)));
+        }
+      }
       // One object, in the isolate of one of the threads, whichever thread asked.
       const object = answers[0].isolate;
       assert(all.includes(object), `the object runs in ${object}`);
