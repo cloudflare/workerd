@@ -51,6 +51,13 @@ export type and reachable definitions without invoking the callback, using the s
 context for every module. Registration-time compatibility gates also govern RTTI
 discovery.
 
+A type that no module exports, such as the type of an argument the runtime passes to a
+handler, is registered with `jsg::modules::add_type::<T>(registry)`, which only the RTTI
+encoder acts on. C++ RTTI refers to such a type through a `JsgRttiRustStructure` (see
+`src/workerd/jsg/rtti.h`) that names the structure and its identity, the Rust type's
+`std::any::type_name`, so that a C++ root such as a handler signature reaches it. A C++ root
+can also reach a Rust module's types this way.
+
 Definitions are emitted into ambient TypeScript only when reachable from a
 TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
 struct to mark such a root, analogous to C++ `JSG_TS_ROOT`. Internal module

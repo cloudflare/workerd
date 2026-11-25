@@ -37,7 +37,8 @@ v8::MaybeLocal<v8::Value> callModuleCallback(ModuleCallback callback, ::workerd:
 // Adapter for registering Rust-implemented modules into the OLD module registry
 // (jsg::ModuleRegistryImpl), which translates Rust ModuleCallback into ModuleInfo, or into the
 // RTTI encoder, which describes each module without instantiating it. The encoder declares
-// `describesRustModules`, so that its addRustBuiltinModule() must match the call below.
+// `describesRustModules`, so that its addRustBuiltinModule() and addRustType() must match the
+// calls below.
 template <typename Registry, typename CallScope>
 struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
   virtual ~RustModuleRegistry() = default;
@@ -82,6 +83,12 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
             ModuleInfo(js, kj_specifier, kj::none, ObjectModuleInfo(js, value.As<v8::Object>())));
       },
           jsgModuleType);
+    }
+  }
+
+  void addType(TypeDescribeCallback describe) override {
+    if constexpr (requires { Registry::describesRustModules; }) {
+      registry.addRustType(describe);
     }
   }
 

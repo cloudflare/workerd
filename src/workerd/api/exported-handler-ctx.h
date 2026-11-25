@@ -4,59 +4,47 @@
 
 #pragma once
 
-// Temporary: this header exists only while the C++ and Rust implementations of ExecutionContext
-// coexist behind the rust-execution-context autogate. Once the C++ api::ExecutionContext is
-// removed, the runtime holds the Rust one directly and this header goes away.
-//
-// The `ctx` of an ExportedHandler, which is either implementation of ExecutionContext. A header
-// of its own because worker.h holds one by value, and global-scope.h depends on worker.h.
+// The `ctx` of an ExportedHandler. A header of its own because worker.h holds one by value, and
+// global-scope.h depends on worker.h.
 
 #include <workerd/jsg/jsg.h>
 
-namespace workerd::api {
+namespace workerd::api::exportedhandler {
 
-class ExecutionContext;
-
-namespace exportedhandler {
-
-// The `ctx` the runtime passes to a handler: either the C++ api::ExecutionContext, or the Rust
-// one from src/workerd/api/execution-context/, as Worker::Api::newExecutionContext() chooses.
-// The Rust one is held by its JavaScript wrapper, which keeps the Rust resource alive. The class
-// is named after the type users know, and lives in a namespace of its own, so that JSG's
-// conversion errors name the type as before. RTTI describes it as the C++ class.
+// The `ctx` the runtime passes to a handler: the Rust ExecutionContext from
+// src/workerd/api/execution-context/, as Worker::Api::newExecutionContext() creates it. It is
+// held by its JavaScript wrapper, which keeps the Rust resource alive. The class is named after
+// the type users know, and lives in a namespace of its own, so that JSG's conversion errors name
+// that type.
 class ExecutionContext {
  public:
-  using JsgRttiDelegate = jsg::Ref<api::ExecutionContext>;
-
-  // Defined out of line, in global-scope.c++, because the C++ class is incomplete here.
-  explicit ExecutionContext(jsg::Ref<api::ExecutionContext> ctx);
-  ExecutionContext(ExecutionContext&& other);
-  ExecutionContext& operator=(ExecutionContext&& other);
-  ~ExecutionContext() noexcept(false);
-  KJ_DISALLOW_COPY(ExecutionContext);
+  // RTTI describes the type as the Rust resource, whose std::any::type_name() is IDENTITY.
+  struct JsgRttiRustStructure {
+    static constexpr kj::StringPtr NAME = "ExecutionContext"_kj;
+    static constexpr kj::StringPtr IDENTITY = "execution_context::ExecutionContext"_kj;
+  };
 
   // `wrapper` must be the JavaScript wrapper of a Rust ExecutionContext.
-  static ExecutionContext fromRust(jsg::Lock& js, jsg::JsObject wrapper);
+  ExecutionContext(jsg::Lock& js, jsg::JsObject wrapper): wrapper(js, wrapper) {}
+  ExecutionContext(ExecutionContext&&) = default;
+  ExecutionContext& operator=(ExecutionContext&&) = default;
+  KJ_DISALLOW_COPY(ExecutionContext);
 
-  ExecutionContext addRef(jsg::Lock& js);
+  ExecutionContext addRef(jsg::Lock& js) {
+    return ExecutionContext(wrapper.addRef(js));
+  }
 
   // The JavaScript object.
-  jsg::JsObject getHandle(jsg::Lock& js);
+  jsg::JsObject getHandle(jsg::Lock& js) {
+    return wrapper.getHandle(js);
+  }
 
   static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
       jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       ExecutionContext value) {
-    KJ_SWITCH_ONEOF(value.impl) {
-      KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
-        return typeWrapper.wrap(js, context, creator, kj::mv(cpp));
-      }
-      KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
-        return rust.getHandle(js);
-      }
-    }
-    KJ_UNREACHABLE;
+    return value.getHandle(js);
   }
 
   static kj::Maybe<ExecutionContext> jsgTryUnwrap(auto& typeWrapper,
@@ -64,26 +52,21 @@ class ExecutionContext {
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    KJ_IF_SOME(cpp,
-        typeWrapper.tryUnwrap(js, context, handle,
-            static_cast<jsg::Ref<api::ExecutionContext>*>(nullptr), parentObject)) {
-      return ExecutionContext(kj::mv(cpp));
-    }
-    return tryUnwrapRust(js, handle);
+    return tryUnwrap(js, handle);
   }
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(wrapper);
+  }
 
  private:
-  explicit ExecutionContext(jsg::JsRef<jsg::JsObject> rust);
+  explicit ExecutionContext(jsg::JsRef<jsg::JsObject> wrapper): wrapper(kj::mv(wrapper)) {}
 
-  // `handle` as a Rust ExecutionContext, if it is one; asks Worker::Api, so that only the
-  // binaries that create Rust ExecutionContexts link the Rust crate.
-  static kj::Maybe<ExecutionContext> tryUnwrapRust(jsg::Lock& js, v8::Local<v8::Value> handle);
+  // `handle` as an ExecutionContext, if it is one. Defined in global-scope.c++: it asks
+  // Worker::Api, so that only the binaries that create ExecutionContexts link the Rust crate.
+  static kj::Maybe<ExecutionContext> tryUnwrap(jsg::Lock& js, v8::Local<v8::Value> handle);
 
-  kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::JsRef<jsg::JsObject>> impl;
+  jsg::JsRef<jsg::JsObject> wrapper;
 };
 
-}  // namespace exportedhandler
-
-}  // namespace workerd::api
+}  // namespace workerd::api::exportedhandler

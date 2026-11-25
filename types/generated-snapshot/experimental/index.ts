@@ -426,26 +426,6 @@ export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
 export declare const navigator: Navigator;
 export interface TestController {}
-export interface ExecutionContext<Props = unknown> {
-  waitUntil(promise: Promise<any>): void;
-  passThroughOnException(): void;
-  readonly exports: Cloudflare.Exports;
-  readonly props: Props;
-  restore(params: any): Promise<any>;
-  cache?: CacheContext;
-  readonly version?: {
-    readonly metadata?: {
-      readonly id: string;
-    };
-    readonly cohort?: string;
-    readonly key?: string;
-    readonly override?: string;
-  };
-  readonly access?: CloudflareAccessContext;
-  mapVirtualHost(fetcher: Fetcher, port: number): string;
-  tracing: Tracing;
-  abort(reason?: any): void;
-}
 export type ExportedHandlerFetchHandler<
   Env = unknown,
   CfHostMetadata = unknown,
@@ -4506,6 +4486,26 @@ export interface TracingSpanContext {
   traceId: string;
   spanId: string;
   traceFlags: number;
+}
+export interface ExecutionContext<Props = unknown> {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
+  restore(params: any): Promise<any>;
+  cache?: CacheContext;
+  readonly version?: {
+    readonly metadata?: {
+      readonly id: string;
+    };
+    readonly cohort?: string;
+    readonly key?: string;
+    readonly override?: string;
+  };
+  readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
+  tracing: Tracing;
+  abort(reason?: any): void;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.

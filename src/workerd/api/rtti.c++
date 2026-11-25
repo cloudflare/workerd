@@ -12,6 +12,7 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
+#include <workerd/api/execution-context/ffi.rs.h>
 #include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
@@ -182,6 +183,10 @@ struct EncoderModuleRegistryImpl {
     describe(*rustTypes, specifier);
   }
 
+  void addRustType(::workerd::rust::jsg::TypeDescribeCallback describe) {
+    describe(*rustTypes);
+  }
+
   kj::Vector<ModuleInfo> modules;
   ::rust::Box<::workerd::rust::jsg::RttiContext> rustTypes;
 };
@@ -267,6 +272,12 @@ struct TypesEncoder {
 
     EncoderModuleRegistryImpl registry(flags);
     registerModules(registry, flags);
+    {
+      // Types that C++ RTTI refers to but no module exports.
+      ::workerd::rust::jsg::RustModuleRegistry<EncoderModuleRegistryImpl, SuppressIoContextScope>
+          rustRegistry(registry);
+      execution_context::register_types(rustRegistry);
+    }
 
     auto rustBytes = registry.rustTypes->encode("rust");
     KJ_REQUIRE(rustBytes.size() % sizeof(capnp::word) == 0,

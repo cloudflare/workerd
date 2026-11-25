@@ -17,6 +17,7 @@ use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 
 use crate::ExecutionContext;
+use crate::register_types;
 
 // Every C++ function takes the isolate, locked by this thread with a context entered and a
 // `HandleScope` open, and handles in that scope.
@@ -28,6 +29,7 @@ pub mod bridge {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
     #[namespace = "workerd::rust::jsg_cpp"]
@@ -87,8 +89,10 @@ pub mod bridge {
             props: Local,
             version: MaybeLocal,
         ) -> MaybeLocal;
-        /// `jsg::resource::ffi_is::<ExecutionContext>`, for `api::isRustExecutionContext()`.
+        /// `jsg::resource::ffi_is::<ExecutionContext>`, for `api::isExecutionContext()`.
         unsafe fn execution_context_is(isolate: *mut Isolate, value: Local) -> KjMaybe<bool>;
+        /// Registers `ExecutionContext` with the RTTI export, which no module reaches.
+        fn register_types(registry: Pin<&mut ModuleRegistry>);
     }
 }
 

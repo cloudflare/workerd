@@ -33,7 +33,6 @@ class DatagramChannel;
 
 namespace workerd::api {
 
-class Tracing;
 class TailEvent;
 class Cache;
 class CacheStorage;
@@ -274,7 +273,8 @@ class CacheContext: public jsg::Object {
 //
 // Standalone workerd never constructs one of these (no `AccessInfo` is supplied), so
 // `ctx.access` is `undefined`. Embedders construct a concrete `AccessInfo` subclass and pass it
-// through the entrypoint; `ExecutionContext::getAccess()` lazily wraps it in this class.
+// through the entrypoint; `ctx.access` (src/workerd/api/execution-context/) lazily wraps it in this
+// class.
 class AccessContext: public jsg::Object {
  public:
   explicit AccessContext(IoOwn<AccessInfo> info): info(kj::mv(info)) {}
@@ -320,162 +320,6 @@ class AccessContext: public jsg::Object {
 
  private:
   IoOwn<AccessInfo> info;
-};
-
-class ExecutionContext: public jsg::Object {
- public:
-  ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
-      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), /*versionInfo=*/kj::none) {}
-
-  ExecutionContext(jsg::Lock& js,
-      jsg::JsValue exports,
-      jsg::JsValue props,
-      kj::Maybe<Worker::VersionInfo> versionInfo)
-      : exports(js, exports),
-        props(js, props),
-        version(versionToJs(js, kj::mv(versionInfo)).map([&js](jsg::JsValue v) {
-          return jsg::JsRef<jsg::JsValue>(js, v);
-        })) {}
-
-  // The value of `ctx.version` for `versionInfo`: none unless the `enable_version_api`
-  // compatibility flag is on and there is version information.
-  static kj::Maybe<jsg::JsValue> versionToJs(
-      jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo);
-
-  void waitUntil(kj::Promise<void> promise);
-  void passThroughOnException();
-
-  // Cancels the current execution context with the given exception, causing all execution to stop
-  // and throwing an error at the client.
-  void abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason);
-
-  jsg::JsValue getExports(jsg::Lock& js) {
-    return exports.getHandle(js);
-  }
-
-  jsg::JsValue getProps(jsg::Lock& js) {
-    return props.getHandle(js);
-  }
-
-  // Call the `[restore]()` method of the current entrypoint with the given params object and
-  // return its result, except that the returned value is able to be persisted in storage.
-  // Persistence works by replaying the restore call whenever the value is loaded from storage
-  // again. Hence, the contents of `params` must themselves be storable. The returned type must
-  // be a Fetcher or RpcStub; ActorClass is intentionally not supported. The value itself
-  // doesn't need to be inherently storable since the replay mechanism can restore it instead.
-  // For example, RpcStubs are never storable by default, nor are ServiceStubs coming from
-  // Dynamic Workers or Facets.
-  jsg::Promise<jsg::Value> restore(jsg::Lock& js,
-      jsg::JsObject params,
-      const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
-      const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
-
-  // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
-  // However, by default this always returns undefined unless the embedding application overrides
-  // the IoContext.
-  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
-
-  jsg::JsValue getVersion(jsg::Lock& js) {
-    // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
-    //   `enable_version_api` compat flag is enabled, but currently dynamic workers and "reusable
-    //   `ctx` object instantiation" do not pass information to populate `ctx.version` with,
-    //   `ctx.version` is currently optional so we can return undefined for now.
-    KJ_IF_SOME(someVersion, version) {
-      return someVersion.getHandle(js);
-    }
-    return js.undefined();
-  }
-
-  jsg::Ref<Tracing> getTracing(jsg::Lock& js);
-
-  // Returns an AccessContext for the current request, or empty jsg::Optional otherwise.
-  // Called by the runtime to provide Cloudflare Access authentication context.
-  jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
-
-  // Maps a virtual host to the given fetcher on the specified port. This is a no-op if an override
-  // has already been installed. Returns the string <host:port> for the override.
-  kj::String mapVirtualHost(jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port);
-
-  JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(waitUntil);
-    JSG_METHOD(passThroughOnException);
-    if (flags.getEnableCtxExports()) {
-      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
-    }
-    JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
-    if (flags.getAllowIrrevocableStubStorage()) {
-      JSG_METHOD(restore);
-    }
-    JSG_LAZY_INSTANCE_PROPERTY(cache, getCache);
-    if (flags.getEnableVersionApi()) {
-      JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
-    }
-    JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
-    JSG_METHOD(mapVirtualHost);
-
-    // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
-    // and enterSpan() is a no-op when called outside a traced request.
-    JSG_LAZY_INSTANCE_PROPERTY(tracing, getTracing);
-
-    JSG_METHOD(abort);
-
-    // TODO(soon): This is getting unwieldy.
-    if (flags.getEnableCtxExports()) {
-      if (flags.getEnableVersionApi()) {
-        JSG_TS_OVERRIDE(<Props = unknown> {
-          readonly props: Props;
-          readonly exports: Cloudflare.Exports;
-          readonly version?: {
-            readonly metadata?: { readonly id: string; };
-            readonly cohort?: string;
-            readonly key?: string;
-            readonly override?: string;
-          };
-          readonly access?: CloudflareAccessContext;
-        });
-      } else {
-        JSG_TS_OVERRIDE(<Props = unknown> {
-          readonly props: Props;
-          readonly exports: Cloudflare.Exports;
-          readonly access?: CloudflareAccessContext;
-        });
-      }
-    } else {
-      if (flags.getEnableVersionApi()) {
-        JSG_TS_OVERRIDE(<Props = unknown> {
-          readonly props: Props;
-          readonly version?: {
-            readonly metadata?: { readonly id: string; };
-            readonly cohort?: string;
-            readonly key?: string;
-            readonly override?: string;
-          };
-          readonly access?: CloudflareAccessContext;
-        });
-      } else {
-        JSG_TS_OVERRIDE(<Props = unknown> {
-          readonly props: Props;
-          readonly access?: CloudflareAccessContext;
-        });
-      }
-    }
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("props", props);
-    tracker.trackField("version", version);
-  }
-
- private:
-  jsg::JsRef<jsg::JsValue> exports;
-  jsg::JsRef<jsg::JsValue> props;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(exports);
-    visitor.visit(props);
-    visitor.visit(version);
-  }
 };
 
 // AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
@@ -1302,8 +1146,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::ExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator, \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
       api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
