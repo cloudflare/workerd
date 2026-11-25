@@ -798,12 +798,15 @@ pub mod ffi {
         /// `new_thread_link`.
         /// Pipelined: no round trip until its first event. It keeps the session alive, and the
         /// other side holds the actor's channel for as long as it lives.
+        /// `caller` says whose requests the actor is for (`actor::Caller::code`), which only
+        /// another loop thread of the process heeds.
         fn rpc_client_debug_actor(
             session: &RpcClient,
             service: &str,
             class_name: &str,
             actor_id: &str,
             actor_name: KjMaybe<&str>,
+            caller: u8,
         ) -> Result<KjOwn<RpcClient>>;
         /// The service `service` on the other side of `session` (a cluster peer, or for a
         /// replica the first loop thread), by `WorkerdDebugPort.getEntrypoint`: a worker's
@@ -1112,7 +1115,9 @@ pub mod ffi {
         /// The debug port's `getActor`: an actor of `class_name` in the service, by its id (hex
         /// for a durable namespace, with the name it was derived from if known; the name for an
         /// ephemeral one). `caller_thread` is set for the session of another loop thread, that
-        /// one's index, whose requests are routed as this thread's own.
+        /// one's index, and `caller` is then whose requests that thread sends
+        /// (`actor::Caller::code`): a stub's of its own, routed as this thread's own, or the
+        /// debug port's or a cluster peer's that it received.
         fn resolve_debug_actor(
             self: &ServerHandle,
             service_name: &str,
@@ -1120,6 +1125,7 @@ pub mod ffi {
             actor_id: &str,
             actor_name: KjMaybe<&str>,
             caller_thread: KjMaybe<u32>,
+            caller: u8,
         ) -> Result<Box<SubrequestChannel>>;
         /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
         /// requests `session` counts.

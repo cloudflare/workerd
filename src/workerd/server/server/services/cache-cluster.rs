@@ -224,7 +224,10 @@ impl Shared {
         let (mut asks, mut replies) = (Vec::new(), Vec::new());
         let done = {
             let mut cache = self.cache.borrow_mut();
-            let membership = self.node.cluster.membership();
+            let Ok(first) = self.node.first() else {
+                return;
+            };
+            let membership = first.membership();
             let (view, fresh, active) = self.timing.view(cluster::now_ms(), membership);
             cache.set(self.now(), view, fresh, active);
             f(&mut cache);

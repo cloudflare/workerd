@@ -521,7 +521,8 @@ kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
     ::rust::Str service,
     ::rust::Str className,
     ::rust::Str actorId,
-    kj::Maybe<::rust::Str> actorName);
+    kj::Maybe<::rust::Str> actorName,
+    uint8_t caller);
 kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,

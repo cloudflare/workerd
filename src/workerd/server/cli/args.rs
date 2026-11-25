@@ -231,8 +231,8 @@ pub struct ServeArgs {
     /// Workers too, so threads can run different code under one name if a Worker Loader's
     /// getCode callback returns different code for it. Durable Objects are spread over the
     /// threads: each lives on one of them, with its storage, alarms and WebSockets, and the
-    /// other threads call it there. A cluster instance is a member of its cluster on one
-    /// thread, and its Durable Objects all run on that one. A Durable Object does not see the
+    /// other threads call it there. A cluster instance keeps its lease and its record of what
+    /// it owns on one thread, which the others ask. A Durable Object does not see the
     /// trace span of a caller on another thread. --inspector-addr and the options that save a Python snapshot are not
     /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
     /// served by one thread only.

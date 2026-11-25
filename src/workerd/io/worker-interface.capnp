@@ -1143,11 +1143,15 @@ interface WorkerdDebugPort {
               -> (entrypoint :WorkerdBootstrap);
   # Get direct access to a stateless entrypoint.
 
-  getActor @1 (service :Text, entrypoint :Text, actorId :Text, actorName :Text)
+  getActor @1 (service :Text, entrypoint :Text, actorId :Text, actorName :Text, caller :UInt8)
       -> (actor :WorkerdBootstrap);
   # Get an actor (Durable Object) stub.
   # The actorId should be a hex string for Durable Objects or a plain string for ephemeral actors.
   # `actorName`, if given with a Durable Object's id, is the name the id was derived from, which
   # the object sees as `ctx.id.name`. It is taken as given: nothing checks that it hashes to the
   # id.
+  # `caller` says whose requests the stub is for, between two threads of one workerd process,
+  # which serve each other this interface: 0 for a stub's of the calling thread, 1 for the debug
+  # port's and 2 for a cluster peer's that the calling thread received. Any other server ignores
+  # it.
 }

@@ -48,6 +48,7 @@ use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
 use crate::cluster::Ready;
+use crate::config::ClusterJoin;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -115,6 +116,9 @@ pub struct RunOptions {
     /// `--front-queue`: how many requests and TCP connections the front's queue holds; zero
     /// for the default.
     pub front_queue: usize,
+    /// On a loop thread other than the first of a cluster instance: what the instance's threads
+    /// share of its membership, which the first thread joined.
+    pub cluster: Option<crate::cluster::Seat>,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -207,7 +211,13 @@ impl Threads {
         let deployments = server.report().replica_deployments();
         let overrides = &options.overrides;
         let started = replicas
-            .start(&ports.front_sockets(), &queue, overrides, &deployments)
+            .start(
+                &ports.front_sockets(),
+                &queue,
+                overrides,
+                &deployments,
+                server.cluster().map(|node| node.seat()).as_ref(),
+            )
             .await?;
         let threads = match options.front_threads {
             0 => front::DEFAULT_THREADS,
@@ -274,10 +284,7 @@ async fn start(
 
     // What several threads cannot serve is a config error. A reporter that serves despite errors
     // (`--watch`) then serves on this thread alone, like any config with an error.
-    // A cluster node's part in the cluster is its first thread's, and with it every actor.
-    let spread = !config.has_cluster();
-    let replicas =
-        (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory, spread));
+    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory));
     if replicas.is_some() {
         for obstacle in threads::obstacles(options.inspector.is_some()) {
             report.error(obstacle);
@@ -299,14 +306,20 @@ async fn start(
     } else {
         None
     };
-    let server = Server::start(
+    let join = match (&cluster_port, options.cluster.take()) {
+        (Some((_, address)), _) => Some(ClusterJoin::At(address.clone())),
+        (None, Some(seat)) => Some(ClusterJoin::Beside(seat)),
+        (None, None) => None,
+    };
+    // Boxed: the graph's construction is most of what this future would hold.
+    let building = Server::start(
         Rc::clone(&factory),
         &options.overrides,
         report,
         bound.inbound,
-        cluster_port.as_ref().map(|(_, address)| address.clone()),
-    )
-    .await?;
+        join,
+    );
+    let server = Box::pin(building).await?;
     report_unmatched_overrides(&server, &options.overrides, config, for_test)?;
 
     let (drain, draining) = watch::channel(false);
@@ -455,13 +468,19 @@ fn start_cluster(
 ) -> Result<()> {
     control.listen_cluster(&listener)?;
     factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
-    let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move { cluster.list_loop().await });
-    let cluster = Rc::clone(&node.cluster);
-    factory.spawn_detached(async move { cluster.tier_loop().await });
+    let first = Rc::clone(node.first()?);
+    factory.spawn_detached(async move { first.list_loop().await });
+    compact(factory, node);
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
     Ok(())
+}
+
+/// Compacts, for the life of the process, the logs of the objects this loop thread owns in the
+/// cluster's bucket.
+fn compact(factory: &Rc<Factory>, node: &Rc<ClusterNode>) {
+    let cluster = Rc::clone(&node.cluster);
+    factory.spawn_detached(async move { cluster.tier_loop().await });
 }
 
 /// A bound socket's name and port, for the control channel's `listen` event.
@@ -888,16 +907,16 @@ pub async fn run(
             // balancers may still send some, and lets its connections finish, its peers' sessions
             // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
-                let deadlines = node.start_draining();
-                let workers = server
-                    .services()
-                    .filter_map(|(_, service)| service.as_worker());
-                let namespaces: Vec<_> = workers
-                    .flat_map(|worker| worker.namespaces())
-                    .map(|(_, ns)| ns)
-                    .filter(|ns| ns.cluster().is_some())
-                    .collect();
-                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+                let deadlines = node.start_draining()?;
+                // Every loop thread hands off the objects whose home it is, at the same time;
+                // the instance stays a member unless each stopped all of its own.
+                let namespaces = server.clustered_namespaces();
+                let elsewhere = server.factory().hand_off_elsewhere(deadlines);
+                let handoff = Box::pin(async {
+                    let here = actor::hand_off_all(&namespaces, deadlines);
+                    let (here, elsewhere) = futures::join!(here, elsewhere);
+                    here && elsewhere
+                });
                 let stopped = match futures::future::select(serving.as_mut(), handoff).await {
                     Either::Left((result, handoff)) => {
                         result?;
@@ -915,7 +934,8 @@ pub async fn run(
                 if stopped {
                     let deregister = async {
                         tokio::time::sleep_until(deadlines.leave).await;
-                        node.cluster.deregister().await
+                        let first = node.first().map_err(|e| e.description().to_owned())?;
+                        (first.deregister().await).map_err(|e| e.to_string())
                     };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
@@ -1050,6 +1070,7 @@ pub async fn run_replica(
     factory: Rc<Factory>,
     overrides: Overrides,
     deployments: Deployments,
+    cluster: Option<crate::cluster::Seat>,
     sockets: FrontSockets,
     queue: front::Queue,
     signals: &Signals,
@@ -1068,6 +1089,7 @@ pub async fn run_replica(
     .with_deployments(deployments, Box::new(drop), Box::new(drop));
     let options = RunOptions {
         overrides,
+        cluster,
         ..RunOptions::default()
     };
     let role = Role::Replica(sockets, queue);
@@ -1084,6 +1106,12 @@ pub async fn run_replica(
         ));
     };
 
+    // In a cluster this thread owns objects: the lease thread watches its loop with the others
+    // once the instance serves, and their logs are compacted from here.
+    if let Some(node) = server.cluster() {
+        node.watch_loop();
+        compact(&factory, node);
+    }
     // Resolves with the phase that ended the serving: `Quiesced` once the process has no
     // connection left or waits for them no longer, `Stopping` if it ends without waiting.
     let serve = async {

@@ -56,7 +56,7 @@ KJ_TEST("a peer session whose connection failed with a call out fails later acto
   auto session = new_rpc_client(*test.factory, kj::mv(pipe.ends[0]));
 
   // A getActor on the session, which the peer reads and never answers.
-  auto first = rpc_client_debug_actor(*session, "service", "Class", "id", kj::none);
+  auto first = rpc_client_debug_actor(*session, "service", "Class", "id", kj::none, 0);
   auto buffer = kj::heapArray<kj::byte>(4096);
   KJ_ASSERT(pipe.ends[1]->tryRead(buffer.begin(), 1, buffer.size()).wait(io.waitScope) > 0);
 
@@ -67,7 +67,7 @@ KJ_TEST("a peer session whose connection failed with a call out fails later acto
   KJ_ASSERT(KJ_ASSERT_NONNULL(lost).getType() == kj::Exception::Type::DISCONNECTED);
 
   // An actor obtained over the session afterwards fails its calls as disconnected too.
-  auto second = rpc_client_debug_actor(*session, "service", "Class", "id", kj::none);
+  auto second = rpc_client_debug_actor(*session, "service", "Class", "id", kj::none, 0);
   auto failed = kj::runCatchingExceptions(
       [&]() { second->getImpl().target.whenResolved().wait(io.waitScope); });
   KJ_EXPECT(KJ_ASSERT_NONNULL(failed).getType() == kj::Exception::Type::DISCONNECTED);

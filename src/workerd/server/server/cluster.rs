@@ -11,6 +11,16 @@
 //! JS RPC to the object cross unchanged. A request for an object this instance
 //! does not own routes on through its own channel to the owner. `GET /ready` answers whether
 //! the instance takes traffic: it serves, holds its lease, and was not told to stop.
+//!
+//! With several loop threads (threads.rs) every thread has a [`ClusterNode`]. The first thread's
+//! has the instance's control plane (`cluster::Cluster`: its record and lease, the one table of
+//! what it claimed, the alarm index) and the peer port; every thread's has a data plane
+//! (`cluster::Member`) for the objects whose home the thread is, with a bucket client and
+//! sessions to peers of its own. A thread other than the first reaches the control plane
+//! through its inbox ([`RemoteControl`]), which checks that the object is the asking thread's,
+//! and reads the lease and the drain from what the threads share (`cluster::Shared`). A peer's
+//! call arrives on the first thread, which counts it on the peer's session and passes it to the
+//! object's home thread as a peer's.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -20,10 +30,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::rc::Weak;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use cluster::Cluster;
+use cluster::Control;
 use cluster::Layout;
+use cluster::Member;
 use cluster::Route;
 use cluster_logic::handoff::Budget;
 use cluster_logic::handoff::GRACE_MS;
@@ -60,6 +76,10 @@ use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
 use crate::channels::attach;
 use crate::config::Factory;
+use crate::hub::ControlAnswer;
+use crate::hub::ControlCall;
+use crate::hub::Mail;
+use crate::placement::Scope;
 use crate::services::header_table;
 use crate::services::not_transferable;
 use crate::services::send_error;
@@ -71,9 +91,30 @@ const AUTH_WINDOW_MS: u64 = 30_000;
 /// How long dialing a peer and its answer to the CONNECT may take.
 const TUNNEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// This instance's cluster: the crate's state and the factory sessions to owners start from.
+/// What the loop threads of an instance share of its membership, for a thread other than the
+/// first to make its [`ClusterNode`] of.
+#[derive(Clone)]
+pub struct Seat {
+    shared: cluster::Shared,
+    /// The objects the instance hands off, named as a request's causes are
+    /// (`ActorContainer::cause_name`), from when its drain begins.
+    handed_off: Arc<Mutex<HashSet<String>>>,
+    /// Each loop thread's count of its progress, for the lease thread to watch
+    /// (`ClusterNode::ready`).
+    progress: Arc<Mutex<Vec<cluster::Progress>>>,
+    /// When the phases of the instance's stop end, set as its drain begins, before any thread
+    /// sees that it drains.
+    deadlines: Arc<OnceLock<Deadlines>>,
+}
+
+/// One loop thread's part in this instance's cluster: the crate's state and the factory sessions
+/// to owners start from.
 pub struct ClusterNode {
-    pub cluster: Rc<Cluster>,
+    /// This thread's data plane.
+    pub cluster: Rc<Member>,
+    /// The instance's control plane, on the first loop thread.
+    first: Option<Rc<Cluster>>,
+    seat: Seat,
     /// `unsafeTimeDivisor`: what the lease's times are divided by.
     pub time_divisor: u64,
     factory: Rc<Factory>,
@@ -90,8 +131,6 @@ pub struct ClusterNode {
     budget: Budget,
     /// `ALARMS_INTERVAL`, unless a test shortens it.
     alarms_interval: Duration,
-    /// Set once this instance drains.
-    deadlines: Cell<Option<Deadlines>>,
     /// The requests the debug port has in flight here; a peer's are its session's.
     peer_requests: Rc<Count>,
     /// The sessions peers have open here (`PeerConnection::connect`).
@@ -107,8 +146,10 @@ pub struct ClusterNode {
     pub leave_wait_ms: Cell<u64>,
     /// The `cache` services a peer's session reaches here (`ServerHandle::resolve_peer_cache`).
     pub caches: RefCell<HashSet<String>>,
-    /// Whether the lease thread watches this thread's event loop (`ready`).
+    /// Whether this thread's event loop counts its progress for the lease thread (`watch_loop`).
     watched: Cell<bool>,
+    /// Whether the lease thread watches the instance's event loops (`ready`).
+    watching: Cell<bool>,
     /// How often the event loop counts its progress while it sleeps: once a lease round.
     beat: Duration,
 }
@@ -542,8 +583,16 @@ impl ClusterNode {
         });
         let cluster = Cluster::new(setup, fence, crate::log::within_thread())
             .map_err(|e| kj::failed!("cluster: {e}"))?;
+        let seat = Seat {
+            shared: cluster.shared().clone(),
+            handed_off: Arc::default(),
+            progress: Arc::default(),
+            deadlines: Arc::default(),
+        };
         Ok(Rc::new(Self {
-            cluster,
+            cluster: Rc::clone(cluster.member()),
+            first: Some(cluster),
+            seat,
             time_divisor: divisor.into(),
             factory,
             sessions: Rc::default(),
@@ -555,7 +604,6 @@ impl ClusterNode {
                 accept_ms: GRACE_MS / u64::from(divisor),
             },
             alarms_interval: ALARMS_INTERVAL / divisor,
-            deadlines: Cell::new(None),
             peer_requests: Rc::default(),
             peer_sessions: Rc::default(),
             refusing_peers: Rc::default(),
@@ -563,26 +611,108 @@ impl ClusterNode {
             leave_wait_ms: Cell::new(0),
             caches: RefCell::default(),
             watched: Cell::new(false),
+            watching: Cell::new(false),
             beat: Duration::from_millis(timing.interval_ms),
         }))
     }
 
+    /// This thread's part in the cluster of the instance whose first loop thread made `seat`:
+    /// a data plane for the objects whose home this thread is, over a bucket client of its own.
+    pub fn member(
+        factory: Rc<Factory>,
+        conf: cluster_config::Reader<'_>,
+        seat: Seat,
+    ) -> Result<Rc<Self>> {
+        let divisor = conf.get_unsafe_time_divisor();
+        let Some(timing) = Timing::divided(divisor.into()) else {
+            return Err(kj::failed!(
+                "cluster: unsafeTimeDivisor {divisor} rounds a lease time down to 0 ms"
+            ));
+        };
+        let bucket = (seat.shared.open_bucket()).map_err(|e| kj::failed!("cluster: {e}"))?;
+        let control = Rc::new(RemoteControl {
+            factory: Rc::clone(&factory),
+            bucket: bucket.clone(),
+        });
+        let member = Member::new(bucket, seat.shared.clone(), control);
+        Ok(Rc::new(Self {
+            cluster: Rc::new(member),
+            first: None,
+            seat,
+            time_divisor: divisor.into(),
+            factory,
+            sessions: Rc::default(),
+            advertise: String::new(),
+            nonces: RefCell::default(),
+            namespaces: RefCell::default(),
+            budget: Budget {
+                stop_ms: conf.get_stop_timeout_ms().into(),
+                accept_ms: GRACE_MS / u64::from(divisor),
+            },
+            alarms_interval: ALARMS_INTERVAL / divisor,
+            peer_requests: Rc::default(),
+            peer_sessions: Rc::default(),
+            refusing_peers: Rc::default(),
+            ready: Cell::new(false),
+            leave_wait_ms: Cell::new(0),
+            caches: RefCell::default(),
+            watched: Cell::new(false),
+            watching: Cell::new(false),
+            beat: Duration::from_millis(timing.interval_ms),
+        }))
+    }
+
+    /// What a thread other than the first makes its node of (`member`).
+    #[must_use]
+    pub fn seat(&self) -> Seat {
+        self.seat.clone()
+    }
+
+    /// The instance's control plane, which the first loop thread has.
+    pub fn first(&self) -> Result<&Rc<Cluster>> {
+        self.first
+            .as_ref()
+            .ok_or_else(|| kj::failed!("the cluster's control plane is the first loop thread's"))
+    }
+
+    /// Has the lease thread watch this thread's event loop too, from when the first thread
+    /// starts the watch (`ready`). The loop beats once a round while it sleeps. A loop that
+    /// cannot be watched serves on, and says that it does.
+    pub fn watch_loop(&self) {
+        if self.watched.replace(true) {
+            return;
+        }
+        match kj_rs_tokio::watch_progress(self.beat) {
+            Ok(progress) => {
+                let mut watched = self.seat.progress.lock();
+                let watched = watched.as_mut().unwrap_or_else(|e| e.get_mut());
+                watched.push(Box::new(move || progress.count()));
+            }
+            Err(e) => tracing::warn!(
+                "cluster: the lease thread cannot watch an event loop, so a loop that makes no \
+                 progress will not fence this node: {e}"
+            ),
+        }
+    }
+
     /// Marks the instance as taking traffic, as far as its listeners go, until the guard is
-    /// dropped.
+    /// dropped. On the first loop thread, once every loop thread is ready.
     ///
-    /// The first time, the lease thread starts watching this thread's event loop
-    /// (`Cluster::watch`). Not before: linking runs in turns as long as itself.
+    /// The first time, the lease thread starts watching the event loops of the instance's
+    /// threads, each of which owns objects (`Cluster::watch`): the count it reads advances only
+    /// when every loop has made progress since it last did, so one loop that stands still
+    /// fences the node as the only loop of an instance does. Not before: linking runs in turns
+    /// as long as itself.
     pub fn ready(self: &Rc<Self>) -> Ready {
-        if !self.watched.replace(true) {
-            // The loop beats once a round while it sleeps. A loop that cannot be watched serves
-            // on, and says that it does; what stops it from being watched lasts, so it is not
-            // tried again.
-            match kj_rs_tokio::watch_progress(self.beat) {
-                Ok(progress) => self.cluster.watch(Box::new(move || progress.count())),
-                Err(e) => tracing::warn!(
-                    "cluster: the lease thread cannot watch the event loop, so a loop that makes \
-                     no progress will not fence this node: {e}"
-                ),
+        self.watch_loop();
+        if let Some(first) = &self.first
+            && !self.watching.replace(true)
+        {
+            let loops = std::mem::take(
+                &mut *(self.seat.progress.lock()).unwrap_or_else(PoisonError::into_inner),
+            );
+            if !loops.is_empty() {
+                first.watch(every_loop(loops));
             }
         }
         self.ready.set(true);
@@ -590,7 +720,9 @@ impl ClusterNode {
     }
 
     /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
-    pub fn start_draining(&self) -> Deadlines {
+    /// On the first loop thread.
+    pub fn start_draining(&self) -> Result<Deadlines> {
+        let first = Rc::clone(self.first()?);
         let now = Instant::now();
         let at = |ms| now + Duration::from_millis(ms);
         let deadlines = Deadlines {
@@ -602,19 +734,24 @@ impl ClusterNode {
             connections: at(self.budget.connections_ms()),
             stop: at(self.budget.stop_ms),
         };
-        self.deadlines.set(Some(deadlines));
-        self.cluster.start_draining();
-        let cluster = Rc::clone(&self.cluster);
+        // Every thread has the deadlines before it sees that the instance drains.
+        let _ = self.seat.deadlines.set(deadlines);
+        first.start_draining();
         self.factory
-            .spawn_detached(async move { cluster.announce_draining().await });
-        deadlines
+            .spawn_detached(async move { first.announce_draining().await });
+        Ok(deadlines)
+    }
+
+    /// When the phases of the instance's stop end, once it drains.
+    fn deadlines(&self) -> Option<Deadlines> {
+        self.seat.deadlines.get().copied()
     }
 
     /// Hands off an object this draining instance owns at `epoch` but does not run, once it is
     /// at rest here, unless the handoff's deadline passes first. Answers whether it was released;
     /// one that was not is abandoned (`Cluster::abandon_actor`).
     pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> bool {
-        let Some(deadlines) = self.deadlines.get() else {
+        let Some(deadlines) = self.deadlines() else {
             return false;
         };
         let release = self.cluster.release_actor(namespace, actor, epoch);
@@ -640,7 +777,7 @@ impl ClusterNode {
     /// deadline; from then on it answers `moved`, and the peer sends the request where the object
     /// went itself.
     pub fn handed_off_relay_deadline(&self) -> Option<Instant> {
-        self.deadlines.get().map(|deadlines| deadlines.in_flight)
+        self.deadlines().map(|deadlines| deadlines.in_flight)
     }
 
     /// Starts a request a peer makes here, or the debug port: counted on the peer's `session`,
@@ -670,18 +807,57 @@ impl ClusterNode {
         self.namespaces.borrow_mut().insert(hash, namespace);
     }
 
-    /// Whether this instance is handing off `object`, named `<namespace hash>/<root key>`.
+    /// Whether this instance is handing off `object`, named `<namespace hash>/<root key>`, on
+    /// whichever loop thread the object lives.
     pub fn hands_off(&self, object: &str) -> bool {
-        let Some((hash, key)) = object.split_once('/') else {
-            return false;
-        };
-        let namespace = self.namespaces.borrow().get(hash).and_then(Weak::upgrade);
-        namespace.is_some_and(|namespace| namespace.hands_off(key))
+        let handed_off = self.seat.handed_off.lock();
+        handed_off
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(object)
     }
 
-    /// Keeps this instance's alarm index tidy and schedules its share of dead peers' alarms.
-    /// Never returns.
+    /// This thread hands `object` off, named `<namespace hash>/<root key>`: every thread admits
+    /// what its work makes from now on (`hands_off`).
+    pub fn handing_off(&self, object: String) {
+        let handed_off = self.seat.handed_off.lock();
+        handed_off
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(object);
+    }
+
+    /// Schedules the alarm, adopted from a dead peer, of the object `actor` of the namespace
+    /// whose hash is `namespace`: here if its home is this thread, else on its home thread.
+    pub fn adopt_alarm(&self, namespace: &str, actor: &str, name: Option<&str>, at_ms: u64) {
+        let found = self.namespaces.borrow().get(namespace).cloned();
+        let Some(found) = found.and_then(|ns| ns.upgrade()) else {
+            // Not configured here: a peer that has it adopts it once this one dies.
+            tracing::warn!("an adopted alarm's namespace is not configured here");
+            return;
+        };
+        let home = found.home(actor);
+        if home != self.factory.thread() {
+            let mail = Mail::AdoptAlarm {
+                namespace: namespace.to_owned(),
+                actor: actor.to_owned(),
+                name: name.map(str::to_owned),
+                at_ms,
+            };
+            if !self.factory.post(home, mail) {
+                tracing::warn!("an adopted alarm's loop thread has ended");
+            }
+            return;
+        }
+        if let Err(e) = found.adopt_alarm(actor, name, at_ms) {
+            tracing::warn!("scheduling an adopted alarm: {}", e.description());
+        }
+    }
+
+    /// Keeps this instance's alarm index tidy and schedules its share of dead peers' alarms,
+    /// each on its object's home thread. On the first loop thread. Never returns.
     pub async fn alarms_loop(&self) {
+        let Ok(first) = self.first().map(Rc::clone) else {
+            return;
+        };
         loop {
             tokio::time::sleep(self.alarms_interval).await;
             // A draining instance takes on no alarms; its own go to its peers as it leaves.
@@ -689,18 +865,86 @@ impl ClusterNode {
                 continue;
             }
             let schedule = |alarm: cluster::Adopted| {
-                let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
-                let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
-                    // Not configured here: a peer that has it adopts it once this one dies.
-                    tracing::warn!("an adopted alarm's namespace is not configured here");
-                    return;
-                };
-                let (actor, name) = (&alarm.actor, alarm.name.as_deref());
-                if let Err(e) = namespace.adopt_alarm(actor, name, alarm.at_ms) {
-                    tracing::warn!("scheduling an adopted alarm: {}", e.description());
-                }
+                self.adopt_alarm(
+                    &alarm.namespace,
+                    &alarm.actor,
+                    alarm.name.as_deref(),
+                    alarm.at_ms,
+                );
             };
-            self.cluster.alarms_round(cluster::now_ms(), schedule).await;
+            first.alarms_round(cluster::now_ms(), schedule).await;
+        }
+    }
+
+    /// What loop thread `from` asked of the control plane, which this thread, the first, has.
+    /// A thread asks only for the objects whose home it is: the one table of what the instance
+    /// owns is changed for an object by one thread alone.
+    pub async fn control(&self, from: usize, call: ControlCall) -> ControlAnswer {
+        let refused = |call: &ControlCall| {
+            let (ns, actor) = call.object();
+            let home = self.factory.home(&Scope::Durable(ns), actor);
+            (home != from).then(|| {
+                tracing::error!(
+                    "loop thread {from} asked the cluster's control plane for {ns}/{actor}, \
+                     whose home is thread {home}"
+                );
+                cluster::Error::Replica(format!(
+                    "{ns}/{actor}: asked for by a loop thread that is not its home"
+                ))
+            })
+        };
+        let first = match (self.first(), refused(&call)) {
+            (Ok(first), None) => Rc::clone(first),
+            (Err(e), _) => return call.failed(cluster::Error::Replica(e.description().to_owned())),
+            (_, Some(e)) => return call.failed(e),
+        };
+        let control = first.control();
+        match call {
+            ControlCall::Claim { ns, actor, now_ms } => {
+                ControlAnswer::Claim(control.claim(&ns, &actor, now_ms).await)
+            }
+            ControlCall::Advance { ns, actor, epoch } => {
+                ControlAnswer::Advance(control.advance(&ns, &actor, epoch).await)
+            }
+            ControlCall::Open { ns, actor, epoch } => {
+                ControlAnswer::Flag(control.open(&ns, &actor, epoch).await)
+            }
+            ControlCall::Release { ns, actor, epoch } => {
+                ControlAnswer::Flag(control.release(&ns, &actor, epoch).await)
+            }
+            ControlCall::Abandon { ns, actor } => {
+                control.abandon(&ns, &actor);
+                ControlAnswer::Done(Ok(()))
+            }
+            ControlCall::ForgetRoute { ns, actor, node } => {
+                control.forget_route(&ns, &actor, &node);
+                ControlAnswer::Done(Ok(()))
+            }
+            ControlCall::RefreshRoute { ns, actor, now_ms } => {
+                ControlAnswer::Done(control.refresh_route(&ns, &actor, now_ms).await)
+            }
+            ControlCall::ArmAlarm {
+                ns,
+                actor,
+                name,
+                at_ms,
+            } => ControlAnswer::Done(control.arm_alarm(&ns, &actor, name.as_deref(), at_ms).await),
+            ControlCall::OpenedAlarm {
+                ns,
+                actor,
+                name,
+                at_ms,
+            } => ControlAnswer::Done(
+                control
+                    .opened_alarm(&ns, &actor, name.as_deref(), at_ms)
+                    .await,
+            ),
+            ControlCall::AlarmElsewhere {
+                ns,
+                actor,
+                owner,
+                now_ms,
+            } => ControlAnswer::Flag(control.alarm_elsewhere(&ns, &actor, &owner, now_ms).await),
         }
     }
 
@@ -755,6 +999,7 @@ impl ClusterNode {
                 class,
                 actor,
                 kj_rs::KjMaybe::None,
+                crate::actor::Caller::Stub.code(),
             )?,
             down: Rc::clone(&session.down),
         };
@@ -767,7 +1012,7 @@ impl ClusterNode {
     /// fail as soon as the session does.
     pub async fn peer_service(&self, node: &str, service: &str) -> Result<Rc<dyn Channel>> {
         let address = self
-            .cluster
+            .first()?
             .address(node, cluster::now_ms())
             .ok_or_else(|| kj::disconnected!("cluster node {node} is not live"))?;
         let session = self
@@ -817,7 +1062,7 @@ impl ClusterNode {
 }
 
 /// A tunnel to instance `node` at `address`, refused by anything else there.
-async fn tunnel(cluster: &Cluster, node: &str, address: &str) -> std::io::Result<TcpStream> {
+async fn tunnel(cluster: &Member, node: &str, address: &str) -> std::io::Result<TcpStream> {
     let mut stream = TcpStream::connect(address).await?;
     stream.set_nodelay(true)?;
     let ms = cluster::now_ms();
@@ -1082,7 +1327,7 @@ pub async fn result_task_run(task: Box<ResultTask>) -> Result<()> {
 
 /// What makes one actor's commits durable: `sync_actor` on its object.
 pub struct Committer {
-    pub cluster: Rc<Cluster>,
+    pub cluster: Rc<Member>,
     pub namespace: String,
     pub object: String,
 }
@@ -1148,7 +1393,7 @@ impl Owned {
         }
     }
 
-    pub fn cluster(&self) -> &Rc<Cluster> {
+    pub fn cluster(&self) -> &Rc<Member> {
         &self.node.cluster
     }
 
@@ -1211,6 +1456,194 @@ impl Retire {
         self.node.factory.spawn_detached(async move {
             cluster.evict_actor(&namespace, &actor, epoch).await;
         });
+    }
+}
+
+/// One count for the lease thread to watch that stands still while any of `loops` does: it
+/// advances when every loop has made progress since it last advanced.
+fn every_loop(loops: Vec<cluster::Progress>) -> cluster::Progress {
+    let seen = Mutex::new((vec![None::<u64>; loops.len()], 0u64));
+    Box::new(move || {
+        let counts: Vec<u64> = loops.iter().map(|count| count()).collect();
+        let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let (last, combined) = &mut *seen;
+        let all = counts
+            .iter()
+            .zip(last.iter())
+            .all(|(count, last)| Some(*count) != *last);
+        if all {
+            *last = counts.into_iter().map(Some).collect();
+            *combined += 1;
+        }
+        let combined = *combined;
+        drop(seen);
+        combined
+    })
+}
+
+/// The control plane of an instance whose first loop thread has it, for another loop thread:
+/// each call is mail to the first thread, answered by its `ClusterNode::control`.
+struct RemoteControl {
+    factory: Rc<Factory>,
+    /// This thread's client of the instance's bucket.
+    bucket: cluster::Bucket,
+}
+
+impl RemoteControl {
+    /// Sends `call` to the first thread and waits for its answer.
+    async fn ask(&self, call: ControlCall) -> cluster::Result<ControlAnswer> {
+        let gone = || cluster::Error::Replica("the first loop thread has ended".to_owned());
+        let (answer, answered) = tokio::sync::oneshot::channel();
+        let mail = Mail::Control {
+            from: self.factory.thread(),
+            call,
+            answer: Some(answer),
+        };
+        if !self.factory.post(0, mail) {
+            return Err(gone());
+        }
+        answered.await.map_err(|_| gone())
+    }
+
+    /// Sends `call`, which has no answer, to the first thread: it is in effect there before
+    /// anything this thread sends after it.
+    fn tell(&self, call: ControlCall) {
+        let mail = Mail::Control {
+            from: self.factory.thread(),
+            call,
+            answer: None,
+        };
+        // A first thread that is gone has no table to change.
+        let _ = self.factory.post(0, mail);
+    }
+}
+
+fn unexpected<T>() -> cluster::Result<T> {
+    Err(cluster::Error::Replica(
+        "the control plane answered another call".to_owned(),
+    ))
+}
+
+#[async_trait::async_trait(?Send)]
+impl cluster::Open for RemoteControl {
+    async fn open(&self, ns: &str, actor: &str, epoch: u64) -> cluster::Result<bool> {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        match self.ask(ControlCall::Open { ns, actor, epoch }).await? {
+            ControlAnswer::Flag(opened) => opened,
+            _ => unexpected(),
+        }
+    }
+
+    async fn current_epoch(&self, ns: &str, actor: &str) -> cluster::Result<Option<u64>> {
+        cluster::current_epoch(&self.bucket, ns, actor).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Control for RemoteControl {
+    async fn claim(&self, ns: &str, actor: &str, now_ms: u64) -> cluster::Result<cluster::Claim> {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        match self.ask(ControlCall::Claim { ns, actor, now_ms }).await? {
+            ControlAnswer::Claim(claim) => claim,
+            _ => unexpected(),
+        }
+    }
+
+    async fn advance(
+        &self,
+        ns: &str,
+        actor: &str,
+        epoch: u64,
+    ) -> cluster::Result<Option<cluster::Owned>> {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        match self.ask(ControlCall::Advance { ns, actor, epoch }).await? {
+            ControlAnswer::Advance(next) => next,
+            _ => unexpected(),
+        }
+    }
+
+    async fn release(&self, ns: &str, actor: &str, epoch: u64) -> cluster::Result<bool> {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        match self.ask(ControlCall::Release { ns, actor, epoch }).await? {
+            ControlAnswer::Flag(released) => released,
+            _ => unexpected(),
+        }
+    }
+
+    fn abandon(&self, ns: &str, actor: &str) {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        self.tell(ControlCall::Abandon { ns, actor });
+    }
+
+    fn forget_route(&self, ns: &str, actor: &str, node: &str) {
+        let (ns, actor, node) = (ns.to_owned(), actor.to_owned(), node.to_owned());
+        self.tell(ControlCall::ForgetRoute { ns, actor, node });
+    }
+
+    async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> cluster::Result<()> {
+        let (ns, actor) = (ns.to_owned(), actor.to_owned());
+        let call = ControlCall::RefreshRoute { ns, actor, now_ms };
+        match self.ask(call).await? {
+            ControlAnswer::Done(done) => done,
+            _ => unexpected(),
+        }
+    }
+
+    async fn arm_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: Option<u64>,
+    ) -> cluster::Result<()> {
+        let call = ControlCall::ArmAlarm {
+            ns: ns.to_owned(),
+            actor: actor.to_owned(),
+            name: name.map(str::to_owned),
+            at_ms,
+        };
+        match self.ask(call).await? {
+            ControlAnswer::Done(done) => done,
+            _ => unexpected(),
+        }
+    }
+
+    async fn opened_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: u64,
+    ) -> cluster::Result<()> {
+        let call = ControlCall::OpenedAlarm {
+            ns: ns.to_owned(),
+            actor: actor.to_owned(),
+            name: name.map(str::to_owned),
+            at_ms,
+        };
+        match self.ask(call).await? {
+            ControlAnswer::Done(done) => done,
+            _ => unexpected(),
+        }
+    }
+
+    async fn alarm_elsewhere(
+        &self,
+        ns: &str,
+        actor: &str,
+        owner: &str,
+        now_ms: u64,
+    ) -> cluster::Result<bool> {
+        let call = ControlCall::AlarmElsewhere {
+            ns: ns.to_owned(),
+            actor: actor.to_owned(),
+            owner: owner.to_owned(),
+            now_ms,
+        };
+        match self.ask(call).await? {
+            ControlAnswer::Flag(again) => again,
+            _ => unexpected(),
+        }
     }
 }
 

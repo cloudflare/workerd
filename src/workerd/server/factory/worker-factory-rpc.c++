@@ -227,7 +227,9 @@ kj::Promise<void> WorkerdDebugPortImpl::getActor(GetActorContext context) {
   kj::Maybe<kj::StringPtr> name;
   if (params.hasActorName()) name = params.getActorName();
   auto target = subrequest_channel_into_kj(server->resolve_debug_actor(toRust(params.getService()),
-      toRust(params.getEntrypoint()), toRust(params.getActorId()), toRust(name), callerThread));
+      toRust(params.getEntrypoint()), toRust(params.getActorId()), toRust(name), callerThread,
+      // Whose requests a caller sends is its word to take only within the process.
+      callerThread == kj::none ? static_cast<uint8_t>(0) : params.getCaller()));
   context.initResults(capnp::MessageSize{4, 1})
       .setActor(
           kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory, restoreTokens));
@@ -448,7 +450,8 @@ kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
     ::rust::Str service,
     ::rust::Str className,
     ::rust::Str actorId,
-    kj::Maybe<::rust::Str> actorName) {
+    kj::Maybe<::rust::Str> actorName,
+    uint8_t caller) {
   auto& impl = session.getImpl();
   auto peer = impl.session->bootstrap.castAs<rpc::WorkerdDebugPort>();
   auto request = peer.getActorRequest();
@@ -456,6 +459,7 @@ kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
   request.setEntrypoint(kj::str(className));
   request.setActorId(kj::str(actorId));
   KJ_IF_SOME(name, actorName) request.setActorName(kj::str(name));
+  request.setCaller(caller);
   return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(
       impl.factory, kj::addRef(*impl.session), request.send().getActor()));
 }

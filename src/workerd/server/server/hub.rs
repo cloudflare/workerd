@@ -70,6 +70,133 @@ pub enum Mail {
         hibernate: bool,
         done: Done,
     },
+    /// In a cluster, for the first thread: thread `from` asks the control plane for an object
+    /// whose home it is. `answer` is none for a call that has no answer (`Abandon`,
+    /// `ForgetRoute`), which is in effect before the next mail is taken.
+    Control {
+        from: usize,
+        call: ControlCall,
+        answer: Option<oneshot::Sender<ControlAnswer>>,
+    },
+    /// In a cluster: schedule the alarm of the object `actor` of the namespace whose hash is
+    /// `namespace`, whose home is this thread, adopted from a dead peer.
+    AdoptAlarm {
+        namespace: String,
+        actor: String,
+        name: Option<String>,
+        at_ms: u64,
+    },
+    /// In a cluster: the instance drains. Hand off this thread's objects by `deadlines`, and
+    /// answer whether every one was stopped.
+    HandOff {
+        deadlines: crate::cluster::Deadlines,
+        stopped: oneshot::Sender<bool>,
+    },
+}
+
+/// What a thread asks of the instance's control plane in a cluster (`cluster::Control`), which
+/// is the first thread's: the call, by the names of `cluster::Control`'s methods.
+pub enum ControlCall {
+    Claim {
+        ns: String,
+        actor: String,
+        now_ms: u64,
+    },
+    Advance {
+        ns: String,
+        actor: String,
+        epoch: u64,
+    },
+    Open {
+        ns: String,
+        actor: String,
+        epoch: u64,
+    },
+    Release {
+        ns: String,
+        actor: String,
+        epoch: u64,
+    },
+    Abandon {
+        ns: String,
+        actor: String,
+    },
+    ForgetRoute {
+        ns: String,
+        actor: String,
+        node: String,
+    },
+    RefreshRoute {
+        ns: String,
+        actor: String,
+        now_ms: u64,
+    },
+    ArmAlarm {
+        ns: String,
+        actor: String,
+        name: Option<String>,
+        at_ms: Option<u64>,
+    },
+    OpenedAlarm {
+        ns: String,
+        actor: String,
+        name: Option<String>,
+        at_ms: u64,
+    },
+    AlarmElsewhere {
+        ns: String,
+        actor: String,
+        owner: String,
+        now_ms: u64,
+    },
+}
+
+impl ControlCall {
+    /// The namespace and the object the call is for.
+    #[must_use]
+    pub fn object(&self) -> (&str, &str) {
+        match self {
+            Self::Claim { ns, actor, .. }
+            | Self::Advance { ns, actor, .. }
+            | Self::Open { ns, actor, .. }
+            | Self::Release { ns, actor, .. }
+            | Self::Abandon { ns, actor }
+            | Self::ForgetRoute { ns, actor, .. }
+            | Self::RefreshRoute { ns, actor, .. }
+            | Self::ArmAlarm { ns, actor, .. }
+            | Self::OpenedAlarm { ns, actor, .. }
+            | Self::AlarmElsewhere { ns, actor, .. } => (ns, actor),
+        }
+    }
+}
+
+impl ControlCall {
+    /// The answer to this call that says it failed with `error`.
+    #[must_use]
+    pub fn failed(&self, error: cluster::Error) -> ControlAnswer {
+        match self {
+            Self::Claim { .. } => ControlAnswer::Claim(Err(error)),
+            Self::Advance { .. } => ControlAnswer::Advance(Err(error)),
+            Self::Open { .. } | Self::Release { .. } | Self::AlarmElsewhere { .. } => {
+                ControlAnswer::Flag(Err(error))
+            }
+            Self::Abandon { .. }
+            | Self::ForgetRoute { .. }
+            | Self::RefreshRoute { .. }
+            | Self::ArmAlarm { .. }
+            | Self::OpenedAlarm { .. } => ControlAnswer::Done(Err(error)),
+        }
+    }
+}
+
+/// The control plane's answer to a [`ControlCall`].
+pub enum ControlAnswer {
+    Claim(cluster::Result<cluster::Claim>),
+    Advance(cluster::Result<Option<cluster::Owned>>),
+    /// Of `Open`, `Release` and `AlarmElsewhere`.
+    Flag(cluster::Result<bool>),
+    /// Of `RefreshRoute`, `ArmAlarm` and `OpenedAlarm`.
+    Done(cluster::Result<()>),
 }
 
 /// Why actors are aborted: the exception's type and description.

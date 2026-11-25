@@ -217,6 +217,12 @@ impl Factory {
         })
     }
 
+    /// Sends `mail` to loop thread `thread`: false if the thread is gone, or this is the
+    /// process's only thread.
+    pub fn post(&self, thread: usize, mail: Mail) -> bool {
+        (self.seat.get()).is_some_and(|(_, hub)| hub.post(thread, mail))
+    }
+
     /// Sends loop thread `thread` the mail `make` makes, and resolves once it did what it asks.
     pub fn ask(
         &self,
@@ -236,6 +242,30 @@ impl Factory {
                 Ok(result) => result.map_err(|description| kj::failed!("{description}")),
                 Err(_) => Err(kj::disconnected!("loop thread {thread} has ended")),
             }
+        })
+    }
+
+    /// In a cluster, has every other loop thread hand its objects off by `deadlines`: whether
+    /// each stopped every one. A thread that has ended, or does not answer, counts as one with
+    /// objects left.
+    pub fn hand_off_elsewhere(
+        &self,
+        deadlines: crate::cluster::Deadlines,
+    ) -> LocalBoxFuture<'static, bool> {
+        let asked: Vec<_> = (0..self.threads())
+            .filter(|thread| *thread != self.thread())
+            .map(|thread| {
+                let (stopped, answer) = oneshot::channel();
+                self.post(thread, Mail::HandOff { deadlines, stopped });
+                answer
+            })
+            .collect();
+        Box::pin(async move {
+            let mut all = true;
+            for answer in asked {
+                all &= answer.await.unwrap_or(false);
+            }
+            all
         })
     }
 
@@ -890,6 +920,15 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// The namespaces whose objects the cluster owns, on this thread.
+    pub fn clustered_namespaces(&self) -> Vec<Rc<ActorNamespace>> {
+        let namespaces = self.workers().flat_map(|(_, worker)| worker.namespaces());
+        namespaces
+            .map(|(_, namespace)| namespace)
+            .filter(|namespace| namespace.cluster().is_some())
+            .collect()
     }
 
     /// Starts the alarm scheduler of every namespace, and of those linked from now on as they
@@ -1722,7 +1761,7 @@ impl Server {
         overrides: &Overrides,
         report: Reporter,
         mut inbound_listeners: HashMap<String, Vec<ffi::InboundListener>>,
-        cluster_address: Option<String>,
+        join: Option<ClusterJoin>,
     ) -> Result<Rc<Self>> {
         let message = factory.config()?;
         let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
@@ -1776,22 +1815,25 @@ impl Server {
                 .insert("internet".to_owned(), Service::Leaf(internet));
         }
 
-        let cluster = match cluster_address {
-            Some(address) if config.has_cluster() => {
-                make_cluster(&factory, config, address, &report)?
+        let cluster = match join {
+            Some(ClusterJoin::At(address)) if config.has_cluster() => {
+                let cluster = make_cluster(&factory, config, address, &report)?;
+                if let Some(cluster) = &cluster {
+                    // Actor databases open only under a lease, which the lease thread keeps from
+                    // here on, however long linking takes: it watches the event loops only once
+                    // the node serves (`ClusterNode::ready`).
+                    (cluster.first()?.join().await)
+                        .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
+                }
+                cluster
+            }
+            // The first loop thread joined; this one takes its part in the instance.
+            Some(ClusterJoin::Beside(seat)) if config.has_cluster() => {
+                let conf = config.get_cluster().map_err(capnp_error)?;
+                Some(ClusterNode::member(Rc::clone(&factory), conf, seat)?)
             }
             _ => None,
         };
-        if let Some(cluster) = &cluster {
-            // Actor databases open only under a lease, which the lease thread keeps from here on,
-            // however long linking takes: it watches the event loop only once the node serves
-            // (`ClusterNode::ready`).
-            cluster
-                .cluster
-                .join()
-                .await
-                .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
-        }
 
         // Every service exists: wire each worker's Workflows to the engine that runs them.
         init_workflows(
@@ -2269,6 +2311,7 @@ impl ServerHandle {
         actor_id: &str,
         actor_name: KjMaybe<&str>,
         caller_thread: KjMaybe<u32>,
+        caller: u8,
     ) -> Result<Box<SubrequestChannel>> {
         let caller_thread: Option<u32> = caller_thread.into();
         let namespace = self.actor_namespace(service_name, class_name)?;
@@ -2290,7 +2333,10 @@ impl ServerHandle {
         // this thread gets, which a draining cluster node routes for as for its own. Whether
         // the stub is persistent arrives with each of its requests.
         Ok(SubrequestChannel::new(match caller_thread {
-            Some(thread) => namespace.channel_from_thread(id, thread as usize),
+            Some(thread) => {
+                let caller = crate::actor::Caller::from_code(caller)?;
+                namespace.channel_from_thread(id, thread as usize, caller)?
+            }
             None => namespace.peer_channel(id, None),
         }))
     }
@@ -2438,8 +2484,8 @@ fn cluster_services(
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
-        // A replica has no cluster, and these services keep state a process has once: each is
-        // the first loop thread's, which checked it.
+        // A `cache` and a `bucket` keep state a process has once: on a replica each is the first
+        // loop thread's, which checked it.
         if factory.thread() != 0 {
             if matches!(
                 conf.which(),
@@ -2502,6 +2548,14 @@ fn cluster_services(
         services.0.insert(name, Service::Leaf(channel));
     }
     Ok(())
+}
+
+/// How a server takes part in the cluster of `Config.cluster`.
+pub enum ClusterJoin {
+    /// As the instance, which peers reach at this address: the process's first loop thread.
+    At(String),
+    /// As another loop thread of the instance whose first thread made the seat.
+    Beside(crate::cluster::Seat),
 }
 
 /// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.

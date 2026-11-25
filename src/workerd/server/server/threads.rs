@@ -7,9 +7,8 @@
 //! The first loop thread is the process's main thread and has everything a process has one of:
 //! it binds the sockets, reports the config's errors, handles SIGTERM, writes the `--control-fd`
 //! events, owns the front and the hub, and serves the UDP sockets, the cron triggers and the
-//! debug port. In cluster mode it also has the instance's whole part in the cluster (its lease,
-//! the objects it owns, the peer port and sessions, the bucket's client), and with it every
-//! Durable Object.
+//! debug port. In cluster mode it also has the instance's control plane (its record and lease,
+//! the one table of the objects the instance claimed, the alarm index) and the peer port.
 //!
 //! No loop thread accepts from a stream socket. The front does (`front/mod.rs`): a tokio runtime
 //! of its own that owns the HTTP, HTTPS and TCP sockets the first thread bound, accepts, performs
@@ -52,10 +51,18 @@
 //! thread said so: `abortAllDurableObjects()`, `deleteAllDurableObjects()` and the eviction test
 //! hooks (`hub::Mail`).
 //!
-//! In cluster mode the hub places every actor on the first thread (`Placement::spread` is off),
-//! which routes a replica's request as its own (owned here, on a peer, or being handed off). A
-//! `bucket` or `cache` service is the first thread's on every thread
-//! (`services::ForwardedService`), with or without a cluster.
+//! In cluster mode (`cluster.rs`) every thread takes part in the instance: each has a data
+//! plane for the objects whose home it is (their captures, uploads and takeovers, over a bucket
+//! client and sessions to peers of its own), and asks the first thread's control plane, through
+//! its inbox, for every change of who owns one; the control plane refuses a thread that asks
+//! for an object that is not its own. Whether the lease holds and whether the instance drains
+//! every thread reads from what they share, and the lease thread watches every thread's loop:
+//! one that stands still fences the instance. A peer's call arrives on the first thread, which
+//! counts it on the peer's session and passes it to the object's home as a peer's; an alarm
+//! adopted from a dead peer is scheduled on its object's home; and when the instance drains,
+//! every thread hands off its own objects. A `cache` service is the first thread's on every
+//! thread (`services::ForwardedService`), with or without a cluster, and so is a `bucket` that
+//! is a local store.
 //!
 //! What the threads share besides is [`Phase`], which the first thread sets and the replicas
 //! follow, and the events a replica sends back: that it is ready, that it has drained, and how
@@ -113,6 +120,7 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::thread::JoinHandle;
 
+use futures::FutureExt;
 use futures::future::LocalBoxFuture;
 use kj_rs::KjArc;
 use kj_rs::KjOwn;
@@ -123,6 +131,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use crate::Result;
+use crate::actor::Caller;
 use crate::bridge::ffi;
 use crate::config::Deployments;
 use crate::config::Factory;
@@ -221,7 +230,6 @@ impl Signals {
 /// The replicas of a run, for the first loop thread. Dropping it stops and joins them.
 pub struct Replicas {
     count: usize,
-    spread: bool,
     /// The replicas' seats, from when the first thread has taken its own until they start.
     seats: RefCell<Vec<Seat>>,
     shared: KjArc<ffi::SharedFactory>,
@@ -234,13 +242,10 @@ pub struct Replicas {
 
 impl Replicas {
     /// `count` replicas of the server of `factory`, the first loop thread's; none runs yet.
-    /// The threads' actors are spread over them if `spread`, else every actor's home is the
-    /// first.
     #[must_use]
-    pub fn new(count: usize, factory: &Factory, spread: bool) -> Self {
+    pub fn new(count: usize, factory: &Factory) -> Self {
         Self {
             count,
-            spread,
             seats: RefCell::new(Vec::new()),
             shared: factory.shared(),
             phase: watch::Sender::new(Phase::Starting),
@@ -261,7 +266,7 @@ impl Replicas {
     pub fn seat(&self, factory: &Rc<Factory>) -> Result<()> {
         let placement = Placement {
             count: self.count + 1,
-            spread: self.spread,
+            spread: true,
         };
         let (hub, seats) = Hub::new(placement);
         let _ = self.hub.set(hub);
@@ -285,6 +290,7 @@ impl Replicas {
         queue: &front::Queue,
         overrides: &Overrides,
         deployments: &Deployments,
+        cluster: Option<&crate::cluster::Seat>,
     ) -> Result<Started> {
         let (events, received) = mpsc::unbounded_channel();
         let count = self.count;
@@ -300,6 +306,7 @@ impl Replicas {
                 queue: queue.clone(),
                 overrides: overrides.clone(),
                 deployments: deployments.clone(),
+                cluster: cluster.cloned(),
                 signals: Signals {
                     index,
                     phase: self.phase.subscribe(),
@@ -508,6 +515,8 @@ struct Replica {
     overrides: Overrides,
     /// The services of the config that came from cluster deployments.
     deployments: Deployments,
+    /// In a cluster, what the instance's threads share of its membership.
+    cluster: Option<crate::cluster::Seat>,
     signals: Signals,
     /// Which loop thread it is, with the hub and its inbox.
     seat: Seat,
@@ -536,6 +545,7 @@ impl Replica {
             queue,
             overrides,
             deployments,
+            cluster,
             signals,
             seat,
             ..
@@ -543,8 +553,15 @@ impl Replica {
         let factory = Rc::new(Factory::new(factory));
         factory.join(seat)?;
         let serving = Rc::clone(&factory);
-        let replica =
-            crate::run::run_replica(serving, overrides, deployments, sockets, queue, &signals);
+        let replica = crate::run::run_replica(
+            serving,
+            overrides,
+            deployments,
+            cluster,
+            sockets,
+            queue,
+            &signals,
+        );
         let result = replica.await;
         let shutdown = crate::entry::shutdown(factory).await;
         result?;
@@ -622,16 +639,24 @@ impl ThreadLink {
 
     /// The actor `key` (the hex id of a durable actor, derived from `name` if that is known;
     /// the name of an ephemeral one) of `class`'s namespace in worker `service`, as the other
-    /// thread resolves it. That thread holds the actor's channel, as a stub there would, until
-    /// this is dropped.
+    /// thread resolves it for requests of `caller`. That thread holds the actor's channel, as a
+    /// stub there would, until this is dropped.
     pub fn actor(
         &self,
         service: &str,
         class: &str,
         key: &str,
         name: Option<&str>,
+        caller: Caller,
     ) -> Result<KjOwn<ffi::RpcClient>> {
-        let actor = ffi::rpc_client_debug_actor(&self.client, service, class, key, name.into());
+        let actor = ffi::rpc_client_debug_actor(
+            &self.client,
+            service,
+            class,
+            key,
+            name.into(),
+            caller.code(),
+        );
         Ok(actor?)
     }
 
@@ -693,6 +718,9 @@ pub async fn take_mail(factory: Rc<Factory>, mut inbox: mpsc::UnboundedReceiver<
                     let _ = done.send(evicted.await.map_err(|e| e.description().to_owned()));
                 });
             }
+            mail @ (Mail::Control { .. } | Mail::AdoptAlarm { .. } | Mail::HandOff { .. }) => {
+                take_cluster_mail(&factory, mail);
+            }
             Mail::Evict {
                 service,
                 class,
@@ -710,6 +738,64 @@ pub async fn take_mail(factory: Rc<Factory>, mut inbox: mpsc::UnboundedReceiver<
                 });
             }
         }
+    }
+}
+
+/// Takes the mail of a cluster instance's loop threads: what another thread asks of the control
+/// plane, which the first thread has, an adopted alarm for an object of this thread, and the
+/// instance's drain.
+fn take_cluster_mail(factory: &Rc<Factory>, mail: Mail) {
+    match mail {
+        Mail::Control { from, call, answer } => {
+            let node = factory.server().and_then(|server| {
+                (server.cluster().cloned())
+                    .ok_or_else(|| kj::failed!("this loop thread is in no cluster"))
+            });
+            let node = match node {
+                Ok(node) => node,
+                Err(e) => {
+                    if let Some(answer) = answer {
+                        let failed = cluster::Error::Replica(e.description().to_owned());
+                        let _ = answer.send(call.failed(failed));
+                    }
+                    return;
+                }
+            };
+            match answer {
+                // A call without an answer does not wait: it is done before the next mail
+                // is taken, and so before what its thread asks next.
+                None => drop(node.control(from, call).now_or_never()),
+                Some(answer) => factory.spawn_detached(async move {
+                    // The thread that asked may have ended.
+                    let _ = answer.send(node.control(from, call).await);
+                }),
+            }
+        }
+        Mail::AdoptAlarm {
+            namespace,
+            actor,
+            name,
+            at_ms,
+        } => {
+            if let Ok(Some(node)) = factory.server().map(|server| server.cluster().cloned()) {
+                node.adopt_alarm(&namespace, &actor, name.as_deref(), at_ms);
+            } else {
+                tracing::warn!("an adopted alarm reached a loop thread that is in no cluster");
+            }
+        }
+        Mail::HandOff { deadlines, stopped } => {
+            let serving = Rc::clone(factory);
+            factory.spawn_detached(async move {
+                let handed_off = async {
+                    let server = serving.server()?;
+                    let namespaces = server.clustered_namespaces();
+                    Ok::<_, crate::Error>(crate::actor::hand_off_all(&namespaces, deadlines).await)
+                };
+                // A thread that cannot say counts as one with objects left.
+                let _ = stopped.send(handed_off.await.unwrap_or(false));
+            });
+        }
+        _ => {}
     }
 }
 

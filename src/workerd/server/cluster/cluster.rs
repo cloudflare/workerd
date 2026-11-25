@@ -90,7 +90,7 @@ pub enum Route {
 /// on.
 pub struct Cluster {
     core: Rc<Core>,
-    member: Member,
+    member: Rc<Member>,
 }
 
 /// An instance's control plane: its record and lease, the one table of what
@@ -196,7 +196,7 @@ impl Cluster {
         #[cfg(test)]
         let control = crate::control::tests::wrap(control);
         Rc::new(Self {
-            member: Member::new(bucket, shared, control),
+            member: Rc::new(Member::new(bucket, shared, control)),
             core,
         })
     }
@@ -207,7 +207,7 @@ impl Cluster {
     }
 
     /// This thread's data plane.
-    pub fn member(&self) -> &Member {
+    pub fn member(&self) -> &Rc<Member> {
         &self.member
     }
 
