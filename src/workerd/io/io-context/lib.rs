@@ -685,7 +685,44 @@ impl<'s> IoContext<'s> {
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
     pub fn add_span(&self, span: SpanBuilder) -> jsg::Result<IoOwnedSpan> {
-        Ok(IoOwnedSpan(self.add_object(ThreadBoundSpan(span))?))
+        Ok(IoOwnedSpan(self.add_thread_bound_object(span)?))
+    }
+
+    /// Gives this `IoContext` ownership of `value`, which belongs to its thread, as C++
+    /// `IoContext::addObject()` does for any object: the counterpart of
+    /// [`add_object`](Self::add_object) for a value that is not `Send`, such as an `Rc`, or a
+    /// `KjOwn` of a C++ I/O object. It is dropped when the `IoContext` is destroyed, or after the
+    /// returned handle is dropped, unless [`IoOwnedLocal::take`] has taken it, and always on the
+    /// `IoContext`'s thread.
+    ///
+    /// The handle is `Send` and `Sync`, so that a resource can hold it, and dropped anywhere, as
+    /// an [`IoOwned`] can: the value stays behind, for the `IoContext` to drop.
+    ///
+    /// Nothing traces the value, which can't be `Traced`, since that requires `Send`: a
+    /// `jsg::Rc` or `TracedGlobal` in it is a strong reference, held until the `IoContext`
+    /// drops it, as one that C++ `IoOwn` holds is.
+    ///
+    /// As for [`await_io_local`](Self::await_io_local), staying on the thread is a property of
+    /// the event loop.
+    ///
+    /// # Safety
+    /// The current event loop runs on this OS thread until the `IoContext` has dropped `value`.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    #[expect(
+        unsafe_code,
+        reason = "owns what may be tied to the OS thread; the caller promises the event loop stays on it"
+    )]
+    pub unsafe fn add_local_object<T: 'static>(&self, value: T) -> jsg::Result<IoOwnedLocal<T>> {
+        self.add_thread_bound_object(value)
+    }
+
+    /// [`add_local_object`](Self::add_local_object) for this crate's spans, which are C++ KJ
+    /// objects: they read no thread-local but the current event loop, so they may move with it to
+    /// another OS thread, and need no pinned loop.
+    fn add_thread_bound_object<T: 'static>(&self, value: T) -> jsg::Result<IoOwnedLocal<T>> {
+        Ok(IoOwnedLocal(self.add_object(ThreadBoundObject(value))?))
     }
 
     /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
@@ -1484,8 +1521,8 @@ fn reject_with_js_exception<'a>(
 /// - **Threads:** the value is shared with the `IoContext`, which drops it, unless it was taken,
 ///   on its own thread and without the isolate lock. The handle, held by a resource, may be
 ///   dropped wherever the resource is, such as by GC on another thread that has locked the
-///   isolate. So a mutex guards the value, which must be `Send`. A span, which is not, has
-///   [`IoOwnedSpan`].
+///   isolate. So a mutex guards the value, which must be `Send`. A value that is not has
+///   [`IoOwnedLocal`].
 pub struct IoOwned<T> {
     slot: Arc<Mutex<Option<T>>>,
     // The id of the IoContext that owns the value.
@@ -1562,12 +1599,9 @@ impl<D: jsg::Traced> jsg::Traced for InContext<D> {
     }
 }
 
-/// A span an `IoContext` owns, from [`IoContext::add_span`].
-///
-/// It is an [`IoOwned`] for a value that is not `Send`. Unlike the span, the handle is `Send` and
-/// `Sync`, since it reaches the span only on the `IoContext`'s thread.
+/// A span an `IoContext` owns, from [`IoContext::add_span`]: an [`IoOwnedLocal`] of the span.
 #[jsg_macros::jsg_traced]
-pub struct IoOwnedSpan(IoOwned<ThreadBoundSpan>);
+pub struct IoOwnedSpan(IoOwnedLocal<SpanBuilder>);
 
 impl IoOwnedSpan {
     /// Takes the span, or returns `None` if it was already taken, as [`IoOwned::take`] does.
@@ -1575,7 +1609,7 @@ impl IoOwnedSpan {
     /// # Errors
     /// As for [`IoOwned::take`].
     pub fn take(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<Option<SpanBuilder>> {
-        Ok(self.0.take(lock)?.map(|span| span.0))
+        self.0.take(lock)
     }
 
     /// Calls `f` with the span, in place, as [`IoOwned::with`] does.
@@ -1587,30 +1621,78 @@ impl IoOwnedSpan {
         lock: &mut jsg::Lock<'_>,
         f: impl FnOnce(&mut SpanBuilder) -> R,
     ) -> jsg::Result<Option<R>> {
-        self.0.with(lock, |span| f(&mut span.0))
+        self.0.with(lock, f)
     }
 }
 
-/// The span of an [`IoOwnedSpan`].
-struct ThreadBoundSpan(SpanBuilder);
+/// A value an `IoContext` owns that belongs to its thread, from
+/// [`IoContext::add_local_object`]: the counterpart of C++ `IoOwn<T>` for a value that is not
+/// `Send`.
+///
+/// It is an [`IoOwned`] whose handle is `Send` and `Sync` though the value isn't, since it reaches
+/// the value only on the `IoContext`'s thread: [`take`](Self::take) and [`with`](Self::with) work
+/// only while the `IoContext` is current, as they do for an `IoOwned`.
+pub struct IoOwnedLocal<T: 'static>(IoOwned<ThreadBoundObject<T>>);
+
+impl<T: 'static> IoOwnedLocal<T> {
+    /// Takes the value, or returns `None` if it was already taken, as [`IoOwned::take`] does.
+    ///
+    /// # Errors
+    /// As for [`IoOwned::take`].
+    pub fn take(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<Option<T>> {
+        Ok(self.0.take(lock)?.map(|value| value.0))
+    }
+
+    /// Calls `f` with the value, in place, as [`IoOwned::with`] does.
+    ///
+    /// # Errors
+    /// As for [`IoOwned::with`].
+    pub fn with<R>(
+        &self,
+        lock: &mut jsg::Lock<'_>,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> jsg::Result<Option<R>> {
+        self.0.with(lock, |value| f(&mut value.0))
+    }
+}
+
+// The handle holds no JavaScript handles of its own, and the value is not traced; see
+// `IoContext::add_local_object`. Written out rather than with `jsg_traced_unchecked!`, which
+// would bound `T` by `Send`.
+impl<T: 'static> jsg::Traced for IoOwnedLocal<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T: 'static> jsg::HoldsNoGcReferences for IoOwnedLocal<T> {}
+
+/// The value of an [`IoOwnedLocal`].
+struct ThreadBoundObject<T>(T);
 
 #[expect(
     unsafe_code,
-    reason = "a span that its IoContext owns is touched only on its thread; see the SAFETY comment"
+    reason = "a value that its IoContext owns through an IoOwnedLocal is touched only on its \
+              thread; see the SAFETY comment"
 )]
-// SAFETY: a span belongs to its request's thread, which is the only one that touches it here.
-// `add_span()` takes it on that thread, from code that holds it there, with the IoContext
-// current. `IoOwnedSpan` reaches it only through `IoOwned::take()` and `IoOwned::with()`, while
-// that IoContext is current, so on its thread, and `take()` hands out the `SpanBuilder`, which is
-// not `Send`. Otherwise the IoContext drops it, through the `SlotRef` it holds, on its thread:
-// when it is destroyed, or when it next runs after the handle's `IoOwn` is destroyed elsewhere,
-// which only queues the deletion (`DeleteQueue::scheduleDeletion()` in io-own.c++). The handle's
-// own reference to the slot may be dropped on another thread, but if it is the last one, that
-// `SlotRef` has emptied the slot, and dropping `None` touches no span.
-unsafe impl Send for ThreadBoundSpan {}
+// SAFETY: the value belongs to its IoContext's thread, which is the only one that touches it
+// here, and stays that thread while the value lives: `add_local_object()`'s caller promises it,
+// and the spans of `add_thread_bound_object()` are KJ objects, which move with their event loop. `add_local_object()` takes it on that thread, since it takes an `IoContext`, which is
+// neither `Send` nor `Sync` and exists only while that IoContext is current. `IoOwnedLocal`
+// reaches it only through `IoOwned::take()` and `IoOwned::with()`, while that IoContext is
+// current, so on its thread, and `take()` hands out the value, which is not `Send`. Otherwise the
+// IoContext drops it, through the `SlotRef` it holds, on its thread: when it is destroyed, or when
+// it next runs after the handle's `IoOwn` is destroyed elsewhere, which only queues the deletion
+// (`DeleteQueue::scheduleDeletion()` in io-own.c++). The handle's own reference to the slot may be
+// dropped on another thread, but if it is the last one, that `SlotRef` has emptied the slot, and
+// dropping `None` touches no value.
+unsafe impl<T> Send for ThreadBoundObject<T> {}
 
-// A span holds no JavaScript handles.
-jsg::jsg_traced_unchecked!(ThreadBoundSpan);
+// Nothing traces the value; see `IoContext::add_local_object`. Written out rather than with
+// `jsg_traced_unchecked!`, which would bound `T` by `Send`.
+impl<T> jsg::Traced for ThreadBoundObject<T> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<T> jsg::HoldsNoGcReferences for ThreadBoundObject<T> {}
 
 impl<T> Drop for SlotRef<T> {
     fn drop(&mut self) {
