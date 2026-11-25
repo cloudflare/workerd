@@ -25,6 +25,17 @@
 //! Either the push sees the loop asleep or the loop sees the item queued; both read after they
 //! wrote (`SeqCst`), so not both miss.
 //!
+//! A loop that is woken for an item is granted one take, which the task that takes for it uses
+//! when it next runs. That is not always at once. The thread may have woken at the same moment
+//! for something of its own, a timer or an event of another thread, and its event loop then
+//! runs that first ([`Parking::before_resume`]), for as long as it takes; so a loop that goes
+//! on to other work with its grant unused wakes another sleeping loop for the item, and takes
+//! it itself only if it is still there when its taker runs. And a loop's taker may not be
+//! running at all, as when the future that holds it is not being polled: such a loop comes
+//! back to sleep with its grant unused ([`Parking::before_park`]), hands the item on the same
+//! way, and is not counted asleep again, so nothing wakes it for an item, until its taker runs
+//! and uses the grant. An item therefore never waits on a loop while another sleeps.
+//!
 //! There is no cap on what a loop has in flight: a cap would leave work queued behind
 //! long-lived items (WebSockets, long polls) with loops free to serve it.
 //!
@@ -203,11 +214,12 @@ struct State<T> {
 /// What the queue knows of one loop.
 #[derive(Default)]
 struct LoopState {
-    /// The loop's thread sleeps, or is about to, and has not been woken for an item.
+    /// The loop's thread sleeps, or is about to, and has not been woken for an item. Never set
+    /// for a loop whose taker does not run.
     asleep: AtomicBool,
     /// When the loop last went to sleep, as a count of all loops' sleeps.
     slept: AtomicU64,
-    /// The loop may take one item.
+    /// The loop may take one item. Set until its taker runs.
     granted: AtomicBool,
     /// Items the loop took whose [`InFlight`] it still holds.
     in_flight: AtomicUsize,
@@ -472,8 +484,8 @@ impl Drop for InFlight {
     }
 }
 
-/// Tells the queue when a loop's thread sleeps and wakes; the thread's event loop calls it
-/// (`kj_rs_tokio::ParkHooks`).
+/// Tells the queue when a loop's thread sleeps, wakes, and goes on to other work; the thread's
+/// event loop calls it (`kj_rs_tokio::ParkHooks`).
 pub struct Parking<T> {
     shared: Arc<Shared<T>>,
     me: Arc<LoopState>,
@@ -482,9 +494,17 @@ pub struct Parking<T> {
 impl<T> Parking<T> {
     /// The thread has nothing to run and is about to sleep. If work is queued the loop is
     /// granted a take, and its taker is woken, which the thread then runs instead of sleeping.
+    ///
+    /// A loop that still has a grant has a taker that does not run: the thread ran everything
+    /// that was ready before it got here, and the taker was woken with the grant. Such a loop
+    /// sleeps without being counted asleep, and what it was granted is another loop's to take.
     pub fn before_park(&self) {
         let me = &self.me;
         if me.gone.load(SeqCst) {
+            return;
+        }
+        if me.granted.load(SeqCst) {
+            self.hand_on();
             return;
         }
         me.slept
@@ -499,6 +519,33 @@ impl<T> Parking<T> {
     /// The thread woke.
     pub fn after_unpark(&self) {
         self.me.asleep.store(false, SeqCst);
+    }
+
+    /// The thread goes on to other work, which may keep it for long, and may do so before
+    /// its taker has run: a loop that still has its grant wakes a sleeping loop for the item.
+    /// Its own taker uses the grant when it runs, if the item is still queued then.
+    pub fn before_resume(&self) {
+        if self.me.granted.load(SeqCst) {
+            self.hand_on();
+        }
+    }
+
+    /// Wakes a sleeping loop, if there is one, for an item this loop was granted and has not
+    /// taken.
+    fn hand_on(&self) {
+        if self.shared.queued.load(SeqCst) == 0 {
+            return;
+        }
+        let state = self.shared.lock();
+        let sleeper = if state.items.is_empty() {
+            None
+        } else {
+            state.claim_sleeper()
+        };
+        drop(state);
+        if let Some(sleeper) = sleeper {
+            sleeper.grant();
+        }
     }
 }
 

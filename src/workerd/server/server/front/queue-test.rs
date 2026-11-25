@@ -375,6 +375,80 @@ fn a_queue_without_loops_drops_its_items() {
 }
 
 #[test]
+fn a_loop_that_wakes_for_something_else_hands_its_grant_on() {
+    let queue = Queue::new();
+    let idle = TestLoop::new(&queue);
+    let woken = TestLoop::new(&queue);
+    idle.sleep();
+    woken.sleep();
+    // The push wakes the loop that slept last, whose thread wakes at that moment for another
+    // reason and goes on to other work before its taker has run.
+    let _ticket = queue.push(1);
+    assert_eq!((woken.wakes(), idle.wakes()), (1, 0));
+    woken.parking.after_unpark();
+    woken.parking.before_resume();
+    // The item is not left to wait for that work to end: the loop that still sleeps is woken.
+    assert_eq!(idle.wakes(), 1);
+    assert_eq!(idle.take().0, 1);
+    // The first loop's taker runs when its thread next can, and finds nothing.
+    assert!(woken.takes_nothing());
+    // It takes part as before.
+    idle.sleep();
+    woken.sleep();
+    let _ticket = queue.push(2);
+    assert_eq!((woken.wakes(), idle.wakes()), (2, 1));
+    assert_eq!(woken.take().0, 2);
+}
+
+#[test]
+fn a_loop_keeps_a_grant_that_no_other_loop_can_use() {
+    let queue = Queue::new();
+    let busy = TestLoop::new(&queue);
+    let woken = TestLoop::new(&queue);
+    woken.sleep();
+    let _ticket = queue.push(1);
+    assert_eq!(woken.wakes(), 1);
+    woken.parking.after_unpark();
+    woken.parking.before_resume();
+    // Nobody else sleeps: the loop takes the item itself once its taker runs.
+    assert_eq!(busy.wakes(), 0);
+    assert_eq!(woken.take().0, 1);
+}
+
+#[test]
+fn a_loop_that_does_not_take_is_not_woken_for_more() {
+    let queue = Queue::new();
+    let taking = TestLoop::new(&queue);
+    let stuck = TestLoop::new(&queue);
+    taking.sleep();
+    stuck.sleep();
+    let _first = queue.push(1);
+    assert_eq!((stuck.wakes(), taking.wakes()), (1, 0));
+    // Its thread wakes, runs everything that was ready, and sleeps again without its taker
+    // having run: what it was woken for goes to a loop that takes.
+    stuck.parking.after_unpark();
+    stuck.parking.before_park();
+    assert_eq!((stuck.wakes(), taking.wakes()), (1, 1));
+    assert_eq!(taking.take().0, 1);
+    // While it does not take it is not woken again, by a push or by itself, though it is the
+    // loop that went to sleep last.
+    taking.sleep();
+    let _second = queue.push(2);
+    assert_eq!((stuck.wakes(), taking.wakes()), (1, 2));
+    stuck.parking.after_unpark();
+    stuck.parking.before_park();
+    assert_eq!(stuck.wakes(), 1);
+    // Once its taker runs again it takes what is queued, and is woken like any other loop.
+    assert_eq!(stuck.take().0, 2);
+    assert!(taking.takes_nothing());
+    taking.sleep();
+    stuck.sleep();
+    let _third = queue.push(3);
+    assert_eq!((stuck.wakes(), taking.wakes()), (2, 2));
+    assert_eq!(stuck.take().0, 3);
+}
+
+#[test]
 fn items_leave_from_anywhere_and_the_rest_keep_their_order() {
     let queue = Queue::new();
     let worker = TestLoop::new(&queue);

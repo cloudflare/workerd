@@ -390,3 +390,76 @@ fn a_task_woken_before_parking_runs_instead_of_the_sleep() {
     assert!(start.elapsed() < Duration::from_secs(5));
     set_park_hooks(None);
 }
+
+/// Wakes a task from `before_park` at the moment the wait ends, once, and counts the times the
+/// port handed the thread back, with the task's polls at the first of them.
+struct RacingHooks {
+    state: Arc<SharedState>,
+    wake: RefCell<Option<std::task::Waker>>,
+    raced: std::cell::Cell<bool>,
+    polls: Rc<std::cell::Cell<u32>>,
+    resumes: std::cell::Cell<u32>,
+    polls_at_resume: std::cell::Cell<Option<u32>>,
+}
+
+impl ParkHooks for RacingHooks {
+    fn before_park(&self) {
+        if !self.raced.replace(true)
+            && let Some(waker) = self.wake.borrow().as_ref()
+        {
+            waker.wake_by_ref();
+            // What KJ does when it has an event to run, or another thread wakes the loop.
+            self.state.notify.notify_one();
+        }
+    }
+
+    fn after_unpark(&self) {}
+
+    fn before_resume(&self) {
+        self.resumes.set(self.resumes.get() + 1);
+        if self.raced.get() && self.polls_at_resume.get().is_none() {
+            self.polls_at_resume.set(Some(self.polls.get()));
+        }
+    }
+}
+
+/// A wait that ends at the moment a task is woken may return before the task has run: tokio
+/// polls the wait's own future first. The hooks are told that the thread goes back to KJ, so
+/// what woke the task can tell whether it ran.
+#[test]
+fn the_hooks_are_told_when_the_thread_goes_back_to_kj() {
+    let port = TokioPort::new();
+    let polls = Rc::new(std::cell::Cell::new(0u32));
+    let hooks = Rc::new(RacingHooks {
+        state: Arc::clone(&port.state),
+        wake: RefCell::new(None),
+        raced: std::cell::Cell::new(true),
+        polls: Rc::clone(&polls),
+        resumes: std::cell::Cell::new(0),
+        polls_at_resume: std::cell::Cell::new(None),
+    });
+    set_park_hooks(Some(hooks.clone()));
+    spawn({
+        let hooks = Rc::clone(&hooks);
+        let polls = Rc::clone(&polls);
+        std::future::poll_fn(move |cx| {
+            polls.set(polls.get() + 1);
+            *hooks.wake.borrow_mut() = Some(cx.waker().clone());
+            std::task::Poll::<()>::Pending
+        })
+    });
+    // The task leaves its waker with the hooks.
+    port.poll();
+    assert_eq!(polls.get(), 1);
+    assert_eq!(hooks.resumes.get(), 1);
+
+    hooks.raced.set(false);
+    port.wait_timeout_ns(10_000_000_000);
+    assert_eq!(hooks.resumes.get(), 2);
+    // Whether or not the task ran before the wait returned, the hooks saw how far it was.
+    assert_eq!(hooks.polls_at_resume.get(), Some(polls.get()));
+    // It runs the next time the port does.
+    port.poll();
+    assert_eq!(polls.get(), 2);
+    set_park_hooks(None);
+}

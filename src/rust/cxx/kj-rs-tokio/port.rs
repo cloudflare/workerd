@@ -81,6 +81,13 @@ pub trait ParkHooks {
 
     /// The thread woke, before it runs anything.
     fn after_unpark(&self);
+
+    /// The port hands the thread back to KJ, which runs its own events until it calls the port
+    /// again. tokio ran what it would, which is not everything that was woken: a wait ends as
+    /// soon as KJ has something to do, ahead of a task woken at the same moment, from
+    /// [`before_park`](Self::before_park) or by another thread. Such a task runs when KJ next
+    /// calls the port.
+    fn before_resume(&self) {}
 }
 
 /// Installs `hooks` for the calling thread's loop, in place of the ones it had, which are
@@ -351,6 +358,7 @@ impl TokioPort {
             }
         });
         state.in_wait.store(false, Ordering::Relaxed);
+        with_park_hooks(|hooks| hooks.before_resume());
 
         self.take_wake_latch()
     }
@@ -371,6 +379,7 @@ impl TokioPort {
                 tokio::task::yield_now().await;
             }
         });
+        with_park_hooks(|hooks| hooks.before_resume());
         self.take_wake_latch()
     }
 

@@ -14,7 +14,9 @@
 //!
 //! A loop takes an item when it has nothing else to run (`front::queue`): its event loop tells
 //! the queue when the thread is about to sleep (`ParkHooks`), and the item it then takes gets
-//! its first poll at once, in the turn that took it. What the front's threads supply while the
+//! its first poll at once, in the turn that took it. The event loop also says when it goes on
+//! to other work, since a wait can end before the task that takes has run: the queue then has
+//! another loop take what this one was woken for. What the front's threads supply while the
 //! loop serves an item, a request's body or a connection's bytes, the loop reads paced to its
 //! own event port (`kj_rs_tokio::PortPace`), so that a client faster than the Worker that reads
 //! it does not keep the loop from everything else.
@@ -60,7 +62,7 @@ pub enum Service {
     Tcp(Rc<dyn Channel>, Rc<str>),
 }
 
-/// Tells the queue when this thread sleeps and wakes.
+/// Tells the queue when this thread sleeps, wakes, and goes on to other work.
 struct Hooks(Parking<Work>);
 
 impl ParkHooks for Hooks {
@@ -70,6 +72,10 @@ impl ParkHooks for Hooks {
 
     fn after_unpark(&self) {
         self.0.after_unpark();
+    }
+
+    fn before_resume(&self) {
+        self.0.before_resume();
     }
 }
 
