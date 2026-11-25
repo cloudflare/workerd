@@ -127,6 +127,19 @@ namespace workerd::util {
   /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
      (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
   V(RUST_MEMORY_CACHE)                                                                             \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default a new isolate is created in V8's loading mode (v8::Isolate::SetIsLoading()),       \
+     which defers full GCs for up to 7 seconds, and V8 is told that loading has ended the first    \
+     time the isolate is left with no request in flight and its thread is idle. That               \
+     notification is V8's cue to collect garbage if the heap is due for it. Enabling this gate     \
+     leaves isolates out of loading mode. See Worker::Isolate::completedRequest(). */              \
+  V(NO_LOADING_MODE)                                                                               \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default the notification that ends loading mode is repeated each later time the            \
+     isolate is left with no request in flight and its thread is idle, and is sent each such       \
+     time, the first included, to an isolate that was never in loading mode. Enabling this gate    \
+     stops all but the one that ends loading mode. */                                              \
+  V(NO_IDLE_GC)                                                                                    \
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
