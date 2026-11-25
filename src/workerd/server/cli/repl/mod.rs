@@ -6,15 +6,17 @@
 //! global loads configs and calls their services (an experimental tool for developing workerd).
 //!
 //! Two threads share the work. The main thread runs the event loop and the session
-//! (bridge.rs, over the C++ in //src/workerd/server/repl), which owns V8 and the loaded configs'
-//! servers. The console thread (console.rs) blocks reading input and sends each finished input to
-//! the session ([`session`]), so the event loop keeps running -- timers, `waitUntil()`, the
-//! loaded servers -- while the console waits for the next line. Piped in without `--interactive`,
-//! the input is one script instead, which the console reads to its end. What decides whether an
-//! input is finished, and how an input or a script that awaits compiles, is in input.rs. On a
-//! terminal, the console keeps the lines typed in the history file (history.rs). On Unix, Ctrl+C
-//! abandons an input that awaits (interrupt.rs).
+//! (environment.rs, over the C++ in //src/workerd/server/repl), which owns V8 and the loaded
+//! configs' servers. The `workerd` global is api.rs. The console thread (console.rs) blocks
+//! reading input and sends each finished input to the session ([`session`]), so the event loop
+//! keeps running -- timers, `waitUntil()`, the loaded servers -- while the console waits for the
+//! next line. Piped in without `--interactive`, the input is one script instead, which the
+//! console reads to its end. What decides whether an input is finished, and how an input or a
+//! script that awaits compiles, is in input.rs. On a terminal, the console keeps the lines typed
+//! in the history file (history.rs). On Unix, Ctrl+C abandons an input that awaits
+//! (interrupt.rs).
 
+mod api;
 mod bridge;
 mod console;
 #[cfg_attr(
@@ -22,6 +24,7 @@ mod console;
     expect(dead_code, reason = "the console edits lines only on Unix terminals")
 )]
 mod editor;
+mod environment;
 #[cfg_attr(
     not(unix),
     expect(
@@ -61,12 +64,14 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
     } else {
         console::Reading::Script
     };
-    let options = bridge::ffi::ReplOptions {
-        compat_date: args.compat_date.unwrap_or_default(),
-        compat_flags: args.compat_flags,
-        experimental: args.experimental,
+    let process = bridge::ffi::ReplProcessOptions {
         autogates: args.autogates,
         v8_flags: args.v8_flags,
+    };
+    let options = environment::Options {
+        compat_date: args.compat_date,
+        compat_flags: args.compat_flags,
+        experimental: args.experimental,
         colors: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
     };
     entry::without_config(verbose, move || {
@@ -83,13 +88,14 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
             }),
             None,
         );
-        let session = match bridge::ffi::repl_session_new(runtime.context(), &options, registry) {
-            Ok(session) => session,
-            Err(error) => {
-                eprintln!("{}", error.what());
-                return Ok(exit(1));
-            }
-        };
+        let session =
+            match environment::Session::new(runtime.context(), &process, options, registry) {
+                Ok(session) => session,
+                Err(error) => {
+                    eprintln!("{}", error.description());
+                    return Ok(exit(1));
+                }
+            };
         let (requests, received) = mpsc::unbounded_channel();
         let console = std::thread::Builder::new()
             .name("repl-console".to_owned())

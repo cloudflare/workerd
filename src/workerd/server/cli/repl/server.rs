@@ -45,10 +45,10 @@ use std::rc::Weak;
 use capnp::message::ReaderOptions;
 use cxx::KjError;
 use cxx::KjExceptionType;
+use frankenvalue::Frankenvalue;
 use futures::FutureExt;
 use futures::future::LocalBoxFuture;
 use futures::future::Shared;
-use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use kj_rs::KjRc;
 use tokio::task::AbortHandle;
@@ -86,11 +86,19 @@ pub trait Watch {
     fn changed(&self) -> LocalBoxFuture<'static, std::result::Result<(), String>>;
 }
 
+/// Whether a loaded config reloads whenever a file it was loaded from changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Watching {
+    Unwatched,
+    Watched,
+}
+
 /// Awaited as each close of a server begins, so that a test can hold a close open.
 pub type BeforeClose = Box<dyn Fn() -> LocalBoxFuture<'static, ()>>;
 
 /// What the servers of one REPL session share, its environments' included: the loader, and what no
-/// two of them may hold at once ([`Claims`]). C++ holds it as a handle, an `Rc` inside.
+/// two of them may hold at once ([`Claims`]). A handle, an `Rc` inside.
+#[derive(Clone)]
 pub struct ServerRegistry(Rc<Session>);
 
 struct Session {
@@ -100,19 +108,12 @@ struct Session {
 }
 
 impl ServerRegistry {
-    #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
-    pub fn new(loader: Box<dyn Loader>, before_close: Option<BeforeClose>) -> Box<Self> {
-        Box::new(Self(Rc::new(Session {
+    pub fn new(loader: Box<dyn Loader>, before_close: Option<BeforeClose>) -> Self {
+        Self(Rc::new(Session {
             loader,
             claims: Claims::default(),
             before_close,
-        })))
-    }
-
-    /// Another handle to the same registry.
-    #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
-    pub fn clone_handle(&self) -> Box<Self> {
-        Box::new(Self(Rc::clone(&self.0)))
+        }))
     }
 }
 
@@ -189,8 +190,9 @@ impl Session {
     }
 }
 
-/// A config `workerd.loadConfig()` loaded, and the server that serves it. C++ holds it as a
-/// handle, an `Rc` inside. Must be closed before the last handle goes.
+/// A config `workerd.loadConfig()` loaded, and the server that serves it. A handle, an `Rc` inside.
+/// Must be closed before the last handle goes.
+#[derive(Clone)]
 pub struct ReplConfigServer(Rc<Inner>);
 
 struct Inner {
@@ -201,7 +203,7 @@ struct Inner {
     /// The constant that holds a Cap'n Proto config, if not the only one.
     const_name: Option<String>,
     /// Reload whenever a file the config was loaded from changes.
-    watch: ffi::Watch,
+    watch: Watching,
     state: RefCell<State>,
 }
 
@@ -227,19 +229,19 @@ struct State {
 }
 
 /// What a reload or a close came to, as a shared future hands it to each of its waiters.
-type Outcome = std::result::Result<(), Failure>;
+pub(super) type Outcome = std::result::Result<(), Failure>;
+
+/// A close under way, or done, for any number of waiters.
+pub(super) type Closing = Shared<LocalBoxFuture<'static, Outcome>>;
 
 #[derive(Clone)]
-struct Failure(Rc<KjError>);
+pub(super) struct Failure(Rc<KjError>);
 
 impl Failure {
-    fn to_error(&self) -> KjError {
+    pub(super) fn to_error(&self) -> KjError {
         KjError::new(self.0.exception_type(), self.0.description().to_owned())
     }
 }
-
-/// A reload asked for: [`ffi::repl_reload_wait`] waits for it.
-pub struct PendingReload(Shared<LocalBoxFuture<'static, Outcome>>);
 
 /// A server built and not yet serving, and its claim.
 struct Prepared {
@@ -253,77 +255,53 @@ struct Started {
     warnings: Vec<String>,
 }
 
-/// Loads the config `path` names and starts serving it. Resolves once every socket listens. A JSG
-/// error listing the problems if it does not load, if it has errors, or if the server does not
-/// start; the server is then closed, and a failure to close is listed with them.
-pub async fn repl_server_load(
-    registry: Box<ServerRegistry>,
-    factory_source: KjRc<ffi::ReplFactorySource>,
-    path: String,
-    const_name: String,
-    watch: ffi::Watch,
-) -> Result<Box<ReplConfigServer>> {
-    let session = Rc::clone(&registry.0);
-    let const_name = (!const_name.is_empty()).then_some(const_name);
-    let watched = if watch == ffi::Watch::Watched {
-        Some(session.loader.watch().map_err(js_error)?)
-    } else {
-        None
-    };
-    let prepared = prepare(
-        &session,
-        &factory_source,
-        &path,
-        const_name.as_deref(),
-        watched.as_deref(),
-        None,
-    )?;
-    let started = serve_or_close(&path, prepared.server).await?;
-    let inner = Rc::new(Inner {
-        session,
-        factory_source,
-        path,
-        const_name,
-        watch,
-        state: RefCell::new(State {
-            server: Some(started.server),
-            warnings: started.warnings,
-            replacing: false,
-            reloading: futures::future::ready(()).boxed_local().shared(),
-            watching: None,
-            claim: Some(prepared.claim),
-            closing: None,
-            close_done: false,
-        }),
-    });
-    if let Some(watched) = watched {
-        inner.watch_for(watched);
-    }
-    Ok(Box::new(ReplConfigServer(inner)))
-}
-
-/// Waits for `reload`; its failure, a JSG error, if it fails.
-pub async fn repl_reload_wait(reload: Box<PendingReload>) -> Result<()> {
-    reload.0.await.map_err(|failure| failure.to_error())
-}
-
-/// Waits for the close [`ReplConfigServer::begin_close`] began; its failure, if it fails.
-pub async fn repl_server_wait_closed(server: Box<ReplConfigServer>) -> Result<()> {
-    let closing = server.0.state.borrow().closing.clone();
-    match closing {
-        Some(closing) => closing.await.map_err(|failure| failure.to_error()),
-        None => Err(KjError::new(
-            KjExceptionType::Failed,
-            "the REPL server's close was not begun".to_owned(),
-        )),
-    }
-}
-
 impl ReplConfigServer {
-    /// Another handle to the same server.
-    #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
-    pub fn clone_handle(&self) -> Box<Self> {
-        Box::new(Self(Rc::clone(&self.0)))
+    /// Loads the config `path` names and starts serving it. Resolves once every socket listens. A
+    /// JSG error listing the problems if it does not load, if it has errors, or if the server does
+    /// not start; the server is then closed, and a failure to close is listed with them.
+    pub async fn load(
+        registry: &ServerRegistry,
+        factory_source: KjRc<ffi::ReplFactorySource>,
+        path: String,
+        const_name: Option<String>,
+        watch: Watching,
+    ) -> Result<Self> {
+        let session = Rc::clone(&registry.0);
+        let watched = if watch == Watching::Watched {
+            Some(session.loader.watch().map_err(js_error)?)
+        } else {
+            None
+        };
+        let prepared = prepare(
+            &session,
+            &factory_source,
+            &path,
+            const_name.as_deref(),
+            watched.as_deref(),
+            None,
+        )?;
+        let started = serve_or_close(&path, prepared.server).await?;
+        let inner = Rc::new(Inner {
+            session,
+            factory_source,
+            path,
+            const_name,
+            watch,
+            state: RefCell::new(State {
+                server: Some(started.server),
+                warnings: started.warnings,
+                replacing: false,
+                reloading: futures::future::ready(()).boxed_local().shared(),
+                watching: None,
+                claim: Some(prepared.claim),
+                closing: None,
+                close_done: false,
+            }),
+        });
+        if let Some(watched) = watched {
+            inner.watch_for(watched);
+        }
+        Ok(Self(inner))
     }
 
     pub fn path(&self) -> &str {
@@ -338,6 +316,12 @@ impl ReplConfigServer {
     /// Whether the close has finished, or failed; [`Self::is_closed`] is true from when it begins.
     pub fn is_close_done(&self) -> bool {
         self.0.state.borrow().close_done
+    }
+
+    /// How many handles hold the server, this one included.
+    #[cfg(test)]
+    pub fn holders(&self) -> usize {
+        Rc::strong_count(&self.0)
     }
 
     /// Whether a change to a file the config was loaded from reloads it.
@@ -356,11 +340,11 @@ impl ReplConfigServer {
     pub fn service(
         &self,
         name: &str,
-        entrypoint: KjMaybe<&str>,
-        props: KjMaybe<KjOwn<ffi::Frankenvalue>>,
+        entrypoint: Option<&str>,
+        props: Option<KjOwn<Frankenvalue>>,
     ) -> Result<Box<SubrequestChannel>> {
         self.0
-            .with_open(|server| server.service(name, entrypoint, props))
+            .with_open(|server| server.service(name, entrypoint.into(), props.into()))
     }
 
     /// A channel that sends HTTP requests to the config's socket `name`, as a client connecting
@@ -376,30 +360,40 @@ impl ReplConfigServer {
         &self,
         service: &str,
         class_name: &str,
-        name: KjMaybe<&str>,
-        id: KjMaybe<&str>,
+        name: Option<&str>,
+        id: Option<&str>,
     ) -> Result<Box<SubrequestChannel>> {
         self.0
-            .with_open(|server| server.actor(service, class_name, name, id))
+            .with_open(|server| server.actor(service, class_name, name.into(), id.into()))
     }
 
     /// Asks for a reload after the one asked for last: the config loaded again and served in place
     /// of what was loaded before, whose channels then fail. It fails with a JSG error listing the
     /// problems, leaving the server as it was, if the config does not load, or with one if the
-    /// server is closed.
-    #[expect(clippy::unnecessary_box_returns, reason = "cxx requires a Box")]
-    pub fn queue_reload(&self) -> Box<PendingReload> {
-        Box::new(PendingReload(self.0.queue_reload(false)))
+    /// server is closed. Returns a future for the reload, which goes on whether or not it is
+    /// awaited.
+    pub fn reload(&self) -> impl Future<Output = Result<()>> + 'static + use<> {
+        let reload = self.0.queue_reload(false);
+        async move { reload.await.map_err(|failure| failure.to_error()) }
     }
 
-    /// Begins the close, unless it has begun: drains the server and takes it apart.
-    pub fn begin_close(&self) {
+    /// Begins the close, unless it has begun: drains the server and takes it apart. Returns a
+    /// future for the close, its failure if it fails, which holds the server until the close is
+    /// done; the close goes on whether or not it is awaited.
+    pub fn close(&self) -> impl Future<Output = Result<()>> + 'static + use<> {
         let inner = &self.0;
-        if inner.is_closed() {
-            return;
+        let closing = inner.state.borrow().closing.clone();
+        let closing = closing.unwrap_or_else(|| {
+            let closing = spawn_outcome(Rc::clone(inner).close_server());
+            inner.state.borrow_mut().closing = Some(closing.clone());
+            closing
+        });
+        let server = self.clone();
+        async move {
+            let outcome = closing.await.map_err(|failure| failure.to_error());
+            drop(server);
+            outcome
         }
-        let closing = spawn_outcome(Rc::clone(inner).close_server());
-        inner.state.borrow_mut().closing = Some(closing);
     }
 }
 
@@ -409,7 +403,7 @@ impl Inner {
     }
 
     fn is_watching(&self) -> bool {
-        self.watch == ffi::Watch::Watched && !self.is_closed()
+        self.watch == Watching::Watched && !self.is_closed()
     }
 
     /// `call` on the running server; a JSG error saying why if nothing runs.
@@ -640,7 +634,7 @@ impl Drop for Inner {
 
 /// Runs `future` as a task of the event loop, so that it goes on whether or not anyone awaits
 /// it; what it comes to, for any number of waiters.
-fn spawn_outcome(
+pub(super) fn spawn_outcome(
     future: impl Future<Output = Result<()>> + 'static,
 ) -> Shared<LocalBoxFuture<'static, Outcome>> {
     let task = kj_rs_tokio::spawn(future);
@@ -829,7 +823,7 @@ fn names_port(address: &str) -> bool {
 }
 
 /// A JSG `Error` with `message`, as a KJ exception tunnels it to JavaScript.
-fn js_error(message: impl Display) -> KjError {
+pub(super) fn js_error(message: impl Display) -> KjError {
     KjError::new(KjExceptionType::Failed, format!("jsg.Error: {message}"))
 }
 

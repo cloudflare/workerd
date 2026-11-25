@@ -13,16 +13,14 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::LocalBoxFuture;
-use kj_rs::KjOwn;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use workerd_server::run::RunOptions;
 
-use super::bridge;
-use super::bridge::ffi::ReplCandidate;
-use super::bridge::ffi::ReplSession;
 use super::editor::Completion;
+use super::environment::Session;
 use super::input;
+use super::input::Candidate;
 use super::server;
 use crate::bridge::ffi;
 use crate::config::Config;
@@ -38,7 +36,7 @@ pub enum Request {
     /// What became of the input `candidates` compile (input.rs); an error if the session failed to
     /// evaluate it. A send on `abandon` while the input awaits abandons it.
     Evaluate {
-        candidates: Vec<ReplCandidate>,
+        candidates: Vec<Candidate>,
         abandon: oneshot::Receiver<()>,
         reply: oneshot::Sender<Result<Evaluated, String>>,
     },
@@ -63,10 +61,10 @@ pub enum Evaluated {
 }
 
 /// Serves `requests` until the console drops its sender, then drains the session; whether anything
-/// failed in the background (see [`bridge::drain`]). An input that takes longer than `timeout`
+/// failed in the background (see [`Session::drain`]). An input that takes longer than `timeout`
 /// times out.
 pub async fn serve(
-    mut session: KjOwn<ReplSession>,
+    session: Session,
     mut requests: mpsc::UnboundedReceiver<Request>,
     timeout: Option<Duration>,
 ) -> Result<bool, cxx::KjError> {
@@ -78,7 +76,7 @@ pub async fn serve(
                 abandon,
                 reply,
             } => {
-                let evaluated = evaluate(session.as_mut(), candidates, abandon, timeout).await;
+                let evaluated = evaluate(&session, candidates, abandon, timeout).await;
                 let _ = reply.send(evaluated);
             }
             Request::Complete {
@@ -86,24 +84,24 @@ pub async fn serve(
                 cursor,
                 reply,
             } => {
-                let completion = complete(session.as_mut(), &line, cursor).await;
+                let completion = complete(&session, &line, cursor).await;
                 let _ = reply.send(completion);
             }
         }
     }
-    bridge::drain(session).await
+    session.drain().await
 }
 
 /// Evaluates the input `candidates` compile, unless abandoned or timed out first. Either drops the
 /// evaluation, which stops awaiting the input's promise. The timer runs only while the event loop
 /// does, so it can't time out JavaScript that runs without awaiting.
 async fn evaluate(
-    session: Pin<&mut ReplSession>,
-    candidates: Vec<ReplCandidate>,
+    session: &Session,
+    candidates: Vec<Candidate>,
     abandon: oneshot::Receiver<()>,
     timeout: Option<Duration>,
 ) -> Result<Evaluated, String> {
-    let mut evaluation = pin!(bridge::evaluate(session, candidates));
+    let mut evaluation = pin!(session.evaluate(candidates));
     // None once the console has dropped its sender without sending: it never abandons then.
     let mut abandon = Some(abandon);
     let mut deadline = pin!(timeout.map(tokio::time::sleep));
@@ -136,7 +134,7 @@ async fn evaluate(
 }
 
 /// The global or property names that complete the name before the cursor.
-async fn complete(session: Pin<&mut ReplSession>, line: &str, cursor: usize) -> Completion {
+async fn complete(session: &Session, line: &str, cursor: usize) -> Completion {
     let Some(target) = input::completion_target(line, cursor) else {
         return Completion {
             start: cursor,
@@ -144,7 +142,8 @@ async fn complete(session: Pin<&mut ReplSession>, line: &str, cursor: usize) -> 
         };
     };
     // A base that fails to evaluate, or that throws, has nothing to complete.
-    let names = bridge::property_names(session, target.base.to_owned())
+    let names = session
+        .property_names(target.base.to_owned())
         .await
         .unwrap_or_default();
     let mut candidates: Vec<String> = names

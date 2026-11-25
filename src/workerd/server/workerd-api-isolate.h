@@ -61,7 +61,6 @@
 // NOLINTNEXTLINE(misc-include-cleaner)
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
-#include <workerd/server/repl/repl-api.h>
 #include <workerd/server/workerd-debug-port-client.h>
 
 namespace workerd::server {
@@ -78,9 +77,7 @@ namespace workerd::server {
 //
 // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
 // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
-// time being), so it gets included in the TypeScript types. The
-// exception is EW_REPL_ISOLATE_TYPES, the API of `workerd repl`, which
-// only the REPL's isolate exposes and which has no TypeScript types.
+// time being), so it gets included in the TypeScript types.
 // clang-format off
 #define JSG_WORKERD_ISOLATE_TYPES                       \
   EW_GLOBAL_SCOPE_ISOLATE_TYPES,                        \
@@ -132,7 +129,6 @@ namespace workerd::server {
   EW_TRACING_ISOLATE_TYPES,                             \
   EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,           \
   EW_WRAPPED_BINDING_ISOLATE_TYPES,                     \
-  EW_REPL_ISOLATE_TYPES,                                \
   workerd::api::EnvModule,                              \
   jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>, \
   jsg::TypeWrapperExtension<PromiseWrapper>,            \

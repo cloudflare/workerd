@@ -25,7 +25,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use super::bridge::ffi::ReplCandidate;
 #[cfg(unix)]
 use super::editor::Completion;
 #[cfg(unix)]
@@ -37,6 +36,7 @@ use super::editor::Line;
 #[cfg(unix)]
 use super::history::HistoryFile;
 use super::input;
+use super::input::Candidate;
 use super::input::Scanner;
 use super::input::Unclosed;
 #[cfg(unix)]
@@ -354,7 +354,7 @@ impl Console {
 
     /// Runs the input `candidates` compile, and prints only its exception, or its failure, to
     /// stderr. Nothing abandons it, so Ctrl+C ends the REPL meanwhile, as it ends `node`.
-    fn run_quietly(&mut self, candidates: Vec<ReplCandidate>) {
+    fn run_quietly(&mut self, candidates: Vec<Candidate>) {
         // Dropped at once, the sender never abandons the input.
         let (_, abandoned) = oneshot::channel();
         match self.send(candidates, abandoned) {
@@ -373,7 +373,7 @@ impl Console {
     /// abandons; `None` if the session has ended.
     fn send(
         &self,
-        candidates: Vec<ReplCandidate>,
+        candidates: Vec<Candidate>,
         abandon: oneshot::Receiver<()>,
     ) -> Option<Result<Evaluated, String>> {
         let (reply, result) = oneshot::channel();

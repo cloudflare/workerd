@@ -4,8 +4,6 @@
 
 #include "repl.h"
 
-#include "repl-environment.h"
-
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/server/cli/repl/bridge.rs.h>
@@ -29,18 +27,6 @@ class EntropySourceImpl final: public kj::EntropySource {
     getEntropy(buffer);
   }
 };
-
-ReplEnvironmentOptions toEnvironmentOptions(const ReplOptions& options) {
-  return {
-    .compatibilityDate = options.compat_date.empty()
-        ? kj::Maybe<kj::String>(kj::none)
-        : kj::str(kj::from<kj_rs::Rust>(options.compat_date)),
-    .compatibilityFlags =
-        KJ_MAP(flag, options.compat_flags) { return kj::str(kj::from<kj_rs::Rust>(flag)); },
-    .experimental = options.experimental,
-    .colors = options.colors,
-  };
-}
 
 kj::Array<kj::String> toStrings(const ::rust::Vec<::rust::String>& strings) {
   return KJ_MAP(string, strings) { return kj::str(kj::from<kj_rs::Rust>(string)); };
@@ -70,24 +56,6 @@ void initAutogates(kj::ArrayPtr<const kj::String> names) {
   util::Autogate::initAutogate(gates.getReader());
 }
 
-kj::Array<ReplEnvironment::Candidate> toCandidates(::rust::Vec<ReplCandidate> candidates) {
-  return KJ_MAP(candidate, candidates) {
-    return ReplEnvironment::Candidate{
-      .source = kj::str(kj::from<kj_rs::Rust>(candidate.source)),
-      .awaited = candidate.awaited,
-      .parenthesized = candidate.parenthesized,
-    };
-  };
-}
-
-// Compiles input as the console does (cli/repl/input.rs).
-class CandidateSource final: public ReplEnvironment::CandidateSource {
- public:
-  kj::Array<ReplEnvironment::Candidate> candidates(kj::StringPtr input) override {
-    return toCandidates(repl_candidates(input.as<kj_rs::RustUncheckedUtf8>()));
-  }
-};
-
 bool sameStrings(kj::ArrayPtr<const kj::String> strings, const ::rust::Vec<::rust::String>& rust) {
   if (strings.size() != rust.size()) return false;
   for (auto i: kj::indices(strings)) {
@@ -109,7 +77,7 @@ class ProcessV8 {
         v8System(
             v8Platform, KJ_MAP(flag, v8Flags) -> kj::StringPtr { return flag; }, platform.get()) {}
 
-  jsg::V8System& get(const ReplOptions& options) {
+  jsg::V8System& get(const ReplProcessOptions& options) {
     KJ_REQUIRE(sameStrings(autogates, options.autogates) && sameStrings(v8Flags, options.v8_flags),
         "the autogates and V8 flags are the process's, which its first REPL session set");
     return v8System;
@@ -129,7 +97,7 @@ class ProcessV8 {
   }
 };
 
-jsg::V8System& processV8(const ReplOptions& options) {
+jsg::V8System& processV8(const ReplProcessOptions& options) {
   // Never destroyed. A failure to set up, such as an unknown autogate, leaves it to the next
   // session to try again.
   static ProcessV8* v8 = new ProcessV8(toStrings(options.autogates), toStrings(options.v8_flags));
@@ -138,32 +106,24 @@ jsg::V8System& processV8(const ReplOptions& options) {
 
 }  // namespace
 
-// What a session sets up, in construction order: the environment is torn down before the I/O it
-// was given.
+// What a session sets up, in construction order.
 class ReplSession::Impl {
  public:
-  Impl(kj_rs_tokio::TokioAsyncIoContext& loop,
-      const ReplOptions& options,
-      ::rust::Box<ServerRegistry> registryParam)
+  Impl(kj_rs_tokio::TokioAsyncIoContext& loop, const ReplProcessOptions& options)
       : timer(loop.getTimer()),
         monotonicClock(kj::systemPreciseMonotonicClock()),
         provider(loop.getTimer()),
-        registry(kj::mv(registryParam)),
-        environment(
-            ReplServerResources{
-              .v8System = processV8(options),
-              .timer = timer,
-              .monotonicClock = monotonicClock,
-              .network = provider.getNetwork(),
-              .entropySource = entropySource,
-              .fs = *fs,
-            },
-            *registry,
-            candidateSource,
-            toEnvironmentOptions(options)) {}
+        resources(kj::rc<ReplResources>(ReplServerResources{
+          .v8System = processV8(options),
+          .timer = timer,
+          .monotonicClock = monotonicClock,
+          .network = provider.getNetwork(),
+          .entropySource = entropySource,
+          .fs = *fs,
+        })) {}
 
-  ReplEnvironment& getEnvironment() {
-    return environment;
+  kj::Rc<ReplResources> getResources() {
+    return resources.addRef();
   }
 
  private:
@@ -172,45 +132,19 @@ class ReplSession::Impl {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj_rs_io::TokioAsyncIoProvider provider;
-  ::rust::Box<ServerRegistry> registry;
-  CandidateSource candidateSource;
-  ReplEnvironment environment;
+  kj::Rc<ReplResources> resources;
 };
 
 ReplSession::ReplSession(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
 ReplSession::~ReplSession() noexcept(false) {}
 
-kj::Own<ReplSession> repl_session_new(kj_rs_tokio::TokioAsyncIoContext& loop,
-    const ReplOptions& options,
-    ::rust::Box<ServerRegistry> registry) {
-  return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options, kj::mv(registry)));
+kj::Own<ReplSession> repl_session_new(
+    kj_rs_tokio::TokioAsyncIoContext& loop, const ReplProcessOptions& options) {
+  return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options));
 }
 
-kj::Promise<ReplEvaluation> repl_evaluate(
-    ReplSession& session, ::rust::Vec<ReplCandidate> candidates) {
-  auto evaluation =
-      co_await session.getImpl().getEnvironment().evaluate(toCandidates(kj::mv(candidates)));
-  co_return ReplEvaluation{
-    // Rendered from JavaScript strings, which convert to valid UTF-8.
-    .text = evaluation.text.as<kj_rs::RustUncheckedUtf8>(),
-    .threw = evaluation.threw,
-  };
-}
-
-kj::Promise<::rust::Vec<::rust::String>> repl_property_names(
-    ReplSession& session, ::rust::String base) {
-  auto names = co_await session.getImpl().getEnvironment().propertyNames(
-      kj::str(kj::from<kj_rs::Rust>(base)));
-  ::rust::Vec<::rust::String> result;
-  result.reserve(names.size());
-  for (auto& name: names) {
-    result.push_back(name.as<kj_rs::RustUncheckedUtf8>());
-  }
-  co_return result;
-}
-
-kj::Promise<bool> repl_drain(ReplSession& session) {
-  return session.getImpl().getEnvironment().drain();
+kj::Rc<ReplResources> repl_session_resources(ReplSession& session) {
+  return session.getImpl().getResources();
 }
 
 }  // namespace workerd::server::repl

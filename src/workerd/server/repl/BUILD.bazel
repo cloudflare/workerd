@@ -1,31 +1,19 @@
-load("//:build/kj_test.bzl", "kj_test")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 package(default_visibility = ["//src/workerd/server:__subpackages__"])
 
-# The REPL's JavaScript API (the `workerd` global and the loaded-config handle), which the workerd
-# API isolate registers (//src/workerd/server:workerd-api).
+# The workers REPL input is evaluated in (//src/workerd/server:cli/repl/environment.rs), the
+# rendering of results, and the factories of the configs the REPL loads, which the command line's
+# REPL serves (//src/workerd/server:cli/repl/server.rs).
 wd_cc_library(
-    name = "repl-api",
-    srcs = ["repl-api.c++"],
-    hdrs = ["repl-api.h"],
+    name = "repl-worker",
+    srcs = ["repl-worker.c++"],
+    hdrs = ["repl-worker.h"],
     deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-    ],
-)
-
-# The environment REPL input is evaluated in, and the factories of the configs it loads, which
-# the command line's REPL serves (//src/workerd/server:cli/repl/server.rs).
-wd_cc_library(
-    name = "repl-environment",
-    srcs = ["repl-environment.c++"],
-    hdrs = ["repl-environment.h"],
-    deps = [
-        ":repl-api",
         ":repl-hdrs",
         "//src/rust/cxx/kj-rs",
+        "//src/rust/jsg-cpp:ffi",
         "//src/workerd/api:memory-cache",
         "//src/workerd/io",
         "//src/workerd/io:bundle-fs",
@@ -48,6 +36,9 @@ wd_cc_library(
     hdrs = ["repl.h"],
     deps = [
         "//src/rust/cxx/kj-rs",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/io",
+        "//src/workerd/io/io-context:ffi",
         "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
@@ -58,8 +49,8 @@ wd_cc_library(
     srcs = ["repl.c++"],
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
-        ":repl-environment",
         ":repl-hdrs",
+        ":repl-worker",
         "//src/rust/cxx/kj-rs",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
@@ -68,13 +59,5 @@ wd_cc_library(
         "//src/workerd/server:v8-platform-impl",
         "//src/workerd/util:autogate",
         "//src/workerd/util:entropy",
-    ],
-)
-
-kj_test(
-    src = "repl-api-test.c++",
-    deps = [
-        ":repl-api",
-        "//src/workerd/tests:test-fixture",
     ],
 )

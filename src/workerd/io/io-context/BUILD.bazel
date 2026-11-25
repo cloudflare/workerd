@@ -26,12 +26,16 @@ wd_rust_crate(
     deps = ["//src/rust/jsg"],
 )
 
-# The bridge's C++. channel-interop's bridge declares EvictWebSocketMode by its alias in ffi.h.
+# The bridge's C++. Other bridges declare its types by their aliases in ffi.h: channel-interop's
+# EvictWebSocketMode, and the IncomingRequest of hosts that hold one, such as `workerd repl`.
 wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
-    visibility = ["//src/workerd/api/channel-interop:__pkg__"],
+    visibility = [
+        "//src/workerd/api/channel-interop:__pkg__",
+        "//src/workerd/server:__subpackages__",
+    ],
     deps = [
         ":current-with-id",
         ":ffi.rs@cxx",

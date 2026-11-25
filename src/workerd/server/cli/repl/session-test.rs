@@ -8,7 +8,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
@@ -17,16 +16,17 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::LocalBoxFuture;
-use kj_rs::KjOwn;
 use tokio::sync::oneshot;
 
-use super::bridge;
-use super::bridge::ffi::ReplCandidate;
-use super::bridge::ffi::ReplOptions;
-use super::bridge::ffi::ReplSession;
+use super::input::Candidate;
 use super::load_config;
 use super::server;
 use super::server::ServerRegistry;
+use crate::repl::api;
+use crate::repl::bridge;
+use crate::repl::environment;
+use crate::repl::environment::Evaluation;
+use crate::repl::environment::Session;
 
 /// A config with a worker that answers fetches with what it was asked, takes scheduled and queue
 /// events, has an entrypoint with props, and an http socket in front of it.
@@ -289,7 +289,7 @@ struct HeldClose {
 /// A REPL session, whose configs are the texts the test sets by name. Drains the session when
 /// dropped, unless the test did.
 struct Fixture {
-    session: Option<KjOwn<ReplSession>>,
+    session: Option<Session>,
     shared: Rc<Shared>,
     runtime: kj_rs_tokio::Runtime,
 }
@@ -338,16 +338,20 @@ impl Fixture {
             });
         let registry =
             ServerRegistry::new(Box::new(TestLoader(Rc::clone(&shared))), Some(before_close));
-        let options = ReplOptions {
-            compat_date: options.compat_date.to_owned(),
-            compat_flags: options.compat_flags.iter().map(|&f| f.to_owned()).collect(),
-            experimental: options.experimental,
+        let process = bridge::ffi::ReplProcessOptions {
             autogates: Vec::new(),
             v8_flags: Vec::new(),
+        };
+        let options = environment::Options {
+            compat_date: Some(options.compat_date)
+                .filter(|date| !date.is_empty())
+                .map(str::to_owned),
+            compat_flags: options.compat_flags.iter().map(|&f| f.to_owned()).collect(),
+            experimental: options.experimental,
             colors: false,
         };
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let session = bridge::ffi::repl_session_new(runtime.context(), &options, registry)?;
+        let session = Session::new(runtime.context(), &process, options, registry)?;
         Ok(Self {
             session: Some(session),
             shared,
@@ -369,15 +373,12 @@ impl Fixture {
     /// Runs `call` on the session to completion. The event loop's futures are `'static`, so the
     /// session goes into the future and comes back out, as the console's loop holds it
     /// (session.rs).
-    fn run<T: 'static>(
-        &mut self,
-        call: impl AsyncFnOnce(Pin<&mut ReplSession>) -> T + 'static,
-    ) -> T {
-        let mut session = self.session.take().expect("the session was drained");
+    fn run<T: 'static>(&mut self, call: impl AsyncFnOnce(&Session) -> T + 'static) -> T {
+        let session = self.session.take().expect("the session was drained");
         let (session, output) = self
             .runtime
             .block_on(async move {
-                let output = call(session.as_mut()).await;
+                let output = call(&session).await;
                 (session, output)
             })
             .expect("running the event loop");
@@ -385,8 +386,8 @@ impl Fixture {
         output
     }
 
-    fn evaluate(&mut self, candidates: Vec<ReplCandidate>) -> bridge::ffi::ReplEvaluation {
-        self.run(async move |session| bridge::evaluate(session, candidates).await)
+    fn evaluate(&mut self, candidates: Vec<Candidate>) -> Evaluation {
+        self.run(async move |session| session.evaluate(candidates).await)
             .expect("evaluating")
     }
 
@@ -414,7 +415,7 @@ impl Fixture {
 
     fn property_names(&mut self, base: &str) -> Vec<String> {
         let base = base.to_owned();
-        self.run(async move |session| bridge::property_names(session, base).await)
+        self.run(async move |session| session.property_names(base).await)
             .expect("listing property names")
     }
 
@@ -423,7 +424,7 @@ impl Fixture {
     fn drain(&mut self) -> bool {
         let session = self.session.take().expect("the session was drained");
         self.runtime
-            .block_on(bridge::drain(session))
+            .block_on(session.drain())
             .expect("running the event loop")
             .expect("draining")
     }
@@ -469,7 +470,7 @@ impl Fixture {
         let failed = self
             .runtime
             .block_on(async move {
-                let mut draining = pin!(bridge::drain(session));
+                let mut draining = pin!(session.drain());
                 let early =
                     tokio::time::timeout(Duration::from_millis(100), draining.as_mut()).await;
                 assert!(early.is_err(), "the drain did not wait for the close");
@@ -485,7 +486,7 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
-            let drained = self.runtime.block_on(bridge::drain(session));
+            let drained = self.runtime.block_on(session.drain());
             if !std::thread::panicking() {
                 drained.expect("running the event loop").expect("draining");
             }
@@ -493,15 +494,15 @@ impl Drop for Fixture {
     }
 }
 
-fn candidate(source: &str, awaited: bool) -> ReplCandidate {
-    ReplCandidate {
+fn candidate(source: &str, awaited: bool) -> Candidate {
+    Candidate {
         source: source.to_owned(),
         awaited,
         parenthesized: false,
     }
 }
 
-fn awaiting(expression: &str) -> ReplCandidate {
+fn awaiting(expression: &str) -> Candidate {
     candidate(&format!("(async () => ({expression}\n))()"), true)
 }
 
@@ -619,7 +620,7 @@ fn reports_the_syntax_error_of_an_input_not_of_its_parentheses() {
     let mut evaluate = |input: &str| {
         fixture
             .evaluate(vec![
-                ReplCandidate {
+                Candidate {
                     source: format!("({input}\n)"),
                     awaited: false,
                     parenthesized: true,
@@ -948,6 +949,18 @@ fn reaches_a_configs_durable_objects_and_evicts_them() {
     assert_starts_with(
         &fixture.eval_await("await workerd.evict(alice)"),
         "Uncaught Error:",
+    );
+    // An option that isn't valid rejects, as `cloudflare:unsafe`'s evict() does.
+    assert_eq!(
+        fixture.eval(
+            "evicting = workerd.evict(alice, { webSockets: 'bogus' }), evicting.catch(() => {}), \
+             evicting instanceof Promise"
+        ),
+        "true"
+    );
+    assert_eq!(
+        fixture.eval_await("await evicting"),
+        "Uncaught TypeError: options.webSockets must be \"hibernate\" or \"close\"."
     );
     assert_starts_with(
         &fixture.eval_await("await workerd.evict(s.service('main'))"),
@@ -1380,7 +1393,7 @@ fn closes_a_server_at_once_whatever_the_configs_shutdown_delay() {
     );
     let closed = fixture
         .run(async move |session| {
-            let closing = bridge::evaluate(session, vec![awaiting("await s.close()")]);
+            let closing = session.evaluate(vec![awaiting("await s.close()")]);
             tokio::time::timeout(Duration::from_secs(5), closing).await
         })
         .expect("the close waited out the config's delay")
@@ -1415,4 +1428,108 @@ fn drains_an_environment_whose_close_a_later_start_found_still_under_way() {
     // A start lets go of the environments that have closed.
     fixture.eval_await("f = await workerd.environment()");
     fixture.expect_drain_waits_for(release);
+}
+
+/// A handle holds what it stands for through the `IoContext` (`IoOwnedLocal`); holding it directly
+/// does not compile, since a resource's fields are `Send`. C++ JSG destroys what JavaScript held
+/// under `DISALLOW_KJ_IO_DESTRUCTORS_SCOPE`, which aborts if a KJ I/O object is destroyed there:
+/// dropping a handle must not abort, and lets go of what it holds at once, as the `IoContext`
+/// destroys it outside that scope.
+#[test]
+fn dropping_a_handle_destroys_no_kj_io_objects() {
+    let mut fixture = Fixture::new();
+    let (server, environment) = fixture.run(async |session| {
+        let state = session.state();
+        let server = state
+            .load_config("worker.capnp".to_owned(), None, server::Watching::Unwatched)
+            .await
+            .expect("loading the config");
+        let environment = state
+            .start_environment(None, Vec::new())
+            .await
+            .expect("starting the environment");
+        (server, environment)
+    });
+    let probe = (server.clone(), Rc::clone(&environment));
+    let (held, dropped) = fixture.run(async move |session| {
+        session
+            .run(move |lock, _context| {
+                let (server, environment) = probe;
+                // Never wrapped, so that each is its handle's only reference, and dropping it
+                // destroys it at once, as collecting its wrapper would.
+                let handles = (
+                    api::ReplServer::new(lock, server.clone())?,
+                    api::ReplEnvironmentHandle::new(lock, Rc::clone(&environment))?,
+                );
+                let held = (server.holders(), Rc::strong_count(&environment));
+                drop(handles);
+                let dropped = (server.holders(), Rc::strong_count(&environment));
+                Ok(std::future::ready(Ok((held, dropped))))
+            })
+            .expect("running in the environment")
+            .await
+            .expect("dropping the handles")
+    });
+    // The environment's lists, the test's two, and the handles'.
+    assert_eq!(held, (4, 4));
+    assert_eq!(dropped, (3, 3));
+    // Held to here, so that the counts include them.
+    drop((server, environment));
+}
+
+#[test]
+fn drains_the_environments_started_and_their_servers() {
+    let mut fixture = Fixture::new();
+    fixture.eval_await("e = await workerd.environment()");
+    assert_eq!(
+        fixture.eval_await(
+            "await e.eval(\"(s = await workerd.loadConfig('worker.capnp'), 'loaded')\")"
+        ),
+        "\"'loaded'\""
+    );
+    // Neither is closed: the drain closes the environment, whose own drain closes the server.
+    let HeldClose {
+        mut waiting,
+        release,
+    } = fixture.hold_next_close();
+    fixture.expect_drain_waits_for(release);
+    waiting
+        .try_recv()
+        .expect("the drain did not close the environment's server");
+}
+
+#[test]
+fn refuses_loads_and_environment_starts_once_the_drain_has_begun() {
+    let mut fixture = Fixture::new();
+    fixture.eval_await("s = await workerd.loadConfig('worker.capnp')");
+    let HeldClose { waiting, release } = fixture.hold_next_close();
+    let session = fixture.session.take().expect("the session was drained");
+    let state = session.state();
+    let (load, start, failed) = fixture
+        .runtime
+        .block_on(async move {
+            let mut draining = pin!(session.drain());
+            // The drain has begun once it closes the server, whose close is held.
+            match futures::future::select(draining.as_mut(), waiting).await {
+                futures::future::Either::Left(_) => panic!("the drain did not close the server"),
+                futures::future::Either::Right((began, _)) => began.expect("waiting for the close"),
+            }
+            let load = state
+                .load_config("worker.capnp".to_owned(), None, server::Watching::Unwatched)
+                .await
+                .err()
+                .map(|error| error.description().to_owned());
+            let start = state
+                .start_environment(None, Vec::new())
+                .await
+                .err()
+                .map(|error| error.description().to_owned());
+            release.send(()).expect("releasing the close");
+            (load, start, draining.await)
+        })
+        .expect("running the event loop");
+    let closing = Some("jsg.Error: The environment is closing.".to_owned());
+    assert_eq!(load, closing);
+    assert_eq!(start, closing);
+    assert!(!failed.expect("draining"));
 }
