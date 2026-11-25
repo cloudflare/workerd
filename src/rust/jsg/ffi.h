@@ -63,6 +63,8 @@ using ModuleCallback = ::rust::Fn<MaybeLocal(Isolate*)>;
 struct RttiContext;
 // Describes a module's exports in an RTTI context, given the module's specifier.
 using ModuleDescribeCallback = ::rust::Fn<void(RttiContext&, ::rust::Str)>;
+// Describes a type in an RTTI context.
+using TypeDescribeCallback = ::rust::Fn<void(RttiContext&)>;
 
 // Mirror CXX shared structs defined in v8.rs. Must be kept in sync.
 // The CXX-generated v8.rs.h provides the canonical definitions; these are
@@ -703,6 +705,11 @@ struct ModuleRegistry {
       ModuleCallback moduleCallback,
       ModuleDescribeCallback describe,
       ModuleType moduleType) = 0;
+
+  // Adds a type that no module exports for the RTTI export to describe, such as the type of an
+  // argument the runtime passes to a handler. Only the RTTI encoder describes types; the
+  // registries that instantiate modules ignore them.
+  virtual void addType(TypeDescribeCallback describe) {}
 };
 
 inline void register_add_builtin_module(ModuleRegistry& registry,
@@ -711,6 +718,10 @@ inline void register_add_builtin_module(ModuleRegistry& registry,
     ModuleDescribeCallback describe,
     ModuleType moduleType) {
   registry.addBuiltinModule(specifier, kj::mv(callback), kj::mv(describe), moduleType);
+}
+
+inline void register_add_type(ModuleRegistry& registry, TypeDescribeCallback describe) {
+  registry.addType(kj::mv(describe));
 }
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor);

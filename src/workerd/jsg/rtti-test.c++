@@ -217,6 +217,19 @@ KJ_TEST("resource reference") {
       "(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))");
 }
 
+// Converts to/from a Rust resource, as a C++ handler's argument can.
+struct RustBacked {
+  struct JsgRttiRustStructure {
+    static constexpr kj::StringPtr NAME = "RustResource"_kj;
+    static constexpr kj::StringPtr IDENTITY = "some_crate::RustResource"_kj;
+  };
+};
+
+KJ_TEST("rust structure reference") {
+  KJ_EXPECT(tType<RustBacked>() ==
+      "(structure = (name = \"RustResource\", fullyQualifiedName = \"some_crate::RustResource\"))");
+}
+
 KJ_TEST("resource structure") {
   KJ_EXPECT(tStructure<Base>() ==
       "(name = \"Base\", members = [], "

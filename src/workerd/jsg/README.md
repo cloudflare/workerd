@@ -69,7 +69,7 @@ that fits, or any other value converted to a number that is finite and in range.
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
 | `jsg::NonCoercible<T>`        | Exact type                  | No automatic coercion; `T` = `kj::String`, `bool`, `double` |
 | `jsg::LenientOptional<T>`     | Optional                    | Silently ignores type errors → `undefined`                  |
-| `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed. Declare `using JsgRttiDelegate = ...` to describe the type to RTTI (TypeScript generation) as an existing type |
+| `SelfConvertible` types       | Custom                      | Types defining static `jsgWrap()`/`jsgTryUnwrap()`; no registration needed. Declare `using JsgRttiDelegate = ...` to describe the type to RTTI (TypeScript generation) as an existing type, or `struct JsgRttiRustStructure` to describe it as a Rust resource (see `rtti.h`) |
 
 ## JsValue Type Mapping
 

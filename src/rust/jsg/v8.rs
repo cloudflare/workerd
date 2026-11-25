@@ -1368,6 +1368,14 @@ pub mod ffi {
             describe: fn(&mut RttiContext, &str),
             module_type: ModuleType,
         );
+
+        /// Registers a type that the RTTI export describes although no module exports it,
+        /// such as the type of an argument the runtime passes to a handler. A metadata registry
+        /// (the RTTI encoder) calls `describe`; other registries ignore it.
+        pub fn register_add_type(
+            registry: Pin<&mut ModuleRegistry>,
+            describe: fn(&mut RttiContext),
+        );
     }
 }
 

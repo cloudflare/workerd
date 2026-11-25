@@ -49,7 +49,10 @@ wd_rust_crate(
         ":ffi-impl",
     ],
     proc_macro_deps = ["//src/rust/jsg-macros"],
-    test_deps = ["@crates_vendor//serde_json"],
+    test_deps = [
+        "//src/workerd/jsg:rtti_capnp_rust",
+        "@crates_vendor//serde_json",
+    ],
     # The crate has more than a thousand tests, each of which creates an isolate, and they run
     # serially (RUST_TEST_THREADS=1). Split between shards, they finish in seconds even in debug
     # and sanitizer builds.
