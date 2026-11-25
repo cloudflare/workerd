@@ -115,6 +115,9 @@ switch (MODE) {
     break;
   case 'temporal-on-control':
     break;
+  case 'quota-exceeded-error-polyfill':
+    globalThis.QuotaExceededError = { polyfill: true };
+    break;
   case 'date-frozen':
     Object.freeze(Date.prototype);
     break;
@@ -170,6 +173,10 @@ function report() {
         ? 'polyfill'
         : typeof globalThis.Temporal,
     toTemporalInstant: typeof Date.prototype.toTemporalInstant,
+    quotaExceededError:
+      globalThis.QuotaExceededError?.polyfill === true
+        ? 'polyfill'
+        : typeof globalThis.QuotaExceededError,
     processCustom: globalThis.process?.custom ?? null,
     bufferCustom: globalThis.Buffer?.custom ?? null,
     processEnv: globalThis.process?.env?.FROM_TOP_LEVEL ?? null,
@@ -286,6 +293,11 @@ async function test(ctrl, env) {
     'temporal-on-control'(r) {
       strictEqual(r.temporal, 'object');
       strictEqual(r.toTemporalInstant, 'function');
+    },
+    // V8 installs its own QuotaExceededError, which the zygote's context removed before the top
+    // level ran; removing it again on restore would remove the polyfill.
+    'quota-exceeded-error-polyfill'(r) {
+      strictEqual(r.quotaExceededError, 'polyfill');
     },
     'process-assign'(r) {
       strictEqual(r.processCustom, 'process');

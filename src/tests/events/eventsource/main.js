@@ -97,6 +97,7 @@ export {
   handlersDefaultToNull,
   handlerPositionalOrdering,
   onPropertyForANamedEvent,
+  handlerReceiver,
 } from 'handlers';
 
 export {

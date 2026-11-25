@@ -1828,15 +1828,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   exposeSerializationTestClass @205 :Bool
       $compatEnableFlag("expose_serialization_test_class")
       $experimental;
-  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
-  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
-  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
-  # RPC. This flag is intended for internal testing only and may never have its experimental
-  # annotation removed.
+  # Exposes the internal CloneableTestBox class on globalThis: a class implemented in the
+  # per-isolate bootstrap that is structured cloneable, for testing the protocol by which such
+  # classes are serialized (src/per_isolate/serialization.ts), such as over RPC. This flag is
+  # intended for internal testing only and may never have its experimental annotation removed.
 
   pythonDedicatedSnapshotKeepImportCaches @206 :Bool
       $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
-      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches");
+      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-12-10");
   # When enabled, a Python Worker restored from a dedicated memory snapshot keeps the import system's
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe

@@ -35,6 +35,14 @@ const unitTests :Workerd.Config = (
       )
     ),
     ( name = "tail", worker = .tailWorker, ),
+    ( name = "tracing-helpers-untraced-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracing-helpers-untraced-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
   ]
 );
 

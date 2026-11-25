@@ -7,9 +7,8 @@
 //! while an exception or a termination is pending is tested in `pending_exception.rs` and
 //! `termination.rs`.
 //!
-//! A `DOMException` that Rust JSG creates is an instance of the C++ class, or, when the per-isolate
-//! bootstrap implements `DOMException` in TypeScript, of the bootstrap's class, which
-//! [`set_up_bootstrap_dom_exception`] stands in for.
+//! A `DOMException` that Rust JSG creates is an instance of the C++ class, or, under the
+//! `V8_DOM_EXCEPTION` autogate, of V8's.
 
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -84,61 +83,26 @@ impl Errors {
     }
 }
 
-/// Stands in for the exports of the per-isolate bootstrap's `dom-exception` module when it
-/// implements `DOMException` in TypeScript. Native code recognizes the class by the private symbol
-/// on its prototype, and gives each instance it creates its name and message under the private
-/// symbols that the getters read. Only native code creates instances, so the constructor is never
-/// called.
-const BOOTSTRAP_DOM_EXCEPTION: &str = r"(() => {
-  class DOMException {
-    get name() { return this[kName]; }
-    get message() { return this[kMessage]; }
-  }
-  Object.setPrototypeOf(DOMException.prototype, Error.prototype);
-  DOMException.prototype[kPrototype] = true;
-  globalThis.DOMException = DOMException;
-  return { DOMException };
-})()";
-
-/// Makes [`BOOTSTRAP_DOM_EXCEPTION`] the bootstrap's `dom-exception` module, and its class the
-/// global `DOMException`, so that the `DOMException`s native code creates in the context are
-/// instances of it.
-pub(super) fn set_up_bootstrap_dom_exception(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>) {
-    for (global, name) in [
-        ("kPrototype", "workerd:domExceptionPrototype"),
-        ("kName", "workerd:errorName"),
-        ("kMessage", "workerd:errorMessage"),
-    ] {
-        let symbol = Harness::private_symbol(lock, name);
-        ctx.set_global(lock, global, symbol);
-    }
-    let exports = ctx
-        .eval_raw(lock, BOOTSTRAP_DOM_EXCEPTION)
-        .unwrap_or_else(|_| panic!("defining the bootstrap's DOMException should not throw"));
-    ctx.set_bootstrap_module(lock, "dom-exception", exports);
-    let exception = lock.dom_exception("Error", "").unwrap();
-    ctx.set_global(lock, "created", exception);
-    assert!(
-        ctx.eval::<bool>(
-            lock,
-            "Object.getPrototypeOf(created) === DOMException.prototype"
-        )
-        .unwrap(),
-        "Rust JSG should create the bootstrap's DOMException"
-    );
-}
-
 /// The class of the `DOMException`s that native code creates.
 #[derive(Clone, Copy, Debug)]
-enum DomExceptionClass {
-    /// C++ JSG's, which native code creates when the context has no bootstrap.
+pub(super) enum DomExceptionClass {
+    /// C++ JSG's, which native code creates without the `V8_DOM_EXCEPTION` autogate.
     Cpp,
-    /// The bootstrap's, which [`set_up_bootstrap_dom_exception`] stands in for.
-    Bootstrap,
+    /// V8's, which native code creates under the autogate.
+    V8,
 }
 
 const DOM_EXCEPTION_CLASSES: [DomExceptionClass; 2] =
-    [DomExceptionClass::Cpp, DomExceptionClass::Bootstrap];
+    [DomExceptionClass::Cpp, DomExceptionClass::V8];
+
+/// Configures the `V8_DOM_EXCEPTION` autogate for `class`, for as long as the guard lives. A
+/// context created meanwhile has the `DOMException` global of `class`.
+pub(super) fn set_autogates_for(class: DomExceptionClass) -> crate::Autogates {
+    crate::set_autogates(match class {
+        DomExceptionClass::Cpp => &[],
+        DomExceptionClass::V8 => &["v8-dom-exception"],
+    })
+}
 
 /// Runs `callback` in a context of `harness` with `Errors` as a global, in which native code
 /// creates `DOMException`s of `class`.
@@ -146,12 +110,10 @@ fn run<F>(harness: &Harness, class: DomExceptionClass, callback: F)
 where
     F: for<'s> FnOnce(&mut jsg::Lock<'s>, &mut EvalContext<'_>) -> jsg::Result<()>,
 {
+    let _autogates = set_autogates_for(class);
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Errors>(lock)?;
         ctx.set_global(lock, "Errors", constructor);
-        if matches!(class, DomExceptionClass::Bootstrap) {
-            set_up_bootstrap_dom_exception(lock, ctx);
-        }
         callback(lock, ctx)
     });
 }
@@ -295,10 +257,10 @@ fn javascript_error_named_like_a_dom_exception_stays_a_class() {
     );
 }
 
-/// With the bootstrap's `DOMException`, each way Rust JSG creates a `DOMException` creates an
-/// instance of the bootstrap's class, with the name and message it is given.
+/// Under the `V8_DOM_EXCEPTION` autogate, each way Rust JSG creates a `DOMException` creates an
+/// instance of V8's, with the name and message it is given.
 #[test]
-fn creates_the_bootstrap_dom_exception() {
+fn creates_v8s_dom_exception() {
     for (expr, expected) in [
         // An `Error` of a `DOMException` type, as `jsg_require!` returns one.
         (
@@ -321,7 +283,7 @@ fn creates_the_bootstrap_dom_exception() {
     ] {
         assert_eq!(
             eval_with(
-                DomExceptionClass::Bootstrap,
+                DomExceptionClass::V8,
                 &format!(
                     "let e; try {{ e = {expr}; }} catch (thrown) {{ e = thrown; }}
                      `${{Object.getPrototypeOf(e) === DOMException.prototype}} \

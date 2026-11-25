@@ -25,6 +25,9 @@ beforeEach(async () => {
 
     // Hard-coded to match a socket name expected in the `workerdConfig` file.
     listenPortNames: ['http'],
+
+    // The config's Worker Loader binding needs the "experimental" compat flag.
+    extraArgs: ['--experimental'],
   });
 
   await workerd.start();
@@ -41,12 +44,11 @@ afterEach(async () => {
   workerd = null;
 });
 
-export async function connectInspector(port) {
+// `target` defaults to a service name expected in the `workerdConfig` file.
+export async function connectInspector(port, target = '/main') {
   return await CDP({
     port,
-
-    // Hard-coded to match a service name expected in the `workerdConfig` file.
-    target: '/main',
+    target,
 
     // Required to avoid trying to load the Protocol (schema, I guess?) from workerd, which doesn't
     // implement the inspector protocol message in question.

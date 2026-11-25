@@ -105,6 +105,76 @@ fn hello() {
 }
 
 #[test]
+fn a_project_directory_names_its_config() {
+    const MAIN: (&str, &str) = (
+        "index.js",
+        "export default { fetch() { return new Response('hi') } }",
+    );
+    let wrangler_json = |name: &str| {
+        format!(
+            r#"{{ "name": "{name}", "main": "index.js", "compatibility_date": "2026-01-01",
+                  "no_bundle": true }}"#
+        )
+    };
+    let served = |dir: &Path| {
+        let path = named_config(dir.to_str().unwrap()).unwrap().unwrap();
+        let message = read(
+            load(
+                path.to_str().unwrap(),
+                &Process::new(None, None, Vec::new()),
+                &RunOptions::default(),
+                None,
+                false,
+            )
+            .unwrap(),
+        );
+        let config = message.get_root::<config::Reader>().unwrap();
+        let service = config.get_services().unwrap().get(0);
+        (path, service.get_name().unwrap().to_string().unwrap())
+    };
+
+    // wrangler.json comes first, as in wrangler.
+    let json = wrangler_json("from-json");
+    let jsonc = wrangler_json("from-jsonc");
+    let dir = project(&[("wrangler.json", &json), ("wrangler.jsonc", &jsonc), MAIN]);
+    assert_eq!(
+        served(&dir),
+        (dir.join("wrangler.json"), "from-json".to_owned())
+    );
+
+    let dir = project(&[("wrangler.jsonc", &jsonc), MAIN]);
+    assert_eq!(
+        served(&dir),
+        (dir.join("wrangler.jsonc"), "from-jsonc".to_owned())
+    );
+
+    let dir = project(&[MAIN]);
+    let error = named_config(dir.to_str().unwrap()).unwrap_err();
+    assert_eq!(
+        error,
+        format!(
+            "{} does not contain wrangler.json or wrangler.jsonc.",
+            dir.display()
+        )
+    );
+}
+
+#[test]
+fn a_file_names_a_wrangler_config_by_its_extension() {
+    let dir = project(&[("app.jsonc", "{}"), ("config.capnp", "")]);
+    let app = dir.join("app.jsonc");
+    assert_eq!(named_config(app.to_str().unwrap()), Ok(Some(app.clone())));
+    let capnp = dir.join("config.capnp");
+    assert_eq!(named_config(capnp.to_str().unwrap()), Ok(None));
+    let missing = dir.join("missing.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        named_config(missing),
+        Err(format!("{missing}: No such file."))
+    );
+}
+
+#[test]
 fn durable_objects() {
     let message = read(
         load_project(&[
@@ -716,6 +786,80 @@ fn sample_parses() {
     assert_eq!(
         do_classes(&w).unwrap(),
         [("Counter".to_owned(), "Counter".to_owned(), true)]
+    );
+}
+
+/// The kubernetes sample's app translates for the flags that `kubernetes.yaml` passes: it stores
+/// its Durable Objects under the `--data-dir`, and writes nothing to its project, which is
+/// read-only in the image.
+#[test]
+fn kubernetes_sample_translates() {
+    let process = Process::new(None, None, Vec::new());
+    let app = project(&[
+        (
+            "wrangler.json",
+            include_str!("../../../../samples/kubernetes/app/wrangler.json"),
+        ),
+        (
+            "src/index.js",
+            include_str!("../../../../samples/kubernetes/app/src/index.js"),
+        ),
+    ]);
+    // Served from its directory, as the workerd image serves `/app`, joined to a cluster.
+    let path = named_config(app.to_str().unwrap()).unwrap().unwrap();
+    let data = data_dir();
+    let config = load(
+        path.to_str().unwrap(),
+        &process,
+        &joining(),
+        Some(&data),
+        true,
+    )
+    .unwrap();
+    let message = read(config);
+    let names: Vec<String> = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap()
+        .iter()
+        .map(|service| service.get_name().unwrap().to_string().unwrap())
+        .collect();
+    // With a data directory, the Cache API keeps its entries in `<name>-cache`.
+    assert_eq!(names, ["counter", CLUSTER_STORAGE, "counter-cache"]);
+    assert!(data.join("do").is_dir(), "{}", data.display());
+    assert!(!app.join(".wrangler").exists());
+}
+
+#[test]
+fn a_missing_config_names_the_one_next_to_it() {
+    let dir = project(&[("wrangler.jsonc", "{}")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        named_config(missing).unwrap_err(),
+        format!(
+            "{missing}: No such file. Did you mean {}?",
+            dir.join("wrangler.jsonc").display()
+        )
+    );
+    let dir = project(&[("wrangler.toml", "")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        named_config(missing).unwrap_err(),
+        format!(
+            "{missing}: No such file. There is a {}, but wrangler.toml is not supported. Convert \
+             it to wrangler.jsonc.",
+            dir.join("wrangler.toml").display()
+        )
+    );
+    let dir = project(&[("index.js", "")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        named_config(missing).unwrap_err(),
+        format!("{missing}: No such file.")
     );
 }
 

@@ -210,8 +210,8 @@ impl<'s> IoContext<'s> {
             .then(lock, outcome.clone(), return_or_throw)?;
         let resolver = resolver.to_global(lock);
         // `catch_poll_panic()` turns a panic while polling into an output, so that it rejects the
-        // promise instead of failing the task as `io_future_wait()` would. `io_future_wait()`
-        // still catches a panic while dropping the future when the wait is cancelled.
+        // promise instead of failing the task, as kj-rs does for a panic in the future it polls.
+        // kj-rs still logs a panic while dropping the future when the wait is cancelled.
         self.await_io_and_run(catch_poll_panic(future), move |lock, output| {
             let resolver = resolver.as_local(lock);
             let result = match output {

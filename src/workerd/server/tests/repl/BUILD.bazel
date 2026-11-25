@@ -1,0 +1,33 @@
+load("//:build/wd_js_test.bzl", "wd_js_test")
+load("//:build/wd_py_test.bzl", "wd_py_test")
+
+# `workerd repl` as a user runs it, input piped in: what only the command line and the console
+# do. src/workerd/server/repl/repl-environment-test.c++ covers evaluation. Each case starts
+# workerd; in a fastbuild on a loaded CI executor the cases take about 15 s in all, a medium test's
+# whole timeout.
+wd_js_test(
+    name = "repl-test",
+    size = "large",
+    data = [
+        ":repl-test.capnp",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "repl-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "REPL_CONFIG": "$(rootpath :repl-test.capnp)",
+    },
+)
+
+# `workerd repl` on a pseudo-terminal: what it leaves the terminal as when a signal ends it.
+wd_py_test(
+    name = "terminal-test",
+    srcs = ["terminal-test.py"],
+    args = ["$(rootpath //src/workerd/server:workerd)"],
+    data = ["//src/workerd/server:workerd"],
+    main = "terminal-test.py",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)

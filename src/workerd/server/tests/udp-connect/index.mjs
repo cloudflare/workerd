@@ -23,6 +23,11 @@ export default {
       if (done) break;
       const bytes = value.data;
       const text = decoder.decode(bytes);
+      if (text === 'remoteAddress') {
+        const { remoteAddress } = await socket.opened;
+        await writer.write(new Datagram(encoder.encode(remoteAddress)));
+        continue;
+      }
       if (text === 'status') {
         const status = lingeringFlowTimedOut ? 'timed-out' : 'waiting';
         await writer.write(new Datagram(encoder.encode(status)));

@@ -2,6 +2,7 @@
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//:build/test_attrs.bzl", "test_attrs")
 
 def wd_cc_benchmark(
         name,
@@ -37,9 +38,8 @@ def wd_cc_benchmark(
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark", "google_benchmark"] + tags,
         size = "large",
-        **kwargs
+        **(kwargs | test_attrs(["workerd-benchmark", "google_benchmark"] + tags, "large"))
     )
 
     # generate benchmark report

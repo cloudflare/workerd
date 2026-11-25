@@ -541,6 +541,104 @@ const FINALIZE_BOOTSTRAP_314_0_6: Patch[] = [
   }),
 ];
 
+// Backports two Emscripten changes to dynamic linking that speed up startup.
+// (https://github.com/pyodide/pyodide/pull/6562 and https://github.com/pyodide/pyodide/pull/6564).
+const DYNAMIC_LINKING_STARTUP_314_0_6: Patch[] = [
+  patch({
+    // https://github.com/emscripten-core/emscripten/pull/28274: the module that
+    // convertJsFunctionToWasm compiles depends only on the signature, so compile it once per
+    // signature. Startup converts a few hundred JS functions with a handful of signatures.
+    name: 'convertJsFunctionToWasm: compile the wrapper module once per signature',
+    expected: 1,
+    imports: ['newWasmModule'],
+    match: (node, parent): node is VariableDeclaration =>
+      Array.isArray(parent) &&
+      isVariableDeclarationOf(node, 'convertJsFunctionToWasm'),
+    replace: () => [
+      stmt('var wrapperModuleCache = {};'),
+      stmt(`
+        var convertJsFunctionToWasm = (func, sig) => {
+          var module = wrapperModuleCache[sig];
+          if (!module) {
+            var bytes = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, 1,
+              ...uleb128EncodeWithLen([1, 96, ...generateTypePack(sig.slice(1)),
+                ...generateTypePack(sig[0] === "v" ? "" : sig[0])]),
+              2, 7, 1, 1, 101, 1, 102, 0, 0, 7, 5, 1, 1, 102, 0, 0);
+            module = wrapperModuleCache[sig] = newWasmModule(bytes);
+          }
+          var instance = new WebAssembly.Instance(module, { e: { f: func } });
+          var wrappedFunc = instance.exports["f"];
+          return wrappedFunc;
+        };
+      `),
+    ],
+  }),
+  // https://github.com/emscripten-core/emscripten/pull/28303: reportUndefinedSymbols visits only
+  // the GOT entries that were created unresolved, rather than the whole GOT, which also holds an
+  // entry for every export of the main module. GOTHandler is the only place that creates an
+  // unresolved entry, so the entries are visited in the same order as before.
+  patch({
+    name: 'GOTHandler: record the GOT entries it creates unresolved',
+    expected: 1,
+    match: (node, parent): node is VariableDeclaration =>
+      Array.isArray(parent) && isVariableDeclarationOf(node, 'GOTHandler'),
+    replace: () => [
+      stmt('var unresolvedSymbols = new Set();'),
+      stmt(`
+        var GOTHandler = {
+          get(weakImports, symName) {
+            var rtn = GOT[symName];
+            if (!rtn) {
+              rtn = GOT[symName] = new WebAssembly.Global({ value: "i32", mutable: true }, -1);
+              unresolvedSymbols.add(symName);
+            }
+            if (!weakImports.has(symName)) {
+              rtn.required = true;
+            }
+            return rtn;
+          }
+        };
+      `),
+    ],
+  }),
+  patch({
+    name: 'reportUndefinedSymbols: visit only the unresolved GOT entries',
+    expected: 1,
+    match: (node, parent): node is VariableDeclaration =>
+      Array.isArray(parent) &&
+      isVariableDeclarationOf(node, 'reportUndefinedSymbols'),
+    replace: () => [
+      stmt(`
+        var reportUndefinedSymbols = () => {
+          for (var symName of unresolvedSymbols) {
+            var entry = GOT[symName];
+            if (entry.value == -1) {
+              var value = resolveGlobalSymbol(symName, true).sym;
+              if (!value && !entry.required) {
+                entry.value = 0;
+                unresolvedSymbols.delete(symName);
+                continue;
+              } else if (!value) {
+                throw new Error(\`Dynamic linking error: undefined symbol '\${symName}'\`);
+              }
+              if (typeof value == "function") {
+                entry.value = addFunction(value, value.sig);
+              } else if (typeof value == "number") {
+                entry.value = value;
+              } else if (typeof value.value == "number") {
+                entry.value = value;
+              } else {
+                throw new Error(\`bad export type for '\${symName}': \${typeof value} (\${value})\`);
+              }
+            }
+            unresolvedSymbols.delete(symName);
+          }
+        };
+      `),
+    ],
+  }),
+];
+
 // pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
 // When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
 // automatically.
@@ -591,7 +689,8 @@ function patchesForVersion(version: string): Patch[] {
   } else if (version === '314.0.6') {
     patches.push(
       ...STACK_SWITCH_GC_HOTFIX_314_0_6,
-      ...FINALIZE_BOOTSTRAP_314_0_6
+      ...FINALIZE_BOOTSTRAP_314_0_6,
+      ...DYNAMIC_LINKING_STARTUP_314_0_6
     );
   }
   patches.push(
