@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_macro")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_proc_macro.bzl", "PROC_MACRO_TARGET_COMPATIBLE_WITH")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
@@ -25,6 +26,7 @@ rust_library(
     deps = [
         "@crates_vendor//foldhash",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 wd_rust_test(
@@ -111,6 +113,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj",
         "@simdutf",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 rust_proc_macro(

@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
@@ -51,6 +52,7 @@ rust_library(
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 wd_cc_library(
@@ -66,8 +68,6 @@ wd_cc_library(
     srcs = [
         "ffi/tests.cc",
         ":bridge/source",
-        ":module/source",
-        "//src/rust/cxx/kj-rs:bridge/source",
     ],
     hdrs = ["ffi/tests.h"],
     linkstatic = True,

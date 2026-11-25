@@ -2,6 +2,8 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
+load("//:build/force_load.bzl", "cc_force_load")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 
 exports_files(["Cargo.toml"])
 
@@ -50,7 +52,15 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":runtime",
-        "@crates_vendor//temporal_capi",
+        ":temporal_capi_crate",
         "@crates_vendor//temporal_capi_cpp_bindings",
     ],
+)
+
+# The temporal_capi crate, which V8's dylib calls in macOS tests (see MACOS_ALWAYSLINK in
+# build/linking.bzl).
+cc_force_load(
+    name = "temporal_capi_crate",
+    dep = "@crates_vendor//temporal_capi",
+    alwayslink = MACOS_ALWAYSLINK,
 )

@@ -1,6 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
-load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC", "MACOS_ALWAYSLINK")
 load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
 
 def rust_cxx_bridge(
@@ -179,6 +179,7 @@ def wd_rust_crate(
 
     rust_library(
         name = name,
+        alwayslink = MACOS_ALWAYSLINK,
         crate_name = crate_name,
         srcs = srcs,
         deps = deps,

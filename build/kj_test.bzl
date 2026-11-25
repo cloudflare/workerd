@@ -1,5 +1,10 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load(
+    "//:build/linking.bzl",
+    "CC_TEST_LINKOPTS",
+    "CC_TEST_LINKSTATIC",
+    "CC_TEST_LINKSTATIC_WITHOUT_MACOS_DYLIBS",
+)
 load("//:build/test_attrs.bzl", "test_attrs")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
@@ -12,6 +17,7 @@ def kj_test(
         shard_count = None,
         target_compatible_with = None,
         generate_all_autogates_variant = True,
+        macos_dylibs = True,
         **kwargs):
     """Defines a KJ test as `name@` and, unless generate_all_autogates_variant is False, as
     `name@all-autogates`, which runs with every autogate on.
@@ -33,7 +39,12 @@ def kj_test(
             # implementations in its link.
             "//src/workerd/util:setup-async-io",
         ] + deps,
-        linkstatic = CC_TEST_LINKSTATIC,
+        # macos_dylibs = False links the test statically on macOS (see
+        # CC_TEST_LINKSTATIC_WITHOUT_MACOS_DYLIBS).
+        linkstatic = (
+            CC_TEST_LINKSTATIC if macos_dylibs else CC_TEST_LINKSTATIC_WITHOUT_MACOS_DYLIBS
+        ),
+        linkopts = (CC_TEST_LINKOPTS if macos_dylibs else []) + kwargs.pop("linkopts", []),
         data = data,
         tags = tags,
         target_compatible_with = target_compatible_with,

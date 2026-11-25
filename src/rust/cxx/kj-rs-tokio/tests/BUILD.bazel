@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
 
 rust_library(
@@ -15,6 +16,7 @@ rust_library(
         "//src/rust/cxx/kj-rs-tokio",
         "@crates_vendor//tokio",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 rust_cxx_bridge(

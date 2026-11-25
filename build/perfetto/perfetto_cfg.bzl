@@ -22,6 +22,18 @@ load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 def _noop_override(**kwargs):
     pass
 
+def _cc_library(**kwargs):
+    # The dylibs of macOS tests use the client library and others that perfetto links statically,
+    # such as protozero, but the macOS linker doesn't take an object from an archive when only a
+    # dylib needs it, so binaries take all of them on macOS (see CC_TEST_LINKOPTS in workerd's
+    # build/linking.bzl).
+    if kwargs.get("linkstatic"):
+        kwargs["alwayslink"] = select({
+            "@perfetto//bazel:os_osx": True,
+            "//conditions:default": False,
+        })
+    cc_library(**kwargs)
+
 PERFETTO_CONFIG = struct(
     # This is used to refer to deps within perfetto's BUILD files.
     # In standalone and bazel-based embedders use '//', because perfetto has its
@@ -131,7 +143,7 @@ PERFETTO_CONFIG = struct(
     rule_overrides = struct(
         proto_library = proto_library,
         cc_binary = cc_binary,
-        cc_library = cc_library,
+        cc_library = _cc_library,
         cc_proto_library = cc_proto_library,
 
         # Supporting java rules pulls in the JDK and generally is not something

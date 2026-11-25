@@ -1,0 +1,57 @@
+diff --git a/toolchain/BUILD b/toolchain/BUILD
+--- a/toolchain/BUILD
++++ b/toolchain/BUILD
+@@ -132,6 +132,16 @@ config_setting(
+     values = {"compilation_mode": "opt"},
+ )
+ 
++# rules_cc links the dylib of each cc_library on its own, without the libraries it depends on, and
++# the binaries that link it load those too. Their symbols resolve at load time, as they do in ELF
++# shared libraries.
++cc_args(
++    name = "nodeps_dynamic_library_undefined_symbols",
++    actions = ["@rules_cc//cc/toolchains/actions:nodeps_dynamic_library_link_actions"],
++    args = ["-Wl,-undefined,dynamic_lookup"],
++    target_compatible_with = ["@platforms//os:macos"],
++)
++
+ cc_feature(
+     name = "dynamic_linking_mode",
+     overrides = "@rules_cc//cc/toolchains/features:dynamic_linking_mode",
+diff --git a/toolchain/cc_toolchain.bzl b/toolchain/cc_toolchain.bzl
+--- a/toolchain/cc_toolchain.bzl
++++ b/toolchain/cc_toolchain.bzl
+@@ -32,6 +32,9 @@ def cc_toolchain(
+         ] + select({
+             Label("//configs:apple"): [Label("//toolchain:apple_env")],
+             "//conditions:default": [],
++        }) + select({
++            Label("@platforms//os:macos"): [Label("//toolchain:nodeps_dynamic_library_undefined_symbols")],
++            "//conditions:default": [],
+         }),
+         artifact_name_patterns = select({
+             Label("//configs:apple"): [Label("//toolchain:dylib_pattern")],
+diff --git a/toolchain/tools/BUILD b/toolchain/tools/BUILD
+--- a/toolchain/tools/BUILD
++++ b/toolchain/tools/BUILD
+@@ -13,6 +13,7 @@ cc_tool_map(
+         "@rules_cc//cc/toolchains/actions:objcpp_compile": ":clangpp_tool",
+         "@rules_cc//cc/toolchains/actions:linkstamp_compile": ":clang_tool",  # TODO: switch to clangpp_tool?
+         "@rules_cc//cc/toolchains/actions:cpp_link_dynamic_library": ":clang_tool",  # TODO: switch to clangpp_tool?
++        "@rules_cc//cc/toolchains/actions:cpp_link_nodeps_dynamic_library": ":clang_tool",
+         "@rules_cc//cc/toolchains/actions:cpp_link_executable": ":clang_tool",  # TODO: switch to clangpp_tool?
+         "@rules_cc//cc/toolchains/actions:objc_compile": ":clang_tool",
+         "@rules_cc//cc/toolchains/actions:objc_executable": ":clang_tool",  # TODO: This should be the same as the other link actions
+@@ -26,6 +27,12 @@ cc_tool_map(
+ cc_tool(
+     name = "clang_tool",
+     src = "//crosstool:exec_wrapped_clang",
++    # Lets cc_library targets with linkstatic = False build a dylib, and binaries that ask for
++    # dynamic linking, such as tests, link against those dylibs.
++    capabilities = select({
++        "@platforms//os:macos": ["@rules_cc//cc/toolchains/capabilities:supports_dynamic_linker"],
++        "//conditions:default": [],
++    }),
+     execution_requirements = ["//toolchain:xcode_execution_info"],
+ )
+ 

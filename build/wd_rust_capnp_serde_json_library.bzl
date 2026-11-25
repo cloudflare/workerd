@@ -3,6 +3,7 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:capnp_gen.bzl", "capnp_gen")
 load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
 
 def _output(src):
@@ -94,6 +95,8 @@ def wd_rust_capnp_serde_json_library(
 
     rust_library(
         name = name,
+        # The bridge's C++, in a dylib in macOS tests, calls the crate (see MACOS_ALWAYSLINK).
+        alwayslink = MACOS_ALWAYSLINK,
         srcs = outs + ffi_outs + [lib_rs],
         crate_name = crate_name,
         crate_root = lib_rs,

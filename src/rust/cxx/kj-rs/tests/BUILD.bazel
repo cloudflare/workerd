@@ -1,6 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC", "MACOS_ALWAYSLINK")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
@@ -31,6 +31,7 @@ rust_library(
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 rust_unpretty(

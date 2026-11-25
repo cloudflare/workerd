@@ -9,6 +9,13 @@ bazel_dep(name = "abseil-cpp", version = "20260817.0")
 
 # apple_support
 bazel_dep(name = "apple_support", version = "2.9.1")
+single_version_override(
+    module_name = "apple_support",
+    patch_strip = 1,
+    patches = [
+        "//:patches/apple_support/0001-Support-the-dynamic-linker-on-macOS.patch",
+    ],
+)
 
 # aspect_rules_esbuild
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")

@@ -1,6 +1,7 @@
 # kj-hyper: HTTP/1.1, WebSockets and TLS for a Rust server whose handlers are kj HTTP interfaces.
 
 load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
@@ -44,6 +45,7 @@ rust_library(
         "@crates_vendor//tower-service",
         "@crates_vendor//x509-cert",
     ],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 wd_rust_test(

@@ -61,6 +61,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":node-core",
+        "//build/deps:zstd",
         "//src/node",
         "//src/rust/api",
         "//src/workerd/api:compression",
@@ -68,7 +69,6 @@ wd_cc_library(
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
-        "@zstd",
     ],
 )
 

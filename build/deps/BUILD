@@ -4,10 +4,21 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_library")
+load("//:build/force_load.bzl", "cc_force_load")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
+
+# -dead_strip is the macOS equivalent of -ffunction-sections, -Wl,--gc-sections.
+cc_library(
+    name = "linkopts_dead_strip",
+    linkopts = select({
+        "@//:use_dead_strip": ["-Wl,-dead_strip"],
+        "//conditions:default": [""],
+    }),
+    visibility = ["//visibility:public"],
+)
 
 cc_library(
     name = "linkopts_common",
-    # -dead_strip is the macOS equivalent of -ffunction-sections, -Wl,--gc-sections.
     # -no_exported_symbols is used to not include the exports trie, which significantly reduces
     # binary sizes. Unfortunately, the flag and the exports trie are poorly documented. Based
     # on analyzing the binary sections with and without the flag, the information being removed
@@ -17,15 +28,14 @@ cc_library(
     # The affected sections appear to not be needed for debugging and are only used when
     # external code needs to look up bindings in a binary, e.g. when loading a plugin
     # (mac-specific feature). In particular, the symbol table is not affected (the name of the
-    # flag is misleading here).
+    # flag is misleading here). The dylibs that macOS test binaries load look up symbols in the
+    # test binary, so linkopts_default leaves this flag out.
     linkopts = select({
-        "@//:use_dead_strip": [
-            "-Wl,-dead_strip",
-            "-Wl,-no_exported_symbols",
-        ],
+        "@//:use_dead_strip": ["-Wl,-no_exported_symbols"],
         "//conditions:default": [""],
     }),
     visibility = ["//visibility:public"],
+    deps = [":linkopts_dead_strip"],
 )
 
 cc_library(
@@ -46,7 +56,7 @@ cc_library(
         "//conditions:default": [""],
     }),
     visibility = ["//visibility:public"],
-    deps = [":linkopts_common"] + select({
+    deps = [":linkopts_dead_strip"] + select({
         "//build/platforms:sanitizer_thread_linux": ["@llvm_runtimes//:runtimes"],
         "//conditions:default": [],
     }),
@@ -62,6 +72,15 @@ cc_library(
         "//build/platforms:sanitizer_thread_linux": ["@llvm_runtimes//:runtimes"],
         "//conditions:default": [],
     }),
+)
+
+# zstd, which the dylibs of macOS tests call, but which its module links statically (see
+# MACOS_ALWAYSLINK in build/linking.bzl).
+cc_force_load(
+    name = "zstd",
+    dep = "@zstd",
+    visibility = ["//visibility:public"],
+    alwayslink = MACOS_ALWAYSLINK,
 )
 
 # ci/v8_update.py imports this as the top-level module `jsonc`.

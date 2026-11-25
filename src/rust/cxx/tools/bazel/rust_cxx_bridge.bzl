@@ -1,6 +1,7 @@
 """CXX Bridge rules."""
 
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
+load("//:build/linking.bzl", "MACOS_ALWAYSLINK")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 def rust_cxx_bridge(name, src, deps = [], hdrs = [], linkstatic = True, include_prefix = None, strip_include_prefix = None, **kwargs):
@@ -47,6 +48,7 @@ def rust_cxx_bridge(name, src, deps = [], hdrs = [], linkstatic = True, include_
         srcs = [src + ".cc"],
         deps = deps + [":%s/include" % name],
         linkstatic = linkstatic,
+        alwayslink = MACOS_ALWAYSLINK,
         include_prefix = include_prefix,
         strip_include_prefix = strip_include_prefix,
         **kwargs
