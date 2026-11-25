@@ -305,6 +305,7 @@ wpt_test(
         "websocket_standard_binary_type",
         "web_socket_auto_reply_to_close",
         "websocket_standard_url_and_extensions",
+        "websocket_send_usv_string",
     ],
     config = "websockets-test.ts",
     start_server = True,

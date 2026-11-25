@@ -219,11 +219,6 @@ export default {
     replace: removeUseCapture,
   },
   'Send-unpaired-surrogates.any.js': {
-    comment:
-      'send() does not replace an unpaired surrogate with U+FFFD as the standard requires, so the echo server never sends the message back',
-    expectedFailures: [
-      'Send unpaired surrogates on a WebSocket - Connection should be closed',
-    ],
     replace: removeUseCapture,
   },
   'back-forward-cache-with-closed-websocket-connection.window.js': {
