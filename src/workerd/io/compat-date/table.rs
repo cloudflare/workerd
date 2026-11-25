@@ -36,6 +36,11 @@ pub enum SchemaError {
     NeededByFlWithoutFlag { field: &'static str },
     #[error("CompatibilityFlags has no field {0}")]
     MissingField(&'static str),
+    #[error("field {field} has more than one ${annotation}")]
+    RepeatedFlag {
+        field: &'static str,
+        annotation: &'static str,
+    },
 }
 
 impl From<capnp::Error> for SchemaError {
@@ -206,6 +211,20 @@ fn date(text: &'static str, field: &'static str) -> Result<CompatDate, SchemaErr
     CompatDate::parse(text).ok_or(SchemaError::Date { field, date: text })
 }
 
+/// Sets a field's enable or disable flag, which the schema may give only once: the compiler
+/// matches one name of each to the configuration's flags.
+fn set_flag(
+    flag: &mut Option<&'static str>,
+    value: &'static str,
+    field: &'static str,
+    annotation: &'static str,
+) -> Result<(), SchemaError> {
+    if flag.replace(value).is_some() {
+        return Err(SchemaError::RepeatedFlag { field, annotation });
+    }
+    Ok(())
+}
+
 fn read_field(schema: StructSchema, field: Field) -> Result<FlagInfo, SchemaError> {
     let proto = field.get_proto();
     let name = proto.get_name()?.to_str()?;
@@ -225,10 +244,20 @@ fn read_field(schema: StructSchema, field: Field) -> Result<FlagInfo, SchemaErro
         let value = annotation.get_value()?;
         match annotation.get_id() {
             compatibility_flags::compat_enable_flag::ID => {
-                info.enable_flag = Some(text(value, name)?);
+                set_flag(
+                    &mut info.enable_flag,
+                    text(value, name)?,
+                    name,
+                    "compatEnableFlag",
+                )?;
             }
             compatibility_flags::compat_disable_flag::ID => {
-                info.disable_flag = Some(text(value, name)?);
+                set_flag(
+                    &mut info.disable_flag,
+                    text(value, name)?,
+                    name,
+                    "compatDisableFlag",
+                )?;
                 info.disable_flag_first = info.enable_flag.is_none();
             }
             compatibility_flags::compat_enable_date::ID => {

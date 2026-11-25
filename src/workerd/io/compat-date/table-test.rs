@@ -57,3 +57,15 @@ fn reads_enable_all_dates() {
         .unwrap();
     assert!(info.enabled_by_date(CompatDate::new(2000, 1, 1).unwrap()));
 }
+
+#[test]
+fn rejects_a_repeated_flag() {
+    let mut flag = None;
+    assert!(set_flag(&mut flag, "first", "someField", "compatEnableFlag").is_ok());
+    assert_eq!(flag, Some("first"));
+    let error = set_flag(&mut flag, "second", "someField", "compatEnableFlag").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "field someField has more than one $compatEnableFlag"
+    );
+}
