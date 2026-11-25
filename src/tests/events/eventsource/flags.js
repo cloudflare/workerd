@@ -16,3 +16,6 @@ export const setToStringTag = flags['set_tostring_tag'] === true;
 // globals as own properties of globalThis.
 export const specCompliantPropertyAttributes =
   flags['spec_compliant_property_attributes'] === true;
+
+// on<type> event handlers and listeners are called with the target as `this`.
+export const setEventTargetThis = flags['set_event_target_this'] === true;
