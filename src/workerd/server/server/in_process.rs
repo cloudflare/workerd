@@ -425,6 +425,12 @@ impl InProcessServer {
         Ok(Box::new(second))
     }
 
+    /// Ends this server's part in its sessions with the other loop threads, as a session that
+    /// failed would: for a test of what the thread at the other end does then.
+    pub fn drop_loop_thread_links(&self) {
+        self.factory.close_links();
+    }
+
     /// Seats this server among the loop threads of the server that made `seat`. Before the
     /// server runs.
     #[expect(

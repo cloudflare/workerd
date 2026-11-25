@@ -1047,6 +1047,9 @@ pub mod ffi {
         type Seat;
         fn add_loop_thread(self: &InProcessServer) -> Result<Box<Seat>>;
         fn join_loop_threads(self: &InProcessServer, seat: Box<Seat>) -> Result<()>;
+        /// Ends the server's part in its sessions with the other loop threads, as if they had
+        /// failed.
+        fn drop_loop_thread_links(self: &InProcessServer);
         /// Drains and awaits the run `start` started, then ends the server's tasks and drops the
         /// factory, logging an error if a service still holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;

@@ -857,9 +857,10 @@ pub async fn run(
     let drain = std::pin::pin!(drain_due(server.factory(), delay, pending, ready, drain));
     // A session with one of the run's other loop threads ends only with that thread, which
     // serves until this one quiesces the threads: one that ends while the listeners serve has
-    // failed, and the Durable Object calls between the two threads with it. (The threads of an
-    // embedding program end when it ends them.)
-    let watches_links = threads.is_some();
+    // failed, and the Durable Object calls between the two threads with it. An embedding
+    // program ends its threads when it likes, so there the thread that has the others' actors
+    // watches nothing; a thread seated beside it cannot serve without it.
+    let watches_links = threads.is_some() || server.factory().thread() != 0;
     let serving = async {
         let listening = std::pin::pin!(serve_listeners(&mut listeners));
         let lost = std::pin::pin!(async {

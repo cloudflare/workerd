@@ -10996,6 +10996,28 @@ class LoopThreadServer {
     return KJ_ASSERT_NONNULL(server)->add_loop_thread();
   }
 
+  // Ends this server's part in its sessions with the other loop threads, as a failed session
+  // would.
+  void dropLoopThreadLinks() {
+    KJ_ASSERT_NONNULL(server)->drop_loop_thread_links();
+  }
+
+  // Waits up to `limit` for the server's run to end, and rethrows what ended it.
+  void waitForRun(kj::Duration limit) {
+    auto task = kj::mv(KJ_ASSERT_NONNULL(runTask));
+    runTask = kj::none;
+    within(kj::mv(task), limit, "the server still runs"_kj);
+  }
+
+  // What `promise` resolves to, if it does within `limit`; fails with `late` otherwise.
+  template <typename T>
+  T within(kj::Promise<T> promise, kj::Duration limit, kj::StringPtr late) {
+    return promise
+        .exclusiveJoin(io.getTimer().afterDelay(limit).then([late]() -> kj::Promise<T> {
+      KJ_FAIL_ASSERT(late);
+    })).wait(ws);
+  }
+
   // The body of the response to a GET of `url` on a new connection to the socket at `addr`.
   kj::Promise<kj::String> get(kj::StringPtr addr, kj::StringPtr url = "http://foo/"_kj) {
     auto stream = KJ_ASSERT_NONNULL(server)->connect(addr.as<kj_rs::RustUncheckedUtf8>());
@@ -11160,9 +11182,9 @@ KJ_TEST("Server: two loop threads each compile and serve the workers of one shar
   }
 }
 
-KJ_TEST("Server: a loop thread without the actors reaches them on the primary loop's") {
-  // Every request goes to one Durable Object, which numbers the requests it gets. "/wait" does
-  // not return.
+// A shared factory for loop threads whose config has one Durable Object, which numbers the
+// requests it gets. "/wait" does not return; "/waiting" is how many requests wait.
+kj::Arc<SharedFactory> counterLoopThreads(kj::EntropySource& entropySource) {
   auto config = parseConfig(R"((
     services = [
       ( name = "hello",
@@ -11206,12 +11228,16 @@ KJ_TEST("Server: a loop thread without the actors reaches them on the primary lo
   message.setRoot(*config);
   auto words = capnp::messageToFlatArray(message);
 
-  SharedEntropySource entropySource;
   auto options = kj::heap<WorkerFactory::Options>();
   options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::INSPECTOR_ONLY);
-  auto shared = kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
+  return kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
       kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
           .as<kj_rs::RustCopy>());
+}
+
+KJ_TEST("Server: a loop thread without the actors reaches them on the primary loop's") {
+  SharedEntropySource entropySource;
+  auto shared = counterLoopThreads(entropySource);
 
   static constexpr uint ROUNDS = 25;
   static constexpr uint REQUESTS_PER_ROUND = 4;
@@ -11256,6 +11282,73 @@ KJ_TEST("Server: a loop thread without the actors reaches them on the primary lo
   }
   KJ_EXPECT(
       primary.get("test-addr"_kj).wait(primary.ws) == kj::str(2 + ROUNDS * REQUESTS_PER_ROUND));
+}
+
+KJ_TEST("Server: a loop thread whose session with the primary loop's ends fails") {
+  SharedEntropySource entropySource;
+  auto shared = counterLoopThreads(entropySource);
+
+  static constexpr uint REQUESTS = 8;
+
+  LoopThreadServer primary(shared.addRef(), PrimaryLoop::YES);
+  KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == "1");
+
+  auto seat = primary.addLoopThread();
+  // The other thread has reached the actor and has a request waiting on it.
+  auto linked = kj::newPromiseAndCrossThreadFulfiller<void>();
+  // This thread has ended its part in the session: fulfilled here, for the other thread, which
+  // makes the promise it waits on.
+  kj::Maybe<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> dropped;
+  auto done = kj::newPromiseAndCrossThreadFulfiller<void>();
+  {
+    kj::Thread thread([&]() {
+      KJ_DEFER(done.fulfiller->fulfill());
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO, kj::mv(seat));
+      for (uint i = 0; i < REQUESTS; i++) {
+        KJ_ASSERT(secondary.get("test-addr"_kj).wait(secondary.ws) == kj::str(2 + i), i);
+      }
+      auto waiting = secondary.get("test-addr"_kj, "http://foo/wait"_kj);
+      while (secondary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(secondary.ws) != "1") {
+        KJ_ASSERT(!waiting.poll(secondary.ws), "the request ended");
+      }
+      auto droppedHere = kj::newPromiseAndCrossThreadFulfiller<void>();
+      dropped = kj::mv(droppedHere.fulfiller);
+      linked.fulfiller->fulfill();
+      droppedHere.promise.wait(secondary.ws);
+
+      // The run of this thread, which cannot reach the actors without the session, fails.
+      auto ended = KJ_ASSERT_NONNULL(
+          kj::runCatchingExceptions([&]() { secondary.waitForRun(10 * kj::SECONDS); }),
+          "the run ended without an error");
+      KJ_EXPECT(ended.getType() == kj::Exception::Type::DISCONNECTED, ended);
+      KJ_EXPECT(ended.getDescription().contains("the session with loop thread 0 ended"), ended);
+      // The call in flight has failed with it.
+      auto lost = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+        secondary.within(kj::mv(waiting), 10 * kj::SECONDS, "the call still waits"_kj);
+      }),
+          "the call in flight was answered");
+      KJ_EXPECT(!lost.getDescription().contains("the call still waits"), lost);
+      // And the socket takes no more requests.
+      KJ_EXPECT_THROW_MESSAGE("the listener has stopped accepting connections",
+          secondary.within(
+              secondary.get("test-addr"_kj), 10 * kj::SECONDS, "the request still waits"_kj));
+    });
+    linked.promise.wait(primary.ws);
+    primary.dropLoopThreadLinks();
+    KJ_ASSERT_NONNULL(dropped)->fulfill();
+    // This thread serves its own requests on.
+    KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == kj::str(2 + REQUESTS));
+    done.promise.wait(primary.ws);
+    // The thread is joined here, with its server closed and its factory destroyed on it.
+  }
+
+  // The actor lost the waiting request, and serves on.
+  for (uint tries = 0; primary.get("test-addr"_kj, "http://foo/waiting"_kj).wait(primary.ws) != "0";
+       tries++) {
+    KJ_ASSERT(tries < 10000, "the actor still has the request");
+    primary.io.getTimer().afterDelay(1 * kj::MILLISECONDS).wait(primary.ws);
+  }
+  KJ_EXPECT(primary.get("test-addr"_kj).wait(primary.ws) == kj::str(3 + REQUESTS));
 }
 
 }  // namespace

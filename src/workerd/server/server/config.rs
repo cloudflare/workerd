@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use capnp::message::ReaderOptions;
 use capnp::serialize::BufferSegments;
+use futures::future::Either;
 use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
 use kj_rs::KjArc;
@@ -96,6 +97,8 @@ pub struct Factory {
     serving_links: Cell<bool>,
     /// The thread at the other end of a session that ended, once one has.
     lost_link: watch::Sender<Option<usize>>,
+    /// Whether this thread closed its links (`close_links`).
+    links_closed: watch::Sender<bool>,
     /// This thread's server, from when its graph is built (`serve_links`).
     server: RefCell<Weak<Server>>,
     /// Whether the namespaces' alarm schedulers run (`Server::start_alarms`): how many loop
@@ -114,6 +117,7 @@ impl Factory {
             inbox: RefCell::new(None),
             serving_links: Cell::new(false),
             lost_link: watch::Sender::new(None),
+            links_closed: watch::Sender::new(false),
             server: RefCell::new(Weak::new()),
             alarms_started: Cell::new(false),
         }
@@ -167,10 +171,16 @@ impl Factory {
         self.links.borrow_mut().insert(peer, Rc::clone(&link));
         // The first session to end is the one reported: a session ends only with the other
         // thread's loop, or by failing.
+        // The watch holds the session until then, or until this thread closes its links.
         let this = Rc::downgrade(self);
         let watched = Rc::clone(&link);
+        let mut closed = self.links_closed.subscribe();
         self.spawn_detached(async move {
-            watched.disconnected().await;
+            let ended = std::pin::pin!(watched.disconnected());
+            let closed = std::pin::pin!(closed.wait_for(|closed| *closed));
+            if let Either::Right(_) = futures::future::select(ended, closed).await {
+                return;
+            }
             if let Some(this) = this.upgrade() {
                 this.lost_link.send_if_modified(|lost| {
                     let first = lost.is_none();
@@ -257,6 +267,8 @@ impl Factory {
     /// them is released, and what it still holds of theirs fails as disconnected. A session ends
     /// once the stubs this thread has over it are gone too.
     pub fn close_links(&self) {
+        // The watch of each lets go of it.
+        self.links_closed.send_replace(true);
         let links = std::mem::take(&mut *self.links.borrow_mut());
         drop(links);
     }
