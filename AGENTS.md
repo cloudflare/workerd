@@ -181,6 +181,13 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
 - **`src/opentelemetry/`** - OTLP schemas vendored from opentelemetry-proto, for tests that decode the spans and logs workerd exports; see `src/opentelemetry/AGENTS.md` for how they are updated
 
+### The Rust seam
+
+The runtime reaches its embedders (the workerd server and others) through a set of interfaces
+called the Rust seam. Each is a Rust trait with a C++ adapter on either side, so that the runtime
+side can move to Rust while embedders stay C++. See
+[docs/reference/rust-seam.md](docs/reference/rust-seam.md) for the ground rules.
+
 ### Configuration System
 
 - Uses **Cap'n Proto** for configuration files (`.capnp` format); a `wrangler.json(c)` is also
@@ -201,6 +208,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Server / binary        | `src/workerd/server/`                                         | Rust `workerd-server` crate (`server/`) drives the C++ `worker-factory`; see `server/AGENTS.md`              |
+| Rust seam              | `docs/reference/rust-seam.md`, `src/rust/worker/`             | Runtime/embedder boundary: trait + `Rust*`/`Cxx*` adapters per interface; requests in via `worker::Interface` |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
 | Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |

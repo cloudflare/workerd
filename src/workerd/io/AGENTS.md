@@ -66,6 +66,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - Keep the C++ boundaries: which component owns which state, which types cross between components, and where each C++ type is bound. A C++ type gets one Rust binding, in the crate matching its header (`io/io-context.h` → `io-context/`, KJ types → `src/rust/kj`), and other crates reuse it through a cxx type alias rather than shimming its methods again. `IoContext::IncomingRequest` is bound in `io-context/`, and `entrypoint/` calls those bindings.
 - Inside those boundaries, write idiomatic Rust: ownership and typestates instead of "can only be called once" runtime checks, enums for state, `Result` for failure.
 - Don't build for callers that don't exist yet. Add holder types, traits or generic layers when a second user needs them.
+- A port that crosses the runtime's boundary with its embedders follows the ground rules of the [Rust seam](../../../docs/reference/rust-seam.md).
 - Make architectural changes in their own step. When Rust allows a better structure than the C++ one, propose it as a separate change, so that each port stays reviewable against the C++ it replaces.
 
 ## Adding a compatibility flag
