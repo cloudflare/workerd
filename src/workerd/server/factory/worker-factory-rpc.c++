@@ -407,12 +407,12 @@ kj::Own<WorkerInterface> rpc_client_start_request(
 }
 
 kj::Own<HttpCall> http_call(kj::Own<WorkerInterface> interface,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     ::rust::Str url,
     const kj::HttpHeaders& headers,
     uint64_t length) {
   auto client = kj::newHttpClient(*interface).attach(kj::mv(interface));
-  auto request = client->request(method, kj::str(url), headers, length);
+  auto request = client->request(kj::HttpMethod(method), kj::str(url), headers, length);
   return kj::heap<HttpCall>(kj::mv(client), kj::mv(request));
 }
 

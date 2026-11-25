@@ -441,7 +441,7 @@ namespace {
 
 static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
   KJ_REQUIRE(method <= capnp::HttpMethod::BAN, "unknown method", method);
-  return static_cast<kj::HttpMethod>(method);
+  return kj::HttpMethod(static_cast<kj::HttpMethod::Known>(method));
 }
 
 }  // namespace
@@ -477,7 +477,7 @@ FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
 }
 
 void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
-  builder.setMethod(static_cast<capnp::HttpMethod>(method));
+  builder.setMethod(static_cast<capnp::HttpMethod>(method.known()));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
 
