@@ -118,8 +118,10 @@ all of these hold:
       V8's cleanup task pops each cell and the callback call throws instead of running. No
       JavaScript runs past step 2. Any such cell fails the zygote: those objects are C++-held
       state the snapshot does not carry, and their cleanups must not be dropped silently.
-   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`,
-      template handles drained from Rust JSG).
+   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`).
+      The templates of Rust JSG resource types are first pinned at isolate level and recorded by
+      `TypeId` in `artifact.rustResourceTemplates` (`pinResourceTemplatesIntoSnapshot()`,
+      `src/rust/jsg/ffi.h`).
    5. `bakeConstructorTemplatesIntoSnapshot()`: every materialized JSG resource constructor
       template is pinned at isolate level and recorded, by position, in
       `artifact.constructorTemplateIndices`.
@@ -127,7 +129,8 @@ all of these hold:
    7. The default-context handle is reset. A heap that still holds a suspended generator, such
       as an async function the top level left awaiting a promise, fails the zygote:
       `CreateBlob(kClear)` discards the bytecode a generator resumes in, which is also why V8's
-      bytecode flushing never discards it. V8 patch 0054 adds
+      bytecode flushing never discards it. The V8 patch
+      `Add-SnapshotCreator-HasSuspendedGenerators` adds
       `SnapshotCreator::HasSuspendedGenerators()`, which looks for one among the objects
       `CreateBlob()` would serialize. Then `SnapshotCreator::CreateBlob()` runs. V8 calls
       `serializeInternalFields()` for each wrapper's tag field and `serializeApiWrapperCallback()`
@@ -193,6 +196,7 @@ long as the isolate does. In order:
 | C++ callback addresses the blob refers to    | `registerExternalReference()` table                         | `externalReferences`              |
 | `env` with its bindings, main module namespace | context-level `AddData`, fixed indices                     | `blob` (indices in `snapshot.h`)  |
 | JSG resource constructor templates           | isolate-level `AddData`, by position                        | `constructorTemplateIndices`      |
+| Rust JSG resource templates                  | isolate-level `AddData`, by `TypeId`                        | `rustResourceTemplates`           |
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
@@ -227,17 +231,23 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
   `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
   live original, and once more per started worker on the stored copy.
-- for a Rust JSG resource, `#[jsg_resource(snapshot_stateless)]` (`UrlUtil`, `DnsUtil`,
-  `InspectorModule`), which requires `Default`. Every Rust resource shares one
-  CppHeapPointerTag, so the type cannot be recorded by tag alone: the Rust-side `Wrappable`'s
-  `snapshotClone()` asks the resource for a fresh instance
-  (`GarbageCollected::snapshot_recreate`) that stands in for the clone. See
-  `src/rust/jsg/README.md`.
+- for a Rust JSG resource, an impl of `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`); see
+  below. `#[jsg_resource(snapshot_stateless)]` (`UrlUtil`, `DnsUtil`, `InspectorModule`)
+  generates one, with an empty snapshot, for a type that implements `Default`. Every Rust
+  resource shares one CppHeapPointerTag, so a Rust type is never recorded by tag alone: it goes
+  through the Rust-side `Wrappable`'s `snapshotClone()`.
 
 A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
+
+`jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
+two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
+`snapshot_references()` and `snapshot_relink()` for their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
+into its new `Realm` (`restoreResourceTemplatesFromSnapshot()`) before anything is wrapped, so
+that its new wrappers of a type and the restored ones share a template. `relinkReferences()` runs
+with the new context entered, for the `Lock` of `snapshot_relink()`.
 
 A type whose state lives on the context, and so does not exist yet when `snapshotClone()` runs
 for the started worker, also overrides `Wrappable::snapshotContextReady()`. The file system
@@ -246,8 +256,9 @@ on the context, enters it and calls `IsolateBase::notifySnapshotContextReady()`.
 
 A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
 registry's `import.meta.resolve`, for example) transfers if its functor provides
-`Impl clone() const`; V8 patch 0052 keeps functions created by `v8::Function::New()` in the
-context snapshot so that their wrapper goes through the same path.
+`Impl clone() const`; the V8 patch
+`snapshot-Keep-functions-created-by-v8-Function-New-in-the-context-snapshot` keeps functions
+created by `v8::Function::New()` in the context snapshot so that their wrapper goes through the same path.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -331,8 +342,8 @@ once.
   it too.
 - Without multiple pointer-compression cages every isolate shares one read-only heap, built from
   the read-only snapshot of the isolate the group starts with. A zygote's read-only snapshot
-  differs from the built-in one only in the SharedFunctionInfo id it records; V8 patch 0053 leaves
-  that id out of the debug build's read-only-heap checksum and has a restored isolate continue
+  differs from the built-in one only in the SharedFunctionInfo id it records; the V8 patch
+  `Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum` leaves that id out of the debug build's read-only-heap checksum and has a restored isolate continue
   past it, so that isolates of both kinds can share the heap.
 
 ## Tests
@@ -340,12 +351,13 @@ once.
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `dropUnreachableWrappables()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
-| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, and the `process`/`Buffer` globals |
+| `src/rust/jsg-test/tests/startup_snapshot.rs`                       | Rust resources: state, shared templates, relinked references, and a type without `SnapshotTransfer` |
+| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, the `process`/`Buffer` globals, and the lazy `MessageChannel`/`MessagePort` globals, read and unread at the top level |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
 | `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
-| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
+| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
 | `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |

@@ -4,18 +4,6 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
-// The TypeScript EventSource (the TS_EVENT_SOURCE autogate) matches the C++
-// one's shape, but its functions are not native.
-const usingTsEventSource = !(
-  EventSource as unknown as { from: () => void }
-).from
-  .toString()
-  .includes('[native code]');
-const kFailsWithCppEventSource = usingTsEventSource ? [] : true;
-
-const kListenerThis =
-  "Inside an EventSource listener, `this` is not the EventSource, so the test's this.close() throws";
-
 export default {
   'dedicated-worker/eventsource-close.js': {
     comment: 'Uses postMessage which is not available in workerd',
@@ -54,10 +42,7 @@ export default {
     comment: 'Uses postMessage which is not available in workerd',
     omittedTests: true,
   },
-  'event-data.any.js': {
-    comment: 'The C++ EventSource drops an event whose data is empty',
-    expectedFailures: kFailsWithCppEventSource,
-  },
+  'event-data.any.js': {},
   'eventsource-close.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
@@ -90,10 +75,7 @@ export default {
   'eventsource-eventtarget.any.js': {},
   'eventsource-onmessage-trusted.any.js': {},
   'eventsource-onmessage.any.js': {},
-  'eventsource-onopen.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'eventsource-onopen.any.js': {},
   'eventsource-prototype.any.js': {},
   'eventsource-reconnect.window.js': {
     comment: 'Window-specific tests are not supported',
@@ -105,31 +87,14 @@ export default {
   },
   'eventsource-url.any.js': {},
   'format-bom-2.any.js': {},
-  'format-bom-split.any.js': {
-    comment:
-      'The C++ EventSource does not strip a byte order mark split across chunks',
-    expectedFailures: kFailsWithCppEventSource,
-  },
+  'format-bom-split.any.js': {},
   'format-bom-utf-16.any.js': {},
   'format-bom.any.js': {},
   'format-comments.any.js': {},
-  'format-data-before-final-empty-line.any.js': {
-    comment:
-      'The C++ EventSource sets lastEventId from an event that is never dispatched',
-    expectedFailures: kFailsWithCppEventSource,
-  },
-  'format-field-data.any.js': {
-    comment: 'The C++ EventSource drops an event whose data is empty',
-    expectedFailures: kFailsWithCppEventSource,
-  },
-  'format-field-event-empty.any.js': {
-    comment: `${kListenerThis}, and with the C++ EventSource the file hangs`,
-    disabledTests: true,
-  },
-  'format-field-event.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'format-data-before-final-empty-line.any.js': {},
+  'format-field-data.any.js': {},
+  'format-field-event-empty.any.js': {},
+  'format-field-event.any.js': {},
   'format-field-id-2.any.js': {},
   'format-field-id-3.window.js': {
     comment: 'Window-specific tests are not supported',
@@ -142,37 +107,23 @@ export default {
   'format-field-id-redirect.any.js': {},
   'format-field-id.any.js': {},
   'format-field-parsing.any.js': {},
-  'format-field-retry-bogus-2.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
-  'format-field-retry-bogus.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'format-field-retry-bogus-2.any.js': {},
+  'format-field-retry-bogus.any.js': {},
   'format-field-retry-empty.any.js': {},
-  'format-field-retry.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'format-field-retry.any.js': {},
   'format-field-unknown.any.js': {},
   'format-leading-space.any.js': {},
-  'format-mime-bogus.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'format-mime-bogus.any.js': {},
   'format-mime-trailing-semicolon.any.js': {},
   'format-mime-valid-bogus.any.js': {},
   'format-newlines.any.js': {},
   'format-null-character.any.js': {},
   'format-utf-8.any.js': {},
-  'request-accept.any.js': {
-    comment: kListenerThis,
-    expectedFailures: true,
-  },
+  'request-accept.any.js': {},
   'request-cache-control.any.js': {
-    comment: `${kListenerThis}, so the second subtest never starts and the file hangs`,
-    disabledTests: true,
+    comment:
+      'fetch() sends no Origin header, so the cross-origin cors.py handler fails with a 500 and the file hangs',
+    disabledTests: [/cors\.py\?run=cache-control/],
   },
   'request-credentials.window.js': {
     comment: 'Window-specific tests are not supported',

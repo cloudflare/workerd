@@ -1,4 +1,5 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 
 js_library(
     name = "server-harness_js_lib",
@@ -6,7 +7,13 @@ js_library(
     visibility = ["//visibility:public"],
 )
 
-js_test(
+js_library(
+    name = "wrangler-serve_js_lib",
+    srcs = ["wrangler-serve.mjs"],
+    visibility = ["//visibility:public"],
+)
+
+wd_js_test(
     name = "server-harness-test",
     size = "small",
     data = [":server-harness_js_lib"],

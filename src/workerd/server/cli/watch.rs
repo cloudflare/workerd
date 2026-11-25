@@ -13,21 +13,30 @@ use kj_rs_io::TokioFileWatcher;
 /// a burst of changes.
 const SETTLE_TIME: Duration = Duration::from_millis(500);
 
+/// A set of watched files. A clone shares the set.
+#[derive(Clone)]
 pub struct Watcher {
     files: Arc<TokioFileWatcher>,
 }
 
 impl Watcher {
-    /// Starts watching `executable`, so that rebuilding the server reloads it too.
-    pub fn new(executable: &Path) -> io::Result<Self> {
+    /// Watches no files yet.
+    pub fn new() -> io::Result<Self> {
         let files = TokioFileWatcher::new().map_err(|error| io::Error::other(error.to_string()))?;
-        let executable = std::path::absolute(executable)?;
-        files
-            .watch(executable.as_os_str().as_encoded_bytes())
-            .map_err(|error| io::Error::other(error.to_string()))?;
         Ok(Self {
             files: Arc::new(files),
         })
+    }
+
+    /// Starts watching `executable` too, so that rebuilding the server reloads it.
+    pub fn with_executable(executable: &Path) -> io::Result<Self> {
+        let watcher = Self::new()?;
+        let executable = std::path::absolute(executable)?;
+        watcher
+            .files
+            .watch(executable.as_os_str().as_encoded_bytes())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        Ok(watcher)
     }
 
     /// Adds a file to the watched set: `path` is native path bytes.
@@ -50,16 +59,32 @@ impl Watcher {
         runtime.block_on(self.wait_for_changes())
     }
 
-    /// Resolves once a watched file has changed and changes have settled. The watcher itself
-    /// needs no runtime (kj-rs-io's is notify-driven); the settle timer needs tokio's.
+    /// Resolves once a watched file has changed and changes have settled, saying on stderr that
+    /// a change was noticed.
     pub fn wait_for_changes(&self) -> impl Future<Output = Result<(), KjError>> + use<> {
+        self.settled_changes(|| {
+            // A carriage return rather than a newline, so that the next line written replaces
+            // this one.
+            eprint!("Noticed configuration change, reloading shortly...\r");
+        })
+    }
+
+    /// Resolves once a watched file has changed and changes have settled, saying nothing.
+    pub fn wait_quietly_for_changes(&self) -> impl Future<Output = Result<(), KjError>> + use<> {
+        self.settled_changes(|| {})
+    }
+
+    /// Resolves once a watched file has changed and changes have settled; `noticed` runs at the
+    /// first change. The watcher itself needs no runtime (kj-rs-io's is notify-driven); the
+    /// settle timer needs tokio's.
+    fn settled_changes<F: FnOnce()>(
+        &self,
+        noticed: F,
+    ) -> impl Future<Output = Result<(), KjError>> + use<F> {
         let files = Arc::clone(&self.files);
         async move {
             files.on_change().await.map_err(KjError::from)?;
-
-            // Let the user know we saw the change. A carriage return rather than a newline, so
-            // the next line written replaces this one.
-            eprint!("Noticed configuration change, reloading shortly...\r");
+            noticed();
 
             // Each further change within SETTLE_TIME restarts the wait.
             while let Ok(change) = tokio::time::timeout(SETTLE_TIME, files.on_change()).await {

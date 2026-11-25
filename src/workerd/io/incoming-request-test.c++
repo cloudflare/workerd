@@ -438,6 +438,66 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   fixture.drainAndDestroy(kj::mv(second));
 }
 
+// An IoChannelFactory numbered in the order the fixture's incoming requests were created.
+struct NumberedChannelFactory final: public TestFixture::DummyIoChannelFactory {
+  NumberedChannelFactory(TimerChannel& timer, uint number)
+      : DummyIoChannelFactory(timer),
+        number(number) {}
+  uint number;
+};
+
+uint channelFactoryNumber(IoContext& context) {
+  return kj::downcast<NumberedChannelFactory>(context.getIoChannelFactory()).number;
+}
+
+// Delivers two requests to one actor, the older numbered 0 and the newer 1, and has the newer
+// return while the actor has background work, so that it stays current. Calls `body` with the
+// actor's context and a function that has the older request return too.
+void withReturnedNewerRequest(TestFixture::SetupParams params,
+    kj::FunctionParam<void(IoContext&, kj::FunctionParam<void()> returnOlder)> body) {
+  uint created = 0;
+  params.actorId = Worker::Actor::Id(kj::str("io-channels-test"));
+  params.ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+      [&created](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<NumberedChannelFactory>(timer, created++);
+  });
+  TestFixture fixture(kj::mv(params));
+  auto context = fixture.newIoContext();
+  auto older = fixture.newIncomingRequest(*context);
+  auto newer = fixture.newIncomingRequest(*context);
+  context->addWaitUntil(kj::NEVER_DONE);
+
+  ErrorHandlerImpl errorHandler;
+  kj::TaskSet waitUntilTasks(errorHandler);
+  newer->drain(waitUntilTasks, kj::mv(newer));
+
+  auto returnOlder = [&]() {
+    if (older.get() != nullptr) older->drain(waitUntilTasks, kj::mv(older));
+  };
+  body(*context, returnOlder);
+  returnOlder();
+}
+
+KJ_TEST("an actor's calls use the channels of its newest running request") {
+  withReturnedNewerRequest(
+      {.autogateKeys = kj::arr(util::AutogateKey::IO_CHANNELS_FROM_RUNNING_REQUEST)},
+      [](IoContext& context, kj::FunctionParam<void()> returnOlder) {
+    KJ_EXPECT(channelFactoryNumber(context) == 0);
+
+    // Once every request has returned, the calls use the current request's channels.
+    returnOlder();
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
+}
+
+KJ_TEST("without IO_CHANNELS_FROM_RUNNING_REQUEST, an actor's calls use its current request's "
+        "channels") {
+  withReturnedNewerRequest(
+      {.ignoreAllAutogatesEnv = true}, [](IoContext& context, kj::FunctionParam<void()>) {
+    KJ_EXPECT(channelFactoryNumber(context) == 1);
+  });
+}
+
 KJ_TEST("cancelPendingWorkForHibernation() cancels pending work but keeps abort watchers armed") {
   TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-test"))});
   auto& waitScope = fixture.getWaitScope();
@@ -584,10 +644,11 @@ kj::Promise<void> runOnHibernate(TestFixture& fixture,
     Worker::Actor& actor,
     kj::Own<RequestObserver> observer,
     kj::Maybe<TimerChannel&> timer = kj::none,
-    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none) {
+    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext = kj::none) {
   return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
-      kj::mv(observer), kj::mv(tracer), kj::none /* selfTokenFactory */);
+      kj::mv(observer), kj::mv(tracer), kj::mv(triggerContext), kj::none /* selfTokenFactory */);
 }
 
 // An actor whose onHibernate handler never settles, leaving a timer behind.
@@ -645,12 +706,15 @@ KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it 
   });
 }
 
-// Records, in order, the onset and return events reported to it.
+// Records, in order, the onset and return events reported to it, and the trace of the invocation
+// whose onset it last saw.
 class RecordingTracer final: public BaseTracer {
  public:
   kj::String events;
+  kj::Maybe<tracing::TraceId> traceId;
 
-  void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&& info) override {
+  void setEventInfo(IoContext::IncomingRequest& request, tracing::EventInfo&& info) override {
+    traceId = request.getInvocationSpanContext().getTraceId();
     KJ_IF_SOME(onHibernate, info.tryGet<tracing::OnHibernateEventInfo>()) {
       events = kj::str(events, "onHibernateOnset:", onHibernate.reason, ";");
     } else {
@@ -707,6 +771,28 @@ KJ_TEST("runOnHibernate() reports the handler to the tracer as an onHibernate ev
         .wait(fixture.getWaitScope());
 
     KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;return;", tracer->events);
+  });
+}
+
+KJ_TEST("runOnHibernate() runs the handler in the trace it's given") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    export default class extends DurableObject {
+      async [onHibernate]() {}
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-trigger-context-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    constexpr tracing::TraceId traceId(0x1234, 0x5678);
+    auto tracer = kj::rc<RecordingTracer>();
+    runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()),
+        tracing::InvocationSpanContext(
+            traceId, tracing::TraceId::nullId, tracing::SpanId::nullId, kj::none))
+        .wait(fixture.getWaitScope());
+
+    KJ_EXPECT(KJ_ASSERT_NONNULL(tracer->traceId) == traceId);
   });
 }
 

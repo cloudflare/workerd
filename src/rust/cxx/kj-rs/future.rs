@@ -34,6 +34,7 @@ impl FuturePollStatus {
 // These types are shared with C++ code.
 pub mod repr {
     use std::ffi::c_void;
+    use std::panic::AssertUnwindSafe;
     use std::pin::Pin;
     use std::task::Context;
     use std::task::Poll;
@@ -42,54 +43,6 @@ pub mod repr {
 
     use super::FuturePollStatus;
     use crate::ffi::PollWaker;
-
-    /// Converts a panic payload (from `std::panic::catch_unwind`) escaping a bridged future
-    /// into a heap-allocated `kj::Exception` written to the poll callback's output parameter,
-    /// so C++ observes a rejected promise instead of a process abort.
-    ///
-    /// This mirrors the sync bridge path (`cxx::private::try_unwind`/`catch_unwind` in
-    /// src/unwind.rs), which converts panics in `extern "Rust"` functions into
-    /// `kj::Exception`s. One divergence: a `cxx::CanceledException` payload (produced when an
-    /// infallible `extern "C++"` call throws `kj::CanceledException`) cannot be propagated as
-    /// a distinct "canceled" state here, because `FuturePollStatus` has no Canceled arm; it is
-    /// reported as a regular `kj::Exception` describing the cancellation instead.
-    ///
-    /// # Safety
-    ///
-    /// `ret` must point to storage valid for holding a `kj::Exception*` (the C++
-    /// `FuturePoller<T>` union guarantees this for the Error arm).
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "takes ownership of the panic payload, mirroring std::panic::catch_unwind's Err arm"
-    )]
-    unsafe fn write_panic_as_exception(
-        ret: *mut c_void,
-        err: Box<dyn std::any::Any + Send>,
-    ) -> FuturePollStatus {
-        let msg = if let Some(s) = err.downcast_ref::<&'static str>() {
-            format!("panic in bridged future poll: {s}")
-        } else if let Some(s) = err.downcast_ref::<String>() {
-            format!("panic in bridged future poll: {s}")
-        } else if err.downcast_ref::<cxx::CanceledException>().is_some() {
-            "panic in bridged future poll: kj::CanceledException".to_owned()
-        } else {
-            "panic in bridged future poll".to_owned()
-        };
-        let exception = cxx::IntoKjException::into_kj_exception(
-            cxx::KjError::new(cxx::KjExceptionType::Failed, msg),
-            file!(),
-            line!(),
-        );
-        // SAFETY: `ret` points to storage valid for a `kj::Exception*` per this fn's
-        // `# Safety` contract (the C++ `FuturePoller<T>` Error arm).
-        unsafe {
-            std::ptr::write(
-                ret.cast::<*mut c_void>(),
-                exception.into_raw().as_ptr().cast(),
-            );
-        }
-        FuturePollStatus::ERROR
-    }
 
     type PollCallback = for<'a> unsafe extern "C" fn(
         fut: *mut c_void,
@@ -150,29 +103,23 @@ pub mod repr {
             // SAFETY: the boxed future is never moved out of its heap allocation, so pinning
             // the `&mut` reborrow is sound.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let poll = match std::panic::catch_unwind(AssertUnwindSafe(|| {
                 let waker = crate::waker::lend(waker);
                 let mut context = Context::from_waker(&waker);
                 fut.poll(&mut context)
             })) {
-                Ok(Poll::Ready(Ok(value))) => {
+                Ok(poll) => poll,
+                Err(payload) => Poll::Ready(Err(poll_panic_exception(&*payload))),
+            };
+            match poll {
+                Poll::Ready(Ok(value)) => {
                     // SAFETY: `ret` points to storage suitable for a `T` (Complete arm).
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Ok(Poll::Ready(Err(error))) => {
-                    // SAFETY: `ret` points to storage for a `kj::Exception*` (Error arm).
-                    unsafe {
-                        std::ptr::write(
-                            ret.cast::<*mut c_void>(),
-                            error.into_raw().as_ptr().cast(),
-                        );
-                    };
-                    FuturePollStatus::ERROR
-                }
-                Ok(Poll::Pending) => FuturePollStatus::PENDING,
-                // SAFETY: `ret` is the Error-arm storage; forwarded to `write_panic_as_exception`.
-                Err(panic_payload) => unsafe { write_panic_as_exception(ret, panic_payload) },
+                // SAFETY: `ret` has room for a `kj::Exception*`, as for a `T`.
+                Poll::Ready(Err(error)) => unsafe { write_error(ret, error) },
+                Poll::Pending => FuturePollStatus::PENDING,
             }
         }
 
@@ -183,10 +130,8 @@ pub mod repr {
         /// (drop-exactly-once, enforced by `Impl`'s move semantics on the C++ side).
         ///
         /// Unwind safety: a panic in the future's destructor has no error channel (this is
-        /// called from C++ destructors/cancellation paths), so it is converted into a
-        /// deterministic, labeled abort via `cxx::private::prevent_unwind` — the same
-        /// semantics the sync bridge uses for panics that cannot be reported (rather than
-        /// the unlabeled langdef abort of unwinding out of `extern "C"`).
+        /// called from C++ destructors/cancellation paths), so it is logged rather than
+        /// unwound into C++ ([`drop_catching_panic`]).
         pub(crate) unsafe extern "C" fn drop_in_place(fut: *mut c_void) {
             // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
             // `RustFuture<T>` not used again, so we may read the pointer, reclaim the box, and pin.
@@ -195,9 +140,7 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // SAFETY: the box is never moved out of its allocation, so pinning it is sound.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            cxx::private::prevent_unwind("kj_rs::repr::RustFuture::drop_in_place", move || {
-                drop(fut);
-            });
+            drop_catching_panic(fut);
         }
     }
 
@@ -219,7 +162,7 @@ pub mod repr {
             let fut = unsafe { *(fut.cast::<InfallibleFuturePtr<T>>()) };
             // SAFETY: the boxed future is never moved out of its allocation, so pinning is sound.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match std::panic::catch_unwind(AssertUnwindSafe(|| {
                 let waker = crate::waker::lend(waker);
                 let mut context = Context::from_waker(&waker);
                 fut.poll(&mut context)
@@ -230,16 +173,15 @@ pub mod repr {
                     FuturePollStatus::COMPLETE
                 }
                 Ok(Poll::Pending) => FuturePollStatus::PENDING,
-                // SAFETY: `ret` is the Error-arm storage; forwarded to `write_panic_as_exception`.
-                Err(panic_payload) => unsafe { write_panic_as_exception(ret, panic_payload) },
+                // SAFETY: `ret` has room for a `kj::Exception*`, as for a `T`.
+                Err(payload) => unsafe { write_error(ret, poll_panic_exception(&*payload)) },
             }
         }
 
         /// # Safety
         ///
         /// Same contract as [`RustFuture::drop_in_place`], with `fut` created by
-        /// [`infallible_future`]. A panic in the destructor aborts deterministically with a
-        /// label (see there for rationale).
+        /// [`infallible_future`]. A panic in the destructor is logged (see there).
         pub(crate) unsafe extern "C" fn drop_in_place(fut: *mut c_void) {
             // SAFETY: per this fn's `# Safety` contract, `fut` is the `fut` field of a live
             // `RustInfallibleFuture<T>` not used again; read the pointer, reclaim the box, and pin.
@@ -248,13 +190,52 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // SAFETY: the box is never moved out of its allocation, so pinning it is sound.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            cxx::private::prevent_unwind(
-                "kj_rs::repr::RustInfallibleFuture::drop_in_place",
-                move || {
-                    drop(fut);
-                },
-            );
+            drop_catching_panic(fut);
         }
+    }
+
+    /// Writes `error` to `ret` for `FuturePoller` in future.h, which takes it over.
+    ///
+    /// # Safety
+    /// `ret` must be the output of a poll callback, which has room for a `kj::Exception*`.
+    unsafe fn write_error(ret: *mut c_void, error: cxx::KjException) -> FuturePollStatus {
+        // Safety: forwarded from the caller's contract.
+        unsafe { std::ptr::write(ret.cast::<*mut c_void>(), error.into_raw().as_ptr().cast()) };
+        FuturePollStatus::ERROR
+    }
+
+    /// The exception that fails the promise of a future whose `poll()` panicked with `payload`.
+    ///
+    /// A `CanceledException` payload fails it too, as a `FAILED` exception, since a promise
+    /// rejects only with a `kj::Exception`.
+    #[cold]
+    fn poll_panic_exception(payload: &(dyn std::any::Any + Send)) -> cxx::KjException {
+        cxx::KjError::new(
+            cxx::KjExceptionType::Failed,
+            cxx::private::panic_description("Rust future", payload),
+        )
+        .into()
+    }
+
+    /// Drops `fut`, logging a panic in its destructor rather than unwinding into C++, which drops
+    /// the future when it cancels its promise.
+    fn drop_catching_panic<F: ?Sized>(fut: Pin<Box<F>>) {
+        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(fut))) {
+            log_drop_panic(&*payload);
+        }
+    }
+
+    #[cold]
+    fn log_drop_panic(payload: &(dyn std::any::Any + Send)) {
+        let description = cxx::private::panic_description("Rust future destructor", payload);
+        // Safety: the pointer and length describe `description`, which outlives the call.
+        unsafe { log_error(description.as_ptr(), description.len()) };
+    }
+
+    unsafe extern "C" {
+        /// `KJ_LOG(ERROR, ...)` with the UTF-8 message of `len` bytes at `ptr`.
+        #[link_name = "cxxbridge$kjrs$future$logError"]
+        fn log_error(ptr: *const u8, len: usize);
     }
 
     #[must_use]

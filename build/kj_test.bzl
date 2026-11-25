@@ -1,6 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
-load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("//:build/test_attrs.bzl", "test_attrs")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def kj_test(
@@ -36,10 +36,8 @@ def kj_test(
         name = test_name + "@",
         binary = binary_name,
         data = data,
-        tags = tags,
         size = size,
-        exec_properties = test_exec_properties(size, tags),
-        target_compatible_with = target_compatible_with,
+        **test_attrs(tags, size, target_compatible_with)
     )
 
     _kj_test(
@@ -48,10 +46,8 @@ def kj_test(
         data = data,
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         # Tag with no-coverage to reduce coverage CI time
-        tags = tags + ["no-coverage"],
         size = size,
-        exec_properties = test_exec_properties(size, tags),
-        target_compatible_with = target_compatible_with,
+        **test_attrs(tags + ["no-coverage"], size, target_compatible_with)
     )
 
 def _kj_test_impl(ctx):

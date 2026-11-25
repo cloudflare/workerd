@@ -1,0 +1,20 @@
+load("//:build/wd_js_test.bzl", "wd_js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "secrets-store-test.wd-test",
+    args = ["--experimental"],
+    data = ["secrets-store-test.js"],
+)
+
+# `workerd serve` of a wrangler.jsonc's secrets_store_secrets.
+wd_js_test(
+    name = "secrets-store-wrangler-test",
+    data = [
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:wrangler-serve_js_lib",
+    ],
+    entry_point = "secrets-store-wrangler-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

@@ -43,18 +43,9 @@ using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
-// The V8 private symbols under which a class implemented in the per-isolate bootstrap keeps an
-// error's name and message, as strings, when its `name` and `message` are accessors, as WebIDL
-// attributes are. V8's ToDetailString() reads only data properties, so it can't describe such an
-// error; toDetailString(), and so kj::str() of a handle, reads these instead.
-constexpr kj::StringPtr ERROR_NAME_KEY = "workerd:errorName"_kj;
-constexpr kj::StringPtr ERROR_MESSAGE_KEY = "workerd:errorMessage"_kj;
-
-// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does,
-// except that an object holding strings under ERROR_NAME_KEY and ERROR_MESSAGE_KEY is described
-// as V8 describes an error with that name and message, as `name: message`. Runs no JavaScript,
-// and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims. Requires an
-// entered context. Fails, as ToDetailString() does, only if execution is terminating.
+// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does. Runs
+// no JavaScript, and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims.
+// Requires an entered context. Fails, as ToDetailString() does, only if execution is terminating.
 v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
 kj::String stringifyHandle(v8::Local<v8::Value> value);
@@ -1216,8 +1207,7 @@ class WeakV8Ref final {
 template <V8Value T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const V8Ref<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
-  // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
-  trackField(edgeName, value.handle.Get(isolate_).template As<v8::Value>(), nodeName);
+  trackField(edgeName, value.handle.Get(isolate_), nodeName);
 }
 
 // A value of type T, or `undefined`.
@@ -2139,6 +2129,8 @@ using ReturnType = ReturnType_<Func, T, passLock>::Type;
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = MaintainPromise<ReturnType<Func, Param, passLock>>;
 
+class ModuleRegistry;
+
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
 // (or a subclass of jsg::Object).
@@ -2152,14 +2144,24 @@ class ContextGlobal {
 
   const capnp::SchemaLoader& getSchemaLoader();
 
+  // Reports the module registry to the heap snapshot. Called from the memory info of the
+  // resource type that inherits ContextGlobal (see visitSubclassForMemoryInfo()).
+  void jsgGetContextGlobalMemoryInfo(MemoryTracker& tracker) const;
+
  private:
   // This opaque owner is used to keep the ModuleRegistry alive as long as the ContextGlobal
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
+  // The registry that moduleRegistryBackingOwner owns, if it is the legacy one.
+  kj::Maybe<const ModuleRegistry&> legacyModuleRegistry;
   kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
+    moduleRegistryBackingOwner = kj::mv(registry);
+  }
+  void setLegacyModuleRegistry(kj::Own<ModuleRegistry> registry) {
+    legacyModuleRegistry = *registry;
     moduleRegistryBackingOwner = kj::mv(registry);
   }
   void setSchemaLoader(const capnp::SchemaLoader& schemaLoader);
@@ -2220,6 +2222,17 @@ template <typename T>
 consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
+
+// Opt-out for a type with no public `visitForGc()`, required by templates that would otherwise skip
+// it silently (such as the State of JSG_ITERATOR). Mark a struct by putting JSG_HOLDS_NO_GC_HANDLES
+// in its body. For a type you can't add a member to, specialize the variable in workerd::jsg:
+//
+//     template <>
+//     inline constexpr bool holdsNoGcHandles<IoOwn<Foo>> = true;
+template <typename T>
+inline constexpr bool holdsNoGcHandles = requires { typename T::JsgHoldsNoGcHandles; };
+
+#define JSG_HOLDS_NO_GC_HANDLES using JsgHoldsNoGcHandles = void
 
 // Visitor used during garbage collection. Any resource class that holds `Ref`s should
 // implement GC visitation by declaring a private method like:
@@ -3344,8 +3357,8 @@ class Lock {
 
   // Creates a DOMException without running JavaScript. Its stack is `stackValue` if given, or
   // else captured from the current one.
-  virtual JsObject domException(
-      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
+  JsObject domException(
+      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none);
 
   struct DomExceptionInfo {
     kj::String name;
@@ -3354,7 +3367,7 @@ class Lock {
 
   // If `value` is a DOMException, returns the name and message it was created with, which own
   // properties shadowing its attributes do not change. Does not run JavaScript.
-  virtual kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) = 0;
+  kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value);
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //
@@ -3362,6 +3375,24 @@ class Lock {
   // of the class object.
   template <typename T>
   JsObject getPrototypeFor();
+
+  // Get the FunctionTemplate for the given C++ type (which must be a JSG_RESOURCE_TYPE). Its
+  // HasInstance() is the exact receiver check JSG applies to the type's own members: unlike
+  // TypeHandler::tryUnwrap(), it does not accept objects that merely inherit from an instance.
+  // The template is per isolate, so callers on a hot path may cache it.
+  template <typename T>
+  v8::Local<v8::FunctionTemplate> getTemplateFor() {
+    return getTemplateFor(typeid(T));
+  }
+
+  // Get the CppHeapPointerTag range of the given JSG_RESOURCE_TYPE and its subclasses: the range
+  // JSG's own member dispatch passes to Wrappable::unwrapFromShimInRangeOrAbort(). It depends on
+  // every type the isolate's TypeWrapper knows, so code that cannot see the TypeWrapper gets it
+  // here. Like the template, it is fixed per isolate and callers on a hot path may cache it.
+  template <typename T>
+  v8::CppHeapPointerTagRange getWrappableTagRangeFor() {
+    return getWrappableTagRangeFor(typeid(T));
+  }
 
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
@@ -3569,6 +3600,15 @@ class Lock {
   friend class JsObject;
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
   virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
+  virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) = 0;
+  virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(const std::type_info& type) = 0;
+
+  // domException() and tryGetDomExceptionInfo() for the C++ DOMException class
+  // (jsg/dom-exception.h), the global without the V8_DOM_EXCEPTION autogate, which needs the
+  // isolate's TypeWrapper.
+  virtual JsObject newCppDomException(
+      kj::String name, kj::String message, kj::Maybe<kj::String> stackValue) = 0;
+  virtual kj::Maybe<DomExceptionInfo> tryGetCppDomExceptionInfo(const JsValue& value) = 0;
 };
 
 template <typename T>

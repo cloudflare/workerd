@@ -5,12 +5,10 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/util/strong-bool.h>
 
 #include <pyodide/bundle/python_packages.capnp.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide_static.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -153,6 +151,22 @@ class PythonModuleInfo {
   }
 };
 
+// The uncompressed bytes of a Python memory snapshot.
+class MemorySnapshotSource {
+ public:
+  virtual ~MemorySnapshotSource() noexcept(false) = default;
+
+  // Wraps bytes that are already uncompressed.
+  static kj::Own<MemorySnapshotSource> fromBytes(kj::Array<kj::byte> bytes);
+
+  // The size of the whole snapshot. This must be known before any of the snapshot is read.
+  virtual size_t size() = 0;
+
+  // Copies the bytes starting at `offset` into `buf`, waiting until they are available, and returns
+  // how many it copied.
+  virtual size_t read(size_t offset, kj::ArrayPtr<kj::byte> buf) = 0;
+};
+
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
 // and metadata about the worker.
 //
@@ -169,7 +183,7 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
-    kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
+    kj::Maybe<kj::Own<MemorySnapshotSource>> memorySnapshot;
 
     State(kj::String mainModule,
         kj::Array<kj::String> names,
@@ -179,7 +193,7 @@ class PyodideMetadataReader: public jsg::Object {
         IsTracing isTracing,
         SnapshotToDisk snapshotToDisk,
         CreateBaselineSnapshot createBaselineSnapshot,
-        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
+        kj::Maybe<kj::Own<MemorySnapshotSource>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           pyodideVersion(kj::mv(pyodideVersion)),
@@ -191,10 +205,9 @@ class PyodideMetadataReader: public jsg::Object {
       verifyNoMainModuleInVendor();
     }
 
-    State(const State& other);
-
     void verifyNoMainModuleInVendor();
 
+    // Copies the state, reading the whole memory snapshot if there is one.
     kj::Own<State> clone();
   };
 
@@ -235,7 +248,7 @@ class PyodideMetadataReader: public jsg::Object {
     if (state->memorySnapshot == kj::none) {
       return 0;
     }
-    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
+    auto size = KJ_REQUIRE_NONNULL(state->memorySnapshot)->size();
     KJ_REQUIRE(size <= static_cast<uint32_t>(kj::maxValue), "memory snapshot too large");
     return size;
   }

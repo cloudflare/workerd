@@ -8,15 +8,15 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iterator>
-#include <new>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 #ifdef _WIN32
 #include <basetsd.h>
 #else
+// For ssize_t. include-cleaner attributes it to whichever libc header defines it first.
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <sys/types.h>
 #endif
 

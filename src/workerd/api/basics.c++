@@ -1311,7 +1311,14 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   if (isCanceled) {
     // The signal is already aborted and cannot be triggered again. We don't need to set up RPC.
-    return abort(js, reason);
+    // Its exception is derived from the reason, which can run JavaScript, so that waits until the
+    // value has been read; until then it is the exception of a signal aborted without a reason.
+    auto signal = js.alloc<AbortSignal>(abortException(js, kj::none), reason.addRef(js));
+    deserializer.afterRead(
+        [signal = signal.addRef(), reason = reason.addRef(js)](jsg::Lock& js) mutable {
+      signal->maybeAbortException = abortException(js, reason.getHandle(js));
+    });
+    return signal;
   }
 
   if (flag == Flag::NEVER_ABORTS) {

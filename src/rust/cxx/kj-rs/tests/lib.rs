@@ -22,6 +22,7 @@ use test_futures::join_retained_wake;
 use test_futures::join_wake_storm;
 use test_futures::new_await_fulfillable_promise_future_void;
 use test_futures::new_await_pending_promise_future_void;
+use test_futures::new_awaiting_then_panicking_future_void;
 use test_futures::new_clone_storm_future_void;
 use test_futures::new_cloned_kj_waker_context_future_void;
 use test_futures::new_cross_thread_wake_future_void;
@@ -36,10 +37,9 @@ use test_futures::new_layered_ready_future_void;
 use test_futures::new_multi_round_cross_thread_wake_future_void;
 use test_futures::new_naive_select_future_void;
 use test_futures::new_optimized_then_generic_future_void;
-use test_futures::new_panic_on_drop_future_void;
-use test_futures::new_panicking_after_await_future_void;
+use test_futures::new_panicking_future_i32;
 use test_futures::new_panicking_future_void;
-use test_futures::new_panicking_infallible_future_void;
+use test_futures::new_panicking_on_drop_future_void;
 use test_futures::new_parking_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_ping_pong_future_void;
@@ -402,18 +402,15 @@ pub mod ffi {
 
         async fn new_errored_future_void() -> Result<()>;
 
-        // Unwind protection (kj-rs/future.rs): panics escaping a bridged future's poll()
-        // must become rejected promises (kj::Exception), not process aborts.
-        async fn new_panicking_future_void() -> Result<()>;
-        /// Never ready; its `Drop` panics. Dropping the promise must abort (death test), never
-        /// unwind into C++.
-        async fn new_panic_on_drop_future_void();
-        async fn new_panicking_infallible_future_void();
-        async fn new_panicking_after_await_future_void() -> Result<()>;
-
         async fn new_kj_errored_future_void() -> Result<()>;
 
         async fn new_error_handling_future_void_infallible();
+
+        // Panic test helpers.
+        async fn new_panicking_future_void() -> Result<()>;
+        async fn new_panicking_future_i32() -> i32;
+        async fn new_awaiting_then_panicking_future_void();
+        async fn new_panicking_on_drop_future_void() -> Result<()>;
 
         async fn new_promise_i32_awaiting_future_void() -> Result<()>;
         async fn new_ready_future_i32(value: i32) -> Result<i32>;

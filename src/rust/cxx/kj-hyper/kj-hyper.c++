@@ -100,6 +100,10 @@ class BodySinkStream final: public kj::AsyncOutputStream {
   kj::Promise<void> whenWriteDisconnected() override {
     return sink->when_write_disconnected();
   }
+  // A body aborted before it is dropped fails rather than ends (BodySink::abort()).
+  void abortWrite(kj::Exception&& exception) override {
+    sink->abort();
+  }
 
  private:
   ::rust::Box<BodySink> sink;

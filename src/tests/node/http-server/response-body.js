@@ -236,11 +236,11 @@ export const corkAndUncork = {
         res.cork();
         strictEqual(res.writableLength, 0);
         res.write('chunk1');
-        strictEqual(res.writableLength, 108);
+        strictEqual(res.writableLength, 103);
         res.write('chunk2');
-        strictEqual(res.writableLength, 114);
+        strictEqual(res.writableLength, 109);
         res.write('chunk3');
-        strictEqual(res.writableLength, 120);
+        strictEqual(res.writableLength, 115);
         res.uncork();
         strictEqual(res.writableLength, 0);
         res.end('final');

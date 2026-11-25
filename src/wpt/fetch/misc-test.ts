@@ -270,16 +270,37 @@ export default {
     omittedTests: true,
   },
   'h1-parsing/lone-cr.window.js': {
-    comment: 'Needs a window or worker global',
-    omittedTests: true,
+    comment:
+      'The HTTP client accepts a head that mixes LF and CRLF line endings, and a head cut off by ' +
+      'EOF after a lone CR rejects with Error("Network connection lost."), not TypeError',
+    expectedFailures: [
+      'Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\r\n\nBody)',
+      'Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\n\r)',
+    ],
   },
   'h1-parsing/resources-with-0x00-in-header.window.js': {
-    comment: 'Needs a window or worker global',
-    omittedTests: true,
+    comment:
+      'Loads a script, an iframe and an image through document, which workerd has no DOM for',
+    omittedTests: [
+      'Expect network error for script with 0x00 in a header',
+      'Expect network error for frame navigation to resource with 0x00 in a header',
+      'Expect network error for image with 0x00 in a header',
+    ],
   },
   'h1-parsing/status-code.window.js': {
-    comment: 'Needs a window or worker global',
-    omittedTests: true,
+    comment:
+      'status-code.py ends the response head at EOF without a blank line, which the HTTP client ' +
+      'rejects with Error("Network connection lost."); it also rejects status codes below 100 ' +
+      'with TypeError, where the spec accepts any three-digit code',
+    expectedFailures: [
+      'HTTP/1.1 0 OK ',
+      'HTTP/1.1 1 OK ',
+      'HTTP/1.1 99 NOT OK ',
+      'HTTP/1.1 077 77 ',
+      'HTTP/1.1 099 HELLO ',
+      'HTTP/1.1 200 ',
+      'HTTP/1.1 999 DOES IT MATTER ',
+    ],
   },
   'http-cache/304-update.any.js': {
     comment: 'fetch() has no HTTP cache',
@@ -503,14 +524,7 @@ export default {
     comment: 'Needs a window or worker global',
     omittedTests: true,
   },
-  'security/1xx-response.any.js': {
-    comment: 'A 1xx final response rejects with Error instead of TypeError',
-    expectedFailures: [
-      'Status(100) should be ignored.',
-      'Status(103) should be ignored.',
-      'Status(199) should be ignored.',
-    ],
-  },
+  'security/1xx-response.any.js': {},
   'security/dangling-markup/service-worker.js': {},
   'security/passthrough-serviceworker.js': {},
   'stale-while-revalidate/fetch.any.js': {

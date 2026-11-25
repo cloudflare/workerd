@@ -6,16 +6,9 @@
 
 #include <sys/types.h>
 
-#include <kj/io.h>
 #include <kj/test.h>
 #include <kj/thread.h>
 
-#if !_WIN32
-#include <unistd.h>
-#endif
-
-#include <csignal>
-#include <cstdio>
 #include <thread>
 
 // Raw-RustFuture test helpers, defined in tests/lib.rs and tests/test_futures.rs. The
@@ -211,57 +204,6 @@ KJ_TEST(".awaiting a Promise<T> from Rust can produce an Err Result") {
 
   []() -> kj::Promise<void> { co_await new_error_handling_future_void_infallible(); }().wait(
            waitScope);
-}
-
-KJ_TEST("a panicking bridged async fn surfaces as a catchable kj::Exception, not an abort") {
-  // Unwind protection in the RustFuture vtable (kj-rs/future.rs): panics escaping poll() are
-  // converted into errored completions, mirroring the sync bridge's panic -> kj::Exception
-  // conversion. Before that protection, any of these would abort the process (unwinding out
-  // of an extern "C" fn).
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-
-  {
-    // Fallible future, panic on first poll.
-    auto exception = KJ_ASSERT_NONNULL(
-        kj::runCatchingExceptions([&]() { new_panicking_future_void().wait(waitScope); }));
-    KJ_EXPECT(exception.getDescription().contains("bridged future panicked on purpose"),
-        exception.getDescription());
-  }
-
-  {
-    // Infallible future: the promise can still reject (kj::Promise<T> always carries an
-    // exception channel even when the Rust signature is infallible).
-    auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
-        [&]() { new_panicking_infallible_future_void().wait(waitScope); }));
-    KJ_EXPECT(exception.getDescription().contains("bridged infallible future panicked on purpose"),
-        exception.getDescription());
-  }
-
-  {
-    // Panic after a suspension point: exercises the event-loop-driven poll path (not the
-    // eager creation-time poll).
-    auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
-        [&]() { new_panicking_after_await_future_void().wait(waitScope); }));
-    KJ_EXPECT(exception.getDescription().contains("panicked after a suspension point"),
-        exception.getDescription());
-  }
-
-  // A panicking bridged future can also be caught from a KJ coroutine.
-  []() -> kj::Promise<void> {
-    kj::Maybe<kj::Exception> maybeException;
-    try {
-      co_await new_panicking_future_void();
-    } catch (...) {
-      maybeException = kj::getCaughtExceptionAsKj();
-    }
-    auto& exception = KJ_ASSERT_NONNULL(maybeException, "should have thrown");
-    KJ_EXPECT(exception.getDescription().contains("bridged future panicked on purpose"),
-        exception.getDescription());
-  }().wait(waitScope);
-
-  // The loop is still healthy after the panics: run a normal future to completion.
-  []() -> kj::Promise<void> { co_await new_ready_future_void(); }().wait(waitScope);
 }
 
 KJ_TEST("Rust can await Promise<int32_t>") {
@@ -485,6 +427,71 @@ KJ_TEST("eager promises still cancel on drop (never explicitly polled by the cal
     KJ_EXPECT(get_cancellation_counter() == 0);
   }
   KJ_EXPECT(get_cancellation_counter() == 1);
+}
+
+// =======================================================================================
+// Panic tests
+
+// The exception that `promise` rejects with.
+template <typename T>
+kj::Exception expectRejected(kj::Promise<T> promise, kj::WaitScope& waitScope) {
+  kj::Maybe<kj::Exception> maybeException;
+  try {
+    promise.wait(waitScope);
+  } catch (...) {
+    maybeException = kj::getCaughtExceptionAsKj();
+  }
+  return kj::mv(KJ_ASSERT_NONNULL(maybeException, "should have rejected"));
+}
+
+KJ_TEST("a fallible Rust future that panics while polled rejects its promise") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto exception = expectRejected(new_panicking_future_void(), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(exception.getDescription() == "panic in Rust future: fallible future panicked",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future whose output is not a Result rejects its promise when it panics") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto exception = expectRejected(new_panicking_future_i32(), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(
+      exception.getDescription() == "panic in Rust future: infallible future panicked with 42",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future that panics when polled again from the event loop rejects its promise") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto promise = new_awaiting_then_panicking_future_void();
+  // The first poll leaves the future waiting for the KJ promise it awaits.
+  KJ_EXPECT(!promise.poll(waitScope));
+  fulfill_stored_promise();
+  auto exception = expectRejected(kj::mv(promise), waitScope);
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(exception.getDescription() == "panic in Rust future: future panicked after awaiting",
+      exception.getDescription());
+}
+
+KJ_TEST("a Rust future that panics when cancelled logs the panic") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  {
+    auto promise = new_panicking_on_drop_future_void();
+    KJ_EXPECT(!promise.poll(waitScope));
+    KJ_EXPECT_LOG(ERROR, "panic in Rust future destructor: future panicked while dropped");
+    { auto dropped = kj::mv(promise); }
+  }
+
+  // The event loop still runs futures.
+  KJ_EXPECT(new_ready_future_i32(7).wait(waitScope) == 7);
 }
 
 // TODO(someday): More test cases.
@@ -897,43 +904,6 @@ KJ_TEST("Same-thread wake storm inside a single poll coalesces into one re-poll"
   KJ_EXPECT(promise.poll(waitScope));
   promise.wait(waitScope);
 }
-
-#if !_WIN32
-// Runs `body` as KJ_EXPECT_SIGNAL does, in a forked child expected to die of `signal`, and returns
-// what the child wrote to stderr. A file rather than a pipe holds it, so that a long backtrace
-// cannot block the child before the parent reads.
-template <typename Func>
-kj::String expectSignalWithStderr(int signal, Func&& body) {
-  FILE* file = tmpfile();
-  KJ_ASSERT(file != nullptr);
-  KJ_DEFER(fclose(file));
-  int fd = fileno(file);
-  KJ_EXPECT_SIGNAL(signal, {
-    dup2(fd, STDERR_FILENO);
-    body();
-  });
-  KJ_SYSCALL(lseek(fd, 0, SEEK_SET));
-  kj::FdInputStream stderrOutput(fd);
-  return stderrOutput.readAllText();
-}
-
-KJ_TEST("a panic in a bridged future's Drop aborts deterministically (no unwind into C++)") {
-  // RustInfallibleFuture::drop_in_place, like RustFuture's, has no error channel -- it runs from
-  // C++ destructors and cancellation paths -- so a panicking Drop is converted into a labeled
-  // abort via cxx::private::prevent_unwind rather than unwinding across the FFI frame. An
-  // unlabeled abort, such as an `extern "C"` function's refusal to unwind, would not name it.
-  auto output = expectSignalWithStderr(SIGABRT, []() {
-    kj::EventLoop loop;
-    kj::WaitScope waitScope(loop);
-    auto promise = new_panic_on_drop_future_void();
-    KJ_EXPECT(!promise.poll(waitScope));
-    promise = nullptr;  // cancels: drops the Rust future, whose Drop panics
-  });
-  KJ_EXPECT(
-      output.contains("panic in ffi function kj_rs::repr::RustInfallibleFuture::drop_in_place"_kj),
-      output);
-}
-#endif
 
 KJ_TEST("Async tracing reaches through the bridge into the awaited KJ promise") {
   kj::EventLoop loop;

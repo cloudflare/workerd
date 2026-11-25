@@ -285,8 +285,7 @@ class Tracing final: public jsg::Object {
   jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
 
   // Returns the span associated with the current async context, or the invocation span when no
-  // user-created span is active. Returns undefined outside an invocation or when execution is
-  // detached into the root async context.
+  // user-created span is active. Returns undefined outside an invocation.
   jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 

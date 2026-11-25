@@ -1,9 +1,10 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_python//python:defs.bzl", "py_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+load("//:build/wd_py_test.bzl", "wd_py_test")
 load("//src/pyodide/bundle:python_bundles.bzl", "python_bundles")
-load(":helpers.bzl", "pyodide_extra", "pyodide_static")
+load(":pyodide_extra.bzl", "pyodide_extra")
+load(":pyodide_static.bzl", "pyodide_static")
 
 pyodide_extra()
 
@@ -27,12 +28,6 @@ wd_cc_embed(
 )
 
 alias(
-    name = "pyodide.capnp.bin@rule",
-    actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
-    visibility = ["//visibility:public"],
-)
-
-alias(
     name = "pyodide",
     actual = "pyodide@" + DEV_VERSION,
     visibility = ["//visibility:public"],
@@ -44,7 +39,7 @@ write_file(
     content = [json.encode(BUNDLE_VERSION_INFO)],
 )
 
-py_test(
+wd_py_test(
     name = "unit-test-introspection",
     srcs = [
         "internal/introspection.py",
@@ -53,7 +48,7 @@ py_test(
     main = "internal/test_introspection.py",
 )
 
-py_test(
+wd_py_test(
     name = "unit-test-frozen-sdk",
     srcs = ["internal/test_frozen_sdk.py"],
     data = glob(["internal/workers-api/**"]),

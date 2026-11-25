@@ -9,6 +9,7 @@
 // them, with jsg_cpp::RustResourceWrapper.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
 
 #include <rust/cxx.h>
@@ -25,6 +26,10 @@ struct HostTag {
   static kj::Maybe<bool> isInstance(v8::Isolate* isolate, jsg_cpp::Local value);
 };
 using HostRef = jsg_cpp::RustRef<HostTag>;
+
+// The tags of the serializable resources below. The harness's isolate registers them all, so no two
+// may be the same.
+enum class SerializationTag { GETTER = 0, FINISHER = 1 };
 
 // A C++ resource whose methods Rust calls.
 class TestCppGreeter final: public jsg::Object {
@@ -114,6 +119,41 @@ class TestCppHolder final: public jsg::Object {
   }
 };
 
+// A C++ resource that serializes the value it holds, as a workerd API object does, and whose
+// deserializer passes the value to the global `afterRead` function through
+// Deserializer::afterRead(), as one whose work on what it read runs JavaScript does.
+class TestCppFinisher final: public jsg::Object {
+ public:
+  explicit TestCppFinisher(jsg::JsRef<jsg::JsValue> value): value(kj::mv(value)) {}
+
+  JSG_RESOURCE_TYPE(TestCppFinisher) {}
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TestCppFinisher> deserialize(
+      jsg::Lock& js, SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(SerializationTag::FINISHER);
+
+ private:
+  jsg::JsRef<jsg::JsValue> value;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(value);
+  }
+};
+
+// A C++ resource whose deserializer returns an object with an own accessor property `probe`, whose
+// getter is the global function `probeGetter`: data that V8 reads can't hold one, so a reader that
+// reads the object's own properties calls JavaScript.
+class TestCppGetter final: public jsg::Object {
+ public:
+  JSG_RESOURCE_TYPE(TestCppGetter) {}
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {}
+  static jsg::JsObject deserialize(
+      jsg::Lock& js, SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(SerializationTag::GETTER);
+};
+
 // How many TestCppHolders have been destroyed.
 uint32_t holdersDestroyedForTest();
 // How many TestCppHolders have been destroyed on this thread, and how many of those while an
@@ -127,6 +167,7 @@ namespace workerd::rust::jsg_test {
 
 using ::workerd::cpp_interop_test::TestCppBase;
 using ::workerd::cpp_interop_test::TestCppDerived;
+using ::workerd::cpp_interop_test::TestCppFinisher;
 using ::workerd::cpp_interop_test::TestCppGreeter;
 using ::workerd::cpp_interop_test::TestCppHolder;
 
@@ -167,6 +208,7 @@ uint32_t test_cpp_holders_destroyed_on_this_thread_in_an_isolate();
 jsg_cpp::MaybeLocal test_cpp_greeter_new(v8::Isolate* isolate, ::rust::Str greeting);
 jsg_cpp::MaybeLocal test_cpp_derived_new(v8::Isolate* isolate);
 jsg_cpp::MaybeLocal test_cpp_holder_new(v8::Isolate* isolate);
+jsg_cpp::MaybeLocal test_cpp_finisher_new(v8::Isolate* isolate, jsg_cpp::Local value);
 // Creates a Rust `Host` the way C++ creates an `ExecutionContext` for a request (through the
 // crate's `extern "Rust"` constructor), checks its type, and has a new TestCppHolder hold it.
 // Returns the holder's wrapper.

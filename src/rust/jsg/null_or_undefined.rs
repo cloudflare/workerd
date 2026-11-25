@@ -9,8 +9,8 @@ use crate::Nullable;
 /// Prefer this to `Option<Nullable<T>>` for optional nullable values. Unlike
 /// [`Nullable<T>`], input conversion keeps `undefined` distinct from `null`.
 /// Method arguments may be omitted, producing [`NullOrUndefined::Undefined`].
-/// Non-nullish values use `T`'s normal conversion rules; use [`crate::Lenient`]
-/// when shallow type mismatches should also become `undefined`.
+/// Non-nullish values use `T`'s normal conversion rules; use [`crate::LenientOption`]
+/// when shallow type mismatches should become absent instead.
 ///
 /// The default is [`NullOrUndefined::Undefined`], without requiring `T: Default`.
 /// Conversions to and from `Option<Nullable<T>>` preserve all three states.

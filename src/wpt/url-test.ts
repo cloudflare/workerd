@@ -12,10 +12,10 @@ const usingTsUrl = !Object.hasOwn(
   'URL'
 );
 
-// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) brand-checks
-// its attributes, so its prototype is not a valid record for
-// URLSearchParams; the C++ one's are instance properties.
-const usingTsDomException = Error.isError(new DOMException());
+// V8's DOMException (the V8_DOM_EXCEPTION autogate) brand-checks its
+// attributes, so its prototype is not a valid record for URLSearchParams; the
+// C++ one's are instance properties.
+const usingV8DomException = Error.isError(new DOMException());
 
 export default {
   'IdnaTestV2-removed.any.js': {},
@@ -69,6 +69,7 @@ export default {
     // Node does the same: https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L24
     omittedTests: true,
   },
+  'url-setters-lone-surrogates.any.js': {},
   'url-setters-stripping.any.js': {},
   'url-setters.any.js': {},
   'url-statics-canparse.any.js': {},
@@ -85,7 +86,7 @@ export default {
   'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
     comment: 'The C++ DOMException.prototype converts to a record',
-    expectedFailures: usingTsDomException
+    expectedFailures: usingV8DomException
       ? []
       : ['URLSearchParams constructor, DOMException as argument'],
   },

@@ -4,11 +4,12 @@
 
 // Top-level code that touches what V8 adds to a context only when it is not building a startup
 // snapshot: Error.stackTraceLimit, WebAssembly, SharedArrayBuffer, the Iterator helpers behind
-// shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h). One service per case: MODE selects the
-// case's top-level behaviour, and each case reports what its Worker sees at request time. The
-// runner asserts the reports. Under the startup-snapshot autogate every service here goes through
-// the zygote; without it they are plain Workers and the same assertions hold with snapshotUsed
-// false.
+// shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h), and the globals the runtime
+// defines in ways a snapshot must carry: process and Buffer, and the lazy MessageChannel and
+// MessagePort. One service per case: MODE selects the case's top-level behaviour, and each case
+// reports what its Worker sees at request time. The runner asserts the reports. Under the
+// startup-snapshot autogate every service here goes through the zygote; without it they are plain
+// Workers and the same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 import { env } from 'cloudflare:workers';
@@ -114,6 +115,9 @@ switch (MODE) {
     break;
   case 'temporal-on-control':
     break;
+  case 'quota-exceeded-error-polyfill':
+    globalThis.QuotaExceededError = { polyfill: true };
+    break;
   case 'date-frozen':
     Object.freeze(Date.prototype);
     break;
@@ -135,6 +139,13 @@ switch (MODE) {
     // here, which the snapshot carries like any other.
     globalThis.emptyBytes = new Uint8Array(new ArrayBuffer(0));
     globalThis.someBytes = new Uint8Array(new ArrayBuffer(4)).fill(7);
+    break;
+  // The MessageChannel and MessagePort globals are lazy data properties, which load their module
+  // when first read (src/per_isolate/main.ts). Left unread, they are still lazy in the snapshot.
+  case 'message-channel':
+    break;
+  case 'message-channel-read':
+    topLevel.messageChannelType = typeof MessageChannel;
     break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
@@ -162,6 +173,10 @@ function report() {
         ? 'polyfill'
         : typeof globalThis.Temporal,
     toTemporalInstant: typeof Date.prototype.toTemporalInstant,
+    quotaExceededError:
+      globalThis.QuotaExceededError?.polyfill === true
+        ? 'polyfill'
+        : typeof globalThis.QuotaExceededError,
     processCustom: globalThis.process?.custom ?? null,
     bufferCustom: globalThis.Buffer?.custom ?? null,
     processEnv: globalThis.process?.env?.FROM_TOP_LEVEL ?? null,
@@ -201,9 +216,42 @@ const NATIVE_TYPES = {
   join: 'function',
 };
 
-async function fetch() {
-  return Response.json(report());
+// The classes the globals hold must be the restored context's: the ones node:worker_threads gets
+// from cloudflare-internal:messagechannel, extending its EventTarget.
+async function reportMessageChannel() {
+  const workerThreads = await import('node:worker_threads');
+  const { port1, port2 } = new MessageChannel();
+  const received = new Promise((resolve) => {
+    port2.onmessage = (event) => resolve(event.data);
+  });
+  port1.postMessage('ping');
+  const data = await received;
+  port1.close();
+  port2.close();
+  return {
+    sameAsWorkerThreads:
+      MessageChannel === workerThreads.MessageChannel &&
+      MessagePort === workerThreads.MessagePort,
+    extendsEventTarget:
+      Object.getPrototypeOf(MessagePort) === EventTarget &&
+      port1 instanceof EventTarget,
+    received: data,
+  };
 }
+
+async function fetch() {
+  const r = report();
+  if (MODE.startsWith('message-channel')) {
+    r.messageChannel = await reportMessageChannel();
+  }
+  return Response.json(r);
+}
+
+const MESSAGE_CHANNEL_WORKS = {
+  sameAsWorkerThreads: true,
+  extendsEventTarget: true,
+  received: 'ping',
+};
 
 async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
@@ -246,6 +294,11 @@ async function test(ctrl, env) {
       strictEqual(r.temporal, 'object');
       strictEqual(r.toTemporalInstant, 'function');
     },
+    // V8 installs its own QuotaExceededError, which the zygote's context removed before the top
+    // level ran; removing it again on restore would remove the polyfill.
+    'quota-exceeded-error-polyfill'(r) {
+      strictEqual(r.quotaExceededError, 'polyfill');
+    },
     'process-assign'(r) {
       strictEqual(r.processCustom, 'process');
     },
@@ -268,6 +321,13 @@ async function test(ctrl, env) {
         emptyBufferLength: 0,
         some: [7, 7, 7, 7],
       });
+    },
+    'message-channel'(r) {
+      deepStrictEqual(r.messageChannel, MESSAGE_CHANNEL_WORKS);
+    },
+    'message-channel-read'(r) {
+      strictEqual(r.topLevel.messageChannelType, 'function');
+      deepStrictEqual(r.messageChannel, MESSAGE_CHANNEL_WORKS);
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top

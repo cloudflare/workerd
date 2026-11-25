@@ -109,6 +109,10 @@ fn parse_url(url: &str) -> Result<(String, String)> {
 impl Dialect for Google {
     const METADATA: &'static str = "x-goog-meta-";
     const VERSION: &'static str = "x-goog-generation";
+    /// Cloud Storage serves an object stored with `Content-Encoding: gzip`
+    /// decompressed, whole whatever the `Range`, to a client that does not
+    /// take gzip: a read takes the bytes as stored, as S3 serves them.
+    const READ: &'static [(&'static str, &'static str)] = &[("accept-encoding", "gzip")];
 
     /// A generation that is not a number is none.
     fn version(response: &HttpResponse) -> &str {

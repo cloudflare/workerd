@@ -54,6 +54,8 @@ const ArrayCtor = Array;
 const ArrayBufferCtor = ArrayBuffer;
 const BigIntCtor = BigInt;
 const BooleanCtor = Boolean;
+// V8's under the V8_DOM_EXCEPTION autogate, otherwise the C++ class.
+const DOMExceptionCtor = DOMException;
 const DataViewCtor = DataView;
 const DateCtor = Date;
 const ErrorCtor = Error;
@@ -655,6 +657,7 @@ const AbortSignalReasonGet = captureJsgGetter<(signal: AbortSignal) => unknown>(
 );
 
 const EventTargetCtor = globalThis.EventTarget;
+const EventTargetPrototype = EventTargetCtor.prototype;
 const EventTargetAddEventListener = uncurryThis(
   EventTargetCtor.prototype.addEventListener
 ) as (target: object, type: string, listener: () => void) => void;
@@ -713,6 +716,7 @@ module.exports = ObjectFreeze({
   ArrayBuffer: ArrayBufferCtor,
   BigInt: BigIntCtor,
   Boolean: BooleanCtor,
+  DOMException: DOMExceptionCtor,
   DataView: DataViewCtor,
   Date: DateCtor,
   Error: ErrorCtor,
@@ -883,6 +887,7 @@ module.exports = ObjectFreeze({
   JSONStringify,
 
   // EventTarget
+  EventTargetPrototype,
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
 

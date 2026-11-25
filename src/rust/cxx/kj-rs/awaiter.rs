@@ -6,6 +6,7 @@
     reason = "constructs and polls the C++ promise awaiter in place"
 )]
 
+use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::Context;
@@ -17,7 +18,7 @@ use crate::ffi::GuardedRustPromiseAwaiter;
 use crate::ffi::GuardedRustPromiseAwaiterRepr;
 use crate::waker::try_waker_cell;
 
-pub struct PromiseAwaiter<Data: std::marker::Unpin> {
+pub struct PromiseAwaiter<Data> {
     node: Option<OwnPromiseNode>,
     pub(crate) data: Data,
     awaiter: MaybeUninit<GuardedRustPromiseAwaiterRepr>,
@@ -30,17 +31,17 @@ pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     // after a `&mut f` partial await, which `Unpin` would permit in safe code) leaves all three
     // pointers dangling -- use-after-free when the promise fires. `PhantomPinned` turns that into
     // a compile error; ordinary `.await` pins structurally and is unaffected.
-    _pinned: std::marker::PhantomPinned,
+    _pinned: PhantomPinned,
 }
 
-impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
+impl<Data> PromiseAwaiter<Data> {
     pub fn new(node: OwnPromiseNode, data: Data) -> Self {
         Self {
             node: Some(node),
             data,
             awaiter: MaybeUninit::uninit(),
             awaiter_initialized: false,
-            _pinned: std::marker::PhantomPinned,
+            _pinned: PhantomPinned,
         }
     }
 
@@ -102,7 +103,7 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
     }
 }
 
-impl<Data: std::marker::Unpin> Drop for PromiseAwaiter<Data> {
+impl<Data> Drop for PromiseAwaiter<Data> {
     fn drop(&mut self) {
         if self.awaiter_initialized {
             // SAFETY: `awaiter_initialized` is true, so `self.awaiter` holds a

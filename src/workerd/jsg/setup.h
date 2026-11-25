@@ -220,19 +220,6 @@ class IsolateBase {
   // uses: looked up once per isolate, rather than once per Serializer.
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
 
-  // Returns the Error.prototype of `context`, found without making an error, which would capture
-  // a stack trace. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception
-  // pending.
-  static v8::MaybeLocal<v8::Value> getErrorPrototype(
-      v8::Isolate* isolate, v8::Local<v8::Context> context);
-
-  // The V8 private symbol named DOM_EXCEPTION_BRAND_KEY, the brand of the bootstrap's
-  // DOMException, looked up once per isolate.
-  static v8::Local<v8::Private> getDomExceptionBrandKey(v8::Isolate* isolate);
-
-  // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
-  static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
-
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -962,18 +949,8 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
-  // FunctionTemplate returned by getDomExceptionTemplate().
-  v8::Global<v8::FunctionTemplate> domExceptionTemplate;
-
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
-
-  // A template of an object whose one property is its context's Error.prototype, which
-  // getErrorPrototype() reads.
-  v8::Global<v8::ObjectTemplate> errorPrototypeTemplate;
-
-  // The private symbol that getDomExceptionBrandKey() returns.
-  v8::Global<v8::Private> domExceptionBrandKey;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
@@ -1107,8 +1084,6 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
-  static void constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static bool isJsApiWrapperNativeErrorCallback(v8::Isolate* isolate, v8::Local<v8::Object> object);
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
@@ -1395,58 +1370,6 @@ class Isolate: public IsolateBase {
           *this, context, handle, jsg::TypeErrorContext::other());
     }
 
-    JsObject domException(
-        kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
-      return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
-        KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
-          return newBootstrapDomException(*this, prototype, name, message,
-              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
-        }
-
-        v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
-            v8Isolate, static_cast<DOMException*>(nullptr));
-        KJ_DASSERT(!tmpl.IsEmpty());
-        v8::Local<v8::Object> obj = check(tmpl->InstanceTemplate()->NewInstance(v8Context()));
-        v8::Local<v8::String> stackName = str("stack"_kjc);
-
-        KJ_IF_SOME(stack, maybeStack) {
-          v8::PropertyDescriptor prop(str(stack), true);
-          prop.set_enumerable(true);
-          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
-        } else {
-          v8::Exception::CaptureStackTrace(v8Context(), obj);
-          v8::PropertyDescriptor prop;
-          prop.set_enumerable(true);
-          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
-        }
-
-        auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
-        // Wrapping through the TypeWrapper would do this, so that serialize() can read `stack`.
-        de->jsgInitReflection(*jsgIsolate.getWrapperByContext(*this));
-        de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
-
-        return obj;
-      }));
-    }
-
-    kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) override {
-      KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(*this, value)) {
-        return DomExceptionInfo{
-          .name = info.name.toString(*this),
-          .message = info.message.toString(*this),
-        };
-      }
-      KJ_IF_SOME(domException,
-          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
-              *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
-        return DomExceptionInfo{
-          .name = kj::str(domException.getName()),
-          .message = kj::str(domException.getMessage()),
-        };
-      }
-      return kj::none;
-    }
-
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
     //
     // Note there's a useful property of class constructor functions: A constructor's __proto__
@@ -1541,7 +1464,11 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
-        metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        {
+          // snapshotRelink() runs with the new context entered.
+          v8::Context::Scope contextScope(context.getHandle(v8Isolate));
+          metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        }
         metadata.releaseSlotsWithChecks();
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and
@@ -1615,6 +1542,47 @@ class Isolate: public IsolateBase {
    private:
     Isolate& jsgIsolate;
 
+    JsObject newCppDomException(
+        kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
+      return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
+        v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
+            v8Isolate, static_cast<DOMException*>(nullptr));
+        KJ_DASSERT(!tmpl.IsEmpty());
+        v8::Local<v8::Object> obj = check(tmpl->InstanceTemplate()->NewInstance(v8Context()));
+        v8::Local<v8::String> stackName = str("stack"_kjc);
+
+        KJ_IF_SOME(stack, maybeStack) {
+          v8::PropertyDescriptor prop(str(stack), true);
+          prop.set_enumerable(true);
+          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
+        } else {
+          v8::Exception::CaptureStackTrace(v8Context(), obj);
+          v8::PropertyDescriptor prop;
+          prop.set_enumerable(true);
+          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
+        }
+
+        auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
+        // Wrapping through the TypeWrapper would do this, so that serialize() can read `stack`.
+        de->jsgInitReflection(*jsgIsolate.getWrapperByContext(*this));
+        de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
+
+        return obj;
+      }));
+    }
+
+    kj::Maybe<DomExceptionInfo> tryGetCppDomExceptionInfo(const JsValue& value) override {
+      KJ_IF_SOME(domException,
+          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
+              *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
+        return DomExceptionInfo{
+          .name = kj::str(domException.getName()),
+          .message = kj::str(domException.getMessage()),
+        };
+      }
+      return kj::none;
+    }
+
     virtual kj::Maybe<Object&> getInstance(
         v8::Local<v8::Object> obj, const std::type_info& type) override {
       auto info = jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type);
@@ -1650,6 +1618,16 @@ class Isolate: public IsolateBase {
 
       KJ_ASSERT(proto.isObject());
       return scope.Escape(v8::Local<v8::Value>(proto).As<v8::Object>());
+    }
+
+    virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) override {
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tmpl;
+    }
+
+    virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(
+        const std::type_info& type) override {
+      v8::HandleScope scope(v8Isolate);
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tagRange;
     }
   };
 

@@ -16,11 +16,11 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
@@ -254,28 +254,23 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto contentType =
-        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
-            TypeError, "Parsing a Body as FormData requires a Content-Type header.");
+    KJ_ASSERT(!bodyStream.isDisturbed(js));
+    auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
 
-    if (!bodyStream.isNull()) {
-      KJ_ASSERT(!bodyStream.isDisturbed(js));
-      return bodyStream.text(js, bufferingLimit())
-          .then(js,
-              [contentType = kj::mv(contentType), formData = kj::mv(formData)](
-                  auto& js, kj::String rawText) mutable {
-        formData->parse(js, kj::mv(rawText), contentType,
-            !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-        return kj::mv(formData);
-      });
-    }
-
-    // Theoretically, we already know if this will throw: the empty string is a valid
-    // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
-    // FormData::parse() make the decision, to keep the logic in one place.
-    formData->parse(
-        js, kj::String(), contentType, !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-    return js.resolvedPromise(kj::mv(formData));
+    // The body is read before the Content-Type is checked, so that an error from the body stream
+    // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
+    // application/x-www-form-urlencoded but not as multipart/form-data.
+    // See https://fetch.spec.whatwg.org/#concept-body-consume-body
+    auto limit = bodyStream.isNull() ? 0 : bufferingLimit();
+    return bodyStream.text(js, limit).then(js,
+        [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
+            auto& js, kj::String rawText) mutable {
+      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
+          "Parsing a Body as FormData requires a Content-Type header.");
+      formData->parse(js, kj::mv(rawText), contentType,
+          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
+      return kj::mv(formData);
+    });
   });
 }
 
@@ -288,10 +283,9 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](auto&& b) -> kj::String {
-      return kj::mv(b);
-    }).orDefault(nullptr);
+    kj::String contentType =
+        kj::Maybe<kj::String>(self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE))
+            .orDefault(nullptr);
 
     if (FeatureFlags::get(js).getBlobStandardMimeType()) {
       contentType = MimeType::extract(contentType)
@@ -341,6 +335,8 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
+  // The body of an `input` Request, when `init` doesn't replace it.
+  kj::Maybe<JsReadableStream> inputBody;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
@@ -399,16 +395,7 @@ jsg::Ref<Request> Request::constructor(
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        KJ_IF_SOME(oldJsBody, oldRequest->getBody(js)) {
-          // The stream spec says to "create a proxy" for the passed in readable, which it
-          // defines generically as creating a TransformStream and using pipeThrough to pass
-          // the input stream through, giving the TransformStream's readable to the extracted
-          // body below. We don't need to do that. Instead, we just create a new stream that
-          // takes over ownership of the internals of the given stream (carrying the retransmit
-          // buffer forward, if any). The given stream is left in a locked/disturbed mode so
-          // that it can no longer be used.
-          body = Body::ExtractedBody(js, oldJsBody.detach(js));
-        }
+        inputBody = oldRequest->getBody(js);
       }
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
@@ -515,8 +502,8 @@ jsg::Ref<Request> Request::constructor(
           // of these fields was modified, but the original Request object that we're rewriting
           // already represented a GET/HEAD method with a body, we allow that to pass through.
           // We support proxying such requests and rewriting their URL/headers/etc.)
-          JSG_REQUIRE(
-              (method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) || body == kj::none,
+          JSG_REQUIRE((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+                  (body == kj::none && inputBody == kj::none),
               TypeError, "Request with a GET or HEAD method cannot have a body.");
         }
       }
@@ -541,6 +528,20 @@ jsg::Ref<Request> Request::constructor(
 
   if (headers == kj::none) {
     headers = js.alloc<Headers>();
+  }
+
+  KJ_IF_SOME(oldJsBody, inputBody) {
+    // This runs after every check that can throw, so a failed construction leaves `input`
+    // usable.
+    //
+    // The stream spec says to "create a proxy" for the passed in readable, which it
+    // defines generically as creating a TransformStream and using pipeThrough to pass
+    // the input stream through, giving the TransformStream's readable to the extracted
+    // body below. We don't need to do that. Instead, we just create a new stream that
+    // takes over ownership of the internals of the given stream (carrying the retransmit
+    // buffer forward, if any). The given stream is left in a locked/disturbed mode so
+    // that it can no longer be used.
+    body = Body::ExtractedBody(js, oldJsBody.detach(js));
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
@@ -850,7 +851,19 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  // The constructor clones `cf` with JSON.stringify(), which can run JavaScript, and none can run
+  // while V8 reads a value. So the request is made without it, and given the clone once the value
+  // has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto request = Request::constructor(js, kj::mv(url), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([request = request.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      request->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return request;
 }
 
 // =======================================================================================
@@ -1455,7 +1468,17 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     }
   }
 
-  return Response::constructor(js, kj::mv(body), kj::mv(init));
+  // As for a Request (Request::deserialize()), `cf` is cloned once the value has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto response = Response::constructor(js, kj::mv(body), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([response = response.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      response->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return response;
 }
 
 // =======================================================================================
@@ -1524,6 +1547,36 @@ namespace {
 
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
+
+// When the HTTP client failed to parse the response head, why. kj-hyper says so in an
+// INVALID_RESPONSE_DETAIL_ID detail. kj's HttpClient, which sets no detail, fails with one of these
+// descriptions, which an embedder's HttpClientErrorHandler may prefix.
+kj::Maybe<kj::ArrayPtr<const char>> invalidResponseReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::INVALID_RESPONSE_DETAIL_ID)) {
+    return reason.asChars();
+  }
+  static constexpr kj::StringPtr DESCRIPTIONS[] = {
+    "Response headers have no terminal newline."_kj,
+    "Invalid response status line"_kj,
+    "The headers sent by the server are not valid."_kj,
+  };
+  auto description = exception.getDescription();
+  for (const auto& text: DESCRIPTIONS) {
+    KJ_IF_SOME(start, description.find(text)) {
+      return description.slice(start).asArray();
+    }
+  }
+  return kj::none;
+}
+
+// When the connection for a request couldn't be made, for example because its host didn't resolve
+// or its TLS handshake failed, the cause, from kj-hyper's CONNECT_FAILED_DETAIL_ID detail.
+kj::Maybe<kj::ArrayPtr<const char>> connectFailureReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::CONNECT_FAILED_DETAIL_ID)) {
+    return reason.asChars();
+  }
+  return kj::none;
+}
 
 // Setup spans stay on the native stack so that they finish before fetch returns its JS promise.
 // Keep the fetch span as the propagated parent of the outgoing request.
@@ -1606,6 +1659,31 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
 
   auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
   return {kj::mv(headers), kj::mv(url)};
+}
+
+// Whether a fetch goes to the placeholder host of a binding that is implemented with an internal
+// fetch (AI, D1, Workflows, Browser Rendering, Images, Vectorize). Such a fetch is an
+// implementation detail of the binding: it opens no user span, so the binding's own span (e.g.
+// `d1_run`) is the subrequest's user span parent. The hosts are the Workers Observability tail
+// worker's, which used to drop these spans when they ended.
+//
+// TODO(cleanup): Remove once every binding talks to its backend over JSRPC. Workflows already
+// do, so `workflow-binding.local` no longer occurs in workerd. Images and AI do for some methods.
+// `fake.host` comes from Browser Rendering's `@cloudflare/puppeteer`, which ships in the user's
+// bundle rather than in workerd. Matching by host also omits the span of a user's own fetch to
+// one of these hosts.
+bool isInternalBindingFetch(const kj::Url& url) {
+  constexpr kj::StringPtr INTERNAL_HOSTS[] = {"workers-binding.ai"_kj, "d1"_kj,
+    "workflow-binding.local"_kj, "fake.host"_kj, "js.images.cloudflare.com"_kj,
+    "vector-search"_kj};
+  kj::ArrayPtr<const char> host = url.host;
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
+    host = host.first(colon);
+  }
+  for (const auto& internalHost: INTERNAL_HOSTS) {
+    if (host == internalHost.asArray()) return true;
+  }
+  return false;
 }
 
 struct ActorFetchFailure {
@@ -1896,7 +1974,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         "fetch"_kjc, [&setupTrace](TraceContext& traceContext) -> kj::Maybe<SpanParent> {
       setupTrace.start(traceContext);
       return kj::none;
-    });
+    }, OmitUserSpan(isInternalBindingFetch(urlList.back())));
   }
   auto clientWithTracing = kj::mv(KJ_ASSERT_NONNULL(maybeClientWithTracing));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
@@ -1988,11 +2066,26 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     }
     auto responsePromise =
         kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)
-            .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
+            .catch_([typeError = FeatureFlags::get(js).getFetchInvalidResponseTypeError()](
+                        kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
       if (exception.getDescription().startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
+      }
+      // Fetch treats a response that doesn't parse, or a connection that couldn't be made, as a
+      // network error, which rejects with a TypeError.
+      auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
+        if (typeError) {
+          return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
+        }
+        return JSG_KJ_EXCEPTION(FAILED, Error, what, reason);
+      };
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        return networkError("Server returned invalid HTTP response: "_kj, reason);
+      }
+      KJ_IF_SOME(reason, connectFailureReason(exception)) {
+        return networkError("Network connection failed: "_kj, reason);
       }
       return kj::mv(exception);
     });
@@ -2722,8 +2815,7 @@ static jsg::Promise<void> throwOnError(
 
 static jsg::Promise<Fetcher::GetResult> parseResponse(
     jsg::Lock& js, jsg::Ref<Response> response, jsg::Optional<kj::String> type) {
-  auto typeName =
-      type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+  auto typeName = kj::Maybe<kj::StringPtr>(type).orDefault("text");
   if (typeName == "stream") {
     KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));
@@ -2949,15 +3041,18 @@ kj::Own<WorkerInterface> Fetcher::getClient(
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
-    kj::ConstString operationName) {
-  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+    kj::ConstString operationName,
+    OmitUserSpan omitUserSpan) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName), omitUserSpan);
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName,
-    MakeUserSpanParent makeUserSpanParent) {
-  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName), kj::mv(makeUserSpanParent));
+    MakeUserSpanParent makeUserSpanParent,
+    OmitUserSpan omitUserSpan) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName), kj::mv(makeUserSpanParent),
+      omitUserSpan);
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioContext,
@@ -2996,13 +3091,15 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
 }
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
-    OutgoingFactory::Result result, kj::ConstString operationName) {
+    OutgoingFactory::Result result, kj::ConstString operationName, OmitUserSpan omitUserSpan) {
   KJ_IF_SOME(parents, result.spanParents) {
     // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
     // actually observed; otherwise returning a (non-recording) TraceContext would still force the
     // fetch hot path to eagerly evaluate span tags (method, URL, etc.) that end up discarded.
     if (parents.isObserved()) {
-      return ClientWithTracing{kj::mv(result.client), parents.newChild(kj::mv(operationName))};
+      return ClientWithTracing{kj::mv(result.client),
+        omitUserSpan ? parents.newChildWithoutUserSpan(kj::mv(operationName))
+                     : parents.newChild(kj::mv(operationName))};
     }
   }
   return ClientWithTracing{kj::mv(result.client), kj::none};
@@ -3010,15 +3107,20 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
 
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
-    kj::ConstString operationName) {
+    kj::ConstString operationName,
+    OmitUserSpan omitUserSpan) {
+  auto makeTraceContext = [&]() {
+    return omitUserSpan ? ioContext.makeTraceSpanWithoutUserSpan(kj::mv(operationName))
+                        : ioContext.makeUserTraceSpan(kj::mv(operationName));
+  };
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
         return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
@@ -3037,12 +3139,12 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       // tree shows `outerSpan -> operationName`.
       auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
           [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName), omitUserSpan);
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
       auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
           [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName), omitUserSpan);
     }
   }
   KJ_UNREACHABLE;
@@ -3076,10 +3178,18 @@ void Fetcher::onActorCallRetry() {
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName,
-    MakeUserSpanParent makeUserSpanParent) {
+    MakeUserSpanParent makeUserSpanParent,
+    OmitUserSpan omitUserSpan) {
+  auto makeTraceContext = [&](TraceContextParent parents) {
+    return omitUserSpan
+        ? parents.newChildWithoutUserSpan(operationName.clone(), ioContext.tryGetAsyncTracker())
+        : parents.newChild(operationName.clone(), ioContext.tryGetAsyncTracker());
+  };
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = omitUserSpan
+          ? ioContext.makeTraceSpanWithoutUserSpan(kj::mv(operationName))
+          : ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto userSpanParent = makeUserSpanParent(traceContext);
       kj::Own<WorkerInterface> client;
       KJ_IF_SOME(parent, userSpanParent) {
@@ -3091,7 +3201,9 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = omitUserSpan
+          ? ioContext.makeTraceSpanWithoutUserSpan(kj::mv(operationName))
+          : ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto propagatedUserSpanParent = traceContext.getUserSpanParent();
       KJ_IF_SOME(parent, makeUserSpanParent(traceContext)) {
         propagatedUserSpanParent = kj::mv(parent);
@@ -3113,7 +3225,7 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
           [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
         if (!outerTraceContext.isObserved()) return kj::none;
-        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        traceContext = makeTraceContext(outerTraceContext.getSpanParents());
         return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
       });
       return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
@@ -3123,7 +3235,7 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
           [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
         if (!outerTraceContext.isObserved()) return kj::none;
-        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        traceContext = makeTraceContext(outerTraceContext.getSpanParents());
         return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
       });
       return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};

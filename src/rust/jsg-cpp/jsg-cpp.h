@@ -25,10 +25,9 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
 
-#include <kj-rs/kj-rs.h>
-#include <rust/cxx.h>
-
 #include <kj/memory.h>
+
+#include <type_traits>
 
 namespace workerd::rust::jsg_cpp {
 
@@ -192,6 +191,16 @@ MaybeLocal cppRefWrap(Isolate* isolate, const CppRef& ref) {
   return ::workerd::rust::jsg::maybe_local_to_ffi(result);
 }
 
+// The base of RustRef<Tag>: forwards `Tag::JsgRttiDelegate` when the tag declares one, and is
+// empty otherwise.
+template <typename Tag, typename = void>
+struct RustRefRtti {};
+
+template <typename Tag>
+struct RustRefRtti<Tag, std::void_t<typename Tag::JsgRttiDelegate>> {
+  using JsgRttiDelegate = Tag::JsgRttiDelegate;
+};
+
 // A reference from C++ to a Rust JSG resource, typed by `Tag`. `Tag` is a C++ struct that
 // stands for the Rust resource type:
 //
@@ -200,6 +209,9 @@ MaybeLocal cppRefWrap(Isolate* isolate, const CppRef& ref) {
 //       static constexpr const char* NAME = "MyResource";
 //       // An `extern "Rust"` function returning `jsg::resource::ffi_is::<MyResource>()`.
 //       static kj::Maybe<bool> isInstance(v8::Isolate* isolate, Local value);
+//       // Optional: describes `RustRef<MyResourceTag>` to RTTI, and so to TypeScript
+//       // generation, as an existing C++ API type.
+//       using JsgRttiDelegate = jsg::Ref<SomeApiType>;
 //     };
 //
 // It holds the resource's JavaScript wrapper, which owns the resource, so it keeps both alive,
@@ -207,7 +219,7 @@ MaybeLocal cppRefWrap(Isolate* isolate, const CppRef& ref) {
 // example back from the Rust resource through a `jsg_cpp::Ref`, is collected. C++ calls the
 // resource's methods through `extern "Rust"` functions given `toFfi()`.
 template <typename Tag>
-class RustRef {
+class RustRef: public RustRefRtti<Tag> {
  public:
   // `value` if it is the wrapper of a `Tag` resource, kj::none for any other value. Throws
   // JsExceptionThrown if the check left an exception pending.

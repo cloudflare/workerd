@@ -132,7 +132,8 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
       kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
+      kj::Maybe<kj::String> clientAddress = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
 
   kj::Weak<IoContext_IncomingRequest> addWeak() {
@@ -143,6 +144,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   IoContext& getContext() {
     return *context;
   }
+
+  // Dispatching a TCP or UDP connect event consumes this address.
+  kj::Maybe<kj::String> clientAddress;
 
   // Invoked when the request is actually delivered.
   //
@@ -278,6 +282,11 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // The user trace scope value for rootUserTraceSpan, made the first time
+  // IoContext::getRootUserTraceScope() needs it. The request's trace frames hold it, and
+  // tracing.getActiveSpan() caches the request's root span on it.
+  kj::Maybe<jsg::Value> rootUserTraceScope;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
@@ -290,8 +299,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
 
   kj::UnwindDetector unwindDetector;
 
-  // Used for debugging, tracks whether we properly called drain() or some other mechanism to
-  // wait for waitUntil tasks.
+  // Tracks whether we called drain() or some other mechanism to wait for waitUntil tasks, which
+  // happens once the request has returned, or is canceled for hibernation. Used for debugging, and
+  // by IoContext::getIncomingRequestForIoChannels() to tell whether the request is still running.
   bool waitedForWaitUntil = false;
 
   // If drain() was already called, this is non-null and fulfilling it will cancel the drain.
@@ -1004,6 +1014,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The original functor may optionally accept `IoContext&` immediately after `jsg::Lock&`. The
   // wrapper injects the current context after the `IoOwn` has verified that it is the context that
   // owns the functor. Callers therefore do not need to capture an IoContext reference themselves.
+  //
+  // Rust code registers such continuations with `IoContext::then()`, `catch()` and
+  // `then_or_catch()` in the `io-context` crate (`io-context/lib.rs`), which check the context and
+  // pass it in the same way.
   template <typename Func>
   auto addFunctor(Func&& func);
 
@@ -1340,8 +1354,29 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Captures the request's internal and user tracing contexts in a single async frame.
-  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
-      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  //
+  // A stateless request that starts in the root frame and observes neither span gets no frame:
+  // with no entry, readers fall back to the current request's spans, and its IoContext runs no
+  // other request. Actors still get a frame, so that a continuation of an unobserved request keeps
+  // masking the spans of a newer, observed request in the same IoContext. So does a request that
+  // starts inside another frame, whose entries it would otherwise inherit.
+  class RequestTraceScope {
+   public:
+    RequestTraceScope(Worker::Lock& lock, IoContext& context);
+    KJ_DISALLOW_COPY_AND_MOVE(RequestTraceScope);
+
+   private:
+    kj::Maybe<jsg::AsyncContextFrame::StorageScope> scope;
+  };
+  [[nodiscard]] RequestTraceScope makeRequestTraceScope(Worker::Lock& lock) {
+    return RequestTraceScope(lock, *this);
+  }
+
+  // The user trace scope value of the current request's root user span, made once per request.
+  // The request's trace frames hold it, and tracing.getActiveSpan() uses it for code that runs
+  // outside them, so the request's root span is the same object either way. Returns nothing if the
+  // IoContext has no current request.
+  kj::Maybe<jsg::Value&> getRootUserTraceScope(Worker::Lock& lock);
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
@@ -1363,6 +1398,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns both an internal and a user tracing span, this ensures that all user spans are
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
+  // Like makeUserTraceSpan(), but opens only the internal span; the current user span is the
+  // user span parent of whatever runs under it.
+  [[nodiscard]] TraceContext makeTraceSpanWithoutUserSpan(kj::ConstString operationName);
 
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on
@@ -1376,13 +1414,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
-  // The IoChannelFactory must be accessed through the
-  // currentIncomingRequest because it has some tracing context built in.
+  // The IoChannelFactory must be accessed through an IncomingRequest because it has some tracing
+  // context built in, and the embedder may stamp outgoing calls with the request's metadata, such
+  // as a loop-detection TTL. getIncomingRequestForIoChannels() says which request that is.
   //
   // TODO(later): this is made public for Python Workers. It should be possible to make this private
   // again later.
   IoChannelFactory& getIoChannelFactory() {
-    return *getCurrentIncomingRequest().ioChannelFactory;
+    return *getIncomingRequestForIoChannels().ioChannelFactory;
   }
 
   void pumpMessageLoop();
@@ -1621,14 +1660,22 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // usage on the part of the actor, including outgoing subrequests, is attributed to the current
   // request for logging and tracing. This is a hack, we don't actually know which request
   // "caused" any particular resource usage, so this is merely our best guess.
-  //
-  // The IoChannelFactory must also be accessed through the currentIncomingRequest because it has
-  // some tracing context built in.
   IncomingRequest& getCurrentIncomingRequest() {
     KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest",
         lastDeliveredLocation);
     return incomingRequests.front();
   }
+
+  // The request whose IoChannelFactory getIoChannelFactory() returns. Without the
+  // IO_CHANNELS_FROM_RUNNING_REQUEST autogate, this is the current request. With it, it is the
+  // newest request that is still running, or the current request if every request has returned.
+  //
+  // An actor's newest request stays current after it returns, while it waits for background work.
+  // So without the autogate, a request that returned long ago can keep governing the calls that
+  // other, still-running requests make, such as calls through a long-lived JS RPC session. With it,
+  // work that a request leaves running after it returns makes its calls through the newest running
+  // request too, since we don't know which request started that work.
+  IncomingRequest& getIncomingRequestForIoChannels();
 
   // Run the given callback within the scope of this IoContext. This encapsulates the
   // setup of a number of scopes that must be entered prior to running within the

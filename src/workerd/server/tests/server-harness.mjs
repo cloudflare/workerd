@@ -15,6 +15,8 @@ export class WorkerdServerHarness {
   #listenPortNames = null;
   #extraArgs = null;
   #startupTimeoutMs = null;
+  #inspector = null;
+  #verbose = null;
 
   // Properties set by `start()` and cleared by `stop()`.
   #child = null;
@@ -30,12 +32,17 @@ export class WorkerdServerHarness {
     listenPortNames,
     extraArgs = [],
     startupTimeoutMs = 30000,
+    // Whether workerd accepts DevTools connections, on a port getListenInspectorPort() answers.
+    inspector = true,
+    verbose = true,
   }) {
     this.#workerdBinary = workerdBinary;
     this.#workerdConfig = workerdConfig;
     this.#listenPortNames = listenPortNames;
     this.#extraArgs = extraArgs;
     this.#startupTimeoutMs = startupTimeoutMs;
+    this.#inspector = inspector;
+    this.#verbose = verbose;
   }
 
   // Spawn our workerd process and wait for it to start.
@@ -48,8 +55,8 @@ export class WorkerdServerHarness {
     const args = [
       'serve',
       this.#workerdConfig,
-      '--verbose',
-      '--inspector-addr=127.0.0.1:0',
+      ...(this.#verbose ? ['--verbose'] : []),
+      ...(this.#inspector ? ['--inspector-addr=127.0.0.1:0'] : []),
       `--control-fd=${CONTROL_FD}`,
       ...this.#extraArgs,
     ];
@@ -75,7 +82,9 @@ export class WorkerdServerHarness {
         this.#expectReadiness(`listen:${name}`),
       ])
     );
-    this.#listenInspectorPort = this.#expectReadiness('listen-inspector');
+    this.#listenInspectorPort = this.#inspector
+      ? this.#expectReadiness('listen-inspector')
+      : null;
     const spawned = this.#expectReadiness('spawn');
 
     this.#closed = new Promise((resolve) => {
@@ -94,7 +103,7 @@ export class WorkerdServerHarness {
     // rejection. Callers receive readiness failures when they await their requested listen port.
     Promise.all([
       spawned,
-      this.#listenInspectorPort,
+      ...(this.#listenInspectorPort ? [this.#listenInspectorPort] : []),
       ...this.#listenPorts.values(),
     ]).then(
       () => clearTimeout(timeout),

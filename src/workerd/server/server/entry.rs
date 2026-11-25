@@ -26,6 +26,7 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use futures::Stream;
 use futures::future::Either;
 use futures::future::LocalBoxFuture;
 use kj_rs::KjOwn;
@@ -101,6 +102,25 @@ pub fn bench(
     run(verbose, config, options, None, Some(process), command)
 }
 
+/// Runs `command`, a command that serves no config of its own (`workerd repl`).
+///
+/// The process's logging is set up around it as for `serve`: the crash handler, and info logging
+/// if `verbose`. The command's result is the result.
+pub fn without_config(
+    verbose: bool,
+    command: impl FnOnce() -> Result<i32> + 'static,
+) -> Result<i32> {
+    // An empty config, which asks for no structured logging.
+    let mut message = capnp::message::Builder::new_default();
+    message.init_root::<workerd_capnp::config::Builder>();
+    let config = capnp::serialize::write_message_to_words(&message)
+        .chunks_exact(8)
+        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
+        .collect();
+    let command = Box::new(PendingCommand(Box::new(move |_, _| command())));
+    Ok(ffi::with_process_context(verbose, config, command)?)
+}
+
 /// A command's Rust half, for the C++ frame that sets up the process's logging around it
 /// (`with_process_context`), which passes it the config and whether logging is structured.
 pub struct PendingCommand(Box<dyn FnOnce(Vec<u64>, bool) -> Result<i32>>);
@@ -128,6 +148,7 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
     let command = move |config, structured| {
+        crate::log::set_structured(structured);
         let mut runtime = kj_rs_tokio::Runtime::new()?;
         let factory = ffi::bootstrap(
             runtime.context(),
@@ -212,26 +233,32 @@ async fn with_watch<T>(
     }
 }
 
-/// Resolves on SIGTERM, or on Windows on Ctrl-Break (`CTRL_BREAK_EVENT`, the console event a
-/// parent can send a process group, where Ctrl-C is the interactive interrupt): the signal to
-/// drain gracefully. The handler is installed by the call, so that a signal during startup drains
-/// the server once it is up.
-fn sigterm() -> impl Future<Output = ()> {
+/// SIGTERM, or on Windows Ctrl-Break (`CTRL_BREAK_EVENT`, the console event a parent can send a
+/// process group, where Ctrl-C is the interactive interrupt): the signal to drain gracefully, each
+/// time it arrives. Signals that arrive before the stream is polled again count as one. The
+/// handler is installed by the call, so that a signal during startup is pending once the server
+/// is up.
+fn sigterm() -> impl Stream<Item = ()> {
     #[cfg(unix)]
     let signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
     #[cfg(windows)]
     let signal = tokio::signal::windows::ctrl_break();
-    async move {
-        match signal {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(e) => {
-                tracing::error!("drain signal handler: {e}");
-                std::future::pending::<()>().await;
-            }
+    let signal = match signal {
+        Ok(signal) => Some(signal),
+        Err(e) => {
+            tracing::error!("drain signal handler: {e}");
+            None
         }
-    }
+    };
+    // Without a handler the stream waits forever rather than end. Once the handler stops
+    // receiving (`recv()` answers `None`), it yields one last signal, then waits forever.
+    futures::stream::unfold(signal, |signal| async move {
+        let Some(mut signal) = signal else {
+            return std::future::pending().await;
+        };
+        let received = signal.recv().await;
+        Some(((), received.map(|()| signal)))
+    })
 }
 
 /// `workerd serve`: serves `factory`'s config until SIGTERM drains it (or a `--watch` reload
@@ -244,6 +271,9 @@ async fn server_serve(
 ) -> Result<()> {
     crate::log::install();
     let deployments = std::mem::take(&mut options.deployments);
+    options.announce = Some(Box::new(move |line| {
+        report(structured, Severity::Info, line);
+    }));
     let report = reporter(watch.is_some(), structured, deployments);
     let factory = Rc::new(Factory::new(factory));
     let result = with_watch(

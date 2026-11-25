@@ -4,6 +4,8 @@
 
 #include "performance.h"
 
+#include "performance-bootstrap.h"
+
 #include <workerd/io/io-util.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/worker.h>
@@ -29,6 +31,27 @@ double Performance::now(jsg::Lock& js) {
   // returns exactly what Date.now() returns.
   isolateLimitEnforcer.markPerfEvent("performance_now"_kjc);
   return dateNow();
+}
+
+v8::Local<v8::FunctionTemplate> getPerformanceTemplateForBootstrap(jsg::Lock& js) {
+  return js.getTemplateFor<Performance>();
+}
+
+v8::CppHeapPointerTagRange getPerformanceTagRangeForBootstrap(jsg::Lock& js) {
+  return js.getWrappableTagRangeFor<Performance>();
+}
+
+double performanceNowForBootstrap(
+    jsg::Lock& js, v8::Local<v8::Object> instance, v8::CppHeapPointerTagRange tagRange) {
+  // The signature check accepts exactly the wrappers built from Performance's template, so this
+  // reads the C++ object straight out of the wrapper, as JSG's own method dispatch does.
+  auto& self = jsg::downcastWrappable<Performance>(
+      *jsg::Wrappable::unwrapFromShimInRangeOrAbort(js.v8Isolate, instance, tagRange));
+  return self.now(js);
+}
+
+jsg::JsObject getPerformancePrototypeForBootstrap(jsg::Lock& js) {
+  return js.getPrototypeFor<Performance>();
 }
 
 jsg::Ref<PerformanceMark> PerformanceMark::constructor(
@@ -223,6 +246,15 @@ jsg::Ref<PerformanceMark> Performance::mark(
   return mark;
 }
 
+kj::Maybe<double> Performance::findMarkTime(kj::StringPtr name) {
+  for (auto& entry: entries) {
+    if (entry->getName() == name && entry->getEntryType() == "mark"_kj) {
+      return entry->getStartTime();
+    }
+  }
+  return kj::none;
+}
+
 jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark,
@@ -232,22 +264,28 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
   double startTime = 0;
   double endTime = dateNow();
 
+  // A mark that does not exist leaves the default time in place.
+  auto useEndMark = [&]() {
+    KJ_IF_SOME(endMark, maybeEndMark) {
+      KJ_IF_SOME(time, findMarkTime(endMark)) {
+        endTime = time;
+      }
+    }
+  };
+
   KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
     KJ_SWITCH_ONEOF(startOrOptions) {
       KJ_CASE_ONEOF(startMark, kj::String) {
-        auto startMarks = getEntriesByName(kj::str(startMark), kj::str("mark"));
-        if (startMarks.size() > 0) {
-          startTime = startMarks[0]->getStartTime();
+        KJ_IF_SOME(time, findMarkTime(startMark)) {
+          startTime = time;
         }
-
-        KJ_IF_SOME(endMark, maybeEndMark) {
-          auto endMarks = getEntriesByName(kj::str(endMark), kj::str("mark"));
-          if (endMarks.size() > 0) {
-            endTime = endMarks[0]->getStartTime();
-          }
-        }
+        useEndMark();
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+        if (options.start == kj::none && options.end == kj::none && options.duration == kj::none) {
+          useEndMark();
+        }
+
         KJ_IF_SOME(start, options.start) {
           startTime = start;
         }
@@ -259,6 +297,8 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
         }
       }
     }
+  } else {
+    useEndMark();
   }
 
   double duration = endTime >= startTime ? endTime - startTime : 0;
@@ -272,7 +312,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
         KJ_IF_SOME(d, options.detail) {
-          measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
+          measure->detail = kj::mv(d);
         }
         // If options.detail is not provided, detail remains null
       }

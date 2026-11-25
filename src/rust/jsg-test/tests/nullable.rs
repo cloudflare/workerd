@@ -39,16 +39,6 @@ fn call(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, expr: &str) -> Strin
     ctx.eval(lock, &code).unwrap()
 }
 
-/// Converts `expr` through a `Lenient` to an `Option<Nullable<String>>`.
-fn lenient_to_optional_nullable(
-    lock: &mut jsg::Lock,
-    ctx: &crate::EvalContext<'_>,
-    expr: &str,
-) -> Option<Nullable<String>> {
-    let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, expr).unwrap();
-    Option::<Nullable<_>>::from(lenient).map(|n| n.map(jsg::NonCoercible::into_inner))
-}
-
 #[jsg_resource]
 struct Args {}
 
@@ -229,29 +219,43 @@ fn nullable_struct_fields() {
     });
 }
 
+/// As in "maybes - don't substitute null" (value-test.c++): a value that `T` does not take is
+/// null for a worker without `dont_substitute_null_on_type_error`, and a type error with it.
 #[test]
-fn lenient_converts_to_optional_nullable() {
+fn nullable_type_mismatch_follows_dont_substitute_null_on_type_error() {
+    type Strict = Nullable<jsg::NonCoercible<String>>;
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        assert_eq!(lenient_to_optional_nullable(lock, ctx, "undefined"), None);
+        assert_eq!(convert::<Strict>(lock, ctx, "123")?, Nullable::Null);
+        // A value that `T` takes, and null, convert as before.
         assert_eq!(
-            lenient_to_optional_nullable(lock, ctx, "null"),
-            Some(Nullable::Null)
+            convert::<Strict>(lock, ctx, "'x'")?,
+            Nullable::Some(jsg::NonCoercible::new("x".to_owned()))
         );
+        assert_eq!(convert::<Strict>(lock, ctx, "null")?, Nullable::Null);
+        // Only a top-level mismatch is null: an element of the wrong type is still an error.
+        let err =
+            convert::<Nullable<Vec<jsg::NonCoercible<String>>>>(lock, ctx, "[1]").unwrap_err();
         assert_eq!(
-            lenient_to_optional_nullable(lock, ctx, "'x'"),
-            Some(Nullable::Some("x".to_owned()))
+            err.message,
+            "Incorrect type for array element 0: the provided value is not of type 'string'."
         );
-        // An unconvertable value reads as undefined.
-        assert_eq!(lenient_to_optional_nullable(lock, ctx, "1"), None);
+        // Each element of a sequence of nullables is converted the same way.
+        assert_eq!(
+            convert::<Vec<Strict>>(lock, ctx, "['a', 1]")?,
+            vec![
+                Nullable::Some(jsg::NonCoercible::new("a".to_owned())),
+                Nullable::Null
+            ]
+        );
+        Ok(())
+    });
 
-        let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, "1")?;
-        let (value, unconvertable) = lenient.to_parts();
-        assert!(value.is_undefined());
-        assert!(unconvertable.is_some());
-
-        assert!(jsg::Lenient::<String>::from(None::<Nullable<String>>).is_undefined_strict());
-        assert!(jsg::Lenient::<String>::from(Some(Nullable::<String>::Null)).is_null());
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_no_substitute_null(true));
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<Strict>(lock, ctx, "123").unwrap_err();
+        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.message, "Expected a string value but got number");
         Ok(())
     });
 }

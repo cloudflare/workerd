@@ -34,8 +34,11 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
+#include <thread>
 
 #if !_WIN32
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -47,6 +50,11 @@
 #endif
 
 #include <workerd/util/use-perfetto-categories.h>
+
+#ifdef WORKERD_USE_TCMALLOC
+#include <pthread.h>
+#include <tcmalloc/malloc_extension.h>
+#endif
 
 // since kj installs their global signal handlers
 // and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
@@ -114,6 +122,39 @@ class EntropySourceImpl: public kj::EntropySource {
 
 // =======================================================================================
 
+// tcmalloc sizes its per-CPU slabs and transfer caches at startup, and only
+// ProcessBackgroundActions() grows them toward the size classes that miss. Without that thread,
+// the caches keep their startup sizes, and a server's allocation-heavy request loop keeps falling
+// through to the central free lists and the page heap. edgeworker runs the same thread
+// (setupBackgroundTcmalloc()). ProcessBackgroundActions() never returns, so the thread is detached
+// and lives as long as the process.
+void startTcmallocBackgroundThread() {
+#ifdef WORKERD_USE_TCMALLOC
+  static std::once_flag once;
+  std::call_once(once, []() {
+    if (!tcmalloc::MallocExtension::NeedsProcessBackgroundActions()) return;
+    std::thread([]() {
+      pthread_setname_np(pthread_self(), "tcmalloc-bg");
+      tcmalloc::MallocExtension::ProcessBackgroundActions();
+    }).detach();
+  });
+#endif
+}
+
+// tcmalloc samples an allocation about every 2 MiB by default and records its stack for heap
+// profiles, but nothing in workerd ever reads those profiles. On x86-64, the stack is walked by
+// following frame pointers, and release builds omit them, in Rust as well as C++. A sampled
+// allocation on a path that does not keep the frame chain, such as hyper's HTTP parsing, can then
+// walk off the end of the stack and crash with SIGSEGV (cloudflare/workerd#8801). Turning sampling
+// off removes both the crash and the cost of sampling.
+void disableTcmallocHeapSampling() {
+#ifdef WORKERD_USE_TCMALLOC
+  tcmalloc::MallocExtension::SetProfileSamplingInterval(0);
+#endif
+}
+
+// =======================================================================================
+
 // How the binary was built, for `workerd bench`'s report: a sanitizer's instrumentation and a
 // debug build's checks make code slower than in a release build.
 kj::StringPtr buildMode() {
@@ -162,6 +203,8 @@ class Bootstrap {
       asyncTraceWriter = AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION);
     }
     TRACE_EVENT("workerd", "Bootstrap()");
+    startTcmallocBackgroundThread();
+    disableTcmallocHeapSampling();
 
     // The process is set up for this config and these options: autogates, the test and bench
     // modes, and V8 with its flags (V8 reads the test modes as it starts).
@@ -387,10 +430,29 @@ void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str messa
   kj::_::Debug::log(fileStr.cStr(), static_cast<int>(line), kjSeverity, "", kj::str(message));
 }
 
+kj::Own<ThreadLogger> thread_logger() {
+  return kj::heap<ThreadLogger>(kj::getExceptionCallback().getThreadInitializer());
+}
+
+void run_with_logger(kj::Own<ThreadLogger> logger, ::rust::Box<ThreadBody> body) {
+  logger->initializer([&body]() { thread_body_run(kj::mv(body)); });
+}
+
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message) {
   auto json = buildJsonLogMessage(static_cast<kj::LogSeverity>(severity), kj::str(file).cStr(),
       static_cast<int>(line), 0, kj::str(message));
   kj::FdOutputStream(STDERR_FILENO).write({json.asBytes(), "\n"_kj.asBytes()});
+}
+
+void write_stderr_nonblocking(::rust::Str text) {
+#if !_WIN32
+  int flags = fcntl(STDERR_FILENO, F_GETFL);
+  if (flags < 0 || fcntl(STDERR_FILENO, F_SETFL, flags | O_NONBLOCK) < 0) return;
+  [[maybe_unused]] auto written = write(STDERR_FILENO, text.data(), text.size());
+  // The open file description may be shared with other processes, such as the supervisor's
+  // terminal or pipe, which expect it to block.
+  fcntl(STDERR_FILENO, F_SETFL, flags);
+#endif
 }
 
 }  // namespace workerd::server::cli

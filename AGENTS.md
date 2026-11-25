@@ -42,6 +42,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - `just node-test <name>` - Run specific Node.js compatibility tests (e.g., `just node-test zlib`)
 - `just wpt-test <name>` - Run Web Platform Tests (e.g., `just wpt-test urlpattern`)
 - `just generate-types` - Generate TypeScript definitions
+- `just update-lockfile` - Regenerate `MODULE.bazel.lock` after editing a MODULE.bazel file or a module extension's inputs by hand; Bazel runs with `--lockfile_mode=error`
 - `just compile-commands` - Generate compile_commands.json for clangd support
 - `just build-asan` - Build with AddressSanitizer
 - `just test-asan` - Run tests with AddressSanitizer
@@ -151,7 +152,7 @@ The other core runtime dependencies include:
 
 These dependencies are vendored via Bazel into the `external/` directory. See `MODULE.bazel` and the `build/deps/` directory for how they are integrated into the build system. (The project uses bzlmod; the legacy `WORKSPACE` file may still exist but is no longer the primary mechanism.)
 
-For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
+For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs. For example, V8's `DOMException` and `QuotaExceededError` and their C++ API (`v8::DOMException`, `v8::QuotaExceededError`, `v8::Exception::DOMException()`, `v8::Exception::QuotaExceededError()`, `v8::Value::IsDOMException()` and `v8::Value::IsQuotaExceededError()`) are not part of upstream V8: `patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch` adds them.
 
 Be aware that workerd uses tcmalloc for memory allocation in the typical case. When analyzing memory usage or debugging memory issues, be aware that tcmalloc's behavior may differ from the standard allocator. Any memory usage analysis that you perform should take this into account.
 
@@ -178,6 +179,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
+- **`src/opentelemetry/`** - OTLP schemas vendored from opentelemetry-proto, for tests that decode the spans and logs workerd exports; see `src/opentelemetry/AGENTS.md` for how they are updated
 
 ### Configuration System
 
@@ -192,6 +194,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Task                   | Location                                                      | Notes                                                                                                        |
 | ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Add/modify JS API      | `src/workerd/api/`                                            | C++ with JSG macros; see `jsg/jsg.h` for binding system                                                      |
+| Port a JS API to TS    | `src/per_isolate/` + `src/per_isolate/public-types.d.ts`      | Conventions: `src/per_isolate/AGENTS.md`; types: "Porting an API to the bootstrap" in `types/AGENTS.md`      |
 | Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro; Rust modules in `src/rust/api/` (`lib.rs`)   |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
@@ -204,11 +207,12 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
-| JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
+| JS benchmarks          | `src/workerd/api/bench-api/`, `bench-core/`, `build/wd_bench.bzl` | Rust `BenchController` and runner (`bench-api`); report building, clocks (`bench-core`); schema `io/bench.capnp`; driver `server/server/bench.rs` |
 | Streams benchmarks     | `src/bench/streams/`                                          | C++ vs TS streams: the same modules under a cell per implementation; see its `AGENTS.md`                     |
-| Clone benchmarks       | `src/bench/serialization/`                                    | `structuredClone()` of object graphs, class instances, arrays and strings                                    |
+| Clone benchmarks       | `src/bench/serialization/`                                    | `structuredClone()`, C++ vs TS (`TS_STRUCTURED_CLONE`): object graphs, arrays, strings, options, cold calls  |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | See `docs/v8-updates.md`                                                                                     |
+| DOMException           | `src/workerd/jsg/dom-exception.{h,c++}`, `patches/v8/2026-11-23-Implement-DOMException-*`  | C++ class, or under the `V8_DOM_EXCEPTION` autogate V8's (our V8 patch, not upstream V8); create with `js.domException()` |
 | Startup snapshot       | `src/workerd/jsg/snapshot.{h,c++}`, `setup.{h,c++}`           | Zygote bakes the top level into a V8 snapshot; `STARTUP_SNAPSHOT` autogate; see `docs/startup-snapshot.md`   |
 
 ## Coding Conventions
@@ -222,6 +226,11 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
   `HEAD~`
 - **Pre-commit hook**: `githooks/pre-commit`, enabled with `git config core.hooksPath githooks`;
   blocks `KJ_DBG` in staged code and runs a format check (see `docs/development.md`)
+- **Includes**: Don't include headers that a file doesn't use. clang-tidy enforces this for
+  headers with `misc-include-cleaner` (see `HEADER_ONLY_CHECKS` in
+  `build/tools/clang_tidy/check_path_filters.bzl`), which ignores KJ headers and doesn't
+  report missing includes. Remove unused includes from `.c++` files too, though nothing
+  enforces it there.
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 

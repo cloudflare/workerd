@@ -8,7 +8,6 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/queue.h>
@@ -25,6 +24,7 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/rtti.h>
+#include <workerd/rust/jsg-cpp/jsg-cpp.h>
 
 #include <capnp/serialize.h>
 #include <kj/test.h>
@@ -77,6 +77,26 @@ KJ_TEST("JsReadableWritablePair delegates its RTTI to ReadableStream::Transform"
   KJ_EXPECT(
       type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream::Transform"_kj,
       type.getStructure().getFullyQualifiedName());
+}
+
+struct RustStreamTag {
+  using JsgRttiDelegate = jsg::Ref<ReadableStream>;
+};
+
+KJ_TEST("RustRef delegates its RTTI to the tag's JavaScript type") {
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<rust::jsg_cpp::RustRef<RustStreamTag>>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(type.getStructure().getFullyQualifiedName() == "workerd::api::ReadableStream"_kj);
+  KJ_EXPECT(builder.structure("workerd::api::ReadableStream"_kj) != kj::none);
+}
+
+KJ_TEST("ctx.cache retains its CacheContext RTTI with either backend") {
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  auto type = builder.type<CacheContextRef>();
+  KJ_ASSERT(type.isStructure());
+  KJ_EXPECT(type.getStructure().getFullyQualifiedName() == "workerd::api::CacheContext"_kj);
+  KJ_EXPECT(builder.structure("workerd::api::CacheContext"_kj) != kj::none);
 }
 
 KJ_TEST("RTTI export discovers Rust modules and their referenced structs without evaluating JS") {

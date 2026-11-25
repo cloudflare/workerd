@@ -574,10 +574,10 @@ impl<T: TypeInfo> TypeInfo for crate::Nullable<T> {
     }
 }
 
-/// `T | null | undefined`, like `Option<Nullable<T>>`.
-impl<T: TypeInfo> TypeInfo for crate::Lenient<T> {
+/// `T | undefined`, like `Option<T>` and C++ `jsg::LenientOptional<T>`.
+impl<T: TypeInfo> TypeInfo for crate::LenientOption<T> {
     fn describe(cx: &mut Context) -> Type {
-        Option::<crate::Nullable<T>>::describe(cx)
+        Option::<T>::describe(cx)
     }
 }
 
@@ -674,6 +674,8 @@ primitive!(v8::Promise, Type::Promise(Box::new(Type::Unknown)));
 // As C++ describes `jsg::Promise<void>`.
 primitive!(v8::VoidPromise<'_>, Type::Promise(Box::new(Type::Void)));
 primitive!(v8::ArrayBuffer, Type::Builtin(Builtin::V8ArrayBuffer));
+// As C++ describes `v8::WasmModuleObject`; a TypeScript override names it `WebAssembly.Module`.
+primitive!(v8::WasmModuleObject, Type::Unknown);
 // As C++ describes `jsg::JsDate`.
 primitive!(v8::Date, Type::Builtin(Builtin::KjDate));
 primitive!(

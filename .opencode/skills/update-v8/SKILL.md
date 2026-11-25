@@ -48,7 +48,8 @@ gclient sync
 
 ```sh
 git checkout -b workerd-patches
-git am --keep-non-patch <path_to_workerd>/patches/v8/*
+export LC_ALL=C  # Glob in the name order that Bazel applies the patches in.
+git am --keep-non-patch --committer-date-is-author-date <path_to_workerd>/patches/v8/*.patch
 ```
 
 There are multiple patches in `patches/v8/`. These include workerd-specific customizations:
@@ -79,10 +80,16 @@ git rebase --onto <new_version> <old_version>
 ### Step 5: Regenerate patches
 
 ```sh
-git format-patch --full-index -k --no-signature --no-stat --zero-commit <new_version>
+git format-patch --full-index -k --no-signature --no-stat --zero-commit \
+  --filename-max-length=200 <new_version>
+paste <(ls 0*.patch) <(git log --reverse --no-merges --format=%as <new_version>..) |
+  while read -r patch date; do mv "$patch" "$date-${patch#*-}"; done
 ```
 
-This produces numbered `.patch` files in the current directory.
+This produces `.patch` files in the current directory, named `<author date>-<subject>.patch`.
+The patches apply in name order, which is author date order. A rebase keeps author dates, so
+it keeps the names unless it changes a subject. To move a patch in the stack, change its author date
+(`git commit --amend --date=...`).
 
 ### Step 6: Replace patches in workerd
 
@@ -109,7 +116,7 @@ Three things need updating:
 
    Format: `"sha256-<base64_hash>="`. Alternatively, attempt a build and copy the expected hash from Bazel's mismatch error.
 
-3. **`PATCHES`**: Update the list if patches were added, removed, or renamed. The list must match the filenames in `patches/v8/` exactly, in order.
+3. **`PATCHES`**: Update the list if patches were added, removed, or renamed. The list must match the filenames in `patches/v8/` exactly, in name order (`LC_ALL=C ls`).
 
 ### Step 8: Update V8's dependencies
 

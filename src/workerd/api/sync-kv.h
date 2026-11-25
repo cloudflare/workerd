@@ -74,3 +74,11 @@ class SyncKvStorage: public jsg::Object {
     api::SyncKvStorage::ListIterator, api::SyncKvStorage::ListIterator::Next
 
 }  // namespace workerd::api
+
+namespace workerd::jsg {
+
+// The cursor is a KJ object; it holds no JS handles.
+template <>
+inline constexpr bool holdsNoGcHandles<IoOwn<SqliteKv::ListCursor>> = true;
+
+}  // namespace workerd::jsg

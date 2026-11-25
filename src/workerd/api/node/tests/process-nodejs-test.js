@@ -895,8 +895,9 @@ export const processLoadEnvFile = {
         assert.fail();
       } catch (e) {
         assert.strictEqual(e.code, 'ENOENT');
-        // TODO(soon): Enable once `path` is supported on ENOENT
-        // assert.strictEqual(e.path, '/bundle/.env');
+        // TODO(soon): Node.js reports the relative path as passed, '.env',
+        // where node:fs reports the absolute '/bundle/.env'.
+        // assert.strictEqual(e.path, '.env');
       }
     }
 
@@ -904,10 +905,10 @@ export const processLoadEnvFile = {
     {
       try {
         process.loadEnvFile(missingEnvFilePath);
+        assert.fail();
       } catch (e) {
         assert.strictEqual(e.code, 'ENOENT');
-        // TODO(soon): Enable once `path` is supported on ENOENT errors
-        // assert.strictEqual(e.path, missingEnvFile);
+        assert.strictEqual(e.path, missingEnvFilePath);
       }
     }
 

@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -381,7 +382,7 @@ wd_test(
     data = ["process-stdio-fs-nodejs-test.js"],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -399,7 +400,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-sh-test@all-autogates",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -418,7 +419,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-fs-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -436,7 +437,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-fs-sh-test@all-autogates",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -737,6 +738,12 @@ wd_test(
     data = ["fs-access-test.js"],
 )
 
+wd_test(
+    src = "fs-errors-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-errors-test.js"],
+)
+
 # The stdio suite runs the same module under a C++ and a TypeScript cell. The
 # C++ cell disables the @all-autogates variant: enabling every autogate enables
 # TS_STDIO, which swaps in the TypeScript implementation under a cell whose
@@ -932,4 +939,12 @@ wd_test(
     src = "als-gc-test.wd-test",
     args = ["--experimental"],
     data = ["als-gc-test.js"],
+)
+
+kj_test(
+    src = "zlib-memory-test.c++",
+    deps = [
+        "//src/workerd/api/node",
+        "//src/workerd/tests:test-fixture",
+    ],
 )

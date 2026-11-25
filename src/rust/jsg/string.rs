@@ -60,10 +60,6 @@ impl Type for JsString<'_> {
     fn class_name() -> &'static str {
         "string"
     }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        value.is_string()
-    }
 }
 
 impl<'s> FromJS<'s> for JsString<'s> {

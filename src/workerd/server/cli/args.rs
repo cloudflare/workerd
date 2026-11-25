@@ -5,6 +5,8 @@
 //! they depended on (e.g. `--watch` and `--binary` must take effect before `<config>` is
 //! parsed).
 
+use std::time::Duration;
+
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -116,6 +118,12 @@ pub enum Command {
         #[command(flatten)]
         deploy: DeployArgs,
     },
+
+    #[command(override_help = help::REPL)]
+    Repl {
+        #[command(flatten)]
+        repl: ReplArgs,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -144,6 +152,9 @@ pub struct ConstNameArg {
 pub struct ServeOrTestArgs {
     #[arg(short = 'd', long = "directory-path", value_name = "name>=<dir", value_parser = parse_override)]
     pub directory_overrides: Vec<Override>,
+
+    #[arg(long, value_name = "dir")]
+    pub data_dir: Option<String>,
 
     #[arg(short = 'e', long = "external-addr", value_name = "name>=<addr", value_parser = parse_override)]
     pub external_overrides: Vec<Override>,
@@ -234,6 +245,36 @@ pub struct DeployArgs {
     pub experimental: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct ReplArgs {
+    #[arg(value_name = "config")]
+    pub config_file: Option<String>,
+
+    #[arg(value_name = "const", requires = "config_file")]
+    pub const_name: Option<String>,
+
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    #[arg(long = "compat-flag", value_name = "flag")]
+    pub compat_flags: Vec<String>,
+
+    #[arg(long = "autogate", value_name = "name")]
+    pub autogates: Vec<String>,
+
+    #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
+    pub v8_flags: Vec<String>,
+
+    #[arg(long, value_name = "seconds", value_parser = parse_seconds)]
+    pub input_timeout: Option<Duration>,
+
+    #[arg(short = 'i', long)]
+    pub interactive: bool,
+
+    #[arg(long)]
+    pub experimental: bool,
+}
+
 impl DeployArgs {
     /// Build the bucket options used by the instances' `cluster.bucketOptions` setting. A gs://
     /// bucket takes none, so it refuses `--endpoint` and `--region`.
@@ -252,6 +293,16 @@ impl DeployArgs {
         let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
         let region = self.region.iter().map(|r| format!("aws_region={r}"));
         Ok(endpoint.chain(region).collect())
+    }
+}
+
+/// Parse a positive number of seconds, such as `30` or `0.5`.
+fn parse_seconds(param: &str) -> Result<Duration, &'static str> {
+    let expected = "expected a positive number of seconds, such as 30 or 0.5";
+    let seconds: f64 = param.parse().map_err(|_| expected)?;
+    match Duration::try_from_secs_f64(seconds) {
+        Ok(duration) if !duration.is_zero() => Ok(duration),
+        _ => Err(expected),
     }
 }
 

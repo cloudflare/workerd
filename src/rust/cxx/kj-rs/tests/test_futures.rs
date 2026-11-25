@@ -750,26 +750,6 @@ pub async fn new_errored_future_void() -> Result<()> {
     Err(std::io::Error::other("test error"))
 }
 
-// Unwind-protection helpers (kj-rs/future.rs vtable): a panic escaping a bridged future's
-// poll() must surface to C++ as a rejected kj::Promise carrying a kj::Exception, not a
-// process abort. These panic at different points to cover both the fallible and infallible
-// vtables and both the first-poll and event-loop-driven poll paths.
-
-pub async fn new_panicking_future_void() -> Result<()> {
-    panic!("bridged future panicked on purpose");
-}
-
-pub async fn new_panicking_infallible_future_void() {
-    panic!("bridged infallible future panicked on purpose");
-}
-
-pub async fn new_panicking_after_await_future_void() -> Result<()> {
-    crate::ffi::new_ready_promise_void()
-        .await
-        .expect("should not throw");
-    panic!("bridged future panicked after a suspension point");
-}
-
 pub async fn new_kj_errored_future_void() -> std::result::Result<(), cxx::KjError> {
     Err(cxx::KjError::new(
         cxx::KjExceptionType::Overloaded,
@@ -782,6 +762,44 @@ pub async fn new_error_handling_future_void_infallible() {
         .await
         .expect_err("should throw");
     assert!(err.what().contains("test error"));
+}
+
+// =======================================================================================
+// Panic test helpers
+
+/// Panics on its first poll, with a `&'static str` payload.
+pub async fn new_panicking_future_void() -> Result<()> {
+    panic!("fallible future panicked");
+}
+
+/// A future whose output is not a `Result`. Panics on its first poll, with a `String` payload.
+pub async fn new_panicking_future_i32() -> i32 {
+    panic!("infallible future panicked with {}", 42);
+}
+
+/// A future whose output is not a `Result`. Waits for `fulfill_stored_promise()`, then panics on
+/// the poll that the fulfillment wakes it for.
+pub async fn new_awaiting_then_panicking_future_void() {
+    crate::ffi::new_fulfillable_promise_void()
+        .await
+        .expect("should not throw");
+    panic!("future panicked after awaiting");
+}
+
+/// Panics when dropped.
+struct PanicOnDrop;
+
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("future panicked while dropped");
+    }
+}
+
+/// Never completes, and panics when C++ cancels it.
+pub async fn new_panicking_on_drop_future_void() -> Result<()> {
+    let _guard = PanicOnDrop;
+    future::pending::<()>().await;
+    Ok(())
 }
 
 pub async fn new_promise_i32_awaiting_future_void() -> Result<()> {
@@ -1394,29 +1412,6 @@ pub async fn new_ping_pong_future_void(side: u32, rounds: u32) {
         rounds_left: rounds,
     }
     .await
-}
-
-/// A future that is never ready and whose `Drop` panics. Dropping it from C++ (cancelling the
-/// bridged promise) hits `RustFuture::drop_in_place`, which has no error channel: the bridge
-/// documents a deterministic labeled abort there rather than an unwind into C++. The C++ death
-/// test asserts exactly that.
-struct PanicOnDropFuture;
-
-impl Future for PanicOnDropFuture {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
-        Poll::Pending
-    }
-}
-
-impl Drop for PanicOnDropFuture {
-    fn drop(&mut self) {
-        panic!("deliberate panic in a bridged future's Drop");
-    }
-}
-
-pub async fn new_panic_on_drop_future_void() {
-    PanicOnDropFuture.await;
 }
 
 /// A Rust future that simply awaits the C++ test's manually fulfillable promise

@@ -52,8 +52,6 @@ use utils::has_flag;
 use utils::is_attr;
 use utils::is_lock_ref;
 use utils::is_named_this;
-use utils::is_null_or_undefined_type;
-use utils::is_option_type;
 use utils::is_promise_type;
 use utils::is_rc_self;
 use utils::is_result_type;
@@ -71,11 +69,11 @@ use utils::typescript_options;
 /// Only `pub` fields are projected into the JavaScript object. Each converts with its `ToJS`
 /// impl, and a field whose conversion fails fails the struct's conversion with that error.
 /// The generated `Traced` impl visits every field, so a field can be a `jsg::Rc<R>`.
-/// Optional fields use `Option<T>` or `jsg::NullOrUndefined<T>`; prefer the latter to
-/// `Option<jsg::Nullable<T>>` to distinguish `null` from `undefined`. A field that holds a
-/// JavaScript value, as a C++ `jsg::JsRef<T>` field does, is a `jsg::v8::TracedGlobal<M>`;
-/// a resource that moves such a struct out of a field keeps it in a `jsg::Cell` or
-/// `jsg::RefCell`, which make the handle strong before it leaves.
+/// Optional fields use `Option<T>`, `jsg::LenientOption<T>` or `jsg::NullOrUndefined<T>`;
+/// prefer `jsg::NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` to distinguish `null` from
+/// `undefined`. A field that holds a JavaScript value, as a C++ `jsg::JsRef<T>` field does, is a
+/// `jsg::v8::TracedGlobal<M>`; a resource that moves such a struct out of a field keeps it in a
+/// `jsg::Cell` or `jsg::RefCell`, which make the handle strong before it leaves.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata and the TypeScript declaration name; it does not define a JS class.
 #[proc_macro_attribute]
@@ -91,10 +89,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
     let rtti = describe_struct(name, &class_name, &typescript_options(attr), &named_fields);
 
-    let mut to_js_fields = Vec::new();
-    let mut field_extractions = Vec::new();
-    let mut field_names = Vec::new();
-    let mut all_optional = true;
+    // Each public field's name, JavaScript name and type, in order.
+    let mut fields = Vec::new();
     let traced_impl = struct_traced_impl(name, &named_fields, custom_marker);
 
     for field in &named_fields {
@@ -106,38 +102,37 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let Some(field_name) = field.ident.as_ref() else {
             continue;
         };
-        let field_name_str = field_name.to_string();
-        let field_type = &field.ty;
-        let present = if is_option_type(field_type) {
-            Some(quote! { this.#field_name.is_some() })
-        } else if is_null_or_undefined_type(field_type) {
-            Some(quote! { !this.#field_name.is_undefined() })
-        } else {
-            None
-        };
-        all_optional &= present.is_some();
-
-        to_js_fields.push((field_name, field_name_str, present));
-        // Like C++ JSG, an absent property reads as undefined.
-        let index = field_extractions.len();
-        field_extractions.push(quote! {
-            let prop = __jsg_shape.get(lock, obj, #index)?;
-            let #field_name = <#field_type as jsg::FromJS<'s>>::from_js(lock, prop)?;
-        });
-        field_names.push(field_name);
+        fields.push((field_name, field_name.to_string(), &field.ty));
     }
 
-    let empty = empty_struct_body(all_optional, &field_names, &class_name);
+    let field_names: Vec<_> = fields
+        .iter()
+        .map(|(field_name, _, _)| *field_name)
+        .collect();
+    let field_extractions =
+        fields
+            .iter()
+            .enumerate()
+            .map(|(index, (field_name, js_name, field_type))| {
+                struct_field_extraction(
+                    field_name,
+                    js_name,
+                    field_type,
+                    &class_name,
+                    &quote! { __jsg_shape.get(lock, obj, #index)? },
+                )
+            });
+    let empty = empty_struct_body(&fields, &class_name);
 
     // The JavaScript names of the public fields, in order; field `i` of the struct's
     // `jsg::StructShape` is the `i`th name. A struct without public fields has no shape. The
-    // local is named so that it can't be a field's name, since `from_js` binds each field's value
-    // to a local of the field's name.
-    let js_names = to_js_fields.iter().map(|(_, js_name, _)| js_name);
-    let get_shape = (!to_js_fields.is_empty()).then(|| {
+    // local is named so that it can't be a field's name, since `try_from_js` binds each field's
+    // value to a local of the field's name.
+    let js_names = fields.iter().map(|(_, js_name, _)| js_name);
+    let get_shape = (!fields.is_empty()).then(|| {
         quote! { let __jsg_shape = jsg::StructShape::of::<Self>(lock, &[#(#js_names),*]); }
     });
-    let to_js_body = to_js_fn_body(&to_js_fields);
+    let to_js_body = to_js_fn_body(&fields);
 
     quote! {
         #input
@@ -147,10 +142,6 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             const UNION_TYPES: jsg::UnionTypes = jsg::UnionTypes::DICTIONARY;
 
             fn class_name() -> &'static str { #class_name }
-
-            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                value.is_object()
-            }
         }
 
         impl<'s> jsg::ToJS<'s> for #name {
@@ -177,24 +168,21 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                Self::try_from_js(lock, value)?.ok_or_else(|| jsg::Error::new_type_error(
+                    format!("Expected object but got {}", value.type_of(lock))
+                ))
+            }
+
+            fn try_from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
                 if value.is_null() || value.is_undefined() {
                     #empty
                 }
                 let Ok(obj) = jsg::v8::Local::<jsg::v8::Object>::try_from(value) else {
-                    return Err(jsg::Error::new_type_error(
-                        format!("Expected object but got {}", value.type_of(lock))
-                    ));
+                    return Ok(None);
                 };
                 #get_shape
                 #(#field_extractions)*
-                Ok(Self { #(#field_names),* })
-            }
-
-            fn try_from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
-                if !value.is_object() && !value.is_null() && !value.is_undefined() {
-                    return Ok(None);
-                }
-                Self::from_js(lock, value).map(Some)
+                Ok(Some(Self { #(#field_names),* }))
             }
         }
 
@@ -207,22 +195,59 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// The statement a `#[jsg_struct]`'s `FromJS::from_js` runs for null or undefined. Like C++ JSG,
-/// it is an empty dictionary, which is an error if a field is required.
+/// The statements a `#[jsg_struct]`'s `FromJS::try_from_js` runs to convert the field's value,
+/// `prop`, and bind it to a local of the field's name. Like C++ JSG, an absent property reads as
+/// undefined, and a value that is not of the field's type is reported as that field's, while an
+/// error from converting one passes through.
+fn struct_field_extraction(
+    field_name: &syn::Ident,
+    js_name: &str,
+    field_type: &syn::Type,
+    class_name: &str,
+    prop: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        let prop = #prop;
+        let Some(#field_name) = <#field_type as jsg::FromJS<'s>>::try_from_js(lock, prop)? else {
+            return Err(jsg::Error::new_incorrect_type(
+                jsg::TypeErrorContext::StructField { field: #js_name, class: #class_name },
+                &<#field_type as jsg::FromJS<'s>>::type_name(),
+            ));
+        };
+    }
+}
+
+/// The statements a `#[jsg_struct]`'s `FromJS::try_from_js` runs for null or undefined. Like C++
+/// JSG, it is an empty dictionary, which is an error if a field's type is not optional (see
+/// `FromJS::is_optional`), and otherwise has each field converted from undefined.
 fn empty_struct_body(
-    all_optional: bool,
-    field_names: &[&syn::Ident],
+    fields: &[(&syn::Ident, String, &syn::Type)],
     class_name: &str,
 ) -> proc_macro2::TokenStream {
-    if all_optional {
-        quote! { return Ok(Self { #(#field_names: Default::default()),* }); }
-    } else {
-        quote! {
+    if fields.is_empty() {
+        return quote! { return Ok(Some(Self {})); };
+    }
+    let field_names = fields.iter().map(|(field_name, _, _)| field_name);
+    let field_types = fields.iter().map(|(_, _, field_type)| field_type);
+    let extractions = fields.iter().map(|(field_name, js_name, field_type)| {
+        struct_field_extraction(
+            field_name,
+            js_name,
+            field_type,
+            class_name,
+            &quote! { __jsg_undefined },
+        )
+    });
+    quote! {
+        if !(#(<#field_types as jsg::FromJS<'s>>::is_optional())&&*) {
             return Err(jsg::Error::new_type_error(format!(
                 "Cannot initialize {} with required members from an undefined or null value.",
                 #class_name,
             )));
         }
+        let __jsg_undefined = lock.undefined();
+        #(#extractions)*
+        return Ok(Some(Self { #(#field_names),* }));
     }
 }
 
@@ -261,13 +286,10 @@ fn struct_traced_impl(
     }
 }
 
-/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
-/// JavaScript name and the condition for its present state, if optional. Unless there are no
-/// fields, the body has the struct's `jsg::StructShape` as `__jsg_shape`. Like C++ JSG's
-/// `JSG_STRUCT`, it follows the `fast_jsg_struct` flag.
-fn to_js_fn_body(
-    fields: &[(&syn::Ident, String, Option<proc_macro2::TokenStream>)],
-) -> proc_macro2::TokenStream {
+/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, JavaScript name
+/// and type. Unless there are no fields, the body has the struct's `jsg::StructShape` as
+/// `__jsg_shape`. Like C++ JSG's `JSG_STRUCT`, it follows the `fast_jsg_struct` flag.
+fn to_js_fn_body(fields: &[(&syn::Ident, String, &syn::Type)]) -> proc_macro2::TokenStream {
     if fields.is_empty() {
         return quote! {
             let _ = (self, creator);
@@ -283,20 +305,12 @@ fn to_js_fn_body(
     let field_sets = fields
         .iter()
         .enumerate()
-        .map(|(index, (field_name, _, present))| {
-            let set = quote! {
-                let value = jsg::ToJS::to_js_with_creator(value, lock, creator)?;
-                __jsg_shape.set(lock, obj, #index, value)?;
-            };
-            if let Some(present) = present {
-                quote! {
-                    if #present {
-                        let value = this.#field_name;
-                        #set
-                    }
+        .map(|(index, (field_name, _, _))| {
+            quote! {
+                if !jsg::ToJS::is_absent(&this.#field_name) {
+                    let value = jsg::ToJS::to_js_with_creator(this.#field_name, lock, creator)?;
+                    __jsg_shape.set(lock, obj, #index, value)?;
                 }
-            } else {
-                quote! { { let value = this.#field_name; #set } }
             }
         });
     quote! {
@@ -787,13 +801,14 @@ fn unwrap_value(
     // required argument or a top-level type mismatch is "Failed to execute
     // ...". FromJS::is_optional() determines whether an argument may be omitted.
     quote! {
-        let not_of_type = || jsg::Error::new_type_error(format!(
-            "Failed to execute '{}' on '{}': parameter {} is not of type '{}'.",
-            #method_name,
-            <Self as jsg::Type>::class_name(),
-            #js_index + 1,
-            <#ty as jsg::FromJS<'_>>::type_name(),
-        ));
+        let not_of_type = || jsg::Error::new_incorrect_type(
+            jsg::TypeErrorContext::MethodArgument {
+                method: #method_name,
+                class: <Self as jsg::Type>::class_name(),
+                index: #js_index,
+            },
+            &<#ty as jsg::FromJS<'_>>::type_name(),
+        );
         if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= argc {
             lock.throw_exception(&not_of_type());
             return;
@@ -1000,6 +1015,9 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The constant name is used as-is (no camelCase conversion), matching the
 /// convention that constants are `UPPER_SNAKE_CASE` in both Rust and JavaScript.
 /// Only numeric types (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`) are supported.
+/// Like a static method, a static constant cannot be named `length`, `name` or
+/// `prototype`, or share its name with another static member (see the README's
+/// "Static member names").
 ///
 /// ```ignore
 /// #[jsg_resource]
@@ -1356,11 +1374,13 @@ pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
 // #[jsg_traced]
 // =============================================================================
 
-/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct of GC-free fields.
+/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct or enum of GC-free
+/// fields.
 ///
-/// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
-/// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
-/// can't implement the marker, see `jsg::jsg_traced_unchecked!`.
+/// Each field's type, in every variant of an enum, must implement `HoldsNoGcReferences`, so a
+/// field that can hold a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile.
+/// For a type whose fields can't implement the marker, such as one from outside JSG, see
+/// `jsg::jsg_traced_unchecked!`.
 ///
 /// ```ignore
 /// #[jsg_traced]

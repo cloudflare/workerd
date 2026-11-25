@@ -5,10 +5,9 @@
 #pragma once
 
 #include "basics.h"
-#include "bench.h"
+#include "cache-context-ref.h"
 #include "filesystem.h"
 #include "http.h"
-#include "messagechannel.h"
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
@@ -23,6 +22,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 class DOMException;
@@ -43,7 +43,6 @@ class JsRpcProperty;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
-class EventSource;
 class FixedLengthStream;
 class SubtleCrypto;
 class TextDecoder;
@@ -378,7 +377,7 @@ class ExecutionContext: public jsg::Object {
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
-  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+  jsg::Optional<CacheContextRef> getCache(jsg::Lock& js);
 
   jsg::JsValue getVersion(jsg::Lock& js) {
     // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
@@ -636,20 +635,6 @@ struct ExportedHandler {
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
 
-// The `bench` handler of an exported object. It isn't a member of ExportedHandler, which is
-// unwrapped from the export for every event, reading each of its handlers: reading another name
-// there would break exports that reject unknown properties, such as a Proxy. Instead,
-// ServiceWorkerGlobalScope::bench() unwraps this from ExportedHandler::self, only when a
-// benchmark runs.
-struct BenchExportedHandler {
-  using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
-
-  JSG_STRUCT(bench);
-};
-
 // V8 private key set on functions marked with retryable() from "cloudflare:durable-objects".
 // Reading it runs no user code, so a claim can check it before the handler or method runs.
 inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
@@ -754,6 +739,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   //
   // `channel` is borrowed, not owned.
   kj::Promise<void> connectUdp(kj::String host,
+      kj::Maybe<kj::String> clientAddress,
       DatagramChannel& channel,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
@@ -785,9 +771,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
-  // register cases, then runs them. Failures, of the handler or of a case, are recorded in the
-  // result rather than rejecting.
-  jsg::Promise<BenchGroupResult> bench(Worker::Lock& lock,
+  // register cases, then runs them, through Worker::Api::runBench(). Resolves with the group's
+  // `BenchReport.Group`, without its name, as an encoded message. Failures, of the handler or of
+  // a case, are recorded in the group rather than rejecting.
+  jsg::Promise<kj::Array<capnp::word>> bench(Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler,
       bench::BenchParams::Reader params);
 
@@ -850,7 +837,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
     JSG_STRUCT(transfer);
-    JSG_STRUCT_TS_OVERRIDE(StructuredSerializeOptions);
+    // Declared in types/defines/structured-clone.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type StructuredSerializeOptions = never);
   };
 
   jsg::JsValue structuredClone(
@@ -942,9 +930,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript DOMException instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+    // Under the V8_DOM_EXCEPTION autogate, the global is V8's own DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION)) {
       JSG_NESTED_TYPE(DOMException);
     }
     JSG_NESTED_TYPE(WorkerGlobalScope);
@@ -963,7 +950,13 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(setInterval);
     JSG_METHOD(clearInterval);
     JSG_METHOD(queueMicrotask);
-    JSG_METHOD(structuredClone);
+    // Under the TS_STRUCTURED_CLONE autogate, the per-isolate bootstrap installs the TypeScript
+    // structuredClone() instead. Its types come from types/defines/structured-clone.d.ts, not from
+    // this method (the JSG_TS_OVERRIDE below omits it), so they do not depend on whether this
+    // method is registered.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_STRUCTURED_CLONE)) {
+      JSG_METHOD(structuredClone);
+    }
     JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);
@@ -1030,12 +1023,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    // Under the TS_MESSAGE_CHANNEL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript MessageChannel and MessagePort instead.
-    if (flags.getExposeGlobalMessageChannel() && !useTypeScriptMessageChannel()) {
-      JSG_NESTED_TYPE(MessageChannel);
-      JSG_NESTED_TYPE(MessagePort);
-    }
+    // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
+    // declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);
@@ -1045,11 +1035,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(StorageManager);
     }
 
-    // Under the TS_EVENT_SOURCE autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript EventSource instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_EVENT_SOURCE)) {
-      JSG_NESTED_TYPE(EventSource);
-    }
+    // The per-isolate bootstrap (src/per_isolate/main.ts) defines EventSource; the TypeScript
+    // override below declares it.
 
     // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
     if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
@@ -1269,6 +1256,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
+    // structuredClone() is declared in types/defines/structured-clone.d.ts.
     JSG_TS_OVERRIDE({
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
@@ -1276,10 +1264,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval(callback: (...args: any[]) => void, msDelay?: number): number;
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
-      structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      structuredClone: never;
       queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
+
+      MessageChannel: typeof MessageChannel;
+      MessagePort: typeof MessagePort;
+      EventSource: typeof EventSource;
     });
   }
 
@@ -1313,10 +1305,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
-      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+      api::ExecutionContext, api::ExportedHandler,                                                 \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

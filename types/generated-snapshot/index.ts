@@ -251,7 +251,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ): number;
   clearInterval(timeoutId: number | null): void;
   queueMicrotask(task: Function): void;
-  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
   reportError(error: any): void;
   fetch(
     input: RequestInfo | URL,
@@ -283,9 +282,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
-  EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
   ReadableByteStreamController: typeof ReadableByteStreamController;
@@ -337,6 +333,9 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   PerformanceResourceTiming: typeof PerformanceResourceTiming;
   PerformanceObserver: typeof PerformanceObserver;
   PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
+  EventSource: typeof EventSource;
 }
 export declare function addEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
@@ -392,11 +391,6 @@ export declare function setInterval<Args extends any[]>(
 export declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 export declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-export declare function structuredClone<T>(
-  value: T,
-  options?: StructuredSerializeOptions,
-): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 export declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
@@ -518,9 +512,6 @@ export interface ExportedHandler<
   test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env, Props>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
-}
-export interface StructuredSerializeOptions {
-  transfer?: any[];
 }
 export declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
@@ -2037,11 +2028,6 @@ export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/blob) */
   blob(): Promise<Blob>;
 }
-/**
- * The **`Response`** interface of the Fetch API represents the response to a request.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
- */
 export declare var Response: {
   prototype: Response;
   new (body?: BodyInit | null, init?: ResponseInit): Response;
@@ -2118,11 +2104,6 @@ export type RequestInfo<
   CfHostMetadata = unknown,
   Cf = CfProperties<CfHostMetadata>,
 > = Request<CfHostMetadata, Cf> | string;
-/**
- * The **`Request`** interface of the Fetch API represents a resource request.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
- */
 export declare var Request: {
   prototype: Request;
   new <CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>(
@@ -2783,11 +2764,6 @@ export interface ReadableStream<R = any> {
     options?: ReadableStreamValuesOptions,
   ): AsyncIterableIterator<R>;
 }
-/**
- * The **`ReadableStream`** interface of the Streams API represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
- */
 export declare const ReadableStream: {
   prototype: ReadableStream;
   new (
@@ -3376,11 +3352,6 @@ export type WebSocketEventMap = {
   open: Event;
   error: ErrorEvent;
 };
-/**
- * The **`WebSocket`** object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
- */
 export declare var WebSocket: {
   prototype: WebSocket;
   new (url: string, protocols?: string[] | string): WebSocket;
@@ -3478,12 +3449,16 @@ export interface SqlStorage {
 }
 export declare abstract class SqlStorageStatement {}
 export type SqlStorageValue = ArrayBuffer | string | number | null;
+export interface SqlStorageCursor<
+  T extends Record<string, SqlStorageValue>,
+> extends Disposable {}
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
   next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
+  close(): void;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
   columnNames: string[];
   get rowsRead(): number;
@@ -3515,58 +3490,6 @@ export interface TlsOptions {
 export interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
-}
-/**
- * The **`EventSource`** interface is web content's interface to server-sent events.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
- */
-export declare class EventSource extends EventTarget {
-  constructor(url: string, init?: EventSourceEventSourceInit);
-  /**
-   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
-   */
-  close(): void;
-  /**
-   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
-   */
-  get url(): string;
-  /**
-   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
-   */
-  get withCredentials(): boolean;
-  /**
-   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
-   */
-  get readyState(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  get onopen(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
-  set onopen(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  get onmessage(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
-  set onmessage(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  get onerror(): any | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
-  set onerror(value: any | null);
-  static readonly CONNECTING: number;
-  static readonly OPEN: number;
-  static readonly CLOSED: number;
-  static from(stream: ReadableStream): EventSource;
-}
-export interface EventSourceEventSourceInit {
-  withCredentials?: boolean;
-  fetcher?: Fetcher;
 }
 export interface ExecOutput {
   readonly stdout: ArrayBuffer;
@@ -3674,59 +3597,6 @@ export interface ContainerStartResources {
   vcpu: number;
   memoryMib: number;
   diskMb: number;
-}
-/**
- * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
- */
-export declare abstract class MessagePort extends EventTarget {
-  /**
-   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
-   */
-  postMessage(
-    data?: any,
-    options?: any[] | MessagePortPostMessageOptions,
-  ): void;
-  /**
-   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
-   */
-  close(): void;
-  /**
-   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
-   */
-  start(): void;
-  get onmessage(): any | null;
-  set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-export declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
-}
-export interface MessagePortPostMessageOptions {
-  transfer?: any[];
 }
 export type LoopbackForExport<
   T extends
@@ -4251,6 +4121,544 @@ export interface TracingSpanContext {
   traceId: string;
   spanId: string;
   traceFlags: number;
+}
+/**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+export interface DOMException extends Error {
+  /**
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
+  readonly name: string;
+  /**
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
+  readonly message: string;
+  /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
+   */
+  readonly code: number;
+  readonly INDEX_SIZE_ERR: 1;
+  readonly DOMSTRING_SIZE_ERR: 2;
+  readonly HIERARCHY_REQUEST_ERR: 3;
+  readonly WRONG_DOCUMENT_ERR: 4;
+  readonly INVALID_CHARACTER_ERR: 5;
+  readonly NO_DATA_ALLOWED_ERR: 6;
+  readonly NO_MODIFICATION_ALLOWED_ERR: 7;
+  readonly NOT_FOUND_ERR: 8;
+  readonly NOT_SUPPORTED_ERR: 9;
+  readonly INUSE_ATTRIBUTE_ERR: 10;
+  readonly INVALID_STATE_ERR: 11;
+  readonly SYNTAX_ERR: 12;
+  readonly INVALID_MODIFICATION_ERR: 13;
+  readonly NAMESPACE_ERR: 14;
+  readonly INVALID_ACCESS_ERR: 15;
+  readonly VALIDATION_ERR: 16;
+  readonly TYPE_MISMATCH_ERR: 17;
+  readonly SECURITY_ERR: 18;
+  readonly NETWORK_ERR: 19;
+  readonly ABORT_ERR: 20;
+  readonly URL_MISMATCH_ERR: 21;
+  readonly QUOTA_EXCEEDED_ERR: 22;
+  readonly TIMEOUT_ERR: 23;
+  readonly INVALID_NODE_TYPE_ERR: 24;
+  readonly DATA_CLONE_ERR: 25;
+}
+export declare var DOMException: {
+  prototype: DOMException;
+  new (message?: string, name?: string): DOMException;
+  readonly INDEX_SIZE_ERR: 1;
+  readonly DOMSTRING_SIZE_ERR: 2;
+  readonly HIERARCHY_REQUEST_ERR: 3;
+  readonly WRONG_DOCUMENT_ERR: 4;
+  readonly INVALID_CHARACTER_ERR: 5;
+  readonly NO_DATA_ALLOWED_ERR: 6;
+  readonly NO_MODIFICATION_ALLOWED_ERR: 7;
+  readonly NOT_FOUND_ERR: 8;
+  readonly NOT_SUPPORTED_ERR: 9;
+  readonly INUSE_ATTRIBUTE_ERR: 10;
+  readonly INVALID_STATE_ERR: 11;
+  readonly SYNTAX_ERR: 12;
+  readonly INVALID_MODIFICATION_ERR: 13;
+  readonly NAMESPACE_ERR: 14;
+  readonly INVALID_ACCESS_ERR: 15;
+  readonly VALIDATION_ERR: 16;
+  readonly TYPE_MISMATCH_ERR: 17;
+  readonly SECURITY_ERR: 18;
+  readonly NETWORK_ERR: 19;
+  readonly ABORT_ERR: 20;
+  readonly URL_MISMATCH_ERR: 21;
+  readonly QUOTA_EXCEEDED_ERR: 22;
+  readonly TIMEOUT_ERR: 23;
+  readonly INVALID_NODE_TYPE_ERR: 24;
+  readonly DATA_CLONE_ERR: 25;
+};
+/**
+ * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
+ */
+export declare class URL {
+  constructor(url: string | URL, base?: string | URL);
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
+  get href(): string;
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
+  set href(value: string);
+  /**
+   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
+   */
+  get origin(): string;
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
+  get protocol(): string;
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
+  set protocol(value: string);
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
+  get username(): string;
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
+  set username(value: string);
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
+  get password(): string;
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
+  set password(value: string);
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
+  get host(): string;
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
+  set host(value: string);
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
+  get hostname(): string;
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
+  set hostname(value: string);
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
+  get port(): string;
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
+  set port(value: string);
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
+  get pathname(): string;
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
+  set pathname(value: string);
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
+  get search(): string;
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
+  set search(value: string);
+  /**
+   * The **`searchParams`** read-only property of the URL interface returns a URLSearchParams object allowing access to the GET decoded query arguments contained in the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
+   */
+  get searchParams(): URLSearchParams;
+  /**
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
+  get hash(): string;
+  /**
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
+  set hash(value: string);
+  /**
+   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as URL.toString().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
+   */
+  toJSON(): string;
+  toString(): string;
+  /**
+   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
+   */
+  static canParse(url: string | URL, base?: string | URL): boolean;
+  /**
+   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
+   */
+  static parse(url: string | URL, base?: string | URL): URL | null;
+  /**
+   * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
+   */
+  static createObjectURL(object: File | Blob): string;
+  /**
+   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling URL.createObjectURL().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
+   */
+  static revokeObjectURL(object_url: string): void;
+}
+/**
+ * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams)
+ */
+export declare class URLSearchParams {
+  constructor(
+    init?: Iterable<Iterable<string>> | Record<string, string> | string,
+  );
+  /**
+   * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size)
+   */
+  get size(): number;
+  /**
+   * The **`append()`** method of the URLSearchParams interface appends a specified key/value pair as a new search parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/append)
+   */
+  append(name: string, value: string): void;
+  /**
+   * The **`delete()`** method of the URLSearchParams interface deletes specified parameters and their associated value(s) from the list of all search parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
+   */
+  delete(name: string, value?: string): void;
+  /**
+   * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/get)
+   */
+  get(name: string): string | null;
+  /**
+   * The **`getAll()`** method of the URLSearchParams interface returns all the values associated with a given search parameter as an array.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/getAll)
+   */
+  getAll(name: string): string[];
+  /**
+   * The **`has()`** method of the URLSearchParams interface returns a boolean value that indicates whether the specified parameter is in the search parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
+   */
+  has(name: string, value?: string): boolean;
+  /**
+   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value. If there were several matching values, this method deletes the others. If the search parameter doesn't exist, this method creates it.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
+   */
+  set(name: string, value: string): void;
+  /**
+   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns undefined. Key/value pairs are sorted by the values of the UTF-16 code units of the keys. This method uses a stable sorting algorithm (i.e., the relative order between key/value pairs with equal keys will be preserved).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
+   */
+  sort(): void;
+  entries(): IterableIterator<[key: string, value: string]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<string>;
+  forEach<This = unknown>(
+    callback: (
+      this: This,
+      value: string,
+      key: string,
+      parent: URLSearchParams,
+    ) => void,
+    thisArg?: This,
+  ): void;
+  toString(): string;
+  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+}
+/**
+ * The **`URLPattern`** interface of the URL Pattern API matches URLs or parts of URLs against a pattern. The pattern can contain capturing groups that extract parts of the matched URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern)
+ */
+export declare class URLPattern {
+  constructor(
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions,
+  );
+  /**
+   * The **`protocol`** read-only property of the URLPattern interface is a string containing the pattern used to match the protocol part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/protocol)
+   */
+  get protocol(): string;
+  /**
+   * The **`username`** read-only property of the URLPattern interface is a string containing the pattern used to match the username part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/username)
+   */
+  get username(): string;
+  /**
+   * The **`password`** read-only property of the URLPattern interface is a string containing the pattern used to match the password part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/password)
+   */
+  get password(): string;
+  /**
+   * The **`hostname`** read-only property of the URLPattern interface is a string containing the pattern used to match the hostname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hostname)
+   */
+  get hostname(): string;
+  /**
+   * The **`port`** read-only property of the URLPattern interface is a string containing the pattern used to match the port part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/port)
+   */
+  get port(): string;
+  /**
+   * The **`pathname`** read-only property of the URLPattern interface is a string containing the pattern used to match the pathname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/pathname)
+   */
+  get pathname(): string;
+  /**
+   * The **`search`** read-only property of the URLPattern interface is a string containing the pattern used to match the search part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/search)
+   */
+  get search(): string;
+  /**
+   * The **`hash`** read-only property of the URLPattern interface is a string containing the pattern used to match the fragment part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hash)
+   */
+  get hash(): string;
+  /**
+   * The **`hasRegExpGroups`** read-only property of the URLPattern interface is a boolean indicating whether or not any of the URLPattern components contain regular expression capturing groups.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hasRegExpGroups)
+   */
+  get hasRegExpGroups(): boolean;
+  /**
+   * The **`test()`** method of the URLPattern interface takes a URL string or object of URL parts, and returns a boolean indicating if the given input matches the current pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/test)
+   */
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
+  /**
+   * The **`exec()`** method of the URLPattern interface takes a URL or object of URL parts, and returns either an object containing the results of matching the URL to the pattern, or null if the URL does not match the pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/exec)
+   */
+  exec(
+    input?: string | URLPatternInit,
+    baseURL?: string,
+  ): URLPatternResult | null;
+}
+export interface URLPatternInit {
+  protocol?: string;
+  username?: string;
+  password?: string;
+  hostname?: string;
+  port?: string;
+  pathname?: string;
+  search?: string;
+  hash?: string;
+  baseURL?: string;
+}
+export interface URLPatternComponentResult {
+  input: string;
+  groups: Record<string, string | undefined>;
+}
+export interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
+}
+export interface URLPatternOptions {
+  ignoreCase?: boolean;
+}
+/**
+ * The **`EventSource`** interface is web content's interface to server-sent events.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
+ */
+export declare class EventSource extends EventTarget {
+  constructor(url: string, init?: EventSourceEventSourceInit);
+  /**
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the EventSource.readyState attribute to 2 (closed).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
+   */
+  close(): void;
+  /**
+   * The **`url`** read-only property of the EventSource interface returns a string representing the URL of the source.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
+   */
+  get url(): string;
+  /**
+   * The **`withCredentials`** read-only property of the EventSource interface returns a boolean value indicating whether the EventSource object was instantiated with CORS credentials set.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
+   */
+  get withCredentials(): boolean;
+  /**
+   * The **`readyState`** read-only property of the EventSource interface returns a number representing the state of the connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
+   */
+  get readyState(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  get onopen(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  set onopen(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  get onmessage(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  set onmessage(value: any | null);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  get onerror(): any | null;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  set onerror(value: any | null);
+  static readonly CONNECTING: number;
+  static readonly OPEN: number;
+  static readonly CLOSED: number;
+  static from(stream: ReadableStream): EventSource;
+}
+export interface EventSourceEventSourceInit {
+  withCredentials?: boolean;
+  fetcher?: Fetcher;
+}
+/**
+ * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+export declare abstract class MessagePort extends EventTarget {
+  /**
+   * The **`postMessage()`** method of the MessagePort interface sends a message from the port, and optionally, transfers ownership of objects to other browsing contexts.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active. This stops the flow of messages to that port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port. This method is only needed when using EventTarget.addEventListener; it is implied when using onmessage.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+export declare class MessageChannel {
+  constructor();
+  /**
+   * The **`port1`** read-only property of the MessageChannel interface returns the first port of the message channel — the port attached to the context that originated the channel.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * The **`port2`** read-only property of the MessageChannel interface returns the second port of the message channel — the port attached to the context at the other end of the channel, which the message is initially sent to.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+export interface MessagePortPostMessageOptions {
+  transfer?: any[];
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -12779,16 +13187,49 @@ export type BrowserRunLinksOptions = BrowserRunCommonOptions & {
   excludeExternalLinks?: boolean;
 };
 export type BrowserRunSnapshotFormat =
-  "content" | "screenshot" | "markdown" | "accessibilityTree";
-export type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
-  /** Which representations of the page to return. At least two distinct formats
-   * are required; request a single format from its dedicated action instead.
-   * @default ["content","screenshot"]
-   */
-  formats?: BrowserRunSnapshotFormat[];
-  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
-  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
-};
+  | "content"
+  | "screenshot"
+  | "markdown"
+  | "accessibilityTree"
+  | "pdf"
+  | "links"
+  | "scrape"
+  | "json";
+export type BrowserRunSnapshotOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions & {
+    /** Which representations of the page to return. At least two distinct formats
+     * are required; request a single format from its dedicated action instead.
+     * @default ["content","screenshot"]
+     */
+    formats?: BrowserRunSnapshotFormat[];
+    /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+    screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+    /** CSS selectors to scrape. Required when `formats` includes `scrape`. */
+    elements?: BrowserRunScrapeOptions["elements"];
+    /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+    pdfOptions?: BrowserRunPDFOptions["pdfOptions"];
+    /** When true, only return links that are visible on the page. @default false */
+    visibleLinksOnly?: BrowserRunLinksOptions["visibleLinksOnly"];
+    /** When true, exclude links pointing to external domains. @default false */
+    excludeExternalLinks?: BrowserRunLinksOptions["excludeExternalLinks"];
+    /** When true, prune accessibility nodes that carry no semantic meaning.
+     * @default true
+     */
+    interestingOnly?: BrowserRunAccessibilityTreeOptions["interestingOnly"];
+    /** CSS selector limiting the accessibility tree to the matching element's
+     * subtree.
+     */
+    root?: BrowserRunAccessibilityTreeOptions["root"];
+    /** Natural-language prompt describing what data to extract. Required when
+     * `formats` includes `json`, unless `response_format` is set.
+     */
+    prompt?: string;
+    /** Structured output schema for the AI model. Required when `formats`
+     * includes `json`, unless `prompt` is set.
+     * @see https://developers.cloudflare.com/workers-ai/json-mode/
+     */
+    response_format?: AiTextGenerationResponseFormat;
+  };
 /** Options for the `accessibilityTree` quick action. */
 export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
   /** When true, prune nodes that carry no semantic meaning, such as generic
@@ -12966,6 +13407,14 @@ export type BrowserRunSnapshotSuccessResponse = {
     markdown?: string;
     /** Root of the page's accessibility tree. */
     accessibilityTree?: BrowserRunSerializedAXNode;
+    /** Base64-encoded PDF. */
+    pdf?: string;
+    /** Links found on the page. */
+    links?: string[];
+    /** Elements matched by the requested selectors. */
+    scrape?: BrowserRunScrapeSuccessResponse["result"];
+    /** JSON data extracted from the page using an AI model. */
+    json?: Record<string, unknown> | unknown[] | null;
   };
   meta: BrowserRunResponseMeta;
 };
@@ -13205,21 +13654,31 @@ export type BrowserRunScriptOptions = {
   lab?: boolean;
   /** Record the browser session. @default false */
   recording?: boolean;
+  /** Run the script on an alternate browser backend. Only the raw CDP client is
+   * supported, and no session is kept open afterwards. Setting `library`,
+   * `keepAlive`, `lab` or `recording` with it returns an HTTP 400 error
+   * response.
+   */
+  browser?: "kitesurf";
 };
-/** Options for `scriptInSession()`. */
+/** Options for `script()` in an existing browser session. */
 export type BrowserRunScriptSessionOptions = {
+  /** Session to run in, such as the `cf-browser-session-id` header returned by
+   * `script()`. The session keeps the launch options it was acquired with.
+   */
+  sessionId: string;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
   /** Library whose objects are passed to the script. Omit it for raw CDP. */
   library?: BrowserRunScriptLibrary;
   /** Maximum run time of the script in milliseconds. Between 1 and 120000.
    * @default 60000
    */
   timeout?: number;
-  /** Page target the script attaches to, such as the `cf-browser-target-id`
-   * header returned by `script()`. Defaults to the session's first page.
-   */
-  targetId?: string;
 };
-/** JSON success body of `script()` and `scriptInSession()`. */
+/** JSON success body of `script()`. */
 export type BrowserRunScriptSuccessResponse = {
   success: true;
   /** The script's return value, or `null` when it returned nothing. */
@@ -13332,8 +13791,9 @@ export declare abstract class BrowserRun {
   /**
    * Get several representations of a web page in one request.
    * @param action - Must be `'snapshot'`.
-   * @param options - Snapshot options including the `formats` to return and
-   * screenshot settings (encoding is always base64).
+   * @param options - Snapshot options: the `formats` to return, plus the
+   * per-format options for screenshots, PDFs, scraped elements, links, the
+   * accessibility tree, and JSON extraction.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13444,7 +13904,7 @@ export declare abstract class BrowserRun {
    * @param code - Source of an async function. It receives the selected
    * library's objects (Playwright `{ page, context, browser }`, Puppeteer
    * `{ page, browser }`) or, without `library`, a CDP client.
-   * @param options - Library, timeout and session launch options.
+   * @param options - Library, timeout, session launch and backend options.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13454,26 +13914,28 @@ export declare abstract class BrowserRun {
    * non-JSON output
    *
    * **Error:**
-   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 502, 503)
    * - HTTP 408 when the script exceeds `timeout`
    * - HTTP 422 when the script fails to compile or throws
+   * - HTTP 502 when the script fails on the `browser: 'kitesurf'` backend
    * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
    * throw before any request is made.
    *
-   * **Headers:**
-   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * **Headers** (not returned with `browser: 'kitesurf'`):
+   * - `cf-browser-session-id`: Session kept open for a later `script()` call
+   * with `sessionId`
    * - `cf-browser-target-id`: Page target the script ran on
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
   script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
   /**
    * Run a script against an existing browser session, such as one kept open by
-   * `script()`.
-   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
-   * header returned by `script()`.
-   * @param code - Source of an async function, as for `script()`.
-   * @param options - Library, timeout and page target options.
-   * @returns A `Response` with the same success bodies as `script()`.
+   * an earlier `script()` call.
+   * @param code - Source of an async function, as for a new session.
+   * @param options - The session to run in, plus page target, library and
+   * timeout options. Launch options such as `keepAlive` cannot be set, because
+   * the session keeps the ones it was acquired with.
+   * @returns A `Response` with the same success bodies as a new-session run.
    *
    * **Error:**
    * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
@@ -13485,10 +13947,9 @@ export declare abstract class BrowserRun {
    * **Headers:**
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
-  scriptInSession(
-    sessionId: string,
+  script(
     code: string,
-    options?: BrowserRunScriptSessionOptions,
+    options: BrowserRunScriptSessionOptions,
   ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
@@ -14814,60 +15275,6 @@ export declare abstract class D1PreparedStatement {
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
 /**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
-export declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  /**
-   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
-   */
-  readonly message: string;
-  /**
-   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
-   */
-  readonly name: string;
-  /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
-   */
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: number;
-  static readonly DOMSTRING_SIZE_ERR: number;
-  static readonly HIERARCHY_REQUEST_ERR: number;
-  static readonly WRONG_DOCUMENT_ERR: number;
-  static readonly INVALID_CHARACTER_ERR: number;
-  static readonly NO_DATA_ALLOWED_ERR: number;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
-  static readonly NOT_FOUND_ERR: number;
-  static readonly NOT_SUPPORTED_ERR: number;
-  static readonly INUSE_ATTRIBUTE_ERR: number;
-  static readonly INVALID_STATE_ERR: number;
-  static readonly SYNTAX_ERR: number;
-  static readonly INVALID_MODIFICATION_ERR: number;
-  static readonly NAMESPACE_ERR: number;
-  static readonly INVALID_ACCESS_ERR: number;
-  static readonly VALIDATION_ERR: number;
-  static readonly TYPE_MISMATCH_ERR: number;
-  static readonly SECURITY_ERR: number;
-  static readonly NETWORK_ERR: number;
-  static readonly ABORT_ERR: number;
-  static readonly URL_MISMATCH_ERR: number;
-  static readonly QUOTA_EXCEEDED_ERR: number;
-  static readonly TIMEOUT_ERR: number;
-  static readonly INVALID_NODE_TYPE_ERR: number;
-  static readonly DATA_CLONE_ERR: number;
-  get stack(): any;
-  set stack(value: any);
-}
-/**
  * The returned data after sending an email
  */
 export interface EmailSendResult {
@@ -14888,15 +15295,15 @@ export interface EmailMessage {
    * Envelope To attribute of the email message.
    */
   readonly to: string;
+  /**
+   * Stream of the email message content.
+   */
+  readonly raw: ReadableStream<Uint8Array>;
 }
 /**
  * An email message that is sent to a consumer Worker and can be rejected/forwarded.
  */
 export interface ForwardableEmailMessage extends EmailMessage {
-  /**
-   * Stream of the email message content.
-   */
-  readonly raw: ReadableStream<Uint8Array>;
   /**
    * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    */
@@ -15792,6 +16199,19 @@ export interface MediaError extends Error {
   readonly message: string;
   readonly stack?: string;
 }
+/**
+ * An `oidc_token` binding: issues OpenID Connect tokens for the Worker's own
+ * identity, to exchange for cloud credentials or send to an API as a bearer
+ * token. Each binding has one audience, set in its config.
+ */
+export interface OidcTokenBinding {
+  /**
+   * Returns a newly signed JWT for the configured audience, valid for 5
+   * minutes. Each call gets a new `jti`. Call it when you need a token; don't
+   * store the token across requests.
+   */
+  getToken(): Promise<string>;
+}
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
@@ -15888,6 +16308,381 @@ export interface RateLimit {
    * @returns A promise that resolves with the outcome of the rate limit.
    */
   limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
+}
+/** Main interface for creating meetings in the app configured for your binding. */
+export interface RealtimeKitBinding {
+  /**
+   * Creates a meeting and returns its details along with a method for adding
+   * participants.
+   */
+  createMeeting(
+    options?: RealtimeKitCreateMeetingOptions,
+  ): Promise<RealtimeKitMeeting>;
+}
+/** Settings for creating a meeting. */
+export interface RealtimeKitCreateMeetingOptions {
+  /** Human-readable meeting title. */
+  title?: string | null;
+  /**
+   * Start recording when a participant joins.
+   * @default false
+   */
+  record_on_start?: boolean | null;
+  /**
+   * Start livestreaming when the meeting starts.
+   * @default false
+   */
+  live_stream_on_start?: boolean | null;
+  /** Meeting recording settings, which take precedence over app settings. */
+  recording_config?: RealtimeKitRecordingConfig;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /**
+   * Retain meeting chat for a week.
+   * @default false
+   */
+  persist_chat?: boolean;
+  /**
+   * Generate a meeting summary; requires transcription.
+   * @default false
+   */
+  summarize_on_end?: boolean;
+  /**
+   * Generate a transcript when the meeting ends.
+   * @default false
+   */
+  transcribe_on_end?: boolean;
+  /**
+   * Seconds a session stays active after its last participant leaves.
+   * Between 60 and 600.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+}
+/** Details of the participant to add to a meeting. */
+export interface RealtimeKitAddParticipantOptions {
+  /** Your unique identifier for the participant, such as a user ID or email. */
+  custom_participant_id: string;
+  /** Name of an existing preset to apply, such as group_call_host. */
+  preset_name: string;
+  /** Participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** Validity window for the participant authentication token. */
+  token?: RealtimeKitParticipantTokenValidity;
+}
+/**
+ * Controls when a participant's join token can be used.
+ * The token is valid from not_before up to, but not including, expires_on.
+ * The validity period cannot exceed 100 days and defaults to 100 days from now.
+ */
+export interface RealtimeKitParticipantTokenValidity {
+  /** RFC 3339 timestamp with a timezone; defaults to now and may be in the past. */
+  not_before?: string;
+  /**
+   * RFC 3339 timestamp with a timezone; must be in the future when issued.
+   * Defaults to not_before plus 100 days.
+   */
+  expires_on?: string;
+}
+/** Participant details and the authentication token needed to join the meeting. */
+export interface RealtimeKitParticipant {
+  /** Participant UUID. */
+  id: string;
+  /** The unique participant identifier you provided when adding the participant. */
+  custom_participant_id: string;
+  /** Preset applied to the participant. */
+  preset_name: string;
+  /** Supplied participant display name. */
+  name?: string | null;
+  /** URL of the participant's profile picture. */
+  picture?: string | null;
+  /** When the participant was created, as an ISO date-time string. */
+  created_at: string;
+  /** When the participant was last updated, as an ISO date-time string. */
+  updated_at: string;
+  /** Sensitive authentication token used to join the meeting. Do not log it. */
+  token: string;
+  /** Time from which the token is valid, as a UTC date-time string. */
+  not_before?: string;
+  /** Time at which the token expires, as a UTC date-time string. */
+  expires_on?: string;
+}
+/**
+ * Meeting details captured when the meeting was created.
+ * Use addParticipant() to add participants to this meeting.
+ * Use `using` to release the meeting handle when finished.
+ */
+export interface RealtimeKitMeeting extends Disposable {
+  /** Unique identifier of the meeting. */
+  readonly id: string;
+  /** Human-readable meeting title. */
+  title?: string;
+  /** When the meeting was created, as an ISO date-time string. */
+  readonly created_at: string;
+  /** When the meeting was last updated, as an ISO date-time string. */
+  readonly updated_at: string;
+  /** Whether recording starts when a participant joins. */
+  record_on_start?: boolean;
+  /** Whether livestreaming starts when the meeting starts. */
+  live_stream_on_start?: boolean;
+  /** Whether meeting chat persists for a week. */
+  persist_chat?: boolean;
+  /** Whether a meeting summary is generated using transcripts. */
+  summarize_on_end?: boolean;
+  /** Whether a transcript is generated when the meeting ends. */
+  transcribe_on_end?: boolean;
+  /** Recording settings for the meeting. Storage credentials are not included. */
+  recording_config?: RealtimeKitRecordingConfigResponse;
+  /** Transcription and summarization settings. */
+  ai_config?: RealtimeKitAIConfig;
+  /** Participants cannot join an INACTIVE meeting. */
+  status?: "ACTIVE" | "INACTIVE";
+  /**
+   * Session keep-alive duration, 60 to 600 seconds.
+   * @default 60
+   */
+  session_keep_alive_time_in_secs?: number;
+  /**
+   * Adds a participant to this meeting and returns their details and join token.
+   */
+  addParticipant(
+    options: RealtimeKitAddParticipantOptions,
+  ): Promise<RealtimeKitParticipant>;
+}
+/** Meeting-level recording settings, overriding the app's recording settings. */
+export interface RealtimeKitRecordingConfig {
+  /** Maximum recording duration in seconds, between 60 and 86400. */
+  max_seconds?: number;
+  /** Prefix added to the recording file name. */
+  file_name_prefix?: string;
+  /** Recorded video encoding, dimensions, and watermark settings. */
+  video_config?: RealtimeKitVideoConfig;
+  /** Recorded audio encoding and channel settings. */
+  audio_config?: RealtimeKitAudioConfig;
+  /** Storage destination and credentials for uploading recordings. */
+  storage_config?: RealtimeKitStorageConfig;
+  /** Whether recordings are uploaded to RealtimeKit's bucket. */
+  realtimekit_bucket_config?: RealtimeKitBucketConfig;
+  /** Destination for live-streaming the recording. */
+  live_streaming_config?: RealtimeKitLivestreamingConfig;
+}
+/** Recording settings for a meeting, with storage credentials omitted. */
+export interface RealtimeKitRecordingConfigResponse extends Omit<
+  RealtimeKitRecordingConfig,
+  "storage_config"
+> {
+  /** Destination storage with access keys, secrets, passwords, and keys omitted. */
+  storage_config?: RealtimeKitStorageConfigResponse;
+}
+/** Video settings for meeting recordings. */
+export interface RealtimeKitVideoConfig {
+  /**
+   * Video codec.
+   * @default 'H264'
+   */
+  codec?: "H264" | "VP8" | "VP9";
+  /**
+   * Video width in pixels, between 1 and 1920.
+   * @default 1280
+   */
+  width?: number;
+  /**
+   * Video height in pixels, between 1 and 1920.
+   * @default 720
+   */
+  height?: number;
+  /** Watermark image, dimensions, and placement. */
+  watermark?: {
+    /** URL of the watermark image. */
+    url?: string;
+    /** Watermark dimensions in pixels. */
+    size?: {
+      /** Watermark width; minimum 1 pixel. */
+      width?: number;
+      /** Watermark height; minimum 1 pixel. */
+      height?: number;
+    };
+    /**
+     * Watermark placement.
+     * @default 'left top'
+     */
+    position?: "left top" | "right top" | "left bottom" | "right bottom";
+  };
+  /**
+   * Export a separate video file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Audio settings for meeting recordings. */
+export interface RealtimeKitAudioConfig {
+  /**
+   * Audio codec. VP8/VP9 video automatically uses Vorbis audio, and the audio
+   * codec cannot be changed.
+   * @default 'AAC'
+   */
+  codec?: "MP3" | "AAC";
+  /**
+   * Audio channel layout.
+   * @default 'stereo'
+   */
+  channel?: "mono" | "stereo";
+  /**
+   * Export a separate audio file.
+   * @default true
+   */
+  export_file?: boolean;
+}
+/** Destination and authentication settings for external recording storage. */
+export interface RealtimeKitStorageConfigBase {
+  /** Destination bucket name. */
+  bucket: string;
+  /**
+   * Storage access key; required and nonempty except for Google Cloud Storage.
+   * Not included in returned storage details.
+   */
+  access_key?: string;
+  /** Secret key for the storage provider. Not included in returned details. */
+  secret?: string;
+  /** Storage region; required and nonempty except for Google Cloud Storage. */
+  region?: string;
+  /** Recording path relative to the bucket root. */
+  path?: string;
+  /** Authentication method for SFTP storage. */
+  auth_method?: "KEY" | "PASSWORD";
+  /** Destination SSH username for SFTP. */
+  username?: string;
+  /**
+   * SFTP login password, or SSH private-key passphrase when using KEY.
+   * Not included in returned storage details.
+   */
+  password?: string;
+  /** Destination SSH hostname for SFTP. */
+  host?: string;
+  /** Destination SSH port for SFTP. */
+  port?: number;
+  /** SSH private key for SFTP key authentication. Not included in returned details. */
+  private_key?: string;
+}
+/** Recording destination in Google Cloud Storage, AWS, Azure, DigitalOcean, or SFTP. */
+export type RealtimeKitStorageConfig =
+  | (RealtimeKitStorageConfigBase &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            access_key: string;
+            region: string;
+          }
+        | ({
+            type: "sftp";
+            access_key: string;
+            region: string;
+            username: string;
+            host: string;
+            port: number;
+          } & (
+            | {
+                auth_method: "KEY";
+                private_key: string;
+              }
+            | {
+                auth_method: "PASSWORD";
+                password: string;
+              }
+          ))
+      ))
+  | null;
+/** Recording destination details, without access keys, secrets, passwords, or private keys. */
+export type RealtimeKitStorageConfigResponse =
+  | (Omit<
+      RealtimeKitStorageConfigBase,
+      "access_key" | "secret" | "password" | "private_key"
+    > &
+      (
+        | {
+            type: "gcs";
+          }
+        | {
+            type: "aws" | "azure" | "digitalocean";
+            region: string;
+          }
+        | {
+            type: "sftp";
+            region: string;
+            auth_method: "KEY" | "PASSWORD";
+            username: string;
+            host: string;
+            port: number;
+          }
+      ))
+  | null;
+/** Controls uploading recordings to RealtimeKit's managed bucket. */
+export interface RealtimeKitBucketConfig {
+  /**
+   * Enable managed-bucket uploads. If false, recording download URLs and
+   * their expiry are not generated.
+   */
+  enabled: boolean;
+}
+/** Live-streaming destination for a recording. */
+export interface RealtimeKitLivestreamingConfig {
+  /** RTMP destination URL. */
+  rtmp_url?: string;
+}
+/** Transcription and summary customization for a meeting. */
+export interface RealtimeKitAIConfig {
+  /** Transcription options. */
+  transcription?: RealtimeKitTranscriptionConfig;
+  /** Summary options. */
+  summarization?: RealtimeKitSummarizationConfig;
+}
+/** Meeting transcription settings. */
+export interface RealtimeKitTranscriptionConfig {
+  /** Terms to recognize more accurately during transcription. */
+  keywords?: string[];
+  /**
+   * Language used for transcription. If omitted, post-meeting transcription
+   * detects the language automatically.
+   */
+  language?:
+    "en-US" | "en-IN" | "de" | "hi" | "sv" | "ru" | "pl" | "el" | "fr" | "nl";
+  /**
+   * Filter offensive language in transcripts.
+   * @default false
+   */
+  profanity_filter?: boolean;
+}
+/** Meeting summarization settings. */
+export interface RealtimeKitSummarizationConfig {
+  /**
+   * Maximum words in the summary, between 150 and 1000.
+   * @default 500
+   */
+  word_limit?: number;
+  /**
+   * Summary text format.
+   * @default 'markdown'
+   */
+  text_format?: "plain_text" | "markdown";
+  /**
+   * Summary style.
+   * @default 'general'
+   */
+  summary_type?:
+    | "general"
+    | "team_meeting"
+    | "sales_call"
+    | "client_check_in"
+    | "interview"
+    | "daily_standup"
+    | "one_on_one_meeting"
+    | "lecture"
+    | "code_review";
 }
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
@@ -16387,6 +17182,7 @@ export interface SecretsStoreSecret {
  * - Binding-level operations:
  *   `await env.STREAM.videos.upload`
  *   `await env.STREAM.videos.createDirectUpload`
+ *   `await env.STREAM.clip`
  *   `await env.STREAM.videos.*`
  *   `await env.STREAM.watermarks.*`
  * - Per-video operations:
@@ -16433,6 +17229,19 @@ export interface StreamBinding {
   createDirectUpload(
     params: StreamDirectUploadCreateParams,
   ): Promise<StreamDirectUpload>;
+  /**
+   * Creates a new video by clipping a time range from an existing video.
+   * @param videoId The unique identifier of the source video to clip from.
+   * @param params The time range to clip from the source video.
+   * @returns The details of the newly created clip.
+   * @throws {NotFoundError} if the source video is not found
+   * @throws {BadRequestError} if the time range is invalid or extends past the end of the source video
+   * @throws {BadRequestError} if the source video is a live stream recording
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {RateLimitedError} if the account has too many videos processing at once
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  clip(videoId: string, params: StreamClipParams): Promise<StreamVideo>;
   videos: StreamVideos;
   watermarks: StreamWatermarks;
 }
@@ -16469,10 +17278,13 @@ export interface StreamVideoHandle {
   delete(): Promise<void>;
   /**
    * Creates a signed URL token for a video.
+   * @param options Optional settings for the token.
    * @returns The signed token that was created.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the options are invalid, e.g. `expiresAt` is in the past or more than 24 hours away, `notBefore` is not before `expiresAt`, or the signing key is not found or does not belong to the account
    * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
    */
-  generateToken(): Promise<string>;
+  generateToken(options?: StreamSignedTokenOptions): Promise<string>;
   downloads: StreamScopedDownloads;
   captions: StreamScopedCaptions;
 }
@@ -16582,6 +17394,13 @@ export interface StreamVideo {
    * Public details associated with the video.
    */
   publicDetails: StreamPublicDetails | null;
+  /**
+   * The unique customer code associated with the video.
+   *
+   * Use this to construct URLs that require a customer code, such as player URLs using signed tokens.
+   * `https://customer-{customerCode}.cloudflarestream.com/{token}/iframe`
+   */
+  customerCode: string;
 }
 export type StreamVideoStatus = {
   /**
@@ -16740,6 +17559,98 @@ export type StreamUrlUploadParams = {
    */
   watermarkId?: string;
 };
+export type StreamClipParams = {
+  /**
+   * The point in the source video, in whole seconds, where the clip starts.
+   */
+  startTimeSeconds: number;
+  /**
+   * The point in the source video, in whole seconds, where the clip ends.
+   * Must be greater than `startTimeSeconds` and no later than the end of the
+   * source video.
+   */
+  endTimeSeconds: number;
+};
+export type StreamSignedTokenOptions = {
+  /**
+   * The signing key to sign the token with. When omitted, the token is signed
+   * with a key Stream manages for the account.
+   */
+  signingKey?: StreamSigningKey;
+  /**
+   * When the token stops being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be in the future and no more than 24 hours from now.
+   * Defaults to one hour from now.
+   */
+  expiresAt?: Date | number;
+  /**
+   * When the token starts being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be earlier than `expiresAt`. Defaults to one hour ago.
+   */
+  notBefore?: Date | number;
+  /**
+   * Whether the token can also be used to access the video's MP4 downloads.
+   * @default false
+   */
+  downloadable?: boolean;
+  /**
+   * Rules that allow or block viewers by IP address or country. Rules are
+   * evaluated in order, and the first rule that matches is applied.
+   */
+  accessRules?: StreamAccessRule[];
+  /**
+   * Additional flags for the token.
+   */
+  flags?: StreamSignedTokenFlags;
+};
+export type StreamSigningKey = {
+  /**
+   * The ID of a Stream signing key.
+   */
+  id: string;
+  /**
+   * The base64-encoded private key, in PEM format, for the signing key.
+   */
+  pem: string;
+};
+export type StreamSignedTokenFlags = {
+  /**
+   * Whether the token serves the original video without transformations.
+   * @default false
+   */
+  original?: boolean;
+};
+export type StreamAccessRuleAction = "allow" | "block";
+export type StreamAccessRule =
+  | {
+      /**
+       * Matches every request. Use as the last rule to set a default action.
+       */
+      type: "any";
+      action: StreamAccessRuleAction;
+    }
+  | {
+      /**
+       * Matches requests from the listed IP addresses or CIDR ranges.
+       */
+      type: "ip.src";
+      action: StreamAccessRuleAction;
+      /**
+       * IPv4 or IPv6 addresses or CIDR ranges.
+       */
+      ip: string[];
+    }
+  | {
+      /**
+       * Matches requests from the listed countries.
+       */
+      type: "ip.geoip.country";
+      action: StreamAccessRuleAction;
+      /**
+       * Two-letter ISO 3166-1 alpha-2 country codes.
+       */
+      country: string[];
+    };
 export interface StreamScopedCaptions {
   /**
    * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
@@ -16774,6 +17685,15 @@ export interface StreamScopedCaptions {
    * @throws {InternalError} if an unexpected error occurs
    */
   list(language?: string): Promise<StreamCaption[]>;
+  /**
+   * Gets the WebVTT file for a caption or subtitle track.
+   * @param language The BCP 47 language tag of the track.
+   * @returns The track's WebVTT file as a stream.
+   * @throws {NotFoundError} if the video is not found, it has no caption for this language, or a generated caption has not finished
+   * @throws {BadRequestError} if the language is not a valid BCP 47 tag
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  get(language: string): Promise<ReadableStream>;
   /**
    * Removes the captions or subtitles from a video.
    * @param language The BCP 47 language tag to remove.
@@ -17123,6 +18043,17 @@ export interface AlreadyUploadedError extends StreamError {
 export interface TooManyWatermarksError extends StreamError {
   name: "TooManyWatermarksError";
 }
+export interface StructuredSerializeOptions {
+  transfer?: any[];
+}
+export interface ServiceWorkerGlobalScope {
+  structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+export declare function structuredClone<T>(
+  value: T,
+  options?: StructuredSerializeOptions,
+): T;
 export type MarkdownDocument = {
   name: string;
   blob: Blob;
@@ -17489,365 +18420,6 @@ export declare namespace TailStream {
     attributes?: TailEventHandler<Attributes>;
   };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
-}
-// URL and URLSearchParams, as WHATWG URL declares them, at every compatibility
-// date. Without the urlsearchparams_delete_has_value_arg compatibility flag
-// (the default from 2023-07-01), delete() and has() ignore `value`.
-/**
- * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
- */
-export declare class URL {
-  constructor(url: string | URL, base?: string | URL);
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  get href(): string;
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  set href(value: string);
-  /**
-   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
-   */
-  get origin(): string;
-  /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
-   */
-  get protocol(): string;
-  /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
-   */
-  set protocol(value: string);
-  /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
-   */
-  get username(): string;
-  /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
-   */
-  set username(value: string);
-  /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
-   */
-  get password(): string;
-  /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
-   */
-  set password(value: string);
-  /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
-   */
-  get host(): string;
-  /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
-   */
-  set host(value: string);
-  /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
-   */
-  get hostname(): string;
-  /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
-   */
-  set hostname(value: string);
-  /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
-   */
-  get port(): string;
-  /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
-   */
-  set port(value: string);
-  /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
-   */
-  get pathname(): string;
-  /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
-   */
-  set pathname(value: string);
-  /**
-   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
-   */
-  get search(): string;
-  /**
-   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
-   */
-  set search(value: string);
-  /**
-   * The **`searchParams`** read-only property of the URL interface returns a URLSearchParams object allowing access to the GET decoded query arguments contained in the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
-   */
-  get searchParams(): URLSearchParams;
-  /**
-   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  get hash(): string;
-  /**
-   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  set hash(value: string);
-  /**
-   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as URL.toString().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
-   */
-  toJSON(): string;
-  toString(): string;
-  /**
-   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
-   */
-  static canParse(url: string | URL, base?: string | URL): boolean;
-  /**
-   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
-   */
-  static parse(url: string | URL, base?: string | URL): URL | null;
-  /**
-   * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
-   */
-  static createObjectURL(object: File | Blob): string;
-  /**
-   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling URL.createObjectURL().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
-   */
-  static revokeObjectURL(object_url: string): void;
-}
-/**
- * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams)
- */
-export declare class URLSearchParams {
-  constructor(
-    init?: Iterable<Iterable<string>> | Record<string, string> | string,
-  );
-  /**
-   * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size)
-   */
-  get size(): number;
-  /**
-   * The **`append()`** method of the URLSearchParams interface appends a specified key/value pair as a new search parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/append)
-   */
-  append(name: string, value: string): void;
-  /**
-   * The **`delete()`** method of the URLSearchParams interface deletes specified parameters and their associated value(s) from the list of all search parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
-   */
-  delete(name: string, value?: string): void;
-  /**
-   * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/get)
-   */
-  get(name: string): string | null;
-  /**
-   * The **`getAll()`** method of the URLSearchParams interface returns all the values associated with a given search parameter as an array.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/getAll)
-   */
-  getAll(name: string): string[];
-  /**
-   * The **`has()`** method of the URLSearchParams interface returns a boolean value that indicates whether the specified parameter is in the search parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
-   */
-  has(name: string, value?: string): boolean;
-  /**
-   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value. If there were several matching values, this method deletes the others. If the search parameter doesn't exist, this method creates it.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
-   */
-  set(name: string, value: string): void;
-  /**
-   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns undefined. Key/value pairs are sorted by the values of the UTF-16 code units of the keys. This method uses a stable sorting algorithm (i.e., the relative order between key/value pairs with equal keys will be preserved).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
-   */
-  sort(): void;
-  entries(): IterableIterator<[key: string, value: string]>;
-  keys(): IterableIterator<string>;
-  values(): IterableIterator<string>;
-  forEach<This = unknown>(
-    callback: (
-      this: This,
-      value: string,
-      key: string,
-      parent: URLSearchParams,
-    ) => void,
-    thisArg?: This,
-  ): void;
-  toString(): string;
-  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-}
-// URLPattern, as the URLPattern standard declares it, for both parsers.
-// The legacy parser (the urlpattern_original compatibility flag, the
-// default before 2025-05-01) has no hasRegExpGroups.
-/**
- * The **`URLPattern`** interface of the URL Pattern API matches URLs or parts of URLs against a pattern. The pattern can contain capturing groups that extract parts of the matched URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern)
- */
-export declare class URLPattern {
-  constructor(
-    input?: string | URLPatternInit,
-    baseURL?: string | URLPatternOptions,
-    patternOptions?: URLPatternOptions,
-  );
-  /**
-   * The **`protocol`** read-only property of the URLPattern interface is a string containing the pattern used to match the protocol part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/protocol)
-   */
-  get protocol(): string;
-  /**
-   * The **`username`** read-only property of the URLPattern interface is a string containing the pattern used to match the username part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/username)
-   */
-  get username(): string;
-  /**
-   * The **`password`** read-only property of the URLPattern interface is a string containing the pattern used to match the password part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/password)
-   */
-  get password(): string;
-  /**
-   * The **`hostname`** read-only property of the URLPattern interface is a string containing the pattern used to match the hostname part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hostname)
-   */
-  get hostname(): string;
-  /**
-   * The **`port`** read-only property of the URLPattern interface is a string containing the pattern used to match the port part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/port)
-   */
-  get port(): string;
-  /**
-   * The **`pathname`** read-only property of the URLPattern interface is a string containing the pattern used to match the pathname part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/pathname)
-   */
-  get pathname(): string;
-  /**
-   * The **`search`** read-only property of the URLPattern interface is a string containing the pattern used to match the search part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/search)
-   */
-  get search(): string;
-  /**
-   * The **`hash`** read-only property of the URLPattern interface is a string containing the pattern used to match the fragment part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hash)
-   */
-  get hash(): string;
-  /**
-   * The **`hasRegExpGroups`** read-only property of the URLPattern interface is a boolean indicating whether or not any of the URLPattern components contain regular expression capturing groups.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hasRegExpGroups)
-   */
-  get hasRegExpGroups(): boolean;
-  /**
-   * The **`test()`** method of the URLPattern interface takes a URL string or object of URL parts, and returns a boolean indicating if the given input matches the current pattern.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/test)
-   */
-  test(input?: string | URLPatternInit, baseURL?: string): boolean;
-  /**
-   * The **`exec()`** method of the URLPattern interface takes a URL or object of URL parts, and returns either an object containing the results of matching the URL to the pattern, or null if the URL does not match the pattern.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/exec)
-   */
-  exec(
-    input?: string | URLPatternInit,
-    baseURL?: string,
-  ): URLPatternResult | null;
-}
-export interface URLPatternInit {
-  protocol?: string;
-  username?: string;
-  password?: string;
-  hostname?: string;
-  port?: string;
-  pathname?: string;
-  search?: string;
-  hash?: string;
-  baseURL?: string;
-}
-export interface URLPatternComponentResult {
-  input: string;
-  groups: Record<string, string | undefined>;
-}
-export interface URLPatternResult {
-  inputs: (string | URLPatternInit)[];
-  protocol: URLPatternComponentResult;
-  username: URLPatternComponentResult;
-  password: URLPatternComponentResult;
-  hostname: URLPatternComponentResult;
-  port: URLPatternComponentResult;
-  pathname: URLPatternComponentResult;
-  search: URLPatternComponentResult;
-  hash: URLPatternComponentResult;
-}
-export interface URLPatternOptions {
-  ignoreCase?: boolean;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:

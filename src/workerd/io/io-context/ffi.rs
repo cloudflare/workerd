@@ -6,17 +6,17 @@
 
 #![allow(
     unsafe_code,
-    reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, the inspector call takes V8 handles, the trace span calls \
+    reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() and reentry_fn_run() open \
+              a scope C++ has set up, the inspector call takes V8 handles, the trace span calls \
               take literals that C++ does not copy, and IsolateWeakRef and AsyncResource \
               are declared Send"
 )]
 
 use std::any::Any;
+use std::cell::Cell;
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::task::Poll;
+use std::rc::Rc;
 
 use jsg::v8;
 
@@ -105,6 +105,19 @@ pub mod bridge {
 
         fn io_context_add_wait_until(id: u64, future: Box<WaitUntilFuture>) -> Result<()>;
 
+        type ReentryCallback;
+        type ReentryPromise;
+
+        fn io_context_make_reentry_callback_weak(
+            id: u64,
+            function: Box<ReentryFn>,
+        ) -> Result<KjOwn<ReentryCallback>>;
+        fn reentry_callback_call(
+            callback: &ReentryCallback,
+            call: Box<ReentryCall>,
+        ) -> Result<KjOwn<ReentryPromise>>;
+        async fn reentry_promise_wait(promise: KjOwn<ReentryPromise>) -> Result<()>;
+
         fn io_context_check_current(id: u64) -> Result<()>;
         fn io_context_abort(id: u64, reason: KjException) -> Result<()>;
         fn io_context_abort_without_reason(id: u64) -> Result<()>;
@@ -187,6 +200,33 @@ pub mod bridge {
         Panicked,
     }
 
+    /// How `reentry_fn_run()` ended.
+    enum ReentryOutcome {
+        /// The function returned a future, or failed with an error or an exception, which the
+        /// call's future then fails with. The `ReentryCall` holds that future.
+        Started,
+        /// Execution is terminating, and the termination is pending.
+        Terminated,
+        /// The function panicked. `jsg::catch_panic()` logged the panic, threw an internal error
+        /// and requested termination.
+        Panicked,
+    }
+
+    extern "Rust" {
+        /// The function of a `ReentryCallback`.
+        type ReentryFn;
+        /// One call of a `ReentryCallback`: receives the future the function returns, and once
+        /// that completes, its output.
+        type ReentryCall;
+
+        unsafe fn reentry_fn_run(
+            isolate: usize,
+            function: &mut ReentryFn,
+            call: &mut ReentryCall,
+        ) -> ReentryOutcome;
+        async fn reentry_call_wait(call: Box<ReentryCall>) -> Result<()>;
+    }
+
     extern "Rust" {
         type IoFuture;
         type IoOutput;
@@ -200,7 +240,7 @@ pub mod bridge {
 
         type WaitUntilFuture;
 
-        async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
+        async fn io_future_wait(future: Box<IoFuture>) -> Box<IoOutput>;
         async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<()>;
         unsafe fn io_callback_run(
             isolate: usize,
@@ -342,77 +382,77 @@ unsafe impl kj_rs::DisposableOnAnyThread for bridge::IoOwnedObject {}
 /// Dropping it drops the value it holds, unless Rust took the value first.
 pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn Send>);
 
-/// Waits for `future`. A panic while polling it fails the wait, so that it becomes a KJ exception
-/// rather than unwinding into the KJ event loop, which would abort the process. A panic while
-/// dropping it, when the wait is cancelled, is logged.
-async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjError> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll.map(|output| Ok(Box::new(IoOutput(output)))),
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future that IoContext::await_io_and_run() waited for panicked: {}",
-                    panic_message(&*payload)
-                ),
-            ))),
-        }
-    })
-    .await
+/// Waits for `future`. kj-rs turns a panic while polling it into a KJ exception that fails the
+/// wait, and logs a panic while dropping it, when the wait is cancelled.
+async fn io_future_wait(future: Box<IoFuture>) -> Box<IoOutput> {
+    Box::new(IoOutput(future.0.await))
 }
 
-/// Waits for `future` as a waitUntil task. A panic while polling it fails the task, and a panic
-/// while dropping it is logged, as in `io_future_wait()`. The task fails with the future's
-/// exception as it is.
+/// Waits for `future` as a waitUntil task, which fails with the future's exception as it is. A
+/// panic is handled as in `io_future_wait()`.
 async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<(), cxx::KjException> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll,
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future of a waitUntil task panicked: {}",
-                    panic_message(&*payload)
-                ),
-            )
-            .into())),
+    future.0.await
+}
+
+/// The future that the function of a `ReentryCallback` returns, with its output type erased. KJ
+/// polls it on the thread of the `IoContext`, so it need not be `Send`.
+pub type ReentryFuture = Pin<Box<dyn Future<Output = Result<Box<dyn Any>, cxx::KjException>>>>;
+
+/// The function of a `ReentryCallback`, with its output type erased. It finds the `IoContext`
+/// itself, which `IoContext::run()` has made current.
+pub type ReentryFnBox = Box<dyn for<'s> FnMut(&mut jsg::Lock<'s>) -> jsg::Result<ReentryFuture>>;
+
+/// See `bridge::ReentryFn`. C++ holds it in the `IoContext`, as a `ReverseIoOwn`, and runs and drops
+/// it only on the thread of the `IoContext`, so it need not be `Send`.
+pub struct ReentryFn(pub ReentryFnBox);
+
+/// See `bridge::ReentryCall`.
+pub struct ReentryCall {
+    /// The future of the function, once `reentry_fn_run()` has started it.
+    pub future: Option<ReentryFuture>,
+    /// Where `reentry_call_wait()` puts the future's output, for the `ReentryCallFuture` of the
+    /// call. Both run on the thread of the `IoContext`.
+    pub output: Rc<Cell<Option<Box<dyn Any>>>>,
+}
+
+/// Runs `function` for `call`, from a `ReentryCallback` in `IoContext::run()`, with the isolate
+/// locked, a context entered and a `HandleScope` open.
+unsafe fn reentry_fn_run(
+    isolate: usize,
+    function: &mut ReentryFn,
+    call: &mut ReentryCall,
+) -> bridge::ReentryOutcome {
+    let scope = std::pin::pin!(
+        // SAFETY: C++ calls this with the isolate locked, a context entered and a HandleScope
+        // open, which outlive the scope.
+        unsafe { jsg::CallbackScope::new(isolate as *mut v8::ffi::Isolate) }
+    );
+    jsg::catch_panic(scope, |lock| {
+        match crate::start_reentry(lock, &mut function.0) {
+            Ok(future) => {
+                call.future = Some(future);
+                bridge::ReentryOutcome::Started
+            }
+            Err(_) => bridge::ReentryOutcome::Terminated,
         }
     })
-    .await
+    .unwrap_or(bridge::ReentryOutcome::Panicked)
 }
 
-/// Holds the future of an `io_future_wait()` or `wait_until_future_wait()`, which kj-rs drops
-/// through an `extern "C"` function, where a panic would abort the process.
-struct CatchDropPanic<F>(Option<F>);
-
-impl<F> Drop for CatchDropPanic<F> {
-    fn drop(&mut self) {
-        let future = self.0.take();
-        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(future))) {
-            bridge::io_context_log_error(&format!(
-                "dropping a future that the IoContext waited for panicked: {}",
-                panic_message(&*payload)
-            ));
-        }
-    }
+/// Waits for the future that `reentry_fn_run()` started for `call`, then puts its output where the
+/// call's `ReentryCallFuture` takes it. A panic is handled as in `io_future_wait()`.
+async fn reentry_call_wait(call: Box<ReentryCall>) -> Result<(), cxx::KjException> {
+    let ReentryCall { future, output } = *call;
+    let Some(future) = future else {
+        unreachable!("C++ waits for a call only once reentry_fn_run() started it")
+    };
+    output.set(Some(future.await?));
+    Ok(())
 }
 
+/// The message of a panic with `payload`, as `cxx::panic_message()` reads it.
 pub fn panic_message(payload: &(dyn Any + Send)) -> &str {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        message
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message
-    } else {
-        "<non-string panic payload>"
-    }
+    cxx::panic_message(payload).unwrap_or("<non-string panic payload>")
 }
 
 /// Runs `callback` with `output`, from `io_context_await_io_and_run()` in the `IoContext`, with the

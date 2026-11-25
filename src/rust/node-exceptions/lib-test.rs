@@ -81,6 +81,9 @@ fn uv_exception_formats_default_message_with_path() {
             Some("no such file or directory, open '/tmp/missing'")
         );
         assert_eq!(get_string(lock, err, "code").as_deref(), Some("ENOENT"));
+        let errno = err.get(lock, "errno")?;
+        assert!(errno.is_int32());
+        assert_eq!(errno.int32_value(lock)?, -libc::ENOENT);
         assert_eq!(get_string(lock, err, "syscall").as_deref(), Some("open"));
         assert_eq!(
             get_string(lock, err, "path").as_deref(),
@@ -109,6 +112,28 @@ fn uv_exception_uses_explicit_message_and_dest() {
         );
         assert_eq!(get_string(lock, err, "code").as_deref(), Some("EEXIST"));
         assert_eq!(get_string(lock, err, "syscall").as_deref(), Some("link"));
+        assert_eq!(get_string(lock, err, "path").as_deref(), Some("/a"));
+        assert_eq!(get_string(lock, err, "dest").as_deref(), Some("/b"));
+        Ok(())
+    });
+}
+
+#[test]
+fn uv_exception_formats_default_message_with_dest() {
+    let harness = Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let err = create_uv_exception_impl(
+            lock,
+            -libc::ENOENT,
+            "rename",
+            None,
+            Some(b"/a".as_slice()),
+            Some(b"/b".as_slice()),
+        )?;
+        assert_eq!(
+            get_string(lock, err, "message").as_deref(),
+            Some("no such file or directory, rename '/a' -> '/b'")
+        );
         assert_eq!(get_string(lock, err, "path").as_deref(), Some("/a"));
         assert_eq!(get_string(lock, err, "dest").as_deref(), Some("/b"));
         Ok(())

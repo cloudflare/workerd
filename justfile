@@ -147,18 +147,26 @@ internal-pr:
 update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
 
+# regenerate MODULE.bazel.lock after changing a MODULE.bazel file or a module extension's inputs by
+# hand; the formatters are tagged manual, so `//...` alone leaves their extension out
+update-lockfile *args:
+  bazel build --lockfile_mode=update --nobuild {{args}} //... //build/deps/formatters:rustfmt@rule
+
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="":
   bazel fetch --repo_env=CARGO_BAZEL_REPIN="{{ if package == "" { "all" } else { package } }}" --repo=@crates_vendor
 
+# Rust joins ThinLTO where lld links; see build:cross-lto in .bazelrc.
+benchmark_config := if os() == "linux" { "--config=benchmark --config=cross-lto" } else { "--config=benchmark" }
+
 # example: just bench mimetype
 bench path:
-  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
+  bazel run //src/workerd/tests:bench-{{path}} {{benchmark_config}}
 
 # example: just wd-bench //src/workerd/api/tests:text-encoder-bench@ '*/encode ascii*'
 # Runs a wd_bench() target in an optimized build; arguments after the target go to `workerd bench`.
 wd-bench target *args:
-  bazel run {{target}} --config=benchmark -- {{args}}
+  bazel run {{target}} {{benchmark_config}} -- {{args}}
 
 # example: just clippy dns
 # example: just clippy //src/workerd/server:workerd-cli
@@ -190,7 +198,7 @@ create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run {{benchmark_config}} {}
 
 lint: eslint
 
@@ -211,7 +219,7 @@ coverage path="//...":
   open coverage/index.html
 
 profile path:
-  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark --run_under="perf record -F max --call-graph lbr"
+  bazel run //src/workerd/tests:bench-{{path}} {{benchmark_config}} --run_under="perf record -F max --call-graph lbr"
   PERF_FILE=$(fdfind perf.data bazel-bin | grep "{{path}}" | head -1); \
   if [ -n "$PERF_FILE" ] && [ -s "$PERF_FILE" ]; then \
     cp $PERF_FILE perf.data; \
