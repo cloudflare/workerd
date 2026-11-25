@@ -28,6 +28,7 @@ def _sharded_rust_test_impl(ctx):
         test[DefaultInfo].default_runfiles,
         ctx.attr._sharder[DefaultInfo].default_runfiles,
     ])
+    test_env = test[RunEnvironmentInfo] if RunEnvironmentInfo in test else RunEnvironmentInfo()
     rlocation = ctx.expand_location("$(rlocationpath {})".format(test.label), [test])
 
     # The lint aspects that --config=lint applies are not run on targets that already have their
@@ -40,7 +41,11 @@ def _sharded_rust_test_impl(ctx):
     }
     return [
         DefaultInfo(executable = executable, runfiles = runfiles),
-        RunEnvironmentInfo(environment = ctx.attr.env | {"WD_SHARDED_RUST_TEST": rlocation}),
+        # The test's environment, with its locations expanded, which the sharder passes on to it.
+        RunEnvironmentInfo(
+            environment = test_env.environment | {"WD_SHARDED_RUST_TEST": rlocation},
+            inherited_environment = test_env.inherited_environment,
+        ),
         OutputGroupInfo(**lint_checks),
     ]
 
@@ -56,7 +61,6 @@ _sharded_rust_test = rule(
             cfg = "target",
             aspects = [rust_clippy_aspect, rustfmt_aspect],
         ),
-        "env": attr.string_dict(),
         "_sharder": attr.label(
             default = "//build/rust/test_sharder:sharder",
             executable = True,
@@ -105,7 +109,6 @@ def wd_rust_test(
         _sharded_rust_test(
             name = name,
             test = ":" + test_name,
-            env = env,
             shard_count = shard_count,
             size = size,
             **attrs

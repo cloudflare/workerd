@@ -10,6 +10,10 @@
 //! by exact name. Its own arguments are passed on to the binary, both when listing (so that a
 //! filter narrows the list) and when running. Without `TEST_TOTAL_SHARDS` it runs the binary
 //! unchanged.
+//!
+//! The runs pass `--exact`, which applies to a filter among those arguments as well: in every
+//! shard it also selects the test whose full name it is, if there is one. So a filter that names a
+//! test exactly runs that test once per shard.
 
 use std::ffi::OsString;
 use std::path::Path;
