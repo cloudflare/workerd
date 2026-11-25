@@ -10,7 +10,14 @@ def kj_test(
         tags = [],
         size = "medium",
         target_compatible_with = None,
+        generate_all_autogates_variant = True,
         **kwargs):
+    """Defines a KJ test as `name@` and, unless generate_all_autogates_variant is False, as
+    `name@all-autogates`, which runs with every autogate on.
+
+    Pass generate_all_autogates_variant = False for a test that sets the autogates itself, where
+    the second variant would only repeat the first.
+    """
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
     cc_binary(
@@ -39,6 +46,9 @@ def kj_test(
         size = size,
         **test_attrs(tags, size, target_compatible_with)
     )
+
+    if not generate_all_autogates_variant:
+        return
 
     _kj_test(
         name = test_name + "@all-autogates",
