@@ -2,28 +2,25 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::sync::Barrier;
 use std::sync::atomic::AtomicUsize;
 use std::task::Wake;
 use std::task::Waker;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use super::*;
 
-/// A taker's waker that counts its wake-ups and unparks a thread.
+/// A taker's waker that counts its wake-ups.
 struct Wakes {
     count: AtomicUsize,
-    /// The wake-ups that came from a thread other than `thread`.
-    foreign: AtomicUsize,
-    thread: Option<thread::Thread>,
 }
 
 impl Wakes {
-    fn new(thread: Option<thread::Thread>) -> Arc<Self> {
+    fn new() -> Arc<Self> {
         Arc::new(Self {
             count: AtomicUsize::new(0),
-            foreign: AtomicUsize::new(0),
-            thread,
         })
     }
 }
@@ -35,22 +32,24 @@ impl Wake for Wakes {
 
     fn wake_by_ref(self: &Arc<Self>) {
         self.count.fetch_add(1, SeqCst);
-        if let Some(thread) = &self.thread {
-            if thread.id() != thread::current().id() {
-                self.foreign.fetch_add(1, SeqCst);
-            }
-            thread.unpark();
-        }
+    }
+}
+
+/// Unparks a loop's thread.
+struct Unparker(thread::Thread);
+
+impl Wake for Unparker {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
     }
 }
 
 /// Plays a loop thread on the calling thread until the queue ends: takes what it may, and
 /// sleeps whenever it took nothing, telling the queue as an event loop would. Returns what it
-/// took and how often another thread woke it.
-fn run_loop(worker: &Worker<u32>) -> (Vec<u32>, usize) {
+/// took. It sleeps without a timeout: were a wake-up lost, it would sleep for good.
+fn run_loop(worker: &Worker<u32>) -> Vec<u32> {
     let parking = worker.parking();
-    let counted = Wakes::new(Some(thread::current()));
-    let waker = Waker::from(Arc::clone(&counted));
+    let waker = Waker::from(Arc::new(Unparker(thread::current())));
     let mut cx = Context::from_waker(&waker);
     let mut taken = Vec::new();
     loop {
@@ -65,10 +64,10 @@ fn run_loop(worker: &Worker<u32>) -> (Vec<u32>, usize) {
         }
         parking.before_park();
         // A wake-up since the poll left a token, with which this returns at once.
-        thread::park_timeout(Duration::from_mins(1));
+        thread::park();
         parking.after_unpark();
     }
-    (taken, counted.foreign.load(SeqCst))
+    taken
 }
 
 /// A loop for a test that plays its thread itself: its worker, its parking, and its wake-ups.
@@ -82,7 +81,7 @@ impl TestLoop {
     fn new(queue: &Queue<u32>) -> Self {
         let worker = queue.worker();
         let parking = worker.parking();
-        let wakes = Wakes::new(None);
+        let wakes = Wakes::new();
         let this = Self {
             worker,
             parking,
@@ -499,57 +498,234 @@ fn a_long_queue_is_left_quickly() {
     assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
 }
 
-/// Loop threads that sleep whenever they have taken nothing, and pushers that push as fast as
-/// they can: every item is taken exactly once, which a lost wake-up would prevent (the test
-/// would hang), and a push wakes one loop at most.
-#[test]
-fn nothing_is_lost_and_no_loop_is_woken_in_vain_under_contention() {
-    const LOOPS: usize = 6;
+/// What became of each item of a stress run.
+struct Fates {
+    taken: Vec<AtomicUsize>,
+    dropped: Vec<AtomicUsize>,
+    /// How many items were dropped, whoever took them out of the queue.
+    gone: AtomicUsize,
+}
+
+/// An item that records being dropped, taken or not.
+struct Item {
+    id: usize,
+    fates: Arc<Fates>,
+}
+
+impl Drop for Item {
+    fn drop(&mut self) {
+        self.fates.dropped[self.id].fetch_add(1, SeqCst);
+        self.fates.gone.fetch_add(1, SeqCst);
+    }
+}
+
+/// A sequence of numbers that looks random and is the same for the same seed.
+struct Dice(u64);
+
+impl Dice {
+    fn roll(&mut self, sides: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % sides
+    }
+}
+
+/// Plays a loop thread until the queue ends, or until it has taken `leaves_after` items, when
+/// it drops its worker as a loop that stops does.
+///
+/// It sleeps without a timeout, so it sleeps for good if a wake-up it needs does not come.
+/// Now and then its thread goes on to other work between waking and running its taker, and
+/// now and then its taker does not run for a few sleeps of the thread, which wakes by itself
+/// then, as a thread with other work does.
+fn stress_loop(worker: Worker<Item>, mut dice: Dice, leaves_after: Option<usize>) {
+    let parking = worker.parking();
+    let waker = Waker::from(Arc::new(Unparker(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    let mut taken = 0;
+    loop {
+        match worker.poll_take(&mut cx) {
+            Poll::Ready(Some((item, in_flight))) => {
+                item.fates.taken[item.id].fetch_add(1, SeqCst);
+                taken += 1;
+                if leaves_after == Some(taken) {
+                    return;
+                }
+                drop((item, in_flight));
+                continue;
+            }
+            Poll::Ready(None) => return,
+            Poll::Pending => {}
+        }
+        parking.before_park();
+        // A wake-up since the poll left a token, with which this returns at once.
+        thread::park();
+        parking.after_unpark();
+        match dice.roll(16) {
+            0 => {
+                parking.before_resume();
+                thread::yield_now();
+            }
+            1 => {
+                for _ in 0..3 {
+                    parking.before_park();
+                    thread::park_timeout(Duration::from_micros(50));
+                    parking.after_unpark();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// One run of loops and pushers at once. Every item is either taken by exactly one loop or
+/// taken out by its ticket, never both and never neither, though tickets are dropped while
+/// loops take, loops leave while others are woken, and takers run late or not at all for a
+/// while.
+///
+/// The pushers push in bursts, all at once, and between two bursts every item pushed so far
+/// has to be gone from the queue: a wake-up that is lost leaves an item queued with every
+/// loop asleep and nothing further pushed that would wake one, which fails the run.
+///
+/// Returns, of the items whose tickets were dropped, how many a loop took first and how many
+/// the ticket took out.
+fn stress(round: u64) -> (usize, usize) {
+    const LEAVING: usize = 2;
     const PUSHERS: usize = 4;
-    const ITEMS: u32 = 20_000;
-    let queue = Queue::<u32>::new();
-    let taken = Arc::new(Mutex::new(Vec::new()));
-    let woken = Arc::new(AtomicUsize::new(0));
-    // Every loop is registered before the first push: an item is never dropped as deserted.
-    let workers: Vec<_> = (0..LOOPS).map(|_| queue.worker()).collect();
-    let mut loops = Vec::new();
-    for worker in workers {
-        let taken = Arc::clone(&taken);
-        let woken = Arc::clone(&woken);
-        loops.push(thread::spawn(move || {
-            let (mine, foreign) = run_loop(&worker);
-            woken.fetch_add(foreign, SeqCst);
-            taken.lock().unwrap().extend(mine);
-        }));
+    const BURSTS: usize = 150;
+    const BURST: usize = 6;
+    let most = PUSHERS * BURSTS * BURST;
+    let counters = || (0..most).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+    let fates = Arc::new(Fates {
+        taken: counters(),
+        dropped: counters(),
+        gone: AtomicUsize::new(0),
+    });
+    let queue = Queue::<Item>::new();
+    // Few loops in some runs and several in others; two of them stop taking part of the way
+    // through. Every loop is registered before the first push: an item is never dropped as
+    // deserted.
+    let loops = LEAVING + 1 + round as usize % 4;
+    let workers: Vec<_> = (0..loops).map(|_| queue.worker()).collect();
+    let (done, ended) = std::sync::mpsc::channel();
+    for (index, worker) in workers.into_iter().enumerate() {
+        let done = done.clone();
+        let dice = Dice(round * 64 + index as u64 + 1);
+        let leaves_after = (index < LEAVING).then_some(40 * (index + 1));
+        thread::spawn(move || {
+            stress_loop(worker, dice, leaves_after);
+            done.send(()).unwrap();
+        });
     }
+    let pushed = Arc::new(AtomicUsize::new(0));
+    let start = Arc::new(Barrier::new(PUSHERS + 1));
+    let finish = Arc::new(Barrier::new(PUSHERS + 1));
     let mut pushing = Vec::new();
-    for pusher in 0..PUSHERS as u32 {
+    for pusher in 0..PUSHERS {
         let queue = queue.clone();
-        // The tickets are kept until every item was pushed, as a connection keeps one for as
-        // long as its request is in flight.
+        let fates = Arc::clone(&fates);
+        let pushed = Arc::clone(&pushed);
+        let (start, finish) = (Arc::clone(&start), Arc::clone(&finish));
+        let mut dice = Dice(round * 64 + 32 + pusher as u64);
         pushing.push(thread::spawn(move || {
-            (0..ITEMS)
-                .map(|i| queue.push(pusher * ITEMS + i))
-                .collect::<Vec<_>>()
+            let mut kept = Vec::new();
+            for _ in 0..BURSTS {
+                start.wait();
+                // The tickets of requests that are in flight for a while.
+                let mut held = Vec::new();
+                for _ in 0..dice.roll(BURST as u64 + 1) {
+                    let id = pushed.fetch_add(1, SeqCst);
+                    let ticket = queue.push(Item {
+                        id,
+                        fates: Arc::clone(&fates),
+                    });
+                    match dice.roll(4) {
+                        // A client that goes away at once, or a little later, while loops
+                        // take.
+                        0 => drop(ticket),
+                        1 => held.push(ticket),
+                        // A request that is served whatever becomes of its connection.
+                        _ => {
+                            ticket.keep_queued();
+                            kept.push(id);
+                        }
+                    }
+                    // The next push comes as the loops go back to sleep, which they do when
+                    // they find the queue empty: a push at that moment is the one a loop
+                    // could miss.
+                    for _ in 0..10_000 {
+                        if queue.is_empty() {
+                            break;
+                        }
+                        std::hint::spin_loop();
+                    }
+                    for _ in 0..dice.roll(200) {
+                        std::hint::spin_loop();
+                    }
+                }
+                drop(held);
+                finish.wait();
+            }
+            kept
         }));
     }
-    let mut tickets = Vec::new();
+    let lost = |what: &str| -> ! {
+        let gone = fates.gone.load(SeqCst);
+        let pushed = pushed.load(SeqCst);
+        panic!(
+            "round {round}: {what} with {} items queued, {gone} of {pushed} gone: a wake-up \
+             was lost",
+            queue.len()
+        )
+    };
+    for _ in 0..BURSTS {
+        start.wait();
+        finish.wait();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while fates.gone.load(SeqCst) < pushed.load(SeqCst) {
+            if Instant::now() > deadline {
+                lost("the loops sleep");
+            }
+            thread::yield_now();
+        }
+    }
+    let mut kept = Vec::new();
     for pusher in pushing {
-        tickets.push(pusher.join().unwrap());
+        kept.extend(pusher.join().unwrap());
     }
     queue.close();
-    for worker in loops {
-        worker.join().unwrap();
+    for _ in 0..loops {
+        if ended.recv_timeout(Duration::from_secs(10)).is_err() {
+            lost("a loop did not end");
+        }
     }
-    drop(tickets);
-    let mut taken = Arc::try_unwrap(taken).unwrap().into_inner().unwrap();
-    taken.sort_unstable();
-    let expected: Vec<u32> = (0..PUSHERS as u32 * ITEMS).collect();
-    assert_eq!(taken, expected);
-    // Another thread woke a loop once per item at most, and each loop once for the close.
-    let items = PUSHERS * ITEMS as usize;
-    assert!(woken.load(SeqCst) <= items + LOOPS, "{woken:?}");
+    let total = pushed.load(SeqCst);
+    let count = |counts: &[AtomicUsize], id: usize| counts[id].load(SeqCst);
+    for id in 0..total {
+        assert_eq!(count(&fates.dropped, id), 1, "item {id} of round {round}");
+        assert!(count(&fates.taken, id) <= 1, "item {id} of round {round}");
+    }
+    for id in &kept {
+        assert_eq!(count(&fates.taken, *id), 1, "item {id} of round {round}");
+    }
+    let taken: usize = (0..total).map(|id| count(&fates.taken, id)).sum();
+    (taken - kept.len(), total - taken)
 }
+
+#[test]
+fn nothing_is_lost_or_taken_twice_under_contention() {
+    let (mut taken, mut removed) = (0, 0);
+    for round in 0..STRESS_ROUNDS {
+        let (taken_first, removed_first) = stress(round);
+        taken += taken_first;
+        removed += removed_first;
+    }
+    // Tickets were dropped both before and after a loop took their items.
+    assert!(taken > 0 && removed > 0, "{taken} taken, {removed} removed");
+}
+
+/// How many runs of [`stress`] the test makes, of 150 bursts each.
+const STRESS_ROUNDS: u64 = 10;
 
 #[test]
 fn one_pusher_sees_its_items_taken_in_order() {
@@ -562,7 +738,7 @@ fn one_pusher_sees_its_items_taken_in_order() {
             tickets
         })
     };
-    let (taken, _) = run_loop(&worker);
+    let taken = run_loop(&worker);
     drop(pusher.join().unwrap());
     assert_eq!(taken, (0..5_000).collect::<Vec<u32>>());
 }
