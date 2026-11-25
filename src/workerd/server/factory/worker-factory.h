@@ -48,7 +48,7 @@ struct ChannelFactory;
 struct SubrequestChannel;
 struct SpawnedTask;
 struct ActorClassChannel;
-struct DynamicChannels;
+struct ChannelTable;
 struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
@@ -69,7 +69,7 @@ using ActorIdHandle = Worker::Actor::Id;
 // The source of a dynamic worker, as `IoChannelFactory::loadIsolate()` receives it: the function
 // that fetches it. `factory_new_worker()` fetches the source and compiles the worker from it; its
 // global outbound and the capabilities in its `env` go into the server's channel table for the
-// worker (`DynamicChannels`).
+// worker (`ChannelTable`).
 using DynamicSource = kj::Function<kj::Promise<DynamicWorkerSource>()>;
 // One request's metadata.
 using RequestMetadata = IoChannelFactory::SubrequestMetadata;
@@ -215,7 +215,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
-    DynamicChannels& dynamicChannels);
+    ChannelTable& channels);
 kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
     const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 

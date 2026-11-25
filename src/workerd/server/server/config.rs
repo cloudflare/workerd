@@ -37,10 +37,8 @@ use crate::bindings::ActorConfig;
 use crate::bindings::ActorConfigMap;
 use crate::bindings::ActorConfigs;
 use crate::bindings::Designator;
-use crate::bindings::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
 use crate::bindings::WorkerLoaderDesignator;
 use crate::bindings::Workflow;
-use crate::bindings::len_u32;
 use crate::bindings::workflow_namespace_key;
 use crate::bridge::ffi;
 use crate::channels::ActorClass;
@@ -1606,30 +1604,36 @@ impl Server {
             |designator: &Designator| lookup_actor_class(services, report, Some(name), designator);
 
         // Both special channels ("next" and "null") reach the global outbound; the difference is
-        // a legacy artifact.
-        let global = lookup(&pending.global_outbound);
-        let mut subrequest: Vec<Rc<dyn Channel>> = Vec::new();
-        for _ in 0..SPECIAL_SUBREQUEST_CHANNEL_COUNT {
-            subrequest.push(Rc::clone(&global));
+        // a legacy artifact. The bindings, then the loopback channels, are added in the order
+        // they were numbered with, and get those numbers because compiling a config worker added
+        // nothing to the table.
+        let mut table = pending.table;
+        debug_assert_eq!((table.subrequest_len(), table.actor_class_len()), (0, 0));
+        table.set_global_outbound(SubrequestChannel::new(lookup(&pending.global_outbound)));
+        for designator in &pending.bindings.subrequest {
+            table.add_subrequest(SubrequestChannel::new(lookup(designator)));
         }
-        subrequest.extend(pending.bindings.subrequest.iter().map(lookup));
-        // The loopback channels, in the order `ctx.exports` was numbered with.
         for entrypoint in &pending.loopback.subrequest_entrypoints {
-            subrequest.push(worker.loopback_entrypoint(entrypoint.as_deref())?);
+            table.add_subrequest(SubrequestChannel::new(
+                worker.loopback_entrypoint(entrypoint.as_deref())?,
+            ));
         }
         // The access binding's entrypoint is a template: its props are each request's identity.
-        let mut access_binding_channel = None;
-        if let Some(designator) = &pending.access_binding
+        let access_binding_channel = if let Some(designator) = &pending.access_binding
             && let Some(channel) = self.access_binding(name, designator)?
         {
-            access_binding_channel = Some(len_u32(&subrequest));
-            subrequest.push(channel);
-        }
+            Some(table.add_subrequest(SubrequestChannel::new(channel)))
+        } else {
+            None
+        };
 
-        let mut actor_class: Vec<Rc<dyn ActorClass>> = Vec::new();
-        actor_class.extend(pending.bindings.actor_classes.iter().map(lookup_class));
+        for designator in &pending.bindings.actor_classes {
+            table.add_actor_class(ActorClassChannel::new(lookup_class(designator)));
+        }
         for class_name in &pending.loopback.actor_classes {
-            actor_class.push(worker.loopback_actor_class(class_name)?);
+            table.add_actor_class(ActorClassChannel::new(
+                worker.loopback_actor_class(class_name)?,
+            ));
         }
 
         // A namespace binding whose service or class does not exist was reported by the
@@ -1668,16 +1672,8 @@ impl Server {
 
         worker.link(
             LinkedChannels {
-                subrequest: subrequest
-                    .into_iter()
-                    .map(SubrequestChannel::Rust)
-                    .collect(),
+                tables: table.finish()?,
                 actor,
-                actor_class: actor_class
-                    .into_iter()
-                    .map(ActorClassChannel::Rust)
-                    .collect(),
-                rpc: Vec::new(),
                 cache,
                 tails,
                 streaming_tails,

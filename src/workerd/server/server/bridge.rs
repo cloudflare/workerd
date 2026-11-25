@@ -22,13 +22,14 @@ pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
 pub use crate::channels::ChannelFactory;
-pub use crate::channels::DynamicChannels;
+pub use crate::channels::ChannelTable;
 pub use crate::channels::KeepAlive;
 pub use crate::channels::ServerHandle;
 pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::channels::actor_class_channel_from_cxx;
+pub use crate::channels::channel_table_new;
 pub use crate::channels::subrequest_channel_from_cxx;
 pub use crate::cluster::Committer;
 pub use crate::cluster::PeerSession;
@@ -427,14 +428,14 @@ pub mod ffi {
         ///
         /// The code comes from the config's `services[config_service]` (a `worker` service) or,
         /// for a dynamic worker, from `dynamic_source`, which is fetched here; its global
-        /// outbound and the capabilities in its `env` go into `dynamic_channels`, which numbers
-        /// them for the `env`. A config worker leaves `dynamic_channels` empty.
+        /// outbound and the capabilities in its `env` go into `channels`, which numbers them for
+        /// the `env`. Compiling a config worker adds nothing to `channels`.
         async fn factory_new_worker(
             factory: &WorkerFactory,
             spec: &WorkerSpec,
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
-            dynamic_channels: &mut DynamicChannels,
+            channels: &mut ChannelTable,
         ) -> Result<KjOwn<CompiledWorker>>;
         /// Compiles a throwaway copy of the config's worker `services[config_service]`, which
         /// `spec` compiled, in a new isolate, destroys it, and returns how long the phases of
@@ -1109,13 +1110,15 @@ pub mod ffi {
         fn require_allows_transfer(self: &ActorClassChannel) -> Result<()>;
         fn token(self: &ActorClassChannel, usage: TokenUsage) -> Result<KjOwn<PendingToken>>;
 
-        /// A dynamic worker's channels from its source, which the factory adds as it rewrites
-        /// them into the `env`'s channel numbers. Each `add_*` returns the channel's number.
-        type DynamicChannels;
-        fn set_global_outbound(self: &mut DynamicChannels, channel: Box<SubrequestChannel>);
-        fn add_subrequest(self: &mut DynamicChannels, channel: Box<SubrequestChannel>) -> u32;
-        fn add_actor_class(self: &mut DynamicChannels, channel: Box<ActorClassChannel>) -> u32;
-        fn add_rpc(self: &mut DynamicChannels, channel: KjRc<CxxRpcChannel>) -> u32;
+        /// A worker's channel tables as compiling it fills them: the factory adds a dynamic
+        /// worker's channels from its source as it rewrites them into the `env`'s channel
+        /// numbers. Each `add_*` returns the channel's number.
+        type ChannelTable;
+        fn channel_table_new() -> Box<ChannelTable>;
+        fn set_global_outbound(self: &mut ChannelTable, channel: Box<SubrequestChannel>);
+        fn add_subrequest(self: &mut ChannelTable, channel: Box<SubrequestChannel>) -> u32;
+        fn add_actor_class(self: &mut ChannelTable, channel: Box<ActorClassChannel>) -> u32;
+        fn add_rpc(self: &mut ChannelTable, channel: KjRc<CxxRpcChannel>) -> u32;
 
         /// A Durable Object namespace, for its alarm scheduler.
         type ActorNamespaceHandle;
