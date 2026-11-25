@@ -127,6 +127,9 @@ pub enum Error {
     OutcomeUnknown(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
+    /// This instance's lease is not known to hold (`Shared::require_lease`).
+    #[error("this instance's cluster lease in the bucket has lapsed")]
+    Lapsed,
     /// Another writer kept winning the conditional write to the key named.
     #[error("{0} is contended")]
     Contended(String),

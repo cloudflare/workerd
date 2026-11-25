@@ -365,19 +365,13 @@ impl ActorNamespace {
         }
     }
 
-    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
-    /// have been taken over: running its actors, even to read their databases, could act on stale
-    /// data.
+    /// Fails in a cluster once this instance's lease has lapsed (`Shared::require_lease`), as
+    /// this thread reads it.
     fn require_lease(&self) -> Result<()> {
-        if self
-            .cluster()
-            .is_some_and(|node| !node.cluster.lease_holds())
-        {
-            return Err(kj::failed!(
-                "this instance's cluster lease in the bucket has lapsed"
-            ));
-        }
-        Ok(())
+        let Some(node) = self.cluster() else {
+            return Ok(());
+        };
+        (node.cluster.require_lease()).map_err(|lapsed| kj::failed!("{lapsed}"))
     }
 
     /// Removes `container` from the map, unless a newer container has taken its key: one whose

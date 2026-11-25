@@ -146,6 +146,18 @@ impl Shared {
         self.held.holds(now_ms())
     }
 
+    /// Fails once this instance's lease has lapsed, as far as the calling
+    /// thread can tell without asking anyone: an instance stalled past its
+    /// lease may have been taken over, so running its objects, even to read
+    /// their databases, could act on stale data.
+    pub fn require_lease(&self) -> Result<()> {
+        if self.lease_holds() {
+            Ok(())
+        } else {
+            Err(Error::Lapsed)
+        }
+    }
+
     /// Whether the instance drains: it claims nothing more.
     pub fn is_draining(&self) -> bool {
         self.draining.load(Ordering::Acquire)
@@ -216,6 +228,11 @@ impl Member {
 
     pub fn lease_holds(&self) -> bool {
         self.shared.lease_holds()
+    }
+
+    /// `Shared::require_lease`.
+    pub fn require_lease(&self) -> Result<()> {
+        self.shared.require_lease()
     }
 
     pub fn is_draining(&self) -> bool {
