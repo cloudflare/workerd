@@ -9,6 +9,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/snapshot.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
@@ -99,6 +100,11 @@ struct TestFixture {
     // If set, and useRealTimers is not, the time the request clock always reads, so a test can
     // tell it from the system clock. Otherwise the mock timer reads the system clock.
     kj::Maybe<kj::Date> fixedNow;
+    // If set, the isolate's startup snapshot configuration. With a jsg::MutableSnapshot the
+    // fixture is a zygote: its Worker records its top level into a snapshot, which
+    // extractSnapshotArtifact() hands out, and it serves no requests. With a
+    // jsg::FinalizedSnapshot, made by such a fixture, the Worker starts from the snapshot.
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   };
 
   // A default argument here would need SetupParams' member initializers before TestFixture is
@@ -150,6 +156,9 @@ struct TestFixture {
       return callback(env);
     }).wait(*waitScope);
   }
+
+  // The snapshot that a zygote fixture (SetupParams::snapshotConfig) recorded. Call it once.
+  kj::Own<jsg::SnapshotArtifact> extractSnapshotArtifact();
 
   // Special void version of runInIoContext that ignores exceptions with given descriptions.
   void runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
