@@ -920,6 +920,13 @@ lock, and can be handed to C++ with `into_ffi()` as a `kj::Own<v8::CompiledWasmM
 which C++ makes another module object without recompiling. As in C++, RTTI describes the module
 as `unknown`; a TypeScript override names it `WebAssembly.Module`.
 
+A `Local<SharedArrayBuffer>` is not a `Local<ArrayBuffer>`, as in V8. Its `to_vec()`, like that
+of a `Local<ArrayBufferView>`, whose buffer may be shared, copies the bytes in C++, so it never
+borrows memory that another agent may write. So does that of a `Local<ArrayBuffer>`, since the
+`buffer()` of a view over a `SharedArrayBuffer` returns it as one, as V8 does. The `as_slice()` of
+an `ArrayBuffer`, an `ArrayBufferView` or a typed array does borrow its bytes, so it suits only a
+buffer that isn't shared.
+
 ### `Global<T>`
 
 A persistent handle that outlives `HandleScope`s, for handles that Rust code owns outside

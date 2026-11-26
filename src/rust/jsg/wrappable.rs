@@ -58,7 +58,8 @@
 //!
 //! From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array` whose elements convert to
 //! `T`. A typed array parameter is a handle, `v8::Local<'s, v8::Uint8Array>` and so on, which
-//! reads its memory in place with `as_slice(lock)`. An `ArrayBuffer` is a
+//! reads its memory in place with `as_slice(lock)`; for one over a `SharedArrayBuffer`, convert it
+//! into a `Local<ArrayBufferView>` and copy its bytes with `to_vec()` instead. An `ArrayBuffer` is a
 //! `v8::Local<'s, v8::ArrayBuffer>`, and `v8::Local<'s, v8::ArrayBufferView>` accepts any view.
 //!
 //! ## Integers
