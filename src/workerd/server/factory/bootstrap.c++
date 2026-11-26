@@ -4,21 +4,16 @@
 
 #include "bootstrap.h"
 
+#include "per-process.h"
 #include "worker-factory.h"
 
-#include <workerd/io/async-trace.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/server/bridge.rs.h>
-#include <workerd/server/v8-platform-impl.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/perfetto-tracing.h>
-#include <workerd/util/thread-scopes.h>
 
 #include <kj-rs-io/async-io.h>
 #include <kj-rs/kj-rs.h>
@@ -34,8 +29,6 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <mutex>
-#include <thread>
 
 #if !_WIN32
 #include <fcntl.h>
@@ -47,13 +40,6 @@
 
 #include <kj/win32-api-version.h>
 #include <kj/windows-sanity.h>
-#endif
-
-#include <workerd/util/use-perfetto-categories.h>
-
-#ifdef WORKERD_USE_TCMALLOC
-#include <pthread.h>
-#include <tcmalloc/malloc_extension.h>
 #endif
 
 // since kj installs their global signal handlers
@@ -122,39 +108,6 @@ class EntropySourceImpl: public kj::EntropySource {
 
 // =======================================================================================
 
-// tcmalloc sizes its per-CPU slabs and transfer caches at startup, and only
-// ProcessBackgroundActions() grows them toward the size classes that miss. Without that thread,
-// the caches keep their startup sizes, and a server's allocation-heavy request loop keeps falling
-// through to the central free lists and the page heap. edgeworker runs the same thread
-// (setupBackgroundTcmalloc()). ProcessBackgroundActions() never returns, so the thread is detached
-// and lives as long as the process.
-void startTcmallocBackgroundThread() {
-#ifdef WORKERD_USE_TCMALLOC
-  static std::once_flag once;
-  std::call_once(once, []() {
-    if (!tcmalloc::MallocExtension::NeedsProcessBackgroundActions()) return;
-    std::thread([]() {
-      pthread_setname_np(pthread_self(), "tcmalloc-bg");
-      tcmalloc::MallocExtension::ProcessBackgroundActions();
-    }).detach();
-  });
-#endif
-}
-
-// tcmalloc samples an allocation about every 2 MiB by default and records its stack for heap
-// profiles, but nothing in workerd ever reads those profiles. On x86-64, the stack is walked by
-// following frame pointers, and release builds omit them, in Rust as well as C++. A sampled
-// allocation on a path that does not keep the frame chain, such as hyper's HTTP parsing, can then
-// walk off the end of the stack and crash with SIGSEGV (cloudflare/workerd#8801). Turning sampling
-// off removes both the crash and the cost of sampling.
-void disableTcmallocHeapSampling() {
-#ifdef WORKERD_USE_TCMALLOC
-  tcmalloc::MallocExtension::SetProfileSamplingInterval(0);
-#endif
-}
-
-// =======================================================================================
-
 // How the binary was built, for `workerd bench`'s report: a sanitizer's instrumentation and a
 // debug build's checks make code slower than in a release build.
 kj::StringPtr buildMode() {
@@ -175,82 +128,28 @@ bool structuredLogging(const ::rust::Vec<uint64_t>& configWords) {
                              : config.getStructuredLogging();
 }
 
-// What the process needs around the Rust server (see the bridge), attached to the factory it
-// builds. Members are declared in construction order, which is the reverse of destruction: V8 goes
-// before the providers.
-class Bootstrap {
+// The I/O of one factory over the Rust-owned loop, attached to the factory. Members are declared
+// in construction order, which is the reverse of destruction.
+class LoopIo {
  public:
-  Bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
-      const ::rust::Vec<uint64_t>& configWords,
-      const ServeOrTestOptions& serveOrTest,
-      kj::Maybe<const TestOptions&> test,
-      kj::Maybe<const BenchOptions&> bench)
+  explicit LoopIo(kj_rs_tokio::TokioAsyncIoContext& loop)
       : timer(loop.getTimer()),
         monotonicClock(kj::systemPreciseMonotonicClock()),
-        provider(loop.getTimer()) {
-    KJ_IF_SOME(path, serveOrTest.perfetto_trace_path) {
-#ifdef WORKERD_USE_PERFETTO
-      perfettoSession = PerfettoSession(kj::str(path),
-          serveOrTest.perfetto_trace_categories
-              .map([](const ::rust::String& categories) {
-        return kj::str(categories);
-      }).orDefault(kj::String()));
-#else
-      KJ_UNIMPLEMENTED("perfetto tracing is not supported by this build", kj::str(path));
-#endif
-    }
-    KJ_IF_SOME(path, serveOrTest.async_trace_path) {
-      asyncTraceWriter = AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION);
-    }
-    TRACE_EVENT("workerd", "Bootstrap()");
-    startTcmallocBackgroundThread();
-    disableTcmallocHeapSampling();
+        provider(loop.getTimer()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(LoopIo);
 
-    // The process is set up for this config and these options: autogates, the test and bench
-    // modes, and V8 with its flags (V8 reads the test modes as it starts).
-    capnp::FlatArrayMessageReader reader(
-        asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
-    auto config = reader.getRoot<config::Config>();
-    util::Autogate::initAutogate(config.getAutogates());
-    KJ_IF_SOME(t, test) {
-      setUpTestProcess(t);
-    }
-    KJ_IF_SOME(b, bench) {
-      setUpBenchProcess(b);
-    }
-
-    platform = jsg::defaultPlatform(0);
-    v8Platform = kj::heap<WorkerdPlatform>(*platform);
-    v8System = kj::heap<jsg::V8System>(*v8Platform,
-        KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
+  FactoryIo get() {
+    return FactoryIo{
+      .timer = timer,
+      .monotonicClock = monotonicClock,
+      .network = provider.getNetwork(),
+      .entropySource = entropySource,
+      .fs = *fs,
+    };
   }
 
-  // Ends the --async-trace file. The factory is destroyed first, ending every context, so the exit
-  // line follows their ends.
-  ~Bootstrap() noexcept(false) {
-    KJ_IF_SOME(writer, asyncTraceWriter) {
-      writer->finish();
-    }
-  }
-
-  KJ_DISALLOW_COPY_AND_MOVE(Bootstrap);
-
-  // A factory over `configWords`, which it owns for its run.
-  kj::Own<WorkerFactory> makeFactory(::rust::Vec<uint64_t> configWords,
-      const ServeOrTestOptions& serveOrTest,
-      kj::Maybe<const TestOptions&> test,
-      kj::Maybe<const BenchOptions&> bench) {
-    auto options = kj::heap<WorkerFactory::Options>();
-    options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
-    applyServeOrTestOptions(*options, serveOrTest);
-    KJ_IF_SOME(t, test) {
-      applyTestOptions(*options, t);
-    }
-    KJ_IF_SOME(b, bench) {
-      applyBenchOptions(*options, b);
-    }
-    return kj::heap<WorkerFactory>(*v8System, timer, monotonicClock, provider.getNetwork(),
-        entropySource, *fs, kj::mv(options), kj::mv(configWords));
+  kj::Filesystem& getFilesystem() {
+    return *fs;
   }
 
  private:
@@ -259,103 +158,128 @@ class Bootstrap {
   kj::Timer& timer;
   // The loop's monotonic clock, consistent with `timer`.
   const kj::MonotonicClock& monotonicClock;
-  // The tokio-backed kj::Network over the Runtime's loop, for the factory.
+  // The tokio-backed kj::Network over the Runtime's loop.
   kj_rs_io::TokioAsyncIoProvider provider;
-
-#ifdef WORKERD_USE_PERFETTO
-  kj::Maybe<PerfettoSession> perfettoSession;
-#endif
-
-  // Set by --async-trace. The factory's isolates write to it, so it outlives them.
-  kj::Maybe<kj::Own<AsyncTraceWriter>> asyncTraceWriter;
-
-  kj::Own<v8::Platform> platform;
-  kj::Own<WorkerdPlatform> v8Platform;
-  kj::Own<jsg::V8System> v8System;
-
-  kj::Maybe<kj::Own<const kj::Directory>> openWritableDirectory(kj::StringPtr pathStr) {
-    return fs->getRoot().tryOpenSubdir(fs->getCurrentPath().eval(pathStr), kj::WriteMode::MODIFY);
-  }
-
-  void applyServeOrTestOptions(
-      WorkerFactory::Options& options, const ServeOrTestOptions& serveOrTest) {
-    KJ_IF_SOME(writer, asyncTraceWriter) {
-      options.asyncTraceWriter = *writer;
-    }
-    KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
-      options.asyncTraceStackDepth = frames;
-    }
-    options.asyncTracePromises = serveOrTest.async_trace_promises;
-    options.experimental = serveOrTest.experimental;
-    auto& python = options.pythonConfig;
-    KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
-      // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
-      // directory).
-      auto dir = fs->getCurrentPath().eval(kj::str(path)).toNativeString(true);
-      // The server takes the directory as UTF-8, which the working directory need not be.
-      KJ_REQUIRE(!kj::encodeUtf16(dir).hadErrors,
-          "--pyodide-bundle-disk-cache-dir does not resolve to a UTF-8 path", dir);
-      options.pyodideBundleDiskCacheDir = kj::mv(dir);
-    }
-    python.createSnapshot = serveOrTest.python_save_snapshot;
-    python.createBaselineSnapshot = serveOrTest.python_save_baseline_snapshot;
-    KJ_IF_SOME(path, serveOrTest.python_load_snapshot) {
-      python.loadSnapshotFromDisk = kj::str(path);
-    }
-    KJ_IF_SOME(path, serveOrTest.python_snapshot_dir) {
-      python.snapshotDirectory = openWritableDirectory(kj::str(path));
-    }
-  }
-
-  // The `test` options that apply to the process.
-  static void setUpTestProcess(const TestOptions& testOptions) {
-    if (!testOptions.no_verbose) {
-      // Always turn on info logging when running tests so that uncaught exceptions are displayed.
-      // TODO(beta): This can be removed once we improve our error logging story.
-      kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
-    }
-    if (testOptions.predictable) {
-      setPredictableModeForTest();
-    }
-    if (testOptions.gc_stress) {
-      setGcStressModeForTest();
-    }
-    if (testOptions.all_autogates) {
-      util::Autogate::initAllAutogates();
-    }
-  }
-
-  // The `test` options that apply to a factory.
-  static void applyTestOptions(WorkerFactory::Options& options, const TestOptions& testOptions) {
-    KJ_IF_SOME(compatDate, testOptions.compat_date) {
-      options.testCompatibilityDateOverride = kj::str(compatDate);
-    }
-    options.syncStorage = false;
-  }
-
-  // The `bench` options that apply to the process. Bench mode is on before any worker compiles.
-  static void setUpBenchProcess(const BenchOptions& benchOptions) {
-    setBenchMode();
-    if (!benchOptions.no_verbose) {
-      // As for tests, so that uncaught exceptions are displayed.
-      kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
-    }
-    if (benchOptions.all_autogates) {
-      util::Autogate::initAllAutogates();
-    }
-  }
-
-  // The `bench` options that apply to a factory.
-  static void applyBenchOptions(WorkerFactory::Options& options, const BenchOptions& benchOptions) {
-    KJ_IF_SOME(compatDate, benchOptions.compat_date) {
-      options.testCompatibilityDateOverride = kj::str(compatDate);
-    }
-    KJ_IF_SOME(compatDate, benchOptions.default_compat_date) {
-      options.defaultCompatibilityDate = kj::str(compatDate);
-    }
-    options.tailWorkers = benchOptions.trace;
-  }
 };
+
+// The `serve` / `test` options that apply to the process.
+void setUpServeOrTestProcess(
+    ProcessState::Options& process, const ServeOrTestOptions& serveOrTest) {
+  KJ_IF_SOME(path, serveOrTest.perfetto_trace_path) {
+    process.perfettoTracePath = kj::str(path);
+  }
+  KJ_IF_SOME(categories, serveOrTest.perfetto_trace_categories) {
+    process.perfettoTraceCategories = kj::str(categories);
+  }
+  KJ_IF_SOME(path, serveOrTest.async_trace_path) {
+    process.asyncTracePath = kj::str(path);
+  }
+}
+
+// The `test` options that apply to the process.
+void setUpTestProcess(ProcessState::Options& process, const TestOptions& testOptions) {
+  // Always turn on info logging when running tests so that uncaught exceptions are displayed.
+  // TODO(beta): This can be removed once we improve our error logging story.
+  process.infoLogging = !testOptions.no_verbose;
+  process.predictable = testOptions.predictable;
+  process.gcStress = testOptions.gc_stress;
+  process.allAutogates = testOptions.all_autogates;
+}
+
+// The `bench` options that apply to the process. Bench mode is on before any worker compiles.
+void setUpBenchProcess(ProcessState::Options& process, const BenchOptions& benchOptions) {
+  process.benchMode = true;
+  // As for tests, so that uncaught exceptions are displayed.
+  process.infoLogging = !benchOptions.no_verbose;
+  process.allAutogates = benchOptions.all_autogates;
+}
+
+void applyServeOrTestOptions(
+    WorkerFactory::Options& options, const ServeOrTestOptions& serveOrTest, kj::Filesystem& fs) {
+  KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
+    options.asyncTraceStackDepth = frames;
+  }
+  options.asyncTracePromises = serveOrTest.async_trace_promises;
+  options.experimental = serveOrTest.experimental;
+  auto& python = options.pythonConfig;
+  KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
+    // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
+    // directory).
+    auto dir = fs.getCurrentPath().eval(kj::str(path)).toNativeString(true);
+    // The server takes the directory as UTF-8, which the working directory need not be.
+    KJ_REQUIRE(!kj::encodeUtf16(dir).hadErrors,
+        "--pyodide-bundle-disk-cache-dir does not resolve to a UTF-8 path", dir);
+    options.pyodideBundleDiskCacheDir = kj::mv(dir);
+  }
+  python.createSnapshot = serveOrTest.python_save_snapshot;
+  python.createBaselineSnapshot = serveOrTest.python_save_baseline_snapshot;
+  KJ_IF_SOME(path, serveOrTest.python_load_snapshot) {
+    python.loadSnapshotFromDisk = kj::str(path);
+  }
+  KJ_IF_SOME(path, serveOrTest.python_snapshot_dir) {
+    python.snapshotDirectory =
+        fs.getRoot().tryOpenSubdir(fs.getCurrentPath().eval(kj::str(path)), kj::WriteMode::MODIFY);
+  }
+}
+
+// The `test` options that apply to a factory.
+void applyTestOptions(WorkerFactory::Options& options, const TestOptions& testOptions) {
+  KJ_IF_SOME(compatDate, testOptions.compat_date) {
+    options.testCompatibilityDateOverride = kj::str(compatDate);
+  }
+  options.syncStorage = false;
+}
+
+// The `bench` options that apply to a factory.
+void applyBenchOptions(WorkerFactory::Options& options, const BenchOptions& benchOptions) {
+  KJ_IF_SOME(compatDate, benchOptions.compat_date) {
+    options.testCompatibilityDateOverride = kj::str(compatDate);
+  }
+  KJ_IF_SOME(compatDate, benchOptions.default_compat_date) {
+    options.defaultCompatibilityDate = kj::str(compatDate);
+  }
+  options.tailWorkers = benchOptions.trace;
+}
+
+kj::Arc<ProcessState> startProcess(const ::rust::Vec<uint64_t>& config,
+    const ServeOrTestOptions& serveOrTest,
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench) {
+  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(config)), CONFIG_READER_OPTIONS);
+  auto root = reader.getRoot<config::Config>();
+  ProcessState::Options options{
+    .autogates = KJ_MAP(gate, root.getAutogates()) { return kj::str(gate); },
+    .v8Flags = KJ_MAP(flag, root.getV8Flags()) { return kj::str(flag); },
+  };
+  setUpServeOrTestProcess(options, serveOrTest);
+  KJ_IF_SOME(t, test) {
+    setUpTestProcess(options, t);
+  }
+  KJ_IF_SOME(b, bench) {
+    setUpBenchProcess(options, b);
+  }
+  return ProcessState::start(options);
+}
+
+kj::Own<WorkerFactory> newFactory(const ProcessState& process,
+    kj_rs_tokio::TokioAsyncIoContext& loop,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench) {
+  auto io = kj::heap<LoopIo>(loop);
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
+  applyServeOrTestOptions(*options, serveOrTest, io->getFilesystem());
+  KJ_IF_SOME(t, test) {
+    applyTestOptions(*options, t);
+  }
+  KJ_IF_SOME(b, bench) {
+    applyBenchOptions(*options, b);
+  }
+  // Destroyed in this order: the factory, its reference to the process, then its I/O.
+  return newWorkerFactory(process, io->get(), kj::mv(options), kj::mv(config)).attach(kj::mv(io));
+}
 
 }  // namespace
 
@@ -401,9 +325,9 @@ kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     const ServeOrTestOptions& options,
     kj::Maybe<const TestOptions&> test,
     kj::Maybe<const BenchOptions&> bench) {
-  auto bootstrap = kj::heap<Bootstrap>(loop, config, options, test, bench);
-  auto factory = bootstrap->makeFactory(kj::mv(config), options, test, bench);
-  return factory.attach(kj::mv(bootstrap));
+  auto process = startProcess(config, options, test, bench);
+  // The factory holds the process, so the process goes with it.
+  return newFactory(*process, loop, kj::mv(config), options, test, bench);
 }
 
 BuildInfo build_info() {
