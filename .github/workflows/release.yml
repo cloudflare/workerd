@@ -117,11 +117,14 @@ jobs:
       arch_name: ${{ matrix.target-arch }}
       upload_binary: true
       macos_use_lld: true
+      # ThinLTO links Xcode clang's bitcode, which declares llvm.coro.end as returning i1. lld 22 and
+      # later reject that (build/pgo/README.md).
+      macos_lld_formula: lld@21
       # On release, generate a full WPT report...
       run_tests: true
       upload_test_logs: true
-      # ...and on Linux, run the serving workload on the PGO binary (build/pgo/README.md).
-      test_target: ${{ matrix.os-name == 'Linux' && '//src/wpt/... //src/workerd/server/tests/pgo-workload/...' || '//src/wpt/...' }}
+      # ...and on Linux and macOS, run the serving workload on the PGO binary (build/pgo/README.md).
+      test_target: ${{ matrix.os-name != 'Windows' && '//src/wpt/... //src/workerd/server/tests/pgo-workload/...' || '//src/wpt/...' }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}

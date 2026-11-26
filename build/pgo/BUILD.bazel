@@ -42,9 +42,34 @@ sh_binary(
 # file because it doesn't resolve repository names the way label-valued flags do.
 fdo_profile(
     name = "profile",
-    profile = "@workerd_pgo_profile//:workerd.profdata",
+    profile = select({
+        "@platforms//os:macos": ":profile-for-xcode",
+        "//conditions:default": "@workerd_pgo_profile//:workerd.profdata",
+    }),
     tags = ["manual"],
     visibility = ["//visibility:public"],
+)
+
+# The profile for Xcode's clang, which reads indexed profiles up to version 12. The toolchain's
+# LLVM writes version 13, which differs from 12 only in the hash that clang's frontend
+# instrumentation (-fprofile-instr-generate) uses by default. This profile comes from IR
+# instrumentation (-fprofile-generate), which doesn't use that hash, so the two versions' files are
+# read the same way, and this copy is the same file marked as version 12. The low byte of the
+# version, the header's second 8-byte field, holds the version number; its other bytes hold flags.
+genrule(
+    name = "profile-for-xcode",
+    srcs = ["@workerd_pgo_profile//:workerd.profdata"],
+    outs = ["workerd-xcode.profdata"],
+    cmd = """
+        if [ "$$(od -An -tx1 -N9 $< | tr -d ' \\n')" != ff6c70726f6669810d ]; then
+            echo "$<: not an indexed version 13 profile; check what changed for Xcode's clang" >&2
+            exit 1
+        fi
+        cp $< $@
+        chmod u+w $@
+        printf '\\014' | dd of=$@ bs=1 seek=8 conv=notrunc 2>/dev/null
+    """,
+    tags = ["manual"],
 )
 
 # The same file, for rustc, which reads it with -Cprofile-use. --config=pgo-use adds it to every

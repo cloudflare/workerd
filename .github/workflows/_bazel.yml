@@ -74,6 +74,11 @@ on:
         type: boolean
         required: false
         default: false
+      # The Homebrew formula that macos_use_lld installs lld from.
+      macos_lld_formula:
+        type: string
+        required: false
+        default: 'lld'
       build_container_images:
         type: boolean
         required: false
@@ -180,8 +185,8 @@ jobs:
           # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
           # exist from an older pre-installed LLVM version on the runner image.
           brew update
-          brew install lld
-          sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
+          brew install ${{ inputs.macos_lld_formula }}
+          sudo ln -s -f $(brew --prefix ${{ inputs.macos_lld_formula }})/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
       - name: Configure download mirrors
