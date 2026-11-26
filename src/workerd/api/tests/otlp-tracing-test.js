@@ -27,6 +27,7 @@ export default {
       span.setAttribute('flags', [true]);
       span.setAttribute('scores', [1.5, undefined]);
       span.setAttribute('none', []);
+      span.setAttribute('url.full', 'https://example.com:8443/user?a=1');
       await (await env.SELF.fetch('http://traced/leaf?secret=1')).text();
     });
     return new Response('not here', { status: 503 });
@@ -121,6 +122,17 @@ export const test = {
     assert.deepStrictEqual(mySpan.attributes.flags, [true]);
     assert.deepStrictEqual(mySpan.attributes.scores, [1.5, null]);
     assert.deepStrictEqual(mySpan.attributes.none, []);
+    // User spans keep url.full as set without deriving extra URL attributes.
+    assert.strictEqual(
+      mySpan.attributes['url.full'],
+      'https://example.com:8443/user?a=1'
+    );
+    assert.strictEqual(mySpan.attributes['url.scheme'], undefined);
+    assert.strictEqual(mySpan.attributes['url.path'], undefined);
+    assert.strictEqual(mySpan.attributes['url.query'], undefined);
+    assert.strictEqual(mySpan.attributes['server.address'], undefined);
+    assert.strictEqual(mySpan.attributes['server.port'], undefined);
+    assert.strictEqual(mySpan.attributes['network.protocol.name'], undefined);
     assert.strictEqual(mySpan.status, undefined);
 
     // The subrequest made inside it.

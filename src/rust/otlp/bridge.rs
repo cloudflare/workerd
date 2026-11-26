@@ -32,6 +32,11 @@ mod ffi {
         Error,
     }
 
+    enum SpanOrigin {
+        Runtime,
+        User,
+    }
+
     /// What is fixed for one invocation's spans.
     struct Options {
         /// The W3C trace flags, zero when the trace carries none.
@@ -124,6 +129,7 @@ mod ffi {
             parent_span_id: u64,
             name: &[u8],
             start: i64,
+            origin: SpanOrigin,
         ) -> bool;
         fn set_span_name(buffer: &mut SpanBuffer, span_id: u64, name: &[u8]);
         fn set_span_status(buffer: &mut SpanBuffer, span_id: u64, code: StatusCode, message: &[u8]);
@@ -284,8 +290,13 @@ fn open_span(
     parent_span_id: u64,
     name: &[u8],
     start: i64,
+    origin: ffi::SpanOrigin,
 ) -> bool {
-    buffer.open(span_id, parent_span_id, text(name), start)
+    let origin = match origin {
+        ffi::SpanOrigin::User => buffer::SpanOrigin::User,
+        _ => buffer::SpanOrigin::Runtime,
+    };
+    buffer.open(span_id, parent_span_id, text(name), start, origin)
 }
 
 fn set_span_name(buffer: &mut SpanBuffer, span_id: u64, name: &[u8]) {

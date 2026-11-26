@@ -80,11 +80,11 @@ fn spans_are_batched_until_the_root_closes() {
     defaults.push("faas.trigger", "not-applied");
     let mut buffer = buffer_with(false, defaults);
 
-    assert!(buffer.open(ROOT, 0x20, "GET".to_owned(), T0));
-    assert!(buffer.open(1, ROOT, "fetch".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0x20, "GET".to_owned(), T0, SpanOrigin::Runtime));
+    assert!(buffer.open(1, ROOT, "fetch".to_owned(), T0, SpanOrigin::Runtime));
     // An id that is already open is refused rather than clobbering the open span.
-    assert!(!buffer.open(1, ROOT, "other".to_owned(), T0));
-    assert!(buffer.open(3, ROOT, "my-span".to_owned(), T0));
+    assert!(!buffer.open(1, ROOT, "other".to_owned(), T0, SpanOrigin::Runtime));
+    assert!(buffer.open(3, ROOT, "my-span".to_owned(), T0, SpanOrigin::Runtime));
     buffer.set_name(3, "renamed".to_owned());
     buffer.set_status(3, StatusCode::Error, "boom".to_owned());
     buffer.add_exception(3, T0 + 5, "TypeError".to_owned(), "boom".to_owned(), None);
@@ -170,7 +170,7 @@ fn spans_are_batched_until_the_root_closes() {
     );
 
     // A span closing after the root is handed out as soon as it closes.
-    assert!(buffer.open(4, ROOT, "late".to_owned(), T0));
+    assert!(buffer.open(4, ROOT, "late".to_owned(), T0, SpanOrigin::Runtime));
     let batch = buffer.close(4, T0, Attributes::default()).unwrap();
     assert_eq!(spans(&decode(&batch))[0].name, "late");
     assert!(buffer.finish(T0).is_none());
@@ -180,17 +180,23 @@ fn spans_are_batched_until_the_root_closes() {
 fn a_full_batch_is_handed_out_and_open_spans_are_capped() {
     let mut buffer = buffer();
     for id in 1..MAX_BATCH_SPANS as u64 {
-        assert!(buffer.open(id, ROOT, "s".to_owned(), T0));
+        assert!(buffer.open(id, ROOT, "s".to_owned(), T0, SpanOrigin::Runtime));
         assert!(buffer.close(id, T0, Attributes::default()).is_none());
     }
-    assert!(buffer.open(1, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(1, ROOT, "s".to_owned(), T0, SpanOrigin::Runtime));
     let batch = buffer.close(1, T0, Attributes::default()).unwrap();
     assert_eq!(batch.span_count, MAX_BATCH_SPANS);
 
     for id in 1..=MAX_OPEN_SPANS as u64 {
-        assert!(buffer.open(id, ROOT, "s".to_owned(), T0));
+        assert!(buffer.open(id, ROOT, "s".to_owned(), T0, SpanOrigin::Runtime));
     }
-    assert!(!buffer.open(MAX_OPEN_SPANS as u64 + 1, ROOT, "s".to_owned(), T0));
+    assert!(!buffer.open(
+        MAX_OPEN_SPANS as u64 + 1,
+        ROOT,
+        "s".to_owned(),
+        T0,
+        SpanOrigin::Runtime
+    ));
 
     // Spans still open at the end are closed then, flagged, in the order they were opened.
     let batch = buffer.finish(T0 - 1).unwrap();
@@ -212,13 +218,13 @@ fn a_full_batch_is_handed_out_and_open_spans_are_capped() {
 fn a_batch_is_handed_out_once_it_is_large() {
     let mut buffer = buffer();
     let big = "x".repeat(MAX_BATCH_BYTES / 2);
-    assert!(buffer.open(1, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(1, ROOT, "s".to_owned(), T0, SpanOrigin::Runtime));
     assert!(
         buffer
             .close(1, T0, attributes(&[("big", string(&big))]))
             .is_none()
     );
-    assert!(buffer.open(2, ROOT, "s".to_owned(), T0));
+    assert!(buffer.open(2, ROOT, "s".to_owned(), T0, SpanOrigin::Runtime));
     let batch = buffer
         .close(2, T0, attributes(&[("big", string(&big))]))
         .unwrap();
@@ -228,9 +234,9 @@ fn a_batch_is_handed_out_once_it_is_large() {
 #[test]
 fn kind_status_and_url_rules_apply_at_close() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "scheduled".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "scheduled".to_owned(), T0, SpanOrigin::Runtime));
     for (id, name) in [(1, "fetch"), (3, "queue_send"), (6, "fetch")] {
-        assert!(buffer.open(id, ROOT, name.to_owned(), T0));
+        assert!(buffer.open(id, ROOT, name.to_owned(), T0, SpanOrigin::Runtime));
     }
 
     // A 4xx child becomes an error with error.type; its URL is split into parts.
@@ -315,7 +321,7 @@ fn kind_status_and_url_rules_apply_at_close() {
 #[test]
 fn unset_does_not_clear_an_explicit_error() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "mine".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "mine".to_owned(), T0, SpanOrigin::Runtime));
     buffer.set_status(ROOT, StatusCode::Error, "first error".to_owned());
     buffer.set_status(ROOT, StatusCode::Error, "second error".to_owned());
     buffer.set_status(ROOT, StatusCode::Unset, String::new());
@@ -330,9 +336,9 @@ fn unset_does_not_clear_an_explicit_error() {
 #[test]
 fn ok_is_final_for_explicit_status_updates() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0, SpanOrigin::Runtime));
     for (id, code) in [(1, StatusCode::Error), (2, StatusCode::Unset)] {
-        assert!(buffer.open(id, ROOT, format!("after-ok-{id}"), T0));
+        assert!(buffer.open(id, ROOT, format!("after-ok-{id}"), T0, SpanOrigin::Runtime));
         buffer.set_status(id, StatusCode::Error, "temporary error".to_owned());
         buffer.set_status(id, StatusCode::Ok, String::new());
         buffer.set_status(id, code, "ignored".to_owned());
@@ -351,9 +357,15 @@ fn ok_is_final_for_explicit_status_updates() {
 #[test]
 fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
     let mut buffer = buffer();
-    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "root".to_owned(), T0, SpanOrigin::Runtime));
     for (id, exception_first) in [(1, false), (2, true)] {
-        assert!(buffer.open(id, ROOT, format!("explicit-error-{id}"), T0));
+        assert!(buffer.open(
+            id,
+            ROOT,
+            format!("explicit-error-{id}"),
+            T0,
+            SpanOrigin::Runtime
+        ));
         if !exception_first {
             buffer.set_status(id, StatusCode::Error, "user description".to_owned());
         }
@@ -390,9 +402,9 @@ fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
 #[test]
 fn a_status_the_worker_set_and_exceptions_come_before_derived_errors() {
     let mut buffer = buffer_with(true, Attributes::default());
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
-    assert!(buffer.open(1, ROOT, "mine".to_owned(), T0));
-    assert!(buffer.open(2, ROOT, "unset".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, SpanOrigin::Runtime));
+    assert!(buffer.open(1, ROOT, "mine".to_owned(), T0, SpanOrigin::Runtime));
+    assert!(buffer.open(2, ROOT, "unset".to_owned(), T0, SpanOrigin::Runtime));
     buffer.set_status(1, StatusCode::Ok, String::new());
     buffer.set_status(2, StatusCode::Unset, String::new());
     let failed = attributes(&[("http.response.status_code", Value::Int(503))]);
@@ -463,7 +475,7 @@ fn a_buffer_that_exports_no_spans_still_keeps_its_root() {
         resource,
         Attributes::default(),
     );
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, SpanOrigin::Runtime));
     let closed = attributes(&[
         ("url.full", string("https://example.com/a?b=1")),
         ("cloudflare.outcome", string("exception")),
@@ -501,7 +513,7 @@ fn timestamps_can_be_omitted() {
         Attributes::default(),
         Attributes::default(),
     );
-    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, SpanOrigin::Runtime));
     buffer.add_exception(ROOT, T0, "Error".to_owned(), "boom".to_owned(), None);
     let batch = buffer.close(ROOT, T0 + 1, Attributes::default()).unwrap();
     let request = decode(&batch);
@@ -510,4 +522,63 @@ fn timestamps_can_be_omitted() {
     assert_eq!(root.end_time_unix_nano, 0);
     assert_eq!(root.events[0].time_unix_nano, 0);
     assert_eq!(root.flags, 0);
+}
+
+#[test]
+fn user_spans_do_not_derive_url_attributes() {
+    for redact in [false, true] {
+        let mut buffer = buffer_with(redact, Attributes::default());
+        assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0, SpanOrigin::Runtime));
+        assert!(buffer.open(1, ROOT, "fetch".to_owned(), T0, SpanOrigin::Runtime));
+        assert!(buffer.open(2, ROOT, "user-op".to_owned(), T0, SpanOrigin::User));
+
+        let url = "https://example.com:8443/p?secret=1";
+        let expected_url = if redact {
+            "https://example.com:8443/p"
+        } else {
+            url
+        };
+        let runtime_attrs = attributes(&[("url.full", string(url))]);
+        let mut user_attrs = attributes(&[("url.full", string(url))]);
+        if redact {
+            user_attrs.push("url.query", "secret=1");
+        }
+        assert!(buffer.close(1, T0, runtime_attrs.clone()).is_none());
+        assert!(buffer.close(2, T0, user_attrs).is_none());
+        let batch = buffer.close(ROOT, T0, runtime_attrs).unwrap();
+        let request = decode(&batch);
+
+        for runtime_name in ["GET", "fetch"] {
+            let span = named(&request, runtime_name);
+            assert_eq!(
+                attribute(&span.attributes, "url.full"),
+                Some(&string(expected_url))
+            );
+            assert_eq!(
+                attribute(&span.attributes, "url.scheme"),
+                Some(&string("https"))
+            );
+            assert_eq!(
+                attribute(&span.attributes, "server.address"),
+                Some(&string("example.com"))
+            );
+            assert_eq!(attribute(&span.attributes, "url.path"), Some(&string("/p")));
+        }
+
+        let user = named(&request, "user-op");
+        assert_eq!(
+            attribute(&user.attributes, "url.full"),
+            Some(&string(expected_url))
+        );
+        for derived in [
+            "url.scheme",
+            "server.address",
+            "server.port",
+            "url.path",
+            "url.query",
+            "network.protocol.name",
+        ] {
+            assert_eq!(attribute(&user.attributes, derived), None);
+        }
+    }
 }

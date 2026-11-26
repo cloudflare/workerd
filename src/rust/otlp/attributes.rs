@@ -40,6 +40,11 @@ impl Attributes {
         }
     }
 
+    /// Removes every entry with the given key.
+    pub fn remove(&mut self, key: &str) {
+        self.0.retain(|(k, _)| k != key);
+    }
+
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
