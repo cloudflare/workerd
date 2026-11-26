@@ -4,7 +4,7 @@ load("//:build/wd_py_test.bzl", "wd_py_test")
 # `workerd repl` as a user runs it, input piped in: what only the command line and the console
 # do. src/workerd/server/repl/repl-environment-test.c++ covers evaluation. Each case starts
 # workerd; in a fastbuild on a loaded CI executor the cases take about 15 s in all, a medium test's
-# whole timeout.
+# whole timeout, and under TSan about 55 s, so they run in shards.
 wd_js_test(
     name = "repl-test",
     size = "large",
@@ -17,6 +17,7 @@ wd_js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "REPL_CONFIG": "$(rootpath :repl-test.capnp)",
     },
+    shard_count = 4,
 )
 
 # `workerd repl` on a pseudo-terminal: what it leaves the terminal as when a signal ends it.
