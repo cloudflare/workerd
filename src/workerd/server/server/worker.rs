@@ -21,6 +21,7 @@ use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
+use kj_rs::KjRc;
 use workerd_capnp::service_designator;
 use workerd_capnp::worker;
 
@@ -33,7 +34,6 @@ use crate::bindings::CompiledBindings;
 use crate::bindings::Designator;
 use crate::bindings::Exports;
 use crate::bindings::LoopbackGlobals;
-use crate::bindings::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
 use crate::bindings::compile_bindings;
 use crate::bindings::len_u32;
 use crate::bindings::loopback_globals;
@@ -43,6 +43,7 @@ use crate::channels::ActorClassChannel;
 use crate::channels::ActorIdHandle;
 use crate::channels::Channel;
 use crate::channels::ChannelFactory;
+use crate::channels::ChannelTable;
 use crate::channels::DynamicSource;
 use crate::channels::Frankenvalue;
 use crate::channels::NewActor;
@@ -50,6 +51,7 @@ use crate::channels::PendingToken;
 use crate::channels::Persistent;
 use crate::channels::RequestMetadata;
 use crate::channels::SubrequestChannel;
+use crate::channels::Tables;
 use crate::channels::Tail;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerEntrypoint;
@@ -73,6 +75,8 @@ pub struct PendingLink {
     pub cache_api_outbound: Option<Designator>,
     pub bindings: CompiledBindings,
     pub loopback: LoopbackGlobals,
+    /// The table compiling the worker filled, which a config worker's leaves empty.
+    pub table: ChannelTable,
     pub tails: Vec<Designator>,
     pub streaming_tails: Vec<Designator>,
     /// `durableObjectStorage.localDisk`: the disk service whose directory holds the storage.
@@ -84,20 +88,16 @@ pub struct PendingLink {
 /// The I/O channel table of a linked worker: what each channel number its bindings hold reaches.
 /// One per worker, shared by every request. The runtime's `IoChannelFactory`.
 ///
-/// A dynamic worker's `env` channels are the factory's own (worker-factory-impl.h); its table
-/// here holds only the channels numbered after them, its `ctx.exports`, and `first_subrequest`
-/// / `first_actor_class` say where it starts. A config worker's table starts at zero.
+/// A config worker's bindings are the server's own channels. A dynamic worker's global outbound
+/// and `env` are what its source supplies, C++ channels among them.
 pub struct LinkedChannels {
-    pub first_subrequest: u32,
-    /// Indexed by channel number less `first_subrequest`: the two global-outbound slots, the
-    /// bindings' channels, then the loopback entrypoints (and the access binding's entrypoint,
-    /// if any).
-    pub subrequest: Vec<Rc<dyn Channel>>,
+    /// The subrequest table holds the two global-outbound slots, the bindings' channels (a
+    /// dynamic worker's `env`), then the loopback entrypoints (and the access binding's
+    /// entrypoint, if any); the actor class table, the bindings' classes, then the loopback
+    /// classes; the RPC table, a dynamic worker's `env`'s RPC channels.
+    pub tables: Tables,
     /// Indexed by actor channel; `None` when the binding's config was invalid.
     pub actor: Vec<Option<Rc<ActorNamespace>>>,
-    pub first_actor_class: u32,
-    /// Indexed by actor class channel less `first_actor_class`.
-    pub actor_class: Vec<Rc<dyn ActorClass>>,
     pub cache: Option<Rc<dyn Channel>>,
     pub tails: Vec<Rc<dyn Channel>>,
     pub streaming_tails: Vec<Rc<dyn Channel>>,
@@ -195,11 +195,13 @@ impl WorkerService {
             globals: std::mem::take(&mut bindings.globals),
             access_blob_header: access_blob_header.into(),
         };
+        let mut table = ChannelTable::default();
         let compiled = ffi::factory_new_worker(
             factory.raw(),
             &spec,
             KjMaybe::Some(service_index),
             KjMaybe::None,
+            &mut table,
         )
         .await?;
 
@@ -230,7 +232,8 @@ impl WorkerService {
         .map_err(capnp_error)?;
         ffi::worker_set_ctx_exports(&compiled, &loopback.globals)?;
 
-        let pending = pending_link(name, conf, bindings, loopback, report).map_err(capnp_error)?;
+        let pending =
+            pending_link(name, conf, bindings, loopback, table, report).map_err(capnp_error)?;
         let config_spec = ffi::is_bench_mode().then_some((service_index, spec));
 
         let this = Rc::new(Self {
@@ -276,11 +279,11 @@ fn split_entrypoints(entrypoints: Vec<ffi::EntrypointInfo>) -> SplitEntrypoints 
 }
 
 impl WorkerService {
-    /// Compiles a dynamic worker from `source` and links it at once. The factory keeps the
-    /// channels the source's `env`, global outbound and tails supply, and serves their numbers
-    /// itself; the table here is the worker's own `ctx.exports`, numbered after them. A dynamic
-    /// worker has no config, so no namespaces, no pending link and no name a token could carry;
-    /// `name` is for error logs. Compilation errors fail the load rather than being reported.
+    /// Compiles a dynamic worker from `source` and links it at once. Its table holds the
+    /// channels the source's global outbound and `env` supply, then its own `ctx.exports`; the
+    /// factory keeps the source's tails. A dynamic worker has no config, so no namespaces, no
+    /// pending link and no name a token could carry; `name` is for error logs. Compilation
+    /// errors fail the load rather than being reported.
     pub async fn new_dynamic(
         factory: Rc<Factory>,
         name: String,
@@ -294,9 +297,17 @@ impl WorkerService {
             globals: Vec::new(),
             access_blob_header: KjMaybe::None,
         };
-        let compiled =
-            ffi::factory_new_worker(factory.raw(), &spec, KjMaybe::None, KjMaybe::Some(source))
-                .await?;
+        // The source's global outbound, if it gives one, replaces the null one.
+        let mut table = ChannelTable::default();
+        table.set_global_outbound(SubrequestChannel::new(Rc::new(NullGlobalOutbound)));
+        let compiled = ffi::factory_new_worker(
+            factory.raw(),
+            &spec,
+            KjMaybe::None,
+            KjMaybe::Some(source),
+            &mut table,
+        )
+        .await?;
 
         let info = ffi::worker_info(&compiled);
         if !info.errors.is_empty() {
@@ -317,14 +328,14 @@ impl WorkerService {
             workflow_classes: &info.workflow_classes,
             actor_classes: &info.actor_classes,
         };
-        // `ctx.exports` is numbered after the env's channels, which the factory serves.
+        // `ctx.exports` is numbered after the env's channels.
         let loopback = loopback_globals(
             &exports,
             &ActorConfigMap::new(),
             |_| None,
-            info.env_subrequest_channels,
+            table.subrequest_len(),
             0,
-            info.env_actor_classes,
+            table.actor_class_len(),
         )
         .map_err(capnp_error)?;
         ffi::worker_set_ctx_exports(&compiled, &loopback.globals)?;
@@ -346,23 +357,20 @@ impl WorkerService {
             broken: Cell::new(false),
         });
 
-        let subrequest = loopback
-            .subrequest_entrypoints
-            .iter()
-            .map(|entrypoint| this.loopback_entrypoint(entrypoint.as_deref()))
-            .collect::<Result<Vec<_>>>()?;
-        let actor_class = loopback
-            .actor_classes
-            .iter()
-            .map(|class_name| this.loopback_actor_class(class_name))
-            .collect::<Result<Vec<_>>>()?;
+        for entrypoint in &loopback.subrequest_entrypoints {
+            table.add_subrequest(SubrequestChannel::new(
+                this.loopback_entrypoint(entrypoint.as_deref())?,
+            ));
+        }
+        for class_name in &loopback.actor_classes {
+            table.add_actor_class(ActorClassChannel::new(
+                this.loopback_actor_class(class_name)?,
+            ));
+        }
         this.link(
             LinkedChannels {
-                first_subrequest: info.env_subrequest_channels + SPECIAL_SUBREQUEST_CHANNEL_COUNT,
-                subrequest,
+                tables: table.finish()?,
                 actor: Vec::new(),
-                first_actor_class: info.env_actor_classes,
-                actor_class,
                 cache: None,
                 tails: Vec::new(),
                 streaming_tails: Vec::new(),
@@ -394,6 +402,7 @@ fn pending_link(
     conf: worker::Reader<'_>,
     bindings: CompiledBindings,
     loopback: LoopbackGlobals,
+    table: ChannelTable,
     report: &Reporter,
 ) -> capnp::Result<PendingLink> {
     let mut errors = Vec::new();
@@ -443,6 +452,7 @@ fn pending_link(
         cache_api_outbound,
         bindings,
         loopback,
+        table,
         tails,
         streaming_tails,
         storage,
@@ -757,9 +767,8 @@ impl WorkerService {
         Ok(())
     }
 
-    /// Cancels the worker's background work, then drops the namespaces and the channel table
-    /// (the factory's part of it included), so that the graph's reference cycles are gone before
-    /// the services are. The background work goes first: it holds the channels and the actors.
+    /// Cancels the worker's background work, then drops the namespaces and the channel table, so
+    /// that the graph's reference cycles are gone before the services are. The background work goes first: it holds the channels and the actors.
     /// Each is taken out of its cell before it is dropped, so that nothing a destructor reaches
     /// finds the cell borrowed.
     pub fn unlink(&self) {
@@ -1045,11 +1054,40 @@ impl ActorClass for ActorClassImpl {
     }
 }
 
+/// The global outbound of a dynamic worker whose source gave it none: every request fails.
+///
+/// Nothing normally refers to it, but a `Fetcher` for the `next` outbound pulled off an incoming
+/// `Request` points at it. Transfer is refused because nothing needs it; were it allowed, the
+/// error of `start_request` would mislead once transferred.
+struct NullGlobalOutbound;
+
+fn null_global_outbound_transfer_error() -> crate::Error {
+    kj::failed!("jsg.DOMException(DataCloneError): The null global outbound is not transferrable.")
+}
+
+impl Channel for NullGlobalOutbound {
+    fn start_request(&self, _metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        Err(kj::failed!(
+            "jsg.Error: This worker is not permitted to access the internet via global functions \
+             like fetch(). It must use capabilities (such as bindings in 'env') to talk to the \
+             outside world."
+        ))
+    }
+
+    fn require_allows_transfer(&self) -> Result<()> {
+        Err(null_global_outbound_transfer_error())
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(null_global_outbound_transfer_error())
+    }
+}
+
 impl LinkedChannels {
-    fn subrequest(&self, channel: u32) -> Result<&Rc<dyn Channel>> {
-        channel
-            .checked_sub(self.first_subrequest)
-            .and_then(|index| self.subrequest.get(index as usize))
+    fn subrequest(&self, channel: u32) -> Result<&SubrequestChannel> {
+        self.tables
+            .subrequest
+            .get(channel as usize)
             .ok_or_else(|| kj::failed!("invalid subrequest channel number"))
     }
 
@@ -1063,7 +1101,9 @@ impl LinkedChannels {
 }
 
 impl ChannelFactory {
-    /// With props, the channel must be a `ctx.exports` template to specialize.
+    /// With props, the channel must be a `ctx.exports` template to specialize. Only
+    /// `ctx.exports` and the access binding pass props, and both are numbered after a dynamic
+    /// worker's `env`, so an `env` channel never gets props, even one that is the server's own.
     pub(crate) fn subrequest_channel(
         &self,
         channel: u32,
@@ -1071,9 +1111,9 @@ impl ChannelFactory {
         persistent: bool,
     ) -> Result<Box<SubrequestChannel>> {
         let target = self.0.subrequest(channel)?;
-        Ok(SubrequestChannel::new(match Option::from(props) {
+        Ok(Box::new(match Option::from(props) {
             Some(props) => target.for_props(props, persistent)?,
-            None => Rc::clone(target),
+            None => target.clone(),
         }))
     }
 
@@ -1113,14 +1153,25 @@ impl ChannelFactory {
         props: KjMaybe<KjOwn<Frankenvalue>>,
         persistent: bool,
     ) -> Result<Box<ActorClassChannel>> {
-        let class = channel
-            .checked_sub(self.0.first_actor_class)
-            .and_then(|index| self.0.actor_class.get(index as usize))
+        let class = self
+            .0
+            .tables
+            .actor_class
+            .get(channel as usize)
             .ok_or_else(|| kj::failed!("invalid actor class channel number"))?;
-        Ok(ActorClassChannel::new(match Option::from(props) {
+        Ok(Box::new(match Option::from(props) {
             Some(props) => class.for_props(props, persistent)?,
-            None => Rc::clone(class),
+            None => class.clone(),
         }))
+    }
+
+    pub(crate) fn rpc_channel(&self, channel: u32) -> Result<KjRc<ffi::CxxRpcChannel>> {
+        self.0
+            .tables
+            .rpc
+            .get(channel as usize)
+            .map(|channel| channel.as_kj().clone())
+            .ok_or_else(|| kj::failed!("invalid RPC channel number"))
     }
 
     pub(crate) fn cache_channel(&self) -> Result<Box<SubrequestChannel>> {

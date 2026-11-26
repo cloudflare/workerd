@@ -158,15 +158,6 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   kj::Own<capnp::MallocMessageBuilder> flagsArena;
   // A dynamic worker's source: its `env`, its tails and the content its script points into.
   kj::Maybe<DynamicWorkerSource> dynamicSource;
-  // A dynamic worker's I/O channel tables, numbered as the runtime numbers channels: the
-  // subrequest table starts with `IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT` slots for the
-  // global outbound (or a null outbound when the source gave none), then the capabilities the
-  // `env` held in cap-table order; actor classes and RPC channels start from zero. The Rust
-  // channel factory serves the numbers past these tables (the worker's own `ctx.exports`). Empty
-  // for a config worker, whose whole table is the Rust side's.
-  kj::Vector<kj::Rc<IoChannelFactory::SubrequestChannel>> subrequestChannels;
-  kj::Vector<kj::Rc<IoChannelFactory::ActorClassChannel>> actorClassChannels;
-  kj::Vector<kj::Rc<IoChannelFactory::RpcChannel>> rpcChannels;
   kj::Maybe<kj::String> accessBlobHeader;
   bool isDynamic = false;
 

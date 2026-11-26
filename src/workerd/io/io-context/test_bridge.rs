@@ -37,7 +37,6 @@ use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
-use kj_rs::KjRc;
 
 /// C++ receives an error as an exception whose description is the `jsg::Error`'s name and
 /// message.
@@ -176,10 +175,10 @@ mod ffi {
         Panic,
     }
 
-    #[namespace = "workerd::api::channel_interop"]
+    #[namespace = "workerd::io_channels"]
     unsafe extern "C++" {
-        include!("workerd/api/channel-interop/ffi.h");
-        type SubrequestChannel = channel_interop::SubrequestChannel;
+        include!("workerd/io/io-channels/ffi.h");
+        type SubrequestChannel = io_channels::ffi::SubrequestChannel;
     }
 
     unsafe extern "C++" {
@@ -1407,7 +1406,7 @@ fn reentry_function_dropped() -> bool {
 /// A `ReentryCallback` whose output is the channel of the `Fetcher` its function resolves, as
 /// `WorkerLoader.get()`'s takes a dynamic Worker's outbound channels from the code it resolves,
 /// held as `HeldReentryCallback` holds its callback.
-struct HeldChannelReentryCallback(ReentryCallback<KjRc<SubrequestChannel>>);
+struct HeldChannelReentryCallback(ReentryCallback<SubrequestChannel>);
 
 /// How many times the conversion of a `make_channel_reentry_callback()` callback has run.
 static CHANNEL_CONVERSION_RUNS: AtomicU32 = AtomicU32::new(0);
@@ -1453,7 +1452,7 @@ unsafe fn make_channel_reentry_callback(
 async unsafe fn call_channel_reentry_callback(
     callback: &HeldChannelReentryCallback,
 ) -> std::result::Result<(), cxx::KjException> {
-    ffi::keep_channel(callback.0.call().await?);
+    ffi::keep_channel(callback.0.call().await?.into_kj());
     Ok(())
 }
 

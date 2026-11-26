@@ -10,10 +10,9 @@ use channel_interop::Fetcher;
 use channel_interop::ScopedChannel;
 use channel_interop::SubrequestChannel;
 use io_context::IoContext;
-use kj_rs::KjRc;
 
 thread_local! {
-    static KEPT: RefCell<Option<KjRc<SubrequestChannel>>> = const { RefCell::new(None) };
+    static KEPT: RefCell<Option<SubrequestChannel>> = const { RefCell::new(None) };
 }
 
 pub fn keep<'s>(

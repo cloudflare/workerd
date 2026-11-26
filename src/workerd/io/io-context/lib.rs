@@ -358,9 +358,9 @@ impl<'s> IoContext<'s> {
     /// [`await_js`](Self::await_js) for a conversion that runs with this `IoContext` and may
     /// produce a value local to its thread, as the continuation that C++ `awaitJs()` waits for
     /// does when it is wrapped in `IoContext::addFunctor()`: for example a `KjOwn<Frankenvalue>`,
-    /// a `KjRc<SubrequestChannel>`, or a C++ struct that holds them, which are neither `Send` nor
-    /// `Sync`. Nothing moves to another thread: the conversion, the future and its output all stay
-    /// on this `IoContext`'s.
+    /// an `io_channels::SubrequestChannel`, or a C++ struct that holds them, which are neither
+    /// `Send` nor `Sync`. Nothing moves to another thread: the conversion, the future and its
+    /// output all stay on this `IoContext`'s.
     ///
     /// The wait is that of `await_js`, with the same failures and cancellation, and the
     /// conversion runs as `await_js`'s `map` does, with this `IoContext` as well. A reaction that

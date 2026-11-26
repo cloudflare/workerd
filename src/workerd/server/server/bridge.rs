@@ -22,11 +22,15 @@ pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
 pub use crate::channels::ChannelFactory;
+pub use crate::channels::ChannelTable;
 pub use crate::channels::KeepAlive;
 pub use crate::channels::ServerHandle;
 pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
+pub use crate::channels::actor_class_channel_from_cxx;
+pub use crate::channels::channel_table_new;
+pub use crate::channels::subrequest_channel_from_cxx;
 pub use crate::cluster::Committer;
 pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
@@ -62,6 +66,19 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/io/frankenvalue/ffi.h");
         type Frankenvalue = frankenvalue::Frankenvalue;
+    }
+
+    // The runtime's channels, as the io_channels crate's bridge declares them. They have a `Cxx`
+    // prefix here, where the server's own channel types have the plain names.
+    #[namespace = "workerd::io_channels"]
+    unsafe extern "C++" {
+        include!("workerd/io/io-channels/ffi.h");
+        #[cxx_name = "SubrequestChannel"]
+        type CxxSubrequestChannel = io_channels::ffi::SubrequestChannel;
+        #[cxx_name = "ActorClassChannel"]
+        type CxxActorClassChannel = io_channels::ffi::ActorClassChannel;
+        #[cxx_name = "RpcChannel"]
+        type CxxRpcChannel = io_channels::ffi::RpcChannel;
     }
 
     #[namespace = "kj::rust"]
@@ -117,11 +134,6 @@ pub mod ffi {
         /// The `allow_irrevocable_stub_storage` compatibility flag: whether channel tokens the
         /// worker hands out may outlive the process.
         persistent_self_tokens: bool,
-        /// A dynamic worker's env channel counts, which `ctx.exports` is numbered after: the
-        /// subrequest channels its `env` held (not counting the global-outbound slots) and its
-        /// actor classes. The factory serves these numbers itself. Zero for a config worker.
-        env_subrequest_channels: u32,
-        env_actor_classes: u32,
     }
 
     struct WorkerSpec {
@@ -415,13 +427,15 @@ pub mod ffi {
         /// server can keep reporting the config's other errors.
         ///
         /// The code comes from the config's `services[config_service]` (a `worker` service) or,
-        /// for a dynamic worker, from `dynamic_source`, which is fetched here; the capabilities
-        /// in its `env` stay with the factory as the worker's own channel tables.
+        /// for a dynamic worker, from `dynamic_source`, which is fetched here; its global
+        /// outbound and the capabilities in its `env` go into `channels`, which numbers them for
+        /// the `env`. Compiling a config worker adds nothing to `channels`.
         async fn factory_new_worker(
             factory: &WorkerFactory,
             spec: &WorkerSpec,
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
+            channels: &mut ChannelTable,
         ) -> Result<KjOwn<CompiledWorker>>;
         /// Compiles a throwaway copy of the config's worker `services[config_service]`, which
         /// `spec` compiled, in a new isolate, destroys it, and returns how long the phases of
@@ -453,9 +467,9 @@ pub mod ffi {
         fn worker_set_otlp_exporter(worker: &CompiledWorker, exporter: KjMaybe<&OtlpExporter>);
         /// Cancels the worker's requests still in flight (background work past the response: a
         /// `waitUntil()`, a tail worker's event), each of which holds the worker and its I/O
-        /// channels; and drops a dynamic worker's env channel tables and tails, which may refer
-        /// back to the worker that loaded it. Releases the worker's OTLP exporter reference too.
-        /// Called when the server unlinks the worker.
+        /// channels; and drops a dynamic worker's tails, which may refer back to the worker that
+        /// loaded it. Releases the worker's OTLP exporter reference too. Called when the server
+        /// unlinks the worker.
         fn worker_unlink(worker: &CompiledWorker);
         /// Starts a request on the worker. `channels` is the worker's I/O channel table for this
         /// request; `tails` receive the request's trace once it completes (the server passes none
@@ -1080,6 +1094,8 @@ pub mod ffi {
             props: KjMaybe<KjOwn<Frankenvalue>>,
             persistent: bool,
         ) -> Result<Box<ActorClassChannel>>;
+        /// The RPC channel a dynamic worker's `env` refers to by `channel`.
+        fn rpc_channel(self: &ChannelFactory, channel: u32) -> Result<KjRc<CxxRpcChannel>>;
         /// The channel of the worker's cache API outbound, if configured.
         fn cache_channel(self: &ChannelFactory) -> Result<Box<SubrequestChannel>>;
         /// The channel of the worker's Cloudflare Access identity binding, whose props come from
@@ -1118,8 +1134,17 @@ pub mod ffi {
         ) -> Box<ActorClassChannel>;
 
         /// Something that can start a request: a worker entrypoint, an actor, an external
-        /// server, the network, a directory.
+        /// server, the network, a directory. The methods that start a request and take the
+        /// channel's token are those of a channel of the server's own, which C++ wraps; a C++
+        /// channel stored here comes back to C++ as itself, through `cxx_channel`.
         type SubrequestChannel;
+        fn subrequest_channel_clone(self: &SubrequestChannel) -> Box<SubrequestChannel>;
+        /// The C++ channel this is, if it is one.
+        fn cxx_channel(self: &SubrequestChannel) -> KjMaybe<KjRc<CxxSubrequestChannel>>;
+        /// A C++ channel, to store.
+        fn subrequest_channel_from_cxx(
+            channel: KjRc<CxxSubrequestChannel>,
+        ) -> Box<SubrequestChannel>;
         fn start_request(
             self: &SubrequestChannel,
             metadata: KjOwn<RequestMetadata>,
@@ -1136,8 +1161,22 @@ pub mod ffi {
         /// A Durable Object class, from which actors are made.
         type ActorClassChannel;
         fn actor_class_channel_clone(self: &ActorClassChannel) -> Box<ActorClassChannel>;
+        fn cxx_channel(self: &ActorClassChannel) -> KjMaybe<KjRc<CxxActorClassChannel>>;
+        fn actor_class_channel_from_cxx(
+            channel: KjRc<CxxActorClassChannel>,
+        ) -> Box<ActorClassChannel>;
         fn require_allows_transfer(self: &ActorClassChannel) -> Result<()>;
         fn token(self: &ActorClassChannel, usage: TokenUsage) -> Result<KjOwn<PendingToken>>;
+
+        /// A worker's channel tables as compiling it fills them: the factory adds a dynamic
+        /// worker's channels from its source as it rewrites them into the `env`'s channel
+        /// numbers. Each `add_*` returns the channel's number.
+        type ChannelTable;
+        fn channel_table_new() -> Box<ChannelTable>;
+        fn set_global_outbound(self: &mut ChannelTable, channel: Box<SubrequestChannel>);
+        fn add_subrequest(self: &mut ChannelTable, channel: Box<SubrequestChannel>) -> u32;
+        fn add_actor_class(self: &mut ChannelTable, channel: Box<ActorClassChannel>) -> u32;
+        fn add_rpc(self: &mut ChannelTable, channel: KjRc<CxxRpcChannel>) -> u32;
 
         /// A Durable Object namespace, for its alarm scheduler.
         type ActorNamespaceHandle;

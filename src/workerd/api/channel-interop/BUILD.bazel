@@ -3,8 +3,8 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
-# Fetcher and DurableObjectClass, and the IoChannelFactory channels behind them, for APIs
-# implemented in Rust: they take and return the C++ JSG resources through jsg-cpp. ffi.h and
+# Fetcher and DurableObjectClass, and the IoChannelFactory channels behind them (io-channels), for
+# APIs implemented in Rust: they take and return the C++ JSG resources through jsg-cpp. ffi.h and
 # ffi.c++ are the per-type and per-method shims, C++ API code that lives with the classes.
 wd_rust_crate(
     name = "channel-interop",
@@ -16,16 +16,17 @@ wd_rust_crate(
         "//src/rust/jsg",
         "//src/rust/jsg-cpp:ffi",
         "//src/workerd/io",
+        "//src/workerd/io/io-channels:ffi.rs@cxx",
     ],
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
-    # For the bridges of crates that take and return the channels.
     cxx_bridge_visibility = ["//visibility:public"],
     link_deps = [":ffi"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
         "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-channels",
         "//src/workerd/io/io-context",
     ],
 )

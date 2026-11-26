@@ -48,6 +48,7 @@ struct ChannelFactory;
 struct SubrequestChannel;
 struct SpawnedTask;
 struct ActorClassChannel;
+struct ChannelTable;
 struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
@@ -66,8 +67,9 @@ using ActorLock = Worker::AsyncLock;
 // A `Worker::Actor::Id`: a 32-byte durable id, or an ephemeral name.
 using ActorIdHandle = Worker::Actor::Id;
 // The source of a dynamic worker, as `IoChannelFactory::loadIsolate()` receives it: the function
-// that fetches it. `factory_new_worker()` fetches the source and compiles the worker from it; the
-// capabilities in its `env` become the worker's own channel tables (`CompiledWorker::Impl`).
+// that fetches it. `factory_new_worker()` fetches the source and compiles the worker from it; its
+// global outbound and the capabilities in its `env` go into the server's channel table for the
+// worker (`ChannelTable`).
 using DynamicSource = kj::Function<kj::Promise<DynamicWorkerSource>()>;
 // One request's metadata.
 using RequestMetadata = IoChannelFactory::SubrequestMetadata;
@@ -216,7 +218,8 @@ void otlp_exporter_unlink(const OtlpExporter& exporter);
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
-    kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
+    kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
+    ChannelTable& channels);
 kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
     const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService);
 
@@ -395,6 +398,11 @@ class SubrequestChannelHandle final: public IoChannelFactory::SubrequestChannel 
  public:
   explicit SubrequestChannelHandle(::rust::Box<server::SubrequestChannel> channel);
 
+  // The Rust handle of a channel the server made, as a dynamic worker's `env` hands it back to
+  // the server; unwrapping it yields the same Rust object, not a wrapper of a wrapper.
+  static kj::Maybe<::rust::Box<server::SubrequestChannel>> tryUnwrap(
+      IoChannelFactory::SubrequestChannel& channel);
+
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override;
   kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode mode) override;
   void requireAllowsTransfer() override;
@@ -422,8 +430,12 @@ class ActorClassChannelHandle final: public IoChannelFactory::ActorClassChannel 
   ::rust::Box<server::ActorClassChannel> channel;
 };
 
-kj::Rc<SubrequestChannelHandle> subrequest_channel_into_kj(::rust::Box<SubrequestChannel> channel);
-kj::Rc<ActorClassChannelHandle> actor_class_channel_into_kj(::rust::Box<ActorClassChannel> channel);
+// A channel of the server's as the runtime holds it: the C++ channel itself when the server stores
+// a C++ one, or else a handle that wraps the server's own.
+kj::Rc<IoChannelFactory::SubrequestChannel> subrequest_channel_into_kj(
+    ::rust::Box<SubrequestChannel> channel);
+kj::Rc<IoChannelFactory::ActorClassChannel> actor_class_channel_into_kj(
+    ::rust::Box<ActorClassChannel> channel);
 
 // =======================================================================================
 

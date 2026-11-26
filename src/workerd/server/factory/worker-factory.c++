@@ -491,7 +491,19 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
 // The server's channels as KJ channels
 
 SubrequestChannelHandle::SubrequestChannelHandle(::rust::Box<server::SubrequestChannel> channel)
-    : channel(kj::mv(channel)) {}
+    : channel(kj::mv(channel)) {
+  // A C++ channel goes back to the runtime as itself (`subrequest_channel_into_kj()`),
+  // never in a handle.
+  KJ_DASSERT(this->channel->cxx_channel() == kj::none);
+}
+
+kj::Maybe<::rust::Box<server::SubrequestChannel>> SubrequestChannelHandle::tryUnwrap(
+    IoChannelFactory::SubrequestChannel& channel) {
+  KJ_IF_SOME(handle, kj::tryDowncast<SubrequestChannelHandle>(channel)) {
+    return handle.channel->subrequest_channel_clone();
+  }
+  return kj::none;
+}
 
 kj::Own<WorkerInterface> SubrequestChannelHandle::startRequest(
     IoChannelFactory::SubrequestMetadata metadata) {
@@ -509,7 +521,11 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> SubrequestChannelHandle
 }
 
 ActorClassChannelHandle::ActorClassChannelHandle(::rust::Box<server::ActorClassChannel> channel)
-    : channel(kj::mv(channel)) {}
+    : channel(kj::mv(channel)) {
+  // A C++ channel goes back to the runtime as itself (`actor_class_channel_into_kj()`),
+  // never in a handle.
+  KJ_DASSERT(this->channel->cxx_channel() == kj::none);
+}
 
 kj::Maybe<::rust::Box<server::ActorClassChannel>> ActorClassChannelHandle::tryUnwrap(
     IoChannelFactory::ActorClassChannel& channel) {
@@ -527,11 +543,16 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ActorClassChannelHandle
   return kj::mv(*channel->token(usage));
 }
 
-kj::Rc<SubrequestChannelHandle> subrequest_channel_into_kj(::rust::Box<SubrequestChannel> channel) {
+kj::Rc<IoChannelFactory::SubrequestChannel> subrequest_channel_into_kj(
+    ::rust::Box<SubrequestChannel> channel) {
+  auto cxx = channel->cxx_channel();
+  KJ_IF_SOME(c, cxx) return kj::mv(c);
   return kj::rc<SubrequestChannelHandle>(kj::mv(channel));
 }
-kj::Rc<ActorClassChannelHandle> actor_class_channel_into_kj(
+kj::Rc<IoChannelFactory::ActorClassChannel> actor_class_channel_into_kj(
     ::rust::Box<ActorClassChannel> channel) {
+  auto cxx = channel->cxx_channel();
+  KJ_IF_SOME(c, cxx) return kj::mv(c);
   return kj::rc<ActorClassChannelHandle>(kj::mv(channel));
 }
 
@@ -675,7 +696,7 @@ kj::Own<AccessInfo> parseAccessBlob(
 }
 
 // The `IoChannelFactory` of one request: the worker's Rust channel table, plus what stays in
-// C++ (a dynamic worker's env tables, channel tokens, the debug port).
+// C++ (channel tokens, the debug port).
 class RustIoChannelFactory final: public IoChannelFactory {
  public:
   RustIoChannelFactory(kj::Own<CompiledWorker::Impl> worker, ::rust::Box<ChannelFactory> channels)
@@ -691,7 +712,6 @@ class RustIoChannelFactory final: public IoChannelFactory {
   }
 
   kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
-    KJ_IF_SOME(env, envSubrequestChannel(channel)) return env.startRequest(kj::mv(metadata));
     // The access binding gets the request's identity as props, as the production embedder does
     // through channel tokens.
     kj::Maybe<kj::Own<Frankenvalue>> props;
@@ -702,8 +722,10 @@ class RustIoChannelFactory final: public IoChannelFactory {
         }
       }
     }
-    return channels->subrequest_channel(channel, kj::mv(props), false)
-        ->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
+    auto target = channels->subrequest_channel(channel, kj::mv(props), false);
+    auto cxx = target->cxx_channel();
+    KJ_IF_SOME(c, cxx) return c->startRequest(kj::mv(metadata));
+    return target->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
   }
 
   capnp::Capability::Client getCapability(uint channel) override {
@@ -748,11 +770,6 @@ class RustIoChannelFactory final: public IoChannelFactory {
       kj::Maybe<Frankenvalue> props,
       kj::Maybe<VersionRequest> versionRequest,
       Persistent persistent) override {
-    KJ_IF_SOME(env, envSubrequestChannel(channel)) {
-      // Only a `ctx.exports` template takes props; an env channel is a concrete one.
-      KJ_REQUIRE(props == kj::none, "can't override props for this service");
-      return env.addRef();
-    }
     return subrequest_channel_into_kj(
         channels->subrequest_channel(channel, toOwn(kj::mv(props)), persistent.toBool()));
   }
@@ -786,17 +803,12 @@ class RustIoChannelFactory final: public IoChannelFactory {
 
   kj::Rc<ActorClassChannel> getActorClassResolved(
       uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
-    if (channel < worker->actorClassChannels.size()) {
-      KJ_REQUIRE(props == kj::none, "can't override props for this actor class");
-      return worker->actorClassChannels[channel]->addRef();
-    }
     return actor_class_channel_into_kj(
         channels->actor_class(channel, toOwn(kj::mv(props)), persistent.toBool()));
   }
 
   kj::Rc<RpcChannel> getRpcChannel(uint channel) override {
-    KJ_REQUIRE(channel < worker->rpcChannels.size(), "invalid RPC channel number");
-    return worker->rpcChannels[channel]->addRef();
+    return channels->rpc_channel(channel);
   }
 
   void abortAllActors(kj::Maybe<kj::Exception&> reason) override {
@@ -865,11 +877,6 @@ class RustIoChannelFactory final: public IoChannelFactory {
 
   ChannelTokenHandler& tokens() {
     return worker->factory.getImpl().channelTokenHandler;
-  }
-  // A dynamic worker's env channel behind `channel`; none when the Rust table serves it.
-  kj::Maybe<SubrequestChannel&> envSubrequestChannel(uint channel) {
-    if (channel < worker->subrequestChannels.size()) return *worker->subrequestChannels[channel];
-    return kj::none;
   }
   void requireDebugPort() {
     KJ_REQUIRE(
@@ -1446,51 +1453,37 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
   return flags.asReader();
 }
 
-// The global outbound of a dynamic worker whose source gave it none: every request fails.
-class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChannel {
- public:
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    JSG_FAIL_REQUIRE(Error,
-        "This worker is not permitted to access the internet via global functions like fetch(). "
-        "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
-  }
+// `channel` as the server stores it: the Rust object of a channel the server made, unwrapped, or
+// else the C++ channel itself, which `subrequest_channel_into_kj()` hands back unchanged.
+::rust::Box<SubrequestChannel> subrequestChannelFromKj(
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
+  KJ_IF_SOME(rust, SubrequestChannelHandle::tryUnwrap(*channel)) return kj::mv(rust);
+  return subrequest_channel_from_cxx(kj::mv(channel));
+}
+::rust::Box<ActorClassChannel> actorClassChannelFromKj(
+    kj::Rc<IoChannelFactory::ActorClassChannel> channel) {
+  KJ_IF_SOME(rust, ActorClassChannelHandle::tryUnwrap(*channel)) return kj::mv(rust);
+  return actor_class_channel_from_cxx(kj::mv(channel));
+}
 
-  // The null outbound is hard to reach: nothing normally refers to it, but a `Fetcher` for the
-  // `next` outbound pulled off an incoming `Request` points at it. Transfer is refused because
-  // nothing needs it; were it allowed, `startRequest()`'s error would mislead once transferred.
-  void requireAllowsTransfer() override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
+// Hands a dynamic worker's channels from its fetched source to the server's table for it: the
+// global outbound, if the source gave one, then the capabilities in `env`, each rewritten into
+// the channel number the server gave it.
+void indexDynamicChannels(DynamicWorkerSource& source, ChannelTable& channels) {
+  KJ_IF_SOME(globalOutbound, source.globalOutbound) {
+    channels.set_global_outbound(subrequestChannelFromKj(kj::mv(globalOutbound)));
   }
-  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-      IoChannelFactory::ChannelTokenUsage usage) override {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
-  }
-};
-
-// Fills a dynamic worker's channel tables from its fetched source: the global outbound slots,
-// then the capabilities in `env`, each rewritten into the channel number it was given.
-void indexDynamicChannels(CompiledWorker::Impl& impl, DynamicWorkerSource& source) {
-  kj::Rc<IoChannelFactory::SubrequestChannel> globalOutbound =
-      kj::mv(source.globalOutbound).orDefault([]() -> kj::Rc<IoChannelFactory::SubrequestChannel> {
-    return kj::rc<NullGlobalOutboundChannel>();
-  });
-  for (uint i = 1; i < IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT; i++) {
-    impl.subrequestChannels.add(globalOutbound.addRef());
-  }
-  impl.subrequestChannels.add(kj::mv(globalOutbound));
+  source.globalOutbound = kj::none;
 
   source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
     KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*entry)) {
-      uint number = impl.subrequestChannels.size();
-      impl.subrequestChannels.add(channel.addRef());
+      uint number = channels.add_subrequest(subrequestChannelFromKj(channel.addRef()));
       return kj::heap<IoChannelCapTableEntry>(IoChannelCapTableEntry::SUBREQUEST, number);
     } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*entry)) {
-      uint number = impl.actorClassChannels.size();
-      impl.actorClassChannels.add(channel.addRef());
+      uint number = channels.add_actor_class(actorClassChannelFromKj(channel.addRef()));
       return kj::heap<IoChannelCapTableEntry>(IoChannelCapTableEntry::ACTOR_CLASS, number);
     } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*entry)) {
-      uint number = impl.rpcChannels.size();
-      impl.rpcChannels.add(channel.addRef());
+      uint number = channels.add_rpc(channel.addRef());
       return kj::heap<IoChannelCapTableEntry>(IoChannelCapTableEntry::RPC, number);
     } else {
       JSG_FAIL_REQUIRE(DOMDataCloneError,
@@ -1563,11 +1556,12 @@ bool supportsStartupSnapshot(kj::StringPtr name,
 
 // `factory_new_worker()`, which records the timing of each phase in the worker's
 // `startupTiming`. The isolate gets an inspector, and is registered with it, only if `registrar` is
-// given.
+// given. A dynamic worker's channels go into `channels`.
 kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFactory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
+    ChannelTable& channels,
     kj::Maybe<InspectorServiceIsolateRegistrar&> registrar) {
   auto& factory = constFactory.getImpl();
   auto name = kj::str(spec.name);
@@ -1603,7 +1597,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
       dynamic.tails = nullptr;
       dynamic.streamingTails = nullptr;
     }
-    indexDynamicChannels(*impl, dynamic);
+    indexDynamicChannels(dynamic, channels);
     featureFlags = dynamic.compatibilityFlags;
     source = kj::mv(dynamic.source);
     compileBindings = [&env = dynamic.env](
@@ -1830,11 +1824,6 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     .errors = ErrorReporter::toRust(errorReporter.errors),
     .warnings = ErrorReporter::toRust(errorReporter.warnings),
     .persistent_self_tokens = featureFlags.getAllowIrrevocableStubStorage(),
-    .env_subrequest_channels = impl->isDynamic
-        ? static_cast<uint32_t>(
-              impl->subrequestChannels.size() - IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT)
-        : 0,
-    .env_actor_classes = static_cast<uint32_t>(impl->actorClassChannels.size()),
   };
   impl->worker = kj::mv(worker);
   co_return kj::heap<CompiledWorker>(kj::mv(impl));
@@ -1845,12 +1834,13 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
-    kj::Maybe<kj::Own<DynamicSource>> dynamicSource) {
+    kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
+    ChannelTable& channels) {
   auto registrar = factory.getImpl().inspectorRegistrar.map(
       [](kj::Own<InspectorServiceIsolateRegistrar>& r) -> InspectorServiceIsolateRegistrar& {
     return *r;
   });
-  return compileWorker(factory, spec, configService, kj::mv(dynamicSource), registrar);
+  return compileWorker(factory, spec, configService, kj::mv(dynamicSource), channels, registrar);
 }
 
 // The copy has no inspector, even when the inspector is enabled. It couldn't be registered: it
@@ -1858,7 +1848,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
 // nothing can connect to would only add to the time measured.
 kj::Promise<WorkerStartupTiming> factory_start_throwaway_worker(
     const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService) {
-  auto compiled = co_await compileWorker(factory, spec, configService, kj::none, kj::none);
+  // The copy is a config worker, which adds no channels, and is never linked.
+  auto scratch = channel_table_new();
+  auto compiled =
+      co_await compileWorker(factory, spec, configService, kj::none, *scratch, kj::none);
   auto& impl = compiled->getImpl();
   // `worker_set_ctx_exports()` would drop the handle under the lock; nothing calls it for a copy.
   impl.getWorker().runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
@@ -1921,9 +1914,6 @@ void worker_set_otlp_exporter(
 void worker_unlink(const CompiledWorker& worker) {
   auto& impl = worker.getImpl();
   impl.waitUntilTasks.clear();
-  impl.subrequestChannels.clear();
-  impl.actorClassChannels.clear();
-  impl.rpcChannels.clear();
   KJ_IF_SOME(dynamic, impl.dynamicSource) {
     dynamic.tails = nullptr;
     dynamic.streamingTails = nullptr;

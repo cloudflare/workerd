@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::bindings::len_u32;
 
 /// A reporter that collects into a shared list.
 fn collecting_reporter() -> (Reporter, Rc<RefCell<Vec<String>>>) {
