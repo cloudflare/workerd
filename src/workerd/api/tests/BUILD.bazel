@@ -465,6 +465,12 @@ wd_test(
     data = ["console-format-throw-test.js"],
 )
 
+# console.count/countReset/time/timeLog/timeEnd label conversion.
+wd_test(
+    src = "console-label-conversion-test.wd-test",
+    data = ["console-label-conversion-test.js"],
+)
+
 # Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
 # Covers both batched tail (`tail(events)`) and streaming tail (`tailStream`) surfaces.
 wd_test(
