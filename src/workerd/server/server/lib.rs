@@ -12,6 +12,7 @@
 
 pub mod actor;
 pub mod alarm_elsewhere;
+pub mod alarm_scheduler;
 pub mod bench;
 pub mod bindings;
 pub mod bridge;
