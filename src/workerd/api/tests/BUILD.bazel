@@ -46,6 +46,8 @@ wd_test(
 
 wd_test(
     src = "streams-byob-progress-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = [
         "streams-byob-progress-test.js",
@@ -55,6 +57,8 @@ wd_test(
 
 wd_test(
     src = "streams-terminal-state-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = [
         "streams-terminal-state-test.js",
@@ -73,6 +77,8 @@ wd_test(
 
 wd_test(
     src = "streams-consumer-reentry-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = [
         "streams-consumer-reentry-test.js",
@@ -189,6 +195,8 @@ wd_test(
 
 wd_test(
     src = "streams-byte-handlePush-uaf-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["streams-byte-handlePush-uaf-test.js"],
 )
@@ -923,6 +931,8 @@ wd_test(
 
 wd_test(
     src = "autovuln-63-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-63-test.js"],
 )
@@ -1006,6 +1016,8 @@ wd_test(
 wd_test(
     size = "large",
     src = "htmlrewriter-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["htmlrewriter-test.js"],
     # TODO(soon): Test is excessively flaky under ASan, re-enable once fixed
@@ -1040,12 +1052,16 @@ wd_test(
 
 wd_test(
     src = "js-rpc-streams-crossflag-test.wd-test",
+    # Mixes both streams implementations, which ts-web-streams would make both TypeScript.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["js-rpc-streams-crossflag-test.js"],
 )
 
 wd_test(
     src = "js-rpc-streams-crossflag-reverse-test.wd-test",
+    # Mixes both streams implementations, which ts-web-streams would make both TypeScript.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["js-rpc-streams-crossflag-test.js"],
 )
@@ -1070,18 +1086,24 @@ wd_test(
 
 wd_test(
     src = "js-rpc-writable-teardown-crossflag-reverse-test.wd-test",
+    # Mixes both streams implementations, which ts-web-streams would make both TypeScript.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["js-rpc-writable-teardown-test.js"],
 )
 
 wd_test(
     src = "js-rpc-writable-teardown-crossflag-test.wd-test",
+    # Mixes both streams implementations, which ts-web-streams would make both TypeScript.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["js-rpc-writable-teardown-test.js"],
 )
 
 wd_test(
     src = "js-rpc-writable-teardown-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["js-rpc-writable-teardown-test.js"],
 )
@@ -1241,6 +1263,8 @@ wd_test(
 
 wd_test(
     src = "streams-consumer-reentry-gc-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["streams-consumer-reentry-gc-test.js"],
     # This test exercises a SIGSEGV regression (EDGEWORKER-RUNTIME-H40) by
@@ -1275,24 +1299,32 @@ wd_test(
 
 wd_test(
     src = "autovuln-132-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-132-test.js"],
 )
 
 wd_test(
     src = "autovuln-37-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-37-test.js"],
 )
 
 wd_test(
     src = "autovuln-88-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-88-test.js"],
 )
 
 wd_test(
     src = "autovuln-131-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-131-test.js"],
 )
@@ -1311,6 +1343,8 @@ wd_test(
 
 wd_test(
     src = "autovuln-148-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["autovuln-148-test.js"],
 )
@@ -1351,12 +1385,13 @@ wd_test(
     generate_default_variant = False,
 )
 
-# Test that verifies autogates are DISABLED - only runs in default variant
+# Test that verifies autogates are DISABLED: in the default variant, and in the @all-autogates
+# variant, which leaves the one it checks out.
 wd_test(
     src = "autogate-disabled-test.wd-test",
+    all_autogates_variant_excludes = ["test-workerd"],
     args = ["--experimental"],
     data = ["autogate-disabled-test.js"],
-    generate_all_autogates_variant = False,
 )
 
 # Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant
@@ -2041,6 +2076,8 @@ wd_test(
 
 wd_test(
     src = "identity-transform-stream-uaf-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["identity-transform-stream-uaf-test.js"],
 )
@@ -2071,6 +2108,8 @@ wd_test(
 
 wd_test(
     src = "byob-reader-resize-pending-read-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = ["byob-reader-resize-pending-read-test.js"],
 )
 

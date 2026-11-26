@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The transform streams suite runs the same test modules under two configs:
 # transform-cpp against the C++ implementation, transform-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 transform_suite_srcs = glob(["*.js"]) + ["transform-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "transform-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = transform_suite_srcs,
 )
 
@@ -25,6 +29,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "transform-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = transform_suite_srcs,
 )
 
@@ -34,6 +39,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "transform-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = transform_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
@@ -41,6 +47,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "transform-cpp-legacy-backpressure.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = transform_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

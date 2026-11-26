@@ -13,7 +13,6 @@ const unitTests :Workerd.Config = (
         cacheApiOutbound = "cache-backend",
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "experimental",
         ],
         bindings = [
@@ -29,4 +28,5 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

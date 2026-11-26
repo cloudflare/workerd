@@ -13,13 +13,14 @@ const unitTests :Workerd.Config = (
         modules = IocontextModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "experimental",
         ],
         bindings = [
           ( name = "self", service = "streams-iocontext-ts" ),
+          ( name = "USING_TS_IMPL", json = "true" ),
         ],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

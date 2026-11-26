@@ -96,7 +96,7 @@ export const noLegacyGlobalsOnPrototypeChain = {
 
 // ======================================================================================
 // C++-created streams (JsReadableStream::create()) are backed by the TypeScript
-// implementation under the typescript_implemented_streams flag: the C++ side wraps its
+// implementation when the TypeScript streams are enabled: the C++ side wraps its
 // kj-native source in a ReadableStreamNativeSource (born carrying the kNativeSource
 // marker) and constructs the TypeScript ReadableStream over it. Blob.prototype.stream()
 // is the simplest C++ API that mints a stream this way, so these tests drive the real

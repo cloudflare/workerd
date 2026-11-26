@@ -35,6 +35,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-abort", esModule = embed "legacy-abort.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

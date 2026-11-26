@@ -12,17 +12,18 @@ const unitTests :Workerd.Config = (
         modules = ReadableByteModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "expose_draining_reader",
           "experimental",
           "enable_weak_ref",
         ],
         bindings = [
           ( name = "SELF", service = "streams-readable-byte-ts" ),
+          ( name = "USING_TS_IMPL", json = "true" ),
         ],
       )
     ),
   ],
   # For gc.js.
   v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

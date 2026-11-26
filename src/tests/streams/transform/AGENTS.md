@@ -5,7 +5,7 @@ in workerd, derived from — and kept in lockstep with — the test suite in
 this directory. **The tests are the normative artifact.** Both the C++
 implementation (`src/workerd/api/streams/transform.c++` over
 `standard.c++`'s `TransformStreamDefaultController`) and the TypeScript
-implementation (behind `typescript_implemented_streams`) are covered.
+implementation (behind the `TS_WEB_STREAMS` autogate) are covered.
 
 The suite COMPLEMENTS WPT (`//src/wpt:streams` runs transform-streams/
 against both implementations). Probing the 30+ C++ expectedFailures

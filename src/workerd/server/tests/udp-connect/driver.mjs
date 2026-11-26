@@ -23,8 +23,7 @@ beforeEach(async () => {
   workerd = new WorkerdServerHarness({
     workerdBinary: env.WORKERD_BINARY,
     workerdConfig: env.WORKERD_CONFIG,
-    extraArgs:
-      env.TS_STREAMS === '1' ? ['tsStreams', '--experimental'] : ['config'],
+    extraArgs: env.TS_STREAMS === '1' ? ['tsStreams'] : ['config'],
     listenPortNames: ['udp', 'udp-bounded', 'udp-disabled', 'http-disabled'],
   });
   await workerd.start();

@@ -11,6 +11,7 @@
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
+#include <workerd/api/streams/common.h>
 #ifdef WORKERD_FUZZILLI
 #include "unsafe.h"
 
@@ -1004,14 +1005,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ScheduledEvent);
     JSG_NESTED_TYPE(MessageEvent);
     JSG_NESTED_TYPE(CloseEvent);
-    // Under typescript_implemented_streams, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript implementations of every Web Streams global, so the C++ classes
-    // are not exposed here. Type generation forces the flag off (see
-    // clearImplementationOnlyFlags() in api/rtti.c++), so the generated declarations still come
-    // from these C++ classes.
+    // When isTypeScriptStreamsEnabled(), the per-isolate bootstrap
+    // (src/per_isolate/webstreams/installer.ts) installs the TypeScript implementations of every
+    // Web Streams global, so the C++ classes are not exposed here. Type generation forces the
+    // flag off (see clearImplementationOnlyFlags() in api/rtti.c++), so the generated declarations
+    // still come from these C++ classes.
     // TODO(soon): Since the goal is to remove the C++ implementation, we will eventually need
     // to replace the type generation with a fixed type definition.
-    if (!flags.getTypeScriptImplementedStreams()) {
+    if (!isTypeScriptStreamsEnabled(flags)) {
       JSG_NESTED_TYPE(ReadableStreamDefaultReader);
       JSG_NESTED_TYPE(ReadableStreamBYOBReader);
       JSG_NESTED_TYPE(ReadableStream);
@@ -1023,9 +1024,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
-    // declares them.
+    // Under expose_global_message_channel, the per-isolate bootstrap
+    // (src/per_isolate/main-post.ts) defines MessageChannel and MessagePort, loaded on first use;
+    // the TypeScript override below declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);
@@ -1035,11 +1036,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(StorageManager);
     }
 
-    // The per-isolate bootstrap (src/per_isolate/main.ts) defines EventSource; the TypeScript
+    // The per-isolate bootstrap (src/per_isolate/main-post.ts) defines EventSource; the TypeScript
     // override below declares it.
 
     // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
-    if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
+    if (flags.getStreamsJavaScriptControllers() && !isTypeScriptStreamsEnabled(flags)) {
       JSG_NESTED_TYPE(ReadableStreamBYOBRequest);
       JSG_NESTED_TYPE(ReadableStreamDefaultController);
       JSG_NESTED_TYPE(ReadableByteStreamController);
@@ -1055,7 +1056,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_METHOD(clearImmediate);
     }
 
-    if (!flags.getTypeScriptImplementedStreams()) {
+    if (!isTypeScriptStreamsEnabled(flags)) {
       JSG_NESTED_TYPE(CompressionStream);
       JSG_NESTED_TYPE(DecompressionStream);
       JSG_NESTED_TYPE(TextEncoderStream);
@@ -1081,8 +1082,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(Navigator);
     }
 
-    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
-    // TypeScript URL and URLSearchParams instead.
+    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main-post.ts)
+    // installs the TypeScript URL and URLSearchParams instead.
     if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL)) {
       if (flags.getSpecCompliantUrl()) {
         JSG_NESTED_TYPE_NAMED(url::URL, URL);
@@ -1115,7 +1116,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(Cache);
 
     // Off-spec extensions.
-    if (!flags.getTypeScriptImplementedStreams()) {
+    if (!isTypeScriptStreamsEnabled(flags)) {
       JSG_NESTED_TYPE(FixedLengthStream);
       JSG_NESTED_TYPE(IdentityTransformStream);
     }

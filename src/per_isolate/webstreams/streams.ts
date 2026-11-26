@@ -59,7 +59,7 @@ module.exports = {
   CompressionStream,
   DecompressionStream,
   // Internal-only reader (the C++ bridge's bulk-read surface). Installed on
-  // globalThis by main.ts ONLY under the internal-testing
+  // globalThis by main-post.ts ONLY under the internal-testing
   // expose_draining_reader flag, for exercising expectedLength pass-through
   // and draining reads from JS tests.
   ReadableStreamDrainingReader,

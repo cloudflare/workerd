@@ -7,9 +7,17 @@ at context creation, before any user code. C++ entry point:
 ## EXECUTION MODEL
 
 - Scripts are compiled as functions whose parameters are the
-  pseudo-globals `require`, `module`, `exports`, `compatFlags`,
-  `autogates`, `primordials`, `utils` are in scope but NOT on
-  `globalThis` (see `per_isolate-env.d.ts`).
+  pseudo-globals `require`, `module`, `exports`, `autogates`,
+  `primordials`, `utils` are in scope but NOT on `globalThis` (see
+  `per_isolate-env.d.ts`).
+- Two phases. `main.ts`, and every module it loads as it runs, may depend
+  on autogates but not on compatibility flags, since a startup snapshot
+  shares their effects between Workers with different flags.
+  `runPostSnapshotBootstrap()` then runs `main-post.ts`, which installs
+  what the flags gate. `utils.getCompatFlags()` returns
+  `{ flag_name: true }` for each enabled flag from then on, and throws
+  before: a module loaded in the main phase may call it only in a function
+  that runs later.
 - Module system is bootstrap CommonJS: `require('webstreams/queue')` +
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
@@ -18,8 +26,9 @@ at context creation, before any user code. C++ entry point:
   `view-extent`).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
-- `main.ts` installs the real stream globals (ReadableStream et al.) when
-  the `typescript_implemented_streams` compat flag is enabled, plus the
+- `main-post.ts` installs the real stream globals (ReadableStream et al.)
+  when the `typescript_implemented_streams` compat flag is enabled (`main.ts`
+  does under the `TS_WEB_STREAMS` autogate), plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`, and the internal-testing cloneable
   `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
@@ -35,7 +44,7 @@ at context creation, before any user code. C++ entry point:
   the native `utils.structuredClone()`), which replaces the C++ method; its
   parity suite and divergence ledger are in `src/tests/structured-clone/`, and
   its types in `types/defines/structured-clone.d.ts`.
-- `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
+- `main-post.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
   under `expose_global_message_channel`, as lazy data properties
   (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads
   on first use, through them or through `cloudflare-internal:messagechannel`
@@ -73,8 +82,11 @@ An embedder can contribute scripts to the same bootstrap. It builds them with
 in an `EmbedderBootstrap` (`src/workerd/api/per-isolate-bootstrap.h`), and
 returns it from `Worker::Api::getEmbedderBootstrap()`.
 
-- Order: `primordials`, workerd's `main`, then `<prefix>main`, all before
-  the WeakRef globals are removed. A failure is fatal, as for workerd's.
+- Order: `primordials`, workerd's `main` and `main-post`, then
+  `<prefix>main`, all before the WeakRef globals are removed. The
+  embedder's scripts run in the post-snapshot phase
+  (`runPostSnapshotBootstrap()`), so they may call `utils.getCompatFlags()`
+  at the top level. A failure is fatal, as for workerd's.
 - Every embedder script is named under the prefix; `require()` takes the
   full specifier (`require('embedder/foo')`, not `require('./foo')`).
 - Embedder scripts share the require() cache and pseudo-globals and can
@@ -100,6 +112,9 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   function exists anywhere to capture**. Use `captureJsgGetter` in
   the `primordials.ts` : prototype-accessor capture with a plain-read fallback
   (an own data property read never consults the patchable prototype chain).
+  Capture an inherited accessor from the prototype that defines it
+  (Response's `body` from Body.prototype), and export the capture for the
+  modules that need it rather than calling `captureJsgGetter` in them.
   The bootstrap runs for every worker regardless of compat date — both layouts
   must work. JSG *methods* are always on the prototype.
 - Internal cross-module surfaces are exported as a single namespace

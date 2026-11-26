@@ -6,9 +6,10 @@
 // the backend the url_standard flag selects (url/backend.ts); everything
 // else follows WHATWG URL and WebIDL for both backends, honoring the dated
 // flags urlsearchparams_delete_has_value_arg,
-// workers_api_getters_setters_on_prototype and set_tostring_tag. Where that
-// departs from the C++ is listed in src/tests/url/AGENTS.md, whose suite
-// runs against both implementations.
+// workers_api_getters_setters_on_prototype and set_tostring_tag, whose tags
+// main-post.ts removes without it. Where that departs from the C++ is listed
+// in src/tests/url/AGENTS.md, whose suite runs against both
+// implementations.
 //
 // Instances are marked uncloneable, so serializing one throws
 // DataCloneError, as it does for the C++ classes.
@@ -57,6 +58,8 @@ const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
+
+const compatFlags = utils.getCompatFlags();
 
 // Only the selected backend is loaded.
 const backend = require(
@@ -641,17 +644,6 @@ function makeEnumerable(object: object, names: readonly PropertyKey[]): void {
   }
 }
 
-// WebIDL makes the tag non-writable; JSG's is writable.
-function markAsWebIdlClass(proto: object, name: string): void {
-  markAsRuntimeClass(proto, name);
-  if (compatFlags['set_tostring_tag'] === true) {
-    ObjectDefineProperty(proto, SymbolToStringTag, {
-      __proto__: null,
-      writable: false,
-    } as PropertyDescriptor);
-  }
-}
-
 const kUrlAttributes = [
   'href',
   'origin',
@@ -677,7 +669,7 @@ makeEnumerable(URL, [
 setNameAndLength(URL, 'URL', 1);
 setNameAndLength(URL.canParse, 'canParse', 1);
 setNameAndLength(URL.parse, 'parse', 1);
-markAsWebIdlClass(URL.prototype, 'URL');
+markAsRuntimeClass(URL.prototype, 'URL');
 
 // The legacy instance layout: the prototype's accessors, again as own
 // properties of each instance, in the order JSG defines them (the reverse
@@ -727,21 +719,19 @@ ObjectDefineProperty(URLSearchParams.prototype, SymbolIterator, {
   enumerable: false,
   configurable: true,
 } as PropertyDescriptor);
-markAsWebIdlClass(URLSearchParams.prototype, 'URLSearchParams');
+markAsRuntimeClass(URLSearchParams.prototype, 'URLSearchParams');
 
 const kIteratorProto = URLSearchParamsIterator.prototype;
 ObjectSetPrototypeOf(kIteratorProto, IteratorPrototype);
 delete (kIteratorProto as { constructor?: unknown }).constructor;
 makeEnumerable(kIteratorProto, ['next']);
-if (compatFlags['set_tostring_tag'] === true) {
-  ObjectDefineProperty(kIteratorProto, SymbolToStringTag, {
-    __proto__: null,
-    value: 'URLSearchParams Iterator',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  } as PropertyDescriptor);
-}
+ObjectDefineProperty(kIteratorProto, SymbolToStringTag, {
+  __proto__: null,
+  value: 'URLSearchParams Iterator',
+  writable: false,
+  enumerable: false,
+  configurable: true,
+} as PropertyDescriptor);
 
 // For the C++ bridge, through url/cpp_exports: each reads the
 // implementation's own state, whatever the instance's methods have become.
@@ -760,11 +750,14 @@ export type { URL, URLSearchParams };
 export type UrlExports = {
   URL: typeof URL;
   URLSearchParams: typeof URLSearchParams;
+  URLSearchParamsIteratorPrototype: object;
   cppExports: typeof cppExports;
 };
 
 module.exports = {
   URL,
   URLSearchParams,
+  // For main-post.ts, which removes its tag without set_tostring_tag.
+  URLSearchParamsIteratorPrototype: kIteratorProto,
   cppExports,
 };

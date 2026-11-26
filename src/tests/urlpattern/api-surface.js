@@ -123,8 +123,7 @@ export const toStringTagBranding = {
       Symbol.toStringTag
     );
     strictEqual(d.value, 'URLPattern');
-    // Ledger #8.
-    strictEqual(attributes(d), usingTsImpl ? 'datac' : 'datawc');
+    strictEqual(attributes(d), 'datawc');
   },
 };
 

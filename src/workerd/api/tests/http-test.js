@@ -116,6 +116,25 @@ export default {
   },
 };
 
+// util.inspect()'s text for a request's or response's unread body of the given
+// length. The TypeScript streams (the TS_WEB_STREAMS autogate) show none of
+// the C++ stream's internal state. User code cannot read an autogate, but
+// unlike a JSG class, a TypeScript class's source text is not [native code].
+const usingTsStreams = !Function.prototype.toString
+  .call(ReadableStream)
+  .includes('[native code]');
+function inspectedBody(length) {
+  if (usingTsStreams) {
+    return 'ReadableStream {}';
+  }
+  return `ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: ${length}n
+  }`;
+}
+
 // inspect tests
 export const test = {
   async test(ctrl, env, ctx) {
@@ -187,12 +206,7 @@ export const test = {
   integrity: '',
   keepalive: false,
   cache: undefined,
-  body: ReadableStream {
-    locked: false,
-    [state]: 'readable',
-    [supportsBYOB]: true,
-    [length]: 7n
-  },
+  body: ${inspectedBody(7)},
   bodyUsed: false
 }`
       );
@@ -209,12 +223,7 @@ export const test = {
   cf: undefined,
   integrity: '',
   keepalive: false,
-  body: ReadableStream {
-    locked: false,
-    [state]: 'readable',
-    [supportsBYOB]: true,
-    [length]: 7n
-  },
+  body: ${inspectedBody(7)},
   bodyUsed: false
 }`
       );
@@ -234,12 +243,7 @@ export const test = {
   webSocket: null,
   cf: undefined,
   type: 'default',
-  body: ReadableStream {
-    locked: false,
-    [state]: 'readable',
-    [supportsBYOB]: true,
-    [length]: 0n
-  },
+  body: ${inspectedBody(0)},
   bodyUsed: false
 }`
     );
@@ -373,12 +377,7 @@ export const cacheMode = {
   webSocket: null,
   cf: undefined,
   type: 'default',
-  body: ReadableStream {
-    locked: false,
-    [state]: 'readable',
-    [supportsBYOB]: true,
-    [length]: 0n
-  },
+  body: ${inspectedBody(0)},
   bodyUsed: false
 }`
         );

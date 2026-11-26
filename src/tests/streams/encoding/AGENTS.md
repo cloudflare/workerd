@@ -6,7 +6,7 @@ suite in this directory. **The tests are the normative artifact**; this
 document indexes every specified behavior to the test that asserts it. Both
 the C++ implementation (`src/workerd/api/streams/encoding.{h,c++}`) and the
 TypeScript implementation (`src/per_isolate/webstreams/encoding.ts`, behind
-`typescript_implemented_streams`) are covered.
+the `TS_WEB_STREAMS` autogate) are covered.
 
 The WPT `encoding/streams/*` tests already run against both implementations
 (`//src/wpt:encoding` and `//src/wpt:encoding-ts`), so this suite

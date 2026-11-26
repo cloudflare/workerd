@@ -5,6 +5,9 @@ load("//:build/wd_test.bzl", "wd_test")
 # configs: sockets-cpp against the C++ implementation, sockets-ts
 # against the TypeScript implementation. A sidecar provides the echo,
 # greet and stall TCP servers.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 js_binary(
     name = "echo-server",
@@ -16,6 +19,7 @@ sockets_suite_srcs = glob(["*.js"]) + ["sockets-modules.capnp"]
 wd_test(
     size = "large",
     src = "sockets-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = sockets_suite_srcs,
     sidecar = "echo-server",

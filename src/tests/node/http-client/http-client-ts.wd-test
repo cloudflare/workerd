@@ -19,13 +19,13 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "enable_nodejs_http_modules",
           "nodejs_zlib",
-          "typescript_implemented_streams",
           "experimental",
         ],
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "HTTP_SERVER_PORT", fromEnvironment = "HTTP_SERVER_PORT"),
           (name = "HTTP_RAW_PORT", fromEnvironment = "HTTP_RAW_PORT"),
+          (name = "USING_TS_IMPL", json = "true"),
         ],
       )
     ),
@@ -35,4 +35,5 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

@@ -14,10 +14,11 @@ const unitTests :Workerd.Config = (
         modules = StrategiesModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "experimental",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

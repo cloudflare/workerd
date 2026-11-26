@@ -57,6 +57,23 @@ const contextLegacy :Workerd.Service = (
   ),
 );
 
+# first-touch-worker.js: a Worker that replaces built-ins at its top level,
+# before it first touches EventSource. Under
+# workers_api_getters_setters_on_prototype, Response's attributes are
+# prototype accessors it can replace.
+const firstTouch :Workerd.Service = (
+  name = "events-eventsource-first-touch",
+  worker = (
+    modules = [(name = "worker", esModule = embed "first-touch-worker.js")],
+    compatibilityFlags = [
+      "nodejs_compat",
+      "streams_enable_constructors",
+      "workers_api_getters_setters_on_prototype",
+    ],
+    bindings = [(name = "self", service = "events-eventsource-first-touch")],
+  ),
+);
+
 const contextHelper :Workerd.Service = (
   name = "context-helper",
   worker = (

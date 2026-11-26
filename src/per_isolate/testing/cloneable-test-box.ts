@@ -1,7 +1,7 @@
 'use strict';
 
 // Internal testing only: a cloneable class (see serialization.ts), which
-// main.ts exposes under the expose_serialization_test_class flag, so that
+// main-post.ts exposes under the expose_serialization_test_class flag, so that
 // tests can send it through structuredClone() and RPC: CloneableTestBox,
 // holding a label and any serializable value. As for any class that only some
 // flags expose, the module is loaded only under the flag, so a reader without

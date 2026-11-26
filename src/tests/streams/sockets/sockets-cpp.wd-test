@@ -22,6 +22,7 @@ const unitTests :Workerd.Config = (
           (name = "STREAMS_GREET_PORT", fromEnvironment = "STREAMS_GREET_PORT"),
           (name = "STREAMS_STALL_PORT", fromEnvironment = "STREAMS_STALL_PORT"),
           (name = "SELF", service = "streams-sockets-cpp"),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
       )
     ),

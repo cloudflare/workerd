@@ -11,6 +11,7 @@
 #include <capnp/message.h>
 #include <kj/common.h>
 #include <kj/debug.h>
+#include <kj/vector.h>
 
 namespace workerd::util {
 
@@ -58,6 +59,43 @@ struct ScreamingSnakeToKebab {
 static_assert(ScreamingSnakeToKebab("TEST_WORKERD") == "test-workerd");
 }  // namespace
 
+namespace {
+
+kj::Maybe<AutogateKey> tryParseAutogateName(kj::ArrayPtr<const char> name) {
+  for (AutogateKey key: getAutogateKeys()) {
+    if (kj::toCharSequence(key).asArray() == name) {
+      return key;
+    }
+  }
+  return kj::none;
+}
+
+// The gates that WORKERD_ALL_AUTOGATES_EXCEPT names, as a comma-separated list of gate names
+// without the prefix. An unknown name throws, so that a misspelled exclusion is not ignored.
+kj::Vector<AutogateKey> getAllAutogatesExceptions() {
+  kj::Vector<AutogateKey> result;
+  const char* env = getenv("WORKERD_ALL_AUTOGATES_EXCEPT");
+  if (env == nullptr) {
+    return result;
+  }
+  kj::StringPtr list = env;
+  for (size_t start = 0; start <= list.size();) {
+    size_t end = start;
+    while (end < list.size() && list[end] != ',') {
+      ++end;
+    }
+    auto name = list.slice(start, end);
+    if (name.size() > 0) {
+      result.add(KJ_REQUIRE_NONNULL(tryParseAutogateName(name),
+          "WORKERD_ALL_AUTOGATES_EXCEPT names an unknown autogate", name));
+    }
+    start = end + 1;
+  }
+  return result;
+}
+
+}  // namespace
+
 kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
 #define V(key)                                                                                     \
@@ -82,11 +120,23 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     auto sliced = name.slice(WORKERD_PREFIX.size());
 
     // Parse the gate name into an AutogateKey.
-    for (AutogateKey key: getAutogateKeys()) {
-      if (kj::str(key) == sliced) {
-        gates[autogateToIndex(key)] = true;
-        break;
-      }
+    KJ_IF_SOME(key, tryParseAutogateName(sliced.asArray())) {
+      gates[autogateToIndex(key)] = true;
+    }
+  }
+}
+
+void Autogate::enableAll(kj::ArrayPtr<const AutogateKey> excluded) {
+  bool left[autogateToIndex(AutogateKey::NumOfKeys)] = {};
+  for (AutogateKey key: getAllAutogatesExceptions()) {
+    left[autogateToIndex(key)] = true;
+  }
+  for (AutogateKey key: excluded) {
+    left[autogateToIndex(key)] = true;
+  }
+  for (AutogateKey key: getAutogateKeys()) {
+    if (!left[autogateToIndex(key)]) {
+      gates[autogateToIndex(key)] = true;
     }
   }
 }
@@ -96,24 +146,31 @@ bool Autogate::isEnabled(AutogateKey key) {
     return a.gates[autogateToIndex(key)];
   }
 
-  static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
-  return defaultResult;
+  static const Autogate defaultAutogate = []() {
+    Autogate autogate;
+    if (getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
+      autogate.enableAll();
+    }
+    return autogate;
+  }();
+  return defaultAutogate.gates[autogateToIndex(key)];
 }
 
-void Autogate::initAutogate(
-    capnp::List<capnp::Text>::Reader gates, IgnoreAllAutogatesEnv ignoreEnv) {
-  // If the WORKERD_ALL_AUTOGATES env var is set, enable all gates regardless of what
-  // was passed in. This ensures the @all-autogates test variant works even when
-  // initAutogate({}) is called early (e.g. by TestFixture), which would otherwise
-  // set globalAutogate to all-false and prevent isEnabled() from reaching its env var
-  // fallback.
+void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates,
+    IgnoreAllAutogatesEnv ignoreEnv,
+    kj::ArrayPtr<const AutogateKey> excludedFromAll) {
+  Autogate autogate(gates);
+  // If the WORKERD_ALL_AUTOGATES env var is set, enable all gates as well as those passed in. This
+  // ensures the @all-autogates test variant works even when initAutogate({}) is called early
+  // (e.g. by TestFixture), which would otherwise set globalAutogate to all-false and prevent
+  // isEnabled() from reaching its env var fallback.
   //
   // Callers (e.g. the production server) that manage the all-autogates behavior themselves and
   // build selective gate configs can pass IgnoreAllAutogatesEnv::YES to skip this override.
   if (!ignoreEnv && getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
-    return initAllAutogates();
+    autogate.enableAll(excludedFromAll);
   }
-  globalAutogate = Autogate(gates);
+  globalAutogate = kj::mv(autogate);
   syncZlibRouter();
 }
 
@@ -123,10 +180,9 @@ void Autogate::deinitAutogate() {
 }
 
 void Autogate::initAllAutogates() {
-  Autogate autogate;
-  for (AutogateKey key: getAutogateKeys()) {
-    autogate.gates[autogateToIndex(key)] = true;
-  }
+  // The gates already enabled, such as those a config names, stay enabled.
+  Autogate autogate = globalAutogate.orDefault(Autogate());
+  autogate.enableAll();
   globalAutogate = kj::mv(autogate);
   syncZlibRouter();
 }
@@ -137,8 +193,9 @@ void Autogate::initAutogateNamesForTest(
       kj::ArrayPtr<const kj::StringPtr>(gateNames.begin(), gateNames.size()), ignoreEnv);
 }
 
-void Autogate::initAutogateNamesForTest(
-    kj::ArrayPtr<const kj::StringPtr> gateNames, IgnoreAllAutogatesEnv ignoreEnv) {
+void Autogate::initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames,
+    IgnoreAllAutogatesEnv ignoreEnv,
+    kj::ArrayPtr<const AutogateKey> excludedFromAll) {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
   auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(gateNames.size());
@@ -147,16 +204,16 @@ void Autogate::initAutogateNamesForTest(
   for (auto name: gateNames) {
     gates.set(count++, kj::str(WORKERD_PREFIX, name));
   }
-  Autogate::initAutogate(gates.asReader(), ignoreEnv);
+  Autogate::initAutogate(gates.asReader(), ignoreEnv, excludedFromAll);
 }
 
 void Autogate::initAutogateForTest(std::initializer_list<AutogateKey> keys) {
-  if (getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
-    return initAllAutogates();
-  }
   Autogate autogate;
   for (auto key: keys) {
     autogate.gates[autogateToIndex(key)] = true;
+  }
+  if (getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
+    autogate.enableAll();
   }
   globalAutogate = kj::mv(autogate);
   syncZlibRouter();

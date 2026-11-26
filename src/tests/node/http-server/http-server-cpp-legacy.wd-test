@@ -39,6 +39,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "SERVICE", service = "node-http-server-cpp-legacy"),
+          (name = "USING_TS_IMPL", json = "false"),
         ],
       )
     ),

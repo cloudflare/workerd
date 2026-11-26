@@ -165,6 +165,13 @@ class SyncThrowingSink final: public WritableStreamSink {
   State& state;
 };
 
+// Builds a TestFixture that runs the C++ streams implementation, for tests that pin its
+// behavior, even in the @all-autogates variant, whose TS_WEB_STREAMS would swap in the
+// TypeScript one.
+TestFixture makeCppStreamsFixture() {
+  return TestFixture({.excludedFromAllAutogates = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
+}
+
 KJ_TEST("JsWritableStream null state") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -460,7 +467,7 @@ KJ_TEST("JsReadableStream pipeTo with preventClose leaves the destination open")
 }
 
 KJ_TEST("JsReadableStream pipeTo rejects when the source is locked") {
-  TestFixture testFixture;
+  auto testFixture = makeCppStreamsFixture();
   SinkState state;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
@@ -484,7 +491,7 @@ KJ_TEST("JsReadableStream pipeTo rejects when the source is locked") {
 }
 
 KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
-  TestFixture testFixture;
+  auto testFixture = makeCppStreamsFixture();
   SinkState state;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
@@ -507,7 +514,7 @@ KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
 }
 
 KJ_TEST("JsReadableStream pipeThrough pipes through an identity transform") {
-  TestFixture testFixture;
+  auto testFixture = makeCppStreamsFixture();
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -531,7 +538,7 @@ KJ_TEST("JsReadableStream pipeThrough composes with pipeTo") {
   // inter-IdentityTransformStream pipes -- "Inter-TransformStream ReadableStream.pipeTo() is
   // not implemented", identity-transform-stream.c++ -- a pre-existing implementation
   // limitation, identical in JavaScript, and not this abstraction's behavior to pin.)
-  TestFixture testFixture;
+  auto testFixture = makeCppStreamsFixture();
   SinkState state;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
@@ -625,24 +632,18 @@ KJ_TEST("JsWritableStream create honors the closure waitable") {
 // =======================================================================================
 // TypeScript-backed streams
 
-// Builds a TestFixture with the typescript_implemented_streams compat flag enabled, so the
-// TypeScript streams implementation is active.
+// Builds a TestFixture with the TS_WEB_STREAMS autogate enabled, so the TypeScript streams
+// implementation is active.
 TestFixture makeTsStreamsFixture() {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({.featureFlags = flags.asReader()});
+  return TestFixture({.autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
 }
 
 // Like makeTsStreamsFixture(), but with an actor, so the Durable Object output gate is in
 // play (used by the output-gate tests below).
 TestFixture makeTsStreamsActorFixture(kj::StringPtr actorName) {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
   Worker::Actor::Id actorId = kj::str(actorName);
   return TestFixture({
-    .featureFlags = flags.asReader(),
+    .autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS),
     .actorId = kj::mv(actorId),
   });
 }

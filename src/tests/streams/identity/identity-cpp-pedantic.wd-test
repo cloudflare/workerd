@@ -30,6 +30,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "SELF", service = "streams-identity-cpp-pedantic" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
       )
     ),

@@ -8,11 +8,11 @@ strategies_bench_srcs = glob(["*.js"]) + ["strategies-modules.capnp"]
 
 wd_bench(
     src = "strategies-cpp.wd-bench",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = strategies_bench_srcs,
 )
 
 wd_bench(
     src = "strategies-ts.wd-bench",
-    args = ["--experimental"],
     data = strategies_bench_srcs,
 )

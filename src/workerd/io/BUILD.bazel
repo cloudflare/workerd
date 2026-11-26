@@ -943,7 +943,11 @@ kj_test(
     ],
 )
 
+# Each of its cases sets up a fresh TestFixture, whose bootstrap installs the TypeScript streams
+# under the @all-autogates variant; in an ASan build the cases take more than 15 s in all, a
+# medium test's whole timeout.
 kj_test(
+    size = "large",
     src = "hibernation-manager-test.c++",
     deps = [
         ":io",

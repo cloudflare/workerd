@@ -15,10 +15,10 @@ const unitTests :Workerd.Config = (
           "experimental",
           "streams_enable_constructors",
           "rpc",
-          "typescript_implemented_streams",
         ],
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+          (name = "USING_TS_IMPL", json = "true"),
         ],
       )
     ),
@@ -32,9 +32,10 @@ const unitTests :Workerd.Config = (
           "experimental",
           "streams_enable_constructors",
           "rpc",
-          "typescript_implemented_streams",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

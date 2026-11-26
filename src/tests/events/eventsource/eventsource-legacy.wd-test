@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
           "do_not_set_tostring_tag",
           "no_spec_compliant_dispatch_exceptions",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

@@ -10,7 +10,8 @@
 //
 // There are several pseudo-globals available in this script:
 // - `globalThis`: the global object of the context being initialized.
-// - `compatFlags`: an object containing compatibility flags enabled for the context.
+// - `utils`: native helpers. `utils.getCompatFlags()` among them throws until
+//   main-post.ts runs (see the warning below).
 // - `autogates`: an object containing autogates enabled for the context.
 // - `require`: a function to load other per-isolate bootstrap scripts.
 // - `module`: the commonjs-style module object for this script, used for exporting values
@@ -28,356 +29,27 @@
 // bootstrap scripts, you can create a separate module and require it from both
 // scripts.
 
-// const foo = require('./foo');
-// (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
-//
+// ***WARNING***: Nothing that runs in main.ts top-level scope should be
+// gated on compat flag. The top-level scope is executed while building
+// the zygote snapshot. Depending on autogates here is fine, anything
+// that requires compat flag gating must be handled in main-post.ts.
+// The same holds for the top level of every module main.ts loads.
+// utils.getCompatFlags() throws until main-post.ts runs, so code here may
+// call it only in a function that runs later. Checking whether a global
+// exists that only a flag installs depends on the flag just as much.
+
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
-// Loaded whatever the compatibility flags, as is every module that sets up a
-// cloneable class that every reader must be able to read (see
-// serialization.ts).
+const globalPrototype = ObjectGetPrototypeOf(globalThis) as object;
+
 require('serialization');
 
-// performance.now() and performance.timeOrigin. Gated by an autogate rather
-// than a compat flag because the swap preserves the observable shape (see
-// performance/AGENTS.md).
 if (autogates['ts-performance-now']) {
   require('performance/now').install(utils.getPerformancePrototype());
 }
 
-if (compatFlags['typescript_implemented_streams']) {
-  const {
-    ReadableStream,
-    ReadableStreamDefaultReader,
-    ReadableStreamBYOBReader,
-    ReadableStreamDefaultController,
-    ReadableByteStreamController,
-    ReadableStreamBYOBRequest,
-    ByteLengthQueuingStrategy,
-    CountQueuingStrategy,
-    WritableStream,
-    WritableStreamDefaultWriter,
-    WritableStreamDefaultController,
-    TransformStream,
-    TransformStreamDefaultController,
-    IdentityTransformStream,
-    FixedLengthStream,
-    TextEncoderStream,
-    TextDecoderStream,
-    CompressionStream,
-    DecompressionStream,
-    ReadableStreamDrainingReader,
-  } = require('webstreams/streams');
-
-  ObjectDefineProperties(globalThis, {
-    ReadableStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableStream,
-    },
-    ReadableStreamDefaultReader: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableStreamDefaultReader,
-    },
-    ReadableStreamBYOBReader: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableStreamBYOBReader,
-    },
-    ReadableStreamDefaultController: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableStreamDefaultController,
-    },
-    ReadableByteStreamController: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableByteStreamController,
-    },
-    ReadableStreamBYOBRequest: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ReadableStreamBYOBRequest,
-    },
-    ByteLengthQueuingStrategy: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: ByteLengthQueuingStrategy,
-    },
-    CountQueuingStrategy: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: CountQueuingStrategy,
-    },
-    WritableStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: WritableStream,
-    },
-    WritableStreamDefaultWriter: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: WritableStreamDefaultWriter,
-    },
-    WritableStreamDefaultController: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: WritableStreamDefaultController,
-    },
-    TransformStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: TransformStream,
-    },
-    TransformStreamDefaultController: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: TransformStreamDefaultController,
-    },
-    IdentityTransformStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: IdentityTransformStream,
-    },
-    FixedLengthStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: FixedLengthStream,
-    },
-    TextEncoderStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: TextEncoderStream,
-    },
-    TextDecoderStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: TextDecoderStream,
-    },
-    CompressionStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: CompressionStream,
-    },
-    DecompressionStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: DecompressionStream,
-    },
-  });
-
-  // Bootstrap the cpp exports module
-  require('webstreams/cpp_exports');
-
-  // DigestStream subclasses WritableStream, so the C++ one would inherit from
-  // the C++ WritableStream that the assignments above just replaced. Swap in
-  // the TypeScript implementation so the hierarchy is consistent.
-  //
-  // JSG installs nested types on the prototype rather than the instance, so
-  // this reaches every `crypto.DigestStream` - including the lazily created
-  // `globalThis.crypto` singleton, which is deliberately not touched here.
-  // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
-  // with no attributes, i.e. all three true), so the swap is invisible to
-  // property introspection.
-  const { DigestStream } = require('crypto/digest-stream');
-  const { Crypto } = globalThis as unknown as {
-    Crypto: { prototype: object };
-  };
-  ObjectDefineProperties(Crypto.prototype, {
-    __proto__: null,
-    DigestStream: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: DigestStream,
-    },
-  });
-
-  // FileSystemWritableFileStream is the other WritableStream subclass, and has
-  // the same problem DigestStream does. Its instances come from
-  // FileSystemFileHandle.createWritable() rather than a constructor, so both the
-  // global and that method have to be replaced for the swap to take effect.
-  //
-  // The web file system is opt-in, so these globals only exist under
-  // enable_web_file_system; without it there is nothing to replace.
-  const { FileSystemFileHandle, FileSystemWritableFileStream: NativeStream } =
-    globalThis as unknown as {
-      FileSystemFileHandle?: { prototype: object };
-      FileSystemWritableFileStream?: unknown;
-    };
-  if (FileSystemFileHandle !== undefined && NativeStream !== undefined) {
-    const {
-      FileSystemWritableFileStream,
-      createWritable,
-    } = require('webfs/writable-file-stream');
-
-    ObjectDefineProperties(globalThis, {
-      FileSystemWritableFileStream: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: FileSystemWritableFileStream,
-      },
-    });
-
-    // The attributes match what JSG_METHOD installs, so the swap is invisible to
-    // property introspection.
-    ObjectDefineProperties(FileSystemFileHandle.prototype, {
-      __proto__: null,
-      createWritable: {
-        __proto__: null,
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: createWritable,
-      },
-    });
-  }
-
-  // Internal-only: expose the DrainingReader for testing expectedLength
-  // pass-through (Content-Length integration). Gated by a separate
-  // experimental flag that may never lose its experimental annotation.
-  if (compatFlags['expose_draining_reader']) {
-    ObjectDefineProperties(globalThis, {
-      ReadableStreamDrainingReader: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: ReadableStreamDrainingReader,
-      },
-    });
-  }
-}
-
-// MessageChannel and MessagePort are loaded on first use, since few Workers
-// use them: through the globals defined here, or through
-// cloudflare-internal:messagechannel (MessageChannelModule in
-// api/messagechannel.h), which node:worker_threads uses. Whichever comes first
-// loads the module; the other finds it in the require() cache.
-if (compatFlags['expose_global_message_channel']) {
-  const { defineLazyDataProperty } = utils;
-  const specifier = 'messagechannel/messagechannel';
-  // Defined as JSG_NESTED_TYPE defines a global class: always on the global
-  // scope's prototype, with all three attributes true, and under
-  // spec_compliant_property_attributes also as own properties of the global,
-  // non-enumerable per Web IDL. Each is a lazy data property, an ordinary data
-  // property once read.
-  const globalPrototype = ObjectGetPrototypeOf(globalThis) as object;
-  defineLazyDataProperty(globalPrototype, 'MessageChannel', specifier, true);
-  defineLazyDataProperty(globalPrototype, 'MessagePort', specifier, true);
-  if (compatFlags['spec_compliant_property_attributes']) {
-    defineLazyDataProperty(globalThis, 'MessageChannel', specifier, false);
-    defineLazyDataProperty(globalThis, 'MessagePort', specifier, false);
-  }
-}
-
-// EventSource is always a global. Loaded after the streams globals above,
-// whose reader it captures, and installed as JSG_NESTED_TYPE installs a
-// global class: on the global scope's prototype, with all three attributes
-// true, and under spec_compliant_property_attributes also as an own property
-// of the global, non-enumerable per Web IDL.
-const { EventSource } = require('eventsource/eventsource');
-ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-  EventSource: {
-    __proto__: null,
-    configurable: true,
-    enumerable: true,
-    writable: true,
-    value: EventSource,
-  },
-});
-if (compatFlags['spec_compliant_property_attributes']) {
-  ObjectDefineProperties(globalThis, {
-    EventSource: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: EventSource,
-    },
-  });
-}
-
-// The TypeScript URL and URLSearchParams replace the C++ ones, which
-// global-scope.h then leaves out. Installed as WebIDL installs an interface:
-// own, non-enumerable properties of the global, and not on its prototype.
-if (autogates['ts-url']) {
-  const { URL, URLSearchParams } = require('url/url');
-  // The C++ bridge's functions, which it finds already loaded.
-  require('url/cpp_exports');
-  ObjectDefineProperties(globalThis, {
-    URL: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: URL,
-    },
-    URLSearchParams: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: URLSearchParams,
-    },
-  });
-}
-
-// The TypeScript URLPattern replaces the C++ ones, which global-scope.h then
-// leaves out, installed as URL is.
-if (autogates['ts-url-pattern']) {
-  const { URLPattern } = require('urlpattern/urlpattern');
-  ObjectDefineProperties(globalThis, {
-    URLPattern: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: URLPattern,
-    },
-  });
+if (autogates['ts-web-streams']) {
+  require('webstreams/installer').installWebStreams();
 }
 
 // The TypeScript structuredClone() replaces the C++ method, which
@@ -386,7 +58,7 @@ if (autogates['ts-url-pattern']) {
 // true).
 if (autogates['ts-structured-clone']) {
   const { structuredClone } = require('structured-clone');
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+  ObjectDefineProperties(globalPrototype, {
     __proto__: null,
     structuredClone: {
       __proto__: null,
@@ -394,22 +66,6 @@ if (autogates['ts-structured-clone']) {
       enumerable: true,
       writable: true,
       value: structuredClone,
-    },
-  });
-}
-
-// Internal-only: a cloneable class for testing the serialization protocol
-// (serialization.ts), such as over RPC. Gated by an experimental flag that
-// may never lose its experimental annotation.
-if (compatFlags['expose_serialization_test_class']) {
-  const { CloneableTestBox } = require('testing/cloneable-test-box');
-  ObjectDefineProperties(globalThis, {
-    CloneableTestBox: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: CloneableTestBox,
     },
   });
 }

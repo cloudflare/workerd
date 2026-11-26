@@ -4,12 +4,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # configs: stream-cpp against the C++ streams implementation, stream-ts
 # against the TypeScript implementation. A test that cannot pass under both
 # belongs in an implementation-specific suite, not here.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 stream_suite_srcs = glob(["*.js"]) + ["stream-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "stream-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = stream_suite_srcs,
 )
 
@@ -25,6 +29,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "stream-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = stream_suite_srcs,
 )
 
@@ -35,6 +40,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "stream-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = stream_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

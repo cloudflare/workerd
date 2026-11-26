@@ -19,6 +19,7 @@ const unitTests :Workerd.Config = (
           "streams_no_default_auto_allocate_chunk_size",
           "experimental",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

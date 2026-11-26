@@ -27,14 +27,14 @@ While a suite covers both implementations:
   TypeScript cells name the API's autogate in the config's `autogates`
   list, and a `USING_TS_IMPL` JSON binding tells `which-impl.js` which
   implementation the cell is meant to run, since user code cannot read
-  autogates. The C++ cells set `generate_all_autogates_variant = False`:
-  enabling every autogate would swap in the TypeScript implementation
-  while `which-impl.js` still reports C++. The TypeScript cells keep the
-  variant, so "every autogate on" is still covered.
+  autogates. The C++ cells name that autogate in
+  `all_autogates_variant_excludes`: enabling it would swap in the
+  TypeScript implementation while `which-impl.js` still reports C++. Their
+  `@all-autogates` variants still enable every other autogate.
 - **Legacy cells run on both implementations.** Unlike the streams, these
   TypeScript implementations honor the same compat flags the C++ ones do
-  (they consult them through `compatFlags` in the bootstrap), so the
-  unflagged behaviors are asserted for each, in `<name>-cpp-legacy` and
+  (they consult them through `utils.getCompatFlags()` in the bootstrap), so
+  the unflagged behaviors are asserted for each, in `<name>-cpp-legacy` and
   `<name>-ts-legacy`.
 
 Retiring the gate collapses the suite to one set of cells, `<name>.wd-test`,

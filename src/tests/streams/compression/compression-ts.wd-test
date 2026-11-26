@@ -22,7 +22,6 @@ const unitTests :Workerd.Config = (
         modules = CompressionModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "strict_compression_checks",
           "unhandled_rejection_after_microtask_checkpoint",
           "expose_draining_reader",
@@ -30,9 +29,11 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "SELF", service = "streams-compression-ts" ),
+          ( name = "USING_TS_IMPL", json = "true" ),
         ],
       )
     ),
   ],
   v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

@@ -2,7 +2,7 @@ using Workerd = import "/workerd/workerd.capnp";
 using IdentityModules = import "identity-modules.capnp";
 
 # Runs the identity streams suite against the TypeScript implementation
-# (typescript_implemented_streams).
+# (the TS_WEB_STREAMS autogate).
 # The embedded modules are byte-for-byte the same ones identity-cpp.wd-test
 # runs against the legacy C++ implementation.
 #
@@ -25,16 +25,17 @@ const unitTests :Workerd.Config = (
         modules = IdentityModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "expose_draining_reader",
           "experimental",
         ],
         bindings = [
           ( name = "SELF", service = "streams-identity-ts" ),
+          ( name = "USING_TS_IMPL", json = "true" ),
         ],
       )
     ),
   ],
   # For gc-interplay.js.
   v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

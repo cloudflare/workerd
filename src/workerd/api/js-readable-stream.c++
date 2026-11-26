@@ -782,7 +782,7 @@ namespace {
 // bootstrap's cpp_exports module. Otherwise the legacy C++ ReadableStream is used.
 JsReadableStream::StreamImpl newBackingStream(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
-  if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (isTypeScriptStreamsEnabled(js)) {
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
     auto sourceObj = jsg::JsValue(
         handler.wrap(js, js.alloc<ReadableStreamNativeSource>(ioContext, kj::mv(source))));
@@ -844,7 +844,7 @@ JsReadableStream JsReadableStream::create(
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
-  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (!isTypeScriptStreamsEnabled(js)) {
     return JsReadableStream(ReadableStream::from(js, kj::mv(generator)));
   }
 
@@ -916,7 +916,7 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
 
 JsReadableStream JsReadableStream::fromPull(
     jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
-  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (!isTypeScriptStreamsEnabled(js)) {
     UnderlyingSource underlyingSource;
     underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
                                 UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
@@ -973,7 +973,7 @@ kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
   // Without the flag there is no TypeScript implementation (and no bootstrap export to
   // ask), so nothing can match. This also keeps the flag-off unwrap path allocation- and
   // JS-call-free.
-  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+  if (!isTypeScriptStreamsEnabled(js)) {
     return kj::none;
   }
   KJ_IF_SOME(obj, JSG_TRY_CAST_OBJECT(jsg::JsValue(handle))) {

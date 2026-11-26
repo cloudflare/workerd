@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-shape", esModule = embed "legacy-shape.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

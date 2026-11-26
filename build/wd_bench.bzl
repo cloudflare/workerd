@@ -1,7 +1,7 @@
 """wd_bench definition"""
 
 load("@workerd//:build/lint_test.bzl", "lint_test")
-load("@workerd//:build/wd_test.bzl", "wd_cli_test")
+load("@workerd//:build/wd_test.bzl", "all_autogates_except_env", "wd_cli_test")
 
 _WORKERD = "//src/workerd/server:workerd"
 
@@ -14,6 +14,7 @@ def wd_bench(
         compat_date = "",
         generate_all_compat_flags_variant = True,
         generate_all_autogates_variant = True,
+        all_autogates_variant_excludes = [],
         size = "medium",
         tags = [],
         **kwargs):
@@ -31,6 +32,8 @@ def wd_bench(
         newest that the build supports.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     all_autogates_variant_excludes: Autogates, named without the `workerd-autogate-` prefix,
+        that the @all-autogates variants leave off.
      size: The size of the @smoke tests, which sets their timeout.
      tags: Tags for all targets.
 
@@ -74,18 +77,23 @@ def wd_bench(
     # Benchmarks usually measure current behavior, so unlike wd_test(), the default variant uses
     # the newest compat date that the build supports rather than the oldest.
     default_compat_args = ["--compat-date={}".format(compat_date or "latest")]
-    variants = [("@", default_compat_args)]
+    variants = [("@", default_compat_args, {})]
     if generate_all_compat_flags_variant:
-        variants.append(("@all-compat-flags", ["--compat-date=2999-12-31"]))
+        variants.append(("@all-compat-flags", ["--compat-date=2999-12-31"], {}))
     if generate_all_autogates_variant:
-        variants.append(("@all-autogates", default_compat_args + ["--all-autogates"]))
+        variants.append((
+            "@all-autogates",
+            default_compat_args + ["--all-autogates"],
+            all_autogates_except_env(all_autogates_variant_excludes),
+        ))
 
     workerd_args = ["$(location {})".format(_WORKERD), "bench", "$(location {})".format(src)] + args
-    for suffix, variant_args in variants:
+    for suffix, variant_args, variant_env in variants:
         _wd_bench_run(
             name = name + suffix,
             data = data + [_WORKERD],
             args = workerd_args + variant_args,
+            env = variant_env,
             tags = ["workerd-benchmark"] + tags,
             **kwargs
         )
@@ -94,6 +102,7 @@ def wd_bench(
             src = src,
             data = data + [_WORKERD],
             args = workerd_args + variant_args + ["--quick"],
+            env = variant_env,
             size = size,
             tags = tags,
             **kwargs
@@ -149,7 +158,10 @@ def _wd_bench_run_impl(ctx):
     runfiles = ctx.runfiles(files = ctx.files.data)
     for target in ctx.attr.data:
         runfiles = runfiles.merge(target[DefaultInfo].default_runfiles)
-    return [DefaultInfo(executable = executable, runfiles = runfiles)]
+    return [
+        DefaultInfo(executable = executable, runfiles = runfiles),
+        RunEnvironmentInfo(environment = ctx.attr.env),
+    ]
 
 # Bazel runs only executables that the rule creates, so this writes a script that runs its
 # arguments, which wd_bench() sets to the workerd command line.
@@ -158,6 +170,7 @@ _wd_bench_run = rule(
     executable = True,
     attrs = {
         "data": attr.label_list(allow_files = True),
+        "env": attr.string_dict(),
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )

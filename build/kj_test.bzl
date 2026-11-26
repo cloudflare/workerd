@@ -1,6 +1,7 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 load("//:build/test_attrs.bzl", "test_attrs")
+load("//:build/wd_test.bzl", "all_autogates_except_env")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def kj_test(
@@ -12,9 +13,11 @@ def kj_test(
         shard_count = None,
         target_compatible_with = None,
         generate_all_autogates_variant = True,
+        all_autogates_variant_excludes = [],
         **kwargs):
     """Defines a KJ test as `name@` and, unless generate_all_autogates_variant is False, as
-    `name@all-autogates`, which runs with every autogate on.
+    `name@all-autogates`, which runs with every autogate on but those named, without the
+    `workerd-autogate-` prefix, in all_autogates_variant_excludes.
 
     Pass generate_all_autogates_variant = False for a test that sets the autogates itself, where
     the second variant would only repeat the first.
@@ -56,7 +59,7 @@ def kj_test(
         name = test_name + "@all-autogates",
         binary = binary_name,
         data = data,
-        env = {"WORKERD_ALL_AUTOGATES": "1"},
+        env = {"WORKERD_ALL_AUTOGATES": "1"} | all_autogates_except_env(all_autogates_variant_excludes),
         # Tag with no-coverage to reduce coverage CI time
         size = size,
         shard_count = shard_count,

@@ -6,7 +6,19 @@
 
 #include "../util.h"
 
+#include <workerd/io/features.h>
+#include <workerd/util/autogate.h>
+
 namespace workerd::api {
+
+bool isTypeScriptStreamsEnabled(CompatibilityFlags::Reader flags) {
+  return util::Autogate::isEnabled(util::AutogateKey::TS_WEB_STREAMS) ||
+      flags.getTypeScriptImplementedStreams();
+}
+
+bool isTypeScriptStreamsEnabled(jsg::Lock& js) {
+  return isTypeScriptStreamsEnabled(FeatureFlags::get(js));
+}
 
 WritableStreamController::PendingAbort::PendingAbort(
     jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, bool reject)

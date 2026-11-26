@@ -34,6 +34,7 @@ const unitTests :Workerd.Config = (
           "streams_enable_constructors",
           "transformstream_enable_standard_constructor",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

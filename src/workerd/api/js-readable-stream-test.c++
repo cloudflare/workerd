@@ -268,7 +268,8 @@ KJ_TEST("JsReadableStream buffer-backed stream") {
 }
 
 KJ_TEST("JsReadableStream consuming twice rejects with the historical Body error") {
-  TestFixture testFixture;
+  // The C++ streams' error, so not under the @all-autogates variant's TS_WEB_STREAMS.
+  TestFixture testFixture({.excludedFromAllAutogates = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1741,13 +1742,10 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
 // =======================================================================================
 // pumpTo of TypeScript-backed streams
 
-// Builds a TestFixture with the typescript_implemented_streams compat flag enabled, so the
-// TypeScript streams implementation is active.
+// Builds a TestFixture with the TS_WEB_STREAMS autogate enabled, so the TypeScript streams
+// implementation is active.
 TestFixture makeTsStreamsFixture() {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({.featureFlags = flags.asReader()});
+  return TestFixture({.autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
 }
 
 KJ_TEST("RPC readable stream length is available before its push resolves") {

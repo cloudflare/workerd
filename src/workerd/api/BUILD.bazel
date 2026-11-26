@@ -782,6 +782,14 @@ kj_test(
 )
 
 kj_test(
+    src = "per-isolate-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "per-isolate-embedder-bootstrap-test.c++",
     deps = [
         "//src/workerd/api/tests/embedder-bootstrap:embedder_bootstrap_test",
@@ -1095,6 +1103,8 @@ wd_test(
 
 wd_test(
     src = "streams/body-read-operation-test.wd-test",
+    # Runs the C++ streams, which the ts-web-streams autogate would replace.
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = ["streams/body-read-operation-test.js"],
 )

@@ -37,13 +37,9 @@ class CountingObserver final: public JsgIsolateObserver {
 KJ_TEST("per-isolate bootstrap consumes its embedded compile caches") {
   CompileCacheCounts counts;
 
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
   // Load the whole bundle, including the streams scripts.
-  flags.setTypeScriptImplementedStreams(true);
-
   TestFixture fixture({
-    .featureFlags = flags.asReader(),
+    .autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS),
     .jsgIsolateObserver = kj::atomicRefcounted<CountingObserver>(counts),
   });
   // The bootstrap runs during context creation; this just ensures the worker is fully set up.

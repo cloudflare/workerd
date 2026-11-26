@@ -26,6 +26,7 @@ const unitTests :Workerd.Config = (
           (name = "legacy-constructor-gate", esModule = embed "legacy-constructor-gate.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],

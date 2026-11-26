@@ -19,9 +19,11 @@ implementation it means to run. `enable_fast_jsg_struct` is not pinned: the
 
 The TypeScript implementation honors the dated flags above and is otherwise
 WebIDL-conformant, so it differs from the C++ only toward the spec, in the
-rows of the ledger below. Each row is pinned on both sides with a
-`usingTsImpl` branch. The C++ cells disable the `@all-autogates` variant,
-which would run the TypeScript implementation under them.
+rows of the ledger below. The exception is `Symbol.toStringTag`, which is
+writable, as JSG's is, where WebIDL makes it non-writable. Each row is
+pinned on both sides with a `usingTsImpl` branch. The C++ cells disable the
+`@all-autogates` variant, which would run the TypeScript implementation
+under them.
 
 ## Core semantics
 
@@ -70,7 +72,7 @@ which would run the TypeScript implementation under them.
 | 5 | Patched `RegExp.prototype.exec` while matching | called for each component ada's fast paths do not cover; legacy all eight | not called | `pollution.js` |
 | 6 | Legacy lone surrogates | WTF-8 | U+FFFD | `conversions.js` |
 | 7 | Three arguments | an object or `undefined` second argument is the options (`undefined`: no baseURL); the third is read and ignored | the second is the baseURL (`ToUSVString`) | `construction.js`, `conversions.js` |
-| 8 | Accessor names, constructor `prototype`, `Symbol.toStringTag`, global | JSG: anonymous, writable, writable, on the global's prototype (WebIDL under the opt-ins but the tag) | WebIDL | `api-surface.js` |
+| 8 | Accessor names, constructor `prototype`, global | JSG: anonymous, writable, on the global's prototype (WebIDL under the opt-ins) | WebIDL | `api-surface.js` |
 | 9 | Calling without `new` | JSG's TypeError message | the language's | `construction.js` |
 | 10 | `Object.prototype` setters | groups always set, so a setter takes them; without `enable_fast_jsg_struct` results assigned too | data properties | `pollution.js` |
 | 11 | `inputs` copy of an init under `enable_fast_jsg_struct` | every member, those absent `undefined` | the members present | `results.js` |

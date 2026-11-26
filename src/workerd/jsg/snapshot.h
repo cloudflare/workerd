@@ -51,9 +51,8 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   the zygote's original. A stateless type (Object::jsgSnapshotStateless) is recorded by its tag
 //   alone. Slots whose index never reached the blob hold no transfer.
 // * `bootstrapStateIndex` is the context-level SnapshotCreator::AddData index of the per-isolate
-//   bootstrap's JS-held state (require(), primordials, the compatFlags, autogates and utils
-//   objects, the require() cache), bundled into one object and pinned by the zygote right before
-//   CreateBlob. A worker started from the snapshot rebuilds its C++ BootstrapState from it instead
+//   bootstrap's JS-held state (require(), primordials, the autogates and utils objects, the
+//   require() cache), bundled into one object and pinned by the zygote right before CreateBlob. A worker started from the snapshot rebuilds its C++ BootstrapState from it instead
 //   of running the bootstrap scripts again. None when the zygote ran without the per-isolate
 //   bootstrap.
 // * `restoreTimeGlobalsIndex` is the context-level AddData index of the record of what the

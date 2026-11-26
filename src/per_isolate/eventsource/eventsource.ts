@@ -64,6 +64,12 @@ const {
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
+  ResponseBodyGet,
+  ResponseHeadersGet,
+  ResponseOkGet,
+  ResponseRedirectedGet,
+  ResponseStatusGet,
+  ResponseUrlGet,
   StringPrototypeCharCodeAt,
   StringPrototypeIndexOf,
   StringPrototypeSlice,
@@ -78,7 +84,6 @@ const {
   TypedArrayPrototypeGetByteLength,
   TypedArrayPrototypeGetByteOffset,
   Uint8Array,
-  captureJsgGetter,
   uncurryThis,
 } = primordials;
 
@@ -107,9 +112,9 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
-// Whichever streams implementation main.ts installed before loading this
-// module; a Response body and anything EventSource.from() accepts are its
-// streams.
+// Whichever streams implementation the bootstrap installed before
+// main-post.ts loads this module, before any user code runs; a Response body
+// and anything EventSource.from() accepts are its streams.
 type Reader = ReadableStreamDefaultReader<unknown>;
 const ReadableStreamGetReader = uncurryThis(
   globalThis.ReadableStream.prototype.getReader
@@ -121,30 +126,6 @@ const ReaderCancel = uncurryThis(
   globalThis.ReadableStreamDefaultReader.prototype.cancel
 ) as (reader: Reader, reason?: unknown) => Promise<void>;
 
-const ResponseProto = globalThis.Response.prototype;
-const ResponseOkGet = captureJsgGetter<(response: Response) => boolean>(
-  ResponseProto,
-  'ok'
-);
-const ResponseStatusGet = captureJsgGetter<(response: Response) => number>(
-  ResponseProto,
-  'status'
-);
-const ResponseHeadersGet = captureJsgGetter<(response: Response) => Headers>(
-  ResponseProto,
-  'headers'
-);
-const ResponseRedirectedGet = captureJsgGetter<(response: Response) => boolean>(
-  ResponseProto,
-  'redirected'
-);
-const ResponseUrlGet = captureJsgGetter<(response: Response) => string>(
-  ResponseProto,
-  'url'
-);
-const ResponseBodyGet = captureJsgGetter<
-  (response: Response) => ReadableStream | null
->(ResponseProto, 'body');
 const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
   headers: Headers,
   name: string
@@ -180,7 +161,8 @@ const kEventStreamMimeType = 'text/event-stream';
 // What a draining read of each streams implementation throws for a chunk
 // that is not bytes; a non-byte chunk fails the EventSource with it.
 const kNotBytes =
-  compatFlags['typescript_implemented_streams'] === true
+  autogates['ts-web-streams'] === true ||
+  utils.getCompatFlags()['typescript_implemented_streams'] === true
     ? 'This ReadableStream did not return bytes.'
     : 'Draining read encountered a value that cannot be converted to bytes';
 
@@ -819,7 +801,7 @@ class EventSource extends EventTarget {
 // The rest makes the class look as JSG's does.
 
 const kSpecCompliantPropertyAttributes =
-  compatFlags['spec_compliant_property_attributes'] === true;
+  utils.getCompatFlags()['spec_compliant_property_attributes'] === true;
 
 const proto = EventSource.prototype;
 

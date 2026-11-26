@@ -6,6 +6,14 @@ import { connect, internalNewHttpClient } from 'cloudflare:sockets';
 import { strict as assert } from 'node:assert';
 import unsafe from 'workerd:unsafe';
 
+// Whether the streams are the TypeScript implementation (the TS_WEB_STREAMS
+// autogate), whose lock errors are worded differently. User code cannot read
+// an autogate, but unlike a JSG class, a TypeScript class's source text is not
+// [native code].
+const usingTsStreams = !Function.prototype.toString
+  .call(ReadableStream)
+  .includes('[native code]');
+
 // Basic connectivity and GET test
 export const oneRequest = {
   async test(ctrl, env, ctx) {
@@ -162,7 +170,9 @@ export const socketFetcherUnusable = {
       },
       {
         name: 'TypeError',
-        message: 'This WritableStream is currently locked to a writer.',
+        message: usingTsStreams
+          ? 'Cannot get a writer for a stream that is locked'
+          : 'This WritableStream is currently locked to a writer.',
       }
     );
 
@@ -172,7 +182,9 @@ export const socketFetcherUnusable = {
       },
       {
         name: 'TypeError',
-        message: 'This ReadableStream is currently locked to a reader.',
+        message: usingTsStreams
+          ? 'Cannot get a reader for a stream that is locked'
+          : 'This ReadableStream is currently locked to a reader.',
       }
     );
   },

@@ -1,5 +1,5 @@
 # The full js-rpc-test suite run with the TypeScript streams implementation enabled
-# (typescript_implemented_streams flag), pinning JS RPC stream transfer -- both directions,
+# (the TS_WEB_STREAMS autogate), pinning JS RPC stream transfer -- both directions,
 # error/abort propagation, locked-stream rejection -- for TypeScript-backed streams against
 # the same expectations the legacy implementation satisfies.
 using Workerd = import "/workerd/workerd.capnp";
@@ -24,6 +24,7 @@ const unitTests :Workerd.Config = (
     ),
   ],
   v8Flags = [ "--expose-gc" ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );
 
 const modules :List(Workerd.Worker.Module) = [
@@ -41,7 +42,6 @@ const compatibilityFlags :List(Text) = [
   "http_headers_getsetcookie",
   "fetch_legacy_url",
   "rpc_params_transfer_stubs",
-  "typescript_implemented_streams",
 ];
 
 const bindings :List(Workerd.Worker.Binding) = [

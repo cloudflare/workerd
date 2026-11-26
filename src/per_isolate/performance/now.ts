@@ -68,7 +68,7 @@ function matchShape(replacement: AnyFunction, original: AnyFunction): void {
 // nothing left to replace or copy the shape from. install() then has to define
 // both members outright: every attribute true (as performance-now-test.js
 // pins), `length` 0, and the getter's `name` "get timeOrigin" under
-// compatFlags['spec_compliant_property_attributes'] and "" otherwise.
+// spec_compliant_property_attributes and "" otherwise.
 function install(proto: object): void {
   const nativeNow = requireDescriptor(proto, 'now');
   const nativeTimeOrigin = requireDescriptor(proto, 'timeOrigin');

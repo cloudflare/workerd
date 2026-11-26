@@ -20,7 +20,7 @@ async function contentsOf(handle) {
   return await (await handle.getFile()).text();
 }
 
-// The reason this implementation exists: with typescript_implemented_streams
+// The reason this implementation exists: with the TypeScript streams
 // enabled, the C++ FileSystemWritableFileStream inherits from the C++
 // WritableStream, which is no longer the WritableStream user code sees. These
 // assertions fail against the C++ implementation, so they double as proof that
@@ -86,9 +86,11 @@ export const createWritableDescriptorMatchesJsg = {
 };
 
 // There is no user-reachable constructor, matching `constructor() = delete` on
-// the C++ class.
+// the C++ class. Its length is 0, as WebIDL gives an interface without a
+// constructor operation.
 export const constructorIsNotCallable = {
   test() {
+    strictEqual(FileSystemWritableFileStream.length, 0);
     throws(() => new FileSystemWritableFileStream(), TypeError);
     // Passing something in the marker position must not get past the gate.
     throws(() => new FileSystemWritableFileStream({}, {}), TypeError);

@@ -12,10 +12,10 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "formdata_parser_supports_files",
-          "typescript_implemented_streams",
           "experimental",
         ],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

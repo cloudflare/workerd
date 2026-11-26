@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
         modules = TransformModules.modules,
         bindings = [
           ( name = "SELF", service = "streams-transform-cpp-pedantic" ),
+          ( name = "USING_TS_IMPL", json = "false" ),
         ],
         compatibilityFlags = [
           "nodejs_compat",

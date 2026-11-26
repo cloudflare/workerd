@@ -282,7 +282,7 @@ const SymbolDispose = Symbol.dispose;
 
 // WeakRef / FinalizationRegistry
 // These globals exist during bootstrap - their deletion from the global is
-// deferred until after bootstrap completes (see runPerIsolateBootstrap) -
+// deferred until after bootstrap completes (see runPostSnapshotBootstrap) -
 // but they are hidden from user code unless the enable_weak_ref compat flag
 // is set. The captures here keep working after the globals are deleted.
 const WeakRefPrototypeDeref = uncurryThis(WeakRef.prototype.deref);
@@ -699,6 +699,35 @@ const TextDecoderIgnoreBOMGet = captureJsgGetter<
   (decoder: TextDecoder) => boolean
 >(TextDecoderCtor.prototype, 'ignoreBOM');
 
+// Response's readonly properties use the same JSG layout. Each is captured
+// from the prototype that defines it: `body` is Body's, which
+// Response.prototype inherits.
+const ResponsePrototype = globalThis.Response.prototype;
+const BodyPrototype = ObjectGetPrototypeOf(ResponsePrototype) as object;
+const ResponseOkGet = captureJsgGetter<(response: Response) => boolean>(
+  ResponsePrototype,
+  'ok'
+);
+const ResponseStatusGet = captureJsgGetter<(response: Response) => number>(
+  ResponsePrototype,
+  'status'
+);
+const ResponseHeadersGet = captureJsgGetter<(response: Response) => Headers>(
+  ResponsePrototype,
+  'headers'
+);
+const ResponseRedirectedGet = captureJsgGetter<(response: Response) => boolean>(
+  ResponsePrototype,
+  'redirected'
+);
+const ResponseUrlGet = captureJsgGetter<(response: Response) => string>(
+  ResponsePrototype,
+  'url'
+);
+const ResponseBodyGet = captureJsgGetter<
+  (response: Response) => ReadableStream | null
+>(BodyPrototype, 'body');
+
 // Freeze the exports object to prevent accidental mutation by bootstrap scripts.
 // Uses the captured ObjectFreeze, not the potentially-polluted global.
 module.exports = ObjectFreeze({
@@ -904,6 +933,14 @@ module.exports = ObjectFreeze({
   TextDecoderIgnoreBOMGet,
   TextEncoderEncode,
   TextDecoderDecode,
+
+  // Response
+  ResponseOkGet,
+  ResponseStatusGet,
+  ResponseHeadersGet,
+  ResponseRedirectedGet,
+  ResponseUrlGet,
+  ResponseBodyGet,
 
   // Safe types - use normal method syntax, resistant to prototype pollution
   SafeMap,

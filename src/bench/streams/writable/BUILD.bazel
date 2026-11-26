@@ -8,11 +8,11 @@ writable_bench_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
 
 wd_bench(
     src = "writable-cpp.wd-bench",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = writable_bench_srcs,
 )
 
 wd_bench(
     src = "writable-ts.wd-bench",
-    args = ["--experimental"],
     data = writable_bench_srcs,
 )

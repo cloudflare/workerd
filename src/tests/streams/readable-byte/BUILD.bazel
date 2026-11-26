@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The readable-byte streams suite runs the same test modules under two
 # configs: readable-byte-cpp against the C++ implementation,
 # readable-byte-ts against the TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 readable_byte_suite_srcs = glob(["*.js"]) + ["readable-byte-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "readable-byte-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_byte_suite_srcs,
 )
 
@@ -25,6 +29,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-byte-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_byte_suite_srcs,
 )
 
@@ -33,6 +38,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-byte-cpp-no-auto-allocate.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     args = ["--experimental"],
     data = readable_byte_suite_srcs,
 )
@@ -43,6 +49,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-byte-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_byte_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
@@ -50,6 +57,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "readable-byte-cpp-nodetach.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = readable_byte_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

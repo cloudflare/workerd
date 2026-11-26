@@ -3,12 +3,16 @@ load("//:build/wd_test.bzl", "wd_test")
 # The writable streams suite runs the same test modules under two configs:
 # writable-cpp against the C++ implementation, writable-ts against the
 # TypeScript implementation.
+#
+# The C++ cells' @all-autogates variants leave out the ts-web-streams
+# autogate, which would swap in the TypeScript implementation.
 
 writable_suite_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
 
 wd_test(
     size = "large",
     src = "writable-cpp.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = writable_suite_srcs,
 )
 
@@ -25,6 +29,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "writable-cpp-pedantic.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = writable_suite_srcs,
 )
 
@@ -34,6 +39,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "writable-cpp-legacy.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = writable_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
@@ -41,6 +47,7 @@ wd_test(
 wd_test(
     size = "large",
     src = "writable-cpp-legacy-writer.wd-test",
+    all_autogates_variant_excludes = ["ts-web-streams"],
     data = writable_suite_srcs,
     generate_all_compat_flags_variant = False,
 )

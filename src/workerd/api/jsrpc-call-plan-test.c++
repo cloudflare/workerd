@@ -1305,10 +1305,7 @@ KJ_TEST("writable RPC serialization resolves its destination before consuming th
     expectWritableStreamUsableAfterDestinationFailure(legacyFixture);
   }
 
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setTypeScriptImplementedStreams(true);
-  TestFixture tsFixture({.featureFlags = flags.asReader()});
+  TestFixture tsFixture({.autogateKeys = kj::arr(util::AutogateKey::TS_WEB_STREAMS)});
   expectWritableStreamUsableAfterDestinationFailure(tsFixture);
 }
 

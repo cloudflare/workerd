@@ -44,6 +44,9 @@ struct TestFixture {
     // If true, only the autogates above are enabled, even under WORKERD_ALL_AUTOGATES (as in the
     // @all-autogates test variant), e.g. to test the behavior with a gate disabled.
     bool ignoreAllAutogatesEnv = false;
+    // Autogates that stay disabled under WORKERD_ALL_AUTOGATES, unless enabled above, while every
+    // other autogate is enabled: for a test of the behavior the gate replaces.
+    kj::Array<util::AutogateKey> excludedFromAllAutogates;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;

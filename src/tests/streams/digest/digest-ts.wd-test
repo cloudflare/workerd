@@ -16,11 +16,12 @@ const unitTests :Workerd.Config = (
         modules = DigestModules.modules,
         compatibilityFlags = [
           "nodejs_compat",
-          "typescript_implemented_streams",
           "experimental",
         ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
   v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-web-streams"],
 );

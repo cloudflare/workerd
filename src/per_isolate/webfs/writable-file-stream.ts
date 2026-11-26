@@ -12,8 +12,9 @@
 // Nothing constructs this from JavaScript: the class has no user-reachable
 // constructor and instances come only from FileSystemFileHandle.createWritable().
 // That method is a C++ JSG method, so the TypeScript version is installed over
-// it on the prototype by main.ts, and createWritable() below is what runs. The
-// C++ createWritable() stays in place and is what runs when the flag is off.
+// it on the prototype by main-post.ts, through webstreams/installer, and
+// createWritable() below is what runs. The C++ createWritable() stays in place
+// and is what runs when the TypeScript streams are off.
 //
 // WRITES BYPASS THE QUEUE
 //
@@ -78,13 +79,15 @@ function isActualObject(value: unknown): boolean {
 class FileSystemWritableFileStream extends WritableStream<unknown> {
   #context: FileSystemWriteContext;
 
-  constructor(marker?: unknown, context?: FileSystemWriteContext) {
-    if (marker !== kConstruct) {
+  // A rest parameter, so that the constructor's length is 0, as WebIDL gives an
+  // interface without a constructor operation.
+  constructor(...args: [marker?: unknown, context?: FileSystemWriteContext]) {
+    if (args[0] !== kConstruct) {
       throw new TypeError('Illegal constructor');
     }
     // The sink closures capture the context rather than `this`, which is in its
     // temporal dead zone until super() returns.
-    const ctx = context as FileSystemWriteContext;
+    const ctx = args[1] as FileSystemWriteContext;
     const sink = {
       __proto__: kNullProtoObject,
       write(chunk: unknown): Promise<void> {
@@ -171,7 +174,7 @@ function readKeepExistingData(options: unknown): boolean {
   return !!(options as { keepExistingData?: unknown }).keepExistingData;
 }
 
-// Installed over FileSystemFileHandle.prototype.createWritable by main.ts.
+// Installed over FileSystemFileHandle.prototype.createWritable by main-post.ts.
 //
 // Deliberately not an async function. JSG unwraps arguments before the method
 // body runs, so a bad option bag is a synchronous throw in C++, while a file

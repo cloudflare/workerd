@@ -530,6 +530,12 @@ kj_test(
 )
 
 kj_test(
+    src = "autogate-test.c++",
+    all_autogates_variant_excludes = ["test-workerd"],
+    deps = [":autogate"],
+)
+
+kj_test(
     src = "uuid-test.c++",
     deps = [
         ":uuid",
