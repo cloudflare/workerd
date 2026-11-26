@@ -19,6 +19,7 @@ struct HttpConnectSettings;
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncOutputStream = kj::AsyncOutputStream;
 using AsyncIoStream = kj::AsyncIoStream;
+using TaskSet = kj::TaskSet;
 
 inline kj::Promise<void> async_output_stream_write(
     AsyncOutputStream& stream, ::rust::Slice<const kj::byte> buffer) {

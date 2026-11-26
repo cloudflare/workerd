@@ -18,6 +18,9 @@ pub mod ffi {
         type AsyncInputStream;
         type AsyncIoStream;
         type AsyncOutputStream;
+        /// `kj::TaskSet`. Rust only passes one on to C++, such as the waitUntil tasks that
+        /// `IoContext::IncomingRequest::drain()` takes.
+        type TaskSet;
 
         async fn async_output_stream_write(
             this_: Pin<&mut AsyncOutputStream>,
@@ -46,6 +49,7 @@ pub mod ffi {
 
 pub type AsyncInputStream = ffi::AsyncInputStream;
 pub type AsyncIoStream = ffi::AsyncIoStream;
+pub type TaskSet = ffi::TaskSet;
 
 impl ffi::AsyncInputStream {
     /// `kj::AsyncInputStream::tryRead`: reads until at least `min_bytes` are in `buffer`, or the

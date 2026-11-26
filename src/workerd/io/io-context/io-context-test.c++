@@ -739,6 +739,164 @@ KJ_TEST("run_in_wait_until() drops its function unrun when the request is destro
   KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
 }
 
+KJ_TEST("run() runs its prelude, its function on the handles, then its future, and resolves") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  awaitContextId = kj::none;
+  // The run starts when the promise is first polled.
+  run_in_context(*request, RunEnding::Succeed).wait(fixture.getWaitScope());
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+  KJ_EXPECT(run_handle() == 42);
+  KJ_EXPECT(run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() prelude that throws fails the run, and the function is dropped") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto promise = run_in_context(*request, RunEnding::PreludeThrows);
+  KJ_EXPECT_THROW_MESSAGE("the prelude threw", promise.wait(fixture.getWaitScope()));
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() function that throws fails the run with its exception") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  UncaughtExceptionLog log;
+  auto promise = run_in_context(*request, RunEnding::Throw);
+  KJ_EXPECT_THROW_MESSAGE("TypeError: the function threw", promise.wait(fixture.getWaitScope()));
+  // run() logs the exception as uncaught, as for C++ code it runs.
+  auto logged = log.take();
+  KJ_EXPECT(logged.contains("TypeError: the function threw"), logged);
+  KJ_EXPECT(!run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() function that fails with a KJ exception fails the run with it, unchanged") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  UncaughtExceptionLog log;
+  auto promise = run_in_context(*request, RunEnding::FailWithKj);
+  KJ_EXPECT_THROW_MESSAGE("jsg.Error: the function failed", promise.wait(fixture.getWaitScope()));
+  // run() doesn't log a KJ exception; it is for its caller to handle.
+  auto logged = log.take();
+  KJ_EXPECT(!logged.contains("the function failed"), logged);
+  KJ_EXPECT(!run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() function that fails with a KJ exception while a JavaScript exception is pending "
+        "fails the run with the pending exception") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  UncaughtExceptionLog log;
+  auto promise = run_in_context(*request, RunEnding::FailWithKjWhilePending);
+  KJ_EXPECT_THROW_MESSAGE("TypeError: the pending exception", promise.wait(fixture.getWaitScope()));
+  auto logged = log.take();
+  KJ_EXPECT(logged.contains("TypeError: the pending exception"), logged);
+  KJ_EXPECT(!logged.contains("the dropped failure"), logged);
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() function that panics terminates execution and fails the run") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto promise = run_in_context(*request, RunEnding::PanicInFunction);
+  {
+    KJ_EXPECT_LOG(ERROR, "internalMessage = the function panicked");
+    KJ_EXPECT_THROW_MESSAGE("the function of IoContext::IncomingRequest::run() panicked",
+        promise.wait(fixture.getWaitScope()));
+  }
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() future that panics fails the run") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto promise = run_in_context(*request, RunEnding::PanicInFuture);
+  KJ_EXPECT_THROW_MESSAGE("the future panicked", promise.wait(fixture.getWaitScope()));
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("run() fails, without running its prelude or function, when IoContext::run() throws as it "
+        "is called") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  // With no request delivered, IoContext::run() throws before it returns a promise.
+  auto request = fixture.newUndeliveredIncomingRequest(*context);
+  auto promise = run_in_context(*request, RunEnding::Succeed);
+  KJ_EXPECT_THROW_MESSAGE("no request in progress", promise.wait(fixture.getWaitScope()));
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+  request->delivered();
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() dropped before its prelude runs drops its function unrun") {
+  TestFixture fixture({
+    .actorId = Worker::Actor::Id(kj::str("run-actor")),
+    .useRealTimers = false,
+  });
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  kj::Maybe<InputGate::Lock> gateLock =
+      fixture.getActor().getInputGate().wait(nullptr).wait(fixture.getWaitScope());
+  auto promise = run_in_context(*request, RunEnding::Succeed);
+  // IoContext::run() waits for the input gate.
+  promise.poll(fixture.getWaitScope());
+  KJ_EXPECT(run_observation() == AwaitObservation::Pending);
+  promise = nullptr;
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+  gateLock = kj::none;
+  fixture.pollEventLoop();
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run() dropped while its future waits drops the future") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto promise = run_in_context(*request, RunEnding::Pend);
+  promise.poll(fixture.getWaitScope());
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_dropped());
+  promise = nullptr;
+  KJ_EXPECT(run_future_dropped());
+  KJ_EXPECT(!run_future_done());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("incoming_request_drain() waits in the task set for the request's waitUntil tasks") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  kj::Pin<bool> ran;
+  context->addWaitUntil(paf.promise.then([ran = ran.addWeak()]() {
+    KJ_REQUIRE_NONNULL(ran.tryGet(), "the flag was destroyed before the task ran") = true;
+  }));
+  struct ErrorHandler final: public kj::TaskSet::ErrorHandler {
+    void taskFailed(kj::Exception&& exception) override {
+      KJ_FAIL_EXPECT("a waitUntil task failed", exception);
+    }
+  } errorHandler;
+  kj::TaskSet tasks(errorHandler);
+  incoming_request_drain(kj::mv(request), tasks);
+  // The drain is a task of `tasks` until the request's waitUntil tasks are done.
+  fixture.pollEventLoop();
+  KJ_EXPECT(!tasks.isEmpty());
+  paf.fulfiller->fulfill();
+  tasks.onEmpty().wait(fixture.getWaitScope());
+  KJ_EXPECT(*ran);
+}
+
 // How the promise of the last await_promise() or await_value() has settled. It is read in a
 // request of its own: the one that awaited may have nothing left to wait for, and be aborted.
 kj::String awaitedOutcome(TestFixture& fixture) {
