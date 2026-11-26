@@ -598,7 +598,6 @@ impl OtlpTracing {
                 collector: None,
                 exporter: ffi::factory_new_otlp_exporter(
                     factory.raw(),
-                    SubrequestChannel::new(Rc::clone(&service)),
                     SubrequestChannel::new(service),
                     &path,
                     true,
@@ -625,7 +624,6 @@ impl OtlpTracing {
             collector: Some(designator.service),
             exporter: ffi::factory_new_otlp_exporter(
                 factory.raw(),
-                SubrequestChannel::new(Rc::clone(&collector)),
                 SubrequestChannel::new(collector),
                 "",
                 tracing.get_export_logs(),

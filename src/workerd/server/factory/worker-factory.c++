@@ -1929,14 +1929,10 @@ void worker_set_otlp_exporter(
     const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
   worker.getImpl().otlpExporter =
       exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
-  worker.getImpl().otlpExportsLogs =
-      exporter.map([](const OtlpExporter& e) {
-    return otlp_exporter_exports_logs(e);
-  }).orDefault(false);
-  worker.getImpl().otlpSampleRatio =
-      exporter.map([](const OtlpExporter& e) {
-    return otlp_exporter_sample_ratio(e);
-  }).orDefault(1);
+  KJ_IF_SOME(e, exporter) {
+    worker.getImpl().otlpExportsLogs = e.exportsLogs;
+    worker.getImpl().otlpSampleRatio = e.sampleRatio;
+  }
 }
 
 void worker_unlink(const CompiledWorker& worker) {

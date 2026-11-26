@@ -196,7 +196,7 @@ kj::Promise<void> factory_sleep(const WorkerFactory& factory, uint64_t nanos);
 class OtlpExporter final {
  public:
   class Impl;
-  explicit OtlpExporter(kj::Rc<Impl> impl);
+  OtlpExporter(kj::Rc<Impl> impl, bool exportsLogs, double sampleRatio);
   ~OtlpExporter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(OtlpExporter);
 
@@ -204,23 +204,22 @@ class OtlpExporter final {
 
   kj::Rc<OtlpSpanExporter> addRef() const;
 
+  // Whether invocations export their logs too, and the share of traces without an upstream
+  // sampling decision they export.
+  const bool exportsLogs;
+  const double sampleRatio;
+
  private:
   mutable kj::Rc<Impl> impl;
 };
 
 kj::Own<OtlpExporter> factory_new_otlp_exporter(const WorkerFactory& factory,
-    ::rust::Box<SubrequestChannel> traces,
-    ::rust::Box<SubrequestChannel> logs,
+    ::rust::Box<SubrequestChannel> collector,
     ::rust::Str path,
     bool exportLogs,
     bool json,
     double sampleRatio);
 kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
-// Whether invocations exporting through `exporter` export their logs too.
-bool otlp_exporter_exports_logs(const OtlpExporter& exporter);
-// The share of traces without an upstream decision that invocations exporting through `exporter`
-// export.
-double otlp_exporter_sample_ratio(const OtlpExporter& exporter);
 void otlp_exporter_unlink(const OtlpExporter& exporter);
 
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
