@@ -5,11 +5,11 @@
 #pragma once
 
 // The C++ half of workerd's command line: the functions the Rust entry point (cli/lib.rs) calls
-// through the cxx bridges in cli/bridge.rs (the build's capabilities) and
-// server/bridge.rs (the process's logging, the bootstrap, the exit). Rust parses the command
-// line, produces the encoded config (config-compiler.h compiles schema files), owns the event loop
-// (kj_rs_tokio::Runtime) and runs the server (server/entry.rs); the bootstrap sets up the process
-// and V8 around it and builds the worker factory.
+// through the cxx bridges in cli/bridge.rs (the build's capabilities) and server/bridge.rs (the
+// process's logging, the process, the factory, the exit). Rust parses the command line, produces
+// the encoded config (config-compiler.h compiles schema files), owns the event loop
+// (kj_rs_tokio::Runtime) and runs the server (server/entry.rs); `process_start` sets up the process
+// and V8 around it (per-process.h) and `factory_new` builds the worker factory.
 //
 // Do not include a generated bridge header here: both bridges include this header.
 
@@ -17,12 +17,14 @@
 
 #include <kj/function.h>
 #include <kj/memory.h>
+#include <kj/refcount.h>
 
 namespace kj_rs_tokio {
 struct TokioAsyncIoContext;
 }  // namespace kj_rs_tokio
 
 namespace workerd::server {
+class ProcessState;
 class WorkerFactory;
 struct PendingCommand;
 struct ThreadBody;
@@ -42,7 +44,12 @@ bool fuzzilli_supported();
 // See the bridge (server/bridge.rs).
 int32_t with_process_context(
     bool verbose, ::rust::Vec<uint64_t> config, ::rust::Box<PendingCommand> command);
-kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
+kj::Arc<ProcessState> process_start(::rust::Slice<const uint64_t> config,
+    const ServeOrTestOptions& options,
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench);
+kj::Own<WorkerFactory> factory_new(const ProcessState& process,
+    kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
     const ServeOrTestOptions& options,
     kj::Maybe<const TestOptions&> test,

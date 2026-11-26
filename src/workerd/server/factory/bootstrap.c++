@@ -241,46 +241,6 @@ void applyBenchOptions(WorkerFactory::Options& options, const BenchOptions& benc
   options.tailWorkers = benchOptions.trace;
 }
 
-kj::Arc<ProcessState> startProcess(const ::rust::Vec<uint64_t>& config,
-    const ServeOrTestOptions& serveOrTest,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench) {
-  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(config)), CONFIG_READER_OPTIONS);
-  auto root = reader.getRoot<config::Config>();
-  ProcessState::Options options{
-    .autogates = KJ_MAP(gate, root.getAutogates()) { return kj::str(gate); },
-    .v8Flags = KJ_MAP(flag, root.getV8Flags()) { return kj::str(flag); },
-  };
-  setUpServeOrTestProcess(options, serveOrTest);
-  KJ_IF_SOME(t, test) {
-    setUpTestProcess(options, t);
-  }
-  KJ_IF_SOME(b, bench) {
-    setUpBenchProcess(options, b);
-  }
-  return ProcessState::start(options);
-}
-
-kj::Own<WorkerFactory> newFactory(const ProcessState& process,
-    kj_rs_tokio::TokioAsyncIoContext& loop,
-    ::rust::Vec<uint64_t> config,
-    const ServeOrTestOptions& serveOrTest,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench) {
-  auto io = kj::heap<LoopIo>(loop);
-  auto options = kj::heap<WorkerFactory::Options>();
-  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
-  applyServeOrTestOptions(*options, serveOrTest, io->getFilesystem());
-  KJ_IF_SOME(t, test) {
-    applyTestOptions(*options, t);
-  }
-  KJ_IF_SOME(b, bench) {
-    applyBenchOptions(*options, b);
-  }
-  // Destroyed in this order: the factory, its reference to the process, then its I/O.
-  return newWorkerFactory(process, io->get(), kj::mv(options), kj::mv(config)).attach(kj::mv(io));
-}
-
 }  // namespace
 
 ::rust::Slice<const uint8_t> release_version() {
@@ -320,14 +280,44 @@ int32_t with_process_context(
   return run_pending_command(kj::mv(command), kj::mv(config), structured);
 }
 
-kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
-    ::rust::Vec<uint64_t> config,
-    const ServeOrTestOptions& options,
+kj::Arc<ProcessState> process_start(::rust::Slice<const uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
     kj::Maybe<const TestOptions&> test,
     kj::Maybe<const BenchOptions&> bench) {
-  auto process = startProcess(config, options, test, bench);
-  // The factory holds the process, so the process goes with it.
-  return newFactory(*process, loop, kj::mv(config), options, test, bench);
+  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(config)), CONFIG_READER_OPTIONS);
+  auto root = reader.getRoot<config::Config>();
+  ProcessState::Options options{
+    .autogates = KJ_MAP(gate, root.getAutogates()) { return kj::str(gate); },
+    .v8Flags = KJ_MAP(flag, root.getV8Flags()) { return kj::str(flag); },
+  };
+  setUpServeOrTestProcess(options, serveOrTest);
+  KJ_IF_SOME(t, test) {
+    setUpTestProcess(options, t);
+  }
+  KJ_IF_SOME(b, bench) {
+    setUpBenchProcess(options, b);
+  }
+  return ProcessState::start(options);
+}
+
+kj::Own<WorkerFactory> factory_new(const ProcessState& process,
+    kj_rs_tokio::TokioAsyncIoContext& loop,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench) {
+  auto io = kj::heap<LoopIo>(loop);
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
+  applyServeOrTestOptions(*options, serveOrTest, io->getFilesystem());
+  KJ_IF_SOME(t, test) {
+    applyTestOptions(*options, t);
+  }
+  KJ_IF_SOME(b, bench) {
+    applyBenchOptions(*options, b);
+  }
+  // Destroyed in this order: the factory, its reference to the process, then its I/O.
+  return newWorkerFactory(process, io->get(), kj::mv(options), kj::mv(config)).attach(kj::mv(io));
 }
 
 BuildInfo build_info() {

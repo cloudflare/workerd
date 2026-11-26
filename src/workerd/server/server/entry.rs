@@ -7,18 +7,19 @@
 //!
 //! The command line (cli/lib.rs) parses the arguments into [`RunOptions`] and calls
 //! [`serve`] / [`test`] / [`bench`]. Each creates the event loop -- a `kj_rs_tokio::Runtime`, the
-//! KJ loop with tokio running whenever it sleeps -- has the C++ bootstrap
-//! (bootstrap.c++) set up the process (logging, perfetto, V8) and build the worker factory on that
-//! loop, then blocks on `server_serve` / `server_test` / `server_bench`, which run the server
-//! (`run.rs`). Every config error is printed, and the server then does not serve; unless
+//! KJ loop with tokio running whenever it sleeps -- has the C++ side set up the process
+//! (`process_start`: perfetto, autogates, V8) and build the worker factory on it and that loop
+//! (`factory_new`), then blocks on `server_serve` / `server_test` / `server_bench`, which run the
+//! server (`run.rs`). Every config error is printed, and the server then does not serve; unless
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
-//! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
-//! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
-//! set the process ends right there, without running the remaining destructors, like
-//! `kj::ProcessContext::exit()`; with it, the Runtime is torn down and `main` returns the status.
+//! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory and the
+//! process's handle have been dropped by then and, with them, V8 and the perfetto session.
+//! Unless `KJ_CLEAN_SHUTDOWN` is set the process ends right there, without running the remaining
+//! destructors, like `kj::ProcessContext::exit()`; with it, the Runtime is torn down and `main`
+//! returns the status.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -137,8 +138,8 @@ pub fn run_pending_command(
     (command.0)(config, structured_logging)
 }
 
-/// The process's schedule (see the module doc): the logging, the loop, the bootstrap, the
-/// command, the exit. `test` and `bench` are the bootstrap's options for those commands.
+/// The process's schedule (see the module doc): the logging, the loop, the process, the
+/// factory, the command, the exit. `test` and `bench` are the options of those commands.
 fn run<Fut: Future<Output = Result<()>> + 'static>(
     verbose: bool,
     config: Vec<u64>,
@@ -147,19 +148,32 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     bench: Option<ffi::BenchOptions>,
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
-    let command = move |config, structured| {
+    let command = move |config: Vec<u64>, structured: bool| {
         crate::log::set_structured(structured);
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let factory = ffi::bootstrap(
+        let process = ffi::process_start(
+            &config,
+            &options,
+            test.as_ref().into(),
+            bench.as_ref().into(),
+        )?;
+        let factory = ffi::factory_new(
+            &process,
             runtime.context(),
             config,
             &options,
             test.as_ref().into(),
             bench.as_ref().into(),
         )?;
-        // The command owns the factory and drops it when it completes (`shutdown`); if it does not
-        // complete, `block_on` drops it, and the factory with it, before returning.
-        let result = runtime.block_on(command(factory, structured));
+        // The command owns the factory and drops it when it completes (`shutdown`), and the
+        // process's handle goes after it: the factory holds the process too, so V8 is torn down
+        // with whichever goes last. If the command does not complete, `block_on` drops both before
+        // returning.
+        let result = runtime.block_on(async move {
+            let result = command(factory, structured).await;
+            drop(process);
+            result
+        });
         if let Err(failure) = result.and_then(|result| result) {
             let failure = ffi::exception_text(cxx::KjException::from(failure));
             let message = format!("*** Uncaught exception ***\n{failure}");
