@@ -6,9 +6,9 @@
 // MIME type parsing and serializing for the TypeScript implementations of MIME types: the
 // per-isolate bootstrap's (src/per_isolate/mime/) and node:util's (src/node/internal/
 // internal_mime.ts). They keep the type, subtype and parameters themselves and leave parsing and
-// serializing to the code behind MimeType (workerd/util/mimetype.h), so that they agree with the
-// C++ code that parses Content-Type values. Under RUST_MIMETYPE, JS strings cross to the Rust
-// parser and serializer as UTF-8 slices of one buffer, with no MimeType in between.
+// serializing to the Rust code behind MimeType (workerd/util/mimetype.h), so that they agree with
+// the C++ code that parses Content-Type values. JS strings cross to it as UTF-8 slices of one
+// buffer, with no MimeType in between.
 //
 // Parameters cross as a list of names and values: the name of parameter `i` at index `2 * i`,
 // and its value at `2 * i + 1`.

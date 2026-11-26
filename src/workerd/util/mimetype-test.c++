@@ -513,6 +513,47 @@ KJ_TEST("MimeType validates tokens and parameter values") {
   KJ_EXPECT(!MimeType::isParamValue(kj::StringPtr("a\0b", 3)));
 }
 
+KJ_TEST("MimeType parses NUL as any other byte") {
+  // A kj::StringPtr may hold a NUL, which is neither a token byte nor a parameter value byte.
+  KJ_EXPECT(MimeType::tryParse(kj::StringPtr("text/pl\0ain", 11)) == kj::none);
+  auto skipped = KJ_ASSERT_NONNULL(MimeType::tryParse(kj::StringPtr("text/plain;a=b\0c;d=e", 20)));
+  KJ_EXPECT(skipped.toString() == "text/plain;d=e");
+  auto quoted = KJ_ASSERT_NONNULL(MimeType::tryParse(kj::StringPtr("text/plain;a=\"\0\"", 16)));
+  KJ_EXPECT(quoted.toString() == "text/plain");
+  KJ_EXPECT(MimeType::extract(kj::heapString("text/plain\0", 11)) == kj::none);
+}
+
+KJ_TEST("MimeType parses the essence alone with IGNORE_PARAMS") {
+  auto parsed =
+      KJ_ASSERT_NONNULL(MimeType::tryParse("Text/HTML;charset=utf-8"_kj, MimeType::IGNORE_PARAMS));
+  KJ_EXPECT(parsed.toString() == "text/html");
+  KJ_EXPECT(parsed.params().size() == 0);
+  KJ_EXPECT(MimeType::tryParse("text/;charset=utf-8"_kj, MimeType::IGNORE_PARAMS) == kj::none);
+}
+
+KJ_TEST("MimeType serializes more parameters than it keeps on the stack") {
+  MimeType::MimeParams params;
+  kj::Vector<kj::String> expected;
+  for (unsigned i = 0; i < 40; ++i) {
+    if (i % 3 == 0) {
+      params.insert(kj::str("p", i), kj::str("needs \"quotes\" ", i));
+      expected.add(kj::str("p", i, "=\"needs \\\"quotes\\\" ", i, "\""));
+    } else {
+      params.insert(kj::str("p", i), kj::str(i));
+      expected.add(kj::str("p", i, "=", i));
+    }
+  }
+  MimeType many(kj::str("multipart"), kj::str("mixed"), kj::mv(params));
+  auto paramsString = kj::strArray(expected, ";");
+  KJ_EXPECT(many.paramsToString() == paramsString);
+  KJ_EXPECT(many.toString() == kj::str("multipart/mixed;", paramsString));
+}
+
+KJ_TEST("MimeType constants serialize to their strings") {
+  KJ_EXPECT(MimeType::PLAINTEXT.toString() == MimeType::PLAINTEXT_STRING);
+  KJ_EXPECT(MimeType::PLAINTEXT_ASCII.toString() == MimeType::PLAINTEXT_ASCII_STRING);
+}
+
 KJ_TEST("Extract Mime Type") {
   // These are taken from the fetch spec
   // https://fetch.spec.whatwg.org/#concept-header-extract-mime-type

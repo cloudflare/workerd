@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// node:util MIMEType and MIMEParams: parsing, serializing and the parameter operations. The
-// default variant parses with the C++ MimeType and @all-autogates with the Rust one.
+// node:util MIMEType and MIMEParams: parsing, serializing and the parameter operations.
 
 import { MIMEType } from 'node:util';
 

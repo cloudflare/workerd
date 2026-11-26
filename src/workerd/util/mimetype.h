@@ -12,9 +12,6 @@
 namespace workerd {
 
 class MimeType;
-namespace legacy {
-struct MimeTypeAccess;
-}
 class ConstMimeType final {
  public:
   constexpr ConstMimeType(kj::StringPtr type, kj::StringPtr subtype)
@@ -212,8 +209,6 @@ class MimeType final {
   kj::String type_;
   kj::String subtype_;
   MimeParams params_;
-
-  friend struct legacy::MimeTypeAccess;
 };
 
 inline ConstMimeType::operator MimeType() const {

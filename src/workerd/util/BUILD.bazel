@@ -198,20 +198,11 @@ wd_cc_library(
 
 wd_cc_library(
     name = "mimetype",
-    srcs = [
-        "mimetype.c++",
-        # The C++ parser and serializer, used unless the RUST_MIMETYPE autogate is on.
-        "mimetype-legacy.c++",
-    ],
-    hdrs = [
-        "mimetype.h",
-        "mimetype-legacy.h",
-    ],
+    srcs = ["mimetype.c++"],
+    hdrs = ["mimetype.h"],
     implementation_deps = [
-        ":autogate",
         ":mimetype-rs",
         ":mimetype/ffi.rs@cxx",
-        ":string-buffer",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -222,7 +213,7 @@ wd_cc_library(
     ],
 )
 
-# The Rust parser and serializer behind mimetype.h, under the RUST_MIMETYPE autogate.
+# The Rust parser and serializer behind mimetype.h.
 wd_rust_crate(
     name = "mimetype-rs",
     srcs = glob(["mimetype/**/*.rs"]),
@@ -496,16 +487,6 @@ kj_test(
 kj_test(
     src = "mimetype-test.c++",
     deps = [
-        ":mimetype",
-    ],
-)
-
-# Checks that the Rust parser and serializer agree with the C++ ones in mimetype-legacy.c++.
-kj_test(
-    size = "large",
-    src = "mimetype-legacy-test.c++",
-    deps = [
-        ":autogate",
         ":mimetype",
     ],
 )

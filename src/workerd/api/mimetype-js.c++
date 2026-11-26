@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "mimetype-js.h"
 
-#include <workerd/util/autogate.h>
-#include <workerd/util/mimetype.h>
 #include <workerd/util/mimetype/ffi.rs.h>
 
 #include <kj/map.h>
@@ -14,12 +12,6 @@ namespace workerd::api {
 namespace ffi = rust::mimetype;
 
 namespace {
-
-// Under RUST_MIMETYPE, the strings cross to the Rust parser and serializer as UTF-8 slices, with
-// nothing in between; otherwise they go through MimeType, which runs the C++ code.
-bool useRust() {
-  return util::Autogate::isEnabled(util::AutogateKey::RUST_MIMETYPE);
-}
 
 ::rust::Slice<const uint8_t> bytes(kj::ArrayPtr<const char> s) {
   return {reinterpret_cast<const uint8_t*>(s.begin()), s.size()};
@@ -150,36 +142,12 @@ jsg::JsString serializeToJs(jsg::Lock& js, size_t len, Write&& write) {
   return js.str(out.asPtr());
 }
 
-MimeType::MimeParams readParams(jsg::Lock& js, jsg::JsObject params, uint32_t paramCount) {
-  MimeType::MimeParams result;
-  for (uint32_t i = 0; i < paramCount; i++) {
-    result.upsert(readString(js, params, 2 * i).toString(js),
-        readString(js, params, 2 * i + 1).toString(js), [](auto&, auto&&) {});
-  }
-  return result;
-}
-
 }  // namespace
 
 kj::Maybe<jsg::JsArray> parseMimeTypeToJs(jsg::Lock& js, jsg::JsString input) {
   kj::SmallArray<char, 256> utf8(input.utf8Length(js));
   utf8.asPtr().fill(0);
   auto inputChars = utf8.asPtr().first(input.writeInto(js, utf8.asPtr()).written);
-
-  if (!useRust()) {
-    KJ_IF_SOME(parsed, MimeType::tryParse(inputChars)) {
-      auto& params = parsed.params();
-      kj::Vector<jsg::JsValue> parts(2 + 2 * params.size());
-      parts.add(js.str(parsed.type()));
-      parts.add(js.str(parsed.subtype()));
-      for (auto& param: params) {
-        parts.add(js.str(param.key));
-        parts.add(js.str(param.value));
-      }
-      return js.arr(parts.asPtr());
-    }
-    return kj::none;
-  }
 
   kj::Vector<jsg::JsValue> parts(8);
   // The type and subtype go first, once the parse finds them; the parameters arrive during it.
@@ -198,11 +166,6 @@ jsg::JsString serializeMimeTypeFromJs(jsg::Lock& js,
     jsg::JsString subtype,
     jsg::JsObject params,
     uint32_t paramCount) {
-  if (!useRust()) {
-    return js.str(
-        MimeType(type.toString(js), subtype.toString(js), readParams(js, params, paramCount))
-            .toString());
-  }
   auto strings = readParamStrings(js, params, paramCount, 2);
   strings.add(type);
   strings.add(subtype);
@@ -219,10 +182,6 @@ jsg::JsString serializeMimeTypeFromJs(jsg::Lock& js,
 }
 
 jsg::JsString serializeMimeParamsFromJs(jsg::Lock& js, jsg::JsObject params, uint32_t paramCount) {
-  if (!useRust()) {
-    return js.str(
-        MimeType(kj::String(), kj::String(), readParams(js, params, paramCount)).paramsToString());
-  }
   auto strings = readParamStrings(js, params, paramCount, 0);
   Utf8Strings utf8(js, strings);
   kj::SmallArray<ffi::Param, 8> views(paramCount);

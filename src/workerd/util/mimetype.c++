@@ -2,16 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Under the RUST_MIMETYPE autogate, MIME types are parsed, validated and serialized by Rust
-// (`mimetype/`), and this file adapts its bridge to KJ types; otherwise by the C++ code in
-// mimetype-legacy.c++.
+// MIME types are parsed, validated and serialized by Rust (`mimetype/`); this file adapts its
+// bridge to KJ types.
 
 #include "mimetype.h"
 
 #include "strings.h"
 
-#include <workerd/util/autogate.h>
-#include <workerd/util/mimetype-legacy.h>
 #include <workerd/util/mimetype/ffi.rs.h>
 
 #include <kj/debug.h>
@@ -21,10 +18,6 @@ namespace workerd {
 namespace ffi = rust::mimetype;
 
 namespace {
-
-bool useRust() {
-  return util::Autogate::isEnabled(util::AutogateKey::RUST_MIMETYPE);
-}
 
 ::rust::Slice<const uint8_t> bytes(kj::ArrayPtr<const char> s) {
   return {reinterpret_cast<const uint8_t*>(s.begin()), s.size()};
@@ -69,7 +62,6 @@ MimeType MimeType::parse(kj::StringPtr input, ParseOptions options) {
 }
 
 kj::Maybe<MimeType> MimeType::tryParse(kj::ArrayPtr<const char> input, ParseOptions options) {
-  if (!useRust()) return legacy::tryParseMimeType(input, options);
   if (options & ParseOptions::IGNORE_PARAMS) {
     return toMimeType(ffi::parse_essence(bytes(input)), kj::none);
   }
@@ -114,11 +106,11 @@ const MimeType::MimeParams& MimeType::params() const {
 }
 
 bool MimeType::isToken(kj::ArrayPtr<const char> s) {
-  return useRust() ? ffi::is_token(bytes(s)) : legacy::isMimeToken(s);
+  return ffi::is_token(bytes(s));
 }
 
 bool MimeType::isParamValue(kj::ArrayPtr<const char> s) {
-  return useRust() ? ffi::is_param_value(bytes(s)) : legacy::isMimeParamValue(s);
+  return ffi::is_param_value(bytes(s));
 }
 
 bool MimeType::addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> value) {
@@ -136,7 +128,6 @@ kj::String MimeType::essence() const {
 }
 
 kj::String MimeType::paramsToString() const {
-  if (!useRust()) return legacy::mimeTypeParamsToString(*this);
   ParamViews views(params_);
   auto result = kj::heapString(ffi::params_serialized_len(views.get()));
   auto written = ffi::serialize_params(views.get(), mutableBytes(result));
@@ -145,7 +136,6 @@ kj::String MimeType::paramsToString() const {
 }
 
 kj::String MimeType::toString() const {
-  if (!useRust()) return legacy::mimeTypeToString(*this);
   ParamViews views(params_);
   auto type = bytes(type_);
   auto subtype = bytes(subtype_);
@@ -185,7 +175,6 @@ const MimeType MimeType::PLAINTEXT = MimeType::parse(PLAINTEXT_STRING);
 const MimeType MimeType::PLAINTEXT_ASCII = MimeType::parse(PLAINTEXT_ASCII_STRING);
 
 kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
-  if (!useRust()) return legacy::extractMimeType(input);
   ffi::MimeParamSink sink;
   auto essence = ffi::extract(bytes(input), sink);
   return toMimeType(essence, kj::mv(sink.params));
