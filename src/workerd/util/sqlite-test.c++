@@ -1934,6 +1934,65 @@ KJ_TEST("SQLite memory metering counts text bound from an array in a UTF-16 data
   KJ_EXPECT(db.getSqliteMemoryBytes() >= memoryBytes, db.getSqliteMemoryBytes(), memoryBytes);
 }
 
+KJ_TEST("SQLite getCheckedBlob() and getCheckedText() throw when a conversion runs out of memory") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/1024 * 1024);
+
+  // A zeroblob() takes no memory until it is read, which then allocates all of it. Its size is
+  // read from a table, as SQLite would copy the result of a constant expression, allocating it.
+  db.run("CREATE TABLE sizes (size INTEGER)");
+  db.run("INSERT INTO sizes VALUES (2097152)");
+  auto query = db.run("SELECT zeroblob(size), zeroblob(size), zeroblob(size), "
+                      "NULL, x'', '', 5, 'text', x'ff' FROM sizes");
+  KJ_ASSERT(!query.isDone());
+  // getBlob() reads the failed conversion as an empty blob. SQLite then reads the value as NULL.
+  KJ_EXPECT(query.getBlob(0).size() == 0);
+  KJ_EXPECT(query.isNull(0));
+  KJ_EXPECT_THROW_MESSAGE("out of memory: SQLITE_NOMEM", query.getCheckedBlob(1));
+  KJ_EXPECT_THROW_MESSAGE("out of memory: SQLITE_NOMEM", query.getCheckedText(2));
+
+  KJ_EXPECT(query.getCheckedBlob(3).size() == 0);
+  KJ_EXPECT(query.getCheckedText(3) == "");
+  KJ_EXPECT(query.getCheckedText(3).begin() != nullptr);
+  KJ_EXPECT(query.getCheckedBlob(4).size() == 0);
+  KJ_EXPECT(query.getCheckedText(4) == "");
+  KJ_EXPECT(query.getCheckedBlob(5).size() == 0);
+  KJ_EXPECT(query.getCheckedText(5) == "");
+  KJ_EXPECT(query.getCheckedText(6) == "5");
+  KJ_EXPECT(query.getCheckedBlob(6) == "5"_kjb);
+  KJ_EXPECT(query.getCheckedText(7) == "text");
+  KJ_EXPECT(query.getCheckedBlob(8) == "\xff"_kjb);
+}
+
+KJ_TEST("SQLite ownChangeCount() is the query's own count") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.run("CREATE TABLE t (v INTEGER)");
+
+  auto insert = db.run("INSERT INTO t VALUES (1), (2), (3)");
+  auto remove = db.run("DELETE FROM t WHERE v = 1");
+  KJ_EXPECT(insert.ownChangeCount() == 3);
+  KJ_EXPECT(remove.ownChangeCount() == 1);
+
+  // changeCount() is still the DELETE's after a statement that changes no rows.
+  auto create = db.run("CREATE TABLE u (v INTEGER)");
+  KJ_EXPECT(create.changeCount() == 1);
+  KJ_EXPECT(create.ownChangeCount() == 0);
+  auto pragma = db.run("PRAGMA user_version = 1");
+  KJ_EXPECT(pragma.ownChangeCount() == 0);
+
+  // A statement with RETURNING counts once it is done.
+  auto returning = db.run("UPDATE t SET v = v + 1 RETURNING v");
+  KJ_ASSERT(!returning.isDone());
+  returning.nextRow();
+  returning.nextRow();
+  KJ_ASSERT(returning.isDone());
+  KJ_EXPECT(returning.ownChangeCount() == 2);
+}
+
 KJ_TEST("I/O exceptions pass through SQLite with the error context") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);

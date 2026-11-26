@@ -77,6 +77,7 @@ def wd_rust_crate(
         test_compile_data = [],
         test_size = "medium",
         test_shard_count = None,
+        test_features = [],
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
@@ -111,6 +112,8 @@ def wd_rust_crate(
         test_shard_count: the number of shards to split the unit tests between, for crates
             whose many tests together take long, since RUST_TEST_THREADS=1 runs them serially.
             See wd_rust_test.
+        test_features: C++ toolchain features of <name>_test's link, such as
+            CFI_CHECKED_TEST_FEATURES (//build:linking.bzl).
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
@@ -205,6 +208,7 @@ def wd_rust_crate(
         rustc_env = rustc_env,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
+        features = test_features,
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

@@ -1,0 +1,36 @@
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# A VFS that C++ owns and lends to Rust (sqlite_rs::Vfs::from_kj); its test is
+# :sqlite-rs-lent-vfs-test_test.
+wd_rust_crate(
+    name = "sqlite-rs-lent-vfs-test",
+    testonly = True,
+    cxx_bridge_deps = [
+        "//src/rust/sqlite-rs:ffi.rs@cxx",
+    ],
+    cxx_bridge_src = "lib.rs",
+    link_deps = [
+        ":ffi",
+    ],
+    test_deps = [
+        "//src/rust/sqlite-rs/testing:sqlite-rs-testing",
+    ],
+    deps = [
+        "//src/rust/sqlite-rs",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    testonly = True,
+    srcs = [
+        "ffi.c++",
+    ],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":lib.rs@cxx",
+        "@capnp-cpp//src/kj",
+    ],
+)
