@@ -5,18 +5,18 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { describe, makeError } from 'error-stacks-common';
 
-function remoteMakesError(kind) {
-  return makeError(kind, 'remote');
+function remoteMakesError() {
+  return makeError('remote');
 }
 
 export default class extends WorkerEntrypoint {
-  throwError(kind) {
-    throw remoteMakesError(kind);
+  throwError() {
+    throw remoteMakesError();
   }
 
   // The error is deep in the value.
-  returnError(kind) {
-    return { deep: [1, { error: remoteMakesError(kind) }] };
+  returnError() {
+    return { deep: [1, { error: remoteMakesError() }] };
   }
 
   describeError(value) {

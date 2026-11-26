@@ -62,6 +62,18 @@ export default {
       // The legacy parser calls into node-internal:url, a binding implemented in Rust.
       return new Response(url.parse('https://example.com/path?q=1').hostname);
     }
+    if (request.url.includes('/loader')) {
+      // The name contains '/', which the inspector must still route to this isolate.
+      const worker = env.LOADER.get('a/b/c/0.0', () => ({
+        compatibilityDate: '2024-01-01',
+        mainModule: 'dynamic.js',
+        modules: {
+          'dynamic.js':
+            'export default { fetch() { return new Response("ok"); } };',
+        },
+      }));
+      return worker.getEntrypoint().fetch(request);
+    }
     if (request.url.includes('/throwException')) {
       const url = new URL(request.url);
       throw new Error(url.searchParams.get('message'));

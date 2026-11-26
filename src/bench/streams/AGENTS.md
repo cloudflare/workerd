@@ -104,7 +104,11 @@ feedback from a full one: compare runs made with the same filter.
 
 `bazel test //src/bench/...` runs each cell's `@smoke` variants, which run
 every case briefly (`--quick`) to check that it works, and the lint. CI runs
-them; it doesn't run the benchmarks themselves.
+them; it doesn't run the benchmarks themselves. A `@smoke` test runs each
+case a few times, so a case that takes tenths of a second a call in an
+optimized build takes seconds in sanitizer and debug builds: such a case
+moves less data or fewer chunks when `b.options.quick` is set, and its name
+shows the amounts the run used.
 
 ## Suites
 

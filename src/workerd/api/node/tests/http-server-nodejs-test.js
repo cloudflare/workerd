@@ -117,6 +117,37 @@ export const testHttpServerMethodQuery = {
   },
 };
 
+export const testHttpServerDefaultStatusMessage = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(res.statusMessage, undefined);
+      if (req.url === '/custom') {
+        res.statusMessage = 'Custom';
+      } else if (req.url === '/missing') {
+        res.statusCode = 404;
+      }
+      res.end();
+      if (req.url === '/') {
+        strictEqual(res.statusMessage, 'OK');
+      }
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
+
+    const ok = await env.SERVICE.fetch('https://cloudflare.com/');
+    strictEqual(ok.status, 200);
+    strictEqual(ok.statusText, 'OK');
+
+    const missing = await env.SERVICE.fetch('https://cloudflare.com/missing');
+    strictEqual(missing.status, 404);
+    strictEqual(missing.statusText, 'Not Found');
+
+    const custom = await env.SERVICE.fetch('https://cloudflare.com/custom');
+    strictEqual(custom.status, 200);
+    strictEqual(custom.statusText, 'Custom');
+  },
+};
+
 // Tests is taken from test/parallel/test-http-server-multiheaders.js
 export const testHttpServerMultiHeaders = {
   async test(_ctrl, env) {

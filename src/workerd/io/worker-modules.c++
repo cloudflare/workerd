@@ -8,7 +8,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
     api::pyodide::SnapshotToDisk snapshotToDisk,
     api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
     PythonSnapshotRelease::Reader pythonRelease,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> maybeSnapshot,
     CompatibilityFlags::Reader featureFlags) {
   auto mainModule = kj::str(source.mainModule);
   auto modules = source.modules.asPtr();

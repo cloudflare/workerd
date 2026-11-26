@@ -6,6 +6,7 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/io/features.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -370,7 +371,7 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
-    if (flags.getWorkerdExperimental()) {
+    if (isUdpIngressEnabled(flags)) {
       // non-standard extension, not part of the proposed sockets spec
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_TS_OVERRIDE({

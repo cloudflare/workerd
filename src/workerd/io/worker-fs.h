@@ -547,6 +547,19 @@ using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
 using FsNodeWithError = kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
 class FsMap;
 
+// The virtual file system stores file names as written, not percent-encoded. These convert
+// a file: URL (or one segment of its pathname) to that form by percent-decoding each segment.
+// fileUrlToPath() and decodeFileName() return kj::none when a segment decodes to something no
+// file name can be: one containing '/' or NUL, or "." or "..".
+kj::Maybe<kj::Path> fileUrlToPath(const jsg::Url& url) KJ_WARN_UNUSED_RESULT;
+kj::Maybe<kj::String> decodeFileName(kj::ArrayPtr<const char> name) KJ_WARN_UNUSED_RESULT;
+
+// The decoded pathname of a file: URL, for error messages.
+kj::String fileUrlToPathString(const jsg::Url& url) KJ_WARN_UNUSED_RESULT;
+
+// A relative URL that resolves, against a directory URL, to the entry with this exact name.
+kj::String encodeFileName(kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+
 // The virtual file system interface. This is the main entry point for accessing the vfs.
 // It is important to always destroy the VirtualFileSystem instance under the isolate lock.
 // The VFS holds a table of Refcounted objects (File, Directory, SymbolicLink) that can only
@@ -748,8 +761,7 @@ class FsMap final {
     return maybe##name##Root.orDefault(kDefault##name##Path);                                      \
   }                                                                                                \
   const kj::Path get##name##Path() const {                                                         \
-    auto path = kj::str(get##name##Root().getPathname().slice(1));                                 \
-    return kj::Path::parse(path);                                                                  \
+    return KJ_ASSERT_NONNULL(fileUrlToPath(get##name##Root()));                                    \
   }                                                                                                \
   void set##name##Root(jsg::Url url) {                                                             \
     KJ_REQUIRE(url.getProtocol() == "file:"_kj, "url must be a file URL");                         \

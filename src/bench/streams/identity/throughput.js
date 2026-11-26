@@ -11,12 +11,12 @@
 // (identity ledger #22).
 
 import {
-  SHAPES,
   drainByob,
   drainBytes,
   expectEqual,
   pump,
   shapeLabel,
+  shapesFor,
 } from 'helpers';
 
 const MIN = 4096;
@@ -37,7 +37,8 @@ async function drainAtLeast(reader) {
 
 export const throughput = {
   bench(b) {
-    for (const [count, size] of SHAPES) {
+    const shapes = shapesFor(b);
+    for (const [count, size] of shapes) {
       b.run(`IdentityTransformStream ${shapeLabel(count, size)}`, async () => {
         const bytes = await pump(
           new IdentityTransformStream(),
@@ -48,7 +49,7 @@ export const throughput = {
         expectEqual(bytes, count * size, 'bytes read');
       });
     }
-    for (const [count, size] of SHAPES) {
+    for (const [count, size] of shapes) {
       b.run(`FixedLengthStream ${shapeLabel(count, size)}`, async () => {
         const bytes = await pump(
           new FixedLengthStream(count * size),
@@ -59,7 +60,7 @@ export const throughput = {
         expectEqual(bytes, count * size, 'bytes read');
       });
     }
-    for (const [count, size] of SHAPES) {
+    for (const [count, size] of shapes) {
       b.run(`BYOB reader ${shapeLabel(count, size)}`, async () => {
         const bytes = await pump(
           new IdentityTransformStream(),
@@ -70,7 +71,7 @@ export const throughput = {
         expectEqual(bytes, count * size, 'bytes read');
       });
     }
-    for (const [count, size] of SHAPES.slice(0, 2)) {
+    for (const [count, size] of shapes.slice(0, 2)) {
       b.run(`readAtLeast(4 KiB) ${shapeLabel(count, size)}`, async () => {
         const bytes = await pump(
           new IdentityTransformStream(),

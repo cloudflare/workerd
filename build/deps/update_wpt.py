@@ -111,6 +111,7 @@ def main():
     # hash and prefix, and leaves every other dependency as it was.
     update_deps.TARGET_FILTER = "wpt"
     update_deps.process_config("shared_deps.jsonc")
+    update_deps.update_lockfile()
 
 
 if __name__ == "__main__":

@@ -15,5 +15,8 @@ const worker :Workerd.Worker = (
     ( name = "./index.mjs", esModule = embed "index.mjs" )
   ],
   compatibilityDate = "2024-01-01",
-  compatibilityFlags = ["nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  bindings = [
+    ( name = "LOADER", workerLoader = () ),
+  ],
 );

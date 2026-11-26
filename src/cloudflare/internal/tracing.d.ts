@@ -2,8 +2,24 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A value acceptable as an attribute on a span.
-type SpanValue = string | number | boolean;
+// A value acceptable as an attribute on a span. Mirrors OpenTelemetry's AttributeValue:
+// a primitive, or a homogeneous array of one primitive type.
+//
+// Array semantics:
+//   - A one-element array stays an array (it is not collapsed to its element).
+//   - An empty array is recorded as an empty array.
+//   - null and undefined elements preserve their position as empty values. Both are represented
+//     as null in downstream tracing output.
+//   - Arrays mixing primitive types, or containing objects or nested arrays, are ignored.
+//
+// Keep in sync with the JSG_TS_OVERRIDE in src/workerd/api/tracing.h.
+type SpanValue =
+  | string
+  | number
+  | boolean
+  | Array<string | null | undefined>
+  | Array<number | null | undefined>
+  | Array<boolean | null | undefined>;
 
 interface SpanAttributes {
   [key: string]: SpanValue | undefined;
@@ -121,8 +137,8 @@ declare const tracing: {
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
 
-  // Returns the span associated with the current async context. Returns undefined
-  // outside an invocation or when execution is detached into the root async context.
+  // Returns the span associated with the current async context, or the invocation span when no
+  // user-created span is active. Returns undefined outside an invocation.
   getActiveSpan(): Span | undefined;
 
   // Makes `span` the active span while invoking `callback(...args)`, then restores the previous

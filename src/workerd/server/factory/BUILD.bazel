@@ -41,6 +41,17 @@ wd_cc_library(
     ],
 )
 
+# The policy objects of a single-tenant runtime: no limits, and the clock JavaScript sees. Shared by
+# the factory and `workerd repl`.
+wd_cc_library(
+    name = "single-tenant-policy",
+    hdrs = ["single-tenant-policy.h"],
+    deps = [
+        "//src/workerd/io",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 # The C++ side of the Rust server: compiles workers, starts requests, builds actors and their
 # storage, serves the capnp RPC protocols, encodes channel tokens, runs the inspector.
 wd_cc_library(
@@ -59,6 +70,7 @@ wd_cc_library(
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
         ":otlp-export-queue",
+        ":single-tenant-policy",
         ":worker-factory-hdrs",
         "//src/rust/worker:bridge",
         "//src/workerd/api:memory-cache",
@@ -112,6 +124,11 @@ wd_cc_library(
     name = "bootstrap",
     srcs = ["bootstrap.c++"],
     linkstatic = CC_LIBRARY_LINKSTATIC,
+    # Bootstrap starts tcmalloc's background thread when the binary links tcmalloc.
+    local_defines = select({
+        "//src/workerd/server:really_use_tcmalloc": ["WORKERD_USE_TCMALLOC"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":bootstrap-hdrs",
         ":worker-factory",
@@ -131,7 +148,10 @@ wd_cc_library(
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
-    ],
+    ] + select({
+        "//src/workerd/server:really_use_tcmalloc": ["@tcmalloc//tcmalloc:malloc_extension"],
+        "//conditions:default": [],
+    }),
     # The C++ root of the workerd binary is linked eagerly, as a cc_binary's own sources would be.
     # Bazel places it ahead of everything it depends on, and from an eager object the linker
     # resolves the rest of the C++ in that order. Left lazy, the Rust side's references would reach

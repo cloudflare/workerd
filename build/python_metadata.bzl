@@ -1,4 +1,4 @@
-# After updating this file, make sure to run "bazel mod tidy"
+# After updating this file, make sure to run "bazel mod tidy --lockfile_mode=update"
 load("@bazel_lib//lib:base64.bzl", "base64")
 load("@bazel_lib//lib:strings.bzl", "chr")
 
@@ -213,8 +213,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "name": "314.0.6",
         "pyodide_version": "314.0.6",
         "pyodide_date": "2026-08-17",
-        "backport": "12",
-        "integrity": "sha256-uVRpvFwiPOiEaG5PsFR6OpCaBRNwb1wdxllxdVAoSgQ=",
+        "backport": "13",
+        "integrity": "sha256-vnBF0bY1IMI6JsTolbd9Xu3FNzbbe7RQY8qj+MjcanE=",
         "flag": "pythonWorkers314",
         "enable_flag_name": "python_workers_314",
         "emscripten_version": "5.0.3",

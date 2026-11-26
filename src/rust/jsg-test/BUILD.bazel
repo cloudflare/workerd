@@ -50,9 +50,11 @@ wd_rust_crate(
     ],
     proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["@crates_vendor//serde_json"],
-    # The crate has hundreds of subtests and uses RUST_TEST_THREADS=1 (serial),
-    # so in debug builds it runs close to the "large" (60s) timeout.
-    test_size = "enormous",
+    # The crate has more than a thousand tests, each of which creates an isolate, and they run
+    # serially (RUST_TEST_THREADS=1). Split between shards, they finish in seconds even in debug
+    # and sanitizer builds.
+    test_shard_count = 8,
+    test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",

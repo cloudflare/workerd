@@ -15,8 +15,7 @@ All Rust/C++ interop uses the `cxx` crate. Each crate with a bridge declares
   `Box`/`UniquePtr`.
 - **Always** verify that lifetimes are respected — an opaque C++ type behind `&T` must outlive the
   Rust reference.
-- **Always** verify that bridges must use the `workerd::rust::<crate_name>` naming convention. The
-  only exception is `python-parser` which uses `edgeworker::rust::python_parser`.
+- **Always** verify that bridges must use the `workerd::rust::<crate_name>` naming convention.
 - **Always** verify companion files. Every CXX bridge should have hand-written `ffi.c++` and `ffi.h`
   implementing the C++ side. Generated headers (`<file>.rs.h`) are produced by the build system.
 
@@ -192,6 +191,9 @@ some violations, and the README says which. Reviewers flag these:
   These test the C++ side of the FFI bridge.
 - **Inline `#[cfg(test)]` modules**: standard Rust unit tests for pure-Rust logic.
 - All test targets run with `RUST_BACKTRACE=1` and `RUST_TEST_THREADS=1` (serial execution).
+  A crate whose tests together take long splits them between Bazel test shards with
+  `test_shard_count` (`wd_rust_crate`) or `shard_count` (`wd_rust_test`), each a process of its
+  own, rather than taking a larger test size.
 
 ### Review Checklist
 

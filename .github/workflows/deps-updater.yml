@@ -36,6 +36,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
         run: bazel fetch --repo_env=CARGO_BAZEL_REPIN=all --repo=@crates_vendor
+      - name: Update the base of the container image
+        # A failed lookup skips this update; a Dockerfile that no longer matches fails the job.
+        run: |
+          pattern='^FROM gcr\.io/distroless/cc-debian13:nonroot@sha256:[0-9a-f]{64} '
+          if ! grep -qE "$pattern" docker/Dockerfile; then
+            echo "::error::docker/Dockerfile has no FROM line matching $pattern"
+            exit 1
+          fi
+          if ! digest=$(docker buildx imagetools inspect gcr.io/distroless/cc-debian13:nonroot \
+            --format '{{.Manifest.Digest}}') || ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::warning::Could not look up the base image's digest; not updating it."
+            exit 0
+          fi
+          sed -i -E "s|^(FROM gcr\.io/distroless/cc-debian13:nonroot@)sha256:[0-9a-f]{64} |\1$digest |" \
+            docker/Dockerfile
+          grep -qF "FROM gcr.io/distroless/cc-debian13:nonroot@$digest " docker/Dockerfile
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request
@@ -55,6 +71,7 @@ jobs:
             MODULE.bazel.lock
             build/deps/gen
             deps/rust
+            docker/Dockerfile
             .github/workflows
       - name: Enable Pull Request Automerge
         run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}

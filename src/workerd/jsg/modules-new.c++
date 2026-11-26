@@ -311,7 +311,12 @@ class EsModule final: public Module {
           }
         }
         KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
-          return space.construct(encodeSource(kj::mv(owned)));
+          auto result = space.construct(encodeSource(kj::mv(owned)));
+          // Release a non-ASCII original now that the transcoded copy replaces
+          // it. Doing so only after encoding succeeds leaves the source intact
+          // for a retry if encoding throws.
+          source = kj::ArrayPtr<const char>();
+          return result;
         }
       }
       KJ_UNREACHABLE;

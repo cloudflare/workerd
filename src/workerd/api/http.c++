@@ -427,13 +427,13 @@ jsg::Ref<Request> Request::constructor(
               // Other methods, even if they would be recognized if they were uppercased,
               // are supposed to be rejected.
               // Refs: https://fetch.spec.whatwg.org/#methods
-              switch (method) {
-                case kj::HttpMethod::GET:
-                case kj::HttpMethod::POST:
-                case kj::HttpMethod::PUT:
-                case kj::HttpMethod::DELETE:
-                case kj::HttpMethod::HEAD:
-                case kj::HttpMethod::OPTIONS:
+              switch (method.known()) {
+                case kj::HttpMethod::Known::GET:
+                case kj::HttpMethod::Known::POST:
+                case kj::HttpMethod::Known::PUT:
+                case kj::HttpMethod::Known::DELETE:
+                case kj::HttpMethod::Known::HEAD:
+                case kj::HttpMethod::Known::OPTIONS:
                   break;
                 default:
                   JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
@@ -561,7 +561,7 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
-kj::StringPtr Request::getMethod() {
+kj::ArrayPtr<const char> Request::getMethod() {
   return kj::toCharSequence(method);
 }
 kj::StringPtr Request::getUrl() {

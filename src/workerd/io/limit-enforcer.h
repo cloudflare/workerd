@@ -108,6 +108,14 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     return 128 * 1024 * 1024;  // 128 MB
   }
 
+  // How long a Durable Object storage operation may hold the output gate before the gate breaks
+  // and the object is reset. This only protects against total hangs. Lowering it much in
+  // production is risky, since a low timeout can fire spuriously under heavy CPU load and fail
+  // requests that would otherwise succeed; tests lower it to exercise the timeout quickly.
+  virtual kj::Duration getOutputGateTimeout() const {
+    return 30 * kj::SECONDS;
+  }
+
   // IoContext::awaitJs() calls this when the promise it waits for is never settled, which can be
   // in a GC finalizer or without the isolate lock, so it must neither enter V8 nor need the lock.
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;

@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//src/pyodide/tests:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 load("//src/pyodide/tests/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
 
@@ -35,6 +35,15 @@ py_wd_test(
     "top-level-entropy",
     name = "top-level-entropy-baseline",
     make_snapshot = False,
+)
+
+# The one test that creates a baseline snapshot from scratch and then restores it, in every Pyodide
+# version; the other tests load the released baseline snapshots. As in `top-level-entropy-baseline`,
+# the top level runs after the restore.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-create-baseline",
+    create_baseline_snapshot = True,
 )
 
 py_wd_test("subdirectory")
@@ -154,7 +163,7 @@ py_wd_test(
 # Shell-driven test for aborting the isolate on a Python fatal error. The Python worker
 # triggers a fatal error which calls abortIsolate(), terminating the workerd process. The shell
 # script verifies the expected fatal output and non-zero exit.
-sh_test(
+wd_sh_test(
     name = "python-abort-isolate-on-fatal-test",
     size = "enormous",
     srcs = ["python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.sh"],

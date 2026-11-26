@@ -28,6 +28,18 @@ export function shapeLabel(count, size) {
   return `${count} x ${sizeLabel(size)}`;
 }
 
+// Under --quick, which only checks that each case runs, the throughput and
+// pipe cases write a sixteenth as many chunks, so that the @smoke tests
+// stay fast in sanitizer and debug builds. Labels show the counts a run
+// used.
+const QUICK_DIVISOR = 16;
+
+// SHAPES, with the chunk counts cut down under --quick.
+export function shapesFor(b) {
+  if (!b.options.quick) return SHAPES;
+  return SHAPES.map(([count, size]) => [count / QUICK_DIVISOR, size]);
+}
+
 // Writes to identity streams copy their bytes, so one buffer of each size
 // serves as every chunk.
 const chunks = new Map();
