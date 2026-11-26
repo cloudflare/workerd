@@ -1395,6 +1395,20 @@ bool JsBufferSource::isSharedArrayBuffer() const {
   return inner->IsSharedArrayBuffer();
 }
 
+bool JsBufferSource::isBackedBySharedArrayBuffer() const {
+  v8::Local<v8::Value> inner = *this;
+  if (inner->IsSharedArrayBuffer()) return true;
+  if (!inner->IsArrayBufferView()) return false;
+  auto view = inner.As<v8::ArrayBufferView>();
+  // A view with no buffer allocated yet keeps its bytes on the V8 heap, so it isn't shared.
+  if (!view->HasBuffer()) return false;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+  return view->GetBuffer()->IsSharedArrayBuffer();
+#else
+  return view->Buffer()->IsSharedArrayBuffer();
+#endif
+}
+
 bool JsBufferSource::isArrayBuffer() const {
   v8::Local<v8::Value> inner = *this;
   return inner->IsArrayBuffer();
