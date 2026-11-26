@@ -78,7 +78,7 @@ export const constants = {
 };
 
 function createBuffer(length: number): Buffer {
-  if (length > kMaxLength) {
+  if (length > kMaxLength || length < 0) {
     throw new ERR_OUT_OF_RANGE(
       'The given length is invalid',
       `0 to ${kMaxLength}`,
@@ -445,7 +445,7 @@ function alloc(size: number, fill?: FillValue, encoding?: string): Buffer {
   if (Number.isNaN(size)) {
     throw new ERR_INVALID_ARG_VALUE.RangeError('size', size);
   }
-  if (size >= kMaxLength) {
+  if (size > kMaxLength || size < 0) {
     throw new ERR_OUT_OF_RANGE('size', `0 to ${kMaxLength}`, size);
   }
 
