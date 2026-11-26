@@ -617,6 +617,28 @@ class IsolateBase {
     return false;
   }
 
+  // The baseline snapshot this isolate booted from, directly or as the base of its zygote.
+  kj::Maybe<const BaselineSnapshot&> tryGetBaselineSnapshot() const {
+    KJ_IF_SOME(c, snapshotConfig) {
+      KJ_SWITCH_ONEOF(c) {
+        KJ_CASE_ONEOF(baseline, BaselineSnapshot) {
+          return baseline;
+        }
+        KJ_CASE_ONEOF(mutableSnapshot, MutableSnapshot) {
+          KJ_IF_SOME(base, mutableSnapshot.base) {
+            return base;
+          }
+        }
+        KJ_CASE_ONEOF(finalizedSnapshot, FinalizedSnapshot) {}
+      }
+    }
+    return kj::none;
+  }
+
+  bool isStartingFromBaselineSnapshot() const {
+    return tryGetBaselineSnapshot() != kj::none;
+  }
+
   // Pins `data` into the snapshot of `context` and returns its index, which the restored context
   // later passes to extractOnceFromSnapshot(). Indices are assigned in call order.
   // Only valid while preparing a snapshot; the caller is inside a handle scope.
@@ -693,6 +715,10 @@ class IsolateBase {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<FinalizedSnapshot>().artifact;
   }
 
+  const SnapshotArtifact& baselineSnapshotArtifact() const {
+    return *KJ_REQUIRE_NONNULL(tryGetBaselineSnapshot()).artifact;
+  }
+
   kj::Own<SnapshotArtifact> extractSnapshotArtifact() {
     return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
   }
@@ -701,6 +727,12 @@ class IsolateBase {
   // inside a handle scope. `badTagFieldsCount` and `wrappablesMetadata` are the data of the
   // serializer callbacks; both must stay alive until createSnapshotBlob() has checked them.
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+      uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
+
+  // Registers an additional context in the snapshot (returning the 0-based index passed to
+  // v8::Context::FromSnapshot()). Same callback lifetime rules as setSnapshotDefaultContext().
+  size_t addSnapshotContext(v8::Local<v8::Context> context,
       uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata);
 
@@ -737,7 +769,10 @@ class IsolateBase {
       kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
       const uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata,
-      kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
+      kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {},
+      v8::SnapshotCreator::FunctionCodeHandling codeHandling =
+          v8::SnapshotCreator::FunctionCodeHandling::kClear,
+      v8::Global<v8::Context> extraContextHandle = {});
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -866,9 +901,10 @@ class IsolateBase {
   v8::Isolate* ptr;
   // Determines how the isolate was created:
   //  * kj::none: plain `v8::Isolate::New(params)`, no SnapshotCreator. The default.
-  //  * MutableSnapshot: an isolate constructed via `v8::SnapshotCreator`, which is used later
-  //    to serialize a startup snapshot.
-  //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
+  //  * MutableSnapshot: an isolate constructed via `v8::SnapshotCreator` (optionally initialized
+  //    from a baseline snapshot), which is used later to serialize a startup snapshot.
+  //  * FinalizedSnapshot: an isolate initialized from a previously-produced per-worker snapshot.
+  //  * BaselineSnapshot: an isolate initialized from a process-wide baseline snapshot.
   kj::Maybe<SnapshotConfig> snapshotConfig;
   // The first FAIL_CLOSED restore-time property the zygote's top level used, if any. Set by the
   // property's getter or setter; removeRestoreTimeGlobalsBeforeSnapshot() fails the zygote on it.
@@ -1272,7 +1308,9 @@ class Isolate: public IsolateBase {
   void iterateResourceTypeTemplates(
       kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) override {
     if (!hasExtraWrappers) {
-      wrappers[0]->iterateResourceTypeTemplates(cb);
+      if (wrappers[0].get() != nullptr) {
+        wrappers[0]->iterateResourceTypeTemplates(cb);
+      }
     } else {
       KJ_FAIL_ASSERT("Not yet implemented");
     }
@@ -1286,7 +1324,9 @@ class Isolate: public IsolateBase {
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
     if (!hasExtraWrappers) {
-      wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
+      if (wrappers[0].get() != nullptr) {
+        wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
+      }
     } else {
       KJ_FAIL_ASSERT("Not yet implemented");
     }
@@ -1444,9 +1484,15 @@ class Isolate: public IsolateBase {
       //   a Ref.
       WrappableDeserializeMetadata metadata;
       kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
+      const SnapshotArtifact* deserializeArtifact = nullptr;
       if (jsgIsolate.isStartingFromSnapshot()) {
-        metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer,
-            jsgIsolate.finalizedSnapshotArtifact(),
+        deserializeArtifact = &jsgIsolate.finalizedSnapshotArtifact();
+      } else if (jsgIsolate.isStartingFromBaselineSnapshot()) {
+        deserializeArtifact = &jsgIsolate.baselineSnapshotArtifact();
+      }
+      if (deserializeArtifact != nullptr) {
+        options.contextSnapshotIndex = deserializeArtifact->contextSnapshotIndex;
+        metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer, *deserializeArtifact,
             [this](v8::CppHeapPointerTag tag) { return jsgIsolate.snapshotRecreateFnFor(tag); });
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
@@ -1463,18 +1509,18 @@ class Isolate: public IsolateBase {
           "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
           "wrapper markers",
           metadata.badTagFieldsCount);
-      if (jsgIsolate.isStartingFromSnapshot()) {
+      if (deserializeArtifact != nullptr) {
         {
           // snapshotRelink() runs with the new context entered.
           v8::Context::Scope contextScope(context.getHandle(v8Isolate));
-          metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+          metadata.relinkReferences(*deserializeArtifact);
         }
         metadata.releaseSlotsWithChecks();
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and
       // adds them to a context restored from the snapshot, see
       // IsolateBase::installRestoreTimeGlobalsForZygote().
-      if (jsgIsolate.isPreparingSnapshot()) {
+      if (jsgIsolate.isPreparingSnapshot() && !options.skipRestoreTimeGlobalsForZygote) {
         jsgIsolate.installRestoreTimeGlobalsForZygote(
             *this, context.getHandle(v8Isolate), options.enableTemporal);
       } else if (jsgIsolate.isStartingFromSnapshot()) {

@@ -49,6 +49,14 @@ at context creation, before any user code. C++ entry point:
   TypeScript `performance.now()`/`timeOrigin`; see `performance/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
+- Process-wide baseline snapshots (`captureBaselineBootstrapForSnapshot()` in
+  `per-isolate-bootstrap.h`; see "Baseline snapshots" in
+  `docs/startup-snapshot.md`) run `primordials.ts` and `main.ts` once in a
+  canonical modern `ServiceWorkerGlobalScope`, then populate the closed-over
+  `compatFlags` object in place on restore. Any compat flag that can vary
+  among baseline-eligible workers (not rejected by `canUseBaselineSnapshot()`)
+  must be read dynamically from `compatFlags` rather than cached at module
+  load time.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap

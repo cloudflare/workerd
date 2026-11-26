@@ -67,18 +67,6 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
-// The RTTI registry (api/rtti.c++) only has the one-argument addBuiltinModule(), and no source
-// storage to map, so it takes the plain form.
-template <class Registry>
-void addNodeJsCompatModule(
-    Registry& registry, jsg::Module::Reader module, const jsg::ModuleSource* moduleSource) {
-  if constexpr (requires { registry.addBuiltinModule(module, kj::none, moduleSource); }) {
-    registry.addBuiltinModule(module, kj::none, moduleSource);
-  } else {
-    registry.addBuiltinModule(module);
-  }
-}
-
 template <class Registry>
 void registerNodeJsCompatModules(
     Registry& registry, auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
@@ -95,125 +83,101 @@ void registerNodeJsCompatModules(
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
-  registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
-    if (!nodeJsCompatEnabled) {
-      // If the `nodejs_compat` flag isn't enabled, only register internal modules.
-      // We need these for `console.log()`ing when running `workerd` locally.
-      return module.getType() == jsg::ModuleType::INTERNAL;
-    }
+  // Value-captured subset of compat flags consulted when gating NODE_BUNDLE modules so the
+  // predicate can be stored lazily on ModuleRegistryImpl without retaining featureFlags.
+  struct NodeJsBundlePredicate {
+    bool nodeJsCompatEnabled;
+    bool nodeJsAls;
+    bool fs;
+    bool http;
+    bool httpServer;
+    bool os;
+    bool http2;
+    bool console;
+    bool vm;
+    bool perfHooks;
+    bool domain;
+    bool childProcess;
+    bool v8;
+    bool tty;
+    bool punycode;
+    bool cluster;
+    bool workerThreads;
+    bool streamWrap;
+    bool wasi;
+    bool dgram;
+    bool inspector;
+    bool traceEvents;
+    bool readline;
+    bool repl;
+    bool sqlite;
 
-    if (isNodeJsCompatFsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsFsModule();
-    }
-
-    // We put node:http and node:https modules behind a compat flag
-    // for securing backward compatibility.
-    if (isNodeHttpModule(module.getName())) {
-      return featureFlags.getEnableNodejsHttpModules();
-    }
-
-    // We put node:_http_server and related features behind a compat flag
-    // for securing backward compatibility.
-    if (isNodeHttpServerModule(module.getName())) {
-      return featureFlags.getEnableNodejsHttpServerModules();
-    }
-
-    if (isNodeOsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsOsModule();
-    }
-
-    if (isNodeHttp2Module(module.getName())) {
-      return featureFlags.getEnableNodeJsHttp2Module();
-    }
-
-    if (isNodeConsoleModule(module.getName())) {
-      return featureFlags.getEnableNodeJsConsoleModule();
-    }
-
-    if (module.getName() == "node:vm"_kj) {
-      return featureFlags.getEnableNodeJsVmModule();
-    }
-
-    if (module.getName() == "node:perf_hooks"_kj) {
-      return featureFlags.getEnableNodeJsPerfHooksModule();
-    }
-
-    if (module.getName() == "node:domain"_kj) {
-      return featureFlags.getEnableNodeJsDomainModule();
-    }
-
-    if (module.getName() == "node:child_process"_kj) {
-      return featureFlags.getEnableNodeJsChildProcessModule();
-    }
-
-    if (module.getName() == "node:v8"_kj) {
-      return featureFlags.getEnableNodeJsV8Module();
-    }
-
-    if (module.getName() == "node:tty"_kj) {
-      return featureFlags.getEnableNodeJsTtyModule();
-    }
-
-    if (module.getName() == "node:punycode"_kj) {
-      return featureFlags.getEnableNodeJsPunycodeModule();
-    }
-
-    if (module.getName() == "node:cluster"_kj) {
-      return featureFlags.getEnableNodeJsClusterModule();
-    }
-
-    if (module.getName() == "node:worker_threads"_kj) {
-      return featureFlags.getEnableNodeJsWorkerThreadsModule();
-    }
-
-    if (module.getName() == "node:_stream_wrap"_kj) {
-      return featureFlags.getEnableNodeJsStreamWrapModule();
-    }
-
-    if (module.getName() == "node:wasi"_kj) {
-      return featureFlags.getEnableNodeJsWasiModule();
-    }
-
-    if (module.getName() == "node:dgram"_kj) {
-      return featureFlags.getEnableNodeJsDgramModule();
-    }
-
-    if (module.getName() == "node:inspector"_kj ||
-        module.getName() == "node:inspector/promises"_kj) {
-      return featureFlags.getEnableNodeJsInspectorModule();
-    }
-
-    if (module.getName() == "node:trace_events"_kj) {
-      return featureFlags.getEnableNodeJsTraceEventsModule();
-    }
-
-    if (module.getName() == "node:readline"_kj || module.getName() == "node:readline/promises"_kj) {
-      return featureFlags.getEnableNodeJsReadlineModule();
-    }
-
-    if (module.getName() == "node:repl"_kj) {
-      return featureFlags.getEnableNodeJsReplModule();
-    }
-
-    if (module.getName() == "node:sqlite"_kj) {
-      return featureFlags.getEnableNodeJsSqliteModule();
-    }
-
-    return true;
-  }, [&](jsg::Module::Reader module) { addNodeJsCompatModule(registry, module, moduleSource); });
-
-  // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
-  // need to register the `node:async_hooks` module from the bundle.
-  if (!nodeJsCompatEnabled && featureFlags.getNodeJsAls()) {
-    jsg::Bundle::Reader reader = NODE_BUNDLE;
-    for (auto module: reader.getModules()) {
-      auto specifier = module.getName();
-      if (specifier == "node:async_hooks") {
-        KJ_DASSERT(module.getType() == jsg::ModuleType::BUILTIN);
-        addNodeJsCompatModule(registry, module, moduleSource);
+    bool operator()(jsg::Module::Reader module) const {
+      if (!nodeJsCompatEnabled) {
+        // If the `nodejs_compat` flag isn't enabled, only register internal modules (needed for
+        // `console.log()` locally), plus `node:async_hooks` when `nodejs_als` is on.
+        if (module.getType() == jsg::ModuleType::INTERNAL) return true;
+        return nodeJsAls && module.getName() == "node:async_hooks"_kj;
       }
+      auto name = module.getName();
+      if (isNodeJsCompatFsModule(name)) return fs;
+      if (isNodeHttpModule(name)) return http;
+      if (isNodeHttpServerModule(name)) return httpServer;
+      if (isNodeOsModule(name)) return os;
+      if (isNodeHttp2Module(name)) return http2;
+      if (isNodeConsoleModule(name)) return console;
+      if (name == "node:vm"_kj) return vm;
+      if (name == "node:perf_hooks"_kj) return perfHooks;
+      if (name == "node:domain"_kj) return domain;
+      if (name == "node:child_process"_kj) return childProcess;
+      if (name == "node:v8"_kj) return v8;
+      if (name == "node:tty"_kj) return tty;
+      if (name == "node:punycode"_kj) return punycode;
+      if (name == "node:cluster"_kj) return cluster;
+      if (name == "node:worker_threads"_kj) return workerThreads;
+      if (name == "node:_stream_wrap"_kj) return streamWrap;
+      if (name == "node:wasi"_kj) return wasi;
+      if (name == "node:dgram"_kj) return dgram;
+      if (name == "node:inspector"_kj || name == "node:inspector/promises"_kj) return inspector;
+      if (name == "node:trace_events"_kj) return traceEvents;
+      if (name == "node:readline"_kj || name == "node:readline/promises"_kj) return readline;
+      if (name == "node:repl"_kj) return repl;
+      if (name == "node:sqlite"_kj) return sqlite;
+      return true;
     }
-  }
+  };
+
+  NodeJsBundlePredicate predicate{
+    .nodeJsCompatEnabled = nodeJsCompatEnabled,
+    .nodeJsAls = featureFlags.getNodeJsAls(),
+    .fs = featureFlags.getEnableNodeJsFsModule(),
+    .http = featureFlags.getEnableNodejsHttpModules(),
+    .httpServer = featureFlags.getEnableNodejsHttpServerModules(),
+    .os = featureFlags.getEnableNodeJsOsModule(),
+    .http2 = featureFlags.getEnableNodeJsHttp2Module(),
+    .console = featureFlags.getEnableNodeJsConsoleModule(),
+    .vm = featureFlags.getEnableNodeJsVmModule(),
+    .perfHooks = featureFlags.getEnableNodeJsPerfHooksModule(),
+    .domain = featureFlags.getEnableNodeJsDomainModule(),
+    .childProcess = featureFlags.getEnableNodeJsChildProcessModule(),
+    .v8 = featureFlags.getEnableNodeJsV8Module(),
+    .tty = featureFlags.getEnableNodeJsTtyModule(),
+    .punycode = featureFlags.getEnableNodeJsPunycodeModule(),
+    .cluster = featureFlags.getEnableNodeJsClusterModule(),
+    .workerThreads = featureFlags.getEnableNodeJsWorkerThreadsModule(),
+    .streamWrap = featureFlags.getEnableNodeJsStreamWrapModule(),
+    .wasi = featureFlags.getEnableNodeJsWasiModule(),
+    .dgram = featureFlags.getEnableNodeJsDgramModule(),
+    .inspector = featureFlags.getEnableNodeJsInspectorModule(),
+    .traceEvents = featureFlags.getEnableNodeJsTraceEventsModule(),
+    .readline = featureFlags.getEnableNodeJsReadlineModule(),
+    .repl = featureFlags.getEnableNodeJsReplModule(),
+    .sqlite = featureFlags.getEnableNodeJsSqliteModule(),
+  };
+
+  static const jsg::BuiltinBundleIndex* const nodeIndex = new jsg::BuiltinBundleIndex(NODE_BUNDLE);
+  registry.addLazyBuiltinBundle(*nodeIndex, kj::none, moduleSource,
+      kj::Function<bool(jsg::Module::Reader)>(kj::mv(predicate)));
 
   ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);

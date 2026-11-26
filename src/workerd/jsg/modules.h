@@ -472,6 +472,39 @@ struct SharedModuleSource {
 
 }  // namespace _
 
+// Pre-parsed process-wide lookup index over a static Cap'n Proto Bundle::Reader. Built once per
+// process for compiled-in builtin bundles (NODE_BUNDLE, CLOUDFLARE_BUNDLE, EW_BUNDLE,
+// STUDIO_BUNDLE) so ModuleRegistryImpl can register a bundle in O(1) and materialize only the
+// modules a Worker actually imports.
+class BuiltinBundleIndex {
+ public:
+  explicit BuiltinBundleIndex(Bundle::Reader bundle): bundle(bundle) {
+    for (auto module: bundle.getModules()) {
+      auto normalized = kj::Path::parse(module.getName()).toString(false);
+      auto& map = module.getType() == ModuleType::INTERNAL ? internalModules : builtinModules;
+      map.insert(kj::mv(normalized), module);
+    }
+  }
+
+  kj::Maybe<Module::Reader> find(kj::StringPtr normalizedPath, ModuleType type) const {
+    if (type == ModuleType::BUNDLE) return kj::none;
+    const auto& map = type == ModuleType::INTERNAL ? internalModules : builtinModules;
+    KJ_IF_SOME(found, map.find(normalizedPath)) {
+      return found;
+    }
+    return kj::none;
+  }
+
+  Bundle::Reader getBundle() const {
+    return bundle;
+  }
+
+ private:
+  Bundle::Reader bundle;
+  kj::HashMap<kj::String, Module::Reader> builtinModules;
+  kj::HashMap<kj::String, Module::Reader> internalModules;
+};
+
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
  public:
@@ -608,6 +641,21 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
+  // Registers a pre-indexed static builtin bundle in O(1). Individual modules are materialized
+  // into `entries` only when resolved, avoiding per-isolate path parsing and hash-table insertion
+  // for unused builtins. `index` must outlive this ModuleRegistryImpl (process-wide static).
+  void addLazyBuiltinBundle(const BuiltinBundleIndex& index,
+      kj::Maybe<Type> maybeFilter = kj::none,
+      const ModuleSource* moduleSource = nullptr,
+      kj::Maybe<kj::Function<bool(Module::Reader)>> predicate = kj::none) {
+    lazyBundles.add(LazyBuiltinBundle{
+      .index = &index,
+      .maybeFilter = maybeFilter,
+      .moduleSource = moduleSource,
+      .predicate = kj::mv(predicate),
+    });
+  }
+
   // Like addBuiltinBundle() above, but instantiates the bundle's Wasm module from `wasmHolder`.
   // The holder must outlive this registry. The bundle may contain at most one Wasm module, since
   // a holder holds one.
@@ -619,15 +667,6 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         sawWasm = true;
       }
       addBuiltinModule(module, wasmHolder);
-    }
-  }
-
-  template <typename Filter, typename AddModule>
-  void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
-    for (auto module: bundle.getModules()) {
-      if (filter(module)) {
-        addModule(module);
-      }
     }
   }
 
@@ -708,7 +747,35 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   }
 
  private:
+  struct Entry;
   static constexpr size_t kMaxFallbackServiceRedirects = 32;
+
+  // Finds the entry for `specifier`, first registering it from a lazy builtin bundle if one holds
+  // it.
+  kj::Maybe<kj::Own<Entry>&> findOrMaterializeEntry(const kj::Path& specifier, Type type) {
+    using Key = Entry::Key;
+    KJ_IF_SOME(entry, entries.find(Key(specifier, type))) {
+      return entry;
+    }
+    if (type == Type::BUNDLE || lazyBundles.empty()) {
+      return kj::none;
+    }
+    auto normalized = specifier.toString(false);
+    for (auto& lb: lazyBundles) {
+      if (lb.maybeFilter != kj::none && lb.maybeFilter != type) continue;
+      KJ_IF_SOME(module, lb.index->find(normalized, type)) {
+        bool allowed = true;
+        KJ_IF_SOME(pred, lb.predicate) {
+          allowed = pred(module);
+        }
+        if (allowed) {
+          addBuiltinModule(module, kj::none, lb.moduleSource);
+          return entries.find(Key(specifier, type));
+        }
+      }
+    }
+    return kj::none;
+  }
 
   kj::Maybe<ModuleInfo&> resolveImpl(jsg::Lock& js,
       const kj::Path& specifier,
@@ -719,12 +786,12 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       kj::Vector<kj::String>& visited) {
     using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
-      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
+      KJ_IF_SOME(entry, findOrMaterializeEntry(specifier, Type::INTERNAL)) {
         return entry->module(js, observer, referrer, method);
       }
       return kj::none;
     } else if (option == ResolveOption::BUILTIN_ONLY) {
-      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+      KJ_IF_SOME(entry, findOrMaterializeEntry(specifier, Type::BUILTIN)) {
         return entry->module(js, observer, referrer, method);
       }
     } else {
@@ -735,7 +802,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         }
       }
       // Then we look for a built-in version of the module.
-      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+      KJ_IF_SOME(entry, findOrMaterializeEntry(specifier, Type::BUILTIN)) {
         return entry->module(js, observer, referrer, method);
       }
     }
@@ -941,9 +1008,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       Lock& js, kj::FunctionParam<void(kj::StringPtr specifier)> onMissing) override {
     uint materialized = 0;
     for (auto& row: snapshotSeeds) {
-      using Key = Entry::Key;
       auto specifier = row.key.specifier.toString(false);
-      KJ_IF_SOME(entry, entries.find(Key(row.key.specifier, row.key.type))) {
+      KJ_IF_SOME(entry, findOrMaterializeEntry(row.key.specifier, row.key.type)) {
         auto& seeds = row.value;
         if (!seeds.module.IsEmpty() &&
             (entry->info.template is<typename Entry::StaticSource>() ||
@@ -1163,7 +1229,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   };
 
+  struct LazyBuiltinBundle {
+    const BuiltinBundleIndex* index;
+    kj::Maybe<Type> maybeFilter;
+    const ModuleSource* moduleSource;
+    kj::Maybe<kj::Function<bool(Module::Reader)>> predicate;
+  };
+
   kj::Table<kj::Own<Entry>, kj::HashIndex<SpecifierHashCallbacks>> entries;
+  kj::Vector<LazyBuiltinBundle> lazyBundles;
 
   // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
   // is the default.

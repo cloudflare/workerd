@@ -3514,6 +3514,7 @@ class Lock {
   // True when the underlying isolate was created in the corresponding snapshot mode.
   bool isPreparingSnapshot() const;
   bool isStartingFromSnapshot() const;
+  bool isStartingFromBaselineSnapshot() const;
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible

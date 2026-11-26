@@ -112,6 +112,12 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
 
   kj::Maybe<size_t> bootstrapStateIndex;
 
+  // 0-based AddContext() snapshot index (passed to v8::Context::FromSnapshot) when this snapshot's
+  // main context is stored as an additional context rather than the default context (used by
+  // process-wide baseline snapshots and by baseline-chained zygotes that delete global instance
+  // properties). None when the main context is the snapshot's default context.
+  kj::Maybe<size_t> contextSnapshotIndex;
+
   // The context-level AddData index of the state the context global's C++ object holds for its
   // JavaScript (the process and Buffer values), when the zygote's top level left any. The
   // restored Worker's fresh global object takes it over.
@@ -304,16 +310,26 @@ void deserializeApiWrapperCallback(
     v8::Local<v8::Object> holder, v8::StartupData payload, void* data);
 
 // Different views for snapshot artifacts:
+// * BaselineSnapshot: an isolate that boots from a process-wide baseline snapshot (a pre-built
+//   canonical modern ServiceWorkerGlobalScope context with per-isolate bootstrap already run and
+//   JSG constructor templates baked, with no Worker evaluated yet).
 // * MutableSnapshot: a zygote isolate built via v8::SnapshotCreator; holds an owning ref to
-//   the artifact and fills it in IsolateBase::createSnapshotBlob().
-// * FinalizedSnapshot: an isolate that boots from a previously produced blob; the Arc
-//   keeps the artifact alive for the isolate's entire life.
+//   the artifact and fills it in IsolateBase::createSnapshotBlob(). When `base` is given, the
+//   SnapshotCreator initializes the isolate from that baseline snapshot instead of V8's built-in
+//   snapshot, copying the baseline's external references as the prefix of
+//   `artifact->externalReferences`.
+// * FinalizedSnapshot: an isolate that boots from a previously produced per-worker startup
+//   snapshot; the Arc keeps the artifact alive for the isolate's entire life.
+struct BaselineSnapshot {
+  kj::Arc<SnapshotArtifact> artifact;
+};
 struct MutableSnapshot {
   kj::Own<SnapshotArtifact> artifact;
+  kj::Maybe<BaselineSnapshot> base = kj::none;
 };
 struct FinalizedSnapshot {
   kj::Arc<SnapshotArtifact> artifact;
 };
-using SnapshotConfig = kj::OneOf<MutableSnapshot, FinalizedSnapshot>;
+using SnapshotConfig = kj::OneOf<MutableSnapshot, FinalizedSnapshot, BaselineSnapshot>;
 
 }  // namespace workerd::jsg

@@ -463,6 +463,10 @@ bool Lock::isStartingFromSnapshot() const {
   return IsolateBase::from(v8Isolate).isStartingFromSnapshot();
 }
 
+bool Lock::isStartingFromBaselineSnapshot() const {
+  return IsolateBase::from(v8Isolate).isStartingFromBaselineSnapshot();
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }
