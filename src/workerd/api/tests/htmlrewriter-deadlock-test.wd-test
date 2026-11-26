@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same worker runs twice: once on the TypeScript streams implementation and once on the C++
+# one.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-deadlock-test",
+      worker = (
+        modules = .modules,
+        # typescript_implemented_streams is experimental.
+        compatibilityFlags = ["nodejs_compat", "experimental", "typescript_implemented_streams"],
+        bindings = [(name = "SELF", service = "htmlrewriter-deadlock-test")],
+      )
+    ),
+    ( name = "htmlrewriter-deadlock-test-cpp-streams",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "SELF", service = "htmlrewriter-deadlock-test-cpp-streams")],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "htmlrewriter-deadlock-test.js"),
+];

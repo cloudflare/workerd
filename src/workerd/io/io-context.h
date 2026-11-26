@@ -840,6 +840,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
+  // Like awaitIo(), but holds no pending event while waiting. Streams read and write this way: the
+  // other end of a stream may be JavaScript in this same isolate (an IdentityTransformStream's
+  // writer, or HTMLRewriter's handlers), so waiting on a stream is not necessarily waiting on
+  // external I/O, and a pending event would hide a deadlock with that JavaScript from the hang
+  // detection that fails a request nothing can advance any more. Streams backed by external I/O
+  // hold their own pending events while their I/O is in flight (see system-streams.c++).
+  template <typename T, typename Func>
+  jsg::PromiseForResult<Func, T, true> awaitIoWithoutPendingEvent(
+      jsg::Lock& js, kj::Promise<T> promise, Func&& func);
+
   // DEPRECATED: Like awaitIo() but:
   // - Does not have a continuation function, so suffers from the problems described in
   //   `awaitIo()`'s doc comment.
@@ -1839,6 +1849,12 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
   return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(), IdentityFunc<T>());
+}
+
+template <typename T, typename Func>
+jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithoutPendingEvent(
+    jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
+  return awaitIoImpl(js, kj::mv(promise), getCriticalSection(), kj::fwd<Func>(func));
 }
 
 template <typename T>

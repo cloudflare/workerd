@@ -151,10 +151,12 @@ struct StallingSinkCalls {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pendingWrite;
 };
 
-// A sink whose writes stay pending until the test completes them, recording every call.
+// A sink whose writes stay pending until the test completes them, recording every call. Like a sink
+// backed by external I/O (see system-streams.c++), it holds a pending event while a write is
+// outstanding, so that the IoContext does not take the stalled write for a hang.
 class StallingSink final: public WritableStreamSink {
  public:
-  explicit StallingSink(StallingSinkCalls& calls): calls(calls) {}
+  StallingSink(StallingSinkCalls& calls, IoContext& context): calls(calls), context(context) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     return stall();
@@ -175,12 +177,13 @@ class StallingSink final: public WritableStreamSink {
 
  private:
   StallingSinkCalls& calls;
+  IoContext& context;
 
   kj::Promise<void> stall() {
     ++calls.writes;
     auto paf = kj::newPromiseAndFulfiller<void>();
     calls.pendingWrite = kj::mv(paf.fulfiller);
-    return kj::mv(paf.promise);
+    return paf.promise.attach(context.registerPendingEvent());
   }
 };
 
@@ -2097,7 +2100,7 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped during a 
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     auto& js = env.js;
     auto stream = makeTsStream(js, makeCancelTrackingQueuedSource(js, cancels, false));
-    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls, env.context), EndStream::YES);
   });
 
   fixture.pollEventLoop();

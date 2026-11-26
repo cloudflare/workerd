@@ -2080,6 +2080,12 @@ wd_test(
 )
 
 wd_test(
+    src = "htmlrewriter-deadlock-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-deadlock-test.js"],
+)
+
+wd_test(
     src = "ts-webstreams-test.wd-test",
     args = [
         "--experimental",
