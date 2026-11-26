@@ -17,11 +17,15 @@
 //!
 //! See `AGENTS.md` for how the crate fits together and what is left to port.
 
+mod bench;
 mod ffi;
 mod scheduled;
 mod test;
 
 use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use cxx::KjException;
 use ffi::bridge;
@@ -152,6 +156,57 @@ impl Delivered {
         Ok(Running(self.0))
     }
 
+    /// Starts the bench event's handler with `params`, an encoded `BenchParams` message, in
+    /// `IoContext::run()`, with [`io_context::incoming_request_run`], and returns the future that
+    /// runs `f` on the promise for its group, waits for the future that `f` returns, and drains
+    /// the request. The handler is found and started first, in the run, by the C++ function
+    /// `entrypoint::startBench()`, as the run's C++ prelude, before Rust holds the lock:
+    /// `Worker::Api::runBench()`, which only `workerd bench` implements, calls its `bench()`. The
+    /// run fails with what finding or starting it throws, as when a class entrypoint's constructor
+    /// throws, or under Service Workers syntax. The prelude also names the run's Perfetto span,
+    /// `WorkerEntrypoint::bench() run`.
+    ///
+    /// The run is started before this returns, and the request is drained whether the run
+    /// succeeds, fails or is cancelled, even if the returned future is never polled:
+    /// `IoContext::IncomingRequest::drain()` lets the request's waitUntil tasks continue in the
+    /// `WorkerEntrypoint`'s task set, without waiting for them. Cancelling the run drops it before
+    /// the request is drained.
+    ///
+    /// The returned future fails with the exception that starting the run fails with, or else
+    /// with the error that the run fails with, or else with the exception that `drain()` throws.
+    pub fn run_bench<F>(
+        mut self,
+        params: &[u64],
+        f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, v8::Local<'s, v8::Promise>) -> Result<F, RunError>
+        + 'static,
+    ) -> impl Future<Output = Result<(), KjException>> + 'static
+    where
+        F: Future<Output = Result<(), KjException>> + 'static,
+    {
+        let start = bridge::invocation_take_bench_start(self.0.pin_mut(), params);
+        let run = io_context::incoming_request_run(
+            ffi::request(self.0.pin_mut()),
+            start,
+            move |lock, handles| {
+                let &[group] = handles else {
+                    return Err(jsg::Error::new_internal_error(format!(
+                        "the bench start returned {} handles, not the group's promise",
+                        handles.len()
+                    ))
+                    .into());
+                };
+                let group = v8::Local::<v8::Promise>::try_from(group).map_err(|_| {
+                    jsg::Error::new_internal_error("Worker::Api::runBench() returned no promise")
+                })?;
+                f(lock, group)
+            },
+        );
+        DrainAfterRun {
+            run: Some(run.map(|run| -> RunFuture { Box::pin(run) })),
+            drain: DrainOnDrop(Some(self.0)),
+        }
+    }
+
     /// Starts the event's scheduled handler with a `ScheduledEvent` for `scheduled_time` and
     /// `cron`, in a waitUntil task of the request, with the C++ function that
     /// `WorkerEntrypoint::runScheduled()` also calls, `entrypoint::startScheduledInWaitUntil()`:
@@ -171,6 +226,65 @@ impl Delivered {
     ) -> Result<Running, KjException> {
         bridge::invocation_start_scheduled_in_wait_until(self.0.pin_mut(), scheduled_time, cron)?;
         Ok(Running(self.0))
+    }
+}
+
+/// A delivered event that drains its request when it is dropped, if it hasn't been drained.
+struct DrainOnDrop(Option<KjOwn<bridge::Invocation>>);
+
+impl DrainOnDrop {
+    /// Drains the request, unless it has been drained.
+    fn drain(&mut self) -> Result<(), KjException> {
+        let Some(mut invocation) = self.0.take() else {
+            return Ok(());
+        };
+        let request = bridge::invocation_take_request(invocation.pin_mut());
+        io_context::incoming_request_drain(
+            request,
+            bridge::invocation_wait_until_tasks(invocation.pin_mut()),
+        )
+    }
+}
+
+impl Drop for DrainOnDrop {
+    fn drop(&mut self) {
+        // Only when the event is cancelled, which leaves nothing to report an error to.
+        if let Err(exception) = self.drain() {
+            tracing::error!("draining a cancelled event's request failed: {exception}");
+        }
+    }
+}
+
+/// The future of a run, boxed so that [`DrainAfterRun`] needs no pin projection.
+type RunFuture = Pin<Box<dyn Future<Output = Result<(), KjException>>>>;
+
+/// The future that [`Delivered::run_bench`] returns: waits for the run, then drains the request.
+struct DrainAfterRun {
+    /// The run, or the exception that starting it failed with, until the future is ready.
+    /// Declared before `drain`, so that dropping the future drops the run before it drains the
+    /// request.
+    run: Option<Result<RunFuture, KjException>>,
+    drain: DrainOnDrop,
+}
+
+impl Future for DrainAfterRun {
+    type Output = Result<(), KjException>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let ran = match self.run.take() {
+            Some(Ok(mut run)) => match run.as_mut().poll(cx) {
+                Poll::Ready(ran) => ran,
+                Poll::Pending => {
+                    self.run = Some(Ok(run));
+                    return Poll::Pending;
+                }
+            },
+            Some(Err(exception)) => Err(exception),
+            None => Err(kj::failed!("the run was polled after it completed").into()),
+        };
+        // The run's error, if any, is the event's; drain() throws only on a runtime bug.
+        let drained = self.drain.drain();
+        Poll::Ready(ran.and(drained))
     }
 }
 

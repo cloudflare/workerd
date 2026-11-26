@@ -1,0 +1,21 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Checks that the bench event has the Perfetto spans of WorkerEntrypoint::bench().
+sh_test(
+    name = "bench-event-perfetto-test",
+    size = "medium",
+    srcs = ["bench-event-perfetto-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location bench-event.wd-bench)",
+    ],
+    data = [
+        "bench-event.js",
+        "bench-event.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
+    target_compatible_with = select({
+        "//src/workerd/util:really_use_perfetto": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

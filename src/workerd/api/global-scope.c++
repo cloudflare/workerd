@@ -38,8 +38,6 @@
 
 #include <v8-microtask-queue.h>
 
-#include <capnp/message.h>
-#include <capnp/serialize.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -1042,34 +1040,6 @@ v8::Local<v8::Function> ServiceWorkerGlobalScope::getTestHandler(
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
   return testHandler.getHandle(js);
-}
-
-jsg::Promise<kj::Array<capnp::word>> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler,
-    bench::BenchParams::Reader params) {
-  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
-      "Benchmarks are not currently supported with Service Workers syntax.");
-  jsg::Lock& js = lock;
-  auto& api = lock.getWorker().getIsolate().getApi();
-  v8::Local<v8::Value> ctx = js.v8Undefined();
-  KJ_IF_SOME(c, eh.getCtx(js)) {
-    ctx = c.getHandle(js);
-  }
-  capnp::MallocMessageBuilder paramsMessage;
-  paramsMessage.setRoot(params);
-  auto group = api.runBench(js, eh.self.getHandle(js), eh.env.getHandle(js), ctx,
-      capnp::messageToFlatArray(paramsMessage));
-  return js.toPromise(group).then(js, [](jsg::Lock& js, jsg::Value value) {
-    auto handle = value.getHandle(js);
-    KJ_ASSERT(handle->IsArrayBuffer(), "the bench runner resolves with an ArrayBuffer");
-    auto buffer = handle.As<v8::ArrayBuffer>();
-    auto bytes = kj::arrayPtr(static_cast<const kj::byte*>(buffer->Data()), buffer->ByteLength());
-    KJ_ASSERT(bytes.size() % sizeof(capnp::word) == 0);
-    // Copied, so that the message is aligned to words.
-    auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
-    words.asBytes().copyFrom(bytes);
-    return words;
-  });
 }
 
 // This promise is used to set the timeout for hibernatable websocket events. It's expected to be

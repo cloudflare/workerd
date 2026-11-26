@@ -4,6 +4,7 @@
 
 #include "worker-entrypoint.h"
 
+#include <workerd/io/bench.capnp.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
@@ -989,6 +990,48 @@ KJ_TEST("an alarm canceled while it waits for its scheduled time drains its requ
   fixture.pollEventLoop();
   KJ_EXPECT(ran == 1, ran);
   KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
+}
+
+// Starts a bench event on an idle actor with an action queued, holds the run up on the input gate,
+// lets `cancel` drop the event's promise, and checks that the request drains: the queued action,
+// which runs as a waitUntil task of the request, still runs once the gate opens.
+template <typename Cancel>
+void expectCanceledBenchDrains(kj::StringPtr actorId, Cancel&& cancel) {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str(actorId))});
+  auto& waitScope = fixture.getWaitScope();
+  auto& actor = fixture.getActor();
+  auto context = fixture.newIoContext();
+  actor.setIoContext(kj::addRef(*context));
+
+  uint ran = 0;
+  KJ_ASSERT(context->getCrossContextExecutor().tryExecute([&ran](jsg::Lock&) { ++ran; }));
+  fixture.pollEventLoop();
+  auto inputLock = actor.getInputGate().wait(nullptr).wait(waitScope);
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  capnp::MallocMessageBuilder params;
+  capnp::MallocMessageBuilder report;
+  auto bench = entrypoint->bench(params.initRoot<bench::BenchParams>().asReader(),
+      report.initRoot<bench::BenchReport::Group>());
+  cancel(bench, waitScope);
+  KJ_EXPECT(ran == 0, ran);
+
+  { auto released = kj::mv(inputLock); }
+  fixture.pollEventLoop();
+  KJ_EXPECT(ran == 1, ran);
+  KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
+}
+
+KJ_TEST("a bench event dropped before it is polled drains its request") {
+  expectCanceledBenchDrains("bench-drop-drain-test"_kj,
+      [](kj::Promise<void>& bench, kj::WaitScope&) { bench = nullptr; });
+}
+
+KJ_TEST("a bench event canceled while its run waits for the input gate drains its request") {
+  expectCanceledBenchDrains(
+      "bench-cancel-drain-test"_kj, [](kj::Promise<void>& bench, kj::WaitScope& waitScope) {
+    KJ_EXPECT(!bench.poll(waitScope));
+    bench = nullptr;
+  });
 }
 
 KJ_TEST("custom events tag failures after delivery") {

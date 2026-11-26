@@ -39,6 +39,13 @@ pub mod bridge {
         type RunPrelude = io_context::RunPrelude;
     }
 
+    #[namespace = "kj::rust"]
+    unsafe extern "C++" {
+        include!("workerd/rust/kj/ffi.h");
+
+        type TaskSet = io_context::TaskSet;
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/entrypoint/ffi.h");
 
@@ -59,6 +66,13 @@ pub mod bridge {
         fn invocation_take_test_handler_lookup(
             invocation: Pin<&mut Invocation>,
         ) -> KjOwn<RunPrelude>;
+        fn invocation_take_bench_start(
+            invocation: Pin<&mut Invocation>,
+            params: &[u64],
+        ) -> KjOwn<RunPrelude>;
+        fn invocation_wait_until_tasks<'a>(
+            invocation: Pin<&'a mut Invocation>,
+        ) -> Pin<&'a mut TaskSet>;
     }
 
     extern "Rust" {
@@ -77,13 +91,22 @@ pub mod bridge {
         /// Starts the test event of `invocation`: see `runTest()` in `ffi.h`.
         fn test_event_start(invocation: KjOwn<Invocation>) -> Result<Box<TestEvent>>;
         async fn test_event_finish(event: Box<TestEvent>) -> Result<bool>;
+
+        type BenchEvent;
+
+        /// Starts the bench event of `invocation`: see `runBench()` in `ffi.h`.
+        fn bench_event_start(
+            invocation: KjOwn<Invocation>,
+            params: &[u64],
+        ) -> Result<Box<BenchEvent>>;
+        async fn bench_event_finish(event: Box<BenchEvent>) -> Result<Vec<u64>>;
     }
 }
 
 /// The request of `invocation`: see `invocation_request()` in `ffi.h`.
 pub fn request(invocation: Pin<&mut bridge::Invocation>) -> Pin<&mut bridge::IncomingRequest> {
-    // SAFETY: the typestates in `lib.rs` take the request out only when they finish it, after
-    // which they call nothing else on the invocation.
+    // SAFETY: the typestates in `lib.rs` take the request out only when they finish or drain it,
+    // after which nothing they call on the invocation reaches the request.
     unsafe { bridge::invocation_request(invocation) }
 }
 
@@ -123,5 +146,23 @@ fn test_event_start(invocation: KjOwn<bridge::Invocation>) -> Result<Box<TestEve
 }
 
 async fn test_event_finish(event: Box<TestEvent>) -> Result<bool, KjException> {
+    event.0.await
+}
+
+/// What a bench event that Rust has started finishes with: its group, encoded, in words.
+type BenchFinish = Pin<Box<dyn Future<Output = Result<Vec<u64>, KjException>>>>;
+
+/// A bench event that Rust has started, until it finishes.
+pub struct BenchEvent(BenchFinish);
+
+fn bench_event_start(
+    invocation: KjOwn<bridge::Invocation>,
+    params: &[u64],
+) -> Result<Box<BenchEvent>, KjException> {
+    let finished = crate::bench::start(crate::Invocation::new(invocation), params)?;
+    Ok(Box::new(BenchEvent(Box::pin(finished))))
+}
+
+async fn bench_event_finish(event: Box<BenchEvent>) -> Result<Vec<u64>, KjException> {
     event.0.await
 }

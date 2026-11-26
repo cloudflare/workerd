@@ -10,6 +10,7 @@
 
 #include <rust/cxx.h>
 
+#include <capnp/common.h>
 #include <kj/async.h>
 #include <kj/time.h>
 
@@ -33,6 +34,17 @@ kj::Own<IoContext::IncomingRequest> invocation_take_request(Invocation& invocati
 // that order.
 kj::Own<io_context::RunPrelude> invocation_take_test_handler_lookup(Invocation& invocation);
 
+// Takes what finds the bench event's handler out of the invocation, as
+// invocation_take_test_handler_lookup() does, with a copy of `params`, an encoded `BenchParams`
+// message, as the prelude of the run that waits for the event's group: the prelude starts the
+// handler's bench() with startBench() (`io/entrypoint-invocation.h`) and returns the group's
+// promise.
+kj::Own<io_context::RunPrelude> invocation_take_bench_start(
+    Invocation& invocation, ::rust::Slice<const uint64_t> params);
+
+// The task set in which draining the event's request waits for its waitUntil tasks.
+kj::TaskSet& invocation_wait_until_tasks(Invocation& invocation);
+
 // startScheduledInWaitUntil() (`io/entrypoint-invocation.h`), which
 // WorkerEntrypoint::runScheduled() also calls, for the event's request, for `scheduledTime` and
 // the cron pattern `cron`. Takes the event's entrypoint name, version info and props.
@@ -53,5 +65,15 @@ kj::Promise<WorkerInterface::ScheduledResult> runScheduled(
 // it returns, and an exception it fails with before then is thrown. Dropping the promise cancels
 // the request.
 kj::Promise<bool> runTest(kj::Own<Invocation> invocation);
+
+// Delivers the bench event `invocation` to its handler's bench() from Rust, with `params`, an
+// encoded `BenchParams` message: reports it to the tracer, delivers it, starts bench() in
+// IoContext::run() through Worker::Api::runBench(), waits for the cases it registers to run, and
+// drains the request, whether the run succeeds, fails or is cancelled (see `bench.rs`). Resolves
+// with the group's `BenchReport.Group`, without its name, as an encoded message. Everything but the
+// run happens before it returns, and an exception it fails with before then is thrown. Dropping
+// the promise cancels the run.
+kj::Promise<kj::Array<capnp::word>> runBench(
+    kj::Own<Invocation> invocation, kj::Array<capnp::word> params);
 
 }  // namespace workerd::entrypoint

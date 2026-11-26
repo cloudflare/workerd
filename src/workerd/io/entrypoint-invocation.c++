@@ -52,4 +52,22 @@ TestHandles getTestHandles(Worker::Lock& lock, IoContext& context, HandlerLookup
   return handles;
 }
 
+v8::Local<v8::Promise> startBench(Worker::Lock& lock,
+    IoContext& context,
+    HandlerLookup lookup,
+    kj::ArrayPtr<const capnp::word> params) {
+  jsg::Lock& js = lock;
+  auto exportedHandler = lock.getExportedHandler(
+      lookup.entrypointName.map([](kj::String& name) -> kj::StringPtr { return name; }),
+      kj::mv(lookup.versionInfo), kj::mv(lookup.props), context.getActor());
+  auto& h = *JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Benchmarks are not currently supported with Service Workers syntax.");
+  v8::Local<v8::Value> ctx = js.v8Undefined();
+  KJ_IF_SOME(c, h.getCtx(js)) {
+    ctx = c.getHandle(js);
+  }
+  return lock.getWorker().getIsolate().getApi().runBench(
+      js, h.self.getHandle(js), h.env.getHandle(js), ctx, params);
+}
+
 }  // namespace workerd::entrypoint
