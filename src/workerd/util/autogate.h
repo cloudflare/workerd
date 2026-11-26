@@ -165,7 +165,11 @@ namespace workerd::util {
      reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
      the request to finish, rather than doing all of that in C++. The handler is still started by  \
      C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
-  V(RUST_ENTRYPOINT_SCHEDULED)
+  V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
+  /* When enabled, TailStreamTarget delivers the tail events of a streaming tail worker as the     \
+     Rust crate src/workerd/io/trace-stream converts them, rather than as the C++ conversion in    \
+     io/trace-stream.c++ does. */                                                                  \
+  V(RUST_TRACE_STREAM)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

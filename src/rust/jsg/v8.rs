@@ -4546,6 +4546,42 @@ impl<'s> Local<'s, Object> {
         })
     }
 
+    /// Sets the property named `name` to `value`, like [`set`](Self::set), with a name that the
+    /// caller made once (internalized, so that each set skips the string table lookup) and
+    /// reuses.
+    ///
+    /// # Errors
+    ///
+    /// As for [`set`](Self::set).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` belongs to another isolate.
+    pub fn set_by_name(
+        self,
+        lock: &mut Lock<'s>,
+        name: &Global<Name>,
+        value: Local<'s, Value>,
+    ) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        value.debug_assert_isolate(lock);
+        assert_in_isolate_of(lock, &name.state);
+        let name = name.as_ffi();
+        call_into_js(lock, |lock| {
+            // SAFETY: the isolate is valid and locked (guaranteed by Lock), `self` and `value` are
+            // valid in 's, and `name` belongs to the lock's isolate, as checked above.
+            let ok = unsafe {
+                ffi::local_object_set_property_by_global_name(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    &name,
+                    value.into_ffi(),
+                )
+            };
+            Ok(ok.then_some(()))
+        })
+    }
+
     /// Whether `key` is in the object or its prototype chain.
     ///
     /// # Errors
