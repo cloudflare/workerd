@@ -146,6 +146,11 @@ wd_cc_library(
     ],
 )
 
+kj_test(
+    src = "html-rewriter-selector-test.c++",
+    deps = [":html-rewriter-selector"],
+)
+
 wd_cc_library(
     name = "capnp",
     srcs = [
@@ -466,6 +471,14 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "html-rewriter-selector",
+    srcs = ["html-rewriter-selector.c++"],
+    hdrs = ["html-rewriter-selector.h"],
+    visibility = ["//visibility:private"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "html-rewriter",
     srcs = ["html-rewriter.c++"],
     hdrs = ["html-rewriter.h"],
@@ -474,6 +487,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":html-rewriter-selector",
         "//src/workerd/io",
     ],
 )
@@ -738,6 +752,14 @@ wd_cc_library(
         "streams/streams-native-source-ownership-test.c++",
     ]
 ]
+
+kj_test(
+    src = "streams/draining-reader-lock-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture-expose-gc",
+    ],
+)
 
 kj_test(
     # Each injection point drains microtasks and forces a full GC, including under ASan.

@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [(
+    name = "htmlrewriter-security-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "htmlrewriter-security-test.js"),
+      ],
+      compatibilityFlags = [
+        "experimental",
+        "nodejs_compat",
+        "streams_enable_constructors",
+        "original-transform-stream-backpressure",
+      ],
+    ),
+  )],
+);

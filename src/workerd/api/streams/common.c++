@@ -43,7 +43,7 @@ namespace {
 // the deferred pump is still running, causing a use-after-free.
 class MemoryInputStream final: public ReadableStreamSource {
  public:
-  MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing)
+  MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<const void>> backing)
       : backing(kj::mv(backing)),
         unread(bytes) {}
 
@@ -84,7 +84,7 @@ class MemoryInputStream final: public ReadableStreamSource {
   }
 
  private:
-  kj::Maybe<kj::Own<void>> backing;
+  kj::Maybe<kj::Own<const void>> backing;
   kj::ArrayPtr<const kj::byte> unread;
 };
 
@@ -151,7 +151,7 @@ class TeeErrorAdapter final: public kj::AsyncInputStream {
 }  // namespace
 
 kj::Own<ReadableStreamSource> newMemorySource(
-    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> maybeBacking) {
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<const void>> maybeBacking) {
   KJ_IF_SOME(backing, maybeBacking) {
     return kj::heap<MemoryInputStream>(bytes, kj::mv(backing));
   }

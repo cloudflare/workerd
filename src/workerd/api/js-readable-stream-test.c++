@@ -17,6 +17,7 @@
 #include <capnp/serialize.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
+#include <kj/thread.h>
 
 namespace workerd::api {
 namespace {
@@ -182,6 +183,29 @@ class StallingSink final: public WritableStreamSink {
     calls.pendingWrite = kj::mv(paf.fulfiller);
     return kj::mv(paf.promise);
   }
+};
+
+// A sink whose first write stays pending until another thread opens the gate.
+class GatedSink final: public WritableStreamSink {
+ public:
+  explicit GatedSink(kj::Promise<void> gate): gate(kj::mv(gate)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return kj::mv(gate);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return kj::mv(gate);
+  }
+
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {}
+
+ private:
+  kj::Promise<void> gate;
 };
 
 KJ_TEST("JsReadableStream null state") {
@@ -625,6 +649,44 @@ KJ_TEST("JsReadableStream pumpTo drains into a sink and ends it") {
   });
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(ended);
+}
+
+KJ_TEST("JsReadableStream buffer is shared with a source dropped outside the isolate lock") {
+  // The source a buffer-backed stream is pumped from holds a reference to the stream's Buffer,
+  // and drops it on the pumping thread, on the event loop, without the isolate lock. Another
+  // thread holding the isolate lock may take and drop references to the same Buffer meanwhile,
+  // e.g. when JavaScript reads the `body` of a Response kept in a global.
+  //
+  // This test passes unless ThreadSanitizer reports the two threads' accesses to the Buffer's
+  // reference count as a data race. Nothing orders the other thread's addRef() relative to the
+  // drop of the source, so ThreadSanitizer reports an unsynchronized count whichever comes first.
+  TestFixture testFixture;
+  auto gate = kj::newPromiseAndCrossThreadFulfiller<void>();
+  kj::Maybe<JsReadableStream> kept;
+  kj::Maybe<kj::Own<kj::Thread>> otherThread;
+
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    JsReadableStream stream(js, kj::str(kData));
+    kept = stream.addRef(js);
+
+    // The other thread gets the isolate lock once this callback returns. It lets the pump
+    // finish only once it holds the lock, so the source is dropped no earlier than that.
+    otherThread = kj::heap<kj::Thread>([&]() {
+      testFixture.enterWorkerLockSynchronously([&](Worker::Lock& lock) {
+        auto& js = jsg::Lock::from(lock.getIsolate());
+        gate.fulfiller->fulfill();
+        auto ref = KJ_ASSERT_NONNULL(kept).addRef(js);
+      });
+    });
+
+    return stream.pumpTo(js, kj::heap<GatedSink>(kj::mv(gate.promise)), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+
+  otherThread = kj::none;
+  testFixture.enterWorkerLock([&](Worker::Lock&) { kept = kj::none; });
 }
 
 KJ_TEST("JsReadableStream pumpTo with EndStream::NO leaves the sink open") {

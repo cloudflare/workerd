@@ -209,7 +209,7 @@ class Element final: public HTMLRewriter::Token {
   jsg::Ref<Element> remove();
   jsg::Ref<Element> removeAndKeepContent();
 
-  void onEndTag(HTMLRewriter::ElementCallbackFunction&& callback);
+  void onEndTag(jsg::Lock& js, HTMLRewriter::ElementCallbackFunction&& callback);
 
   JSG_RESOURCE_TYPE(Element) {
     JSG_INSTANCE_PROPERTY(tagName, getTagName, setTagName);

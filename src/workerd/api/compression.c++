@@ -765,10 +765,14 @@ kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
     case ZSTD_c_contentSizeFlag:
     case ZSTD_c_checksumFlag:
     case ZSTD_c_dictIDFlag:
-    case ZSTD_c_nbWorkers:
     case ZSTD_c_jobSize:
     case ZSTD_c_overlapLog:
       break;
+    case ZSTD_c_nbWorkers:
+      // Multithreaded compression starts up to `value` OS threads per context. Accept the
+      // parameter for Node.js compatibility, but always compress on the calling thread. jobSize
+      // and overlapLog only affect multithreaded compression.
+      return kj::none;
     default:
       return CompressionError(kj::str("Unsupported Zstd compression parameter: ", key),
           "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);

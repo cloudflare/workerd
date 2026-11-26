@@ -1050,6 +1050,18 @@ wd_test(
 )
 
 wd_test(
+    src = "htmlrewriter-security-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-security-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-security-test.js"],
+)
+
+wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],

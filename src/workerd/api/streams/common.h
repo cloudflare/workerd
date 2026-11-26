@@ -1098,7 +1098,9 @@ inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
 // lifetime is tied to the IoContext.
 //
 // The `backing` parameter keeps the underlying memory alive for the lifetime of the stream.
-// If not provided, the bytes are copied.
+// If not provided, the bytes are copied. The stream is destroyed on the kj event loop, without
+// the isolate lock, so dropping `backing` there must be safe: a reference counted object it
+// shares with JavaScript-reachable objects needs an atomic count (kj::Arc, not kj::Rc).
 //
 // Reads and pumps run on the kj event loop without the isolate lock, so `bytes` MUST be
 // readable there.  When MPK protects isolate memory, that rules out anything inside the V8
@@ -1111,7 +1113,7 @@ inline kj::Maybe<IoContext::Id> tryGetIoContextId() {
 // or not, but in this case, that may be entirely opaque behind the details of the backing memory
 // as is the case with kj::Array<kj::byte> instances that come from the type wrapper system.
 kj::Own<ReadableStreamSource> newMemorySource(
-    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<const void>> backing = kj::none);
 
 // Wraps a kj::AsyncInputStream returned from a tee() call to ensure that it translates
 // errors into equivalent JS exceptions. Typically this is used when customizing tee() on

@@ -16,7 +16,8 @@ class Lock;
 
 class IoContext;
 
-// Tracks whether ReverseIoOwn instances can access their objects.
+// Tracks whether objects owned by an IoContext can still be accessed outside it, through
+// ReverseIoOwn or IoOwn::tryGetWithoutCurrentContext().
 class ReverseIoOwnValidity final: public kj::AtomicRefcounted {
  public:
   bool isValid() const {
@@ -88,7 +89,11 @@ class OwnedObjectList {
 // Object which receives possibly-cross-thread deletions of owned objects.
 class DeleteQueue: public kj::AtomicRefcounted {
  public:
-  DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
+  // Must be constructed on the thread of the IoContext that owns it.
+  DeleteQueue()
+      : crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}),
+        reverseIoOwnValidity(kj::arc<ReverseIoOwnValidity>()),
+        ownerExecutor(kj::getCurrentThreadExecutor().addRef()) {}
 
   void scheduleDeletion(OwnedObject* object) const;
 
@@ -128,6 +133,11 @@ class DeleteQueue: public kj::AtomicRefcounted {
   // The number of actions queued. For tests.
   size_t getQueuedActionCountForTest() const;
 
+  // True if objects owned by this queue's IoContext may be accessed without that IoContext being
+  // current: no other IoContext is current, and the owning one has not begun to be destroyed.
+  // Must be called on the owning IoContext's thread.
+  bool canAccessWithoutCurrentContext() const;
+
   struct State {
     kj::Vector<OwnedObject*> queue;
     // Actions that some other IoContext has requested be executed in this IoContext. When
@@ -151,13 +161,16 @@ class DeleteQueue: public kj::AtomicRefcounted {
   // cross-thread deletions can just be ignored.
   kj::MutexGuarded<kj::Maybe<State>> crossThreadDeleteQueue;
 
+  // Invalidated by the owning IoContext's destructor before it destroys any owned objects, so
+  // unlike `crossThreadDeleteQueue` it is accurate while those objects are being destroyed.
+  kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
+
   // Implements the corresponding methods of IoContext and ActorContext.
   template <typename T>
   IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   template <typename T>
-  ReverseIoOwn<T> addObjectReverse(
-      kj::Arc<ReverseIoOwnValidity> validity, kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
+  ReverseIoOwn<T> addObjectReverse(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   static void checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type);
 
@@ -175,6 +188,9 @@ class DeleteQueue: public kj::AtomicRefcounted {
 
   // True if any actions are queued.
   bool hasQueuedActions() const;
+
+  // Identifies the owning IoContext's thread.
+  kj::Own<const kj::Executor> ownerExecutor;
 
   friend class IoContext;
 };
@@ -244,8 +260,8 @@ inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObj
 
 template <typename T>
 inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
-    kj::Arc<ReverseIoOwnValidity> validity, kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
-  return ReverseIoOwn<T>(kj::mv(validity), addObjectImpl(kj::mv(obj), ownedObjects));
+    kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
+  return ReverseIoOwn<T>(reverseIoOwnValidity.addRef(), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
 // When the IoContext is destroyed, we need to null out the DeleteQueue. Complicating
@@ -279,6 +295,11 @@ class IoOwn {
   // example, when it was created by a different request). A non-throwing alternative to
   // operator->() for callers that have something else to fall back to.
   kj::Maybe<T&> tryGet();
+  // Like tryGet(), but also returns the object when no IoContext is current, for code on the
+  // owning IoContext's thread that runs outside it. Returns kj::none if this IoOwn is null, if
+  // some other IoContext is current, or once the owning IoContext has begun to be destroyed.
+  // Throws if called from any other thread.
+  kj::Maybe<T&> tryGetWithoutCurrentContext();
   operator kj::Own<T>() &&;
   IoOwn& operator=(IoOwn&& other);
   IoOwn& operator=(decltype(nullptr));
@@ -439,6 +460,14 @@ inline T* IoOwn<T>::operator->() {
 template <typename T>
 inline kj::Maybe<T&> IoOwn<T>::tryGet() {
   if (item != nullptr && deleteQueue->isCurrentIoContext()) {
+    return *item->ptr;
+  }
+  return kj::none;
+}
+
+template <typename T>
+inline kj::Maybe<T&> IoOwn<T>::tryGetWithoutCurrentContext() {
+  if (item != nullptr && deleteQueue->canAccessWithoutCurrentContext()) {
     return *item->ptr;
   }
   return kj::none;

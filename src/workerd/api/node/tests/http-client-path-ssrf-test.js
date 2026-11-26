@@ -2,12 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-16:
-// Verify that node:http ClientRequest rejects absolute-form and network-path
-// request targets in options.path, preventing SSRF via URL authority override.
+// Regression tests for AUTOVULN-CLOUDFLARE-WORKERD-16, VULN-146188 and
+// VULN-157700: node:http ClientRequest must not let options.path,
+// options.host or options.hostname, or the path and host fields after
+// construction, override the authority of the URL it sends to.
 
 import http from 'node:http';
-import { throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 
 // Absolute URLs in options.path must be rejected.
 // Without the fix, new URL('http://evil.test/x', baseUrl) in #onFinish
@@ -141,28 +142,164 @@ export const testBackslashPathsCannotOverrideAuthority = {
   },
 };
 
-// Defense-in-depth: mutating req.path after construction must not bypass
-// the SSRF guard.  The #onFinish check should catch it and destroy the
-// request with an error.
-export const testRejectsPathMutationAfterConstruction = {
+// Replaces fetch() while `fn` runs, recording the URL of every request
+// node:http sends and answering each with an empty 200 response.
+async function recordFetches(fn) {
+  const original = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(new URL(url).href);
+    return new Response(null);
+  };
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+  return urls;
+}
+
+// Sends a request for `options`, passing it to `change` first. Resolves
+// with the request's error, or its response status.
+function send(options, change) {
+  const req = http.request({ port: 80, ...options });
+  change?.(req);
+  return new Promise((resolve) => {
+    req.on('error', (error) => resolve({ error }));
+    req.on('response', (res) => {
+      res.resume();
+      resolve({ status: res.statusCode });
+    });
+    req.end();
+  });
+}
+
+// Sends a request to api.example.test whose path is reassigned after
+// construction.
+function sendWithPathChangedTo(path) {
+  return send({ hostname: 'api.example.test', path: '/safe' }, (req) => {
+    req.path = path;
+  });
+}
+
+// VULN-146188: the constructor validates options.path, but `path` is a
+// public field. A path assigned afterwards must be validated the same way
+// when the request is sent. The URL parser strips leading control
+// characters and spaces and removes tabs and newlines anywhere, so each of
+// these would otherwise send the request to evil.test.
+export const testRejectsAuthorityOverridingPathSetAfterConstruction = {
   async test() {
-    const req = http.request({
-      hostname: 'api.example.test',
-      port: 80,
-      path: '/safe',
-    });
-    // Mutate the public field to an authority-overriding value.
-    req.path = '//evil.test/steal';
-
-    const error = await new Promise((resolve) => {
-      req.on('error', resolve);
-      req.end();
-    });
-
-    if (error.code !== 'ERR_INVALID_ARG_VALUE') {
-      throw new Error(
-        `Expected ERR_INVALID_ARG_VALUE but got ${error.code}: ${error.message}`
+    const cases = [
+      ['//evil.test/steal', 'ERR_INVALID_ARG_VALUE'],
+      ['http://evil.test/steal', 'ERR_INVALID_ARG_VALUE'],
+      ['\t//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\n//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\r\n//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\u0000//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\u001f//evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      [' //evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['/\t/evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\t\\\\evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+      ['\thttp://evil.test/steal', 'ERR_UNESCAPED_CHARACTERS'],
+    ];
+    for (const [path, code] of cases) {
+      // Each case must be one that would reach evil.test if it got through.
+      strictEqual(
+        new URL(path, 'http://api.example.test/').host,
+        'evil.test',
+        JSON.stringify(path)
       );
+
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await sendWithPathChangedTo(path);
+      });
+      deepStrictEqual(urls, [], JSON.stringify(path));
+      strictEqual(result.error?.code, code, JSON.stringify(path));
+    }
+  },
+};
+
+// A valid path assigned after construction is still sent, to the
+// configured host. This also shows that recordFetches() sees the requests
+// node:http makes, so the empty lists above mean nothing was sent.
+export const testSendsValidPathSetAfterConstruction = {
+  async test() {
+    let result;
+    const urls = await recordFetches(async () => {
+      result = await sendWithPathChangedTo('/changed?q=1');
+    });
+    deepStrictEqual(urls, ['http://api.example.test/changed?q=1']);
+    strictEqual(result.status, 200);
+  },
+};
+
+// VULN-157700: node:http builds the request URL as `http://${host}`.
+// Node passes options.host and options.hostname to DNS as they are, so a
+// value that ends in ".api.example.test" but contains a URL delimiter fails
+// there. The URL parser instead ends the host at the delimiter, so an
+// allowlist that checks the suffix would let these send to evil.test.
+const AUTHORITY_SPLITTING_HOSTS = [
+  'evil.test/.api.example.test',
+  'evil.test\\.api.example.test',
+  'evil.test?.api.example.test',
+  'evil.test#.api.example.test',
+  'api.example.test@evil.test',
+  'evil.test\t/.api.example.test',
+];
+
+export const testRejectsAuthoritySplittingHost = {
+  async test() {
+    for (const host of AUTHORITY_SPLITTING_HOSTS) {
+      // Each case must be one that would reach evil.test if it got through.
+      strictEqual(
+        new URL(`http://${host}`).hostname,
+        'evil.test',
+        JSON.stringify(host)
+      );
+
+      for (const field of ['host', 'hostname']) {
+        throws(
+          () => http.request({ [field]: host, port: 80, path: '/' }),
+          { code: 'ERR_INVALID_ARG_VALUE' },
+          `${field}: ${JSON.stringify(host)}`
+        );
+      }
+
+      // `host` is also a public field, which a caller may reassign after
+      // construction.
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await send({ hostname: 'api.example.test' }, (req) => {
+          req.host = host;
+        });
+      });
+      deepStrictEqual(urls, [], JSON.stringify(host));
+      strictEqual(
+        result.error?.code,
+        'ERR_INVALID_ARG_VALUE',
+        JSON.stringify(host)
+      );
+    }
+  },
+};
+
+// Host names and addresses, IPv6 in brackets included, are still sent to.
+export const testSendsToValidHosts = {
+  async test() {
+    const cases = [
+      [{ hostname: 'api.example.test' }, 'http://api.example.test/'],
+      [{ host: 'sub.api.example.test' }, 'http://sub.api.example.test/'],
+      [{ hostname: '127.0.0.1' }, 'http://127.0.0.1/'],
+      [{ hostname: '[::1]' }, 'http://[::1]/'],
+    ];
+    for (const [options, expected] of cases) {
+      let result;
+      const urls = await recordFetches(async () => {
+        result = await send(options);
+      });
+      deepStrictEqual(urls, [expected]);
+      strictEqual(result.status, 200);
     }
   },
 };
