@@ -19,6 +19,13 @@ export default {
     if (url.pathname === '/throw') {
       throw new Error('handler failed');
     }
+    if (url.pathname === '/record-exception') {
+      ctx.tracing.enterSpan('exception-span', (span) => {
+        span.recordException('message only');
+        span.recordException({ code: 'ECONNRESET' });
+      });
+      return new Response('ok');
+    }
     await ctx.tracing.enterSpan('my-span', async (span) => {
       span.setAttribute('answer', 42);
       span.setAttribute('ratio', 0.5);
@@ -206,5 +213,27 @@ export const test = {
         );
       }
     }
+
+    // Empty exception fields are omitted from exception event attributes.
+    const exceptionResponse = await env.SELF.fetch(
+      'http://traced/record-exception'
+    );
+    assert.strictEqual(exceptionResponse.status, 200);
+    await exceptionResponse.text();
+    count += 1;
+    const exceptionRequest = (await collected(env, count)).at(-1);
+    const exceptionSpan = exceptionRequest.spans.find(
+      (span) => span.name === 'exception-span'
+    );
+    assert.ok(exceptionSpan);
+    assert.deepStrictEqual(
+      exceptionSpan.events.map((event) => event.name),
+      ['exception', 'exception']
+    );
+    assert.deepStrictEqual(exceptionSpan.events[0].attributes, {
+      'exception.message': 'message only',
+    });
+    // `code` is not exported yet, so neither exception.type nor exception.message is emitted.
+    assert.deepStrictEqual(exceptionSpan.events[1].attributes, {});
   },
 };

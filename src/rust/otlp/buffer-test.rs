@@ -511,3 +511,42 @@ fn timestamps_can_be_omitted() {
     assert_eq!(root.events[0].time_unix_nano, 0);
     assert_eq!(root.flags, 0);
 }
+
+#[test]
+fn empty_exception_attributes_are_omitted() {
+    let mut buffer = buffer();
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    buffer.add_exception(ROOT, T0, String::new(), "only message".to_owned(), None);
+    buffer.add_exception(
+        ROOT,
+        T0 + 1,
+        "OnlyType".to_owned(),
+        String::new(),
+        Some(String::new()),
+    );
+    buffer.add_exception(ROOT, T0 + 2, String::new(), String::new(), None);
+    buffer.add_exception(
+        ROOT,
+        T0 + 3,
+        String::new(),
+        String::new(),
+        Some("at x".to_owned()),
+    );
+    let batch = buffer.close(ROOT, T0 + 4, Attributes::default()).unwrap();
+    let request = decode(&batch);
+    let root = named(&request, "GET");
+    assert_eq!(root.events.len(), 4);
+    assert_eq!(
+        root.events[0].attributes,
+        vec![key_value("exception.message", "only message")]
+    );
+    assert_eq!(
+        root.events[1].attributes,
+        vec![key_value("exception.type", "OnlyType")]
+    );
+    assert!(root.events[2].attributes.is_empty());
+    assert_eq!(
+        root.events[3].attributes,
+        vec![key_value("exception.stacktrace", "at x")]
+    );
+}

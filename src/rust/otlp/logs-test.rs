@@ -296,6 +296,33 @@ fn exceptions_are_exception_events() {
 }
 
 #[test]
+fn empty_exception_log_attributes_are_omitted() {
+    let mut buffer = buffer();
+    buffer.add_exception(
+        SPAN,
+        T0,
+        String::new(),
+        "only message".to_owned(),
+        Some(String::new()),
+    );
+    buffer.add_exception(SPAN, T0 + 1, String::new(), String::new(), None);
+    let records = decode(&buffer.flush().unwrap());
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[0].attributes,
+        vec![
+            key_value("exception.message", "only message"),
+            key_value("cloudflare.entrypoint", "MyEntrypoint"),
+        ]
+    );
+    assert_eq!(*body(&records[1]), Value::String(String::new()));
+    assert_eq!(
+        records[1].attributes,
+        vec![key_value("cloudflare.entrypoint", "MyEntrypoint")]
+    );
+}
+
+#[test]
 fn a_full_batch_is_handed_out() {
     let mut buffer = buffer();
     for _ in 1..MAX_BATCH_RECORDS {

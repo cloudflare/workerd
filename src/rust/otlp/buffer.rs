@@ -164,11 +164,14 @@ impl SpanBuffer {
         let Some(span) = self.open.get_mut(&span_id) else {
             return;
         };
-        let mut attributes = vec![
-            key_value("exception.type", name),
-            key_value("exception.message", message.clone()),
-        ];
-        if let Some(stack) = stack {
+        let mut attributes = Vec::new();
+        if !name.is_empty() {
+            attributes.push(key_value("exception.type", name));
+        }
+        if !message.is_empty() {
+            attributes.push(key_value("exception.message", message.clone()));
+        }
+        if let Some(stack) = stack.filter(|stack| !stack.is_empty()) {
             attributes.push(key_value("exception.stacktrace", stack));
         }
         span.events.push(proto::Event {
