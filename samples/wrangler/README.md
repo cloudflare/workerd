@@ -8,7 +8,7 @@ As Wrangler does, workerd bundles `main` with esbuild, so esbuild must be
 installed: in the project (`npm i -D esbuild`), on `PATH`, or named by
 `WORKERD_ESBUILD`.
 
-To run the example on http://localhost:8787
+To run the example on http://localhost:8080
 
 ```sh
 $ ./workerd serve wrangler.jsonc
@@ -23,9 +23,9 @@ $ bazel run //src/workerd/server:workerd -- serve ~/cloudflare/workerd/samples/w
 To test:
 
 ```sh
-$ curl http://localhost:8787/alice
+$ curl http://localhost:8080/alice
 Hello, alice! (visit 1)
-$ curl http://localhost:8787/alice
+$ curl http://localhost:8080/alice
 Hello, alice! (visit 2)
 ```
 

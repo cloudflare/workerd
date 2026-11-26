@@ -55,8 +55,8 @@
 //! entrypoint. Without `main` it serves only the files. Under `--experimental` the Worker's
 //! `caches` are served by the cache service `<name>-cache`, its entries in
 //! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured". The
-//! server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if there are
-//! assets, else to the worker; `--socket-addr http=<addr>` overrides the address.
+//! server listens on `localhost:8080` to `<name>-assets` if there are assets, else to the worker;
+//! `--socket-addr http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
@@ -85,7 +85,7 @@ use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
-const DEFAULT_ADDRESS: &str = "localhost:8787";
+const DEFAULT_ADDRESS: &str = "localhost:8080";
 
 /// The disk service that holds Durable Objects in a cluster. A deployment's are stored on the
 /// node's, since a deployment may define no disk. A node that serves a wrangler config and joins a
