@@ -626,7 +626,10 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   v8::Local<v8::ArrayBuffer> arrayBuffer;
   if (value.isArrayBufferView()) {
     auto view = v8::Local<v8::Value>(value).As<v8::ArrayBufferView>();
-    arrayBuffer = view->Buffer();
+    auto buffer = view->GetBuffer();
+    // A view backed by a SharedArrayBuffer is not transferable either.
+    JSG_REQUIRE(!buffer->IsShared(), DOMDataCloneError, "Object is not transferable.");
+    arrayBuffer = buffer.As<v8::ArrayBuffer>();
   } else if (value.isArrayBuffer()) {
     arrayBuffer = v8::Local<v8::Value>(value).As<v8::ArrayBuffer>();
   } else {

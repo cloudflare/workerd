@@ -6,7 +6,7 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8eaf2582fe897c96457c4ea7de41145240af4ef8..d554427c01de432a0e8d66184fd2c5028409d0e6 100644
+index d21c241fd5231e4040b0389b8fe24b5422902c47..f44d032c5683d26cb2023e038118df5e5a6bed19 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -164,6 +164,11 @@ v8_flag(name = "v8_enable_verify_predictable")
@@ -21,15 +21,15 @@ index 8eaf2582fe897c96457c4ea7de41145240af4ef8..d554427c01de432a0e8d66184fd2c502
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -579,6 +584,7 @@ v8_config(
-         "v8_x64_16byte_stack_alignment": "V8_X64_16BYTE_STACK_ALIGNMENT",
+@@ -591,6 +596,7 @@ v8_config(
          "v8_support_la57": "V8_SUPPORT_LA57",
          "v8_enable_ecma402_icu4x": "V8_ENABLE_ECMA402_ICU4X",
+         "v8_enable_descriptor_array_lookup_table": "V8_ENABLE_DESCRIPTOR_ARRAY_LOOKUP_TABLE",
 +        "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
          "GOOGLE3",
-@@ -5005,6 +5011,8 @@ v8_library(
+@@ -5006,6 +5012,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",

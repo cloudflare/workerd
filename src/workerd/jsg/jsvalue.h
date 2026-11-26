@@ -351,11 +351,7 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   kj::ArrayPtr<T> asArrayPtr() {
     JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
     v8::Local<v8::ArrayBufferView> inner = *this;
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     auto buf = inner->GetBuffer();
-#else
-    auto buf = inner->Buffer();
-#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -377,11 +373,7 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   template <typename T = kj::byte>
   kj::ArrayPtr<const T> asArrayPtr() const {
     v8::Local<v8::ArrayBufferView> inner = *this;
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     auto buf = inner->GetBuffer();
-#else
-    auto buf = inner->Buffer();
-#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -440,11 +432,7 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   bool isResizable() const;
 
   bool isImmutable() const {
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     return inner->GetBuffer()->IsImmutable();
-#else
-    return inner->Buffer()->IsImmutable();
-#endif
   }
 
   operator JsBufferSource() const;
@@ -479,11 +467,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
   kj::ArrayPtr<T> asArrayPtr() {
     JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
     v8::Local<v8::Uint8Array> inner = *this;
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     auto buf = inner->GetBuffer();
-#else
-    auto buf = inner->Buffer();
-#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -505,11 +489,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
   template <typename T = kj::byte>
   kj::ArrayPtr<const T> asArrayPtr() const {
     v8::Local<v8::Uint8Array> inner = *this;
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     auto buf = inner->GetBuffer();
-#else
-    auto buf = inner->Buffer();
-#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -549,11 +529,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 
   // Set up for later when immutable arraybuffer is a thing
   bool isImmutable() const {
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
     return inner->GetBuffer()->IsImmutable();
-#else
-    return inner->Buffer()->IsImmutable();
-#endif
   }
 
   operator JsArrayBufferView() const;
