@@ -260,9 +260,7 @@ jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::const
   return js.alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKeyParam, generatorParam));
 }
 
-CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh): dh(kj::mv(dh)) {
-  verifyError = JSG_REQUIRE_NONNULL(this->dh.check(), Error, "DiffieHellman init failed");
-};
+CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh): dh(kj::mv(dh)) {}
 
 void CryptoImpl::DiffieHellmanHandle::setPrivateKey(jsg::Lock& js, jsg::JsBufferSource key) {
   dh.setPrivateKey(nonNullBytes(key.asArrayPtr()));
@@ -298,7 +296,13 @@ jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
 }
 
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
-  return verifyError;
+  KJ_IF_SOME(codes, verifyError) {
+    return codes;
+  }
+  // The prime and generator never change after construction, and DH_check() reads nothing else.
+  int codes = JSG_REQUIRE_NONNULL(dh.check(), Error, "DiffieHellman check failed");
+  verifyError = codes;
+  return codes;
 }
 #pragma endregion  // DiffieHellman
 
