@@ -50,6 +50,11 @@ pub mod bridge {
         fn vfs_default_settings() -> VfsSettings;
         fn vfs_new_in_memory(settings: VfsSettings) -> Result<KjOwn<SqliteVfs>>;
         fn vfs_new_on_disk(path: &str, settings: VfsSettings) -> Result<KjOwn<SqliteVfs>>;
+        fn vfs_new_on_disk_observed(
+            path: &str,
+            settings: VfsSettings,
+            observer: Box<WalObserverBox>,
+        ) -> Result<KjOwn<SqliteVfs>>;
 
         // Process
         fn set_max_memory_per_process_bytes(bytes: i64) -> Result<i64>;
@@ -98,8 +103,21 @@ pub mod bridge {
     }
 
     extern "Rust" {
+        /// A [`crate::WalObserver`], for C++ to hold.
+        type WalObserverBox;
+        fn wal_write(self: &WalObserverBox, path: &str, offset: u64, data: &[u8]);
+
         // Copies a value's bytes for `query_text` and `query_blob` to return, in one copy.
         fn bytes_to_vec(bytes: &[u8]) -> Vec<u8>;
+    }
+}
+
+/// What C++ holds of a [`crate::WalObserver`]: cxx passes a sized type only.
+pub struct WalObserverBox(pub Box<dyn crate::WalObserver>);
+
+impl WalObserverBox {
+    fn wal_write(&self, path: &str, offset: u64, data: &[u8]) {
+        self.0.wal_write(path, offset, data);
     }
 }
 

@@ -33,6 +33,7 @@ namespace workerd::rust::sqlite_rs {
 // Defined by the generated bridge header, which includes this one.
 enum class OpenMode : uint8_t;
 struct VfsSettings;
+struct WalObserverBox;
 
 using SqliteVfs = SqliteDatabase::Vfs;
 using Statement = SqliteDatabase::Statement;
@@ -106,6 +107,10 @@ class Query {
 VfsSettings vfs_default_settings();
 kj::Own<SqliteVfs> vfs_new_in_memory(VfsSettings settings);
 kj::Own<SqliteVfs> vfs_new_on_disk(::rust::Str path, VfsSettings settings);
+// A VFS over the directory at `path` that reports each WAL write to `observer`, through the KJ VFS
+// (`newWalReportingDirectory()`).
+kj::Own<SqliteVfs> vfs_new_on_disk_observed(
+    ::rust::Str path, VfsSettings settings, ::rust::Box<WalObserverBox> observer);
 
 // Process
 // Sets SQLite's hard heap limit, 0 for none, and returns the one it replaces.

@@ -7,6 +7,7 @@ use std::rc::Rc;
 use kj_rs::KjOwn;
 
 use crate::Result;
+use crate::ffi::WalObserverBox;
 use crate::ffi::bridge;
 use crate::ffi::bridge::SqliteVfs;
 
@@ -48,6 +49,14 @@ impl VfsOptions {
     }
 }
 
+/// Receives each write that SQLite makes to a WAL through a VFS from [`Vfs::on_disk_observed`].
+pub trait WalObserver {
+    /// `data` was written at `offset` to the WAL at `path`, relative to the VFS's directory (for
+    /// the database `dir/db.sqlite`, `dir/db.sqlite-wal`). Called once the write succeeded. It is
+    /// called from C++, so a panic aborts the process.
+    fn wal_write(&self, path: &str, offset: u64, data: &[u8]);
+}
+
 /// A SQLite VFS: workerd's `SqliteDatabase::Vfs` over a directory.
 ///
 /// Every database opened through it reads and writes that directory. A clone is another handle
@@ -80,6 +89,22 @@ impl Vfs {
     /// [`Vfs::on_disk`] with `options`.
     pub fn on_disk_with(path: &str, options: VfsOptions) -> Result<Self> {
         Ok(Self::from_kj(bridge::vfs_new_on_disk(path, options.0)?))
+    }
+
+    /// [`Vfs::on_disk_with`], with each write to a WAL (a file whose name ends in `-wal`) reported
+    /// to `observer` once it succeeds. SQLite opens its files with workerd's KJ VFS on every
+    /// platform, not the native one, and writes them through a directory that reports WAL writes
+    /// (`newWalReportingDirectory()`), as a clustered Durable Object namespace's storage does.
+    /// The observer lives as long as the VFS.
+    pub fn on_disk_observed(
+        path: &str,
+        options: VfsOptions,
+        observer: impl WalObserver + 'static,
+    ) -> Result<Self> {
+        let observer = Box::new(WalObserverBox(Box::new(observer)));
+        Ok(Self::from_kj(bridge::vfs_new_on_disk_observed(
+            path, options.0, observer,
+        )?))
     }
 
     /// The VFS that C++ hands over. To lend Rust a VFS that it owns elsewhere, C++ passes a

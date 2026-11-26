@@ -49,6 +49,7 @@ pub use ffi::bridge::SqliteVfs;
 pub use process::set_max_memory_per_process_bytes;
 pub use vfs::Vfs;
 pub use vfs::VfsOptions;
+pub use vfs::WalObserver;
 
 /// The error of every fallible call: the C++ exception, with its type, description and details.
 pub type Result<T> = std::result::Result<T, cxx::KjError>;
