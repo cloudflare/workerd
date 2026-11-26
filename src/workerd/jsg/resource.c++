@@ -92,4 +92,20 @@ void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context)
   check(proto->Delete(context, v8StrIntern(isolate, "toTemporalInstant"_kj)));
 }
 
+void hideV8DomExceptionGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context) {
+  auto global = context->Global();
+  auto name = v8StrIntern(isolate, "DOMException"_kj);
+  check(global->Delete(context, v8StrIntern(isolate, "QuotaExceededError"_kj)));
+  check(global->Delete(context, name));
+
+  // The own property registerNestedType() leaves to this function: a nested type is always on the
+  // global's prototype, which the lookup now reaches.
+  if (getSpecCompliantPropertyAttributes(isolate)) {
+    auto value = check(global->Get(context, name));
+    if (!value->IsUndefined()) {
+      check(global->DefineOwnProperty(context, name, value, v8::PropertyAttribute::DontEnum));
+    }
+  }
+}
+
 }  // namespace workerd::jsg

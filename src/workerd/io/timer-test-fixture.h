@@ -122,9 +122,12 @@ class TimerTestIoChannelFactory final: public TestFixture::DummyIoChannelFactory
 // IoContext::now() directly, the same clock that the server's V8 platform exposes as Date.now().
 class TimerTest {
  public:
-  explicit TimerTest(kj::StringPtr source, TimerClock clock = TimerClock::CLAMPED)
+  explicit TimerTest(kj::StringPtr source,
+      TimerClock clock = TimerClock::CLAMPED,
+      kj::Maybe<kj::Array<kj::StringPtr>> autogates = kj::none)
       : timer(clock),
-        fixture({.mainModuleSource = source,
+        fixture({.autogates = kj::mv(autogates),
+          .mainModuleSource = source,
           .actorId = Worker::Actor::Id(kj::str("timer-test")),
           .actorClassName = "default"_kj,
           .useRealTimers = false,

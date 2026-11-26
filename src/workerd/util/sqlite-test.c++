@@ -1817,6 +1817,21 @@ KJ_TEST("SQLite VFS skips syncs when its sync option is off") {
   KJ_EXPECT(commitAndCountSyncs({.sync = false}) == 0);
 }
 
+#if _WIN32
+KJ_TEST("SQLite on Windows disk doesn't sync when its VFS's sync option is off") {
+  // On Windows, databases on disk are opened with SQLite's own VFS, which syncs without asking
+  // ours, so the option has to reach SQLite as a pragma.
+  TempDirOnDisk dir;
+  auto synchronous = [&](SqliteDatabase::Vfs::Options options) {
+    SqliteDatabase::Vfs vfs(*dir, options);
+    SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    return db.run("PRAGMA synchronous").getInt(0);
+  };
+  KJ_EXPECT(synchronous({}) != 0);
+  KJ_EXPECT(synchronous({.sync = false}) == 0);
+}
+#endif
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);

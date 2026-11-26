@@ -146,6 +146,9 @@ pub mod bridge {
         ) -> Result<CustomEventResult>;
 
         async unsafe fn test<'a>(self: &'a mut Wrapper) -> Result<bool>;
+
+        /// `params` and the result are encoded messages in words; see `Interface::bench`.
+        async unsafe fn bench<'a>(self: &'a mut Wrapper, params: &'a [u64]) -> Result<Vec<u64>>;
     }
 
     unsafe extern "C++" {
@@ -216,6 +219,13 @@ pub mod bridge {
 
         async unsafe fn worker_test<'a>(worker: Pin<&'a mut WorkerInterface>) -> Result<bool>;
 
+        /// Runs `worker`'s bench handler. `params` is an encoded `BenchParams` message in words;
+        /// returns the `BenchReport.Group` it filled in, encoded in words.
+        async unsafe fn worker_bench<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            params: &'a [u64],
+        ) -> Result<Vec<u64>>;
+
         /// Calls `event->notSupported()`, which produces the event's result for a target that
         /// cannot handle it. Takes ownership of the event and keeps it alive until the result
         /// is ready.
@@ -256,9 +266,9 @@ fn new_cxx_worker(inner: kj_rs::KjOwn<bridge::WorkerInterface>) -> Box<Wrapper> 
     reason = "c++ expects heap-allocation"
 )]
 fn new_promised_interface(start: KjOwn<bridge::WorkerPromise>) -> Box<Wrapper> {
-    crate::Interface::into_ffi(crate::PromisedInterface::new(async move {
-        Ok(bridge::worker_promise_await(start).await?)
-    }))
+    crate::Interface::into_ffi(crate::PromisedInterface::new(bridge::worker_promise_await(
+        start,
+    )))
 }
 
 impl Wrapper {
@@ -334,6 +344,10 @@ impl Wrapper {
     async fn test(&mut self) -> Result<bool> {
         let result = self.worker.test().await?;
         Ok(result)
+    }
+
+    async fn bench(&mut self, params: &[u64]) -> Result<Vec<u64>> {
+        self.worker.bench(params).await
     }
 }
 

@@ -94,7 +94,7 @@ const kInitMemberNames = [
   'protocol',
   'search',
   'username',
-] as const;
+] as const satisfies readonly (keyof URLPatternInit)[];
 const kInitMemberIndices = [
   I_BASE_URL,
   I_HASH,
@@ -107,25 +107,37 @@ const kInitMemberIndices = [
   I_USERNAME,
 ] as const;
 
-// The results, as the URLPattern standard's dictionaries.
-type ComponentResult = {
-  groups: Record<string, string | undefined>;
+// The URLPattern standard's dictionaries, which the Workers types publish
+// (public-types.d.ts).
+interface URLPatternInit {
+  protocol?: string;
+  username?: string;
+  password?: string;
+  hostname?: string;
+  port?: string;
+  pathname?: string;
+  search?: string;
+  hash?: string;
+  baseURL?: string;
+}
+interface URLPatternComponentResult {
   input: string;
-};
-type InitDictionary = Partial<
-  Record<(typeof kInitMemberNames)[number], string>
->;
-type PatternResult = {
-  hash: ComponentResult;
-  hostname: ComponentResult;
-  inputs: (string | InitDictionary)[];
-  password: ComponentResult;
-  pathname: ComponentResult;
-  port: ComponentResult;
-  protocol: ComponentResult;
-  search: ComponentResult;
-  username: ComponentResult;
-};
+  groups: Record<string, string | undefined>;
+}
+interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
+}
+interface URLPatternOptions {
+  ignoreCase?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // WebIDL conversions
@@ -323,7 +335,7 @@ function groupsOf(
 function matchComponent(
   component: Component,
   value: string
-): ComponentResult | null {
+): URLPatternComponentResult | null {
   let groups: Record<string, string | undefined>;
   switch (component.type) {
     case FULL_WILDCARD:
@@ -416,7 +428,7 @@ function defineData(object: object, key: string, value: unknown): void {
 
 // The URLPatternInit an init list converts back to: its members present,
 // in WebIDL's order.
-function initDictionary(init: UrlPatternInitList): InitDictionary {
+function initDictionary(init: UrlPatternInitList): URLPatternInit {
   const dictionary = {};
   for (let i = 0; i < kInitMemberNames.length; i++) {
     const value = init[kInitMemberIndices[i] as number];
@@ -431,14 +443,14 @@ function exec(
   pattern: Pattern,
   input: string | UrlPatternInitList,
   base: string | undefined
-): PatternResult | null {
+): URLPatternResult | null {
   const subject = subjectOf(input, base, kExecInitWithBase);
   if (subject === kNoMatch) return null;
   const isString = typeof input === 'string';
   const components = pattern.components;
   // Pre-sized, so that its elements are its own (see emptyInitList()).
   // prettier-ignore
-  const results: (ComponentResult | undefined)[] = [
+  const results: (URLPatternComponentResult | undefined)[] = [
     undefined, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined,
   ];
@@ -450,7 +462,7 @@ function exec(
     if (result === null) return null;
     results[i] = result;
   }
-  let inputs: (string | InitDictionary)[];
+  let inputs: (string | URLPatternInit)[];
   if (typeof input !== 'string') {
     inputs = [initDictionary(input)];
   } else if (base === undefined) {
@@ -460,15 +472,15 @@ function exec(
   }
   // Members in WebIDL's order, lexicographic.
   return {
-    hash: results[I_HASH] as ComponentResult,
-    hostname: results[I_HOSTNAME] as ComponentResult,
+    hash: results[I_HASH] as URLPatternComponentResult,
+    hostname: results[I_HOSTNAME] as URLPatternComponentResult,
     inputs,
-    password: results[I_PASSWORD] as ComponentResult,
-    pathname: results[I_PATHNAME] as ComponentResult,
-    port: results[I_PORT] as ComponentResult,
-    protocol: results[I_PROTOCOL] as ComponentResult,
-    search: results[I_SEARCH] as ComponentResult,
-    username: results[I_USERNAME] as ComponentResult,
+    password: results[I_PASSWORD] as URLPatternComponentResult,
+    pathname: results[I_PATHNAME] as URLPatternComponentResult,
+    port: results[I_PORT] as URLPatternComponentResult,
+    protocol: results[I_PROTOCOL] as URLPatternComponentResult,
+    search: results[I_SEARCH] as URLPatternComponentResult,
+    username: results[I_USERNAME] as URLPatternComponentResult,
   };
 }
 
@@ -496,9 +508,18 @@ function test(
 
 let patternOf: (pattern: unknown) => Pattern;
 
+// The overload signatures are the declarations the Workers types publish
+// (public-types.d.ts), as the URLPattern standard declares them, for both
+// parsers, though the legacy one has no hasRegExpGroups. The
+// implementations take any value, which they convert as WebIDL does.
 class URLPattern {
   #pattern: Pattern;
 
+  constructor(
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions
+  );
   constructor(input?: unknown, baseURL?: unknown, options?: unknown) {
     // WebIDL's overload resolution: with three arguments, or a second that
     // is not an object, null or undefined, the second is the baseURL; else
@@ -569,13 +590,18 @@ class URLPattern {
     return patternOf(this).hasRegExpGroups;
   }
 
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
   test(input?: unknown, baseURL?: unknown): boolean {
     const pattern = patternOf(this);
     const patternInput = toInput(input);
     return test(pattern, patternInput, toOptionalUSVString(baseURL));
   }
 
-  exec(input?: unknown, baseURL?: unknown): PatternResult | null {
+  exec(
+    input?: string | URLPatternInit,
+    baseURL?: string
+  ): URLPatternResult | null;
+  exec(input?: unknown, baseURL?: unknown): URLPatternResult | null {
     const pattern = patternOf(this);
     const patternInput = toInput(input);
     return exec(pattern, patternInput, toOptionalUSVString(baseURL));
@@ -633,6 +659,14 @@ if (compatFlags['set_tostring_tag'] === true) {
     writable: false,
   } as PropertyDescriptor);
 }
+
+export type {
+  URLPattern,
+  URLPatternInit,
+  URLPatternComponentResult,
+  URLPatternResult,
+  URLPatternOptions,
+};
 
 export type UrlPatternExports = {
   URLPattern: typeof URLPattern;

@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "util.h"
 
+#include <workerd/api/mimetype-js.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/mimetype.h>
 
 #include <kj/vector.h>
 
@@ -60,6 +62,35 @@ jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(
 
 jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value) {
   return js.str(value.getConstructorName());
+}
+
+jsg::JsValue UtilModule::parseMimeType(jsg::Lock& js, jsg::JsString input) {
+  KJ_IF_SOME(parts, parseMimeTypeToJs(js, input)) {
+    return parts;
+  }
+  return js.undefined();
+}
+
+jsg::JsString UtilModule::serializeMimeType(jsg::Lock& js,
+    jsg::JsString type,
+    jsg::JsString subtype,
+    jsg::JsObject params,
+    int paramCount) {
+  KJ_REQUIRE(paramCount >= 0);
+  return serializeMimeTypeFromJs(js, type, subtype, params, paramCount);
+}
+
+jsg::JsString UtilModule::serializeMimeParams(jsg::Lock& js, jsg::JsObject params, int paramCount) {
+  KJ_REQUIRE(paramCount >= 0);
+  return serializeMimeParamsFromJs(js, params, paramCount);
+}
+
+bool UtilModule::isMimeToken(kj::String s) {
+  return MimeType::isToken(s);
+}
+
+bool UtilModule::isMimeParamValue(kj::String s) {
+  return MimeType::isParamValue(s);
 }
 
 #define V(Type)                                                                                    \

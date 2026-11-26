@@ -17,6 +17,14 @@ CompressionAllocator::CompressionAllocator(
     kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
     : externalMemoryTarget(kj::mv(externalMemoryTarget)) {}
 
+void CompressionAllocator::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  size_t total = 0;
+  for (auto& entry: allocations) {
+    total += entry.value.data.size();
+  }
+  tracker.trackFieldWithSize("allocations", total);
+}
+
 void* CompressionAllocator::AllocForZlib(void* data, uInt items, uInt size) {
   size_t real_size =
       nbytes::MultiplyWithOverflowCheck(static_cast<size_t>(items), static_cast<size_t>(size));
@@ -392,6 +400,11 @@ bool CodecStage::empty() {
 
 void CodecStage::clear() {
   output.clear();
+}
+
+void CodecStage::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  context.visitForMemoryInfo(tracker);
+  tracker.trackFieldWithSize("output", output.size());
 }
 
 void CodecStage::pump(int flush) {

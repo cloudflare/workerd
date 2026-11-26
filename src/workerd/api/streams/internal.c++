@@ -1373,7 +1373,6 @@ jsg::Promise<void> WritableStreamInternalController::write(
       // creates a safe copy of the data to be written in a kj::Array<kj::byte>
       KJ_IF_SOME(data, processChunk(js, value)) {
         size_t len = data.size();
-        auto ptr = data.asPtr();
 
         // Fast path: complete the write synchronously when ALL of:
         // - The queue is empty. Anything queued must complete first (FIFO), and the write loop
@@ -1391,7 +1390,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
             maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none) {
           bool syncSuccess = false;
           KJ_TRY {
-            syncSuccess = writable->sink->tryWriteSync(ptr);
+            syncSuccess = writable->sink->tryWriteSync(data);
           }
           KJ_CATCH(exception) {
             // tryWriteSync() may throw when a synchronous write is possible but fails. Handle
@@ -1429,8 +1428,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
               Write{
                 .promise = kj::mv(prp.resolver),
                 .totalBytes = len,
-                .ownBytes = kj::mv(data),
-                .bytes = ptr,
+                .ownBytes = kj::Array<const kj::byte>(kj::mv(data)),
               },
         });
 
@@ -2039,7 +2037,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
   KJ_SWITCH_ONEOF(queue.front().event) {
     KJ_CASE_ONEOF(request, Write) {
-      auto amountToWrite = request.bytes.size();
+      // A write is processed only once, so its bytes are still here.
+      auto& bytes = KJ_ASSERT_NONNULL(request.ownBytes);
+      auto amountToWrite = bytes.size();
       if (amountToWrite == 0) {
         // Zero-length writes are no-ops with a pending event. If we allowed them, we'd have a hard
         // time distinguishing between disconnections and zero-length reads on the other end of the
@@ -2056,11 +2056,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // Fast path: try to complete the write synchronously, avoiding a trip through the KJ
       // event loop when the sink can accept data immediately.
       if (syncDepth < kMaxSyncWriteDepth) {
-        auto ptr = request.bytes;
         bool syncSuccess = false;
         KJ_TRY {
           syncSuccess = KJ_ASSERT_NONNULL(state.whenActive(
-              [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(ptr); }));
+              [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(bytes); }));
         }
         KJ_CATCH(exception) {
           // tryWriteSync() may throw when a synchronous write is possible but fails. Handle
@@ -2101,9 +2100,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }
 
       auto check = makeChecker(*this);
-      auto promise = KJ_ASSERT_NONNULL(state.whenActive([&request](IoOwn<Writable>& writable) {
+      // Moving ownBytes into the attachment leaves it none, so `bytes` must not be used after this.
+      auto promise =
+          KJ_ASSERT_NONNULL(state.whenActive([&request, &bytes](IoOwn<Writable>& writable) {
         return writable->canceler.wrap(
-            writable->sink->write(request.bytes).attach(kj::mv(request.ownBytes)));
+            writable->sink->write(bytes).attach(kj::mv(request.ownBytes)));
       }));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in

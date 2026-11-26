@@ -64,6 +64,10 @@ inline void configureJsgIsolate(jsg::Lock& js, CompatibilityFlags::Reader flags)
   }
 }
 
+inline bool isUdpIngressEnabled(CompatibilityFlags::Reader flags) {
+  return flags.getUdpIngress() || flags.getWorkerdExperimental();
+}
+
 // Returns whether the new module registry implementation should be used for a
 // worker with the given flags. Python workers always use the original module
 // registry: the new_module_registry flag is ignored for them, whether it was

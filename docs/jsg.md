@@ -1683,6 +1683,56 @@ private:
 - Tag enum values must never change once data has been serialized
 - `deserialize()` receives the tag so it can handle multiple versions
 
+### Running No JavaScript While Reading
+
+`deserialize()` runs while V8 reads the value, and no JavaScript may run then.
+
+`deserialize()` may read raw data and nested values, check their types, create
+objects, define properties on them, and unwrap a `JSG_STRUCT`, which reads only
+own properties during a read.
+
+It must not get a property that may be inherited, assign one, convert an object
+to a primitive or JSON, call a function, or serialize a value. Nor may it call
+C++ that does any of these, such as `jsg::Lock::exceptionToKj()` on a value it
+read. Such work goes in a callback given to `deserializer.afterRead()`:
+
+```cpp
+static jsg::Ref<MyType> deserialize(
+    jsg::Lock& js, SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto reason = deserializer.readValue(js);
+  auto result = js.alloc<MyType>();
+  deserializer.afterRead(
+      [result = result.addRef(), reason = jsg::JsRef(js, reason)](jsg::Lock& js) {
+    // May run JavaScript: reads properties of `reason`.
+    result->setReason(js, reason.getHandle(js));
+  });
+  return result;
+}
+```
+
+The callbacks run once the top-level `readValue()` has read the whole value
+and initialized the instances of classes implemented in JavaScript that it
+holds. JavaScript is allowed when they run. A callback must not call
+`afterRead()`; the top-level `readValue()` fails if one does.
+
+They run in the order they were given. So when a type gives its callback after
+reading its nested values, the callbacks of the objects in those values run
+first. Even so, JavaScript that an earlier callback runs can reach any object
+in the value, including one whose own callback has not run yet. So the object
+that `deserialize()` returns must be in a consistent state from the start.
+
+If a callback throws, the read fails and the remaining callbacks are not
+called. If the read itself fails, none is called. Where the caller has
+disallowed JavaScript execution, the read throws `DataCloneError`. A Rust
+deserializer calls the callbacks at the same point, through the
+`AfterReadCallbacks` that `readApiObject()` takes.
+
+If a `deserialize()` tries to run JavaScript anyway, the read fails with
+`DataCloneError`, and the attempt is logged. That check is a safety net, not
+permission to look up properties during a read: a `deserialize()` still reads
+only own properties, and leaves anything that may run JavaScript to
+`afterRead()`.
+
 ### Classes Implemented in JavaScript
 
 Classes that the runtime implements in JavaScript, in the per-isolate bootstrap
@@ -1703,7 +1753,8 @@ part through a protocol modelled on Node.js's js_transferable, which
 
 Neither mark has any effect on an instance of a built-in that V8 serializes
 itself, such as a `Map`, even of a subclass, so `makeCloneable()` rejects a
-class that inherits from one.
+class that inherits from one. It also rejects a class that inherits from
+`Error`: the deserializer makes an ordinary object, never an error.
 
 For example, a bootstrap module `example/range` that defines a cloneable
 `Range`:
@@ -1823,24 +1874,17 @@ getters.
 The deserializer finds the class by resolving `'module:Export'` among the
 bootstrap's loaded modules (`jsg::BootstrapModules`), so there is no registry.
 V8 runs no JavaScript while it reads a value, so the deserializer creates each
-instance from `Export.prototype` without calling the constructor (as a native
-error if the prototype inherits from `Error.prototype`), marks it with the
-class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
-value has been read. An error's `stack` is not part of its data: the serializer
-writes it if it is a string, and the deserializer restores it as it does a
-native error's, when `preserveStackInErrors` is set or the writer was not using
-enhanced error serialization. Otherwise it keeps the stack it captured, which
-begins with the error's name and the writer's message, as a native error's does
-(the serializer writes the message for that alone: `deserialize()` still sets
-`message`). The class that marked an instance decides how it is written, so an
-instance of a subclass is written as one of `Range`, and changing an instance's
-prototype does not change which `clone()` runs. A `deserializeInfo` is part of
-the format: like a tag, it must never change. `src/workerd/jsg/ser.h` describes
-the protocol in full.
+instance from `Export.prototype` without calling the constructor, marks it with
+the class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
+value has been read. The class that marked an instance decides how it is
+written, so an instance of a subclass is written as one of `Range`, and
+changing an instance's prototype does not change which `clone()` runs. A
+`deserializeInfo` is part of the format: like a tag, it must never change.
+`src/workerd/jsg/ser.h` describes the protocol in full.
 
 `src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. Its
-classes are exposed as `CloneableTestBox` and `CloneableTestError` under the
-experimental `expose_serialization_test_class` flag, for tests such as
+class is exposed as `CloneableTestBox` under the experimental
+`expose_serialization_test_class` flag, for tests such as
 `src/tests/serialization/`, which sends instances over RPC.
 
 ### Versioning Serializable Types
@@ -1984,9 +2028,23 @@ Unwraps V8's `MaybeLocal` and `Maybe` types, throwing `JsExceptionThrown` if emp
 v8::Local<v8::String> str = check(maybeStr);
 ```
 
-### `jsg::DOMException`
+### DOMException
 
-Implements the standard Web IDL [DOMException][] interface. To throw from C++:
+The global [DOMException][] is one of two implementations, chosen per process by the
+`V8_DOM_EXCEPTION` autogate:
+
+- Without it, `jsg::DOMException` (`dom-exception.h`), a resource type.
+- With it, V8's, along with WebIDL's `QuotaExceededError` subclass. **These are not part of
+  upstream V8.** workerd adds them, and their C++ API, with
+  `patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch`:
+  `v8::Exception::DOMException()` and `v8::Exception::QuotaExceededError()` (in
+  `v8-exception.h`) create instances, `v8::Value::IsDOMException()` and
+  `IsQuotaExceededError()` recognize them, and `v8::DOMException` and `v8::QuotaExceededError`
+  read their name, message and amounts. Look for them in the patch, not in V8's documentation,
+  and change them by changing the patch (see `docs/v8-updates.md`).
+
+Create a DOMException with `js.domException(name, message)` and recognize one with
+`js.tryGetDomExceptionInfo(value)`, which work with either implementation. To throw from C++:
 
 ```cpp
 JSG_REQUIRE(isValid, DOMInvalidStateError, "The object is in an invalid state");

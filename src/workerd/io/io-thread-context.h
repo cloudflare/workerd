@@ -1,13 +1,14 @@
 #pragma once
 
 #include <capnp/compat/http-over-capnp.h>
+#include <kj/async.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
 
 // Thread-level stuff needed to construct a IoContext. One of these is created for each
 // request-handling thread.
-class ThreadContext {
+class ThreadContext final: private kj::TaskSet::ErrorHandler {
  public:
   struct HeaderIdBundle {
     HeaderIdBundle(kj::HttpHeaderTable::Builder& builder);
@@ -65,6 +66,12 @@ class ThreadContext {
     return byteStreamFactory;
   }
 
+  // Runs `task` on this thread, independently of any IoContext. The task is canceled when the
+  // ThreadContext is destroyed.
+  void addTask(kj::Promise<void> task) {
+    tasks.add(kj::mv(task));
+  }
+
  private:
   // NOTE: This timer only updates when entering the event loop!
   kj::Timer& timer;
@@ -72,6 +79,9 @@ class ThreadContext {
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::TaskSet tasks;
+
+  void taskFailed(kj::Exception&& exception) override;
 };
 
 }  // namespace workerd

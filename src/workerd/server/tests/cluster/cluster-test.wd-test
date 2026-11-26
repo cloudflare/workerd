@@ -71,7 +71,7 @@ const cache :Workerd.Config = (
 );
 
 # As `config`, with a tenth of the default lease rather than a quarter: a node whose event loop
-# makes no progress fences within seconds.
+# makes no progress fences within seconds, and a turn of the loop that outlasts the lease is short.
 const shortLease :Workerd.Config = (
   services = .services,
   sockets = .sockets,
@@ -82,6 +82,19 @@ const shortLease :Workerd.Config = (
     key = "test-cluster-shared-secret-of-32-bytes",
     stopTimeoutMs = 10000,
     unsafeTimeDivisor = 10,
+  ),
+);
+
+# As `config`, with the key and bucket left to WORKERD_CLUSTER_KEY (or WORKERD_CLUSTER_KEY_FILE) and
+# WORKERD_CLUSTER_BUCKET.
+const fromEnvironment :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    stopTimeoutMs = 10000,
+    unsafeTimeDivisor = 4,
   ),
 );
 

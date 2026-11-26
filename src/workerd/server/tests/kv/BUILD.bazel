@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 # About 5 s in debug and ASan builds, which a loaded arm64 machine can make
@@ -11,7 +11,7 @@ wd_test(
 )
 
 # `workerd serve` of a wrangler.jsonc's kv_namespaces.
-js_test(
+wd_js_test(
     name = "kv-wrangler-test",
     data = ["//src/workerd/server:workerd"],
     entry_point = "kv-wrangler-test.mjs",

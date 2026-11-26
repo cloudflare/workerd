@@ -211,7 +211,8 @@ where
         lock: &mut Lock<'a>,
         promise: Local<'a, v8::Promise>,
     ) -> crate::Result<Local<'a, v8::Promise>> {
-        promise.then(lock, (), convert_resolution::<T>)
+        let undefined = lock.undefined();
+        promise.then_conversion(lock, undefined, convert_resolution::<T>)
     }
 
     fn try_from_value<'a>(
@@ -227,13 +228,8 @@ where
 
 /// The reaction that converts what a promise from JavaScript resolved with, as C++ JSG's
 /// `thenUnwrap()` does.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "has the signature of a reaction, which borrows its data"
-)]
 fn convert_resolution<'a, T>(
     lock: &mut Lock<'a>,
-    _data: &(),
     value: Local<'a, Value>,
 ) -> crate::Result<Local<'a, Value>>
 where
@@ -249,15 +245,10 @@ where
 }
 
 /// The reaction that converts a typed promise's value to JavaScript, as C++ JSG's `thenWrap()`
-/// does. Its data is the promise's creator, which it keeps alive until it runs, as `thenWrap()`'s
-/// does.
-#[expect(
-    clippy::ref_option,
-    reason = "has the signature of a reaction, which borrows its data"
-)]
+/// does. Its function's data is the promise's creator, which it keeps alive until it runs, as
+/// `thenWrap()`'s does.
 fn convert_to_js<'a, T>(
     lock: &mut Lock<'a>,
-    _creator: &Option<TracedGlobal<v8::Object>>,
     raw: Local<'a, Value>,
 ) -> crate::Result<Local<'a, Value>>
 where
@@ -643,8 +634,13 @@ where
         lock: &mut Lock<'s>,
         creator: Option<Local<'s, v8::Object>>,
     ) -> crate::Result<Local<'s, Value>> {
-        let creator = creator.map(|creator| creator.to_traced_global(lock));
-        let promise = self.handle.then(lock, creator, convert_to_js::<T>)?;
+        let data = match creator {
+            Some(creator) => creator.into(),
+            None => lock.undefined(),
+        };
+        let promise = self
+            .handle
+            .then_conversion(lock, data, convert_to_js::<T>)?;
         if self.handled {
             promise.mark_as_handled();
         }

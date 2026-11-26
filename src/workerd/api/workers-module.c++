@@ -39,7 +39,7 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
 
 jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
     const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<ExecutionContext> ctx,
+    exportedhandler::ExecutionContext ctx,
     jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
   //   `This()`. There ought to be a better way to get access to `this` in a constructor.
@@ -58,14 +58,8 @@ void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-jsg::Optional<jsg::Ref<CacheContext>> EntrypointsModule::getCtxCache(jsg::Lock& js) {
-  // Delegate to the embedding application's getCtxCacheProperty() hook, which returns a
-  // CacheContext (e.g. CachePurge in edgeworker) when cache is enabled for this pipeline.
-  // Returns kj::none when there is no active request or cache is not available.
-  if (IoContext::hasCurrent()) {
-    return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
-  }
-  return kj::none;
+jsg::Optional<CacheContextRef> EntrypointsModule::getCtxCache(jsg::Lock& js) {
+  return currentCacheContext(js);
 }
 
 kj::String EntrypointsModule::mapVirtualHost(

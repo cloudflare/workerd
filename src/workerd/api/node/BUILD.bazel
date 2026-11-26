@@ -56,6 +56,7 @@ wd_cc_library(
         "zlib-util.h",
     ],
     implementation_deps = [
+        "//src/workerd/api:mimetype-js",
         "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
     visibility = ["//visibility:public"],

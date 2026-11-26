@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# gcDuringCloseOfDroppedStream (gc-pressure.js) against the C++
+# implementation, apart from the main suite because it needs its own V8
+# flags: --stress-incremental-marking keeps a major GC's marking in progress
+# almost all the time, so allocations inside the sinks often finish it.
+# When the sinks held the stream by raw reference, this crashed every ASan
+# run with a heap-use-after-free.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-digest-gc-pressure-cpp",
+      worker = (
+        modules = [(name = "main", esModule = embed "gc-pressure.js")],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+  v8Flags = ["--stress-incremental-marking"],
+);

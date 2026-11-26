@@ -493,7 +493,7 @@ class SqliteDatabase {
       kj::Maybe<const kj::Exception&> exception);
 
   kj::Maybe<kj::StringPtr> getErrorContext() {
-    return errorContext.map([](kj::String& s) -> kj::StringPtr { return s; });
+    return errorContext;
   }
 
   enum Multi { SINGLE, MULTI };

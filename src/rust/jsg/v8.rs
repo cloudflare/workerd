@@ -194,6 +194,14 @@ pub mod ffi {
         Info,
     }
 
+    /// Mirrors `v8::ConstructorBehavior`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ConstructorBehavior {
+        /// The function throws when called with `new`, and V8 creates no prototype object for it.
+        Throw = 0,
+        Allow = 1,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -262,6 +270,8 @@ pub mod ffi {
         type PropertySetterCallbackInfo;
         type PropertyQueryCallbackInfo;
         type Wrappable;
+        /// C++ `v8::EscapableHandleScope`, which `Lock::with_escapable_handle_scope` opens.
+        type EscapableHandleScope;
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
@@ -611,6 +621,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             callback: usize,
             data: &Local,
+            behavior: ConstructorBehavior,
         ) -> MaybeLocal;
 
         // Struct shapes; see `structs.rs`.
@@ -674,6 +685,11 @@ pub mod ffi {
             object: &Local,
             names: &mut Vec<Local>,
         ) -> bool;
+        pub unsafe fn local_object_set_prototype(
+            isolate: *mut Isolate,
+            object: &Local,
+            prototype: Local,
+        ) -> KjMaybe<bool>;
 
         // Local<Promise>
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
@@ -685,6 +701,12 @@ pub mod ffi {
             promise: &Local,
             on_fulfilled: &Local,
             on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_callback(
+            isolate: *mut Isolate,
+            promise: &Local,
+            callback: usize,
+            data: &Local,
         ) -> MaybeLocal;
 
         // Local<PromiseResolver>
@@ -766,6 +788,7 @@ pub mod ffi {
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
+        #[nothrow]
         pub unsafe fn wrappable_clear_trait_object(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_strong_refcount(wrappable: &Wrappable) -> u32;
 
@@ -775,7 +798,9 @@ pub mod ffi {
             align: usize,
             storage: &mut usize,
         ) -> KjRc<Wrappable>;
+        #[nothrow]
         pub unsafe fn wrappable_init(wrappable: Pin<&mut Wrappable>, ptr: TraitObjectPtr);
+        #[nothrow]
         pub unsafe fn wrappable_init_unreferenced(
             wrappable: Pin<&mut Wrappable>,
             ptr: TraitObjectPtr,
@@ -1033,6 +1058,23 @@ pub mod ffi {
             exception: &mut MaybeLocal,
         );
 
+        // HandleScope
+        pub unsafe fn isolate_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize),
+        );
+        pub unsafe fn isolate_escapable_handle_scope(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize, Pin<&mut EscapableHandleScope>),
+        );
+        #[nothrow]
+        pub unsafe fn escapable_handle_scope_escape(
+            scope: Pin<&mut EscapableHandleScope>,
+            value: Local,
+        ) -> Local;
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_internal_error(
@@ -1224,12 +1266,11 @@ pub mod ffi {
         // Leaves what creating the wrapper throws pending; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
-            wrappable: KjRc<Wrappable>,
+            wrappable: Pin<&mut Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            wrapped_elsewhere: &mut bool,
         ) -> MaybeLocal /* v8::Local<Value> */;
 
-        // The existing wrapper, as `wrap_resource` returns it, without creating one; see `ffi.h`.
+        // See `ffi.h`.
         pub unsafe fn wrappable_get_wrapper(
             isolate: *mut Isolate,
             wrappable: Pin<&mut Wrappable>,
@@ -2391,10 +2432,6 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
-    fn detach_before_drop(&self) -> bool {
-        T::needs_drop_detach()
-    }
-
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -2446,8 +2483,47 @@ impl Function {
                 &mut FunctionCallbackInfo<'a>,
             ) -> Result<Local<'a, Value>, Error>,
     {
-        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        let [function] = Self::new_sharing_data(
+            lock,
+            data,
+            [Self::callback::<T, F>(f)],
+            ffi::ConstructorBehavior::Allow,
+        )?;
         Ok(function)
+    }
+
+    /// Creates a JavaScript function that V8 calls `callback` for, with no data, like C++
+    /// `v8::Function::New()` with a plain callback.
+    ///
+    /// Unlike [`Function::new`], a call doesn't reach data through a Wrappable, so it costs no
+    /// more than V8's call of `callback`. The function carries no state: its data is
+    /// `undefined`. It has no signature, so `this` can be any value, it can be called with `new`,
+    /// and, as with [`Function::new`], its name is empty and its `length` is 0.
+    ///
+    /// [`crate::function_callback`] turns a Rust closure that captures nothing into a callback,
+    /// which opens a [`crate::CallbackScope`] and turns a panic into an internal error that
+    /// terminates execution. A callback can also be an `extern "C"` function that V8 calls
+    /// directly. It gets no lock and no panic handling of its own, so a panic in it aborts the
+    /// process.
+    ///
+    /// Fails as [`Function::new`] does.
+    pub fn from_callback<'s>(
+        lock: &mut Lock<'s>,
+        callback: crate::RawFunctionCallback,
+    ) -> crate::Result<Local<'s, Self>> {
+        let undefined = lock.undefined();
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock); `callback` is a V8 function callback and `undefined` a handle in
+        // the lock's scope, in which the function is created.
+        unsafe {
+            Local::from_ffi_maybe(ffi::function_new(
+                lock.isolate().as_ffi(),
+                callback as usize,
+                undefined.raw(),
+                ffi::ConstructorBehavior::Allow,
+            ))
+        }
+        .ok_or_else(Error::pending)
     }
 
     /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
@@ -2460,6 +2536,7 @@ impl Function {
         lock: &Lock<'s>,
         data: T,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Self>; N]>
     where
         T: Traced + 'static,
@@ -2467,7 +2544,7 @@ impl Function {
         // As in `jsg::Rc::new`, the Wrappable owns the data, which is dropped when the Wrappable
         // is destroyed.
         let (mut wrappable, _) = WrappableRc::new(FunctionData(data));
-        let functions = wrappable.new_functions(lock, callbacks);
+        let functions = wrappable.new_functions(lock, callbacks, behavior);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
         wrappable.remove_strong_ref();
@@ -4412,6 +4489,38 @@ impl Object {
 }
 
 impl<'s> Local<'s, Object> {
+    /// Changes this object's prototype to `prototype`, or to null for `None`, as
+    /// `Object.setPrototypeOf()` does.
+    ///
+    /// # Errors
+    /// A `TypeError` if the object refuses the change: the new prototype chain would contain
+    /// a cycle, the object is not extensible, or it is a Proxy whose `setPrototypeOf` trap
+    /// refused or threw. A pending exception or termination is propagated.
+    pub fn set_prototype(self, lock: &mut Lock<'s>, prototype: Option<Self>) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        let prototype: Local<'s, Value> = match prototype {
+            Some(prototype) => {
+                prototype.debug_assert_isolate(lock);
+                prototype.into()
+            }
+            None => lock.null(),
+        };
+        call_into_js(lock, |lock| {
+            // SAFETY: the isolate is locked, a context is entered and both handles are in scope.
+            match Option::from(unsafe {
+                ffi::local_object_set_prototype(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    prototype.into_ffi(),
+                )
+            }) {
+                Some(true) => Ok(Some(())),
+                Some(false) => Err(Error::new_type_error("Cannot set the object's prototype")),
+                None => Ok(None),
+            }
+        })
+    }
+
     /// Sets `key` to `value`, like JS `obj[key] = value`.
     ///
     /// # Errors
@@ -4638,41 +4747,15 @@ impl<T> TracedGlobal<T> {
     }
 
     /// Materializes this handle as a `Local` in the scope of `lock`.
-    ///
-    /// Panics if the handle is empty; see [`TracedGlobal::is_empty`] and
-    /// [`TracedGlobal::try_as_local`].
     pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
         assert_in_isolate_of(lock, &self.state);
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
 
-    /// Whether the handle is empty, because GC made it weak and its value then died.
-    ///
-    /// A handle that a resource's `Drop` moves out of a field is empty if the resource was its
-    /// value's only holder and a full GC collected the resource's wrapper. It is never empty
-    /// while a resource that GC traces through holds it.
-    pub fn is_empty(&self, lock: &mut Lock<'_>) -> bool {
-        assert_in_isolate_of(lock, &self.state);
-        self.strong_handle().ptr == 0
-    }
-
-    /// Materializes this handle as a `Local` in the scope of `lock`, or returns `None` if it is
-    /// empty; see [`TracedGlobal::is_empty`].
-    pub fn try_as_local<'s>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, T>> {
-        if self.is_empty(lock) {
-            None
-        } else {
-            Some(self.as_local(lock))
-        }
-    }
-
     /// Clears the traced reference, if any, without resetting it, and makes the strong handle
     /// strong; see [`GcVisitor::visit_traced_global`]. The caller must hold the lock of the
     /// handle's isolate, which must not be closed.
-    ///
-    /// V8 resets the weak handles of dead values before cppgc starts sweeping, so a weak handle
-    /// that isn't empty reaches a live value even in a `Drop` that the sweep runs.
     fn let_go_of_traced(&self) {
         // SAFETY: GC writes into the slot only while it runs on the thread holding the lock,
         // which is this thread; see `GlobalSlot`.
@@ -5312,11 +5395,6 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         // Clone before clearing — clear_wrappable zeroes data_ptr.
         let saved = trait_ptr.clone();
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
-        // The resource is alive until `drop_object`.
-        let resource = saved.as_gc_ref();
-        if resource.detach_before_drop() {
-            GcVisitor::detach_for_drop(resource);
-        }
         saved.drop_object();
     }
 }
@@ -5433,16 +5511,13 @@ pub struct GcVisitor {
 }
 
 /// What a [`GcVisitor`] visits for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum VisitMode {
     /// For the C++ `jsg::GcVisitor` of its owner's visit.
     Visit,
     /// To detach the value from its owner, under the lock of the given isolate; see
     /// [`GcVisitor::is_detaching`].
     Detach(*mut ffi::Isolate),
-    /// To detach the references of a resource that is being dropped from it, before its `Drop`
-    /// runs; see [`GcVisitor::detach_for_drop`].
-    DetachForDrop,
 }
 
 impl GcVisitor {
@@ -5477,33 +5552,12 @@ impl GcVisitor {
         value.trace(&mut visitor);
     }
 
-    /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
-    /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
-    /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
-    /// next owner's visit asserts against, while a moved `TracedGlobal` would stay weak and lose
-    /// its value once nothing else holds it. Every `jsg::Rc`, C++ `jsg::Ref` and `TracedGlobal` of
-    /// an isolate whose lock this thread holds becomes strong again, as a moved C++ `jsg::Ref` or
-    /// `jsg::V8Ref` does; the others are left as they are. This can run during the garbage
-    /// collector's sweep, when the value of a weak `TracedGlobal` may be dead; its handle is then
-    /// empty and stays so (see `TracedGlobal::let_go_of_traced`).
-    ///
-    /// A child without a wrapper is visited once here, to make what it holds strong, and again
-    /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
-    /// resources that each implement `Drop` costs time quadratic in its length.
-    pub(crate) fn detach_for_drop(resource: &dyn GarbageCollected) {
-        let mut visitor = Self {
-            handle: ffi::GcVisitor { ptr: 0 },
-            mode: VisitMode::DetachForDrop,
-        };
-        resource.trace(&mut visitor);
-    }
-
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
     /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        matches!(self.mode, VisitMode::Detach(_) | VisitMode::DetachForDrop)
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -5533,8 +5587,6 @@ impl GcVisitor {
     ///
     /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
     ///   another, or of a closed isolate.
-    /// - A drop visit (see [`GcVisitor::detach_for_drop`]) changes the reference only if this
-    ///   thread holds the lock of the reference's isolate, and otherwise leaves it as it is.
     /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
     ///   reference as it is: a strong reference stays strong, so its target leaks rather than
     ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
@@ -5548,9 +5600,6 @@ impl GcVisitor {
                 "attempt to use a {what} in an isolate other than the one it was created in"
             );
             return true;
-        }
-        if self.mode == VisitMode::DetachForDrop {
-            return state.this_thread_holds_lock();
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
@@ -5584,8 +5633,8 @@ impl GcVisitor {
     ///
     /// # Traced nodes
     ///
-    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
+    /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource (by a
+    /// hand-written `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -5603,9 +5652,6 @@ impl GcVisitor {
     /// be live, and visits and drops could reuse or reset only the nodes known to be live. A
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
-    ///
-    /// A drop visit only lets go of the traced reference, under its isolate's lock; see
-    /// [`GcVisitor::detach_for_drop`].
     ///
     /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
     /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
@@ -5641,7 +5687,7 @@ impl GcVisitor {
         }
         // A detaching visit panics with the message `assert_in_isolate_of` uses for both kinds
         // of handle; the debug assert of a GC visit names the only kind it visits.
-        let what = if matches!(self.mode, VisitMode::Detach(_)) {
+        let what = if self.is_detaching() {
             "Global or TracedGlobal"
         } else {
             "TracedGlobal"
@@ -5903,19 +5949,12 @@ impl WrappableRc {
             return Ok(Some(wrapper));
         }
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
-        // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
-        let handle = unsafe {
-            ffi::wrap_resource(
-                lock.isolate().as_ffi(),
-                self.handle.clone(),
-                &constructor,
-                &mut wrapped_elsewhere,
-            )
-        };
-        if wrapped_elsewhere {
-            return Ok(None);
-        }
+        // SAFETY: isolate is valid and locked; the Wrappable has no wrapper, as checked above, or
+        // an exception is pending and `wrap_resource` returns before it attaches one; the
+        // constructor is a function template of the isolate, which the Realm's template cache
+        // keeps alive.
+        let handle =
+            unsafe { ffi::wrap_resource(lock.isolate().as_ffi(), self.as_pin_mut(), &constructor) };
         // SAFETY: the wrapper is created in the scope of `lock`.
         let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
         Ok(Some(wrapper))
@@ -6079,6 +6118,7 @@ impl WrappableRc {
         &self,
         lock: &Lock<'s>,
         callbacks: [crate::RawFunctionCallback; N],
+        behavior: ffi::ConstructorBehavior,
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
         let data = self.attach_opaque_wrapper(lock)?;
@@ -6088,7 +6128,12 @@ impl WrappableRc {
             // (guaranteed by Lock); `callback` is a V8 function callback and `data` a handle in
             // the lock's scope, in which the function is created.
             let function = unsafe {
-                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
+                Local::from_ffi_maybe(ffi::function_new(
+                    isolate,
+                    callback as usize,
+                    data.raw(),
+                    behavior,
+                ))
             };
             functions.push(function.ok_or_else(Error::pending)?);
         }

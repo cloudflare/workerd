@@ -51,7 +51,7 @@ unsafe impl ExternType for OwnPromiseNode {
 
 pub trait KjPromise: Sized {
     type Output;
-    type Data: std::marker::Unpin;
+    type Data;
     fn into_own_promise_node(self) -> OwnPromiseNode;
 
     /// # Errors

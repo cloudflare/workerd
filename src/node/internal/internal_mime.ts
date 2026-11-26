@@ -2,9 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// node:util MIMEType and MIMEParams. The parser follows the WHATWG MIME Sniffing standard the way
-// workerd's C++ MimeType (src/workerd/util/mimetype.c++) does, so that both agree on every input.
-// Several details differ from Node.js and are kept for compatibility:
+// node:util MIMEType and MIMEParams. Parsing, serializing and validating are native
+// (node-internal:util, over workerd's MimeType in src/workerd/util/mimetype.h), so that a MIME type
+// parses here as it does for Blob, Body and fetch. This file keeps the arguments, the parameters
+// and the classes. Several details differ from Node.js and are kept for compatibility:
 // - MIMEParams.get() and has() match the name exactly, while set() and delete() lowercase it.
 // - MIMEParams.set() does not replace the value of an existing parameter.
 // - Deleting a parameter moves the last parameter into its place.
@@ -12,9 +13,10 @@
 // - Lone surrogates in an argument become three U+FFFD characters each, the result of converting
 //   them to UTF-8 and back.
 //
-// Parsing, serialization and the parameter operations use only language syntax: string indexing,
-// `length`, operators, and objects with a null prototype. They call no built-in methods and read no
-// globals, so user code that patches built-ins after this module loads can't change their results.
+// Besides the native calls, which take strings and objects with a null prototype, the code uses
+// only language syntax: string indexing, `length`, operators, and objects with a null prototype.
+// It calls no built-in methods and reads no globals, so user code that patches built-ins after
+// this module loads can't change its results.
 
 import { default as utilImpl } from 'node-internal:util';
 
@@ -61,10 +63,6 @@ function stringArg(
   return toRuntimeString(args[index]);
 }
 
-function isWhitespace(c: string | undefined): boolean {
-  return c === '\t' || c === '\n' || c === '\r' || c === ' ';
-}
-
 const lowercaseOf: Record<string, string | undefined> = {
   __proto__: null,
   A: 'a',
@@ -95,54 +93,6 @@ const lowercaseOf: Record<string, string | undefined> = {
   Z: 'z',
 } as unknown as Record<string, string | undefined>;
 
-// HTTP token code points besides ASCII alphanumerics. The backslash is accepted to match the C++
-// parser.
-const tokenSymbols: Record<string, true | undefined> = {
-  __proto__: null,
-  '!': true,
-  '#': true,
-  $: true,
-  '%': true,
-  '&': true,
-  "'": true,
-  '*': true,
-  '+': true,
-  '\\': true,
-  '-': true,
-  '.': true,
-  '^': true,
-  _: true,
-  '`': true,
-  '|': true,
-  '~': true,
-} as unknown as Record<string, true | undefined>;
-
-function isTokenChar(c: string): boolean {
-  return (
-    (c >= 'a' && c <= 'z') ||
-    (c >= 'A' && c <= 'Z') ||
-    (c >= '0' && c <= '9') ||
-    tokenSymbols[c] === true
-  );
-}
-
-function isToken(str: string): boolean {
-  if (str.length === 0) return false;
-  for (let i = 0; i < str.length; i++) {
-    if (!isTokenChar(str[i] as string)) return false;
-  }
-  return true;
-}
-
-// HTTP quoted-string token code points: tab, 0x20 to 0x7E, and everything outside ASCII.
-function isQuotedStringToken(str: string): boolean {
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i] as string;
-    if (c !== '\t' && (c < ' ' || c === '\x7f')) return false;
-  }
-  return true;
-}
-
 function asciiLowercase(str: string): string {
   let result = '';
   for (let i = 0; i < str.length; i++) {
@@ -150,31 +100,6 @@ function asciiLowercase(str: string): string {
     result += lowercaseOf[c] ?? c;
   }
   return result;
-}
-
-// str.slice(start, end), without calling String.prototype.slice.
-function substring(str: string, start: number, end: number): string {
-  let result = '';
-  for (let i = start; i < end; i++) result += str[i] as string;
-  return result;
-}
-
-// The index of the first `c` in str at or after `start`, or -1.
-function find(str: string, c: string, start: number): number {
-  for (let i = start; i < str.length; i++) {
-    if (str[i] === c) return i;
-  }
-  return -1;
-}
-
-// The end of str[start, end) with trailing whitespace removed.
-function trimTrailingWhitespace(
-  str: string,
-  start: number,
-  end: number
-): number {
-  while (end > start && isWhitespace(str[end - 1])) end--;
-  return end;
 }
 
 function isHighSurrogate(c: string | undefined): boolean {
@@ -217,30 +142,39 @@ function newList<T>(): List<T> {
   };
 }
 
+// The list of `length` items produced by `item`.
+function listOf<T>(length: number, item: (i: number) => T): List<T> {
+  const result = newList<T>();
+  for (let i = 0; i < length; i++) result.items[i] = item(i);
+  result.length = length;
+  return result;
+}
+
 // A map where erasing an entry moves the last entry into its place, like kj::HashMap. This decides
 // the order of the parameters after one is deleted.
 class ParamTable {
-  #keys = newList<string>();
-  #values = newList<string>();
+  // The entries as node-internal:util takes them: the key of entry `i` at `2 * i`, its value next.
+  #items = { __proto__: null } as unknown as Record<number, string>;
+  #size = 0;
   #index = { __proto__: null } as unknown as Record<string, number | undefined>;
 
   get size(): number {
-    return this.#keys.length;
+    return this.#size;
   }
 
   get(key: string): string | undefined {
     const i = this.#index[key];
-    return i === undefined ? undefined : this.#values.items[i];
+    return i === undefined ? undefined : this.#items[2 * i + 1];
   }
 
   // Adds the entry unless the key is already present.
   add(key: string, value: string): void {
     if (this.#index[key] !== undefined) return;
-    const i = this.#keys.length;
+    const i = this.#size;
     this.#index[key] = i;
-    this.#keys.items[i] = key;
-    this.#values.items[i] = value;
-    this.#keys.length = this.#values.length = i + 1;
+    this.#items[2 * i] = key;
+    this.#items[2 * i + 1] = value;
+    this.#size = i + 1;
   }
 
   // Removes the entry's properties instead of leaving them behind, so that a long-lived table
@@ -250,42 +184,43 @@ class ParamTable {
     if (i === undefined) return;
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete this.#index[key];
-    const last = this.#keys.length - 1;
+    const last = this.#size - 1;
     if (i < last) {
-      const lastKey = this.#keys.items[last] as string;
-      this.#keys.items[i] = lastKey;
-      this.#values.items[i] = this.#values.items[last] as string;
+      const lastKey = this.#items[2 * last] as string;
+      this.#items[2 * i] = lastKey;
+      this.#items[2 * i + 1] = this.#items[2 * last + 1] as string;
       this.#index[lastKey] = i;
     }
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete this.#keys.items[last];
+    delete this.#items[2 * last];
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete this.#values.items[last];
-    this.#keys.length = this.#values.length = last;
+    delete this.#items[2 * last + 1];
+    this.#size = last;
   }
 
-  // Copies of the parameters, for iterators and serialization.
+  // Copies of the entries, for iterators.
   keys(): List<string> {
-    return copyList(this.#keys, (i) => this.#keys.items[i] as string);
+    return listOf(this.#size, (i) => this.#items[2 * i] as string);
   }
 
   values(): List<string> {
-    return copyList(this.#values, (i) => this.#values.items[i] as string);
+    return listOf(this.#size, (i) => this.#items[2 * i + 1] as string);
   }
 
   entries(): List<string[]> {
-    return copyList(this.#keys, (i) => [
-      this.#keys.items[i] as string,
-      this.#values.items[i] as string,
+    return listOf(this.#size, (i) => [
+      this.#items[2 * i] as string,
+      this.#items[2 * i + 1] as string,
     ]);
   }
-}
 
-function copyList<T>(source: List<unknown>, item: (i: number) => T): List<T> {
-  const result = newList<T>();
-  for (let i = 0; i < source.length; i++) result.items[i] = item(i);
-  result.length = source.length;
-  return result;
+  serialize(): string {
+    return utilImpl.serializeMimeParams(this.#items, this.#size);
+  }
+
+  serializeWith(type: string, subtype: string): string {
+    return utilImpl.serializeMimeType(type, subtype, this.#items, this.#size);
+  }
 }
 
 interface ParsedMimeType {
@@ -297,140 +232,25 @@ interface ParsedMimeType {
 // Adds a parameter if its name is a token and its value is made of quoted-string token code
 // points. Returns whether the parameter was valid.
 function addParam(params: ParamTable, name: string, value: string): boolean {
-  if (!isToken(name) || !isQuotedStringToken(value)) return false;
+  if (!utilImpl.isMimeToken(name) || !utilImpl.isMimeParamValue(value)) {
+    return false;
+  }
   params.add(asciiLowercase(name), value);
   return true;
 }
 
 function parseMimeType(str: string): ParsedMimeType | null {
-  const end = str.length;
-  let pos = 0;
-  while (pos < end && isWhitespace(str[pos])) pos++;
-  if (pos === end) return null;
-
-  const slash = find(str, '/', pos);
-  if (slash === -1) return null;
-  const type = substring(str, pos, slash);
-  if (!isToken(type)) return null;
-  pos = slash + 1;
-  if (pos === end) return null;
-
-  let semicolon = find(str, ';', pos);
-  if (semicolon === -1) semicolon = end;
-  const subtype = substring(
-    str,
-    pos,
-    trimTrailingWhitespace(str, pos, semicolon)
-  );
-  if (!isToken(subtype)) return null;
-  pos = semicolon + 1;
-
+  const parts = utilImpl.parseMimeType(str);
+  if (parts === undefined) return null;
   const params = new ParamTable();
-  while (pos < end) {
-    while (pos < end && isWhitespace(str[pos])) pos++;
-    if (pos === end) break;
-
-    let delimiter = pos;
-    while (
-      delimiter < end &&
-      str[delimiter] !== ';' &&
-      str[delimiter] !== '='
-    ) {
-      delimiter++;
-    }
-    // Text with no ';' or '=' up to the end is ignored.
-    if (delimiter === end) break;
-    // A parameter without '=' is ignored.
-    if (str[delimiter] === ';') {
-      pos = delimiter + 1;
-      continue;
-    }
-
-    const name = substring(str, pos, delimiter);
-    pos = delimiter + 1;
-    if (!isToken(name)) {
-      // Skip to the next parameter.
-      const next = find(str, ';', pos);
-      if (next === -1) break;
-      pos = next + 1;
-      continue;
-    }
-    if (pos === end) break;
-
-    let value: string;
-    if (str[pos] === '"') {
-      // Collect an HTTP quoted string, unescaping backslashes. A backslash at the very end of the
-      // input is kept as is.
-      value = '';
-      pos++;
-      while (pos < end) {
-        const c = str[pos] as string;
-        pos++;
-        if (c === '"') break;
-        if (c === '\\') {
-          if (pos === end) {
-            value += '\\';
-            break;
-          }
-          value += str[pos] as string;
-          pos++;
-        } else {
-          value += c;
-        }
-      }
-      // Anything after the closing quote, up to the next ';', is ignored.
-      addParam(params, name, value);
-    } else {
-      let next = find(str, ';', pos);
-      if (next === -1) next = end;
-      value = substring(str, pos, trimTrailingWhitespace(str, pos, next));
-      if (value.length > 0) addParam(params, name, value);
-      pos = next;
-    }
-    const next = find(str, ';', pos);
-    if (next === -1) break;
-    pos = next + 1;
+  for (let i = 2; i < parts.length; i += 2) {
+    params.add(parts[i] as string, parts[i + 1] as string);
   }
-
   return {
-    type: asciiLowercase(type),
-    subtype: asciiLowercase(subtype),
+    type: parts[0] as string,
+    subtype: parts[1] as string,
     params,
   };
-}
-
-function serializeParams(params: ParamTable): string {
-  const names = params.keys();
-  const values = params.values();
-  let result = '';
-  for (let i = 0; i < names.length; i++) {
-    const name = names.items[i] as string;
-    const value = values.items[i] as string;
-    if (i > 0) result += ';';
-    // A space before the boundary parameter matches the HTML form submission serialization.
-    if (name === 'boundary') result += ' ';
-    result += name + '=';
-    if (value.length === 0) {
-      result += '""';
-    } else if (isToken(value)) {
-      result += value;
-    } else {
-      result += '"';
-      for (let j = 0; j < value.length; j++) {
-        const c = value[j] as string;
-        result += c === '"' || c === '\\' ? '\\' + c : c;
-      }
-      result += '"';
-    }
-  }
-  return result;
-}
-
-function serializeMimeType(mime: ParsedMimeType): string {
-  const result = `${mime.type}/${mime.subtype}`;
-  return mime.params.size > 0
-    ? `${result};${serializeParams(mime.params)}`
-    : result;
 }
 
 const kInternalClass = Symbol.for('cloudflare:internal-class');
@@ -576,12 +396,12 @@ export class MIMEParams {
 
   toString(): string {
     MIMEParams.#check(this);
-    return this.#mime === null ? '' : serializeParams(this.#mime.params);
+    return this.#mime === null ? '' : this.#mime.params.serialize();
   }
 
   toJSON(): string {
     MIMEParams.#check(this);
-    return this.#mime === null ? '' : serializeParams(this.#mime.params);
+    return this.#mime === null ? '' : this.#mime.params.serialize();
   }
 
   // Not MIMEParams.prototype.entries, so that replacing entries() doesn't change iteration.
@@ -627,7 +447,9 @@ export class MIMEType {
   set type(value: unknown) {
     MIMEType.#check(this);
     const type = toRuntimeString(value);
-    if (!isToken(type)) throw new TypeErrorCtor('Not a valid MIME type');
+    if (!utilImpl.isMimeToken(type)) {
+      throw new TypeErrorCtor('Not a valid MIME type');
+    }
     this.#mime.type = asciiLowercase(type);
   }
 
@@ -639,7 +461,9 @@ export class MIMEType {
   set subtype(value: unknown) {
     MIMEType.#check(this);
     const subtype = toRuntimeString(value);
-    if (!isToken(subtype)) throw new TypeErrorCtor('Not a valid MIME subtype');
+    if (!utilImpl.isMimeToken(subtype)) {
+      throw new TypeErrorCtor('Not a valid MIME subtype');
+    }
     this.#mime.subtype = asciiLowercase(subtype);
   }
 
@@ -655,12 +479,12 @@ export class MIMEType {
 
   toString(): string {
     MIMEType.#check(this);
-    return serializeMimeType(this.#mime);
+    return this.#mime.params.serializeWith(this.#mime.type, this.#mime.subtype);
   }
 
   toJSON(): string {
     MIMEType.#check(this);
-    return serializeMimeType(this.#mime);
+    return this.#mime.params.serializeWith(this.#mime.type, this.#mime.subtype);
   }
 
   static {

@@ -147,6 +147,11 @@ internal-pr:
 update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
 
+# regenerate MODULE.bazel.lock after changing a MODULE.bazel file or a module extension's inputs by
+# hand; the formatters are tagged manual, so `//...` alone leaves their extension out
+update-lockfile *args:
+  bazel build --lockfile_mode=update --nobuild {{args}} //... //build/deps/formatters:rustfmt@rule
+
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="":
   bazel fetch --repo_env=CARGO_BAZEL_REPIN="{{ if package == "" { "all" } else { package } }}" --repo=@crates_vendor

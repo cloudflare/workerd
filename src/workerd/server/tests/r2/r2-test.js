@@ -7,7 +7,8 @@ import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 
 // Miniflare's R2 tests, in workers-sdk, run the binding against r2.js;
-// these cover what they don't. Sizes are in units of 16 KiB.
+// these cover what they don't, with listings a reply's budget cuts short
+// in r2-listing-test.js. Sizes are in units of 16 KiB.
 const CHUNK = 16 * 1024;
 
 // `size` bytes, each its index mod 251, so any range is checkable.
@@ -198,65 +199,5 @@ export const copyValues = {
       const range = new Headers({ range: 'bytes=0-5' });
       same(await copy({ range }), bytes(6));
     }
-  },
-};
-
-// A listing whose reply would pass the binding's 1 MiB stops short, with a
-// cursor that resumes after its last key.
-export const largeListings = {
-  async test(ctrl, env) {
-    const customMetadata = { m: 'x'.repeat(6000) };
-    const keys = Array.from(
-      { length: 100 },
-      (_, i) => `l/${String(i).padStart(3, '0')}`
-    );
-    await Promise.all(
-      keys.map((k) => env.BUCKET.put(k, '', { customMetadata }))
-    );
-    const listed = [];
-    let cursor;
-    let pages = 0;
-    do {
-      const page = await env.BUCKET.list({
-        prefix: 'l/',
-        include: ['customMetadata'],
-        cursor,
-      });
-      listed.push(...page.objects.map((o) => o.key));
-      cursor = page.truncated ? page.cursor : undefined;
-      pages++;
-    } while (cursor);
-    assert.ok(pages > 1, `${pages} page`);
-    assert.deepStrictEqual(listed, keys.toSorted());
-    await env.BUCKET.delete(keys);
-
-    // The budget is bytes, not characters, and counts prefixes, which a
-    // page may stop at: here each object is over 10 KB of UTF-8 in 3,500
-    // characters, and is followed by a prefix of almost 1 KB.
-    const wide = { customMetadata: { m: '字'.repeat(3500) } };
-    const names = keys.map((k) => `w/${k.slice(2)}`);
-    const long = (n) => `${n}${'x'.repeat(900)}/`;
-    await Promise.all(
-      names.flatMap((n) => [
-        env.BUCKET.put(n, '', wide),
-        env.BUCKET.put(`${long(n)}k`, ''),
-      ])
-    );
-    const seen = { objects: [], prefixes: [] };
-    cursor = undefined;
-    do {
-      const page = await env.BUCKET.list({
-        prefix: 'w/',
-        delimiter: '/',
-        include: ['customMetadata'],
-        cursor,
-      });
-      seen.objects.push(...page.objects.map((o) => o.key));
-      seen.prefixes.push(...page.delimitedPrefixes);
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor);
-    assert.deepStrictEqual(seen.objects, names);
-    assert.deepStrictEqual(seen.prefixes, names.map(long));
-    await env.BUCKET.delete([...names, ...names.map((n) => `${long(n)}k`)]);
   },
 };

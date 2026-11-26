@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Services = import "startup-snapshot-globals-services.capnp";
+
+# Top-level code that touches the globals the runtime defines in ways a snapshot must carry
+# (process, Buffer, typed arrays, MessageChannel), for the cases whose top level the zygote can run:
+# with the pipeline on, they are started from the snapshot. The runner's test() fetches every case
+# service and asserts its report; see startup-snapshot-globals-test.js. The other cases are in the
+# transferable-v8 and fallback configs, so that each config starts only a few Workers and the
+# configs run in parallel. The @all-autogates variant turns the startup-snapshot autogate on, so
+# every service here goes through the zygote; the @ variant runs them as plain Workers.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = Services.compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "GROUP", json = "\"transferable-runtime\""),
+          (name = "process-assign", service = "process-assign"),
+          (name = "buffer-assign", service = "buffer-assign"),
+          (name = "process-env", service = "process-env"),
+          (name = "process-stdout", service = "process-stdout"),
+          (name = "empty-typed-array", service = "empty-typed-array"),
+          (name = "message-channel", service = "message-channel"),
+          (name = "message-channel-read", service = "message-channel-read"),
+        ],
+      )
+    ),
+    Services.processAssign,
+    Services.bufferAssign,
+    Services.processEnv,
+    Services.processStdout,
+    Services.emptyTypedArray,
+    Services.messageChannel,
+    Services.messageChannelRead,
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

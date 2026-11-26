@@ -1684,7 +1684,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
   # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
-  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3 digests, related key encapsulation helpers,
+  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3, cSHAKE256 (SHAKE256 only), and TurboSHAKE256
+  # (default domain separation only) digests, related key encapsulation helpers,
   # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
   # the draft is still changing and workerd does not implement the full proposal. The API may
   # change as the draft evolves.
@@ -1828,15 +1829,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   exposeSerializationTestClass @205 :Bool
       $compatEnableFlag("expose_serialization_test_class")
       $experimental;
-  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
-  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
-  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
-  # RPC. This flag is intended for internal testing only and may never have its experimental
-  # annotation removed.
+  # Exposes the internal CloneableTestBox class on globalThis: a class implemented in the
+  # per-isolate bootstrap that is structured cloneable, for testing the protocol by which such
+  # classes are serialized (src/per_isolate/serialization.ts), such as over RPC. This flag is
+  # intended for internal testing only and may never have its experimental annotation removed.
 
   pythonDedicatedSnapshotKeepImportCaches @206 :Bool
       $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
-      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches");
+      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-12-10");
   # When enabled, a Python Worker restored from a dedicated memory snapshot keeps the import system's
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
@@ -1852,6 +1853,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # rules rather than by the KJ URL parser alone, which follows neither those nor RFC 3986. Relative
   # URLs still throw a SyntaxError, because a Worker has no base URL. Once the connection is open,
   # `protocol` and `extensions` are the empty string when the server selected none, not null.
+  # Protocols passed to the constructor are compared case-insensitively, so `["echo", "Echo"]`
+  # throws a SyntaxError as repeated values.
 
   fetchInvalidResponseTypeError @208 :Bool
       $compatEnableFlag("fetch_invalid_response_type_error")
@@ -1860,6 +1863,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # byte or the status line is malformed, `fetch()` rejects with a TypeError, as the Fetch spec
   # requires for a network error. Without the flag it rejects with an Error. The message is
   # "Server returned invalid HTTP response: " followed by the reason either way.
+  #
+  # The same goes for a connection that couldn't be made because its host didn't resolve or its
+  # TLS handshake failed, where the message is "Network connection failed: " followed by the
+  # cause.
 
   connectHandlerImmediateTls @209 :Bool
       $compatEnableFlag("connect_handler_immediate_tls")
@@ -1873,4 +1880,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  udpIngress @210 :Bool
+      $compatEnableFlag("udp_ingress")
+      $compatDisableFlag("no_udp_ingress")
+      $compatEnableDate("2026-12-16");
+  # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
+  # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
 }

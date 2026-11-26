@@ -5,7 +5,7 @@
 // pipeThrough() chains of transform streams, read to the end: the cost of
 // each pipe a chunk crosses.
 
-import { drainReader, enqueuedStream, expectEqual } from 'helpers';
+import { drainReader, enqueuedStream, expectEqual, scaled } from 'helpers';
 
 function passThrough() {
   return {
@@ -25,17 +25,18 @@ async function chain(count, length, makeTransformer) {
 
 export const pipeThrough = {
   bench(b) {
-    for (const count of [16, 256]) {
+    for (const count of [16, 256].map((count) => scaled(b, count))) {
       b.run(`1 TransformStream x${count}`, () =>
         chain(count, 1, () => undefined)
       );
     }
-    b.run('4 TransformStreams x256', () => chain(256, 4, () => undefined));
-    b.run('1 TransformStream, transform() enqueues x256', () =>
-      chain(256, 1, passThrough)
+    const many = scaled(b, 256);
+    b.run(`4 TransformStreams x${many}`, () => chain(many, 4, () => undefined));
+    b.run(`1 TransformStream, transform() enqueues x${many}`, () =>
+      chain(many, 1, passThrough)
     );
-    b.run('4 TransformStreams, transform() enqueues x256', () =>
-      chain(256, 4, passThrough)
+    b.run(`4 TransformStreams, transform() enqueues x${many}`, () =>
+      chain(many, 4, passThrough)
     );
   },
 };

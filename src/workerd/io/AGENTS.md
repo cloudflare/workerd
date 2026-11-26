@@ -28,6 +28,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 | Promise bridging KJ↔JS         | `io-context.h` — `awaitIo()`, `awaitJs()`                                         |
 | Request lifecycle / subrequests | `io-context.{h,c++}`, `worker-entrypoint.{h,c++}`                                 |
 | `IoContext` from Rust           | `io-context/` — the `io-context` crate; identifies an `IoContext` by its `Id`     |
+| Events delivered from Rust      | `entrypoint/` — the `entrypoint` crate; `WorkerEntrypoint` hands it an `Invocation` |
 | Actor storage ops               | `actor-cache.h` (`ActorCacheOps`), `actor-sqlite.h`, `actor-storage.capnp`        |
 | DO gate semantics               | `io-gate.{h,c++}` — `InputGate::CriticalSection`, `OutputGate::lockWhile()`       |
 | Worker/isolate creation         | `worker.{h,c++}`, `worker-modules.{h,c++}`                                        |
@@ -45,6 +46,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `awaitIo(js, kjPromise, func)` bridges KJ→JS; `func` runs under V8 lock. `awaitIo(js, kjPromise)` for identity
 - `awaitJs(js, jsPromise)` bridges JS→KJ
 - `addObject(kj::Own<T>)` returns `IoOwn<T>` — the **only** safe way to store KJ I/O objects reachable from JS heap
+- `promise.then(js, ioctx.addFunctor(func))` runs a continuation only in its own request. Rust's counterpart is `IoContext::then()` / `catch()` / `then_or_catch()` in the `io-context` crate; use them rather than `v8::Local<v8::Promise>::then()` for reactions that must run in the request that registered them
 - Cross-context actions (`IoCrossContextExecutor::tryExecute()`, `DeleteQueue::scheduleAction()`) can wait in the owning IoContext's queue, keeping what they capture alive: coalesce actions holding just a weak reference, and count native copies of JS data as external memory. See `scheduleAction()` in `io-own.h`.
 - Two-phase locking: `Worker::AsyncLock` (fair queue) → `Worker::Lock` (V8 isolate lock)
 - `ActorCacheOps` methods return `kj::OneOf<Result, kj::Promise<Result>>` — sync when cached, async otherwise
@@ -56,6 +58,16 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `IoContext::observeTime()` advances the observable clock floor only while an input lock selects the caller's scope; internal pre-entry reads see the root scope and must not override a nested timer's clamp. Timer delivery samples the channel with the callback's own deadline and retains that observation through the V8 microtask checkpoint. Handoff tests must cover callbacks that defer their first clock read to a microtask.
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
 - Module registry selection: **always** use `isNewModuleRegistryEnabled(flags)` (`features.h`), never read `getNewModuleRegistry()` directly — Python workers ignore the flag and must not end up split across the two registries
+
+## Porting C++ to Rust
+
+**Keep the shape, write Rust.** A port moves a component to Rust without redesigning the architecture around it in the same step: neither a line-by-line translation nor a rewrite.
+
+- Keep the C++ boundaries: which component owns which state, which types cross between components, and where each C++ type is bound. A C++ type gets one Rust binding, in the crate matching its header (`io/io-context.h` → `io-context/`, KJ types → `src/rust/kj`), and other crates reuse it through a cxx type alias rather than shimming its methods again. `IoContext::IncomingRequest` is bound in `io-context/`, and `entrypoint/` calls those bindings.
+- Inside those boundaries, write idiomatic Rust: ownership and typestates instead of "can only be called once" runtime checks, enums for state, `Result` for failure.
+- Don't build for callers that don't exist yet. Add holder types, traits or generic layers when a second user needs them.
+- A port that crosses the runtime's boundary with its embedders follows the ground rules of the [Rust seam](../../../docs/reference/rust-seam.md).
+- Make architectural changes in their own step. When Rust allows a better structure than the C++ one, propose it as a separate change, so that each port stays reviewable against the C++ it replaces.
 
 ## Adding a compatibility flag
 

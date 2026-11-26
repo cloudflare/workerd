@@ -5,7 +5,7 @@
 #pragma once
 
 #include "basics.h"
-#include "bench.h"
+#include "cache-context-ref.h"
 #include "filesystem.h"
 #include "http.h"
 #include "performance.h"
@@ -334,17 +334,15 @@ class ExecutionContext: public jsg::Object {
       jsg::JsValue props,
       kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, props) {
-    auto featureFlags = FeatureFlags::get(js);
-    if (featureFlags.getEnableVersionApi()) {
-      version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
-        return jsg::JsRef{js,
-          v.toJs(js,
-              featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
-                                                         : PopulateVersionInfoMetadata::NO)};
-      });
-    }
-  }
+        props(js, props),
+        version(versionToJs(js, kj::mv(versionInfo)).map([&js](jsg::JsValue v) {
+          return jsg::JsRef<jsg::JsValue>(js, v);
+        })) {}
+
+  // The value of `ctx.version` for `versionInfo`: none unless the `enable_version_api`
+  // compatibility flag is on and there is version information.
+  static kj::Maybe<jsg::JsValue> versionToJs(
+      jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo);
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -377,7 +375,7 @@ class ExecutionContext: public jsg::Object {
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
-  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+  jsg::Optional<CacheContextRef> getCache(jsg::Lock& js);
 
   jsg::JsValue getVersion(jsg::Lock& js) {
     // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
@@ -518,26 +516,27 @@ class AlarmInvocationInfo: public jsg::Object {
 struct ExportedHandler {
   using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  using ConnectHandler = jsg::Promise<void>(jsg::Ref<Socket> socket,
+      jsg::Value env,
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
   using TailStreamHandler = kj::Promise<void>(
-      jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::JsObject obj, jsg::Value env, jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
   using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
   using AlarmHandler = kj::Promise<void>(jsg::Ref<AlarmInvocationInfo> alarmInfo);
@@ -546,7 +545,7 @@ struct ExportedHandler {
 
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
   using HibernatableWebSocketMessageHandler = kj::Promise<void>(
@@ -616,7 +615,7 @@ struct ExportedHandler {
   // TODO(cleanup): Why isn't `env` a `jsg::Optional` too? Or maybe the pair should be wrapped in
   //   a struct that is `Maybe`?
   jsg::Value env = nullptr;
-  jsg::Optional<jsg::Ref<ExecutionContext>> ctx = kj::none;
+  jsg::Optional<exportedhandler::ExecutionContext> ctx = kj::none;
   // TODO(cleanup): These are shoved here as a bit of a hack. At present, this is convenient and
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
@@ -625,28 +624,14 @@ struct ExportedHandler {
   // permit RPC to this class.
   bool missingSuperclass = false;
 
-  jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
-    return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
+  jsg::Optional<exportedhandler::ExecutionContext> getCtx(jsg::Lock& js) {
+    return ctx.map([&](exportedhandler::ExecutionContext& p) { return p.addRef(js); });
   }
 
   ExportedHandler clone(jsg::Lock& js);
 
   // YES if `fetch` was marked with retryable().
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
-};
-
-// The `bench` handler of an exported object. It isn't a member of ExportedHandler, which is
-// unwrapped from the export for every event, reading each of its handlers: reading another name
-// there would break exports that reject unknown properties, such as a Proxy. Instead,
-// ServiceWorkerGlobalScope::bench() unwraps this from ExportedHandler::self, only when a
-// benchmark runs.
-struct BenchExportedHandler {
-  using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
-
-  JSG_STRUCT(bench);
 };
 
 // V8 private key set on functions marked with retryable() from "cloudflare:durable-objects".
@@ -753,6 +738,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   //
   // `channel` is borrowed, not owned.
   kj::Promise<void> connectUdp(kj::String host,
+      kj::Maybe<kj::String> clientAddress,
       DatagramChannel& channel,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
@@ -784,9 +770,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
-  // register cases, then runs them. Failures, of the handler or of a case, are recorded in the
-  // result rather than rejecting.
-  jsg::Promise<BenchGroupResult> bench(Worker::Lock& lock,
+  // register cases, then runs them, through Worker::Api::runBench(). Resolves with the group's
+  // `BenchReport.Group`, without its name, as an encoded message. Failures, of the handler or of
+  // a case, are recorded in the group rather than rejecting.
+  jsg::Promise<kj::Array<capnp::word>> bench(Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler,
       bench::BenchParams::Reader params);
 
@@ -942,9 +929,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript DOMException instead.
-    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+    // Under the V8_DOM_EXCEPTION autogate, the global is V8's own DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::V8_DOM_EXCEPTION)) {
       JSG_NESTED_TYPE(DOMException);
     }
     JSG_NESTED_TYPE(WorkerGlobalScope);
@@ -1133,7 +1119,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(IdentityTransformStream);
     }
     JSG_NESTED_TYPE(HTMLRewriter);
-    if (flags.getWorkerdExperimental()) {
+    if (isUdpIngressEnabled(flags)) {
       JSG_NESTED_TYPE(Datagram);
     }
 
@@ -1318,10 +1304,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
-      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+      api::ExecutionContext, api::ExportedHandler,                                                 \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

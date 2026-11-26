@@ -50,12 +50,7 @@ static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct ParentResource {
     pub child: jsg::Rc<SimpleResource>,
     pub optional_child: Option<jsg::Rc<SimpleResource>>,
-}
-
-impl Drop for ParentResource {
-    fn drop(&mut self) {
-        PARENT_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -144,6 +139,7 @@ fn resource_with_traced_ref_field() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: Some(optional_child.clone(lock)),
             },
@@ -185,6 +181,7 @@ fn child_traced_ref_kept_alive_by_parent() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -406,6 +403,7 @@ fn traced_ref_in_gc() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -910,6 +908,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -992,12 +991,7 @@ static NULLABLE_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct NullableParent {
     pub child: jsg::Nullable<jsg::Rc<SimpleResource>>,
-}
-
-impl Drop for NullableParent {
-    fn drop(&mut self) {
-        NULLABLE_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1020,6 +1014,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             NullableParent {
+                drops: crate::DropCounter(&NULLABLE_PARENT_DROPS),
                 child: jsg::Nullable::Some(child.clone(lock)),
             },
         );
@@ -1056,6 +1051,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             NullableParent {
+                drops: crate::DropCounter(&NULLABLE_PARENT_DROPS),
                 child: jsg::Nullable::Null,
             },
         );
@@ -1145,6 +1141,7 @@ fn traced_ref_drop_respects_strong_flag() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child: child.clone(lock),
                 optional_child: None,
             },
@@ -1257,12 +1254,7 @@ struct CyclicResource {
     /// The stored "callback". Uses `jsg::Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
     callback: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
-}
-
-impl Drop for CyclicResource {
-    fn drop(&mut self) {
-        CYCLIC_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1286,6 +1278,7 @@ fn global_value_back_ref_is_collected_by_gc() {
         let resource = jsg::Rc::new(
             lock,
             CyclicResource {
+                drops: crate::DropCounter(&CYCLIC_RESOURCE_DROPS),
                 callback: jsg::Cell::new(None),
             },
         );
@@ -1346,12 +1339,7 @@ static CELL_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct CellParent {
     pub child: jsg::Cell<jsg::Rc<CellChild>>,
-}
-
-impl Drop for CellParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1361,12 +1349,7 @@ impl CellParent {}
 #[jsg_resource]
 struct CellOptionParent {
     pub child: jsg::Cell<Option<jsg::Rc<CellChild>>>,
-}
-
-impl Drop for CellOptionParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1376,12 +1359,7 @@ impl CellOptionParent {}
 #[jsg_resource]
 struct CellNullableParent {
     pub child: jsg::Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
-}
-
-impl Drop for CellNullableParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
+    drops: crate::DropCounter,
 }
 
 #[jsg_resource]
@@ -1399,6 +1377,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(child.clone(lock)),
             },
         );
@@ -1436,6 +1415,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellOptionParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(Some(child.clone(lock))),
             },
         );
@@ -1469,6 +1449,7 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellOptionParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(None),
             },
         );
@@ -1501,6 +1482,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellNullableParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(jsg::Nullable::Some(child.clone(lock))),
             },
         );
@@ -1534,6 +1516,7 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(
             lock,
             CellNullableParent {
+                drops: crate::DropCounter(&CELL_PARENT_DROPS),
                 child: jsg::Cell::new(jsg::Nullable::Null),
             },
         );
@@ -1804,6 +1787,7 @@ fn parent_with_unwrapped_child_released_after_dispose() {
         let parent = jsg::Rc::new(
             lock,
             ParentResource {
+                drops: crate::DropCounter(&PARENT_RESOURCE_DROPS),
                 child,
                 optional_child: None,
             },
@@ -1817,24 +1801,25 @@ fn parent_with_unwrapped_child_released_after_dispose() {
     assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
 }
 
-/// A resource whose drop waits at a barrier, to stop the thread draining the queue.
-#[jsg_resource(custom_trace)]
-struct DisposeGate {
-    barrier: std::sync::Arc<std::sync::Barrier>,
+/// Waits at its barrier when it is dropped.
+struct WaitOnDrop(std::sync::Arc<std::sync::Barrier>);
+
+jsg::jsg_traced_unchecked!(WaitOnDrop);
+
+impl Drop for WaitOnDrop {
+    fn drop(&mut self) {
+        self.0.wait();
+    }
 }
 
-impl jsg::Traced for DisposeGate {
-    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+/// A resource whose drop waits at a barrier, to stop the thread draining the queue.
+#[jsg_resource]
+struct DisposeGate {
+    barrier: WaitOnDrop,
 }
 
 #[jsg_resource]
 impl DisposeGate {}
-
-impl Drop for DisposeGate {
-    fn drop(&mut self) {
-        self.barrier.wait();
-    }
-}
 
 /// After the isolate is disposed, no lock serializes the reference counts. Another thread
 /// dropping references while the dispose hook releases the queued ones must not update the
@@ -1852,7 +1837,7 @@ fn rc_dropped_on_another_thread_while_the_disposed_queue_drains() {
         let gate = jsg::Rc::new(
             lock,
             DisposeGate {
-                barrier: std::sync::Arc::clone(&barrier),
+                barrier: WaitOnDrop(std::sync::Arc::clone(&barrier)),
             },
         );
         let queued: Vec<_> = (0..100_000).map(|_| resource.clone(lock)).collect();

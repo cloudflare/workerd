@@ -24,6 +24,7 @@ use crate::GroupResult;
 use crate::MAX_SAMPLES;
 use crate::QUICK_MIN_TIME_NS;
 use crate::QUICK_SAMPLES;
+use crate::Timing;
 
 /// Untimed starts before a startup group's samples, except under `--quick`.
 const STARTUP_WARMUPS: u32 = 1;
@@ -31,13 +32,6 @@ const STARTUP_WARMUPS: u32 = 1;
 /// A startup group stops at the sampling budget only once it has at least this many samples, so
 /// that a slow Worker still gets usable statistics.
 const STARTUP_MIN_SAMPLES: usize = 5;
-
-/// A reading of how long something took on the monotonic and thread CPU clocks, in nanoseconds.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Timing {
-    pub wall_ns: i64,
-    pub cpu_ns: i64,
-}
 
 /// How long the phases of starting one Worker took; see `BenchReport.Group.startup` for what each
 /// covers.

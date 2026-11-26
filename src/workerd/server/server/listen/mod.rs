@@ -527,6 +527,7 @@ impl Handler for HttpConnection {
         body: Pin<&'a mut worker::AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
+        perfetto::trace_event_async!("HttpConnection::request()");
         async {
             let table = header_table(&self.context.factory);
             let rewriter = &self.socket.rewriter;
@@ -557,7 +558,8 @@ impl Handler for HttpConnection {
                     body,
                     ServiceResponse::from(response.as_mut()),
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -569,6 +571,7 @@ impl Handler for HttpConnection {
         headers: HeadersRef<'a>,
         connect: Connect,
     ) -> Result<()> {
+        perfetto::trace_event_async!("HttpConnection::connect()");
         async {
             let table = header_table(&self.context.factory);
             if let Some(capnp_host) = self.socket.rewriter.capnp_connect_host()
@@ -595,7 +598,8 @@ impl Handler for HttpConnection {
                         tls_starter: KjMaybe::None,
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
         .await
         .inspect_err(log_uncaught)
@@ -668,7 +672,8 @@ pub async fn listen_tcp(
                         tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
                     },
                 )
-                .await
+                .await?;
+            Ok(())
         }
     };
     accept_loop(

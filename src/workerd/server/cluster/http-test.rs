@@ -33,7 +33,8 @@ fn a_body_held_in_memory_is_capped() {
         let url = format!("http://127.0.0.1:{port}/");
         let payload = Payload::Bytes(bytes::Bytes::new());
         let sent = http.send("GET".into(), url, vec![], payload, None, (wait, wait));
-        assert_eq!(sent.await.err().as_deref(), Some("response body too large"));
+        let message = sent.await.err().map(|e| e.message);
+        assert_eq!(message.as_deref(), Some("response body too large"));
     });
 }
 
@@ -50,7 +51,7 @@ async fn serving(answer: impl Fn(usize) -> Answer + Send + Sync + 'static) -> Se
     Server::serving(move |_, n| answer(n)).await
 }
 
-fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse, String>> {
+fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse, HttpError>> {
     let wait = Duration::from_secs(30);
     let url = format!("http://{}/k", server.host);
     let payload = Payload::Bytes(bytes::Bytes::new());
@@ -61,6 +62,55 @@ fn get(http: &Http, server: &Server) -> impl Future<Output = Result<HttpResponse
 async fn abandoned(server: &Server, n: usize) {
     let abandoned = tokio::time::timeout(Duration::from_secs(30), server.abandoned(n));
     abandoned.await.unwrap();
+}
+
+#[test]
+fn a_failed_request_says_whether_it_may_have_reached_the_server() {
+    runtime().block_on(async {
+        let http = Http::new().unwrap();
+        let wait = Duration::from_secs(30);
+        let send = |url: String, head: Duration| {
+            http.send("GET".into(), url, vec![], EMPTY, None, (head, wait))
+        };
+        // The server reads the request, then closes the connection.
+        let server = serving(|n| {
+            if n == 1 {
+                Answer::Close
+            } else {
+                reply(200, "ok")
+            }
+        })
+        .await;
+        let error = get(&http, &server).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Lost, "{}", error.message);
+        assert_eq!(
+            error.message,
+            "client error (SendRequest): connection closed before message completed"
+        );
+        // A new connection closed before the request went out on it.
+        server.hang_up(1);
+        let error = get(&http, &server).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Unsent, "{}", error.message);
+        assert_eq!(server.requests(), 1);
+        assert_eq!(get(&http, &server).await.unwrap().body, b"ok");
+        // No connection at all: nothing listens on port 0.
+        let error = send("http://127.0.0.1:0/k".into(), wait)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.failure, Failure::Other, "{}", error.message);
+        assert!(
+            error.message.starts_with("client error (Connect): "),
+            "{}",
+            error.message
+        );
+        // No answer in time.
+        let stalled = serving(|_| Answer::Stall).await;
+        let url = format!("http://{}/k", stalled.host);
+        let error = send(url, Duration::from_millis(50)).await.err().unwrap();
+        assert_eq!(error.failure, Failure::Other, "{}", error.message);
+        assert_eq!(error.message, "timed out");
+    });
 }
 
 const EMPTY: Payload = Payload::Bytes(bytes::Bytes::new());

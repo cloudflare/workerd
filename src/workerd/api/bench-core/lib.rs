@@ -8,16 +8,18 @@
 //! This crate root turns the samples that the runner took for a group's cases into a
 //! `BenchReport.Group` (bench.capnp), with summary statistics computed after subtracting the
 //! runner's own overhead and flags for results that can't be trusted. The [`startup`] module
-//! times a Worker's startup and reports it the same way, and [`GlobFilter`] is the case filter.
+//! times a Worker's startup and reports it the same way, [`clock`] reads the clocks both time
+//! with, and [`GlobFilter`] is the case filter.
 //!
 //! The group's name is left unset, since the caller knows it.
 //!
-//! Names and errors that come through the C++ bridge are bytes, written to the report's `Text`
-//! fields unchanged: C++ strings needn't be valid UTF-8, so a Rust `String` couldn't hold all of
-//! them. The [`startup`] module makes its own phase names, and gets a failed start's error as a
+//! Names and errors are bytes, written to the report's `Text` fields unchanged: they come from
+//! JavaScript strings, which needn't be valid UTF-16, as WTF-8, as C++ JSG converts them to a
+//! `kj::String`, so a Rust `String` couldn't hold all of them.
+//! The [`startup`] module makes its own phase names, and gets a failed start's error as a
 //! `String`.
 
-mod ffi;
+pub mod clock;
 mod glob_filter;
 pub mod startup;
 
@@ -30,15 +32,38 @@ use histogram::Options;
 pub use crate::glob_filter::GlobFilter;
 
 /// The sampling budget, when neither the case nor the command line sets one.
-const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
+pub const DEFAULT_MIN_TIME_NS: u64 = 1_000_000_000;
 /// The number of samples, when neither the case nor the command line sets one.
-const DEFAULT_SAMPLES: u32 = 50;
+pub const DEFAULT_SAMPLES: u32 = 50;
 
 /// Under `--quick`, the sampling budget and the number of samples are capped at these.
-const QUICK_MIN_TIME_NS: u64 = 10_000_000;
-const QUICK_SAMPLES: u32 = 5;
+///
+/// A quick run checks that cases work rather than measuring them, so two samples are enough: a
+/// case still runs more than once, and a slow one costs a few calls rather than several.
+pub const QUICK_MIN_TIME_NS: u64 = 10_000_000;
+pub const QUICK_SAMPLES: u32 = 2;
 
-const MAX_SAMPLES: u32 = 1_000_000;
+/// The most samples a case can ask for.
+pub const MAX_SAMPLES: u32 = 1_000_000;
+
+/// A reading of the monotonic and thread CPU clocks ([`clock::now`]), or the difference of two,
+/// which is how long the code between them took, in nanoseconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Timing {
+    pub wall_ns: i64,
+    pub cpu_ns: i64,
+}
+
+impl std::ops::Sub for Timing {
+    type Output = Self;
+
+    fn sub(self, start: Self) -> Self {
+        Self {
+            wall_ns: self.wall_ns - start.wall_ns,
+            cpu_ns: self.cpu_ns - start.cpu_ns,
+        }
+    }
+}
 
 /// Samples are recorded into histograms in picoseconds, up to an hour per call.
 const HISTOGRAM_HIGHEST_PS: i64 = 3_600_000_000_000_000;
@@ -140,11 +165,25 @@ pub fn fill_group(
     Ok(())
 }
 
-/// `result` as an encoded `BenchReport.Group` message (segment table, then segments) in words.
-pub fn encode_group(result: &GroupResult) -> Result<Vec<u64>, Error> {
+/// `result` as an encoded `BenchReport.Group` message (segment table, then segments), as the
+/// bytes of the `ArrayBuffer` the runner resolves with.
+pub fn encode_group(result: &GroupResult) -> Result<Vec<u8>, Error> {
     let mut message = capnp::message::TypedBuilder::<bench_report::group::Owned>::new_default();
     fill_group(result, message.init_root())?;
-    to_words(&message)
+    Ok(capnp::serialize::write_message_to_words(
+        message.borrow_inner(),
+    ))
+}
+
+/// `words`, an encoded message, as the bytes that hold it, for a reader or a buffer that takes
+/// bytes. Copied a word at a time: the messages can be tens of megabytes.
+#[must_use]
+pub fn words_to_bytes(words: &[u64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(size_of_val(words));
+    for word in words {
+        bytes.extend_from_slice(&word.to_ne_bytes());
+    }
+    bytes
 }
 
 /// `message`, encoded (segment table, then segments) in words.

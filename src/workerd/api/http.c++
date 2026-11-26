@@ -16,6 +16,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
@@ -282,10 +283,9 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](auto&& b) -> kj::String {
-      return kj::mv(b);
-    }).orDefault(nullptr);
+    kj::String contentType =
+        kj::Maybe<kj::String>(self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE))
+            .orDefault(nullptr);
 
     if (FeatureFlags::get(js).getBlobStandardMimeType()) {
       contentType = MimeType::extract(contentType)
@@ -427,13 +427,13 @@ jsg::Ref<Request> Request::constructor(
               // Other methods, even if they would be recognized if they were uppercased,
               // are supposed to be rejected.
               // Refs: https://fetch.spec.whatwg.org/#methods
-              switch (method) {
-                case kj::HttpMethod::GET:
-                case kj::HttpMethod::POST:
-                case kj::HttpMethod::PUT:
-                case kj::HttpMethod::DELETE:
-                case kj::HttpMethod::HEAD:
-                case kj::HttpMethod::OPTIONS:
+              switch (method.known()) {
+                case kj::HttpMethod::Known::GET:
+                case kj::HttpMethod::Known::POST:
+                case kj::HttpMethod::Known::PUT:
+                case kj::HttpMethod::Known::DELETE:
+                case kj::HttpMethod::Known::HEAD:
+                case kj::HttpMethod::Known::OPTIONS:
                   break;
                 default:
                   JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
@@ -561,7 +561,7 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
-kj::StringPtr Request::getMethod() {
+kj::ArrayPtr<const char> Request::getMethod() {
   return kj::toCharSequence(method);
 }
 kj::StringPtr Request::getUrl() {
@@ -851,7 +851,19 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  // The constructor clones `cf` with JSON.stringify(), which can run JavaScript, and none can run
+  // while V8 reads a value. So the request is made without it, and given the clone once the value
+  // has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto request = Request::constructor(js, kj::mv(url), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([request = request.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      request->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return request;
 }
 
 // =======================================================================================
@@ -1456,7 +1468,17 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     }
   }
 
-  return Response::constructor(js, kj::mv(body), kj::mv(init));
+  // As for a Request (Request::deserialize()), `cf` is cloned once the value has been read.
+  auto cf = kj::mv(init.cf);
+  init.cf = kj::none;
+  auto response = Response::constructor(js, kj::mv(body), kj::mv(init));
+  KJ_IF_SOME(c, cf) {
+    deserializer.afterRead([response = response.addRef(), cf = kj::mv(c)](jsg::Lock& js) mutable {
+      auto cloned = cf.deepClone(js);
+      response->cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+    });
+  }
+  return response;
 }
 
 // =======================================================================================
@@ -1526,10 +1548,13 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
-// When the HTTP client failed to parse the response head, the part of the exception's description
-// that says why. kj's HttpClient fails with one of these descriptions, which an embedder's
-// HttpClientErrorHandler may prefix, and kj-hyper (src/rust/cxx/kj-hyper/client.rs) uses the last.
-kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
+// When the HTTP client failed to parse the response head, why. kj-hyper says so in an
+// INVALID_RESPONSE_DETAIL_ID detail. kj's HttpClient, which sets no detail, fails with one of these
+// descriptions, which an embedder's HttpClientErrorHandler may prefix.
+kj::Maybe<kj::ArrayPtr<const char>> invalidResponseReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::INVALID_RESPONSE_DETAIL_ID)) {
+    return reason.asChars();
+  }
   static constexpr kj::StringPtr DESCRIPTIONS[] = {
     "Response headers have no terminal newline."_kj,
     "Invalid response status line"_kj,
@@ -1538,8 +1563,17 @@ kj::Maybe<kj::StringPtr> invalidResponseReason(const kj::Exception& exception) {
   auto description = exception.getDescription();
   for (const auto& text: DESCRIPTIONS) {
     KJ_IF_SOME(start, description.find(text)) {
-      return description.slice(start);
+      return description.slice(start).asArray();
     }
+  }
+  return kj::none;
+}
+
+// When the connection for a request couldn't be made, for example because its host didn't resolve
+// or its TLS handshake failed, the cause, from kj-hyper's CONNECT_FAILED_DETAIL_ID detail.
+kj::Maybe<kj::ArrayPtr<const char>> connectFailureReason(const kj::Exception& exception) {
+  KJ_IF_SOME(reason, exception.getDetail(jsg::CONNECT_FAILED_DETAIL_ID)) {
+    return reason.asChars();
   }
   return kj::none;
 }
@@ -2039,14 +2073,19 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       } else if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
-      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
-        // Fetch treats a response that doesn't parse as a network error, which rejects with a
-        // TypeError.
+      // Fetch treats a response that doesn't parse, or a connection that couldn't be made, as a
+      // network error, which rejects with a TypeError.
+      auto networkError = [typeError](kj::StringPtr what, kj::ArrayPtr<const char> reason) {
         if (typeError) {
-          return JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "Server returned invalid HTTP response: ", reason);
+          return JSG_KJ_EXCEPTION(FAILED, TypeError, what, reason);
         }
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Server returned invalid HTTP response: ", reason);
+        return JSG_KJ_EXCEPTION(FAILED, Error, what, reason);
+      };
+      KJ_IF_SOME(reason, invalidResponseReason(exception)) {
+        return networkError("Server returned invalid HTTP response: "_kj, reason);
+      }
+      KJ_IF_SOME(reason, connectFailureReason(exception)) {
+        return networkError("Network connection failed: "_kj, reason);
       }
       return kj::mv(exception);
     });
@@ -2776,8 +2815,7 @@ static jsg::Promise<void> throwOnError(
 
 static jsg::Promise<Fetcher::GetResult> parseResponse(
     jsg::Lock& js, jsg::Ref<Response> response, jsg::Optional<kj::String> type) {
-  auto typeName =
-      type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+  auto typeName = kj::Maybe<kj::StringPtr>(type).orDefault("text");
   if (typeName == "stream") {
     KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));

@@ -1,0 +1,27 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# The Cap'n Proto compiler plugin behind wd_rust_capnp_serde_json_library().
+wd_rust_binary(
+    name = "capnpc-rust-serde-json",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//anyhow",
+        "@crates_vendor//capnp",
+    ],
+)
+
+# The same plugin, which also writes the cxx bridges of
+# wd_rust_capnp_serde_json_library(ffi = True). The compiler passes plugins no options, so the
+# choice is made when the plugin is built.
+wd_rust_binary(
+    name = "capnpc-rust-serde-json-ffi",
+    crate_root = "main.rs",
+    rustc_env = {"CAPNPC_RUST_SERDE_JSON_FFI": "1"},
+    # capnpc-rust-serde-json_test runs the unit tests.
+    test = False,
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//anyhow",
+        "@crates_vendor//capnp",
+    ],
+)

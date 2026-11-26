@@ -15,10 +15,8 @@
 use std::any::Any;
 use std::cell::Cell;
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::Poll;
 
 use jsg::v8;
 
@@ -192,6 +190,50 @@ pub mod bridge {
         ) -> Result<bool>;
     }
 
+    #[namespace = "workerd::rust::worker"]
+    unsafe extern "C++" {
+        include!("workerd/rust/worker/ffi.rs.h");
+
+        type ScheduledResult = worker::ffi::bridge::ScheduledResult;
+    }
+
+    // `IoContext::IncomingRequest` (`io/io-context.h`), and the calls on it that Rust makes, as
+    // C++ has them. The code that delivers an event holds the request and makes the calls.
+    unsafe extern "C++" {
+        include!("workerd/io/io-context/ffi.h");
+
+        type IncomingRequest;
+
+        /// `IncomingRequest::delivered(eventType, NO, location)`, for the location in `file`,
+        /// `function`, `line` and `column`. C++ copies `event_type`.
+        ///
+        /// # Safety
+        /// `file` and `function` are static NUL-terminated strings with their NUL, which C++
+        /// keeps as the request's `kj::SourceLocation`.
+        unsafe fn incoming_request_delivered(
+            request: Pin<&mut IncomingRequest>,
+            event_type: &[u8],
+            file: &[u8],
+            function: &[u8],
+            line: u32,
+            column: u32,
+        ) -> Result<()>;
+        /// Tells the request's tracer, if it has one, that the event is a scheduled event for
+        /// `scheduled_time` and the cron pattern `cron`.
+        fn incoming_request_set_scheduled_event_info(
+            request: Pin<&mut IncomingRequest>,
+            scheduled_time: KjDate,
+            cron: &[u8],
+        ) -> Result<()>;
+        /// `IncomingRequest::finishScheduled(self)`. An exception that it throws fails the future.
+        async fn incoming_request_finish_scheduled(
+            request: KjOwn<IncomingRequest>,
+        ) -> Result<ScheduledResult>;
+    }
+
+    // Dropping a `KjOwn` of it is generated here, where it is declared.
+    impl KjOwn<IncomingRequest> {}
+
     /// How `io_callback_run()` ended.
     enum IoCallbackOutcome {
         Succeeded,
@@ -242,7 +284,7 @@ pub mod bridge {
 
         type WaitUntilFuture;
 
-        async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
+        async fn io_future_wait(future: Box<IoFuture>) -> Box<IoOutput>;
         async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<()>;
         unsafe fn io_callback_run(
             isolate: usize,
@@ -374,51 +416,16 @@ unsafe impl Sync for bridge::IoOwnedObject {}
 /// Dropping it drops the value it holds, unless Rust took the value first.
 pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn Send>);
 
-/// Waits for `future`. A panic while polling it fails the wait, so that it becomes a KJ exception
-/// rather than unwinding into the KJ event loop, which would abort the process. A panic while
-/// dropping it, when the wait is cancelled, is logged.
-async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjError> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll.map(|output| Ok(Box::new(IoOutput(output)))),
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future that IoContext::await_io_and_run() waited for panicked: {}",
-                    panic_message(&*payload)
-                ),
-            ))),
-        }
-    })
-    .await
+/// Waits for `future`. kj-rs turns a panic while polling it into a KJ exception that fails the
+/// wait, and logs a panic while dropping it, when the wait is cancelled.
+async fn io_future_wait(future: Box<IoFuture>) -> Box<IoOutput> {
+    Box::new(IoOutput(future.0.await))
 }
 
-/// Waits for `future` as a waitUntil task. A panic while polling it fails the task, and a panic
-/// while dropping it is logged, as in `io_future_wait()`. The task fails with the future's
-/// exception as it is.
+/// Waits for `future` as a waitUntil task, which fails with the future's exception as it is. A
+/// panic is handled as in `io_future_wait()`.
 async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<(), cxx::KjException> {
-    let mut future = CatchDropPanic(Some(future.0));
-    std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll,
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future of a waitUntil task panicked: {}",
-                    panic_message(&*payload)
-                ),
-            )
-            .into())),
-        }
-    })
-    .await
+    future.0.await
 }
 
 /// The future that the function of a `ReentryCallback` returns, with its output type erased. KJ
@@ -467,59 +474,19 @@ unsafe fn reentry_fn_run(
 }
 
 /// Waits for the future that `reentry_fn_run()` started for `call`, then puts its output where the
-/// call's `ReentryCallFuture` takes it. A panic while polling the future fails the call, and a
-/// panic while dropping it is logged, as in `io_future_wait()`.
+/// call's `ReentryCallFuture` takes it. A panic is handled as in `io_future_wait()`.
 async fn reentry_call_wait(call: Box<ReentryCall>) -> Result<(), cxx::KjException> {
     let ReentryCall { future, output } = *call;
     let Some(future) = future else {
         unreachable!("C++ waits for a call only once reentry_fn_run() started it")
     };
-    let mut future = CatchDropPanic(Some(future));
-    let value = std::future::poll_fn(move |cx| {
-        let Some(inner) = future.0.as_mut() else {
-            unreachable!("dropped only with the wait")
-        };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(poll) => poll,
-            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!(
-                    "the future of a reentry callback's function panicked: {}",
-                    panic_message(&*payload)
-                ),
-            )
-            .into())),
-        }
-    })
-    .await?;
-    output.set(Some(value));
+    output.set(Some(future.await?));
     Ok(())
 }
 
-/// Holds the future of an `io_future_wait()`, `wait_until_future_wait()` or `reentry_call_wait()`,
-/// which kj-rs drops through an `extern "C"` function, where a panic would abort the process.
-struct CatchDropPanic<F>(Option<F>);
-
-impl<F> Drop for CatchDropPanic<F> {
-    fn drop(&mut self) {
-        let future = self.0.take();
-        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(future))) {
-            bridge::io_context_log_error(&format!(
-                "dropping a future that the IoContext waited for panicked: {}",
-                panic_message(&*payload)
-            ));
-        }
-    }
-}
-
+/// The message of a panic with `payload`, as `cxx::panic_message()` reads it.
 pub fn panic_message(payload: &(dyn Any + Send)) -> &str {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        message
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message
-    } else {
-        "<non-string panic payload>"
-    }
+    cxx::panic_message(payload).unwrap_or("<non-string panic payload>")
 }
 
 /// Runs `callback` with `output`, from `io_context_await_io_and_run()` in the `IoContext`, with the
@@ -542,4 +509,67 @@ unsafe fn io_callback_run(
         }
     })
     .unwrap_or(bridge::IoCallbackOutcome::Panicked)
+}
+
+/// Where Rust code delivered a request.
+///
+/// It is the `kj::SourceLocation` that `IoContext::IncomingRequest::delivered()` records, which
+/// the "no current `IncomingRequest`" warnings report. Made by
+/// [`delivered_location!`](crate::delivered_location).
+pub struct DeliveredLocation {
+    pub file: &'static std::ffi::CStr,
+    pub function: &'static std::ffi::CStr,
+    pub line: u32,
+    pub column: u32,
+}
+
+/// The [`DeliveredLocation`] of the macro's caller, as a `&'static DeliveredLocation`.
+///
+/// Its function is the caller's module path, since Rust has no name for the enclosing function.
+#[macro_export]
+macro_rules! delivered_location {
+    () => {
+        const {
+            &$crate::DeliveredLocation {
+                file: match ::std::ffi::CStr::from_bytes_with_nul(concat!(file!(), "\0").as_bytes())
+                {
+                    Ok(file) => file,
+                    Err(_) => panic!("a file name contains a NUL"),
+                },
+                function: match ::std::ffi::CStr::from_bytes_with_nul(
+                    concat!(module_path!(), "\0").as_bytes(),
+                ) {
+                    Ok(function) => function,
+                    Err(_) => panic!("a module path contains a NUL"),
+                },
+                line: line!(),
+                column: column!(),
+            }
+        }
+    };
+}
+
+/// `IoContext::IncomingRequest::delivered(eventType)`, for `event_type`, such as `"scheduled"`.
+///
+/// The event type names the request's async trace resource, and `location` is recorded as where
+/// the request was delivered.
+///
+/// # Errors
+/// Fails with the exception that `delivered()` throws.
+pub fn incoming_request_delivered(
+    request: Pin<&mut bridge::IncomingRequest>,
+    event_type: &str,
+    location: &'static DeliveredLocation,
+) -> Result<(), cxx::KjException> {
+    // SAFETY: a `DeliveredLocation`'s strings are static `CStr`s, passed with their NUL.
+    unsafe {
+        bridge::incoming_request_delivered(
+            request,
+            event_type.as_bytes(),
+            location.file.to_bytes_with_nul(),
+            location.function.to_bytes_with_nul(),
+            location.line,
+            location.column,
+        )
+    }
 }

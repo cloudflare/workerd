@@ -5,6 +5,7 @@
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod arguments;
@@ -86,9 +87,11 @@ pub use resource::undescribed;
 pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::EscapableScope;
 pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
+pub use scope::NestedScope;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
@@ -120,6 +123,10 @@ pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
+#[doc(hidden)]
+pub use wrappable::DropCheck;
+#[doc(hidden)]
+pub use wrappable::DropCheckFallback;
 pub use wrappable::FromJS;
 pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
@@ -187,6 +194,9 @@ mod ffi {
         type Global = crate::v8::ffi::Global;
 
         // Realm
+        /// Null if no Realm is attached. `#[nothrow]` so that cross-language LTO inlines it:
+        /// a struct conversion reads the Realm on each call.
+        #[nothrow]
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
         /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
         /// none has been detached, which sets the dispose hook.
@@ -395,21 +405,38 @@ impl_error_constructors! {
     ReferenceError => new_reference_error,
 }
 
+impl Error {
+    /// The `TypeError` for a callback whose `this` is not a wrapper of its resource, with the
+    /// message that C++ JSG and V8's signature check throw (`kIllegalInvocation`).
+    pub fn new_illegal_invocation() -> Self {
+        Self::new_type_error(
+            "Illegal invocation: function called with incorrect `this` reference. See \
+             https://developers.cloudflare.com/workers/observability/errors/\
+             #illegal-invocation-errors for details.",
+        )
+    }
+}
+
 impl<'s> FromJS<'s> for Error {
     type ResultType = Self;
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
-    /// If the value is a native error, extracts the name and message properties.
-    /// Otherwise, converts the value to a string for the message.
+    /// A `DOMException` becomes an error thrown as a `DOMException` with the name and message it
+    /// was created with, as [`try_unwrap_dom_exception`] reads them. A native error becomes an
+    /// error of the class its `name` property names, with its `message` property. Any other value
+    /// fails to convert with a `TypeError`.
     ///
-    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or an exception or a termination is already pending, this fails with an
-    /// error for which [`Error::is_pending`] is true.
+    /// Reading `name` and `message` of a native error can run JavaScript (a getter, a Proxy trap,
+    /// or `toString`). If it throws, or an exception or a termination is already pending, this
+    /// fails with an error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
+        if let Some((name, message)) = tunnel::try_unwrap_dom_exception(lock, value)? {
+            return Ok(Self::new_dom_exception(name, message));
+        }
         if value.is_native_error()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
         {
@@ -428,7 +455,7 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                // A `DOMException` is not a native error, so `name` names a class.
+                // A `DOMException` was converted above, so `name` names a class.
                 name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
                     ErrorName::class_named(&n)
                 }),
@@ -1062,8 +1089,9 @@ impl<'s> Lock<'s> {
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the Realm stays attached
+        // while the lock is in use, and `self` is borrowed for as long as the result.
+        unsafe { attached_realm(self.isolate().as_ffi()).as_mut() }
     }
 
     /// Returns the current worker's compatibility flags reader.
@@ -1662,16 +1690,21 @@ pub enum Member {
         getter_callback: RawGetterCallback,
         read_only: bool,
     },
+    /// A method of the constructor. The names of a type's static methods and static constants
+    /// must differ from each other and from `length`, `name` and `prototype`, which every
+    /// function already has; creating the type's template panics otherwise.
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<fast_api::FastCallback>,
         length: u32,
     },
-    StaticConstant {
-        name: String,
-        value: ConstantValue,
-    },
+    /// A read-only number on both the constructor and the prototype. Its name follows the rules
+    /// of [`Member::StaticMethod`], and must also differ from the names of the type's prototype
+    /// members, such as instance methods and prototype properties: a debug build of V8 throws
+    /// when it instantiates a prototype with two properties of the same name, and a release build
+    /// keeps only one of them.
+    StaticConstant { name: String, value: ConstantValue },
     /// A property of every instance with any string name that is not a defined property of the
     /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
     /// one. `query_callback` tells V8 whether a property exists, for `in`.
@@ -1682,29 +1715,21 @@ pub enum Member {
     /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
     /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
     /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
-    Dispose {
-        callback: RawFunctionCallback,
-    },
+    Dispose { callback: RawFunctionCallback },
     /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
     /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
     /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
     /// one, and may also have a [`Member::Dispose`].
-    AsyncDispose {
-        callback: RawFunctionCallback,
-    },
+    AsyncDispose { callback: RawFunctionCallback },
     /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.
-    Callable {
-        callback: RawFunctionCallback,
-    },
+    Callable { callback: RawFunctionCallback },
     /// The method installed as `prototype[Symbol.iterator]`, which makes instances iterable
     /// with `for...of`, spread and `Array.from()`, like C++ JSG's `JSG_ITERABLE`. It returns the
     /// iterator. Like a [`Member::Method`], it is registered with the type's `v8::Signature`;
     /// unlike one, it is not enumerable. A type has at most one.
-    Iterable {
-        callback: RawFunctionCallback,
-    },
+    Iterable { callback: RawFunctionCallback },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.
@@ -1741,15 +1766,6 @@ pub trait GarbageCollected: Traced {
     /// Reports the resource's fields to a heap snapshot: the C++ `jsgGetMemoryInfo` of a
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
-
-    /// Whether the resource implements `Drop` itself or a field's type needs it (see
-    /// [`Traced::needs_drop_detach`]). If so, its references are made strong and forget their
-    /// parent before it is dropped, so that a `Drop` impl may move them out (see
-    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
-    /// type that needs it must override it to return `true`.
-    fn detach_before_drop(&self) -> bool {
-        false
-    }
 
     /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
     /// which makes a Worker whose top level leaves it reachable start without the snapshot.
@@ -1887,6 +1903,29 @@ unsafe fn isolate_disposed(state: *const IsolateState) {
     state.isolate_disposed();
 }
 
+/// The Realm attached to `isolate`. The caller chooses whether to borrow it shared or unique.
+///
+/// # Panics
+///
+/// Panics if no Realm is attached.
+///
+/// # Safety
+///
+/// `isolate` must be valid and locked by this thread.
+#[expect(
+    unsafe_code,
+    reason = "reads the Realm pointer from the isolate's data slot"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "a Realm is attached to every isolate that runs Rust JSG code"
+)]
+unsafe fn attached_realm(isolate: *mut v8::ffi::Isolate) -> NonNull<Realm> {
+    // SAFETY: the isolate is valid and locked (guaranteed by the caller).
+    let realm = unsafe { ffi::realm_from_isolate(isolate) };
+    NonNull::new(realm).expect("Rust Realm not set on isolate")
+}
+
 /// See the bridge declaration.
 #[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
 unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
@@ -1904,8 +1943,10 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
     // (guaranteed by the C++ caller, and checked above).
     let isolate = unsafe { Isolate::from_raw(isolate) };
-    // SAFETY: the Realm is attached while the hook that calls this is installed.
-    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    // SAFETY: the isolate is valid and locked, and the Realm is attached while the hook that
+    // calls this is installed. The reference is shared, since releasing a reference can drop a
+    // resource, whose `Drop` may reach the Realm.
+    let realm = unsafe { attached_realm(isolate.as_ffi()).as_ref() };
     realm.state.drain_awaiting_lock(isolate);
 }
 

@@ -25,16 +25,18 @@ pub enum TranscodeError {
     ExpectedUtf16LengthTooLarge,
     #[error("Expected UTF-8 length is too large to transcode")]
     ExpectedUtf8LengthTooLarge,
-    #[error("UTF-16le input size should be multiple of 2")]
-    OddUtf16leInput,
     #[error("Expected UTF16 length mismatch")]
     Utf16LengthMismatch,
     #[error("Expected UTF8 length mismatch")]
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
-    #[error("Failed to initialize converter")]
-    ConverterOpenFailed,
+    /// Malformed UTF-8 or UTF-16LE input to the UTF-8/UTF-16LE pairs, which
+    /// Node reports with ICU's `U_INVALID_CHAR_FOUND`. `transcode()` in
+    /// `src/node/internal/internal_buffer.ts` matches this message to add
+    /// Node's `code` and `errno`.
+    #[error("Unable to transcode Buffer [U_INVALID_CHAR_FOUND]")]
+    InvalidChar,
     #[error("Invalid encoding passed to transcode")]
     InvalidEncoding,
     #[error("Failed to allocate memory for Uint8Array")]

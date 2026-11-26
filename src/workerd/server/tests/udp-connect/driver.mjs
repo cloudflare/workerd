@@ -23,8 +23,9 @@ beforeEach(async () => {
   workerd = new WorkerdServerHarness({
     workerdBinary: env.WORKERD_BINARY,
     workerdConfig: env.WORKERD_CONFIG,
-    listenPortNames: ['udp'],
-    extraArgs: ['--experimental'],
+    extraArgs:
+      env.TS_STREAMS === '1' ? ['tsStreams', '--experimental'] : ['config'],
+    listenPortNames: ['udp', 'udp-bounded', 'udp-disabled', 'http-disabled'],
   });
   await workerd.start();
   await workerd.getListenPort('udp');
@@ -57,12 +58,44 @@ function sendAndReceive(client, port, data, timeoutMs = 5000) {
   });
 }
 
+test('UDP ingress is not dispatched without the compatibility flag on older dates', async () => {
+  const udpPort = await workerd.getListenPort('udp-disabled');
+  const httpPort = await workerd.getListenPort('http-disabled');
+  const client = createSocket('udp4');
+  try {
+    await assert.rejects(
+      sendAndReceive(client, udpPort, Buffer.from('hello'), 500),
+      /timed out waiting for reply datagram/
+    );
+    const response = await fetch(`http://127.0.0.1:${httpPort}/`);
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(await response.json(), 0);
+  } finally {
+    client.close();
+  }
+});
+
 test('UDP connect() handler reports protocol "udp"', async () => {
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
   try {
     const reply = await sendAndReceive(client, port, Buffer.from('hello'));
     assert.strictEqual(reply.toString(), 'first:udp:hello');
+  } finally {
+    client.close();
+  }
+});
+
+test('UDP socket.opened reports the original peer address and port', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    const reply = await sendAndReceive(
+      client,
+      port,
+      Buffer.from('remoteAddress')
+    );
+    assert.strictEqual(reply.toString(), `127.0.0.1:${client.address().port}`);
   } finally {
     client.close();
   }
@@ -163,5 +196,51 @@ test('timed-out Flow destructor does not unregister its replacement', async () =
   } finally {
     client.close();
     controlClient.close();
+  }
+});
+
+test('UDP connect() drops datagrams once the flow exceeds maxPendingBytes', async () => {
+  // The configured maxPendingBytes is 95. The worker echoes a priming ping immediately, which
+  // confirms it's already running (isolate/module startup already paid for) and about to enter
+  // its 300ms delay -- only then do we fire the burst of single-byte datagrams that's meant to
+  // overflow the queue. A one-byte payload and its 24-byte kj::Array handle cost 25 bytes, so only
+  // the first three datagrams fit; the rest are dropped rather than buffered.
+  const port = await workerd.getListenPort('udp-bounded');
+  const client = createSocket('udp4');
+  try {
+    await sendAndReceive(client, port, Buffer.from('p'));
+
+    const received = [];
+    client.on('message', (msg) => received.push(msg.toString()));
+
+    for (const byte of ['0', '1', '2', '3', '4', '5']) {
+      client.send(Buffer.from(byte), port, '127.0.0.1');
+    }
+
+    // Give the worker time to wake up from its delay and echo back whatever fit in the queue.
+    await scheduler.wait(1000);
+
+    assert.deepStrictEqual(received, ['0', '1', '2']);
+  } finally {
+    client.close();
+  }
+});
+
+test('UDP connect() accounts for empty datagrams in maxPendingBytes', async () => {
+  const port = await workerd.getListenPort('udp-bounded');
+  const client = createSocket('udp4');
+  try {
+    await sendAndReceive(client, port, Buffer.from('p'));
+
+    let received = 0;
+    client.on('message', () => received++);
+    for (let i = 0; i < 6; i++) {
+      client.send(Buffer.alloc(0), port, '127.0.0.1');
+    }
+
+    await scheduler.wait(1000);
+    assert.strictEqual(received, 3);
+  } finally {
+    client.close();
   }
 });

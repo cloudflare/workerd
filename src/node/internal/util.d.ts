@@ -15,6 +15,22 @@ export const PerformanceResourceTiming = perfHooks.PerformanceResourceTiming;
 
 export const kResourceTypeInspect: unique symbol;
 
+// MIME types for internal_mime.ts. `params` holds `paramCount` names and values:
+// the name of parameter `i` at index `2 * i`, its value next.
+export function parseMimeType(input: string): string[] | undefined;
+export function serializeMimeType(
+  type: string,
+  subtype: string,
+  params: Record<number, string>,
+  paramCount: number
+): string;
+export function serializeMimeParams(
+  params: Record<number, string>,
+  paramCount: number
+): string;
+export function isMimeToken(s: string): boolean;
+export function isMimeParamValue(s: string): boolean;
+
 export const ALL_PROPERTIES: 0;
 export const ONLY_ENUMERABLE: 1;
 export function getOwnNonIndexProperties(

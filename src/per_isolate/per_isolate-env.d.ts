@@ -97,6 +97,7 @@ declare const primordials: {
     <T>(value: T): Promise<Awaited<T>>;
   };
   readonly PromiseReject: <T = never>(reason?: unknown) => Promise<T>;
+  readonly DOMException: typeof DOMException;
 
   // Everything else is loosely typed — add specific entries as needed.
   readonly [key: string]: any;
@@ -116,9 +117,6 @@ declare const utils: {
   // name (jsg::JsObject::getPrivate() and setPrivate()). V8-private
   // properties are neither reflected by JavaScript nor inherited.
   getPrivateSymbol(name: string): symbol;
-  // The constructor the TypeScript DOMException constructs its instances with
-  // (jsg::getBootstrapDomExceptionBase()).
-  DOMExceptionBase: new () => object;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
@@ -141,6 +139,19 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The three Performance members below exist only under the
+  // ts-performance-now autogate; only performance/now uses them.
+  //
+  // performance.now() on `this`: the Spectre-safe clock plus the native
+  // perf-event accounting. It and requirePerformance() take the Performance as
+  // a signature-checked `this`; call them through uncurryThis. See "THE C++
+  // CONTRACT" in performance/AGENTS.md.
+  performanceNow(this: unknown): number;
+  // The receiver check alone: does nothing for a Performance `this`.
+  requirePerformance(this: unknown): void;
+  // Performance.prototype, without creating the lazy `performance` singleton,
+  // whatever the compat flags.
+  getPerformancePrototype(): object;
   // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
   // these only through events/event-target-internals, which documents them.
   setListenerCountHook(
@@ -244,8 +255,12 @@ declare const utils: {
     ignoreCase: boolean
   ): unknown[];
   legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
-  // The lowercased `type/subtype`, or undefined if not a MIME type.
-  mimeTypeEssence(input: string): string | undefined;
+  // `[type, subtype, name0, value0, ...]`, lowercased but for the values, or
+  // undefined if not a MIME type (api/mimetype-js.h). Use mime/mime-type.
+  mimeTypeParse(input: string): string[] | undefined;
+  // A MIME type serialized; `params` lists names and values as mimeTypeParse()
+  // does after the subtype.
+  mimeTypeSerialize(type: string, subtype: string, params: string[]): string;
   // Undefined for anything but a ReadableStream of either implementation.
   readableStreamState(
     value: unknown
@@ -268,6 +283,15 @@ declare interface RequestIo {
   fetch(fetcher: unknown, url: string, init?: RequestInit): Promise<Response>;
   wait(milliseconds: number, signal: AbortSignal): Promise<void>;
   logUncaughtException(error: unknown): void;
+}
+
+// A service binding, as the Workers types' Fetcher declares it in full,
+// which EventSourceInit's `fetcher` names (eventsource.public.d.ts). The
+// bootstrap only checks one with utils.isFetcher() and passes it to
+// RequestIo.fetch(). The Workers types publish their own declaration, not
+// this one.
+declare interface Fetcher {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
 // An abort algorithm registration. Obtained only from
