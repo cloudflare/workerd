@@ -15,25 +15,34 @@ wd_rust_crate(
     ],
     cxx_bridge_deps = [
         "//src/rust/jsg",
+        "//src/rust/worker:bridge",
         "//src/workerd/io",
     ],
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
+    # The entrypoint crate's bridge names IncomingRequest.
+    cxx_bridge_visibility = ["//src/workerd/io/entrypoint:__pkg__"],
     link_deps = [":ffi"],
     proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
-    deps = ["//src/rust/jsg"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/worker",
+    ],
 )
 
 wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
+    # The entrypoint crate's shims hand C++ IncomingRequests to Rust.
+    visibility = ["//src/workerd/io/entrypoint:__pkg__"],
     deps = [
         ":current-with-id",
         ":ffi.rs@cxx",
         "//src/rust/jsg:ffi",
+        "//src/rust/worker:bridge",
         "//src/workerd/io",
         "//src/workerd/jsg:inspector",
     ],
@@ -74,6 +83,7 @@ wd_rust_crate(
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
     cxx_bridge_deps = [
+        ":ffi",
         "//src/rust/jsg",
         "//src/workerd/api/channel-interop:ffi.rs@cxx",
     ],

@@ -160,7 +160,12 @@ namespace workerd::util {
   V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
   /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
      than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
-  V(RUST_COMPAT_DATE)
+  V(RUST_COMPAT_DATE)                                                                              \
+  /* WorkerEntrypoint::runScheduled() hands the scheduled event to Rust (io/entrypoint), which     \
+     reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
+     the request to finish, rather than doing all of that in C++. The handler is still started by  \
+     C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
+  V(RUST_ENTRYPOINT_SCHEDULED)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
