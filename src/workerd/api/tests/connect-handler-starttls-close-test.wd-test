@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same worker runs twice: once on the TypeScript streams implementation and once on the C++
+# one, since startTls() detaches a socket's streams differently in each.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "connect-handler-starttls-close-test",
+      worker = (
+        modules = .modules,
+        # connect_handler_starttls and typescript_implemented_streams are experimental.
+        compatibilityFlags = [
+          "nodejs_compat_v2", "connect_handler_starttls", "experimental",
+          "typescript_implemented_streams",
+        ],
+        durableObjectNamespaces = [
+          (className = "Peer", uniqueKey = "7d2b4f1e9a6c4b3d8e5f0a1b2c3d4e5f"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [(name = "PEER", durableObjectNamespace = "Peer")],
+      )
+    ),
+    ( name = "connect-handler-starttls-close-test-cpp-streams",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
+        durableObjectNamespaces = [
+          (className = "Peer", uniqueKey = "1a9e3c5b7d2f4e6a8b0c2d4e6f8a0b1c"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [(name = "PEER", durableObjectNamespace = "Peer")],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "connect-handler-starttls-close-test.js"),
+];

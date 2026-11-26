@@ -299,6 +299,12 @@ wd_test(
     data = ["connect-handler-starttls-lifetime-test.js"],
 )
 
+wd_test(
+    src = "connect-handler-starttls-close-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-handler-starttls-close-test.js"],
+)
+
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
 # NeuterableIoStream when the handler promise resolves, preventing use-after-free.
 wd_test(
