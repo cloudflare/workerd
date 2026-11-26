@@ -11,6 +11,7 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/rust/jsg-cpp/jsg-cpp.h>
 #include <workerd/server/cli/repl/bridge.rs.h>
+#include <workerd/server/factory/per-process.h>
 #include <workerd/server/factory/single-tenant-policy.h>
 #include <workerd/server/factory/worker-factory.h>
 #include <workerd/server/workerd-api.h>
@@ -34,15 +35,21 @@ const PythonConfig REPL_PYTHON_CONFIG{.createSnapshot = false, .createBaselineSn
 }  // namespace
 
 kj::Own<WorkerFactory> repl_new_factory(
-    const ReplFactorySource& source, ::rust::Slice<const uint64_t> config) {
+    const ReplFactorySource& source, ::rust::Vec<uint64_t> config) {
   auto& resources = source.resources;
   auto options = kj::heap<WorkerFactory::Options>();
   options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
   options->experimental = source.experimental;
   options->hostHeaderTable = source.headerTable;
-  return kj::heap<WorkerFactory>(resources.v8System, resources.timer, resources.monotonicClock,
-      resources.network, resources.entropySource, resources.fs, kj::mv(options),
-      kj::from<kj_rs::Rust>(config).as<kj_rs::RustCopy>());
+  return newWorkerFactory(resources.process,
+      FactoryIo{
+        .timer = resources.timer,
+        .monotonicClock = resources.monotonicClock,
+        .network = resources.network,
+        .entropySource = resources.entropySource,
+        .fs = resources.fs,
+      },
+      kj::mv(options), kj::mv(config));
 }
 
 kj::Own<ReplWorker> repl_worker_new(
@@ -221,7 +228,7 @@ void ReplWorker::Impl::compileWorker() {
       vfs->getBundleRoot(), capnp::List<config::Extension>::Reader{});
 
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
-  auto api = kj::heap<WorkerdApi>(resources.v8System, featureFlags,
+  auto api = kj::heap<WorkerdApi>(resources.process.getV8System(), featureFlags,
       capnp::List<config::Extension>::Reader{}, limitEnforcer->getCreateParams(),
       jsg::newIsolateGroup(), kj::atomicRefcounted<JsgIsolateObserver>(), *memoryCacheProvider,
       REPL_PYTHON_CONFIG);

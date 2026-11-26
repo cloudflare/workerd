@@ -129,14 +129,14 @@ pub mod ffi {
         /// C++ channels itself.
         fn repl_channel_into_kj(channel: Box<SubrequestChannel>) -> KjRc<IoSubrequestChannel>;
 
-        /// What the servers of an environment's configs are built from: the session's V8, timer,
+        /// What the servers of an environment's configs are built from: the session's process, timer,
         /// network and filesystem, and the environment's header table and `--experimental`.
         type ReplFactorySource;
 
         /// A worker factory for `config`, an encoded `Config` message.
         fn repl_new_factory(
             source: &ReplFactorySource,
-            config: &[u64],
+            config: Vec<u64>,
         ) -> Result<KjOwn<WorkerFactory>>;
     }
 }

@@ -608,8 +608,9 @@ it may be the last to hold it, destroys no KJ I/O objects. C++ renders results w
 **Loaded configs.** A loaded config's server is Rust: `ReplConfigServer` (`cli/repl/server.rs`),
 which the JavaScript API holds directly.
 `workerd.loadConfig()` reads the config as `workerd serve` does (`CliLoader`,
-`cli/repl/session.rs`), has C++ build a `WorkerFactory` for it over the REPL's V8 and event loop
-(`repl_new_factory`), and hands that to the Rust server's `InProcessServer`
+`cli/repl/session.rs`), has C++ build a `WorkerFactory` for it on the process's state
+(`ProcessState`, `factory/per-process.h`, which the first session starts) and the REPL's event loop
+(`repl_new_factory`, through `newWorkerFactory`), and hands that to the Rust server's `InProcessServer`
 (`server/in_process.rs`). `InProcessServer::start()` serves the config in the background, its
 stream sockets on `loopback:` names. A reload reads the config and builds the new
 `InProcessServer`, closes the old one, then starts the new; reloads and closes run as tasks of the

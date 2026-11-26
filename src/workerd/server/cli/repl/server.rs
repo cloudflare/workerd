@@ -669,7 +669,7 @@ fn prepare(
     .map_err(js_error)?;
     let claim = session.claim(path, exclusive_resources(&words)?, except)?;
     // The server owns the factory for as long as it runs.
-    let factory = ffi::repl_new_factory(factory_source, &words)?;
+    let factory = ffi::repl_new_factory(factory_source, words)?;
     Ok(Prepared {
         server: workerd_server::in_process::new_in_process_server(factory),
         claim,

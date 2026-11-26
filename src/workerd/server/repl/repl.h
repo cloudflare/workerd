@@ -35,19 +35,17 @@ namespace kj_rs_tokio {
 struct TokioAsyncIoContext;
 }  // namespace kj_rs_tokio
 
-namespace workerd::jsg {
-class V8System;
-}  // namespace workerd::jsg
-
 namespace workerd::server {
 
+class ProcessState;
 struct SubrequestChannel;
 class WorkerFactory;
 
 // The REPL session's process-wide resources, which its workers and the servers of the configs it
 // loads are built from.
 struct ReplServerResources {
-  jsg::V8System& v8System;
+  // The process's V8 and autogates (factory/per-process.h), which the first session starts.
+  const ProcessState& process;
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
@@ -89,7 +87,7 @@ class ReplFactorySource final: public kj::Refcounted {
 };
 
 // A REPL session's I/O: the timer, network and filesystem of the event loop it was created on,
-// and the process's V8. Created on the event loop's thread, and used only there.
+// and the process's state. Created on the event loop's thread, and used only there.
 class ReplSession {
  public:
   class Impl;
@@ -140,6 +138,6 @@ bool repl_inspect(
 kj::Rc<IoChannelFactory::SubrequestChannel> repl_channel_into_kj(
     ::rust::Box<SubrequestChannel> channel);
 kj::Own<WorkerFactory> repl_new_factory(
-    const ReplFactorySource& source, ::rust::Slice<const uint64_t> config);
+    const ReplFactorySource& source, ::rust::Vec<uint64_t> config);
 
 }  // namespace workerd::server::repl
