@@ -1,0 +1,13 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Safe wrappers of the IoContext APIs that need an event loop pinned to its OS thread, which every
+# event loop of the workerd binary is. Visible only to the binary's packages: an API crate that
+# also runs where event loops move between threads must not reach them.
+wd_rust_crate(
+    name = "pinned-thread-io",
+    visibility = ["//src/workerd/server:__subpackages__"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io/io-context",
+    ],
+)

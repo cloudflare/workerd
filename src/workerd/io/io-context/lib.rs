@@ -284,7 +284,8 @@ impl<'s> IoContext<'s> {
     ///
     /// Staying on one thread is a property of the event loop, not of this function: a host may
     /// move an event loop between OS threads, and `future`, its output or `callback` may hold
-    /// what is tied to the thread, such as an `Rc` with a clone outside them.
+    /// what is tied to the thread, such as an `Rc` with a clone outside them. Hosts whose event
+    /// loops are pinned to their threads wrap this once, safely (`//src/workerd/server/pinned-thread-io`).
     ///
     /// # Safety
     /// The current event loop runs on this OS thread until `future`, its output and `callback`
@@ -703,7 +704,7 @@ impl<'s> IoContext<'s> {
     /// drops it, as one that C++ `IoOwn` holds is.
     ///
     /// As for [`await_io_local`](Self::await_io_local), staying on the thread is a property of
-    /// the event loop.
+    /// the event loop, which pinned hosts state once (`//src/workerd/server/pinned-thread-io`).
     ///
     /// # Safety
     /// The current event loop runs on this OS thread until the `IoContext` has dropped `value`.
