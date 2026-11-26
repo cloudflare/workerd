@@ -538,6 +538,14 @@ kj::Maybe<bool> Worker::Api::isCtxCacheRustInstance(
   return false;
 }
 
+api::exportedhandler::ExecutionContext Worker::Api::newExecutionContext(jsg::Lock& js,
+    jsg::JsValue exports,
+    jsg::JsValue props,
+    kj::Maybe<VersionInfo> versionInfo) const {
+  return api::exportedhandler::ExecutionContext(
+      js.alloc<api::ExecutionContext>(js, exports, props, kj::mv(versionInfo)));
+}
+
 v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
     v8::Local<v8::Value> handler,
     v8::Local<v8::Value> env,
@@ -2631,7 +2639,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Historically, non-class-based handlers reused the same ctx object for all requests.
                         // This was an accident, but some Workers depend on it.
                         // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
-                        obj.ctx = js.alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
+                        obj.ctx = api.newExecutionContext(
+                            lock, jsg::JsValue(ctxExports), js.obj(), kj::none);
 
                         // Python Workers append all durable objects, worker entrypoint and workflow
                         // entrypoint classes in the pythonEntrypoints named export.
@@ -2944,7 +2953,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
       [&](EntrypointClass& cls) -> kj::Maybe<kj::Own<api::ExportedHandler>> {
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
-        js.alloc<api::ExecutionContext>(js,
+        worker.getIsolate().getApi().newExecutionContext(js,
             jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
             kj::mv(versionInfo)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
@@ -2964,7 +2973,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     jsg::Lock& js = *this;
     if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
       api::ExportedHandler constructedHandler = h.clone(js);
-      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
+      constructedHandler.ctx = worker.getIsolate().getApi().newExecutionContext(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
           kj::mv(versionInfo));
       ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler.self.getHandle(js)));
