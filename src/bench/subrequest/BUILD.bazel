@@ -1,0 +1,14 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# Subrequests through a worker's I/O channel factory: a service binding's fetch() and RPC,
+# ctx.exports with props, and a dynamic worker's env, a restored stub in it included, with a
+# Durable Object stub and Date.now() as controls. `--experimental` for the Worker Loader binding.
+wd_bench(
+    src = "subrequest.wd-bench",
+    args = ["--experimental"],
+    data = [
+        "restorer.js",
+        "subrequest.js",
+        "target.js",
+    ],
+)

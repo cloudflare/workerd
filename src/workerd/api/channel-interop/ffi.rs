@@ -16,7 +16,6 @@ use io_context::IoContext;
 use jsg::v8;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
-use kj_rs::KjRc;
 
 // Every function takes the isolate of the caller's lock, locked by this thread with a context
 // entered and a `HandleScope` open, and handles in that scope.
@@ -68,24 +67,15 @@ pub mod bridge {
         NO,
     }
 
+    // The channels behind the classes, as the io_channels bridge declares them.
+    #[namespace = "workerd::io_channels"]
     unsafe extern "C++" {
-        /// A C++ `IoChannelFactory::SubrequestChannel`: somewhere requests can be sent.
-        ///
-        /// C++ documents a channel as an I/O object, valid only in the `IoContext` it was made
-        /// in, and keeps one past its request only once `requireAllowsTransfer()` has allowed it.
-        /// Rust gets one for the current request as a [`ScopedChannel`](super::ScopedChannel),
-        /// which can't outlive the lock it was obtained with, and keeps one past its request as
-        /// the `KjRc<SubrequestChannel>` that
-        /// [`ScopedChannel::require_allows_transfer`](super::ScopedChannel::require_allows_transfer)
-        /// returns. A `KjRc` is a `kj::Rc`, whose clones share its count. Like the C++ channel,
-        /// it belongs to the thread it was made on, so it is neither `Send` nor `Sync`, and can't
-        /// be held by a resource; it may be dropped with or without the isolate lock, and after
-        /// its `IoContext` is gone.
-        type SubrequestChannel;
+        include!("workerd/io/io-channels/ffi.h");
+        type SubrequestChannel = io_channels::ffi::SubrequestChannel;
+        type ActorClassChannel = io_channels::ffi::ActorClassChannel;
+    }
 
-        /// The same, for a C++ `IoChannelFactory::ActorClassChannel`: a Durable Object class.
-        type ActorClassChannel;
-
+    unsafe extern "C++" {
         type RequiresHostAndProtocol;
         type InHouse;
 
@@ -150,10 +140,10 @@ pub mod bridge {
     }
 }
 
-use bridge::ActorClassChannel;
 use bridge::DurableObjectClass;
 use bridge::Fetcher;
-use bridge::SubrequestChannel;
+use io_channels::ActorClassChannel;
+use io_channels::SubrequestChannel;
 
 // SAFETY: the shims instantiate cppRefTryUnwrap and cppRefWrap with api::Fetcher.
 unsafe impl jsg_cpp::CppResource for Fetcher {
@@ -256,8 +246,12 @@ impl InHouse {
 /// it with [`require_allows_transfer`](Self::require_allows_transfer), as C++ does. Code that
 /// keeps the `Fetcher` or `DurableObjectClass` instead keeps the channel only as C++ does, bound
 /// to its `IoContext`.
+///
+/// A channel kept past its request is the [`SubrequestChannel`] or [`ActorClassChannel`] of the
+/// `io_channels` crate, which can't be held by a resource either: like the C++ channel, it
+/// belongs to the thread it was made on, so it is neither `Send` nor `Sync`.
 pub struct ScopedChannel<'s, C: Channel> {
-    channel: KjRc<C>,
+    channel: C,
     _lock: PhantomData<(&'s (), *const ())>,
 }
 
@@ -266,7 +260,7 @@ impl<'s, C: Channel> ScopedChannel<'s, C> {
     /// [`require_allows_transfer`](Self::require_allows_transfer) returned, or one that C++ made
     /// for this request, such as a channel to a Worker Loader's dynamic Worker.
     #[must_use]
-    pub const fn new(_io_context: &IoContext<'s>, channel: KjRc<C>) -> Self {
+    pub const fn new(_io_context: &IoContext<'s>, channel: C) -> Self {
         Self {
             channel,
             _lock: PhantomData,
@@ -279,7 +273,7 @@ impl<'s, C: Channel> ScopedChannel<'s, C> {
     ///
     /// # Errors
     /// Fails with the error C++ throws for a channel that can't be transferred.
-    pub fn require_allows_transfer(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<KjRc<C>> {
+    pub fn require_allows_transfer(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<C> {
         // SAFETY: `call_cpp` calls the shim with the lock's isolate.
         jsg_cpp::call_cpp(lock, |isolate| unsafe {
             C::require_allows_transfer(isolate, &self.channel)
@@ -287,7 +281,7 @@ impl<'s, C: Channel> ScopedChannel<'s, C> {
         Ok(self.channel.clone())
     }
 
-    fn into_inner(self) -> KjRc<C> {
+    fn into_inner(self) -> C {
         self.channel
     }
 }
@@ -308,7 +302,7 @@ mod sealed {
 }
 
 /// [`SubrequestChannel`] or [`ActorClassChannel`]: what a [`ScopedChannel`] holds.
-pub trait Channel: sealed::Sealed + Sized {
+pub trait Channel: sealed::Sealed + Sized + Clone {
     /// The shim of `requireAllowsTransfer()`.
     ///
     /// # Safety
@@ -320,14 +314,14 @@ pub trait Channel: sealed::Sealed + Sized {
 impl Channel for SubrequestChannel {
     unsafe fn require_allows_transfer(isolate: *mut v8::ffi::Isolate, channel: &Self) -> bool {
         // SAFETY: forwarded from the caller.
-        unsafe { bridge::subrequest_channel_require_allows_transfer(isolate, channel) }
+        unsafe { bridge::subrequest_channel_require_allows_transfer(isolate, channel.as_kj()) }
     }
 }
 
 impl Channel for ActorClassChannel {
     unsafe fn require_allows_transfer(isolate: *mut v8::ffi::Isolate, channel: &Self) -> bool {
         // SAFETY: forwarded from the caller.
-        unsafe { bridge::actor_class_channel_require_allows_transfer(isolate, channel) }
+        unsafe { bridge::actor_class_channel_require_allows_transfer(isolate, channel.as_kj()) }
     }
 }
 
@@ -351,7 +345,10 @@ impl Fetcher {
         })?;
         let channel = Option::from(slot)
             .unwrap_or_else(|| unreachable!("a shim that completed sets its result"));
-        Ok(ScopedChannel::new(io_context, channel))
+        Ok(ScopedChannel::new(
+            io_context,
+            SubrequestChannel::from_kj(channel),
+        ))
     }
 
     /// A new `Fetcher` that sends requests to `channel`, bound to `io_context` as a C++
@@ -366,7 +363,7 @@ impl Fetcher {
         channel: ScopedChannel<'s, SubrequestChannel>,
     ) -> jsg::Result<jsg_cpp::Ref<Self>> {
         let id = io_context.as_ffi();
-        let channel = channel.into_inner();
+        let channel = channel.into_inner().into_kj();
         // SAFETY: the shim instantiates callCppForRef with api::Fetcher, and `call_cpp_for_ref`
         // calls it with the lock's isolate.
         let fetcher = unsafe {
@@ -443,7 +440,10 @@ impl DurableObjectClass {
         })?;
         let channel = Option::from(slot)
             .unwrap_or_else(|| unreachable!("a shim that completed sets its result"));
-        Ok(ScopedChannel::new(io_context, channel))
+        Ok(ScopedChannel::new(
+            io_context,
+            ActorClassChannel::from_kj(channel),
+        ))
     }
 
     /// A new `DurableObjectClass` for `channel`, bound to `io_context` as a C++ one made with
@@ -459,7 +459,7 @@ impl DurableObjectClass {
         channel: ScopedChannel<'s, ActorClassChannel>,
     ) -> jsg::Result<jsg_cpp::Ref<Self>> {
         let id = io_context.as_ffi();
-        let channel = channel.into_inner();
+        let channel = channel.into_inner().into_kj();
         // SAFETY: the shim instantiates callCppForRef with api::DurableObjectClass, and
         // `call_cpp_for_ref` calls it with the lock's isolate.
         let class = unsafe {

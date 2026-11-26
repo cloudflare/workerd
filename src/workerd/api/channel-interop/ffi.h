@@ -27,8 +27,8 @@ namespace workerd::api::channel_interop {
 
 namespace jsg_cpp = ::workerd::rust::jsg_cpp;
 
-// The nested channel classes, by names in this namespace, which the bridge declares them by.
-// Rust holds them as `KjRc`s.
+// The nested channel classes, by the names the shims' signatures use. The bridge aliases them
+// from the io_channels bridge, which declares them in `workerd::io_channels`.
 using SubrequestChannel = IoChannelFactory::SubrequestChannel;
 using ActorClassChannel = IoChannelFactory::ActorClassChannel;
 

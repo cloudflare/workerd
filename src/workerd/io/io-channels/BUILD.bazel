@@ -1,0 +1,53 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The channels of C++ `IoChannelFactory` (workerd/io/io-channels.h) for Rust: the one bridge that
+# declares them, which other bridges alias, and the newtypes Rust holds them as. ffi.h names the
+# nested classes in the bridge's namespace. A package of its own because //src/workerd/io must not
+# depend on Rust.
+wd_rust_crate(
+    name = "io-channels",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+    ],
+    cxx_bridge_deps = ["//src/workerd/io"],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    # For the bridges of crates that take and return the channels.
+    cxx_bridge_visibility = ["//visibility:public"],
+    visibility = ["//visibility:public"],
+)
+
+# Snippets that must compile against io-channels. See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [
+        ":io-channels",
+        "@crates_vendor//static_assertions",
+    ],
+)
+
+# The Rust half of io-channels-test: functions that take each channel as its newtype and hand it
+# back.
+wd_rust_crate(
+    name = "io-channels-test-bridge",
+    testonly = True,
+    srcs = ["test_bridge.rs"],
+    crate_root = "test_bridge.rs",
+    cxx_bridge_deps = [":ffi.rs@cxx"],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "test_bridge.rs",
+    deps = [":io-channels"],
+)
+
+# Each channel handed to Rust and back is the C++ object it was, counted once per reference.
+kj_test(
+    src = "io-channels-test.c++",
+    deps = [
+        ":io-channels-test-bridge",
+        "//src/workerd/io",
+    ],
+)

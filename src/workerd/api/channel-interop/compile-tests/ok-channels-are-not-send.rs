@@ -13,10 +13,9 @@
 use channel_interop::ActorClassChannel;
 use channel_interop::ScopedChannel;
 use channel_interop::SubrequestChannel;
-use kj_rs::KjRc;
 use static_assertions::assert_not_impl_any;
 
-assert_not_impl_any!(KjRc<SubrequestChannel>: Send, Sync);
-assert_not_impl_any!(KjRc<ActorClassChannel>: Send, Sync);
+assert_not_impl_any!(SubrequestChannel: Send, Sync);
+assert_not_impl_any!(ActorClassChannel: Send, Sync);
 assert_not_impl_any!(ScopedChannel<'static, SubrequestChannel>: Send, Sync);
 assert_not_impl_any!(ScopedChannel<'static, ActorClassChannel>: Send, Sync);
