@@ -91,6 +91,14 @@ declare const primordials: {
   // result then reads.
   readonly captureJsgGetter: <T>(proto: object, name: string) => T;
 
+  // Response's readonly properties, as captureJsgGetter() captures them.
+  readonly ResponseOkGet: (response: Response) => boolean;
+  readonly ResponseStatusGet: (response: Response) => number;
+  readonly ResponseHeadersGet: (response: Response) => Headers;
+  readonly ResponseRedirectedGet: (response: Response) => boolean;
+  readonly ResponseUrlGet: (response: Response) => string;
+  readonly ResponseBodyGet: (response: Response) => ReadableStream | null;
+
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
     (): Promise<void>;

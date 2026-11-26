@@ -42,6 +42,7 @@ const unitTests :Workerd.Config = (
     EventSourceModules.contextCurrent,
     EventSourceModules.contextLegacy,
     EventSourceModules.contextHelper,
+    EventSourceModules.firstTouch,
   ],
   v8Flags = ["--expose-gc"],
 );

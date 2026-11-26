@@ -100,6 +100,9 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   function exists anywhere to capture**. Use `captureJsgGetter` in
   the `primordials.ts` : prototype-accessor capture with a plain-read fallback
   (an own data property read never consults the patchable prototype chain).
+  Capture an inherited accessor from the prototype that defines it
+  (Response's `body` from Body.prototype), and export the capture for the
+  modules that need it rather than calling `captureJsgGetter` in them.
   The bootstrap runs for every worker regardless of compat date — both layouts
   must work. JSG *methods* are always on the prototype.
 - Internal cross-module surfaces are exported as a single namespace

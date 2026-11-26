@@ -64,6 +64,12 @@ const {
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
+  ResponseBodyGet,
+  ResponseHeadersGet,
+  ResponseOkGet,
+  ResponseRedirectedGet,
+  ResponseStatusGet,
+  ResponseUrlGet,
   StringPrototypeCharCodeAt,
   StringPrototypeIndexOf,
   StringPrototypeSlice,
@@ -78,7 +84,6 @@ const {
   TypedArrayPrototypeGetByteLength,
   TypedArrayPrototypeGetByteOffset,
   Uint8Array,
-  captureJsgGetter,
   uncurryThis,
 } = primordials;
 
@@ -121,30 +126,6 @@ const ReaderCancel = uncurryThis(
   globalThis.ReadableStreamDefaultReader.prototype.cancel
 ) as (reader: Reader, reason?: unknown) => Promise<void>;
 
-const ResponseProto = globalThis.Response.prototype;
-const ResponseOkGet = captureJsgGetter<(response: Response) => boolean>(
-  ResponseProto,
-  'ok'
-);
-const ResponseStatusGet = captureJsgGetter<(response: Response) => number>(
-  ResponseProto,
-  'status'
-);
-const ResponseHeadersGet = captureJsgGetter<(response: Response) => Headers>(
-  ResponseProto,
-  'headers'
-);
-const ResponseRedirectedGet = captureJsgGetter<(response: Response) => boolean>(
-  ResponseProto,
-  'redirected'
-);
-const ResponseUrlGet = captureJsgGetter<(response: Response) => string>(
-  ResponseProto,
-  'url'
-);
-const ResponseBodyGet = captureJsgGetter<
-  (response: Response) => ReadableStream | null
->(ResponseProto, 'body');
 const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
   headers: Headers,
   name: string

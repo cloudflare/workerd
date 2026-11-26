@@ -105,7 +105,9 @@ dictionary EventSourceInit {
   cancelled (not pinned). An event wrapped before dispatch keeps its target
   alive until the event is swept, so the EventSource can outlive its
   stream's end by a major GC; `gc.js` allows three.
-- **Prototype pollution:** built-ins are reached only through primordials.
+- **Prototype pollution:** built-ins are reached only through primordials,
+  and captured before any user code runs, so a Worker that replaces them
+  before it first touches EventSource still gets the originals.
 
 ## Compatibility flags
 
@@ -143,6 +145,7 @@ variant. The main cells also pin `nodejs_compat` (`node:assert`,
 | `context.js` | cross-request callbacks and close(), with and without `handle_cross_request_promise_resolution`; close during reconnection; same-request delivery |
 | `gc.js` | pending reads retain, ended streams release, for native and JavaScript sources and in a Durable Object |
 | `pollution.js` | from() and connected delivery under patched built-ins |
+| `first-touch-worker.js` | a Worker of its own (`events-eventsource-first-touch`, in the main cells), which replaces built-ins at its top level before it first touches EventSource: from() and a connection use none of them |
 | `legacy-shape.js` | `[object Object]` |
 | `legacy-listener-exceptions.js` | the first throwing listener ends the dispatch, unreported |
 | `server.js` | the event streams connected EventSources fetch, through `subrequest` |
