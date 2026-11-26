@@ -48,7 +48,12 @@ namespace workerd::util {
 //    config option in the test's config file.
 // 4. You can set the `WORKERD_ALL_AUTOGATES=1` environment variable to enable
 //    all gates for a test run.
-// 5. In a Rust test, `jsg_test::set_autogates(&["my-new-feature"])` configures exactly the
+// 5. `WORKERD_ALL_AUTOGATES_EXCEPT`, a comma-separated list of gate names
+//    without the `workerd-autogate-` prefix, leaves those gates off whenever
+//    all gates are enabled, by the variable above or by the `--all-autogates`
+//    flag. The test macros' `all_autogates_variant_excludes` sets it, so that
+//    a target's `@all-autogates` variant runs every other gate.
+// 6. In a Rust test, `jsg_test::set_autogates(&["my-new-feature"])` configures exactly the
 //    named gates for as long as the returned guard lives.
 //
 // Removing the gate after rollout:
@@ -214,22 +219,28 @@ class Autogate {
 
   // Creates a global Autogate and seeds it with gates that are specified in the config.
   //
+  // Under WORKERD_ALL_AUTOGATES (unless `ignoreEnv`), the config's gates are enabled along with
+  // every gate initAllAutogates() would enable, other than those in `excludedFromAll`.
+  //
   // This function is not thread safe, it should be called exactly once close to the start of the
   // process before any threads are created.
   static void initAutogate(capnp::List<capnp::Text>::Reader autogates,
-      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
+      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO,
+      kj::ArrayPtr<const AutogateKey> excludedFromAll = nullptr);
 
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   // Prefer the AutogateKey overload in hand-written tests for compile-time safety.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames,
       IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
   static void initAutogateNamesForTest(kj::ArrayPtr<const kj::StringPtr> gateNames,
-      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO);
+      IgnoreAllAutogatesEnv ignoreEnv = IgnoreAllAutogatesEnv::NO,
+      kj::ArrayPtr<const AutogateKey> excludedFromAll = nullptr);
 
   // Type-safe overload: takes enum values directly, avoiding silent typo bugs.
   static void initAutogateForTest(std::initializer_list<AutogateKey> keys);
 
-  // Initializes all autogates to true. Used for testing with the --all-autogates flag.
+  // Initializes all autogates to true, but those WORKERD_ALL_AUTOGATES_EXCEPT names. Used for
+  // testing with the --all-autogates flag.
   static void initAllAutogates();
 
   // Destroys an initialized global Autogate instance. Used only for testing.
@@ -240,6 +251,9 @@ class Autogate {
 
   Autogate() = default;
   Autogate(capnp::List<capnp::Text>::Reader autogates);
+
+  // Enables every gate the all-autogates test mode enables, other than those in `excluded`.
+  void enableAll(kj::ArrayPtr<const AutogateKey> excluded = nullptr);
 };
 
 // Retrieves the name of the gate.

@@ -11,6 +11,7 @@ def wd_test(
         python_snapshot_test = False,
         generate_default_variant = True,
         generate_all_autogates_variant = True,
+        all_autogates_variant_excludes = [],
         generate_all_compat_flags_variant = True,
         generate_gc_stress_variant = True,
         predictable = True,
@@ -32,6 +33,9 @@ def wd_test(
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
      generate_default_variant: If True (default), generate the default variant with oldest compat date.
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     all_autogates_variant_excludes: Autogates, named without the `workerd-autogate-` prefix,
+        that the @all-autogates variant leaves off, such as one that would swap in an
+        implementation other than the one the test is about.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_gc_stress_variant: If True (default), generate @gc-stress variant.
      predictable: If True (default), pass `--predictable` to workerd.
@@ -131,7 +135,7 @@ def wd_test(
             args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
             size = size,
-            **(kwargs | attrs)
+            **(kwargs | attrs | {"env": kwargs.get("env", {}) | all_autogates_except_env(all_autogates_variant_excludes)})
         )
 
     # GC stress variant: forced full GC at every awaitIo continuation.
@@ -447,6 +451,14 @@ _wd_test = rule(
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )
+
+def all_autogates_except_env(excludes):
+    """Returns the environment that leaves autogates off in an @all-autogates variant.
+
+    Args:
+     excludes: The autogates to leave off, named without the `workerd-autogate-` prefix.
+    """
+    return {"WORKERD_ALL_AUTOGATES_EXCEPT": ",".join(excludes)} if excludes else {}
 
 def wd_cli_test(
         tags = [],

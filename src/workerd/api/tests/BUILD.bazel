@@ -1351,12 +1351,13 @@ wd_test(
     generate_default_variant = False,
 )
 
-# Test that verifies autogates are DISABLED - only runs in default variant
+# Test that verifies autogates are DISABLED: in the default variant, and in the @all-autogates
+# variant, which leaves the one it checks out.
 wd_test(
     src = "autogate-disabled-test.wd-test",
     args = ["--experimental"],
+    all_autogates_variant_excludes = ["test-workerd"],
     data = ["autogate-disabled-test.js"],
-    generate_all_autogates_variant = False,
 )
 
 # Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant

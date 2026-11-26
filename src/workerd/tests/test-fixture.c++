@@ -306,8 +306,8 @@ inline server::config::Worker::Reader buildConfig(
   for (auto key: params.autogateKeys) {
     gates.add(kj::toCharSequence(key));
   }
-  util::Autogate::initAutogateNamesForTest(
-      gates.asPtr(), util::IgnoreAllAutogatesEnv(params.ignoreAllAutogatesEnv));
+  util::Autogate::initAutogateNamesForTest(gates.asPtr(),
+      util::IgnoreAllAutogatesEnv(params.ignoreAllAutogatesEnv), params.excludedFromAllAutogates);
 
   return config;
 }
