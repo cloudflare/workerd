@@ -68,6 +68,10 @@ git_repository(
     name = "llvm_runtimes",
     build_file = "@workerd//:build/BUILD.llvm-runtimes",
     commit = "85ac560262434c9ccfc0c183ec22d4138ed647fb",
+    patch_strip = 1,
+    patches = [
+        "//:patches/llvm_runtimes/0001-libunwind-Trust-the-eh_frame_hdr-table-on-a-miss.patch",
+    ],
     remote = "https://github.com/llvm/llvm-project.git",
     sparse_checkout_patterns = [
         "cmake",
