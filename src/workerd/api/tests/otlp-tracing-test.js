@@ -27,6 +27,7 @@ export default {
       span.setAttribute('flags', [true]);
       span.setAttribute('scores', [1.5, undefined]);
       span.setAttribute('none', []);
+      span.recordException(new Error('handled'));
       await (await env.SELF.fetch('http://traced/leaf?secret=1')).text();
     });
     return new Response('not here', { status: 503 });
@@ -121,7 +122,17 @@ export const test = {
     assert.deepStrictEqual(mySpan.attributes.flags, [true]);
     assert.deepStrictEqual(mySpan.attributes.scores, [1.5, null]);
     assert.deepStrictEqual(mySpan.attributes.none, []);
+    // Recording an exception adds an event without changing an UNSET span status.
     assert.strictEqual(mySpan.status, undefined);
+    assert.deepStrictEqual(
+      mySpan.events.map((event) => event.name),
+      ['exception']
+    );
+    assert.strictEqual(mySpan.events[0].attributes['exception.type'], 'Error');
+    assert.strictEqual(
+      mySpan.events[0].attributes['exception.message'],
+      'handled'
+    );
 
     // The subrequest made inside it.
     assert.strictEqual(fetch.kind, SPAN_KIND_CLIENT);
@@ -141,7 +152,7 @@ export const test = {
     assert.strictEqual(leaf.spans[0].parentSpanId, fetch.spanId);
     assert.strictEqual(leaf.spans[0].status, undefined);
 
-    // An uncaught exception is recorded on the root, and its message is the error status's.
+    // An uncaught exception is recorded on the root and derives an error status from the outcome.
     await assert.rejects(env.SELF.fetch('http://traced/throw'));
     const [, , thrown] = await collected(env, 3);
     assert.deepStrictEqual(
@@ -156,7 +167,7 @@ export const test = {
     assert.strictEqual(thrownRoot.attributes['error.type'], 'exception');
     assert.deepStrictEqual(thrownRoot.status, {
       code: STATUS_CODE_ERROR,
-      message: 'handler failed',
+      message: '',
     });
     assert.deepStrictEqual(
       thrownRoot.events.map((event) => event.name),

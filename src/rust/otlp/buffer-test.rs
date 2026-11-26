@@ -388,7 +388,60 @@ fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
 }
 
 #[test]
-fn a_status_the_worker_set_and_exceptions_come_before_derived_errors() {
+fn recording_an_exception_does_not_set_error_status() {
+    let mut buffer = buffer();
+    assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+    assert!(buffer.open(1, ROOT, "child".to_owned(), T0));
+    buffer.add_exception(1, T0, "Error".to_owned(), "handled".to_owned(), None);
+    assert!(buffer.close(1, T0, Attributes::default()).is_none());
+
+    buffer.add_exception(
+        ROOT,
+        T0,
+        "Error".to_owned(),
+        "also handled".to_owned(),
+        None,
+    );
+    let batch = buffer
+        .close(
+            ROOT,
+            T0,
+            attributes(&[("cloudflare.outcome", string("ok"))]),
+        )
+        .unwrap();
+    let request = decode(&batch);
+
+    for name in ["child", "GET"] {
+        let span = named(&request, name);
+        assert_eq!(span.status, None);
+        assert_eq!(attribute(&span.attributes, "error.type"), None);
+        assert_eq!(span.events.len(), 1);
+        assert_eq!(span.events[0].name, "exception");
+    }
+
+    // An uncaught invocation exception still gets ERROR from cloudflare.outcome.
+    let mut uncaught = self::buffer();
+    assert!(uncaught.open(ROOT, 0, "GET".to_owned(), T0));
+    uncaught.add_exception(ROOT, T0, "Error".to_owned(), "uncaught".to_owned(), None);
+    let batch = uncaught
+        .close(
+            ROOT,
+            T0,
+            attributes(&[("cloudflare.outcome", string("exception"))]),
+        )
+        .unwrap();
+    let request = decode(&batch);
+    let root = named(&request, "GET");
+    assert_eq!(status_code(root), StatusCode::Error);
+    assert!(root.status.as_ref().unwrap().message.is_empty());
+    assert_eq!(
+        attribute(&root.attributes, "error.type"),
+        Some(&string("exception"))
+    );
+}
+
+#[test]
+fn a_status_the_worker_set_comes_before_derived_errors() {
     let mut buffer = buffer_with(true, Attributes::default());
     assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
     assert!(buffer.open(1, ROOT, "mine".to_owned(), T0));
@@ -430,7 +483,7 @@ fn a_status_the_worker_set_and_exceptions_come_before_derived_errors() {
 
     let root = named(&request, "GET");
     assert_eq!(status_code(root), StatusCode::Error);
-    assert_eq!(root.status.as_ref().unwrap().message, "boom");
+    assert!(root.status.as_ref().unwrap().message.is_empty());
     assert_eq!(
         attribute(&root.attributes, "error.type"),
         Some(&string("500"))
