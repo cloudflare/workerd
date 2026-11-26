@@ -6116,12 +6116,113 @@ export const testGetSystemError = {
   },
 };
 
-export const testNotImplemented = {
+export const testErrnoException = {
   async test() {
-    for (const method of ['_errnoException', '_exceptionWithHostPort']) {
-      assert.throws(() => util[method](), {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      });
+    const e = util._errnoException(-2, 'open', '/tmp/x');
+    assert.ok(e instanceof Error);
+    assert.strictEqual(e.constructor, Error);
+    assert.strictEqual(e.name, 'Error');
+    assert.strictEqual(e.message, 'open ENOENT /tmp/x');
+    assert.deepStrictEqual(Object.keys(e), ['errno', 'code', 'syscall']);
+    assert.strictEqual(e.errno, -2);
+    assert.strictEqual(e.code, 'ENOENT');
+    assert.strictEqual(e.syscall, 'open');
+
+    // Linux libuv numbering, as Node reports on Linux.
+    assert.strictEqual(
+      util._errnoException(-111, 'connect').message,
+      'connect ECONNREFUSED'
+    );
+    assert.strictEqual(
+      util._errnoException(-2, 'read', '').message,
+      'read ENOENT'
+    );
+    assert.strictEqual(
+      util._errnoException(-9999, 'read').message,
+      'read Unknown system error -9999'
+    );
+
+    const withNew = new util._errnoException(-13, 'mkdir');
+    assert.strictEqual(withNew.message, 'mkdir EACCES');
+    assert.strictEqual(withNew.constructor, Error);
+
+    // The stack starts at the caller, not inside node:util.
+    const stackLines = e.stack.split('\n');
+    assert.strictEqual(stackLines[0], 'Error: open ENOENT /tmp/x');
+    assert.match(stackLines[1], /^ {4}at Object\.test /);
+  },
+};
+
+export const testExceptionWithHostPort = {
+  async test() {
+    const fn = util._exceptionWithHostPort;
+    const e = fn(-111, 'connect', '127.0.0.1', 80, '10.0.0.1:5000');
+    assert.ok(e instanceof Error);
+    assert.strictEqual(e.constructor, Error);
+    assert.strictEqual(
+      e.message,
+      'connect ECONNREFUSED 127.0.0.1:80 - Local (10.0.0.1:5000)'
+    );
+    assert.deepStrictEqual(Object.keys(e), [
+      'errno',
+      'code',
+      'syscall',
+      'address',
+      'port',
+    ]);
+    assert.strictEqual(e.errno, -111);
+    assert.strictEqual(e.code, 'ECONNREFUSED');
+    assert.strictEqual(e.syscall, 'connect');
+    assert.strictEqual(e.address, '127.0.0.1');
+    assert.strictEqual(e.port, 80);
+    assert.match(e.stack.split('\n')[1], /^ {4}at Object\.test /);
+
+    const noPort = fn(-98, 'bind', '0.0.0.0', 0);
+    assert.strictEqual(noPort.message, 'bind EADDRINUSE 0.0.0.0');
+    assert.deepStrictEqual(Object.keys(noPort), [
+      'errno',
+      'code',
+      'syscall',
+      'address',
+    ]);
+
+    // A negative port is still stored, but not shown.
+    const negPort = fn(-98, 'bind', '0.0.0.0', -1);
+    assert.strictEqual(negPort.message, 'bind EADDRINUSE 0.0.0.0');
+    assert.strictEqual(negPort.port, -1);
+
+    const bare = fn(-111, 'connect');
+    assert.strictEqual(bare.message, 'connect ECONNREFUSED');
+    assert.ok(Object.hasOwn(bare, 'address'));
+    assert.strictEqual(bare.address, undefined);
+    assert.ok(!Object.hasOwn(bare, 'port'));
+
+    assert.strictEqual(
+      fn(-111, 'connect', undefined, undefined, '10.0.0.1:5000').message,
+      'connect ECONNREFUSED - Local (10.0.0.1:5000)'
+    );
+    assert.strictEqual(
+      new fn(-111, 'connect', 'example.com', 443).message,
+      'connect ECONNREFUSED example.com:443'
+    );
+  },
+};
+
+export const testErrnoExceptionInvalidErr = {
+  async test() {
+    for (const fn of [util._errnoException, util._exceptionWithHostPort]) {
+      for (const err of ['-2', null, undefined, {}]) {
+        assert.throws(() => fn(err, 'open'), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+        });
+      }
+      for (const err of [0, 1, NaN, -1.5, -Infinity]) {
+        assert.throws(() => fn(err, 'open'), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+        });
+      }
     }
   },
 };

@@ -28,7 +28,6 @@ export { debuglog };
 
 import {
   ERR_INVALID_ARG_TYPE,
-  ERR_METHOD_NOT_IMPLEMENTED,
   ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
 import {
@@ -437,14 +436,60 @@ export function convertProcessSignalToExitCode(signalCode: string): number {
 // Workers never receive SIGINT, so there is no stack trace to print.
 export function setTraceSigInt(_enable: boolean): void {}
 
-export function _errnoException(): void {
-  // TODO(soon): We might support this in the future.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('_errnoException');
+type ErrnoError = Error & {
+  errno: number;
+  code: string;
+  syscall: string;
+  address?: string | undefined;
+  port?: number;
+};
+
+// A libuv error as Node reports it: a plain Error with the libuv error name in
+// `code`.
+function errnoError(err: number, syscall: string, details: string): ErrnoError {
+  const code = getErrorName(err);
+  const e = new Error(`${syscall} ${code}${details}`) as ErrnoError;
+  e.errno = err;
+  e.code = code;
+  e.syscall = syscall;
+  return e;
 }
 
-export function _exceptionWithHostPort(): void {
-  // TODO(soon): We might support this in the future.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('_exceptionWithHostPort');
+export function _errnoException(
+  err: unknown,
+  syscall: string,
+  original?: string
+): Error {
+  validateSystemError(err);
+  const e = errnoError(err, syscall, original ? ` ${original}` : '');
+  Error.captureStackTrace(e, _errnoException);
+  return e;
+}
+
+export function _exceptionWithHostPort(
+  err: unknown,
+  syscall: string,
+  address?: string,
+  port?: number,
+  additional?: string
+): Error {
+  validateSystemError(err);
+  let details = '';
+  if (port && port > 0) {
+    details = ` ${address}:${port}`;
+  } else if (address) {
+    details = ` ${address}`;
+  }
+  if (additional) {
+    details += ` - Local (${additional})`;
+  }
+  const e = errnoError(err, syscall, details);
+  e.address = address;
+  if (port) {
+    e.port = port;
+  }
+  Error.captureStackTrace(e, _exceptionWithHostPort);
+  return e;
 }
 
 export default {
