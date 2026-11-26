@@ -19,11 +19,14 @@
 
 mod ffi;
 mod scheduled;
+mod test;
 
 use std::future::Future;
 
 use cxx::KjException;
 use ffi::bridge;
+use io_context::RunError;
+use jsg::v8;
 use kj_rs::KjDate;
 use kj_rs::KjOwn;
 
@@ -39,6 +42,14 @@ impl Invocation {
     #[must_use]
     pub fn new(invocation: KjOwn<bridge::Invocation>) -> Self {
         Self { invocation }
+    }
+
+    /// Tells the request's tracer, if it has one, that the event is a custom event.
+    ///
+    /// # Errors
+    /// Fails with the exception the tracer throws.
+    pub fn set_custom_event_info(&mut self) -> Result<(), KjException> {
+        io_context::incoming_request_set_custom_event_info(ffi::request(self.invocation.pin_mut()))
     }
 
     /// Tells the request's tracer, if it has one, that the event is a scheduled event for
@@ -85,7 +96,62 @@ impl Invocation {
 /// `WorkerEntrypoint` method, the request is destroyed with the `WorkerEntrypoint`.
 pub struct Delivered(KjOwn<bridge::Invocation>);
 
+/// The handles that [`Delivered::run_test_in_wait_until`] runs its function on.
+pub struct TestHandler<'s> {
+    /// The exported handler's `test()` function.
+    pub test: v8::Local<'s, v8::Function>,
+    /// The exported handler, which `test()` is a method of.
+    pub handler: v8::Local<'s, v8::Value>,
+    /// The Worker's env.
+    pub env: v8::Local<'s, v8::Value>,
+    /// The handler's ctx, or undefined if it has none.
+    pub ctx: v8::Local<'s, v8::Value>,
+}
+
 impl Delivered {
+    /// Runs `f` on the test event's [`TestHandler`] in a waitUntil task of the request, with
+    /// [`io_context::incoming_request_run_in_wait_until`], then waits for the future that `f`
+    /// returns. The handler and its `test()` function are found first, in the task, by the C++
+    /// function `entrypoint::getTestHandles()`, as the run's C++ prelude, before Rust holds the
+    /// lock: the task fails with what finding them throws, as when a class entrypoint's
+    /// constructor throws, or what `ServiceWorkerGlobalScope::getTestHandler()` throws under
+    /// Service Workers syntax or when there is no `test()` function. The prelude also names the
+    /// run's Perfetto span, `WorkerEntrypoint::test() run`.
+    ///
+    /// # Errors
+    /// Fails with the exception that keeps the task from being added.
+    pub fn run_test_in_wait_until<F>(
+        mut self,
+        f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, TestHandler<'s>) -> Result<F, RunError> + 'static,
+    ) -> Result<Running, KjException>
+    where
+        F: Future<Output = Result<(), KjException>> + 'static,
+    {
+        let lookup = bridge::invocation_take_test_handler_lookup(self.0.pin_mut());
+        io_context::incoming_request_run_in_wait_until(
+            ffi::request(self.0.pin_mut()),
+            lookup,
+            move |lock, handles| {
+                let &[test, handler, env, ctx] = handles else {
+                    unreachable!("the test handler lookup returns test(), the handler, env and ctx")
+                };
+                let Ok(test) = v8::Local::<v8::Function>::try_from(test) else {
+                    unreachable!("getTestHandler() returns a function")
+                };
+                f(
+                    lock,
+                    TestHandler {
+                        test,
+                        handler,
+                        env,
+                        ctx,
+                    },
+                )
+            },
+        )?;
+        Ok(Running(self.0))
+    }
+
     /// Starts the event's scheduled handler with a `ScheduledEvent` for `scheduled_time` and
     /// `cron`, in a waitUntil task of the request, with the C++ function that
     /// `WorkerEntrypoint::runScheduled()` also calls, `entrypoint::startScheduledInWaitUntil()`:

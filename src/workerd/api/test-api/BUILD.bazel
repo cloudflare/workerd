@@ -1,0 +1,11 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# TestController, the first argument of a Worker's `test()` handler, and the call of that handler.
+# The entrypoint crate (//src/workerd/io/entrypoint) delivers the test event to it.
+wd_rust_crate(
+    name = "test-api",
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/jsg"],
+)

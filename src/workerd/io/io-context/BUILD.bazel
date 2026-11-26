@@ -45,6 +45,7 @@ wd_cc_library(
         "//src/rust/worker:bridge",
         "//src/workerd/io",
         "//src/workerd/jsg:inspector",
+        "//src/workerd/util:perfetto",
     ],
 )
 
@@ -95,6 +96,7 @@ wd_rust_crate(
         ":io-context",
         "//src/rust/jsg",
         "//src/rust/jsg-cpp",
+        "//src/rust/kj",
         "//src/workerd/api/channel-interop",
         "@crates_vendor//futures",
     ],
@@ -108,6 +110,7 @@ wd_cc_library(
     srcs = ["test-bridge.c++"],
     hdrs = ["test-bridge-state.h"],
     deps = [
+        ":ffi",
         ":test_bridge.rs@cxx",
         "//src/workerd/io",
     ],

@@ -571,6 +571,174 @@ KJ_TEST("an await_io_and_run() future that panics fails the task, and its callba
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+// Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it
+// exists, and passes on other messages the log level allowed before, as in request-ops-test.c++.
+// Only INFO messages are recorded, so that a failed KJ_EXPECT that quotes one reaches the test.
+class UncaughtExceptionLog final: public kj::ExceptionCallback {
+ public:
+  UncaughtExceptionLog(): previousLevel(currentLogLevel()) {
+    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+  }
+  ~UncaughtExceptionLog() noexcept(false) {
+    kj::_::Debug::setLogLevel(previousLevel);
+  }
+
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    if (severity == kj::LogSeverity::INFO && text.contains("uncaught exception")) {
+      messages.add(kj::mv(text));
+    } else if (severity >= previousLevel) {
+      next.logMessage(severity, file, line, contextDepth, kj::mv(text));
+    }
+  }
+
+  // The messages recorded since the last call, separated by " | ".
+  kj::String take() {
+    auto result = kj::strArray(messages, " | ");
+    messages.clear();
+    return result;
+  }
+
+  kj::Vector<kj::String> messages;
+
+ private:
+  kj::LogSeverity previousLevel;
+
+  // KJ has no getter for the log level.
+  static kj::LogSeverity currentLogLevel() {
+    for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
+           kj::LogSeverity::FATAL}) {
+      if (kj::_::Debug::shouldLog(severity)) return severity;
+    }
+    return kj::LogSeverity::DBG;
+  }
+};
+
+KJ_TEST("run_in_wait_until() runs its prelude, its function on the handles, then its future") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  awaitContextId = kj::none;
+  run_in_wait_until(*request, RunEnding::Succeed);
+  // The function runs in IoContext::run(), which waits for the isolate lock.
+  KJ_EXPECT(run_observation() == AwaitObservation::Pending);
+  fixture.pollEventLoop();
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(awaitContextId) == idOf(*context));
+  KJ_EXPECT(run_handle() == 42);
+  KJ_EXPECT(run_future_done());
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::OK);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run_in_wait_until() prelude that throws fails the task, and the function is dropped") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  run_in_wait_until(*request, RunEnding::PreludeThrows);
+  fixture.pollEventLoop();
+  KJ_EXPECT(run_observation() != AwaitObservation::Ran);
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+}
+
+KJ_TEST("a run_in_wait_until() function that throws fails the task") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  UncaughtExceptionLog log;
+  run_in_wait_until(*request, RunEnding::Throw);
+  fixture.pollEventLoop();
+  // run() logs the function's exception as uncaught.
+  auto logged = log.take();
+  KJ_EXPECT(logged.contains("TypeError: the function threw"), logged);
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run_in_wait_until() function that fails with a KJ exception fails the task") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  UncaughtExceptionLog log;
+  run_in_wait_until(*request, RunEnding::FailWithKj);
+  fixture.pollEventLoop();
+  // The task fails with the KJ exception unchanged.
+  auto logged = log.take();
+  KJ_EXPECT(logged.contains("jsg.Error: the function failed"), logged);
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run_in_wait_until() function that fails with a KJ exception while a JavaScript "
+        "exception is pending fails the task with the pending exception") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  UncaughtExceptionLog log;
+  run_in_wait_until(*request, RunEnding::FailWithKjWhilePending);
+  fixture.pollEventLoop();
+  auto logged = log.take();
+  KJ_EXPECT(logged.contains("TypeError: the pending exception"), logged);
+  KJ_EXPECT(!logged.contains("the dropped failure"), logged);
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run_in_wait_until() function that panics terminates execution and fails the task") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  run_in_wait_until(*request, RunEnding::PanicInFunction);
+  {
+    KJ_EXPECT_LOG(
+        ERROR, "the function of IoContext::IncomingRequest::run_in_wait_until() panicked");
+    KJ_EXPECT_LOG(ERROR, "internalMessage = the function panicked");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a run_in_wait_until() future that panics fails the task") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  run_in_wait_until(*request, RunEnding::PanicInFuture);
+  {
+    KJ_EXPECT_LOG(ERROR, "panic in Rust future: the future panicked");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(run_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(!run_future_done());
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("run_in_wait_until() drops its function unrun when the request is destroyed first") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  run_in_wait_until(*request, RunEnding::Succeed);
+  {
+    KJ_EXPECT_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it");
+    request = nullptr;
+  }
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+  fixture.pollEventLoop();
+  KJ_EXPECT(run_observation() == AwaitObservation::Dropped);
+}
+
 // How the promise of the last await_promise() or await_value() has settled. It is read in a
 // request of its own: the one that awaited may have nothing left to wait for, and be aborted.
 kj::String awaitedOutcome(TestFixture& fixture) {
@@ -1939,52 +2107,6 @@ KJ_TEST("in an untraced request, await_js() creates no async trace resource and 
   auto neverSettled = awaitJsUntraced(fixture, AwaitJsStart::DropResolver);
   KJ_EXPECT(neverSettled == NEVER_SETTLED_OUTCOME, neverSettled);
 }
-
-// Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it
-// exists, and passes on other messages the log level allowed before, as in request-ops-test.c++.
-// Only INFO messages are recorded, so that a failed KJ_EXPECT that quotes one reaches the test.
-class UncaughtExceptionLog final: public kj::ExceptionCallback {
- public:
-  UncaughtExceptionLog(): previousLevel(currentLogLevel()) {
-    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
-  }
-  ~UncaughtExceptionLog() noexcept(false) {
-    kj::_::Debug::setLogLevel(previousLevel);
-  }
-
-  void logMessage(kj::LogSeverity severity,
-      const char* file,
-      int line,
-      int contextDepth,
-      kj::String&& text) override {
-    if (severity == kj::LogSeverity::INFO && text.contains("uncaught exception")) {
-      messages.add(kj::mv(text));
-    } else if (severity >= previousLevel) {
-      next.logMessage(severity, file, line, contextDepth, kj::mv(text));
-    }
-  }
-
-  // The messages recorded since the last call, separated by " | ".
-  kj::String take() {
-    auto result = kj::strArray(messages, " | ");
-    messages.clear();
-    return result;
-  }
-
-  kj::Vector<kj::String> messages;
-
- private:
-  kj::LogSeverity previousLevel;
-
-  // KJ has no getter for the log level.
-  static kj::LogSeverity currentLogLevel() {
-    for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
-           kj::LogSeverity::FATAL}) {
-      if (kj::_::Debug::shouldLog(severity)) return severity;
-    }
-    return kj::LogSeverity::DBG;
-  }
-};
 
 // How an await_js() rejection is logged, up to what follows "stack = " or "exception = ".
 constexpr kj::StringPtr IN_PROMISE = "uncaught exception; source = Uncaught (in promise); "_kj;

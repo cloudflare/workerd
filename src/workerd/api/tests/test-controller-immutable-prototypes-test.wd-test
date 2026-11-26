@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# test-controller-test under immutable_api_prototypes, which no compatibility date enables.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc", "immutable_api_prototypes"],
+
+  modules = [
+    (name = "worker", esModule = embed "test-controller-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "EchoObject", uniqueKey = "6f2e3d4c5b7a4f8e9d0c1b2a3f4e5d6c"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "echo", durableObjectNamespace = "EchoObject"),
+    (name = "MESSAGE", text = "hello"),
+  ],
+);

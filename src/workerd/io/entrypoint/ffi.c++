@@ -17,6 +17,37 @@ kj::Own<IoContext::IncomingRequest> invocation_take_request(Invocation& invocati
   return kj::mv(invocation.request);
 }
 
+namespace {
+
+// Finds the test event's handler, as the prelude of the run that calls it: its test() function,
+// the handler, env and ctx, in that order.
+class TestHandlerLookupPrelude final: public io_context::RunPrelude {
+ public:
+  explicit TestHandlerLookupPrelude(HandlerLookup lookup): lookup(kj::mv(lookup)) {}
+
+  kj::Array<v8::Local<v8::Value>> run(Worker::Lock& lock, IoContext& context) override {
+    auto handles = getTestHandles(lock, context, kj::mv(lookup));
+    return kj::arr(handles.test, handles.handler, handles.env, handles.ctx);
+  }
+
+  kj::StringPtr spanName() const override {
+    return "WorkerEntrypoint::test() run"_kj;
+  }
+
+ private:
+  HandlerLookup lookup;
+};
+
+}  // namespace
+
+kj::Own<io_context::RunPrelude> invocation_take_test_handler_lookup(Invocation& invocation) {
+  return kj::heap<TestHandlerLookupPrelude>(HandlerLookup{
+    .entrypointName = kj::mv(invocation.entrypointName),
+    .versionInfo = kj::mv(invocation.versionInfo),
+    .props = kj::mv(invocation.props),
+  });
+}
+
 void invocation_start_scheduled_in_wait_until(
     Invocation& invocation, kj::Date scheduledTime, ::rust::Slice<const kj::byte> cron) {
   startScheduledInWaitUntil(invocation.request->getContext(), scheduledTime,
@@ -32,6 +63,10 @@ kj::Promise<WorkerInterface::ScheduledResult> runScheduled(
       .then([](::workerd::rust::worker::ScheduledResult result) {
     return kj::from<kj_rs::Rust>(result);
   });
+}
+
+kj::Promise<bool> runTest(kj::Own<Invocation> invocation) {
+  return test_event_finish(test_event_start(kj::mv(invocation)));
 }
 
 }  // namespace workerd::entrypoint
