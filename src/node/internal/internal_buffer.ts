@@ -917,7 +917,10 @@ Buffer.prototype.asciiWrite = function asciiWrite(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  // Default an omitted length to the space remaining after offset, not the full
+  // buffer size, so a two-argument call with a non-zero offset doesn't throw.
+  // Matches Node.js. See https://github.com/cloudflare/workerd/issues/6875
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -935,7 +938,7 @@ Buffer.prototype.base64Write = function base64Write(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -953,7 +956,7 @@ Buffer.prototype.base64urlWrite = function base64urlWrite(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -971,7 +974,7 @@ Buffer.prototype.hexWrite = function hexWrite(
   length: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -989,7 +992,7 @@ Buffer.prototype.latin1Write = function latin1Write(
   length: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -1007,7 +1010,7 @@ Buffer.prototype.ucs2Write = function ucs2Write(
   length: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
@@ -1025,7 +1028,7 @@ Buffer.prototype.utf8Write = function utf8Write(
   length: number
 ) {
   offset ??= 0;
-  length ??= this.length;
+  length ??= this.length - offset;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
