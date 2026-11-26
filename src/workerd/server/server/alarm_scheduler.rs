@@ -72,6 +72,25 @@ pub trait AlarmStorage {
     fn clear(&self) -> Result<()>;
 }
 
+/// Storage shared with others.
+impl<T: AlarmStorage + ?Sized> AlarmStorage for Rc<T> {
+    fn load(&self) -> Result<Vec<StoredAlarm>> {
+        (**self).load()
+    }
+
+    fn set(&self, actor: &ActorKey, scheduled_time: SystemTime) -> Result<bool> {
+        (**self).set(actor, scheduled_time)
+    }
+
+    fn remove(&self, id: &str) -> Result<bool> {
+        (**self).remove(id)
+    }
+
+    fn clear(&self) -> Result<()> {
+        (**self).clear()
+    }
+}
+
 /// What the scheduler runs on.
 pub trait AlarmEnv {
     /// The wall clock that alarm times are compared with.

@@ -1326,6 +1326,12 @@ kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex) {
   return kj::heap<ActorIdHandle>(kj::Own<ActorIdFactory::ActorId>(
       kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none)));
 }
+kj::Own<ActorIdHandle> actor_id_for_alarm(
+    ::rust::Str uniqueKey, ::rust::Str actor, kj::Maybe<::rust::Str> name) {
+  // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
+  return kj::heap<ActorIdHandle>(
+      ActorIdFactoryImpl(kj::str(uniqueKey)).idFromStringNamed(kj::str(actor), toKj(name)));
+}
 
 kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name) {
   return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromName(kj::str(name)));

@@ -27,6 +27,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::rc::Weak;
 use std::time::Duration;
+use std::time::SystemTime;
 
 use cluster_logic::handoff::Heat;
 use futures::FutureExt;
@@ -38,6 +39,7 @@ use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use kj_rs::KjRc;
+use sqlite_rs::Vfs;
 use tokio::sync::Notify;
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -45,10 +47,17 @@ use worker::Interface;
 use worker::PromisedInterface;
 
 use crate::Result;
+use crate::actor_alarms::NamespaceAlarmEnv;
+use crate::actor_alarms::time_from_ns;
 use crate::alarm_elsewhere::AlarmElsewhere;
 use crate::alarm_elsewhere::AlarmOwnedElsewhere;
+use crate::alarm_scheduler::ActorKey;
+use crate::alarm_scheduler::AlarmScheduler;
+use crate::alarm_scheduler::AlarmStorage;
+use crate::alarm_store::AlarmStore;
 use crate::bindings::ActorConfig;
 use crate::bridge::ffi;
+use crate::channels::ActorAlarms;
 use crate::channels::ActorClass;
 use crate::channels::ActorHooks;
 use crate::channels::ActorIdHandle;
@@ -114,6 +123,10 @@ pub struct ActorNamespace {
     /// Opened by `link`; every actor of the namespace shares it. An ephemeral namespace gets
     /// in-memory storage that its actors, being ephemeral, never use.
     storage: OnceCell<KjOwn<ffi::ActorStorage>>,
+    /// The root actors' alarms, kept in `alarm_store`; started by `link`.
+    alarms: OnceCell<AlarmScheduler>,
+    /// The persisted alarms, in `storage`'s `metadata.sqlite`; opened by `link`.
+    alarm_store: OnceCell<Rc<AlarmStore>>,
     /// A broken actor removes its container; an idle one keeps it, minus the actor, so that the
     /// next request rebuilds the actor in place. The cleanup loop drops long-idle, clientless
     /// containers.
@@ -170,6 +183,8 @@ impl ActorNamespace {
             actor_class,
             persistent_self_tokens,
             storage: OnceCell::new(),
+            alarms: OnceCell::new(),
+            alarm_store: OnceCell::new(),
             actors: RefCell::new(LinkedHashMap::new()),
             cleanup_task: RefCell::new(None),
             cluster: OnceCell::new(),
@@ -201,7 +216,20 @@ impl ActorNamespace {
                 "the namespace cannot adopt alarms because its worker cannot handle requests"
             ));
         }
-        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
+        let alarms = self.alarms()?;
+        let time = SystemTime::UNIX_EPOCH + Duration::from_millis(at_ms);
+        // Only ever earlier: waking an object early is a no-op, late is a missed alarm.
+        if alarms
+            .get_alarm(actor)
+            .is_some_and(|current| current <= time)
+        {
+            return Ok(());
+        }
+        let actor = ActorKey {
+            id: actor.to_owned(),
+            name: name.filter(|n| !n.is_empty()).map(str::to_owned),
+        };
+        alarms.set_alarm(&actor, time)?;
         Ok(())
     }
 
@@ -352,6 +380,15 @@ impl ActorNamespace {
 
     fn storage(&self) -> Result<&ffi::ActorStorage> {
         self.storage.get().map(|storage| &**storage).ok_or_else(|| {
+            kj::failed!(
+                "Durable Object class \"{}\": link() has not been called",
+                self.class_name
+            )
+        })
+    }
+
+    fn alarms(&self) -> Result<&AlarmScheduler> {
+        self.alarms.get().ok_or_else(|| {
             kj::failed!(
                 "Durable Object class \"{}\": link() has not been called",
                 self.class_name
@@ -545,10 +582,7 @@ impl ActorNamespace {
             container.reset_storage();
         }
         self.abort_all(reason);
-        match self.storage.get() {
-            Some(storage) => Ok(ffi::actor_storage_delete_all(storage)?),
-            None => Ok(()),
-        }
+        self.alarms.get().map_or(Ok(()), AlarmScheduler::delete_all)
     }
 
     /// Test hook: shuts down every running actor of the namespace (hibernating or closing its
@@ -608,13 +642,23 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        let vfs = Vfs::from_kj(ffi::actor_storage_vfs(&storage));
+        let store = Rc::new(AlarmStore::open(&vfs, "metadata.sqlite")?);
         if self.cluster().is_some() {
             // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
             // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
+            store.clear()?;
         }
-        // Checked above; nothing else sets it.
+        let env = NamespaceAlarmEnv {
+            factory: Rc::clone(&self.factory),
+            namespace: Weak::clone(&self.this),
+            unique_key: unique_key.to_owned(),
+        };
+        let alarms = AlarmScheduler::new(Rc::new(env), Box::new(Rc::clone(&store)))?;
+        // Checked above; nothing else sets them.
         let _ = self.storage.set(storage);
+        let _ = self.alarm_store.set(store);
+        let _ = self.alarms.set(alarms);
         Ok(())
     }
 
@@ -694,7 +738,33 @@ fn claim_directory(directory: &str) -> Result<()> {
         .map_err(|e| kj::failed!("{}: {e}", marker.display()))
 }
 
+impl ActorAlarms {
+    pub fn schedule(
+        &self,
+        actor: &str,
+        name: KjMaybe<&str>,
+        scheduled_time_ns: KjMaybe<i64>,
+    ) -> Result<()> {
+        let namespace = self.namespace.upgrade();
+        let scheduler = namespace.as_ref().and_then(|ns| ns.alarms.get());
+        let time = Option::from(scheduled_time_ns).map(time_from_ns);
+        let key = || ActorKey {
+            id: actor.to_owned(),
+            name: Option::from(name).map(str::to_owned),
+        };
+        match (time, scheduler) {
+            (Some(time), Some(scheduler)) => scheduler.set_alarm(&key(), time),
+            (None, Some(scheduler)) => scheduler.delete_alarm(actor),
+            (Some(time), None) => self.store.set(&key(), time),
+            (None, None) => self.store.remove(actor),
+        }?;
+        Ok(())
+    }
+}
+
 impl ActorNamespaceHandle {
+    /// The actor to run an alarm on, started if needed. The id carries the name the actor was
+    /// created with, when the scheduler persisted one.
     pub(crate) fn actor_for_alarm(
         &self,
         id: KjOwn<ActorIdHandle>,
@@ -737,6 +807,20 @@ impl ActorNamespaceHandle {
             }
         })
         .into_kj())
+    }
+
+    pub fn alarms(&self) -> Result<Box<ActorAlarms>> {
+        let namespace = self
+            .namespace()
+            .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
+        let store = namespace
+            .alarm_store
+            .get()
+            .ok_or_else(|| kj::failed!("the Durable Object namespace is not linked"))?;
+        Ok(Box::new(ActorAlarms {
+            namespace: Weak::clone(&self.0),
+            store: Rc::clone(store),
+        }))
     }
 
     pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {

@@ -26,6 +26,7 @@
 #include <workerd/rust/kj/ffi.h>
 #include <workerd/rust/worker/ffi.rs.h>
 #include <workerd/server/channel-token.h>
+#include <workerd/util/sqlite.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
@@ -314,9 +315,11 @@ kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name);
 kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex);
 kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name);
 kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex);
+kj::Own<ActorIdHandle> actor_id_for_alarm(
+    ::rust::Str uniqueKey, ::rust::Str actor, kj::Maybe<::rust::Str> name);
 
-// The storage of one Durable Object namespace: its directory (or none, for in-memory storage),
-// the SQLite VFS over it, and the alarm scheduler.
+// The storage of one Durable Object namespace: its directory (or none, for in-memory storage)
+// and the SQLite VFS over it.
 class ActorStorage final {
  public:
   class Impl;
@@ -334,9 +337,8 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Str path,
     ::rust::Str uniqueKey,
     ::rust::Box<ActorNamespaceHandle> actors);
-void actor_storage_set_alarm(
-    const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
-void actor_storage_delete_all(const ActorStorage& storage);
+// The storage's SQLite VFS, holding a reference to the storage.
+kj::Own<SqliteDatabase::Vfs> actor_storage_vfs(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.
 void actor_storage_delete_facet(const ActorStorage& storage,

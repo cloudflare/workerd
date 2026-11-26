@@ -2,12 +2,58 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! A Durable Object namespace's alarms, as the server keeps them.
+//! A Durable Object namespace's alarm scheduler, as the server runs it.
 //!
-//! Their times are stored in the namespace's `AlarmStore` as nanoseconds from the Unix epoch.
+//! Alarms are persisted in the namespace's `AlarmStore`, wait on the factory's timer, and run on
+//! actors the namespace starts for them.
 
+use std::rc::Rc;
+use std::rc::Weak;
 use std::time::Duration;
 use std::time::SystemTime;
+
+use futures::future::LocalBoxFuture;
+use worker::CxxWorkerInterface;
+
+use crate::Result;
+use crate::actor::ActorNamespace;
+use crate::alarm_scheduler::ActorKey;
+use crate::alarm_scheduler::AlarmEnv;
+use crate::bridge::ffi;
+use crate::channels::ActorNamespaceHandle;
+use crate::config::Factory;
+
+/// The event loop, the clock and the actors of a namespace's alarms: the factory's timer and
+/// task set, the system clock, and the namespace's actors.
+pub struct NamespaceAlarmEnv {
+    pub factory: Rc<Factory>,
+    pub namespace: Weak<ActorNamespace>,
+    pub unique_key: String,
+}
+
+impl AlarmEnv for NamespaceAlarmEnv {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn sleep(&self, delay: Duration) -> LocalBoxFuture<'static, ()> {
+        let factory = Rc::clone(&self.factory);
+        Box::pin(async move { factory.sleep(delay).await })
+    }
+
+    fn spawn(&self, task: LocalBoxFuture<'static, ()>) {
+        self.factory.spawn_detached(task);
+    }
+
+    fn actor(&self, actor: &ActorKey) -> Result<Box<dyn worker::Interface>> {
+        let id =
+            ffi::actor_id_for_alarm(&self.unique_key, &actor.id, actor.name.as_deref().into())?;
+        let namespace = ActorNamespaceHandle(Weak::clone(&self.namespace));
+        Ok(Box::new(CxxWorkerInterface::new(
+            namespace.actor_for_alarm(id)?,
+        )))
+    }
+}
 
 /// A time `ns` nanoseconds from the Unix epoch, before it for a negative `ns`.
 pub fn time_from_ns(ns: i64) -> SystemTime {

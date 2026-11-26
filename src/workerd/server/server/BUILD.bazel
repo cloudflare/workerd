@@ -7,6 +7,7 @@ wd_rust_crate(
     name = "workerd-server",
     cxx_bridge_deps = [
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/rust/sqlite-rs:ffi.rs@cxx",
         "//src/workerd/io/frankenvalue:ffi.rs@cxx",
         "//src/workerd/server/factory:bootstrap-hdrs",
         "//src/workerd/server/factory:worker-factory-hdrs",
