@@ -8,8 +8,19 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/strong-bool.h>
+
+namespace workerd {
+
+// Whether a WorkerEntrypoint's entrypoint name was supplied at request time (see
+// Worker::Lock::getExportedHandler()).
+WD_STRONG_BOOL(IsDynamicDispatch);
+
+}  // namespace workerd
 
 namespace workerd::entrypoint {
+
+class Fetch;
 
 // One invocation of a WorkerEntrypoint for an event, which WorkerEntrypoint hands to Rust to
 // deliver: the request the event was made for, and what finds the handler that receives it. Rust
@@ -29,6 +40,19 @@ class CxxEntrypoint: public WorkerInterface {
   // Takes the invocation of the entrypoint's one event, for Rust to deliver. Fails if an event was
   // already delivered.
   virtual kj::Own<Invocation> takeInvocation() = 0;
+
+  // Takes the invocation of the entrypoint's one event as a fetch event (see entrypoint-fetch.h),
+  // with the arguments of request(). `flowId` keys its Perfetto flow events. Fails if an event was
+  // already delivered.
+  virtual kj::Own<Fetch> takeFetch(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response,
+      const void* flowId) = 0;
+
+  // The canceler that cancels the entrypoint's event when its actor is aborted, if it has one.
+  virtual kj::Maybe<kj::Canceler&> getCanceler() = 0;
 };
 
 // Starts the scheduled handler of the exported handler that `entrypointName`, `versionInfo` and

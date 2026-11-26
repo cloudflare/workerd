@@ -5,10 +5,10 @@
 #pragma once
 
 #include <workerd/io/access-info.h>
+#include <workerd/io/entrypoint-invocation.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/worker.h>
-#include <workerd/util/strong-bool.h>
 
 namespace workerd {
 
@@ -18,8 +18,6 @@ class RequestObserver;
 class ThreadContext;
 class WorkerInterface;
 class BaseTracer;
-
-WD_STRONG_BOOL(IsDynamicDispatch);
 
 namespace tracing {
 class InvocationSpanContext;
