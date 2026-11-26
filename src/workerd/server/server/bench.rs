@@ -33,6 +33,7 @@ use crate::channels::Channel;
 use crate::config::capnp_error;
 use crate::config::text;
 use crate::log;
+use crate::process::BenchOptions;
 use crate::worker::WorkerService;
 
 /// `workerd bench`'s options, besides the service and entrypoint patterns.
@@ -93,12 +94,12 @@ impl Options {
     }
 
     /// The options the C++ bootstrap applies, with the workers' compatibility dates.
-    pub(crate) fn process(&self, dates: &CompatDates) -> ffi::BenchOptions {
-        ffi::BenchOptions {
+    pub(crate) fn process(&self, dates: &CompatDates) -> BenchOptions {
+        BenchOptions {
             no_verbose: self.no_verbose,
             all_autogates: self.all_autogates,
-            compat_date: dates.compat_date.clone().into(),
-            default_compat_date: dates.default_compat_date.clone().into(),
+            compat_date: dates.compat_date.clone(),
+            default_compat_date: dates.default_compat_date.clone(),
             trace: self.trace,
         }
     }

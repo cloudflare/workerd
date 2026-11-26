@@ -174,7 +174,6 @@ wd_cc_library(
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/server:json-logger",
-        "//src/workerd/server:workerd_capnp",
         "//src/workerd/server/server:bridge.rs@cxx",
         "//src/workerd/util:entropy",
         # :bootstrap exists only for the workerd binary, so it links the binary's kj::setupAsyncIo()

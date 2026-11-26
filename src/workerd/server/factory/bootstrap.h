@@ -32,9 +32,8 @@ struct ThreadBody;
 
 namespace workerd::server::cli {
 
-struct ServeOrTestOptions;
-struct TestOptions;
-struct BenchOptions;
+struct ProcessOptions;
+struct FactoryOptions;
 struct BuildInfo;
 
 ::rust::Slice<const uint8_t> release_version();
@@ -42,18 +41,12 @@ bool perfetto_supported();
 bool fuzzilli_supported();
 
 // See the bridge (server/bridge.rs).
-int32_t with_process_context(
-    bool verbose, ::rust::Vec<uint64_t> config, ::rust::Box<PendingCommand> command);
-kj::Arc<ProcessState> process_start(::rust::Slice<const uint64_t> config,
-    const ServeOrTestOptions& options,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench);
+int32_t with_process_context(bool verbose, bool structured, ::rust::Box<PendingCommand> command);
+kj::Arc<ProcessState> process_start(const ProcessOptions& options);
 kj::Own<WorkerFactory> factory_new(const ProcessState& process,
     kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
-    const ServeOrTestOptions& options,
-    kj::Maybe<const TestOptions&> test,
-    kj::Maybe<const BenchOptions&> bench);
+    const FactoryOptions& options);
 BuildInfo build_info();
 ::rust::String newest_compat_date();
 [[noreturn]] void cli_exit(int32_t code);

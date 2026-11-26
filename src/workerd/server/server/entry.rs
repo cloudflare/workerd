@@ -6,11 +6,12 @@
 //! schedule.
 //!
 //! The command line (cli/lib.rs) parses the arguments into [`RunOptions`] and calls
-//! [`serve`] / [`test`] / [`bench`]. Each creates the event loop -- a `kj_rs_tokio::Runtime`, the
-//! KJ loop with tokio running whenever it sleeps -- has the C++ side set up the process
-//! (`process_start`: perfetto, autogates, V8) and build the worker factory on it and that loop
-//! (`factory_new`), then blocks on `server_serve` / `server_test` / `server_bench`, which run the
-//! server (`run.rs`). Every config error is printed, and the server then does not serve; unless
+//! [`serve`] / [`test`] / [`bench`]. Each sets up the process's logging (`with_process_context`),
+//! creates the event loop -- a `kj_rs_tokio::Runtime`, the KJ loop with tokio running whenever it
+//! sleeps -- sets up the process (`process_start`: perfetto, autogates, V8; `process.rs` reads its
+//! settings out of the config), builds the worker factory on it and that loop (`factory_new`),
+//! then blocks on `server_serve` / `server_test` / `server_bench`, which run the server
+//! (`run.rs`). Every config error is printed, and the server then does not serve; unless
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
@@ -40,6 +41,11 @@ use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::log::Severity;
+use crate::process::BenchOptions;
+use crate::process::ServeOrTestOptions;
+use crate::process::TestOptions;
+use crate::process::command_options;
+use crate::process::structured_logging;
 use crate::run::RunOptions;
 
 /// `--watch`: fails if watching does; a config change replaces the process with a fresh run of
@@ -53,7 +59,7 @@ static HAD_ERRORS: AtomicBool = AtomicBool::new(false);
 pub fn serve(
     verbose: bool,
     config: Vec<u64>,
-    options: ffi::ServeOrTestOptions,
+    options: ServeOrTestOptions,
     run_options: RunOptions,
     watch: Option<Watch>,
 ) -> Result<i32> {
@@ -66,8 +72,8 @@ pub fn serve(
 pub fn test(
     verbose: bool,
     config: Vec<u64>,
-    options: ffi::ServeOrTestOptions,
-    test: ffi::TestOptions,
+    options: ServeOrTestOptions,
+    test: TestOptions,
     run_options: RunOptions,
     patterns: (String, String),
     watch: Option<Watch>,
@@ -82,7 +88,7 @@ pub fn test(
 pub fn bench(
     verbose: bool,
     config: Vec<u64>,
-    options: ffi::ServeOrTestOptions,
+    options: ServeOrTestOptions,
     bench: bench::Options,
     run_options: RunOptions,
     patterns: (String, String),
@@ -106,36 +112,25 @@ pub fn bench(
 /// Runs `command`, a command that serves no config of its own (`workerd repl`).
 ///
 /// The process's logging is set up around it as for `serve`: the crash handler, and info logging
-/// if `verbose`. The command's result is the result.
+/// if `verbose`; logging is not structured. The command's result is the result.
 pub fn without_config(
     verbose: bool,
     command: impl FnOnce() -> Result<i32> + 'static,
 ) -> Result<i32> {
-    // An empty config, which asks for no structured logging.
-    let mut message = capnp::message::Builder::new_default();
-    message.init_root::<workerd_capnp::config::Builder>();
-    let config = capnp::serialize::write_message_to_words(&message)
-        .chunks_exact(8)
-        .map(|chunk| u64::from_ne_bytes(chunk.try_into().unwrap_or_default()))
-        .collect();
-    let command = Box::new(PendingCommand(Box::new(move |_, _| command())));
-    Ok(ffi::with_process_context(verbose, config, command)?)
+    let command = Box::new(PendingCommand(Box::new(command)));
+    Ok(ffi::with_process_context(verbose, false, command)?)
 }
 
 /// A command's Rust half, for the C++ frame that sets up the process's logging around it
-/// (`with_process_context`), which passes it the config and whether logging is structured.
-pub struct PendingCommand(Box<dyn FnOnce(Vec<u64>, bool) -> Result<i32>>);
+/// (`with_process_context`).
+pub struct PendingCommand(Box<dyn FnOnce() -> Result<i32>>);
 
 #[expect(
     clippy::boxed_local,
     reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
 )]
-pub fn run_pending_command(
-    command: Box<PendingCommand>,
-    config: Vec<u64>,
-    structured_logging: bool,
-) -> Result<i32> {
-    (command.0)(config, structured_logging)
+pub fn run_pending_command(command: Box<PendingCommand>) -> Result<i32> {
+    (command.0)()
 }
 
 /// The process's schedule (see the module doc): the logging, the loop, the process, the
@@ -143,28 +138,18 @@ pub fn run_pending_command(
 fn run<Fut: Future<Output = Result<()>> + 'static>(
     verbose: bool,
     config: Vec<u64>,
-    options: ffi::ServeOrTestOptions,
-    test: Option<ffi::TestOptions>,
-    bench: Option<ffi::BenchOptions>,
+    options: ServeOrTestOptions,
+    test: Option<TestOptions>,
+    bench: Option<BenchOptions>,
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
-    let command = move |config: Vec<u64>, structured: bool| {
+    let structured = structured_logging(&config)?;
+    let command = move || {
         crate::log::set_structured(structured);
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let process = ffi::process_start(
-            &config,
-            &options,
-            test.as_ref().into(),
-            bench.as_ref().into(),
-        )?;
-        let factory = ffi::factory_new(
-            &process,
-            runtime.context(),
-            config,
-            &options,
-            test.as_ref().into(),
-            bench.as_ref().into(),
-        )?;
+        let (process_options, factory_options) = command_options(&config, options, test, bench)?;
+        let process = ffi::process_start(&process_options)?;
+        let factory = ffi::factory_new(&process, runtime.context(), config, &factory_options)?;
         // The command owns the factory and drops it when it completes (`shutdown`), and the
         // process's handle goes after it: the factory holds the process too, so V8 is torn down
         // with whichever goes last. If the command does not complete, `block_on` drops both before
@@ -187,7 +172,7 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
         Ok(code)
     };
     let command = Box::new(PendingCommand(Box::new(command)));
-    Ok(ffi::with_process_context(verbose, config, command)?)
+    Ok(ffi::with_process_context(verbose, structured, command)?)
 }
 
 /// Reports an error -- a config error, failed tests, the run's failure -- and makes the exit
