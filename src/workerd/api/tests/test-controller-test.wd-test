@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "test-controller-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "EchoObject", uniqueKey = "5e1d2c3b4a6f4e7d8c9b0a1f2e3d4c5b"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "echo", durableObjectNamespace = "EchoObject"),
+    (name = "MESSAGE", text = "hello"),
+  ],
+);
