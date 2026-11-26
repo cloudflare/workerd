@@ -1342,6 +1342,12 @@ wd_test(
 )
 
 wd_test(
+    src = "pipe-loop-promise-chain-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-loop-promise-chain-test.js"],
+)
+
+wd_test(
     src = "autovuln-132-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-132-test.js"],

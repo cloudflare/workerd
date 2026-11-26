@@ -1079,7 +1079,10 @@ class WritableStreamJsController final: public WritableStreamController {
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
  private:
-  jsg::Promise<void> pipeLoop(jsg::Lock& js);
+  // Runs one iteration of the pipe. Returns the pipe's outcome if this iteration ends the pipe.
+  // Otherwise schedules the next iteration, returns kj::none, and settles `resolver` once a later
+  // iteration ends the pipe.
+  kj::Maybe<jsg::Promise<void>> pipeLoop(jsg::Lock& js, jsg::Promise<void>::Resolver resolver);
 
   kj::Weak<WritableStream> owner;
 
@@ -4395,11 +4398,20 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   auto onFailure =
       JSG_VISITABLE_LAMBDA((ref = addRef(), resolver = kj::mv(prp.resolver)), (ref, resolver),
           (jsg::Lock& js, jsg::Value reason) { resolver.reject(js, reason.getHandle(js)); });
-  pipeLoop(js).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  // A pipe that ends on its first iteration hands its outcome back here, so the handlers attach to
+  // it right away. Resolving `loop` with it would attach them a microtask later, and an outcome
+  // that is already rejected could be reported as an unhandled rejection first.
+  auto loop = js.newPromiseAndResolver<void>();
+  KJ_IF_SOME(outcome, pipeLoop(js, kj::mv(loop.resolver))) {
+    outcome.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  } else {
+    loop.promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  }
   return kj::mv(prp.promise);
 }
 
-jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
+kj::Maybe<jsg::Promise<void>> WritableStreamJsController::pipeLoop(
+    jsg::Lock& js, jsg::Promise<void>::Resolver resolver) {
   auto maybePipeLock = lock.tryGetPipe();
   // Whatever released the lock settled the pipe; this outcome is ignored.
   if (maybePipeLock == kj::none) return js.resolvedPromise();
@@ -4486,27 +4498,41 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   // fails, we reject the pipe promise and propagate the error back to the
   // source (again, depending on options). If the write operation is successful,
   // we call pipeLoop again to move on to the next iteration.
+  //
+  // The continuations settle the pipe through `resolver` instead of returning the next
+  // iteration's promise. Returning it would resolve every iteration's promise with the next
+  // one's, so the whole chain, a few promises per chunk, stays alive until the pipe ends
+  // (https://github.com/cloudflare/workerd/issues/8901). The reference implementation fixed the
+  // same leak in https://github.com/whatwg/streams/pull/968.
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel, pipeThrough), (ref),
-      (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<void> {
+  auto onSuccess = JSG_VISITABLE_LAMBDA(
+      (this, ref = addRef(), resolver = resolver.addRef(js), preventCancel, pipeThrough),
+      (ref, resolver), (jsg::Lock & js, ReadResult result) mutable {
         auto maybePipeLock = lock.tryGetPipe();
-        if (maybePipeLock == kj::none) return js.resolvedPromise();
+        if (maybePipeLock == kj::none) return resolver.resolve(js);
         auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
 
         KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
           lock.releasePipeLock();
-          return kj::mv(promise);
+          return resolver.resolve(js, kj::mv(promise));
         } else {
         }  // Trailing else() is squash compiler warning
 
         if (result.done || pipeLock.isSourceReleased()) {
           // We'll handle the close, or the released source, at the start of the next iteration.
-          return pipeLoop(js);
+          KJ_IF_SOME(outcome, pipeLoop(js, resolver.addRef(js))) {
+            resolver.resolve(js, kj::mv(outcome));
+          }
+          return;
         }
 
-        auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef()),(ref) ,(jsg::Lock& js) { return pipeLoop(js); } );
+        auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), resolver = resolver.addRef(js)),(ref, resolver) ,(jsg::Lock& js) mutable {
+          KJ_IF_SOME(outcome, pipeLoop(js, resolver.addRef(js))) {
+            resolver.resolve(js, kj::mv(outcome));
+          }
+        } );
 
-        auto onFailure = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel, pipeThrough),(ref) ,(
+        auto onFailure = JSG_VISITABLE_LAMBDA((this, ref = addRef(), resolver = resolver.addRef(js), preventCancel, pipeThrough),(ref, resolver) ,(
                          jsg::Lock& js, jsg::V8Ref<v8::Value> exception) mutable {
       // The write failed. We need to release the source if the pipe lock still exists.
       // The write-side pipe lock is left in place; doError() cleans it up when the
@@ -4516,26 +4542,30 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
         cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
       } else {} // Trailing else() to squash compiler warning
-      return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
+      resolver.resolve(
+          js, rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough)));
     } );
 
         auto promise = write(js,
             result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
 
-        return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+        promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
       });
 
-  auto onFailure = JSG_VISITABLE_LAMBDA(
-      (this, ref = addRef()), (ref), (jsg::Lock & js, jsg::Value value) mutable {
+  auto onFailure = JSG_VISITABLE_LAMBDA((this, ref = addRef(), resolver = resolver.addRef(js)),
+      (ref, resolver), (jsg::Lock & js, jsg::Value value) mutable {
         // The read failed. We will handle the error at the start of the next iteration.
-        return pipeLoop(js);
+        KJ_IF_SOME(outcome, pipeLoop(js, resolver.addRef(js))) {
+        resolver.resolve(js, kj::mv(outcome));
+        }
       });
 
   // The read can run the source's pull algorithm, and that user JS can end this pipe (e.g. by
   // erroring the destination) and drop the last reference to the source while its read is still
   // on the stack. Keep it alive until the read returns.
   auto sourceRef = pipeLock.readableStreamRef.addRef();
-  return pipeLock.source->read(js).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  pipeLock.source->read(js).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  return kj::none;
 }
 
 void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpressure) {
