@@ -199,6 +199,9 @@ wpt_test(
         "transformstream_enable_standard_constructor",
     ],
     config = "encoding-test.ts",
+    # The shards divide the test files. Unsharded, the suite took 25 s under TSan, and 50-80 s on a
+    # slow executor.
+    shard_count = 4,
     wpt_directory = "@wpt//:encoding@module",
 )
 
@@ -216,13 +219,17 @@ wpt_test(
 
 wpt_test(
     name = "WebCryptoAPI",
-    size = "enormous",
+    size = "large",
     compat_flags = [
         "disable_fast_jsg_struct",
         "webcrypto_modern_algorithms",
     ],
     config = "WebCryptoAPI-test.ts",
     include_tentative = True,
+    # Generating RSA keys makes up most of the run time, so the shards divide the variants of
+    # generateKey/successes_RSA-*. With 8 shards, a shard took 20 s under TSan, and 40-60 s on a
+    # slow executor.
+    shard_count = 16,
     target_compatible_with = select({
         # Too slow on Windows
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -269,6 +276,9 @@ wpt_test(
         "text_decoder_cjk_decoder",
     ],
     config = "encoding-test-ts.ts",
+    # The shards divide the test files. Unsharded, the suite took 25 s under TSan, and 50-80 s on a
+    # slow executor.
+    shard_count = 4,
     wpt_directory = "@wpt//:encoding@module",
 )
 
@@ -337,10 +347,10 @@ wpt_test(
     wpt_directory = "@wpt//:webidl@module",
 )
 
-# The TypeScript DOMException, against the same expectations.
+# V8's DOMException, against the same expectations.
 wpt_test(
-    name = "webidl-ts",
-    autogates = ["workerd-autogate-ts-dom-exception"],
+    name = "webidl-v8",
+    autogates = ["workerd-autogate-v8-dom-exception"],
     config = "webidl-test.ts",
     wpt_directory = "@wpt//:webidl@module",
 )
@@ -360,6 +370,13 @@ wpt_test(
     # Uses 1.6-2.3 cores on average, and up to 3.4.
     tags = ["cpu:2"],
     wpt_directory = "@wpt//:wasm/jsapi@module",
+)
+
+wpt_test(
+    name = "wasm/serialization",
+    config = "wasm/serialization-test.ts",
+    include_tentative = True,
+    wpt_directory = "@wpt//:wasm/serialization@module",
 )
 
 wpt_test(

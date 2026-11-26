@@ -491,6 +491,79 @@ export const testDetailAcceptsAnyValue = {
   },
 };
 
+export const testMarkDetailIsCloned = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    const detail = { foo: 1, bar: { 1: 2 } };
+
+    const mark = perfHooksPerformance.mark('m', { detail });
+    const ctorMark = new PerformanceMark('c', { detail });
+    detail.foo = 2;
+
+    for (const entry of [mark, ctorMark]) {
+      notStrictEqual(entry.detail, detail);
+      deepStrictEqual(entry.detail, { foo: 1, bar: { 1: 2 } });
+      strictEqual(entry.detail, entry.detail);
+    }
+    perfHooksPerformance.clearMarks();
+  },
+};
+
+export const testMeasureDetailIsCloned = {
+  test() {
+    perfHooksPerformance.clearMeasures();
+    const detail = { foo: 1 };
+
+    const measure = perfHooksPerformance.measure('m', { start: 0, detail });
+    detail.foo = 2;
+
+    notStrictEqual(measure.detail, detail);
+    deepStrictEqual(measure.detail, { foo: 1 });
+    strictEqual(measure.detail, measure.detail);
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testPrimitiveDetailRoundTrips = {
+  test() {
+    for (const detail of [null, 0, 'text', true]) {
+      strictEqual(perfHooksPerformance.mark('m', { detail }).detail, detail);
+      strictEqual(
+        perfHooksPerformance.measure('m', { start: 0, detail }).detail,
+        detail
+      );
+    }
+    strictEqual(
+      perfHooksPerformance.mark('m', { detail: undefined }).detail,
+      null
+    );
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testUncloneableDetailThrows = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+
+    for (const detail of [Symbol(), { s: Symbol() }, () => {}, { fn() {} }]) {
+      const isDataCloneError = (err) => err.name === 'DataCloneError';
+      throws(
+        () => perfHooksPerformance.mark('bad', { detail }),
+        isDataCloneError
+      );
+      throws(() => new PerformanceMark('bad', { detail }), isDataCloneError);
+      throws(
+        () => perfHooksPerformance.measure('bad', { start: 0, detail }),
+        isDataCloneError
+      );
+    }
+
+    strictEqual(perfHooksPerformance.getEntriesByName('bad').length, 0);
+  },
+};
+
 export const testMeasureEndMarkWithoutStart = {
   test() {
     perfHooksPerformance.clearMarks();
@@ -502,6 +575,88 @@ export const testMeasureEndMarkWithoutStart = {
       strictEqual(measure.startTime, 0);
       strictEqual(measure.duration, 123);
     }
+
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testMarkNegativeStartTime = {
+  test() {
+    perfHooksPerformance.clearMarks();
+
+    const makeMark = [
+      (name, options) => perfHooksPerformance.mark(name, options),
+      (name, options) => new PerformanceMark(name, options),
+    ];
+    for (const mark of makeMark) {
+      throws(() => mark('negative', { startTime: -1 }), TypeError);
+      ok(mark('zero', { startTime: -0 }).startTime === 0);
+    }
+
+    perfHooksPerformance.clearMarks();
+  },
+};
+
+export const testMeasureArgumentErrors = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+    perfHooksPerformance.mark('existing', { startTime: 10 });
+
+    const typeErrors = [
+      ['options and end mark', { start: 2 }, 'existing'],
+      ['detail-only options and end mark', { detail: 1 }, 'existing'],
+      ['neither start nor end', { duration: 5 }],
+      ['only detail', { detail: 1 }],
+      ['start, end and duration', { start: 1, end: 5, duration: 4 }],
+      ['negative start', { start: -1 }],
+      ['negative end', { end: -1 }],
+      ['negative duration', { start: 1, duration: -1 }],
+      ['PerformanceTiming start name', 'navigationStart'],
+      ['PerformanceTiming end name', 'existing', 'loadEventEnd'],
+    ];
+    const syntaxErrors = [
+      ['missing start mark', 'missing'],
+      ['missing start mark, existing end mark', 'missing', 'existing'],
+      ['existing start mark, missing end mark', 'existing', 'missing'],
+      ['missing end mark only', undefined, 'missing'],
+    ];
+
+    for (const [what, ...args] of typeErrors) {
+      throws(() => perfHooksPerformance.measure('m', ...args), TypeError, what);
+    }
+    for (const [what, ...args] of syntaxErrors) {
+      throws(
+        () => perfHooksPerformance.measure('m', ...args),
+        (err) => err instanceof DOMException && err.name === 'SyntaxError',
+        what
+      );
+    }
+
+    // A mark named like a PerformanceTiming attribute can still be created, but not measured.
+    perfHooksPerformance.mark('navigationStart');
+    throws(
+      () => perfHooksPerformance.measure('m', 'navigationStart'),
+      TypeError
+    );
+
+    // Arguments that stay valid.
+    for (const start of [undefined, null, {}, { invalidDict: 1 }]) {
+      const measure = perfHooksPerformance.measure('m', start, 'existing');
+      strictEqual(measure.startTime, 0);
+      strictEqual(measure.duration, 10);
+    }
+    const fromMarks = perfHooksPerformance.measure('m', 'existing', 'existing');
+    strictEqual(fromMarks.startTime, 10);
+    strictEqual(fromMarks.duration, 0);
+
+    const endAndDuration = perfHooksPerformance.measure('m', {
+      end: 30,
+      duration: 5,
+    });
+    strictEqual(endAndDuration.startTime, 25);
+    strictEqual(endAndDuration.duration, 5);
 
     perfHooksPerformance.clearMarks();
     perfHooksPerformance.clearMeasures();

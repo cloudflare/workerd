@@ -14,8 +14,11 @@ wd_rust_crate(
     ],
     cxx_bridge_hdrs = [],
     cxx_bridge_src = "bridge.rs",
-    # The factory's C++ includes the bridge header.
-    cxx_bridge_visibility = ["//src/workerd/server/factory:__pkg__"],
+    # The factory's C++, and the REPL's that runs loaded configs, include the bridge header.
+    cxx_bridge_visibility = [
+        "//src/workerd/server/factory:__pkg__",
+        "//src/workerd/server/repl:__pkg__",
+    ],
     link_deps = [
         # The command line's bootstrap, called from entry.rs.
         "//src/workerd/server/factory:bootstrap",
@@ -44,6 +47,7 @@ wd_rust_crate(
         "//src/workerd/server:workerd_capnp_rust",
         "//src/workerd/server/cluster",
         "//src/workerd/server/cluster/logic:cluster-logic",
+        "//src/workerd/util/perfetto",
         "@crates_vendor//base64",
         "@crates_vendor//bytes",
         "@crates_vendor//capnp",

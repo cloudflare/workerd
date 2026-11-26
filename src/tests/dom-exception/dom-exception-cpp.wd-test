@@ -31,7 +31,7 @@ const unitTests :Workerd.Config = (
           "enhanced_error_serialization",
         ],
         bindings = [
-          (name = "USING_TS_IMPL", json = "false"),
+          (name = "USING_V8_IMPL", json = "false"),
           (name = "SELF", service = "dom-exception-cpp"),
           (name = "RPC", service = (name = "dom-exception-cpp", entrypoint = "DomExceptionRpc")),
         ],

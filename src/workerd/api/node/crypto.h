@@ -49,7 +49,9 @@ class CryptoImpl final: public jsg::Object {
 
    private:
     DiffieHellman dh;
-    int verifyError;
+    // DH_check() runs primality tests, which are expensive for primes as large as the standard
+    // groups', so it runs only when the script first reads verifyError.
+    kj::Maybe<int> verifyError;
   };
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(jsg::Lock& js, kj::String name);

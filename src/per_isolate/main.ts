@@ -38,47 +38,11 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 // serialization.ts).
 require('serialization');
 
-// Loaded before any module that may create or recognize a DOMException.
-const { DOMException, QuotaExceededError } = require('dom-exception');
-
-// The TypeScript DOMException replaces the C++ one, which global-scope.h then
-// leaves out, and adds QuotaExceededError, which the C++ one lacks. Installed
-// as JSG_NESTED_TYPE installs the C++ class.
-if (autogates['ts-dom-exception']) {
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-    DOMException: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: DOMException,
-    },
-    QuotaExceededError: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: QuotaExceededError,
-    },
-  });
-  if (compatFlags['spec_compliant_property_attributes']) {
-    ObjectDefineProperties(globalThis, {
-      DOMException: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: DOMException,
-      },
-      QuotaExceededError: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: QuotaExceededError,
-      },
-    });
-  }
+// performance.now() and performance.timeOrigin. Gated by an autogate rather
+// than a compat flag because the swap preserves the observable shape (see
+// performance/AGENTS.md).
+if (autogates['ts-performance-now']) {
+  require('performance/now').install(utils.getPerformancePrototype());
 }
 
 if (compatFlags['typescript_implemented_streams']) {
@@ -434,14 +398,11 @@ if (autogates['ts-structured-clone']) {
   });
 }
 
-// Internal-only: cloneable classes for testing the serialization protocol
+// Internal-only: a cloneable class for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.
 if (compatFlags['expose_serialization_test_class']) {
-  const {
-    CloneableTestBox,
-    CloneableTestError,
-  } = require('testing/cloneable-test-box');
+  const { CloneableTestBox } = require('testing/cloneable-test-box');
   ObjectDefineProperties(globalThis, {
     CloneableTestBox: {
       __proto__: null,
@@ -449,13 +410,6 @@ if (compatFlags['expose_serialization_test_class']) {
       enumerable: false,
       writable: true,
       value: CloneableTestBox,
-    },
-    CloneableTestError: {
-      __proto__: null,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value: CloneableTestError,
     },
   });
 }

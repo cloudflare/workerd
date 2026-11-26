@@ -8,8 +8,8 @@
 #include "js-readable-stream.h"
 #include "streams/readable.h"
 
+#include <workerd/api/mimetype-js.h>
 #include <workerd/jsg/url.h>
-#include <workerd/util/mimetype.h>
 
 namespace workerd::api {
 
@@ -33,14 +33,26 @@ jsg::JsValue BootstrapUtils::parseUrl(jsg::Lock& js, jsg::JsValue input) {
   return js.undefined();
 }
 
-jsg::JsValue BootstrapUtils::mimeTypeEssence(jsg::Lock& js, jsg::JsValue input) {
+jsg::JsValue BootstrapUtils::mimeTypeParse(jsg::Lock& js, jsg::JsValue input) {
   auto str = JSG_REQUIRE_NONNULL(
-      input.tryCast<jsg::JsString>(), TypeError, "mimeTypeEssence() expects a string")
-                 .toString(js);
-  KJ_IF_SOME(parsed, MimeType::tryParse(str)) {
-    return js.str(parsed.essence());
+      input.tryCast<jsg::JsString>(), TypeError, "mimeTypeParse() expects a string");
+  KJ_IF_SOME(parts, parseMimeTypeToJs(js, str)) {
+    return parts;
   }
   return js.undefined();
+}
+
+jsg::JsValue BootstrapUtils::mimeTypeSerialize(
+    jsg::Lock& js, jsg::JsValue type, jsg::JsValue subtype, jsg::JsValue params) {
+  auto typeStr = JSG_REQUIRE_NONNULL(
+      type.tryCast<jsg::JsString>(), TypeError, "mimeTypeSerialize() expects a string type");
+  auto subtypeStr = JSG_REQUIRE_NONNULL(
+      subtype.tryCast<jsg::JsString>(), TypeError, "mimeTypeSerialize() expects a string subtype");
+  auto list = JSG_REQUIRE_NONNULL(
+      params.tryCast<jsg::JsArray>(), TypeError, "mimeTypeSerialize() expects a parameter array");
+  JSG_REQUIRE(list.size() % 2 == 0, TypeError,
+      "mimeTypeSerialize() expects a name and a value for each parameter");
+  return serializeMimeTypeFromJs(js, typeStr, subtypeStr, list, list.size() / 2);
 }
 
 jsg::JsValue BootstrapUtils::readableStreamState(jsg::Lock& js, jsg::JsValue value) {

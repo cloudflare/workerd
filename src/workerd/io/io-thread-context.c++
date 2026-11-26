@@ -1,5 +1,7 @@
 #include "io-thread-context.h"
 
+#include <kj/debug.h>
+
 namespace workerd {
 
 ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& builder)
@@ -37,6 +39,11 @@ ThreadContext::ThreadContext(kj::Timer& timer,
       entropySource(entropySource),
       headerIds(headerIds),
       httpOverCapnpFactory(httpOverCapnpFactory),
-      byteStreamFactory(byteStreamFactory) {}
+      byteStreamFactory(byteStreamFactory),
+      tasks(*this) {}
+
+void ThreadContext::taskFailed(kj::Exception&& exception) {
+  KJ_LOG(ERROR, "ThreadContext task failed", exception);
+}
 
 }  // namespace workerd

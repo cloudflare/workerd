@@ -146,7 +146,7 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_name(
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncIoStream = kj::AsyncIoStream;
 using ConnectResponse = kj::HttpService::ConnectResponse;
-using HttpMethod = kj::HttpMethod;
+using HttpMethod = kj::HttpMethod::Known;
 using HttpService = kj::HttpService;
 using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
@@ -187,7 +187,7 @@ inline kj::Promise<void> request(HttpService& service,
     AsyncInputStream& request_body,
     HttpServiceResponse& response) {
   auto strUrl = kj::str(kj::from<kj_rs::Rust>(url).asChars());
-  co_await service.request(method, strUrl, headers, request_body, response);
+  co_await service.request(kj::HttpMethod(method), strUrl, headers, request_body, response);
 }
 
 kj::Promise<void> connect(HttpService& service,

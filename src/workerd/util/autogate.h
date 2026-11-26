@@ -107,14 +107,17 @@ namespace workerd::util {
      they stay strong roots and keep such a stream or cursor alive until its isolate is torn       \
      down, and jsg::TracedOwn behaves like kj::Own. */                                             \
   V(GC_COMPLETE_TRACING)                                                                           \
-  /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
-     (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
-     class in jsg/dom-exception.h. */                                                              \
-  V(TS_DOM_EXCEPTION)                                                                              \
+  /* DOMException and QuotaExceededError are V8's, whose instances are native errors, rather       \
+     than the C++ DOMException class in jsg/dom-exception.h and no QuotaExceededError. V8's come   \
+     from patches/v8/2026-11-23-Implement-DOMException-and-QuotaExceededError.patch. */            \
+  V(V8_DOM_EXCEPTION)                                                                              \
   /* The global structuredClone() is the TypeScript implementation from the per-isolate            \
      bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
      serializer, rather than the C++ method in api/global-scope.h. */                              \
   V(TS_STRUCTURED_CLONE)                                                                           \
+  /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
+     performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
+  V(TS_PERFORMANCE_NOW)                                                                            \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
@@ -124,6 +127,19 @@ namespace workerd::util {
   /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
      (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
   V(RUST_MEMORY_CACHE)                                                                             \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default a new isolate is created in V8's loading mode (v8::Isolate::SetIsLoading()),       \
+     which defers full GCs for up to 7 seconds, and V8 is told that loading has ended the first    \
+     time the isolate is left with no request in flight and its thread is idle. That               \
+     notification is V8's cue to collect garbage if the heap is due for it. Enabling this gate     \
+     leaves isolates out of loading mode. See Worker::Isolate::completedRequest(). */              \
+  V(NO_LOADING_MODE)                                                                               \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default the notification that ends loading mode is repeated each later time the            \
+     isolate is left with no request in flight and its thread is idle, and is sent each such       \
+     time, the first included, to an isolate that was never in loading mode. Enabling this gate    \
+     stops all but the one that ends loading mode. */                                              \
+  V(NO_IDLE_GC)                                                                                    \
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
@@ -131,17 +147,28 @@ namespace workerd::util {
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
   V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
-  /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
-     flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
-     group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
   /* An actor's outgoing calls use the I/O channels of its newest request that is still running,   \
      rather than its newest request, which may have returned and be waiting only for background    \
      work. See IoContext::getIncomingRequestForIoChannels(). */                                    \
   V(IO_CHANNELS_FROM_RUNNING_REQUEST)                                                              \
   /* WorkerInterface::fromException() makes the Rust worker in src/rust/worker/failure.rs          \
      instead of the C++ ErrorWorkerInterface in io/worker-interface.c++. */                        \
-  V(RUST_FAILURE_WORKER_INTERFACE)
+  V(RUST_FAILURE_WORKER_INTERFACE)                                                                 \
+  /* Counts the bytes behind a Request or Response body built from in-memory data, such as a       \
+     string or BufferSource, as the isolate's external memory, so that they prompt GCs and the     \
+     isolate's memory limit applies to them. See JsReadableStream::Buffer. */                      \
+  V(BODY_BUFFER_EXTERNAL_MEMORY)                                                                   \
+  /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
+     than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
+  V(RUST_COMPAT_DATE)                                                                              \
+  /* WorkerEntrypoint::runScheduled() hands the scheduled event to Rust (io/entrypoint), which     \
+     reports it to the tracer, delivers it, starts the handler in a waitUntil task and waits for   \
+     the request to finish, rather than doing all of that in C++. The handler is still started by  \
+     C++ ServiceWorkerGlobalScope::startScheduled(). */                                            \
+  V(RUST_ENTRYPOINT_SCHEDULED)                                                                     \
+  /* MIME types are parsed and serialized by the Rust crate in util/mimetype/ rather than the      \
+     C++ code in util/mimetype-legacy.c++. See util/mimetype.c++. */                               \
+  V(RUST_MIMETYPE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -11,9 +11,10 @@
 
 namespace workerd {
 
-template <size_t>
-class StringBuffer;
 class MimeType;
+namespace legacy {
+struct MimeTypeAccess;
+}
 class ConstMimeType final {
  public:
   constexpr ConstMimeType(kj::StringPtr type, kj::StringPtr subtype)
@@ -71,6 +72,12 @@ class MimeType final {
   // Asserts if the input could not be parsed as a valid MimeType. tryParse should
   // be preferred for most cases.
   static MimeType parse(kj::StringPtr input, ParseOptions options = ParseOptions::DEFAULT);
+
+  // Whether `s` is a valid type, subtype or parameter name: a nonempty HTTP token.
+  static bool isToken(kj::ArrayPtr<const char> s);
+
+  // Whether `s` is a valid parameter value: made of HTTP quoted-string token code points.
+  static bool isParamValue(kj::ArrayPtr<const char> s);
 
   explicit MimeType(
       kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params = kj::none);
@@ -206,10 +213,7 @@ class MimeType final {
   kj::String subtype_;
   MimeParams params_;
 
-  using ToStringBuffer = StringBuffer<128>;
-  // 128 bytes will keep all reasonable mimetypes on the stack.
-
-  void paramsToString(ToStringBuffer& buffer) const;
+  friend struct legacy::MimeTypeAccess;
 };
 
 inline ConstMimeType::operator MimeType() const {

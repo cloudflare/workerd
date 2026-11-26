@@ -2,7 +2,6 @@ load("//:build/wd_test.bzl", "wd_test")
 
 # The `bucket` service's HTTP API over its local store, without a cluster.
 wd_test(
-    size = "large",
     src = "bucket-test.wd-test",
     args = ["--experimental"],
     data = ["bucket-test.js"],

@@ -35,6 +35,8 @@ $ bazel test //types:all
 - `src/transforms`: post-processing TypeScript AST transforms
 - `src/index.ts`: main entrypoint
 - `src/{print,program}.ts`: helpers for printing nodes and creating programs
+- `src/per-isolate.ts`: collecting the declarations the per-isolate bootstrap
+  (`src/per_isolate`) publishes in `src/per_isolate/public-types.d.ts`
 - `defines`: additional TypeScript-only definitions that don't correspond to
   `workerd` runtime APIs, appended to the end of outputs
 

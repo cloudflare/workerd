@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
 // Test worker for the UDP `connect()` handler. Each datagram flow (grouped by peer address) gets
 // its own `connect()` invocation. The first datagram received on a flow gets a reply prefixed with
 // `first:<protocol>:`, so the test can assert `socket.protocol` from the wire. Every datagram after
@@ -23,6 +25,11 @@ export default {
       if (done) break;
       const bytes = value.data;
       const text = decoder.decode(bytes);
+      if (text === 'remoteAddress') {
+        const { remoteAddress } = await socket.opened;
+        await writer.write(new Datagram(encoder.encode(remoteAddress)));
+        continue;
+      }
       if (text === 'status') {
         const status = lingeringFlowTimedOut ? 'timed-out' : 'waiting';
         await writer.write(new Datagram(encoder.encode(status)));
@@ -50,3 +57,26 @@ export default {
     }
   },
 };
+
+// Test worker for the UDP flow's bounded pending-bytes queue. The first datagram is a priming
+// ping: it's read and echoed immediately, so the driver knows this handler is already running
+// (past any isolate/module startup cost) before it fires the burst of datagrams meant to
+// overflow the queue during the delay that follows.
+
+export class BoundedQueue extends WorkerEntrypoint {
+  async connect(socket) {
+    const reader = socket.readable.getReader();
+    const writer = socket.writable.getWriter();
+
+    const { value: ping } = await reader.read();
+    await writer.write(ping);
+
+    await scheduler.wait(300);
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      await writer.write(value);
+    }
+  }
+}

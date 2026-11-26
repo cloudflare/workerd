@@ -1,0 +1,161 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+//! The FFI between `workerd repl`'s console and its C++ half (repl/repl.h): the session that owns
+//! V8 and evaluates input. C++ calls back into [`repl_load_config`] to load a config as `workerd
+//! serve` does, and into [`repl_candidates`] to compile input as the console does.
+
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue, and awaits its unsafe async \
+              functions"
+)]
+
+use std::pin::Pin;
+
+use kj_rs::KjOwn;
+
+pub use super::input::candidates as repl_candidates;
+pub use super::session::ReplWatch;
+pub use super::session::repl_load_config;
+pub use super::session::repl_watch_new;
+
+#[cxx::bridge(namespace = "workerd::server::repl")]
+pub mod ffi {
+    struct ReplOptions {
+        /// The compatibility date of the REPL's JavaScript; today if empty.
+        compat_date: String,
+        compat_flags: Vec<String>,
+        /// `--experimental`, for the compatibility flags and the loaded configs.
+        experimental: bool,
+        /// `--autogate`: the process's autogates, by kebab-case name.
+        autogates: Vec<String>,
+        /// `--v8-flag`: the process's V8 flags.
+        v8_flags: Vec<String>,
+        /// Render results with ANSI colors.
+        colors: bool,
+    }
+
+    /// One way to compile an input: the input itself, or the input wrapped in an async function
+    /// so that it can `await`, or in parentheses so that a leading `{` starts an object literal
+    /// (input.rs).
+    #[derive(Debug, PartialEq, Eq)]
+    struct ReplCandidate {
+        source: String,
+        /// The completion value is a promise to await, and render what it settles to.
+        awaited: bool,
+        /// The input is in parentheses it doesn't have, so a syntax error compiling it isn't the
+        /// input's own: if no candidate compiles, another's error is reported.
+        parenthesized: bool,
+    }
+
+    /// Whether a loaded config may use experimental features: `--experimental`.
+    enum Features {
+        Stable,
+        Experimental,
+    }
+
+    /// What became of an input.
+    struct ReplEvaluation {
+        /// The text to print: the rendered result, or `Uncaught ...`.
+        text: String,
+        /// The input threw, or the promise it awaited rejected: `text` renders the exception.
+        threw: bool,
+    }
+
+    #[namespace = "kj_rs_tokio"]
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/server/repl/repl.h");
+
+        /// V8, the I/O of the loaded configs, and the environment input is evaluated in.
+        type ReplSession;
+
+        /// A session on the event loop `event_loop`, which it must not outlive.
+        fn repl_session_new(
+            event_loop: Pin<&mut TokioAsyncIoContext>,
+            options: &ReplOptions,
+        ) -> Result<KjOwn<ReplSession>>;
+
+        /// Evaluates the first of `candidates` that compiles. An error means the session itself
+        /// failed.
+        async unsafe fn repl_evaluate<'a>(
+            session: Pin<&'a mut ReplSession>,
+            candidates: Vec<ReplCandidate>,
+        ) -> Result<ReplEvaluation>;
+
+        /// The property names of the value of `base`, an identifier chain, or of the global object
+        /// if `base` is empty: the names tab completion offers.
+        async unsafe fn repl_property_names<'a>(
+            session: Pin<&'a mut ReplSession>,
+            base: String,
+        ) -> Result<Vec<String>>;
+
+        /// Closes the loaded configs' servers and ends the session's JavaScript; whether
+        /// anything failed in the background, such as a timer callback that threw or a rejection
+        /// nothing handled. Must complete before the session is dropped.
+        async unsafe fn repl_drain<'a>(session: Pin<&'a mut ReplSession>) -> Result<bool>;
+    }
+
+    extern "Rust" {
+        /// The candidates of `input`, as the console makes them of an input typed at it
+        /// (input.rs): what `workerd.environment()`'s environments evaluate.
+        fn repl_candidates(input: &str) -> Vec<ReplCandidate>;
+
+        /// Loads the config at `path`, a Cap'n Proto config (with the constant `const_name`, if
+        /// not empty) or a `wrangler.json(c)`, as an encoded `Config` message. The error lists
+        /// every problem.
+        fn repl_load_config(path: &str, const_name: &str, features: Features) -> Result<Vec<u64>>;
+
+        /// Files configs were loaded from, watched for changes (cli/watch.rs).
+        type ReplWatch;
+
+        /// A watch of no files yet.
+        fn repl_watch_new() -> Result<Box<ReplWatch>>;
+
+        /// `repl_load_config`, watching each file the load reads, whether or not it succeeds.
+        fn load_config(
+            self: &ReplWatch,
+            path: &str,
+            const_name: &str,
+            features: Features,
+        ) -> Result<Vec<u64>>;
+
+        /// Resolves once a watched file has changed and changes have settled.
+        async unsafe fn changed<'a>(self: &'a ReplWatch) -> Result<()>;
+    }
+}
+
+pub async fn evaluate(
+    session: Pin<&mut ffi::ReplSession>,
+    candidates: Vec<ffi::ReplCandidate>,
+) -> Result<ffi::ReplEvaluation, cxx::KjError> {
+    // SAFETY: the returned future borrows the session for its duration.
+    unsafe { ffi::repl_evaluate(session, candidates) }
+        .await
+        .map_err(cxx::KjError::from)
+}
+
+pub async fn property_names(
+    session: Pin<&mut ffi::ReplSession>,
+    base: String,
+) -> Result<Vec<String>, cxx::KjError> {
+    // SAFETY: the returned future borrows the session for its duration.
+    unsafe { ffi::repl_property_names(session, base) }
+        .await
+        .map_err(cxx::KjError::from)
+}
+
+/// Drains the session; whether anything failed in the background (`repl_drain`).
+pub async fn drain(mut session: KjOwn<ffi::ReplSession>) -> Result<bool, cxx::KjError> {
+    // SAFETY: the returned future borrows the session, which outlives it here.
+    unsafe { ffi::repl_drain(session.as_mut()) }
+        .await
+        .map_err(cxx::KjError::from)
+}

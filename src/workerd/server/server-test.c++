@@ -531,6 +531,7 @@ class Server: public kj::PtrTarget {
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
     auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
+    started.mock_internet();
     for (auto& [deployment, service]: deploymentServices) {
       started.add_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
           service.asPtr().as<kj_rs::RustUncheckedUtf8>());
@@ -936,7 +937,7 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
       name = "worker",
       worker = (
         compatibilityDate = "2024-01-01",
-        compatibilityFlags = ["experimental"],
+        compatibilityFlags = ["udp_ingress"],
         modules = [(
           name = "worker.js",
           esModule =
@@ -958,7 +959,6 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
     )]
   ))"_kj);
 
-  test.server.allowExperimental();
   test.start();
 
   // The second flow is only served if the server survived the first exception.
@@ -7373,7 +7373,7 @@ KJ_TEST("Server: UDP RPC over HTTP connections") {
       ( name = "worker",
         worker = (
           compatibilityDate = "2024-02-23",
-          compatibilityFlags = ["experimental"],
+          compatibilityFlags = ["udp_ingress"],
           modules = [(
             name = "main.js",
             esModule =
@@ -7395,7 +7395,6 @@ KJ_TEST("Server: UDP RPC over HTTP connections") {
     ]
   ))"_kj);
 
-  test.server.allowExperimental();
   test.start();
 
   test.sendUdp("udp-address", "peer:1234", "hello"_kjb);

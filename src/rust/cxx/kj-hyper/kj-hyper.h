@@ -42,10 +42,10 @@ bool ecdsa_verify(Ecdsa algorithm,
     ::rust::Slice<const uint8_t> message,
     ::rust::Slice<const uint8_t> signature);
 
-inline bool parse_method(::rust::Slice<const uint8_t> name, kj::HttpMethod& method) {
+inline bool parse_method(::rust::Slice<const uint8_t> name, kj::HttpMethod::Known& method) {
   auto text = kj::str(kj::arrayPtr(name.data(), name.size()).asChars());
   KJ_IF_SOME(parsed, kj::tryParseHttpMethod(text)) {
-    method = parsed;
+    method = parsed.known();
     return true;
   }
   return false;
@@ -56,7 +56,7 @@ inline bool parse_method(::rust::Slice<const uint8_t> name, kj::HttpMethod& meth
 kj::Own<kj::AsyncIoStream> new_rust_io_stream(::rust::Box<RustIo> io);
 kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body);
 kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
+    kj::HttpMethod::Known method,
     const kj::HttpHeaders& headers,
     WebSocketCompression compression,
     kj::Maybe<const kj::WebSocketErrorHandler&> errors);

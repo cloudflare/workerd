@@ -24,22 +24,29 @@ async function pump(name, count, { honorBackpressure }) {
   expectEqual(read, output(count), 'chunks read');
 }
 
+// Under --quick, which only checks that each case runs, every case writes
+// a sixteenth as many chunks: a write and its read take tens of
+// microtask turns, which are slow in sanitizer and debug builds.
+const QUICK_DIVISOR = 16;
+
 export const throughput = {
   bench(b) {
-    for (const count of [16, 256]) {
+    const scale = (count) => (b.options.quick ? count / QUICK_DIVISOR : count);
+    for (const count of [16, 256].map(scale)) {
       b.run(`await ready, no transformer x${count}`, () =>
         pump('no transformer', count, { honorBackpressure: true })
       );
     }
+    const many = scale(256);
     for (const name of Object.keys(TRANSFORMERS)) {
       if (name === 'no transformer') continue;
-      b.run(`await ready, ${name} x256`, () =>
-        pump(name, 256, { honorBackpressure: true })
+      b.run(`await ready, ${name} x${many}`, () =>
+        pump(name, many, { honorBackpressure: true })
       );
     }
     for (const name of ['no transformer', 'transform() enqueues']) {
-      b.run(`queue every write(), ${name} x256`, () =>
-        pump(name, 256, { honorBackpressure: false })
+      b.run(`queue every write(), ${name} x${many}`, () =>
+        pump(name, many, { honorBackpressure: false })
       );
     }
   },

@@ -1,10 +1,17 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default,-requires-container-engine
+# A common option, rather than a build one, so that a config enabled by default with
+# `common --config=...` in .local/bazelrc, such as bazelflare, can replace it: rc files give all
+# common options before all build options.
+common --build_tag_filters=-off-by-default,-requires-container-engine
 build --//build/config:container_test_images
 # block network access by default
 build --nosandbox_default_allow_network
-test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
+# Tests tagged requires-container-engine are incompatible where there is no container engine (see
+# build/test_attrs.bzl), so that bazelflare, whose executors have one, needs no test tag filter of
+# its own, which would replace the sanitizer and coverage configs'. Those configs, of which a build
+# uses at most one, still skip the container tests.
+test --test_tag_filters=-off-by-default,-requires-fuzzilli
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 test:tsan-common --test_tag_filters=-off-by-default,-no-tsan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
@@ -17,8 +24,11 @@ build:regenerate-snapshots --//build/config:python_snapshots=false
 test --local_resources=wptserve=1
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
-# corresponds to small,medium,large,enormous tests (medium is default)
-build --test_timeout=3,15,60,240
+# corresponds to small,medium,large,enormous tests (medium is default). No test gets more than 60 s,
+# in any config: every test should finish within 40 s, sanitizers included, so a test that reaches
+# 60 s has hung or regressed. Make a slow test faster or shard it; don't raise its size. Only PGO
+# training (pgo-instrument) allows longer.
+build --test_timeout=3,15,60,60
 
 # TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
 common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
@@ -40,6 +50,13 @@ build --incompatible_remote_local_fallback_for_remote_cache
 
 # Require custom module extensions to return metadata
 common --incompatible_require_repo_extension_metadata=root
+
+# Fail instead of rewriting MODULE.bazel.lock when it is out of date or lacks an extension a
+# command needs, so that a change to a MODULE.bazel file or to a module extension's inputs has to
+# commit the refreshed lockfile with it. build/deps/update-deps.py refreshes it; after editing such
+# files by hand, run `just update-lockfile`, not the `bazel mod deps` that Bazel's error suggests:
+# that evaluates every extension in the module graph, and protobuf's crate_universe one fails.
+common --lockfile_mode=error
 
 # Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
 # code. Applies to both Linux and macOS via the shared `:unix` config (see the
@@ -257,7 +274,9 @@ build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
 build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
 build:sanitizer-common --copt="-Og"
-build:sanitizer-common --copt="-g" --strip=never
+# Sanitizer reports need only line tables, and full debug info makes each statically linked TSan
+# test 1.5 GB to stage on a remote executor. Add --copt=-g to debug with locals.
+build:sanitizer-common --copt="-g1" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
 # Rust's sanitizer support requires nightly
@@ -320,8 +339,8 @@ build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:hi
 build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
-# TSan significantly increases test runtime.
-build:tsan-common --test_timeout=30,150,600,2400
+# TSan significantly increases test runtime, so the smaller sizes get more time, up to the 60 s cap.
+build:tsan-common --test_timeout=30,60,60,60
 # Enable V8's TSan synchronization annotations. V8's Bazel build does not currently derive this
 # define from the compiler's sanitizer flags. V8_IS_TSAN, which would also make V8's generated code
 # call into TSan on every load and store, is left off: that costs V8-heavy tests about 20x the time
@@ -411,7 +430,7 @@ build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms //:macOS_x86
 # Some cross-compiled tests are slower when run over Rosetta, increase the medium test size timeout.
 # Test performance is still very much satisfactory considering that emulation is being used here.
-build:macos-cross-x86_64 --test_timeout=1,30,60,240
+build:macos-cross-x86_64 --test_timeout=1,30,60,60
 
 # On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
 # nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
@@ -529,7 +548,8 @@ build:pgo-instrument --config=release_linux-without-pgo --config=thin-lto --conf
 build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
 # The instrumented tests run slower and also merge their profiles (build/pgo/profile-env.sh). In
 # training, the serving workload takes about a minute against its 15 s limit, and the eventsource
-# tests 10-12 s. A test that times out loses its profile.
+# tests 10-12 s. A test that times out loses its profile. Training collects profiles rather than
+# checking changes, so it keeps longer timeouts than the 60 s cap on every other config.
 build:pgo-instrument --test_timeout=30,240,600,1200
 # Instrument the Rust code too. Its counters go into the same profile, written by the profile
 # runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
@@ -641,9 +661,9 @@ build:coverage --experimental_generate_llvm_lcov
 build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --test_env=LLVM_COV=llvm-cov
 build:coverage --test_env=LLVM_PROFDATA=llvm-profdata
-# Ensure that we fetch coverage data from remote cache
-build:coverage --experimental_fetch_all_coverage_outputs
-build:coverage --experimental_split_coverage_postprocessing
+# Each test post-processes its coverage in its own spawn, without
+# --experimental_split_coverage_postprocessing, whose second spawn per test would stage the test's
+# inputs again on a remote executor.
 # Allow coverage outputs to be writable for post-processing
 build:coverage --experimental_writable_outputs
 build:coverage --collect_code_coverage
@@ -664,10 +684,11 @@ build:coverage --copt=-g1
 # Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
 build:coverage --copt=-mllvm --copt=-limited-coverage-experimental=true
 coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
-# Coverage instrumentation slows down test execution, so extend timeouts
+# Coverage instrumentation slows down test execution, so every size gets the full 60 s cap. The
+# slowest test takes about 25 s under coverage on bazelflare.
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
-coverage --test_timeout=240,240,240,240
+coverage --test_timeout=60,60,60,60
 coverage --build_tests_only
 
 # These configs are defined internally and enabled on many machines.
@@ -714,9 +735,13 @@ common:bazelflare --noenable_platform_specific_config
 build:bazelflare --config=linux
 build:bazelflare --config=werror
 common:bazelflare --cpu=k8 --host_cpu=k8
-common:bazelflare --platforms=//build/bazelflare:linux_x86_64
+# The host platform is also the target platform of builds that select none. Configs that select
+# one, such as asan and tsan, select a child of @base_target_platform//:platform, which this makes
+# bazelflare's (see build/bazelflare/base_target_platform.bzl), so that they combine with this
+# config in either order.
 common:bazelflare --host_platform=//build/bazelflare:linux_x86_64
 common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
+common:bazelflare --repo_env=WORKERD_BAZELFLARE=1
 # Assign full runner for linking select binaries to avoid slowdown due to size/linker optimizations
 build:bazelflare --//build/config:link_executor=bazelflare
 # Host tools are Linux binaries, so actions don't fall back to the client, where most of them
@@ -725,10 +750,11 @@ build:bazelflare --//build/config:link_executor=bazelflare
 common:bazelflare --spawn_strategy=remote --remote_local_fallback=false
 # V8 marks its inspector code generator `local = 1`; it runs fine remotely.
 common:bazelflare --modify_execution_info=Genrule=-local
-# Targets that must run on the client are skipped; unlike the default filters, these keep the
-# container tests. Filters don't change action keys.
+# Targets that must run on the client are skipped; unlike the default filter, this keeps the
+# container tests, which the executors can run (see build/test_attrs.bzl). There is no test
+# tag filter, which would replace the sanitizer and coverage configs'. Filters don't change action
+# keys.
 common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-fuzzilli
-test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-fuzzilli
 common:bazelflare --remote_download_minimal
 common:bazelflare --remote_cache_compression --remote_timeout=600
 # bazelflare sends nothing while an action runs, so only pings notice a connection that died
@@ -743,30 +769,8 @@ common:bazelflare --jobs=200
 # Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
 # streams onto each connection, each served by one bazelflare Worker invocation.
 common:bazelflare --noexperimental_throttle_remote_action_building --remote_max_concurrency_per_connection=8
-# Sanitizer builds on bazelflare, in place of --config=bazelflare: each applies its sanitizer config
-# and then bazelflare, whose platform replaces the sanitizer config's, so it restores the sanitizer
-# constraint, which selects the sanitizer-built Rust standard library. Sanitizer reports need only
-# line tables, and full debug info makes each statically linked TSan test 1.5 GB to stage.
-build:bazelflare-asan --config=asan --config=bazelflare
-build:bazelflare-asan --platforms=//build/bazelflare:linux_x86_64_asan
-build:bazelflare-asan --copt=-g1
-build:bazelflare-tsan --config=tsan --config=bazelflare
-build:bazelflare-tsan --platforms=//build/bazelflare:linux_x86_64_tsan
-build:bazelflare-tsan --copt=-g1
-# The bazelflare filters replace the sanitizer configs', so these add their -no-asan and -no-tsan
-# back.
-test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
-test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 # The release build of the Linux x64 binary and the types, on bazelflare.
 build:bazelflare-release --config=release_linux_x64 --config=bazelflare --strip=always
-# `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
-# The report lands in bazel-out/_coverage/_coverage_report.dat.
-build:bazelflare-coverage --config=coverage --config=bazelflare
-coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli,-lint,-benchmark,-workerd-benchmark
-# Each test collects its coverage in its own spawn: the coverage config's split post-processing adds
-# a second spawn per test, with the same inputs, and needs every coverage output fetched.
-build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
-build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
 # Generated headers and Rust sources that editors read from bazel-bin, which
 # --remote_download_minimal otherwise leaves remote. The aspect (build/generated_srcs.bzl) generates
 # those of the built C++ and Rust targets and their dependencies, and the regex downloads them.

@@ -7,6 +7,10 @@
 //! `IoContext` (`src/workerd/io/io-context.h`) holds the state of the request that JavaScript is
 //! running on behalf of. This crate is a package of its own because `//src/workerd/io` depends on
 //! `jsg`.
+//!
+//! It also binds `IoContext::IncomingRequest` ([`IncomingRequest`]), for the code that delivers an
+//! event: [`incoming_request_delivered`], [`incoming_request_finish_scheduled`] and
+//! [`incoming_request_set_scheduled_event_info`] are the calls on it, made as C++ makes them.
 
 mod ffi;
 mod trace;
@@ -29,7 +33,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+pub use ffi::DeliveredLocation;
 use ffi::bridge;
+pub use ffi::bridge::IncomingRequest;
+pub use ffi::bridge::incoming_request_finish_scheduled;
+pub use ffi::bridge::incoming_request_set_scheduled_event_info;
+pub use ffi::incoming_request_delivered;
 use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
@@ -210,8 +219,8 @@ impl<'s> IoContext<'s> {
             .then(lock, outcome.clone(), return_or_throw)?;
         let resolver = resolver.to_global(lock);
         // `catch_poll_panic()` turns a panic while polling into an output, so that it rejects the
-        // promise instead of failing the task as `io_future_wait()` would. `io_future_wait()`
-        // still catches a panic while dropping the future when the wait is cancelled.
+        // promise instead of failing the task, as kj-rs does for a panic in the future it polls.
+        // kj-rs still logs a panic while dropping the future when the wait is cancelled.
         self.await_io_and_run(catch_poll_panic(future), move |lock, output| {
             let resolver = resolver.as_local(lock);
             let result = match output {

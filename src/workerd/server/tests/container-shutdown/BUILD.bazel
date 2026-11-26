@@ -1,5 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
-load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//images/container-client-test:images.bzl", "CONTAINER_TEST_IMAGES")
 
 _TAGS = [
@@ -8,7 +7,7 @@ _TAGS = [
     "requires-network",  # Accesses unix:///var/run/docker.sock
 ]
 
-js_test(
+wd_js_test(
     name = "container-shutdown-test",
     size = "enormous",
     data = [
@@ -22,6 +21,5 @@ js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
-    exec_properties = test_exec_properties("enormous", _TAGS),
     tags = _TAGS,
 )

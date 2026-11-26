@@ -1,8 +1,18 @@
 #include <workerd/tests/bench-tools.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/mimetype.h>
 
 namespace workerd {
 namespace {
+
+// Runs a benchmark with the RUST_MIMETYPE autogate on, so that it measures the Rust parser and
+// serializer rather than the C++ ones.
+template <void (*run)(benchmark::State&)>
+void withRust(benchmark::State& state) {
+  util::Autogate::initAutogateForTest({util::AutogateKey::RUST_MIMETYPE});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+  run(state);
+}
 
 static void MimeType_ParseAndSerialize(benchmark::State& state) {
   for (auto _: state) {
@@ -38,6 +48,8 @@ static void MimeType_Serialize(benchmark::State& state) {
 
 WD_BENCHMARK(MimeType_ParseAndSerialize)->Name("Mimetype::ParseAndSerialize");
 WD_BENCHMARK(MimeType_Serialize)->Name("Mimetype::Serialize");
+WD_BENCHMARK(withRust<MimeType_ParseAndSerialize>)->Name("Mimetype::ParseAndSerialize/rust");
+WD_BENCHMARK(withRust<MimeType_Serialize>)->Name("Mimetype::Serialize/rust");
 
 }  // namespace
 

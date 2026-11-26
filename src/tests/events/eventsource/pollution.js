@@ -50,6 +50,9 @@ function patchAll({ promises = true } = {}) {
     [Response.prototype, ['ok', 'status', 'headers', 'body', 'url']],
     [Headers.prototype, ['get']],
     [AbortController.prototype, ['abort', 'signal']],
+    // Array.prototype.slice() and the like look this up to create their
+    // result.
+    [Array, [Symbol.species]],
     // Last, as the loops above iterate arrays.
     [Array.prototype, ['push', Symbol.iterator]],
   ];

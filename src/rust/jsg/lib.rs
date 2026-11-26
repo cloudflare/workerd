@@ -405,21 +405,38 @@ impl_error_constructors! {
     ReferenceError => new_reference_error,
 }
 
+impl Error {
+    /// The `TypeError` for a callback whose `this` is not a wrapper of its resource, with the
+    /// message that C++ JSG and V8's signature check throw (`kIllegalInvocation`).
+    pub fn new_illegal_invocation() -> Self {
+        Self::new_type_error(
+            "Illegal invocation: function called with incorrect `this` reference. See \
+             https://developers.cloudflare.com/workers/observability/errors/\
+             #illegal-invocation-errors for details.",
+        )
+    }
+}
+
 impl<'s> FromJS<'s> for Error {
     type ResultType = Self;
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
-    /// If the value is a native error, extracts the name and message properties.
-    /// Otherwise, converts the value to a string for the message.
+    /// A `DOMException` becomes an error thrown as a `DOMException` with the name and message it
+    /// was created with, as [`try_unwrap_dom_exception`] reads them. A native error becomes an
+    /// error of the class its `name` property names, with its `message` property. Any other value
+    /// fails to convert with a `TypeError`.
     ///
-    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or an exception or a termination is already pending, this fails with an
-    /// error for which [`Error::is_pending`] is true.
+    /// Reading `name` and `message` of a native error can run JavaScript (a getter, a Proxy trap,
+    /// or `toString`). If it throws, or an exception or a termination is already pending, this
+    /// fails with an error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
+        if let Some((name, message)) = tunnel::try_unwrap_dom_exception(lock, value)? {
+            return Ok(Self::new_dom_exception(name, message));
+        }
         if value.is_native_error()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
         {
@@ -438,7 +455,7 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                // A `DOMException` is not a native error, so `name` names a class.
+                // A `DOMException` was converted above, so `name` names a class.
                 name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
                     ErrorName::class_named(&n)
                 }),
@@ -1673,16 +1690,21 @@ pub enum Member {
         getter_callback: RawGetterCallback,
         read_only: bool,
     },
+    /// A method of the constructor. The names of a type's static methods and static constants
+    /// must differ from each other and from `length`, `name` and `prototype`, which every
+    /// function already has; creating the type's template panics otherwise.
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<fast_api::FastCallback>,
         length: u32,
     },
-    StaticConstant {
-        name: String,
-        value: ConstantValue,
-    },
+    /// A read-only number on both the constructor and the prototype. Its name follows the rules
+    /// of [`Member::StaticMethod`], and must also differ from the names of the type's prototype
+    /// members, such as instance methods and prototype properties: a debug build of V8 throws
+    /// when it instantiates a prototype with two properties of the same name, and a release build
+    /// keeps only one of them.
+    StaticConstant { name: String, value: ConstantValue },
     /// A property of every instance with any string name that is not a defined property of the
     /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
     /// one. `query_callback` tells V8 whether a property exists, for `in`.
@@ -1693,29 +1715,21 @@ pub enum Member {
     /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
     /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
     /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
-    Dispose {
-        callback: RawFunctionCallback,
-    },
+    Dispose { callback: RawFunctionCallback },
     /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
     /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
     /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
     /// one, and may also have a [`Member::Dispose`].
-    AsyncDispose {
-        callback: RawFunctionCallback,
-    },
+    AsyncDispose { callback: RawFunctionCallback },
     /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.
-    Callable {
-        callback: RawFunctionCallback,
-    },
+    Callable { callback: RawFunctionCallback },
     /// The method installed as `prototype[Symbol.iterator]`, which makes instances iterable
     /// with `for...of`, spread and `Array.from()`, like C++ JSG's `JSG_ITERABLE`. It returns the
     /// iterator. Like a [`Member::Method`], it is registered with the type's `v8::Signature`;
     /// unlike one, it is not enumerable. A type has at most one.
-    Iterable {
-        callback: RawFunctionCallback,
-    },
+    Iterable { callback: RawFunctionCallback },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.

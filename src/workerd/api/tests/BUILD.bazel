@@ -1,10 +1,11 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/lint_test.bzl", "lint_test")
 load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_bench.bzl", "wd_bench")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "PYODIDE_BUNDLE_ARGS", "PYODIDE_BUNDLE_DATA")
 
 wasm_tools_parse(
     name = "compact-imports.wasm",
@@ -357,6 +358,19 @@ wd_test(
 )
 
 wd_test(
+    src = "scheduled-test.wd-test",
+    # service_binding_extra_handlers, for the scheduled() of a service binding, is experimental.
+    args = ["--experimental"],
+    data = [
+        "scheduled-test.js",
+        "scheduled-test-handler.js",
+        "scheduled-test-listener.js",
+        "scheduled-test-no-listener.js",
+        "scheduled-test-tail.js",
+    ],
+)
+
+wd_test(
     # It runs several other tests' workers to trace them, which takes up to 12.5s of the 15s
     # "medium" timeout in debug builds.
     size = "large",
@@ -462,6 +476,12 @@ wd_test(
 wd_test(
     src = "console-format-throw-test.wd-test",
     data = ["console-format-throw-test.js"],
+)
+
+# console.count/countReset/time/timeLog/timeEnd label conversion.
+wd_test(
+    src = "console-label-conversion-test.wd-test",
+    data = ["console-label-conversion-test.js"],
 )
 
 # Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
@@ -883,6 +903,11 @@ wd_test(
 wd_test(
     src = "crypto-sha3-test.wd-test",
     data = ["crypto-sha3-test.js"],
+)
+
+wd_test(
+    src = "crypto-xof-test.wd-test",
+    data = ["crypto-xof-test.js"],
 )
 
 wd_test(
@@ -1389,17 +1414,22 @@ wd_test(
     data = ["url-test.js"],
 )
 
-# The @all-compat-flags variant would turn the temporal flag on, which the cases without that flag
-# expect to be off.
-wd_test(
-    # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
-    # timeout in loaded debug builds.
-    size = "large",
-    src = "startup-snapshot-globals-test.wd-test",
+# One config per group of cases, so that their Workers, each started from a zygote and then from
+# its snapshot, start in parallel. The @all-compat-flags variant would turn the temporal flag
+# on, which the cases without that flag expect to be off.
+[wd_test(
+    src = "startup-snapshot-globals-%s-test.wd-test" % group,
     args = ["--experimental"],
-    data = ["startup-snapshot-globals-test.js"],
+    data = [
+        "startup-snapshot-globals-services.capnp",
+        "startup-snapshot-globals-test.js",
+    ],
     generate_all_compat_flags_variant = False,
-)
+) for group in [
+    "fallback",
+    "transferable-runtime",
+    "transferable-v8",
+]]
 
 # Top-level event listeners across a startup snapshot. Only the @all-autogates variant runs the
 # pipeline.
@@ -1492,6 +1522,11 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-handlers-test.wd-test",
+    data = ["websocket-handlers-test.js"],
+)
+
+wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],
@@ -1520,9 +1555,19 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-send-blob-test.wd-test",
+    data = ["websocket-send-blob-test.js"],
+)
+
+wd_test(
     src = "websocket-constructor-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-constructor-test.js"],
+)
+
+wd_test(
+    src = "websocket-send-before-open-test.wd-test",
+    data = ["websocket-send-before-open-test.js"],
 )
 
 wd_test(
@@ -1818,6 +1863,18 @@ wd_test(
 )
 
 wd_test(
+    src = "performance-now-test.wd-test",
+    args = ["--experimental"],
+    data = ["performance-now-test.js"],
+)
+
+wd_test(
+    src = "performance-now-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["performance-now-test.js"],
+)
+
+wd_test(
     src = "ts-webfs-writable-test.wd-test",
     args = ["--experimental"],
     data = ["ts-webfs-writable-test.js"],
@@ -1859,21 +1916,27 @@ wd_test(
     data = ["worker-loader-test.js"],
 )
 
-# Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/pyodide/tests.
-wd_test(
+# Each case starts Pyodide from scratch in a new isolate, which takes several seconds in debug and
+# sanitizer builds, so each case runs as a test of its own, selected by `workerd test`'s filter.
+# Tagged `python` like the tests under //src/pyodide/tests.
+[wd_test(
+    name = "worker-loader-python-test-" + case,
     size = "enormous",
     src = "worker-loader-python-test.wd-test",
-    args = ["--experimental"],
-    data = ["worker-loader-python-test.js"],
+    args = ["--experimental"] + PYODIDE_BUNDLE_ARGS + ["worker-loader-python-test:" + case],
+    data = ["worker-loader-python-test.js"] + PYODIDE_BUNDLE_DATA,
+    # The cases share one source file, which needs linting once.
+    lint = case == "pythonBasics",
     tags = [
-        "cpu:2",
         "no-coverage",
         "python",
-        # Fetches Pyodide.
-        "requires-network",
     ],
-)
+) for case in [
+    "pythonBasics",
+    "pythonArbitraryModuleExtensions",
+    "pythonImplicitFlagsRespectCompatDate",
+    "minimalPythonPackage",
+]]
 
 wd_test(
     src = "worker-loader-wasm-test.wd-test",
@@ -2056,7 +2119,7 @@ wd_test(
     data = ["ts-webstreams-test.js"],
 )
 
-sh_test(
+wd_sh_test(
     name = "abortIsolate",
     size = "medium",
     srcs = ["abortIsolate.sh"],

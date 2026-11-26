@@ -129,12 +129,26 @@ void WebSocket::accept(jsg::Lock& js, jsg::Optional<WebSocket::AcceptOptions> op
   impl->accept(js, kj::mv(options));
 }
 
-void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
+void WebSocket::send(
+    jsg::Lock& js, kj::OneOf<kj::Array<byte>, jsg::Ref<Blob>, kj::String> message) {
   // Mark the send here, at the in-scope JS call, rather than in the async output pump where the
   // observer's sentMessage() fires -- the pump runs outside a perf-counter monitor scope, so a
   // mark there would be dropped. "now" at the send() call is the send-initiation time.
   markWebSocketPerfEvent("ws_sent"_kjc);
-  impl->send(js, kj::mv(message));
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      impl->send(js, kj::mv(data));
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      // The spec reads the Blob asynchronously but sends it in order with the other send() calls.
+      // A Blob's bytes are always in memory, so copying them now and queuing them like any other
+      // binary message keeps that order.
+      impl->send(js, kj::heapArray(blob->getData(js)));
+    }
+    KJ_CASE_ONEOF(text, kj::String) {
+      impl->send(js, kj::mv(text));
+    }
+  }
 }
 
 void WebSocket::close(
@@ -1023,6 +1037,12 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
     return;
   }
 
+  if (native.state.is<AwaitingConnection>() && FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the WHATWG WebSocket spec, send() on a WebSocket that is still CONNECTING throws an
+    // InvalidStateError. See https://websockets.spec.whatwg.org/#dom-websocket-send step 1.
+    JSG_FAIL_REQUIRE(
+        DOMInvalidStateError, "Can't call WebSocket send() before the connection is open.");
+  }
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
       "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");

@@ -529,6 +529,15 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+jsg::Optional<api::RustCacheContext> Worker::Api::getCtxCacheRustProperty(jsg::Lock& js) const {
+  return kj::none;
+}
+
+kj::Maybe<bool> Worker::Api::isCtxCacheRustInstance(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) const {
+  return false;
+}
+
 v8::Local<v8::Promise> Worker::Api::runBench(jsg::Lock& lock,
     v8::Local<v8::Value> handler,
     v8::Local<v8::Value> env,
@@ -1162,7 +1171,7 @@ void messageCallback(v8::Local<v8::Message> msg, v8::Local<v8::Value>) {
   KJ_LOG(ERROR, "NOSENTRY V8 message callback", message, scriptLocation, kj::getStackTrace());
 }
 
-// The console methods wrapped by setupContext (debug, error, info, log, warn).
+// The console methods setupContext routes through handleLog (debug, error, info, log, warn).
 struct ConsoleMethod {
   const char* name;
   v8::FunctionCallback callback;
@@ -1189,6 +1198,37 @@ static_assert(static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_WARN) -
             static_cast<int>(jsg::ContextDataSlot::CONSOLE_ORIGINAL_DEBUG) + 1 ==
         static_cast<int>(kConsoleMethodsCount),
     "kConsoleMethods must have one entry per CONSOLE_ORIGINAL_* embedder-data slot, in slot order");
+
+// The console methods that take a label, which setupContext wraps with consoleLabelDecorator.
+constexpr const char* kConsoleLabelMethods[] = {
+  "count", "countReset", "time", "timeLog", "timeEnd"};
+
+// V8's builtins for kConsoleLabelMethods read the label only through the inspector's console
+// delegate, and drop any error converting it. The Console spec converts the label to a string
+// first and rethrows. The original builtin is the function's data.
+void consoleLabelDecorator(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  auto isolate = info.GetIsolate();
+  auto context = isolate->GetCurrentContext();
+  v8::LocalVector<v8::Value> args(isolate, info.Length());
+  for (int i = 0; i < info.Length(); ++i) {
+    args[i] = info[i];
+  }
+  if (info.Length() > 0 && !info[0]->IsUndefined()) {
+    v8::Local<v8::String> label;
+    if (!info[0]->ToString(context).ToLocal(&label)) {
+      return;
+    }
+    args[0] = label;
+  }
+  v8::Local<v8::Value> result;
+  if (info.DataV2()
+          .As<v8::Value>()
+          .As<v8::Function>()
+          ->Call(context, info.This(), args.size(), args.data())
+          .ToLocal(&result)) {
+    info.GetReturnValue().Set(result);
+  }
+}
 
 }  // namespace
 
@@ -1233,6 +1273,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
+    if (!util::Autogate::isEnabled(util::AutogateKey::NO_LOADING_MODE)) {
+      // Lets the heap grow past its allocation limit instead of running a full GC during startup
+      // and an early first request. V8 drops the mode by itself after 7 seconds;
+      // completedRequest() ends it sooner.
+      lock->v8Isolate->SetIsLoading(true);
+      v8Loading.store(true);
+    }
+
     // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
     // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
     // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
@@ -1251,6 +1299,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       jsg::isolateRegisterExternalReference(
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
     }
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, reinterpret_cast<intptr_t>(&consoleLabelDecorator));
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, jsg::modules::getSyntheticModuleEvaluationStepsRef());
@@ -1292,12 +1342,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
     // This notification has no lasting effect: V8 handles it synchronously because we hold the
     // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
-    // starting incremental marking, which we disable. What it does do is free caches shared by the
-    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
-    // the Wasm it runs, and it empties the isolate group's memory pools.
-    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
-      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
-    }
+    // starting incremental marking, which we disable. What it does do is empty the isolate group's
+    // memory pools, which the whole process shares.
+    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
@@ -2268,6 +2315,14 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
     auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
     jsg::setContextDataSlot(context, jsg::consoleOriginalSlot(i), original);
     auto decorator = jsg::check(v8::Function::New(context, kConsoleMethods[i].callback));
+    jsg::check(console->Set(context, methodStr, decorator));
+  }
+
+  for (auto name: kConsoleLabelMethods) {
+    auto methodStr = lock.strIntern(name);
+    auto original = jsg::check(console->Get(context, methodStr)).As<v8::Function>();
+    auto decorator = jsg::check(v8::Function::New(context, &consoleLabelDecorator, original));
+    decorator->SetName(methodStr);
     jsg::check(console->Set(context, methodStr, decorator));
   }
 }
@@ -4190,10 +4245,14 @@ struct Worker::Actor::Impl {
                          public ActorCache::Hooks,
                          private kj::TaskSet::ErrorHandler {
    public:
-    HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
+    HooksImpl(kj::Own<Loopback> loopback,
+        TimerChannel& timerChannel,
+        ActorObserver& metrics,
+        kj::Duration outputGateTimeout)
         : loopback(kj::mv(loopback)),
           timerChannel(timerChannel),
-          metrics(metrics) {}
+          metrics(metrics),
+          outputGateTimeout(outputGateTimeout) {}
 
     void inputGateLocked() override {
       metrics.inputGateLocked();
@@ -4210,11 +4269,8 @@ struct Worker::Actor::Impl {
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
-      // This really only protects against total hangs. Lowering the timeout drastically is risky,
-      // since low timeouts can spuriously fire when under heavy CPU load, failing requests that
-      // would otherwise succeed.
-      auto timeout = 30 * kj::SECONDS;
-      co_await timerChannel.afterLimitTimeout(timeout);
+      // See IsolateLimitEnforcer::getOutputGateTimeout() for why this is long.
+      co_await timerChannel.afterLimitTimeout(outputGateTimeout);
 
       auto e = KJ_EXCEPTION(OVERLOADED,
           "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
@@ -4256,6 +4312,7 @@ struct Worker::Actor::Impl {
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+    kj::Duration outputGateTimeout;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
 
@@ -4358,7 +4415,10 @@ struct Worker::Actor::Impl {
         container(kj::mv(container)),
         containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
-        hooks(loopback->addRef(), timerChannel, *metrics),
+        hooks(loopback->addRef(),
+            timerChannel,
+            *metrics,
+            self.worker->getIsolate().getLimitEnforcer().getOutputGateTimeout()),
         inputGate(hooks),
         outputGate(hooks),
         loopback(kj::mv(loopback)),
@@ -5117,16 +5177,18 @@ kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
   return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
-      kj::mv(observer), kj::mv(workerTracer), kj::mv(selfTokenFactory)));
+      kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext), kj::mv(selfTokenFactory)));
 }
 
 kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
     kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext,
     kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
   // without the request tracking that addRef() adds.
@@ -5142,10 +5204,9 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   });
 
   RequestObserver& observerRef = *observer;
-  auto incomingRequest =
-      kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
-          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */,
-          kj::none /* accessInfo */, kj::mv(selfTokenFactory));
+  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
+      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer), kj::mv(triggerContext),
+      kj::none /* accessInfo */, kj::mv(selfTokenFactory));
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
   }
@@ -5232,8 +5293,55 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
       kj::mv(maybeNewModuleRegistry));
 }
 
-void Worker::Isolate::completedRequest() const {
+void Worker::Isolate::startedRequest() const {
+  inFlightRequests.fetch_add(1);
+}
+
+kj::Maybe<kj::Promise<void>> Worker::Isolate::completedRequest() const {
   limitEnforcer->completedRequest(id);
+  if (inFlightRequests.fetch_sub(1) == 1 &&
+      (v8Loading.load() || !util::Autogate::isEnabled(util::AutogateKey::NO_IDLE_GC)) &&
+      !idleNotificationPending.exchange(true)) {
+    return notifyV8WhenIdle(getWeakRef());
+  }
+  return kj::none;
+}
+
+kj::Promise<void> Worker::Isolate::notifyV8WhenIdle(kj::Own<const WeakIsolateRef> weakIsolate) {
+  {
+    // Cleared before `inFlightRequests` is read, so that a request completing after the read
+    // starts a new task, and on cancellation, so that the isolate's other threads still can.
+    auto clearPending = kj::defer([&weakIsolate]() {
+      KJ_IF_SOME(isolate, weakIsolate->tryAddStrongRef()) {
+        isolate->idleNotificationPending.store(false);
+      }
+    });
+    co_await AsyncLock::whenThreadIdle();
+  }
+
+  auto isolate = KJ_UNWRAP_OR(weakIsolate->tryAddStrongRef(), co_return);
+  if (isolate->inFlightRequests.load() != 0) co_return;
+
+  // A thread queued for the lock means the isolate is in use by something that is not a request,
+  // such as a prewarm or a dynamic import, so it is not idle. Waiting behind it would also keep
+  // this thread from taking any other isolate's lock.
+  auto queueLock =
+      KJ_UNWRAP_OR(isolate->asyncLockQueue.tryLock(kj::atomicAddRef(*isolate)), co_return);
+  auto lockTiming = isolate->getMetrics().tryCreateLockTiming(SpanParent(nullptr));
+  KJ_IF_SOME(lt, lockTiming) {
+    lt->reportAsyncInfo(0, false, 0);
+  }
+  AsyncLock asyncLock(kj::mv(queueLock), kj::mv(lockTiming));
+  isolate->runInLockScope(asyncLock, [&](jsg::Lock& js) {
+    // A request delivered in the meantime gets its own notification when it completes.
+    if (isolate->inFlightRequests.load() == 0) {
+      js.v8Isolate->SetIsLoading(false);
+      isolate->v8Loading.store(false);
+      // Lets the enforcer account for memory that a GC just freed. Condemnation is left for the
+      // next request to act on.
+      (void)isolate->getLimitEnforcer().exitJs(js);
+    }
+  });
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {
