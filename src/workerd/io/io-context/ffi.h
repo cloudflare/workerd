@@ -43,6 +43,9 @@ void incoming_request_set_scheduled_event_info(
 // Tells the request's tracer, if it has one, that the event is a custom event.
 void incoming_request_set_custom_event_info(IncomingRequest& request);
 
+// Fails if the request's IoContext belongs to an actor.
+void incoming_request_assert_no_actor(IncomingRequest& request);
+
 // Rust type, defined in ffi.rs.
 struct WaitUntilRun;
 

@@ -2,10 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The events of a C++ `WorkerEntrypoint` that Rust delivers.
+//! A Rust [`WorkerEntrypoint`], which owns the C++ one, and the events it delivers from Rust.
 //!
 //! `WorkerEntrypoint` (`src/workerd/io/worker-entrypoint.h`) delivers each event to its
-//! Worker's exported handler. For an event that Rust implements, it hands Rust an
+//! Worker's exported handler. For an event that Rust implements, the C++ object hands Rust an
 //! [`Invocation`]: the request it was made for, and what finds the handler. Rust then reports the
 //! event to the tracer, delivers it, runs the handler, and finishes the request.
 //!
@@ -22,6 +22,7 @@ mod scheduled;
 mod test;
 
 use std::future::Future;
+use std::pin::Pin;
 
 use cxx::KjException;
 use ffi::bridge;
@@ -31,6 +32,39 @@ use kj_rs::KjDate;
 use kj_rs::KjOwn;
 
 pub use crate::ffi::bridge::Invocation as InvocationFfi;
+
+/// A `WorkerEntrypoint`: the receiver of one event for a Worker's exported handler, which makes
+/// the `IoContext::IncomingRequest` the event runs in.
+///
+/// It owns the C++ `WorkerEntrypoint` (`src/workerd/io/worker-entrypoint.c++`), which made the
+/// request. An event that Rust implements is delivered here, from the C++ object's
+/// [`Invocation`]; any other event goes to the C++ object, which C++ calls directly (see
+/// `newWorkerEntrypoint()` in `ffi.h`).
+pub struct WorkerEntrypoint {
+    cxx: KjOwn<bridge::CxxEntrypoint>,
+}
+
+impl WorkerEntrypoint {
+    #[must_use]
+    pub fn new(cxx: KjOwn<bridge::CxxEntrypoint>) -> Self {
+        Self { cxx }
+    }
+
+    /// The C++ `WorkerEntrypoint`, which delivers the events that Rust doesn't implement.
+    pub fn cxx(&mut self) -> Pin<&mut bridge::CxxEntrypoint> {
+        self.cxx.pin_mut()
+    }
+
+    /// Takes the invocation of the entrypoint's one event, to deliver it.
+    ///
+    /// # Errors
+    /// Fails if an event was already delivered.
+    pub fn take_invocation(&mut self) -> Result<Invocation, KjException> {
+        Ok(Invocation::new(bridge::cxx_entrypoint_take_invocation(
+            self.cxx.pin_mut(),
+        )?))
+    }
+}
 
 /// An invocation of a `WorkerEntrypoint` for an event, which it handed to Rust, not delivered yet.
 /// Dropping it cancels the event before delivery, so that no JavaScript runs for it.
@@ -42,6 +76,16 @@ impl Invocation {
     #[must_use]
     pub fn new(invocation: KjOwn<bridge::Invocation>) -> Self {
         Self { invocation }
+    }
+
+    /// Fails if the event's request is for an actor, to which scheduled events are never
+    /// delivered: they don't work with actors, whose cancellations happen at once, without
+    /// waiting for the request's waitUntil tasks.
+    ///
+    /// # Errors
+    /// Fails with the assertion failure.
+    pub fn assert_no_actor(&mut self) -> Result<(), KjException> {
+        io_context::incoming_request_assert_no_actor(ffi::request(self.invocation.pin_mut()))
     }
 
     /// Tells the request's tracer, if it has one, that the event is a custom event.

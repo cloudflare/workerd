@@ -234,6 +234,9 @@ pub mod bridge {
         /// Tells the request's tracer, if it has one, that the event is a custom event.
         fn incoming_request_set_custom_event_info(request: Pin<&mut IncomingRequest>)
         -> Result<()>;
+        /// Fails if the request's `IoContext` belongs to an actor:
+        /// `KJ_ASSERT(request.getContext().getActor() == kj::none)`.
+        fn incoming_request_assert_no_actor(request: Pin<&mut IncomingRequest>) -> Result<()>;
         /// The C++ work that a run in a waitUntil task does before it calls Rust.
         type RunPrelude;
 
